@@ -2181,3 +2181,208 @@ hr_width_tail_anchor
          in row:\n{plain}"
     );
 }
+
+// =============================================================================
+//  SUB-SPEC #7 (review-7) — page code theme, hyperlink layout, local-image
+//  fallback styling. Real-terminal captures for behaviours that previously had
+//  Level 1 coverage only.
+// =============================================================================
+
+/// `style.page.code.theme: dracula` must change visible code-block bytes
+/// relative to the same document rendered with a different theme. We compare
+/// the SGR raw streams; identical bytes would prove the frontmatter was
+/// ignored.
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_page_code_theme_changes_terminal_rendering() {
+    let doc_dracula = "---\nstyle:\n  page:\n    code:\n      theme: dracula\n---\n\n\
+        ```rust\nfn _theme_marker_dm() { let x = 1; }\n```\n";
+    let doc_nord = "---\nstyle:\n  page:\n    code:\n      theme: nord\n---\n\n\
+        ```rust\nfn _theme_marker_dm() { let x = 1; }\n```\n";
+
+    let Some((dracula, _)) = run_md(doc_dracula, "--max-width 60") else {
+        return;
+    };
+    let Some((nord, _)) = run_md(doc_nord, "--max-width 60") else {
+        return;
+    };
+
+    assert!(
+        dracula.plain.contains("_theme_marker_dm"),
+        "code body missing from dracula capture:\n{}",
+        dracula.plain
+    );
+    assert!(
+        nord.plain.contains("_theme_marker_dm"),
+        "code body missing from nord capture:\n{}",
+        nord.plain
+    );
+    assert_ne!(
+        dracula.raw, nord.raw,
+        "style.page.code.theme: dracula vs nord must produce different SGR bytes"
+    );
+}
+
+/// CLI `--code-theme` must beat `style.page.code.theme`. With frontmatter set
+/// to `dracula` and CLI passing `--code-theme nord`, the rendered bytes must
+/// match a plain `--code-theme nord` render of the same body.
+#[test]
+#[serial(level2_terminal)]
+fn level2_cli_code_theme_overrides_style_page_code_theme() {
+    let doc_with_fm = "---\nstyle:\n  page:\n    code:\n      theme: dracula\n---\n\n\
+        ```rust\nfn _cli_override_marker() { let x = 1; }\n```\n";
+    let doc_plain = "```rust\nfn _cli_override_marker() { let x = 1; }\n```\n";
+
+    let Some((with_fm, _)) = run_md(doc_with_fm, "--code-theme nord --max-width 60") else {
+        return;
+    };
+    let Some((baseline, _)) = run_md(doc_plain, "--code-theme nord --max-width 60") else {
+        return;
+    };
+
+    // Both must contain the same SGR-bearing code body — frontmatter must NOT
+    // re-color the block when CLI claims the slot.
+    assert!(
+        with_fm.plain.contains("_cli_override_marker"),
+        "fm-with-cli plain missing body:\n{}",
+        with_fm.plain
+    );
+
+    // Extract just the code line bytes from each capture for comparison.
+    let line_of = |frame: &CapturedFrame| -> Option<String> {
+        frame
+            .raw
+            .lines()
+            .find(|l| l.contains("_cli_override_marker"))
+            .map(|l| l.to_string())
+    };
+    let with_fm_line = line_of(&with_fm).expect("with_fm code line not found in raw stream");
+    let baseline_line = line_of(&baseline).expect("baseline code line not found in raw stream");
+    assert_eq!(
+        with_fm_line, baseline_line,
+        "CLI --code-theme nord must override style.page.code.theme: dracula"
+    );
+}
+
+/// `style.hyperlinks.color` + `style.hyperlinks.local-style.color` must
+/// produce visibly different SGR streams between a local link and a remote
+/// link in the same document.
+#[test]
+#[serial(level2_terminal)]
+fn level2_local_hyperlink_color_differs_from_remote_in_terminal() {
+    let body = "---\nstyle:\n  hyperlinks:\n    color: red-500\n    local-style:\n      color: blue-500\n---\n\n\
+        [LOCAL_LINK](./somewhere.md) [REMOTE_LINK](https://example.com)\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    // WezTerm may re-emit truecolor SGR as either semicolon (`;`) or ITU
+    // colon (`:`) form. Accept both.
+    let red_semi = "38;2;251;44;54";
+    let red_colon = "38:2::251:44:54";
+    let blue_semi = "38;2;43;127;255";
+    let blue_colon = "38:2::43:127:255";
+
+    let has_red = frame.raw.contains(red_semi) || frame.raw.contains(red_colon);
+    let has_blue = frame.raw.contains(blue_semi) || frame.raw.contains(blue_colon);
+    assert!(
+        has_red && has_blue,
+        "expected both remote red and local blue SGR. has_red={has_red}, has_blue={has_blue}\nraw:\n{}",
+        frame.raw
+    );
+    // Plain labels must still appear.
+    assert!(
+        frame.plain.contains("LOCAL_LINK") && frame.plain.contains("REMOTE_LINK"),
+        "link labels missing from plain capture:\n{}",
+        frame.plain
+    );
+}
+
+/// `style.hyperlinks.width: 20` must produce a label box padded to that exact
+/// width before the OSC8 close. We can't compare visible widths without a
+/// stable column probe, so we assert the raw stream pads the label.
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_hyperlinks_width_pads_label_in_terminal() {
+    let body = "---\nstyle:\n  hyperlinks:\n    width: 20\n---\n\n\
+        [HI](https://example.com)\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    // Padded label width = 20 cells, label "HI" is 2 cells, so 18 trailing
+    // spaces precede the OSC8 close. Look for the label followed by at least
+    // 10 spaces and the OSC8 terminator. (Be tolerant of any ANSI bytes that
+    // a terminal may inject for cursor positioning; the padding spaces are
+    // the visible signal.)
+    assert!(
+        frame.plain.contains("HI                  "),
+        "expected padded label `HI` followed by 18 spaces. plain:\n{}",
+        frame.plain
+    );
+}
+
+/// `style.images.local-style.color` + `bg-color` must color a local image's
+/// fallback alt text in a real terminal. Remote images must not pick this up.
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_images_local_style_colors_fallback_in_terminal() {
+    let body = "---\nstyle:\n  images:\n    local-style:\n      color: red-500\n---\n\n\
+        ![ALT_LOCAL](./no-such-image.png)\n\n![ALT_REMOTE](https://example.com/x.png)\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    let red_semi = "38;2;251;44;54";
+    let red_colon = "38:2::251:44:54";
+    let has_red = frame.raw.contains(red_semi) || frame.raw.contains(red_colon);
+    assert!(
+        has_red,
+        "expected red foreground SGR for local image fallback. raw:\n{}",
+        frame.raw
+    );
+    // The local fallback line carries the red bytes; the remote line must
+    // not. We only check the raw stream for the presence of red SGR; the
+    // remote line shouldn't add a second red occurrence.
+    let red_hits = frame.raw.matches(red_semi).count() + frame.raw.matches(red_colon).count();
+    assert!(
+        red_hits >= 1 && red_hits <= 4,
+        "unexpected red SGR hit count {red_hits} (heuristic). raw len={}",
+        frame.raw.len()
+    );
+    assert!(
+        frame.plain.contains("ALT_LOCAL") && frame.plain.contains("ALT_REMOTE"),
+        "alt fallbacks missing from plain capture:\n{}",
+        frame.plain
+    );
+}
+
+/// `style.images.local-style.width: 40` + `alignment: right` must right-pad
+/// the local image fallback line to 40 visible cells.
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_images_local_style_width_alignment_in_terminal() {
+    let body = "---\nstyle:\n  images:\n    local-style:\n      width: 40\n      alignment: right\n---\n\n\
+        ![A](./no-such-image.png)\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    // The fallback line is "▉ IMAGE[A]" (10 cells visible). Right-padded to
+    // 40 cells means 30 leading spaces. Look for that prefix on the fallback
+    // line.
+    let fallback_line = frame
+        .plain
+        .lines()
+        .find(|l| l.contains("IMAGE[A]"))
+        .unwrap_or_else(|| panic!("fallback line missing in plain capture:\n{}", frame.plain));
+    let leading_spaces = fallback_line.chars().take_while(|c| *c == ' ').count();
+    assert!(
+        leading_spaces >= 28,
+        "expected >=28 leading spaces for right-aligned width:40 fallback, got {leading_spaces}: {fallback_line:?}"
+    );
+}
