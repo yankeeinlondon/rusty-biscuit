@@ -1,0 +1,42 @@
+[package]
+name = "biscuit-file-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.biscuit-file]
+path = ".."
+features = ["full"]
+
+[[bin]]
+name = "pdf_extract"
+path = "fuzz_targets/pdf_extract.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "toml_roundtrip"
+path = "fuzz_targets/toml_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "yaml_roundtrip"
+path = "fuzz_targets/yaml_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "json5_roundtrip"
+path = "fuzz_targets/json5_roundtrip.rs"
+test = false
+doc = false

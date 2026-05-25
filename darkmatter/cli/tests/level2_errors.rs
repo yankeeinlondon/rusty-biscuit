@@ -5,16 +5,17 @@
 //! pane per test would push each test past the nextest slow-test termination
 //! threshold (`slow-timeout = 5s`, `terminate-after = 3` → 15 s).
 
+use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::fs;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
+use test_toolkit::{Level, LevelDecision, evaluate_level};
 
-static SHARED_HARNESS: Mutex<Option<WezTermHarness>> = Mutex::new(None);
+static SHARED_HARNESS: SharedHarness<WezTermHarness> = SharedHarness::new();
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 const SENTINEL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -72,9 +73,13 @@ fn run_md_compose_named(
     file_name: &str,
     file_body: &str,
 ) -> Option<(CapturedFrame, std::path::PathBuf)> {
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return None;
+    match evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm") {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return None;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
     }
 
     let dir = tempdir().unwrap();
@@ -82,14 +87,11 @@ fn run_md_compose_named(
     fs::write(&file_path, file_body).unwrap();
     let canonical = file_path.canonicalize().expect("canonicalize failed");
 
-    let mut guard = SHARED_HARNESS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    if guard.is_none() {
+    let mut guard = SHARED_HARNESS.get_or_init(|| {
         let mut harness = WezTermHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
-        *guard = Some(harness);
-    }
+        harness
+    });
     let harness = guard.as_mut().unwrap();
 
     // Reset the visible region so a previous test's output does not bleed

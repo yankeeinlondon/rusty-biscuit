@@ -19,3 +19,8 @@ serde_json = "1.0"
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.0"
+
+# Opt-out of benchmarking: thin CLI wrapper around the homelab library.
+[package.metadata.benchmarks]
+required = false
+reason = "Thin CLI wrapper around homelab; no measurable hot paths."

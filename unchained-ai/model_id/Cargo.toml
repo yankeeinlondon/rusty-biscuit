@@ -14,3 +14,8 @@ proc-macro2 = "1.0"
 
 [dev-dependencies]
 trybuild = "1.0"
+
+# Opt-out of benchmarking: proc-macro crate; compile-time only.
+[package.metadata.benchmarks]
+required = false
+reason = "Proc-macro crate; compile-time only, no runtime hot paths."

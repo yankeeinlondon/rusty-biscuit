@@ -24,3 +24,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"
+
+# Opt-out of benchmarking: thin CLI wrapper around the queue library.
+[package.metadata.benchmarks]
+required = false
+reason = "Thin CLI wrapper around queue; no measurable hot paths."
