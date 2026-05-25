@@ -82,7 +82,7 @@ The canonical migration applies to the **curated `areas` list in the root
 
 ```
 biscuit-hash biscuit-location biscuit-speaks biscuit-terminal
-schematic biscuit-file unchained-ai playa
+biscuit-tui schematic biscuit-file unchained-ai playa
 tree-hugger darkmatter sniff model-citizen
 claudine research queue homelab
 ```
@@ -91,7 +91,6 @@ claudine research queue homelab
 
 | Workspace member | Why it is not in `areas` |
 | ---------------- | ------------------------ |
-| `biscuit-tui`    | Mature package area with its own `justfile`, but historically not part of the root orchestrator. Eligible to migrate; tracked separately. |
 | `biscuit-clipboard`, `biscuit-visualized`, `messenger`, `tabby`, `worktree`, `dmls` | Smaller utility crates or experimental areas not yet promoted into the curated list. |
 | `tools/test-toolkit`, `biscuit-test-harness`, `biscuit-browser-harness` | Test-only infrastructure crates. Their tests run as part of the consumers (darkmatter, claudine, biscuit-terminal, etc.). |
 | `schematic/schema` | Generated code; intentionally excluded from the workspace and rebuilt via `just generate` in the `schematic` area. |
