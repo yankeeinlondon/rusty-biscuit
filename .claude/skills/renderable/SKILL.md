@@ -82,11 +82,13 @@ Terminal from the single tree it produces.
 
 Darkmatter's document-level `style:` frontmatter is implemented in
 `darkmatter::style`, but it intentionally uses renderable primitives:
-`Length`, `Alignment`, and color-backed values. Active wiring currently covers
-sub-specs 1 through 5 from
+`Length`, `Alignment`, and color-backed values. Active wiring covers
+sub-specs 1 through 7 from
 `renderable/features/2026-05-23-style-property/`: schema/parser, page layout,
-table/image/block-quote layout, `ul`/`ol`/`li` layout, and page/component
-`color` / `bg-color`.
+table/image/block-quote layout, `ul`/`ol`/`li` layout, page/component
+`color` / `bg-color`, `style.hr.*`, and the bespoke knobs
+`page.stylesheet`, `page.meta`, `page.code.theme`, hyperlink style, and
+local hyperlink/image style.
 
 This pipeline is separate from `renderable::style::Style`. Frontmatter applies
 policy to `DarkmatterPage`; `Style` is the render-tree appearance attribute
@@ -168,7 +170,7 @@ The **renderable** library can and should be used by any renderable components w
     - provides all sorts of utilities for discovering features of a given terminal as well as how to render to a terminal (with good fallbacks)
     - because it is so concentrated on terminal features, the `TerminalRenderable` trait resides in **biscuit-terminal** instead of **renderable**
     - current IR migration goal: every IR-aware component should share one private projection helper between `TreeRenderable::render_tree` and `TerminalRenderable::render_tree_node`; nested `RenderableTerminalContent::Component` values should project structurally instead of falling back to ANSI-stripped text
-    - Stage 3 closes the remaining structural-projection gap for `BlockQuote`, `StatusBlock`, and `FileSystem`, decides whether `FileSystem::render` can flip from its bespoke terminal path, and retires or documents each remaining `render_bespoke` compatibility hook
+    - Stage 3 closed the remaining structural-projection gap for `BlockQuote`, `StatusBlock`, and `FileSystem`, deferred the `FileSystem::render` terminal flip to Stage 4, and retired or documented each remaining `render_bespoke` compatibility hook
     - **biscuit-terminal** also provides these important components:
         - `Prose`
         - `Table`
