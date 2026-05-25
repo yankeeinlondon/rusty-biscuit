@@ -87,11 +87,8 @@ fn run_md_compose_named(
     fs::write(&file_path, file_body).unwrap();
     let canonical = file_path.canonicalize().expect("canonicalize failed");
 
-    let mut guard = SHARED_HARNESS.get_or_init(|| {
-        let mut harness = WezTermHarness::new();
-        harness.spawn_shell().expect("spawn_shell failed");
-        harness
-    });
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().unwrap();
 
     // Reset the visible region so a previous test's output does not bleed
