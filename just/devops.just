@@ -234,15 +234,85 @@ _sanity pkg *args="":
         --no-tests=pass {{ args }}
 
 # Level 2 tier: real terminal / PTY / harness tests.
-# Skip-clean by default; pass BISCUIT_TEST_LEVEL_REQUIRED=2 to make missing
-# harnesses hard-fail.
+#
+# Skip-clean by default; pass BISCUIT_TEST_LEVEL_REQUIRED=2 to make
+# missing harnesses hard-fail.
+#
+# ## Shared harness amortization
+#
+# `cargo nextest run` executes each test in its own child process, so a
+# process-local `SharedHarness` static cannot reuse a terminal pane
+# across tests. To realise the 2-3 s per-spawn savings the spec
+# promises, this recipe:
+#
+#   1. Builds `biscuit-harness-broker` and uses it to spawn ONE pane /
+#      window / session per backend (WezTerm, kitty, tmux, Apple
+#      Terminal) on the host. Each spawn's id is exported via a
+#      `BISCUIT_SHARED_*` env var so each nextest child can attach via
+#      `<Backend>Harness::shared_or_spawn()` instead of spawning fresh.
+#
+#   2. Runs nextest with `-j 1` so tests share the single pane without
+#      contending for it. L2 tests are `#[serial(level2)]`-tagged
+#      anyway and only one `question` / `bt` process can sensibly own a
+#      pane at a time.
+#
+#   3. Tears every spawned pane down in a trap after nextest exits
+#      (success or failure) via `biscuit-harness-broker kill`.
+#
+# Backends whose tooling is missing return exit code 2 from
+# `broker spawn`; the recipe simply doesn't export that env var and
+# tests fall back to per-process spawning (which themselves skip
+# cleanly via `require_level!`). This means the recipe degrades
+# gracefully on hosts without every terminal installed.
 _test_l2 pkg *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     echo
     echo -e "🖥  Level-2 tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
-    cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass {{ args }}
+
+    # Build the broker once (no-op if already up to date) and resolve
+    # its absolute path through cargo metadata.
+    cargo build -p biscuit-test-harness --bin biscuit-harness-broker --quiet
+    target_dir="$(cargo metadata --no-deps --format-version 1 | jq -r '.target_directory')"
+    broker="${target_dir}/debug/biscuit-harness-broker"
+    if [[ ! -x "${broker}" ]]; then
+        echo -e "{{ yellow }}warning: ${broker} not executable; falling back to per-test spawning{{ reset }}"
+        cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass {{ args }}
+        exit $?
+    fi
+
+    # Registry of (backend id) pairs the trap uses to tear down panes
+    # the broker spawned. The trap consumes the registry on EXIT.
+    SHARED_REGISTRY="$(mktemp -t biscuit-shared-XXXXXX)"
+    trap 'while read -r b i; do "${broker}" kill "${b}" "${i}" >/dev/null 2>&1 || true; done < "${SHARED_REGISTRY}"; rm -f "${SHARED_REGISTRY}"' EXIT
+
+    # spawn one shared pane per backend. Backends whose tooling is
+    # missing exit non-zero; we silently skip them. The corresponding
+    # BISCUIT_SHARED_* env var stays unset and tests fall back to
+    # per-process spawning (which also skip cleanly).
+    if id="$("${broker}" spawn wezterm 2>/dev/null)" && [[ -n "${id}" ]]; then
+        export BISCUIT_SHARED_WEZTERM_PANE_ID="${id}"
+        echo "wezterm ${id}" >> "${SHARED_REGISTRY}"
+        echo -e "  {{ dim }}spawned wezterm pane ${id}{{ reset }}"
+    fi
+    if id="$("${broker}" spawn kitty 2>/dev/null)" && [[ -n "${id}" ]]; then
+        export BISCUIT_SHARED_KITTY_WINDOW_ID="${id}"
+        echo "kitty ${id}" >> "${SHARED_REGISTRY}"
+        echo -e "  {{ dim }}spawned kitty window ${id}{{ reset }}"
+    fi
+    if id="$("${broker}" spawn tmux 2>/dev/null)" && [[ -n "${id}" ]]; then
+        export BISCUIT_SHARED_TMUX_SESSION="${id}"
+        echo "tmux ${id}" >> "${SHARED_REGISTRY}"
+        echo -e "  {{ dim }}spawned tmux session ${id}{{ reset }}"
+    fi
+    if id="$("${broker}" spawn apple-terminal 2>/dev/null)" && [[ -n "${id}" ]]; then
+        export BISCUIT_SHARED_APPLE_TERMINAL_WINDOW_ID="${id}"
+        echo "apple-terminal ${id}" >> "${SHARED_REGISTRY}"
+        echo -e "  {{ dim }}spawned apple-terminal window ${id}{{ reset }}"
+    fi
+
+    cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass -j 1 {{ args }}
 
 # Level 3 tier: OS keyboard/mouse injection tests. Always opt-in via
 # RUN_LEVEL3=1; the recipe sets the variable so the gate trips cleanly.
