@@ -1499,6 +1499,11 @@ impl Table {
                 max_width: col.max_width.and_then(|w| u32::try_from(w).ok()),
                 fixed_width: col.fixed_width.and_then(|w| u32::try_from(w).ok()),
                 conditional: conditional_to_hint(&col.when),
+                // `droppable` is the authoritative signal — `drop_note` is
+                // `Some` only for `DropWithMessage`, so silent-drop columns
+                // would otherwise round-trip as non-droppable and produce a
+                // "Table could not be rendered" error inline.
+                droppable: col.is_droppable(),
                 drop_note: col.drop_note(),
                 uniform_alignment: col.uniform_alignment,
             };

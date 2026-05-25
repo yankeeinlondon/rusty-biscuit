@@ -43,14 +43,63 @@ build *args="":
     @cargo build -p sniff-cli {{ args }}
     @echo
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity sniff
+    @just _sanity sniff-cli
+
 # test library and CLI
 test *args="":
     @just _test sniff {{ args }}
     @just _test sniff-cli {{ args }}
 
+# not applicable: sniff has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for sniff"
+
+# not applicable: sniff has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for sniff"
+
+# not applicable: sniff emits CLI output, not HTML
+test-browser:
+    @echo "test-browser: not applicable for sniff"
+
+# Real-resource tests (network probes, host filesystem). Skip-clean when absent.
+test-real *args="":
+    @just _test_real sniff {{ args }}
+    @just _test_real sniff-cli {{ args }}
+
 # lint with clippy
 lint *args="":
     @cargo clippy -p sniff -p sniff-cli -- {{ args }}
+
+# Per-package LCOV coverage.
+coverage *args="":
+    @just _coverage sniff {{ args }}
+    @just _coverage sniff-cli {{ args }}
+
+# Doctests.
+doctest *args="":
+    @just _doctest sniff {{ args }}
+    @just _doctest sniff-cli {{ args }}
+
+# not applicable: sniff has no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for sniff"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # install latest release version of CLI
 install *args="":

@@ -1,0 +1,7 @@
+{
+  // A comment
+  name: 'example',
+  version: "1.0.0",
+  hex: 0xFF,
+  trailing: true,
+}

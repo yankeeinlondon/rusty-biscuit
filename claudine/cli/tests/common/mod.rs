@@ -126,6 +126,29 @@ pub fn strip_ansi(input: &str) -> String {
     out
 }
 
+/// Probe for a usable pseudo-terminal on the host.
+///
+/// On Unix, attempts to open `/dev/ptmx` (the master multiplexer). Returns
+/// `true` when allocation succeeds, which is the precondition every
+/// `expectrl::Session::spawn` call in this crate's L2 PTY tests requires.
+/// On non-Unix targets returns `false` (the PTY test files are themselves
+/// `#[cfg(unix)]`, so this branch is unreachable from those tests).
+#[allow(dead_code)]
+pub fn pty_available() -> bool {
+    #[cfg(unix)]
+    {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/ptmx")
+            .is_ok()
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 pub fn write_executable(path: &Path, content: &str) {
     ensure_test_tracing_initialized();
     #[cfg(unix)]

@@ -105,6 +105,22 @@ Every backend implements one **shell-model-first** contract:
 
 Assert styling/links on `raw`; assert visible text on `plain`.
 
+## Default L2 backend: prefer `TmuxHarness`
+
+**Pick `TmuxHarness` first.** It is fully headless, requires only `tmux`
+on `$PATH`, and runs on any CI runner without a GUI. It covers the
+common Level-2 capability surface (plain text, SGR, OSC8) and is the
+only backend immune to the "which terminal am I running inside" gotcha
+described below.
+
+Reach for `WezTermHarness` or `KittyHarness` **only** when you need a
+capability tmux cannot deliver: graphics protocols, inline images,
+truecolor display nuances, Kitty keyboard-protocol bytes, or a
+`pane_size()`/`pane_cols()` geometry query against a real emulator.
+Tests that require those capabilities should document the dependency
+inline. Use `AppleTerminalHarness` exclusively for graceful-degradation
+checks on a deliberately low-capability terminal.
+
 ## Harness variants — when to use which
 
 All four implement `TerminalHarness`. Choose by the capability you need
@@ -152,6 +168,47 @@ let harness = WezTermHarness::new().with_spawn_visibility(SpawnVisibility::Foreg
 visibility is irrelevant. `AppleTerminalHarness` always spawns behind
 the developer's frontmost app (it snapshots and restores focus around
 the `do script` call).
+
+## Sharing a harness across tests — `SharedHarness<T>`
+
+Spawning a real terminal costs 2–3 s. Test binaries that hold many
+`#[serial]` tests against the same backend should share a single
+harness via [`shared::SharedHarness`]. The helper wraps the
+`Mutex<Option<T>>` + `libc::atexit` cleanup pattern so the harness's
+`Drop` impl runs at process exit (Rust does not run `Drop` on `static`
+values, which would otherwise leak the pane).
+
+```rust,ignore
+use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::wezterm::WezTermHarness;
+
+static SHARED: SharedHarness<WezTermHarness> = SharedHarness::new();
+
+fn run_in_pane() {
+    let mut guard = SHARED.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell");
+        h
+    });
+    let harness = guard.as_mut().expect("harness present");
+    // ... drive the harness ...
+}
+```
+
+## Defensive cleanup
+
+The harness defensively removes stale resources before opening new
+real-terminal sessions. WezTerm panes, tmux sessions, and Terminal.app
+windows are tagged with the creating process id; later runs close only
+tagged resources whose process is no longer alive, so active concurrent
+test runs are left alone.
+
+`cleanup_stale_terminal_harness_resources()` is available for explicit
+suite setup or local maintenance. Backend spawns also call their own
+cleanup path once per process. For historical WezTerm leaks created
+before tagging existed, the WezTerm cleanup sweeps untagged panes in the
+`biscuit-bg` workspace when that workspace grows past a conservative
+limit, or when `BISCUIT_TEST_HARNESS_SWEEP_LEGACY_WEZTERM=1` is set.
 
 ## Environment prerequisites
 
@@ -241,6 +298,7 @@ Re-exported from the crate root:
 | `SpawnVisibility` | `Background` (default) / `Foreground`. |
 | `strip_ansi(&str)` | Remove CSI/OSC/SGR/charset-designation escapes (ECMA-48 §5.4 aware). |
 | `skip_with_reason(&str)` | Print `skipping: requires <X>` to stderr; returns `true`. |
+| `cleanup_stale_terminal_harness_resources()` | Best-effort cleanup for tagged stale WezTerm, tmux, and Terminal.app resources. |
 | `detect_shell()` | Pick a POSIX shell (`bash` → `sh` → `$SHELL`). |
 | `cargo_bin_dir(name)` | Locate the directory of a built cargo binary, for `PATH` augmentation. |
 | `apply_color_forcing_env(&mut Command)` | Set `FORCE_COLOR`/`CLICOLOR_FORCE`/`TERM`/`COLORTERM`, clear `NO_COLOR`. |

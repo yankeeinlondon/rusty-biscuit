@@ -58,6 +58,7 @@ members = [
     "worktree/cli",
     "darkmatter/dmls",
     "tools/test-toolkit",
+    "biscuit-browser-harness",
 ]
 exclude = ["schematic/schema"]
 

@@ -43,6 +43,7 @@ use syntect::util::LinesWithEndings;
 /// - Top padding row (blank line with theme background)
 /// - Code lines with syntax highlighting, optional line numbers, and highlight backgrounds
 /// - Bottom padding row (blank line with theme background)
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_terminal_code_block(
     code: &str,
     language: &str,
@@ -51,13 +52,15 @@ pub(crate) fn render_terminal_code_block(
     meta: &CodeBlockMeta,
     color_mode: ColorMode,
     target_width: Option<u16>,
+    override_bg: Option<Color>,
 ) -> Result<String, MarkdownError> {
     let syntax = find_syntax(language, highlighter.syntax_set())
         .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
     let theme = highlighter.theme();
 
-    // Get background color from theme
-    let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+    // Use override background when provided (e.g. from page/component style),
+    // otherwise fall back to the theme background.
+    let bg_color = override_bg.unwrap_or_else(|| theme.settings.background.unwrap_or(Color::BLACK));
 
     // Use LinesWithEndings to preserve newlines - required for proper multi-line
     // syntax parsing in grammars like bash/shell that track state across lines
@@ -443,6 +446,7 @@ mod tests {
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
+            hr_defaults: None,
         }
     }
 
@@ -463,6 +467,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
         );
 
@@ -490,6 +495,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
         );
 
@@ -520,6 +526,7 @@ mod tests {
             &meta,
             ColorMode::Light,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -544,6 +551,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
         );
 
@@ -673,6 +681,7 @@ mod tests {
             &meta,
             ColorMode::Dark,
             Some(20),
+            None,
         )
         .unwrap();
 

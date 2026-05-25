@@ -12,6 +12,8 @@ use super::types::{
     PageAlignment, PageBackground, PageComponent, PageFill, PageMargin, PagePadding, WidthUnit,
 };
 use crate::markdown::highlighting::ColorMode;
+use crate::style::StyleColor;
+use crate::style::schema::CommonStyle;
 
 /// Resolved layout state used during terminal rendering.
 ///
@@ -55,6 +57,26 @@ pub(crate) struct LayoutContext {
     #[allow(dead_code)]
     /// Per-component fills.
     pub fills: std::collections::HashMap<PageComponent, PageFill>,
+    /// Per-component list left margins.
+    pub list_left_margins: std::collections::HashMap<PageComponent, WidthUnit>,
+    /// Page foreground color.
+    #[allow(dead_code)]
+    pub page_color: Option<StyleColor>,
+    /// Page background color.
+    #[allow(dead_code)]
+    pub page_bg_color: Option<StyleColor>,
+    /// Per-component foreground colors.
+    #[allow(dead_code)]
+    pub component_colors: std::collections::HashMap<PageComponent, StyleColor>,
+    /// Per-component background colors.
+    #[allow(dead_code)]
+    pub component_bg_colors: std::collections::HashMap<PageComponent, StyleColor>,
+    /// Global hyperlink style from `style.hyperlinks.*`.
+    pub hyperlink_style: Option<CommonStyle>,
+    /// Local hyperlink override from `style.hyperlinks.local-style`.
+    pub local_hyperlink_style: Option<CommonStyle>,
+    /// Local image override from `style.images.local-style`.
+    pub local_image_style: Option<CommonStyle>,
 }
 
 /// Concrete RGB background color resolved from [`PageBackground`] and the
@@ -127,6 +149,14 @@ impl LayoutContext {
         options_color_mode: ColorMode,
         alignments: std::collections::HashMap<PageComponent, PageAlignment>,
         fills: std::collections::HashMap<PageComponent, PageFill>,
+        list_left_margins: std::collections::HashMap<PageComponent, WidthUnit>,
+        page_color: Option<StyleColor>,
+        page_bg_color: Option<StyleColor>,
+        component_colors: std::collections::HashMap<PageComponent, StyleColor>,
+        component_bg_colors: std::collections::HashMap<PageComponent, StyleColor>,
+        hyperlink_style: Option<CommonStyle>,
+        local_hyperlink_style: Option<CommonStyle>,
+        local_image_style: Option<CommonStyle>,
     ) -> Result<Self, PageRenderError> {
         let margin_x = margin.horizontal();
         let padding_x = padding.horizontal();
@@ -150,7 +180,12 @@ impl LayoutContext {
             || page_background != PageBackground::Transparent
             || max_width.is_some()
             || !alignments.is_empty()
-            || !fills.is_empty();
+            || !fills.is_empty()
+            || !list_left_margins.is_empty()
+            || page_color.is_some()
+            || page_bg_color.is_some()
+            || !component_colors.is_empty()
+            || !component_bg_colors.is_empty();
 
         // Per spec, page background resolution uses the *terminal's* detected
         // color mode (so `Subtle` picks a dark-vs-light surface based on the
@@ -198,6 +233,14 @@ impl LayoutContext {
             render_color_mode,
             alignments,
             fills,
+            list_left_margins,
+            page_color,
+            page_bg_color,
+            component_colors,
+            component_bg_colors,
+            hyperlink_style,
+            local_hyperlink_style,
+            local_image_style,
         })
     }
 
@@ -208,17 +251,158 @@ impl LayoutContext {
 
     /// Whether any per-component alignment or fill is configured.
     pub fn has_component_styles(&self) -> bool {
-        !self.alignments.is_empty() || !self.fills.is_empty()
+        !self.alignments.is_empty()
+            || !self.fills.is_empty()
+            || !self.list_left_margins.is_empty()
+            || !self.component_colors.is_empty()
+            || !self.component_bg_colors.is_empty()
+    }
+
+    /// Resolve effective foreground color for a component.
+    ///
+    /// Returns the component-specific color when set, otherwise falls back
+    /// to the page-level color.
+    #[allow(dead_code)]
+    pub fn component_color(&self, component: PageComponent) -> Option<&StyleColor> {
+        self.component_colors
+            .get(&component)
+            .or(self.page_color.as_ref())
+    }
+
+    /// Resolve effective background color for a component.
+    ///
+    /// Returns the component-specific color when set, otherwise falls back
+    /// to the page-level color.
+    #[allow(dead_code)]
+    pub fn component_bg_color(&self, component: PageComponent) -> Option<&StyleColor> {
+        self.component_bg_colors
+            .get(&component)
+            .or(self.page_bg_color.as_ref())
+    }
+
+    /// Resolve effective hyperlink foreground/background colors.
+    ///
+    /// For local links (`is_local == true`), merges `local_hyperlink_style`
+    /// over `hyperlink_style` and uses the resulting color fields. For remote
+    /// links, uses the global `hyperlinks` component color.
+    pub fn hyperlink_color(&self, is_local: bool) -> (Option<StyleColor>, Option<StyleColor>) {
+        let merged = if is_local {
+            self.local_hyperlink_style.as_ref().map(|local| {
+                if let Some(base) = self.hyperlink_style.as_ref() {
+                    crate::style::bespoke::merge_common_style(base, local)
+                } else {
+                    local.clone()
+                }
+            })
+        } else {
+            self.hyperlink_style.clone()
+        };
+
+        let fg = merged
+            .as_ref()
+            .and_then(|s| s.color.clone())
+            .or_else(|| self.component_colors.get(&PageComponent::Hyperlinks).cloned())
+            .or_else(|| self.page_color.clone());
+        let bg = merged
+            .as_ref()
+            .and_then(|s| s.bg_color.clone())
+            .or_else(|| self.component_bg_colors.get(&PageComponent::Hyperlinks).cloned())
+            .or_else(|| self.page_bg_color.clone());
+
+        (fg, bg)
+    }
+
+    /// Resolve the effective hyperlink [`CommonStyle`] for a link.
+    ///
+    /// For local links (`is_local == true`), merges `local_hyperlink_style`
+    /// over `hyperlink_style`. For remote links, returns `hyperlink_style`.
+    pub fn effective_hyperlink_style(&self, is_local: bool) -> Option<CommonStyle> {
+        if is_local {
+            self.local_hyperlink_style.as_ref().map(|local| {
+                if let Some(base) = self.hyperlink_style.as_ref() {
+                    crate::style::bespoke::merge_common_style(base, local)
+                } else {
+                    local.clone()
+                }
+            }).or_else(|| self.hyperlink_style.clone())
+        } else {
+            self.hyperlink_style.clone()
+        }
+    }
+
+    /// Resolve effective image foreground/background colors for fallback text.
+    ///
+    /// For local images (`is_local == true`), merges `local_image_style`
+    /// over the global `style.images.*` colors. For remote images, uses the
+    /// global `images` component color.
+    pub fn image_color(&self, is_local: bool) -> (Option<StyleColor>, Option<StyleColor>) {
+        let merged = if is_local {
+            self.local_image_style.as_ref().map(|local| {
+                let base = CommonStyle {
+                    color: self.component_colors.get(&PageComponent::Images).cloned(),
+                    bg_color: self.component_bg_colors.get(&PageComponent::Images).cloned(),
+                    ..CommonStyle::default()
+                };
+                crate::style::bespoke::merge_common_style(&base, local)
+            })
+        } else {
+            None
+        };
+
+        let fg = merged
+            .as_ref()
+            .and_then(|s| s.color.clone())
+            .or_else(|| self.component_colors.get(&PageComponent::Images).cloned())
+            .or_else(|| self.page_color.clone());
+        let bg = merged
+            .as_ref()
+            .and_then(|s| s.bg_color.clone())
+            .or_else(|| self.component_bg_colors.get(&PageComponent::Images).cloned())
+            .or_else(|| self.page_bg_color.clone());
+
+        (fg, bg)
+    }
+
+    /// Get the list left margin for a component, if any.
+    #[allow(dead_code)]
+    pub fn list_left_margin(&self, component: PageComponent) -> Option<WidthUnit> {
+        self.list_left_margins.get(&component).copied()
     }
 
     /// Get the alignment for a component, defaulting to [`PageAlignment::Left`].
+    ///
+    /// For the concrete list variants (`Ul`, `Ol`, `Li`), falls back to the
+    /// deprecated [`PageComponent::Lists`] entry when no explicit entry exists.
     pub fn component_alignment(&self, component: PageComponent) -> PageAlignment {
-        self.alignments.get(&component).copied().unwrap_or_default()
+        self.alignments
+            .get(&component)
+            .copied()
+            .or_else(|| {
+                if PageComponent::LISTS.contains(&component) {
+                    self.alignments.get(&PageComponent::Lists).copied()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default()
     }
 
     /// Get the fill for a component, defaulting to [`PageFill::Full`].
+    ///
+    /// For the concrete list variants (`Ul`, `Ol`, `Li`), falls back to the
+    /// deprecated [`PageComponent::Lists`] entry when no explicit entry exists.
     pub fn component_fill(&self, component: PageComponent) -> PageFill {
-        self.fills.get(&component).copied().unwrap_or_default()
+        self.fills
+            .get(&component)
+            .copied()
+            .or_else(|| {
+                if PageComponent::LISTS.contains(&component) {
+                    self.fills.get(&PageComponent::Lists).copied()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default()
     }
 
     /// Resolve the target render width for a component based on its fill setting.
@@ -346,6 +530,14 @@ mod tests {
             render_color_mode: ColorMode::Dark,
             alignments: HashMap::new(),
             fills: HashMap::new(),
+            list_left_margins: HashMap::new(),
+            page_color: None,
+            page_bg_color: None,
+            component_colors: HashMap::new(),
+            component_bg_colors: HashMap::new(),
+            hyperlink_style: None,
+            local_hyperlink_style: None,
+            local_image_style: None,
         }
     }
 
@@ -581,6 +773,98 @@ mod tests {
             c.component_side_padding(PageComponent::BlockQuotes)
                 .unwrap(),
             (6, 6)
+        );
+    }
+
+    // ---------- Phase 1: color context tests ----------
+
+    use crate::style::StyleColor;
+    use renderable::color::{Color, Tailwind};
+
+    fn red_style_color() -> StyleColor {
+        StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: None,
+        }
+    }
+
+    fn blue_style_color() -> StyleColor {
+        StyleColor {
+            color: Color::Tailwind(Tailwind::Blue500),
+            opacity: None,
+        }
+    }
+
+    #[test]
+    fn needs_decoration_true_when_page_color_set() {
+        let mut c = ctx(100, 80);
+        c.page_color = Some(red_style_color());
+        assert!(c.needs_decoration());
+    }
+
+    #[test]
+    fn needs_decoration_true_when_page_bg_color_set() {
+        let mut c = ctx(100, 80);
+        c.page_bg_color = Some(red_style_color());
+        assert!(c.needs_decoration());
+    }
+
+    #[test]
+    fn needs_decoration_true_when_component_color_set() {
+        let mut c = ctx(100, 80);
+        c.component_colors
+            .insert(PageComponent::Tables, red_style_color());
+        assert!(c.needs_decoration());
+    }
+
+    #[test]
+    fn has_component_styles_true_when_component_colors_set() {
+        let mut c = ctx(100, 80);
+        assert!(!c.has_component_styles());
+        c.component_colors
+            .insert(PageComponent::Tables, red_style_color());
+        assert!(c.has_component_styles());
+    }
+
+    #[test]
+    fn has_component_styles_true_when_component_bg_colors_set() {
+        let mut c = ctx(100, 80);
+        c.component_bg_colors
+            .insert(PageComponent::Tables, red_style_color());
+        assert!(c.has_component_styles());
+    }
+
+    #[test]
+    fn component_color_inherits_from_page() {
+        let mut c = ctx(100, 80);
+        c.page_color = Some(red_style_color());
+        c.component_colors
+            .insert(PageComponent::Tables, blue_style_color());
+
+        assert_eq!(
+            c.component_color(PageComponent::Tables),
+            Some(&blue_style_color())
+        );
+        assert_eq!(
+            c.component_color(PageComponent::Images),
+            Some(&red_style_color())
+        );
+    }
+
+    #[test]
+    fn component_bg_color_inherits_from_page() {
+        let mut c = ctx(100, 80);
+        c.page_bg_color = Some(red_style_color());
+        c.component_bg_colors
+            .insert(PageComponent::Tables, blue_style_color());
+
+        assert_eq!(
+            c.component_bg_color(PageComponent::Tables),
+            Some(&blue_style_color())
+        );
+        assert_eq!(
+            c.component_bg_color(PageComponent::Images),
+            Some(&red_style_color())
         );
     }
 }

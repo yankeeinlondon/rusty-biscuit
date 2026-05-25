@@ -30,4 +30,5 @@ predicates = "3"
 serial_test = "3"
 sha2 = "0.10"
 tempfile = "3"
+test-toolkit = { path = "../../tools/test-toolkit" }
 unicode-width = "0.2"

@@ -1705,8 +1705,16 @@ fn build_table_column(
     }
     col = col.with_when(conditional_from_hint(hints.conditional));
     col = col.with_uniform_alignment(hints.uniform_alignment);
+    // Reconstruct droppability from the authoritative `droppable` flag. A
+    // `drop_note` always implies droppable, but the reverse is not true —
+    // silent-drop columns (`drop_when_space_is_limited::<String>(None)`)
+    // carry `droppable=true` with `drop_note=None`. Honoring the flag
+    // ensures the render-tree plan agrees with the bespoke planner about
+    // which columns may be dropped to fit the available width.
     if let Some(note) = &hints.drop_note {
         col = col.drop_when_space_is_limited(Some(note.clone()));
+    } else if hints.droppable {
+        col = col.drop_when_space_is_limited::<String>(None);
     }
     col
 }

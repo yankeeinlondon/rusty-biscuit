@@ -185,11 +185,25 @@ Darkmatter already owns frontmatter extraction. The fold should not duplicate
 that parser. Instead, the render-tree entry point for Darkmatter should accept
 the already extracted metadata and attach it to `DocumentMetadata`.
 
+The `style:` frontmatter pipeline reinforces this boundary. Today
+`darkmatter::style` parses the document-level style object into
+`StyleFrontmatter` and applies implemented phases 1 through 7 onto
+`DarkmatterPage` before rendering. That includes page layout, table/image/
+block-quote/list layout, page/component colors, HR defaults, page
+stylesheet/meta/code-theme settings, hyperlink style, and local
+hyperlink/image style. It does not mean the fold should parse YAML or
+reinterpret style keys itself. A tree-native darkmatter entry point should
+receive already-resolved page/component policy, and then decide which parts
+become `DocumentMetadata`, `NodeAttrs` layout/style hints, or renderer
+options.
+
 This keeps responsibilities clean:
 
 - Darkmatter extracts and composes document state.
 - The fold converts Markdown body events to tree nodes.
 - The final `Document` carries both body structure and metadata.
+- Style frontmatter stays a Darkmatter policy layer above the fold until a
+  dedicated tree-native style propagation design exists.
 
 ### The compose pipeline is not automatically tree-native
 

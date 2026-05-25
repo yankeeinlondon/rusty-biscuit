@@ -1408,6 +1408,7 @@ title: Test
             max_width: Some(80),
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
+            hr_defaults: None,
         };
         let output = for_terminal(&md, options).unwrap();
 
@@ -1470,6 +1471,7 @@ title: Test
             max_width: Some(80),
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
+            hr_defaults: None,
         };
         let terminal_output = for_terminal(&md, terminal_options).unwrap();
         let terminal_plain = strip_ansi_codes(&terminal_output);

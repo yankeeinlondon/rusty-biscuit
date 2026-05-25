@@ -25,9 +25,16 @@ use super::types::{
 };
 use crate::markdown::Markdown;
 use crate::markdown::highlighting::{ColorMode, ThemePair};
+use crate::markdown::inline::HorizontalRuleAttrs;
 use crate::markdown::output::html::HtmlOptions;
 use crate::markdown::output::terminal::{
     ColorDepth, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode, TerminalOptions,
+};
+use crate::style::StyleColor;
+use crate::style::color::lower_to_css;
+use crate::style::schema::hr::{HrAlignment, HrKind, HrWeight};
+use crate::markdown::block::{
+    hr_alignment_to_string, hr_kind_to_string, hr_weight_to_string,
 };
 
 /// A page-level layout primitive that owns layout state for darkmatter
@@ -74,11 +81,32 @@ pub struct DarkmatterPage {
     line_numbers: bool,
     alignments: HashMap<PageComponent, PageAlignment>,
     fills: HashMap<PageComponent, PageFill>,
+    list_left_margins: HashMap<PageComponent, WidthUnit>,
+    page_color: Option<StyleColor>,
+    page_bg_color: Option<StyleColor>,
+    component_colors: HashMap<PageComponent, StyleColor>,
+    component_bg_colors: HashMap<PageComponent, StyleColor>,
+    hr_kind: Option<HrKind>,
+    hr_weight: Option<HrWeight>,
+    hr_alignment: Option<HrAlignment>,
+    hr_width: Option<String>,
     options: TerminalOptions,
     /// Stored markdown for [`TerminalRenderable`] support.
     markdown: Option<Markdown>,
     /// Layout for [`TerminalRenderable`] trait compliance.
     layout: Layout,
+    /// Page-level stylesheet for HTML output.
+    stylesheet: Option<crate::style::bespoke::PageStylesheet>,
+    /// Page-level HTML meta tags.
+    page_meta: Option<crate::style::bespoke::PageMeta>,
+    /// Page-level code block theme override.
+    page_code_theme: Option<ThemePair>,
+    /// Global hyperlink style from `style.hyperlinks.*`.
+    hyperlink_style: Option<crate::style::schema::CommonStyle>,
+    /// Local hyperlink override from `style.hyperlinks.local-style`.
+    local_hyperlink_style: Option<crate::style::schema::CommonStyle>,
+    /// Local image override from `style.images.local-style`.
+    local_image_style: Option<crate::style::schema::CommonStyle>,
 }
 
 impl DarkmatterPage {
@@ -101,9 +129,24 @@ impl DarkmatterPage {
             line_numbers: false,
             alignments: HashMap::new(),
             fills: HashMap::new(),
+            list_left_margins: HashMap::new(),
+            page_color: None,
+            page_bg_color: None,
+            component_colors: HashMap::new(),
+            component_bg_colors: HashMap::new(),
+            hr_kind: None,
+            hr_weight: None,
+            hr_alignment: None,
+            hr_width: None,
             options: TerminalOptions::default(),
             markdown: None,
             layout: Layout::default(),
+            stylesheet: None,
+            page_meta: None,
+            page_code_theme: None,
+            hyperlink_style: None,
+            local_hyperlink_style: None,
+            local_image_style: None,
         }
     }
 
@@ -161,19 +204,157 @@ impl DarkmatterPage {
 
     /// Resolve alignment for the given component, defaulting to
     /// [`PageAlignment::Left`].
+    ///
+    /// For the concrete list variants (`Ul`, `Ol`, `Li`), falls back to the
+    /// deprecated [`PageComponent::Lists`] entry when no explicit entry exists.
     pub fn alignment_for(&self, component: PageComponent) -> PageAlignment {
         self.alignments
             .get(&component)
             .copied()
+            .or_else(|| {
+                if PageComponent::LISTS.contains(&component) {
+                    self.alignments.get(&PageComponent::Lists).copied()
+                } else {
+                    None
+                }
+            })
             .unwrap_or(PageAlignment::Left)
     }
 
     /// Resolve fill for the given component, defaulting to [`PageFill::Full`].
+    ///
+    /// For the concrete list variants (`Ul`, `Ol`, `Li`), falls back to the
+    /// deprecated [`PageComponent::Lists`] entry when no explicit entry exists.
     pub fn fill_for(&self, component: PageComponent) -> PageFill {
         self.fills
             .get(&component)
             .copied()
+            .or_else(|| {
+                if PageComponent::LISTS.contains(&component) {
+                    self.fills.get(&PageComponent::Lists).copied()
+                } else {
+                    None
+                }
+            })
             .unwrap_or(PageFill::Full)
+    }
+
+    /// Resolve list left margin for the given component.
+    pub fn list_left_margin_for(&self, component: PageComponent) -> Option<WidthUnit> {
+        self.list_left_margins.get(&component).copied()
+    }
+
+    /// Configured page foreground color, if any.
+    pub fn page_color(&self) -> Option<&StyleColor> {
+        self.page_color.as_ref()
+    }
+
+    /// Configured page background color, if any.
+    pub fn page_bg_color(&self) -> Option<&StyleColor> {
+        self.page_bg_color.as_ref()
+    }
+
+    /// Resolve effective foreground color for the given component.
+    ///
+    /// Returns the component-specific color when set, otherwise falls back
+    /// to the page-level color.
+    pub fn color_for(&self, component: PageComponent) -> Option<&StyleColor> {
+        self.component_colors
+            .get(&component)
+            .or(self.page_color.as_ref())
+    }
+
+    /// Resolve effective background color for the given component.
+    ///
+    /// Returns the component-specific color when set, otherwise falls back
+    /// to the page-level color.
+    pub fn bg_color_for(&self, component: PageComponent) -> Option<&StyleColor> {
+        self.component_bg_colors
+            .get(&component)
+            .or(self.page_bg_color.as_ref())
+    }
+
+    /// Configured HR kind, if any.
+    pub fn hr_kind(&self) -> Option<HrKind> {
+        self.hr_kind
+    }
+
+    /// Configured HR weight, if any.
+    pub fn hr_weight(&self) -> Option<HrWeight> {
+        self.hr_weight
+    }
+
+    /// Configured HR alignment, if any.
+    pub fn hr_alignment(&self) -> Option<HrAlignment> {
+        self.hr_alignment
+    }
+
+    /// Configured HR width string, if any.
+    pub fn hr_width(&self) -> Option<&str> {
+        self.hr_width.as_deref()
+    }
+
+    /// Configured page stylesheet, if any.
+    pub fn stylesheet(&self) -> Option<&crate::style::bespoke::PageStylesheet> {
+        self.stylesheet.as_ref()
+    }
+
+    /// Configured page meta tags, if any.
+    pub fn page_meta(&self) -> Option<&crate::style::bespoke::PageMeta> {
+        self.page_meta.as_ref()
+    }
+
+    /// Configured page code theme, if any.
+    pub fn page_code_theme(&self) -> Option<&ThemePair> {
+        self.page_code_theme.as_ref()
+    }
+
+    /// Configured global hyperlink style, if any.
+    pub fn hyperlink_style(&self) -> Option<&crate::style::schema::CommonStyle> {
+        self.hyperlink_style.as_ref()
+    }
+
+    /// Configured local hyperlink style override, if any.
+    pub fn local_hyperlink_style(&self) -> Option<&crate::style::schema::CommonStyle> {
+        self.local_hyperlink_style.as_ref()
+    }
+
+    /// Configured local image style override, if any.
+    pub fn local_image_style(&self) -> Option<&crate::style::schema::CommonStyle> {
+        self.local_image_style.as_ref()
+    }
+
+    /// Build [`HorizontalRuleAttrs`] from the page's resolved HR fields.
+    ///
+    /// Returns `None` when no HR-specific settings have been configured.
+    pub fn hr_defaults(&self) -> Option<HorizontalRuleAttrs> {
+        let mut attrs = HorizontalRuleAttrs::default();
+        let mut has_any = false;
+
+        if let Some(kind) = self.hr_kind() {
+            attrs.kind = Some(hr_kind_to_string(kind).to_string());
+            has_any = true;
+        }
+        if let Some(weight) = self.hr_weight() {
+            attrs.weight = Some(hr_weight_to_string(weight).to_string());
+            has_any = true;
+        }
+        if let Some(alignment) = self.hr_alignment() {
+            attrs.alignment = Some(hr_alignment_to_string(alignment).to_string());
+            has_any = true;
+        }
+        if let Some(width) = self.hr_width() {
+            attrs.width = Some(width.to_string());
+            has_any = true;
+        }
+        if let Some(color) = self.color_for(PageComponent::Hr)
+            && let Some(css) = lower_to_css(color)
+        {
+            attrs.color = Some(css);
+            has_any = true;
+        }
+
+        if has_any { Some(attrs) } else { None }
     }
 
     /// Read-only view of the underlying [`TerminalOptions`].
@@ -335,6 +516,30 @@ impl DarkmatterPage {
         self
     }
 
+    /// Set the page foreground color.
+    pub fn with_page_color(mut self, color: StyleColor) -> Self {
+        self.page_color = Some(color);
+        self
+    }
+
+    /// Set the page background color.
+    pub fn with_page_bg_color(mut self, color: StyleColor) -> Self {
+        self.page_bg_color = Some(color);
+        self
+    }
+
+    /// Set the foreground color for a single [`PageComponent`].
+    pub fn with_component_color(mut self, component: PageComponent, color: StyleColor) -> Self {
+        self.component_colors.insert(component, color);
+        self
+    }
+
+    /// Set the background color for a single [`PageComponent`].
+    pub fn with_component_bg_color(mut self, component: PageComponent, color: StyleColor) -> Self {
+        self.component_bg_colors.insert(component, color);
+        self
+    }
+
     /// Cap the content width at `max_width` columns.
     pub fn with_max_width(mut self, max_width: u16) -> Self {
         self.max_width = Some(max_width);
@@ -363,6 +568,9 @@ impl DarkmatterPage {
     }
 
     /// Apply the same alignment to every [`PageComponent`].
+    ///
+    /// Writes only the concrete variants in [`PageComponent::ALL`]; the
+    /// deprecated [`PageComponent::Lists`] is not written.
     pub fn use_alignment_for_all(mut self, alignment: PageAlignment) -> Self {
         for component in PageComponent::ALL {
             self.alignments.insert(component, alignment);
@@ -377,10 +585,124 @@ impl DarkmatterPage {
     }
 
     /// Apply the same fill to every [`PageComponent`].
+    ///
+    /// Writes only the concrete variants in [`PageComponent::ALL`]; the
+    /// deprecated [`PageComponent::Lists`] is not written.
     pub fn with_fill_for_all(mut self, fill: PageFill) -> Self {
         for component in PageComponent::ALL {
             self.fills.insert(component, fill);
         }
+        self
+    }
+
+    /// Set the HR kind.
+    pub fn with_hr_kind(mut self, kind: HrKind) -> Self {
+        self.hr_kind = Some(kind);
+        self
+    }
+
+    /// Set the HR weight.
+    pub fn with_hr_weight(mut self, weight: HrWeight) -> Self {
+        self.hr_weight = Some(weight);
+        self
+    }
+
+    /// Set the HR alignment.
+    pub fn with_hr_alignment(mut self, alignment: HrAlignment) -> Self {
+        self.hr_alignment = Some(alignment);
+        self
+    }
+
+    /// Set the HR width string.
+    pub fn with_hr_width(mut self, width: impl Into<String>) -> Self {
+        self.hr_width = Some(width.into());
+        self
+    }
+
+    /// Set the list left margin for a single [`PageComponent`].
+    ///
+    /// Only [`PageComponent::Ul`] is accepted; other components return a
+    /// fallible error via [`Self::try_with_list_left_margin`].
+    ///
+    /// ## Panics
+    ///
+    /// Panics when `component` is not [`PageComponent::Ul`]. Callers that
+    /// cannot guarantee the component statically should use the fallible
+    /// [`Self::try_with_list_left_margin`] instead.
+    pub fn with_list_left_margin(self, component: PageComponent, margin: WidthUnit) -> Self {
+        match self.try_with_list_left_margin(component, margin) {
+            Ok(page) => page,
+            Err(_) => panic!("with_list_left_margin only accepts PageComponent::Ul"),
+        }
+    }
+
+    /// Fallible variant of [`Self::with_list_left_margin`].
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`PageRenderError::InvalidListLeftMarginComponent`] when
+    /// `component` is not [`PageComponent::Ul`]. This is the channel
+    /// `apply_list_style` uses to surface a clear apply error instead of
+    /// panicking when frontmatter targets an unsupported list bucket.
+    pub fn try_with_list_left_margin(
+        mut self,
+        component: PageComponent,
+        margin: WidthUnit,
+    ) -> Result<Self, PageRenderError> {
+        if component != PageComponent::Ul {
+            return Err(PageRenderError::InvalidListLeftMarginComponent);
+        }
+        self.list_left_margins.insert(component, margin);
+        Ok(self)
+    }
+
+    // ---------- Bespoke style builders (sub-spec #7) ----------
+
+    /// Set the page stylesheet for HTML output.
+    pub fn with_stylesheet(
+        mut self,
+        stylesheet: crate::style::bespoke::PageStylesheet,
+    ) -> Self {
+        self.stylesheet = Some(stylesheet);
+        self
+    }
+
+    /// Set the page meta tags for HTML output.
+    pub fn with_page_meta(mut self, meta: crate::style::bespoke::PageMeta) -> Self {
+        self.page_meta = Some(meta);
+        self
+    }
+
+    /// Set the page-level code block theme.
+    pub fn with_page_code_theme(mut self, theme: ThemePair) -> Self {
+        self.page_code_theme = Some(theme);
+        self
+    }
+
+    /// Set the global hyperlink style.
+    pub fn with_hyperlink_style(
+        mut self,
+        style: crate::style::schema::CommonStyle,
+    ) -> Self {
+        self.hyperlink_style = Some(style);
+        self
+    }
+
+    /// Set the local hyperlink style override.
+    pub fn with_local_hyperlink_style(
+        mut self,
+        style: crate::style::schema::CommonStyle,
+    ) -> Self {
+        self.local_hyperlink_style = Some(style);
+        self
+    }
+
+    /// Set the local image style override.
+    pub fn with_local_image_style(
+        mut self,
+        style: crate::style::schema::CommonStyle,
+    ) -> Self {
+        self.local_image_style = Some(style);
         self
     }
 
@@ -484,6 +806,7 @@ impl DarkmatterPage {
     /// renderer fails.
     pub fn render(&self, md: &Markdown) -> Result<String, PageRenderError> {
         self.validate_fills()?;
+        crate::style::bespoke::validate_terminal_inline_lengths(self)?;
         let ctx = LayoutContext::from_page(
             self.terminal_width,
             self.margin,
@@ -494,6 +817,14 @@ impl DarkmatterPage {
             self.options.color_mode,
             self.alignments.clone(),
             self.fills.clone(),
+            self.list_left_margins.clone(),
+            self.page_color.clone(),
+            self.page_bg_color.clone(),
+            self.component_colors.clone(),
+            self.component_bg_colors.clone(),
+            self.hyperlink_style.clone(),
+            self.local_hyperlink_style.clone(),
+            self.local_image_style.clone(),
         )?;
 
         // Build derived TerminalOptions.
@@ -520,6 +851,12 @@ impl DarkmatterPage {
         }
         options.include_line_numbers = self.line_numbers;
         options.color_mode = ctx.render_color_mode;
+        options.hr_defaults = self.hr_defaults();
+
+        // Apply page-level code theme override if set via frontmatter.
+        if let Some(theme) = self.page_code_theme {
+            options.code_theme = theme;
+        }
 
         // Delegate to the existing terminal renderer. When no layout builder
         // has been called we must NOT thread a layout context — doing so leaks
@@ -582,28 +919,40 @@ impl DarkmatterPage {
             self.options.color_mode,
             self.alignments.clone(),
             self.fills.clone(),
+            self.list_left_margins.clone(),
+            self.page_color.clone(),
+            self.page_bg_color.clone(),
+            self.component_colors.clone(),
+            self.component_bg_colors.clone(),
+            self.hyperlink_style.clone(),
+            self.local_hyperlink_style.clone(),
+            self.local_image_style.clone(),
         )?;
 
         // Build HtmlOptions from TerminalOptions.
         let html_options = HtmlOptions {
-            code_theme: self.options.code_theme,
+            code_theme: self.page_code_theme.unwrap_or(self.options.code_theme),
             prose_theme: self.options.prose_theme,
             color_mode: ctx.render_color_mode,
             include_line_numbers: self.line_numbers,
             include_styles: true,
             mermaid_mode: self.options.mermaid_mode,
             hr_css_variables: std::collections::HashMap::new(),
+            hr_defaults: self.hr_defaults(),
+            hyperlink_style: self.hyperlink_style.clone(),
+            local_hyperlink_style: self.local_hyperlink_style.clone(),
+            local_image_style: self.local_image_style.clone(),
         };
 
         let body = md
             .as_html(html_options)
             .map_err(|e| PageRenderError::Render(e.to_string()))?;
 
-        if !ctx.needs_decoration() && !ctx.has_component_styles() {
+        if !ctx.needs_decoration() && !ctx.has_component_styles() && self.stylesheet().is_none() && self.page_meta().is_none() {
             return Ok(body);
         }
 
-        Ok(wrap_browser_html(&body, &ctx))
+        Ok(wrap_browser_html(&body, &ctx, self))
     }
 
     // ---------- Validation ----------
@@ -622,6 +971,18 @@ impl DarkmatterPage {
             && !self.line_numbers
             && self.alignments.is_empty()
             && self.fills.is_empty()
+            && self.list_left_margins.is_empty()
+            && self.page_color.is_none()
+            && self.page_bg_color.is_none()
+            && self.component_colors.is_empty()
+            && self.component_bg_colors.is_empty()
+            && self.hyperlink_style.is_none()
+            && self.local_hyperlink_style.is_none()
+            && self.local_image_style.is_none()
+            && self.hr_kind.is_none()
+            && self.hr_weight.is_none()
+            && self.hr_alignment.is_none()
+            && self.hr_width.is_none()
     }
 
     /// Validate horizontal space requirements against the captured terminal
@@ -864,8 +1225,64 @@ impl TerminalRenderable for DarkmatterPage {
 // which takes the `Markdown` explicitly.
 
 /// Wrap HTML markdown body in a page-level container with layout CSS.
-fn wrap_browser_html(body: &str, ctx: &LayoutContext) -> String {
+fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> String {
     let mut output = String::new();
+
+    // Emit page-level meta tags first.
+    if let Some(meta) = page.page_meta() {
+        for tag in &meta.tags {
+            match tag {
+                crate::style::bespoke::MetaTag::Charset(charset) => {
+                    output.push_str(&format!(
+                        r#"<meta charset="{}" />"#,
+                        html_escape::encode_text(charset)
+                    ));
+                    output.push('\n');
+                }
+                crate::style::bespoke::MetaTag::Name { name, content } => {
+                    output.push_str(&format!(
+                        r#"<meta name="{}" content="{}" />"#,
+                        html_escape::encode_text(name),
+                        html_escape::encode_text(content)
+                    ));
+                    output.push('\n');
+                }
+                crate::style::bespoke::MetaTag::Property { property, content } => {
+                    output.push_str(&format!(
+                        r#"<meta property="{}" content="{}" />"#,
+                        html_escape::encode_text(property),
+                        html_escape::encode_text(content)
+                    ));
+                    output.push('\n');
+                }
+            }
+        }
+    }
+
+    // Emit page-level stylesheet.
+    if let Some(sheet) = page.stylesheet() {
+        match sheet {
+            crate::style::bespoke::PageStylesheet::Inline { source, css } => {
+                output.push_str(&format!(
+                    r#"<style data-darkmatter-source="{}">"#,
+                    html_escape::encode_text(&source.display().to_string())
+                ));
+                output.push('\n');
+                output.push_str(css);
+                if !css.ends_with('\n') {
+                    output.push('\n');
+                }
+                output.push_str("</style>\n");
+            }
+            crate::style::bespoke::PageStylesheet::Remote { href } => {
+                output.push_str(&format!(
+                    r#"<link rel="stylesheet" href="{}" />"#,
+                    html_escape::encode_text(href)
+                ));
+                output.push('\n');
+            }
+        }
+    }
 
     // Build page-level wrapper styles.
     let mut wrapper_styles = String::new();
@@ -891,6 +1308,17 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext) -> String {
             g = bg.g,
             b = bg.b
         ));
+    }
+
+    // Page-level foreground color from style frontmatter.
+    if let Some(color) = ctx.page_color.as_ref().and_then(lower_to_css) {
+        wrapper_styles.push_str(&format!("color: {color}; "));
+    }
+
+    // Page-level background color from style frontmatter takes precedence
+    // over the computed PageBackground color.
+    if let Some(bg_color) = ctx.page_bg_color.as_ref().and_then(lower_to_css) {
+        wrapper_styles.push_str(&format!("background-color: {bg_color}; "));
     }
 
     // Use a very large max-width (terminal_width) when no max-width is set,
@@ -921,16 +1349,46 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext) -> String {
     output
 }
 
-/// Generate CSS rules for per-component alignment and fill.
+/// Generate CSS rules for per-component alignment, fill, and color.
 fn build_component_css(ctx: &LayoutContext) -> String {
     let mut css = String::new();
+
+    // Emit deprecated `Lists` rules first so concrete variant rules
+    // override them via normal cascade (more specific selectors).
+    #[allow(deprecated)]
+    {
+        let alignment = ctx.component_alignment(PageComponent::Lists);
+        let fill = ctx.component_fill(PageComponent::Lists);
+        let has_color = ctx.component_color(PageComponent::Lists).is_some();
+        let has_bg_color = ctx.component_bg_color(PageComponent::Lists).is_some();
+        if alignment != PageAlignment::Left
+            || fill != PageFill::Full
+            || has_color
+            || has_bg_color
+        {
+            let selectors = component_selectors(PageComponent::Lists);
+            css.push_str(&format!(".darkmatter-page {} {{\n", selectors));
+            emit_component_css_rules(&mut css, ctx, alignment, fill);
+            emit_component_color_rules(&mut css, ctx, PageComponent::Lists);
+            css.push_str("}\n");
+        }
+    }
 
     for component in PageComponent::ALL {
         let alignment = ctx.component_alignment(component);
         let fill = ctx.component_fill(component);
+        let has_left_margin = component == PageComponent::Ul
+            && ctx.list_left_margin(PageComponent::Ul).is_some();
+        let has_color = ctx.component_color(component).is_some();
+        let has_bg_color = ctx.component_bg_color(component).is_some();
 
-        // Only emit CSS when non-default.
-        if alignment == PageAlignment::Left && fill == PageFill::Full {
+        // Only emit CSS when non-default or when Ul has left-margin or color.
+        if alignment == PageAlignment::Left
+            && fill == PageFill::Full
+            && !has_left_margin
+            && !has_color
+            && !has_bg_color
+        {
             continue;
         }
 
@@ -941,64 +1399,97 @@ fn build_component_css(ctx: &LayoutContext) -> String {
 
         css.push_str(&format!(".darkmatter-page {} {{\n", selectors));
 
-        // Alignment.
-        match alignment {
-            PageAlignment::Left => {
-                // Default, no rule needed.
-            }
-            PageAlignment::Center => {
-                css.push_str("  margin-left: auto;\n");
-                css.push_str("  margin-right: auto;\n");
-            }
-            PageAlignment::Right => {
-                css.push_str("  margin-left: auto;\n");
-                css.push_str("  margin-right: 0;\n");
-            }
-        }
+        emit_component_css_rules(&mut css, ctx, alignment, fill);
+        emit_component_color_rules(&mut css, ctx, component);
 
-        // Fill.
-        match fill {
-            PageFill::Full => {
-                // Default, no rule needed.
-            }
-            PageFill::Pad(unit) => {
-                if let Ok(pad) = resolve_width_unit_for_browser(unit, ctx) {
-                    css.push_str(&format!("  padding-left: {pad}ch;\n"));
-                    css.push_str(&format!("  padding-right: {pad}ch;\n"));
-                }
-            }
-            PageFill::Indent(unit) => {
-                if let Ok(indent) = resolve_width_unit_for_browser(unit, ctx) {
-                    match alignment {
-                        PageAlignment::Left => {
-                            css.push_str(&format!("  padding-left: {indent}ch;\n"));
-                        }
-                        PageAlignment::Right => {
-                            css.push_str(&format!("  padding-right: {indent}ch;\n"));
-                        }
-                        PageAlignment::Center => {
-                            css.push_str(&format!("  padding-left: {indent}ch;\n"));
-                            css.push_str(&format!("  padding-right: {indent}ch;\n"));
-                        }
-                    }
-                }
-            }
-            PageFill::Max(unit) => {
-                if let Ok(max) = resolve_width_unit_for_browser(unit, ctx) {
-                    css.push_str(&format!("  max-width: {max}ch;\n"));
-                }
-            }
-            PageFill::Explicit(unit) => {
-                if let Ok(width) = resolve_width_unit_for_browser(unit, ctx) {
-                    css.push_str(&format!("  width: {width}ch;\n"));
-                }
-            }
+        // Left margin for unordered lists.
+        if component == PageComponent::Ul
+            && let Some(margin) = ctx.list_left_margin(PageComponent::Ul)
+            && let Ok(ch) = resolve_width_unit_for_browser(margin, ctx)
+        {
+            css.push_str(&format!("  margin-left: {ch}ch;\n"));
         }
 
         css.push_str("}\n");
     }
 
     css
+}
+
+/// Emit alignment and fill CSS rules for a single component.
+fn emit_component_css_rules(
+    css: &mut String,
+    ctx: &LayoutContext,
+    alignment: PageAlignment,
+    fill: PageFill,
+) {
+    // Alignment.
+    match alignment {
+        PageAlignment::Left => {
+            // Default, no rule needed.
+        }
+        PageAlignment::Center => {
+            css.push_str("  margin-left: auto;\n");
+            css.push_str("  margin-right: auto;\n");
+        }
+        PageAlignment::Right => {
+            css.push_str("  margin-left: auto;\n");
+            css.push_str("  margin-right: 0;\n");
+        }
+    }
+
+    // Fill.
+    match fill {
+        PageFill::Full => {
+            // Default, no rule needed.
+        }
+        PageFill::Pad(unit) => {
+            if let Ok(pad) = resolve_width_unit_for_browser(unit, ctx) {
+                css.push_str(&format!("  padding-left: {pad}ch;\n"));
+                css.push_str(&format!("  padding-right: {pad}ch;\n"));
+            }
+        }
+        PageFill::Indent(unit) => {
+            if let Ok(indent) = resolve_width_unit_for_browser(unit, ctx) {
+                match alignment {
+                    PageAlignment::Left => {
+                        css.push_str(&format!("  padding-left: {indent}ch;\n"));
+                    }
+                    PageAlignment::Right => {
+                        css.push_str(&format!("  padding-right: {indent}ch;\n"));
+                    }
+                    PageAlignment::Center => {
+                        css.push_str(&format!("  padding-left: {indent}ch;\n"));
+                        css.push_str(&format!("  padding-right: {indent}ch;\n"));
+                    }
+                }
+            }
+        }
+        PageFill::Max(unit) => {
+            if let Ok(max) = resolve_width_unit_for_browser(unit, ctx) {
+                css.push_str(&format!("  max-width: {max}ch;\n"));
+            }
+        }
+        PageFill::Explicit(unit) => {
+            if let Ok(width) = resolve_width_unit_for_browser(unit, ctx) {
+                css.push_str(&format!("  width: {width}ch;\n"));
+            }
+        }
+    }
+}
+
+/// Emit color and background-color CSS rules for a single component.
+fn emit_component_color_rules(
+    css: &mut String,
+    ctx: &LayoutContext,
+    component: PageComponent,
+) {
+    if let Some(color) = ctx.component_color(component).and_then(lower_to_css) {
+        css.push_str(&format!("  color: {color};\n"));
+    }
+    if let Some(bg_color) = ctx.component_bg_color(component).and_then(lower_to_css) {
+        css.push_str(&format!("  background-color: {bg_color};\n"));
+    }
 }
 
 /// CSS selectors for a page component.
@@ -1008,6 +1499,15 @@ fn component_selectors(component: PageComponent) -> &'static str {
         PageComponent::BlockQuotes => "blockquote",
         PageComponent::Tables => "table",
         PageComponent::CodeBlocks => ".code-block, pre",
+        PageComponent::Ul => "ul",
+        PageComponent::Ol => "ol",
+        PageComponent::Li => "li",
+        // The HR component's browser renderer emits `<svg class="darkmatter-hr">`
+        // (see `biscuit_terminal::components::horizontal_rule::browser`), so
+        // targeting `hr` here would generate rules that match no element.
+        PageComponent::Hr => ".darkmatter-hr",
+        PageComponent::Hyperlinks => "a",
+        #[allow(deprecated)]
         PageComponent::Lists => "ul, ol",
     }
 }
@@ -1126,6 +1626,128 @@ mod tests {
             page.fill_for(PageComponent::Tables),
             PageFill::Pad(WidthUnit::Fixed(2))
         );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn alignment_for_ul_falls_back_to_lists() {
+        let page = page().use_alignment(PageComponent::Lists, PageAlignment::Right);
+        assert_eq!(page.alignment_for(PageComponent::Ul), PageAlignment::Right);
+        assert_eq!(page.alignment_for(PageComponent::Ol), PageAlignment::Right);
+        assert_eq!(page.alignment_for(PageComponent::Li), PageAlignment::Right);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn use_alignment_for_all_does_not_write_deprecated_lists() {
+        // New broadcast paths must not write `PageComponent::Lists`; only the
+        // concrete variants in `PageComponent::ALL` should be set.
+        let page = page().use_alignment_for_all(PageAlignment::Center);
+        assert_eq!(
+            page.alignment_for(PageComponent::Lists),
+            PageAlignment::Left,
+            "use_alignment_for_all must not write deprecated Lists"
+        );
+        // But the concrete variants are written.
+        assert_eq!(page.alignment_for(PageComponent::Ul), PageAlignment::Center);
+        assert_eq!(page.alignment_for(PageComponent::Ol), PageAlignment::Center);
+        assert_eq!(page.alignment_for(PageComponent::Li), PageAlignment::Center);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn with_fill_for_all_does_not_write_deprecated_lists() {
+        let page = page().with_fill_for_all(PageFill::Max(WidthUnit::Fixed(40)));
+        assert_eq!(
+            page.fill_for(PageComponent::Lists),
+            PageFill::Full,
+            "with_fill_for_all must not write deprecated Lists"
+        );
+        assert_eq!(
+            page.fill_for(PageComponent::Ul),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn fill_for_ol_falls_back_to_lists() {
+        let page = page().with_fill(PageComponent::Lists, PageFill::Max(WidthUnit::Fixed(40)));
+        assert_eq!(
+            page.fill_for(PageComponent::Ol),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+        assert_eq!(
+            page.fill_for(PageComponent::Ul),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+        assert_eq!(
+            page.fill_for(PageComponent::Li),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+    }
+
+    #[test]
+    fn list_left_margin_accessor() {
+        let page = page().with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(4));
+        assert_eq!(
+            page.list_left_margin_for(PageComponent::Ul),
+            Some(WidthUnit::Fixed(4))
+        );
+        assert_eq!(page.list_left_margin_for(PageComponent::Ol), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "with_list_left_margin only accepts PageComponent::Ul")]
+    fn list_left_margin_rejects_non_ul_component() {
+        let _ = page().with_list_left_margin(PageComponent::Images, WidthUnit::Fixed(4));
+    }
+
+    #[test]
+    #[should_panic(expected = "with_list_left_margin only accepts PageComponent::Ul")]
+    fn list_left_margin_rejects_ol_component() {
+        let _ = page().with_list_left_margin(PageComponent::Ol, WidthUnit::Fixed(4));
+    }
+
+    #[test]
+    #[should_panic(expected = "with_list_left_margin only accepts PageComponent::Ul")]
+    fn list_left_margin_rejects_li_component() {
+        let _ = page().with_list_left_margin(PageComponent::Li, WidthUnit::Fixed(4));
+    }
+
+    #[test]
+    fn try_with_list_left_margin_accepts_ul() {
+        let page = page()
+            .try_with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(6))
+            .unwrap();
+        assert_eq!(
+            page.list_left_margin_for(PageComponent::Ul),
+            Some(WidthUnit::Fixed(6))
+        );
+    }
+
+    #[test]
+    fn try_with_list_left_margin_rejects_ol() {
+        let err = page()
+            .try_with_list_left_margin(PageComponent::Ol, WidthUnit::Fixed(4))
+            .unwrap_err();
+        assert_eq!(err, PageRenderError::InvalidListLeftMarginComponent);
+    }
+
+    #[test]
+    fn try_with_list_left_margin_rejects_li() {
+        let err = page()
+            .try_with_list_left_margin(PageComponent::Li, WidthUnit::Fixed(4))
+            .unwrap_err();
+        assert_eq!(err, PageRenderError::InvalidListLeftMarginComponent);
+    }
+
+    #[test]
+    fn try_with_list_left_margin_rejects_non_list_component() {
+        let err = page()
+            .try_with_list_left_margin(PageComponent::Images, WidthUnit::Fixed(4))
+            .unwrap_err();
+        assert_eq!(err, PageRenderError::InvalidListLeftMarginComponent);
     }
 
     #[test]
@@ -2021,6 +2643,761 @@ mod tests {
         assert!(
             plain.len() <= 120,
             "content line should not exceed terminal width"
+        );
+    }
+
+    // ---------- Phase 4: list split + wiring tests ----------
+
+    #[test]
+    fn render_ul_left_margin() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(4));
+        let md: Markdown = "- Hello world\n".into();
+
+        let out = page.render(&md).unwrap();
+        let plain = crate::testing::strip_ansi_codes(&out);
+        let list_line = plain.lines().find(|l| l.contains("Hello")).unwrap();
+        assert!(
+            list_line.starts_with("    - "),
+            "unordered list should have 4ch left margin before marker, got: {:?}",
+            list_line
+        );
+    }
+
+    #[test]
+    fn render_ul_max_width() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_fill(PageComponent::Ul, PageFill::Max(WidthUnit::Fixed(40)));
+        let md: Markdown = "- This is an unusually long bullet item that ought to be forced to wrap once Max(40) constrains the list rendering width to forty columns.\n".into();
+
+        let out = page.render(&md).unwrap();
+        let plain = crate::testing::strip_ansi_codes(&out);
+        let lines: Vec<&str> = plain.lines().collect();
+        let max_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+        assert!(
+            max_len <= 40,
+            "list lines should be capped to 40 cols, got max={}:\n{}",
+            max_len,
+            plain
+        );
+    }
+
+    #[test]
+    fn render_ul_left_margin_and_max_width() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(4))
+            .with_fill(PageComponent::Ul, PageFill::Max(WidthUnit::Fixed(40)));
+        let md: Markdown = "- This is an unusually long bullet item that ought to be forced to wrap once Max(40) constrains the list rendering width to forty columns.\n".into();
+
+        let out = page.render(&md).unwrap();
+        let plain = crate::testing::strip_ansi_codes(&out);
+        let lines: Vec<&str> = plain.lines().collect();
+        // Body wraps at <= ul.max-width (40 cells); the 4-cell left margin
+        // sits outside the body, so total line length is <= 44 cells.
+        let max_total = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+        assert!(
+            max_total <= 44,
+            "list lines should fit in left-margin (4) + body (<= 40) = 44 cols, got max={}:\n{}",
+            max_total,
+            plain
+        );
+        // Body width: stripping the 4-cell margin, the remaining content
+        // must wrap at no more than 40 cells.
+        let max_body = lines
+            .iter()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                let trimmed = l.strip_prefix("    ").unwrap_or(l);
+                trimmed.chars().count()
+            })
+            .max()
+            .unwrap_or(0);
+        assert!(
+            max_body <= 40,
+            "body (after 4ch margin) should wrap at <= 40 cols, got max body={}:\n{}",
+            max_body,
+            plain
+        );
+        // First non-empty line should start with 4 spaces of left margin.
+        let first_line = lines.iter().find(|l| !l.trim().is_empty()).copied().unwrap_or("");
+        assert!(
+            first_line.starts_with("    - "),
+            "first line should start with 4ch left margin, got: {:?}",
+            first_line
+        );
+    }
+
+    #[test]
+    fn render_ol_alignment_right() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_fill(PageComponent::Ol, PageFill::Max(WidthUnit::Fixed(40)))
+            .use_alignment(PageComponent::Ol, PageAlignment::Right);
+        let md: Markdown = "1. Hello world\n".into();
+
+        let out = page.render(&md).unwrap();
+        let plain = crate::testing::strip_ansi_codes(&out);
+        let list_line = plain.lines().find(|l| l.contains("Hello")).unwrap();
+        // Component is 40 cols wide, right-aligned in 80 => 40 cols of left padding.
+        let leading_spaces = list_line.len() - list_line.trim_start().len();
+        assert!(
+            leading_spaces >= 35,
+            "ordered list should be right-aligned, got {} leading spaces: {:?}",
+            leading_spaces,
+            list_line
+        );
+    }
+
+    #[test]
+    fn render_li_body_alignment_right() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_fill(PageComponent::Li, PageFill::Max(WidthUnit::Fixed(40)))
+            .use_alignment(PageComponent::Li, PageAlignment::Right);
+        let md: Markdown = "- Hello world\n".into();
+
+        assert!(!page.is_default_layout(), "page should not be default layout");
+        assert_eq!(
+            page.fill_for(PageComponent::Li),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+        assert_eq!(
+            page.alignment_for(PageComponent::Li),
+            PageAlignment::Right
+        );
+
+        let out = page.render(&md).unwrap();
+        let plain = crate::testing::strip_ansi_codes(&out);
+        let lines: Vec<&str> = plain.lines().collect();
+        // Per spec, `li.alignment` affects the item body only; the marker
+        // stays at the column dictated by the containing Ul (column 0 here,
+        // since Ul has no override). The body becomes a block on a new line
+        // that is right-aligned within `effective_width - body_width = 40`.
+        let marker_line = lines
+            .iter()
+            .find(|l| l.trim_start().starts_with('-'))
+            .copied()
+            .unwrap_or("");
+        assert!(
+            marker_line.starts_with("- "),
+            "marker should remain at column 0 (Ul column), got: {:?}",
+            marker_line
+        );
+        let body_line = lines
+            .iter()
+            .find(|l| l.contains("Hello"))
+            .copied()
+            .unwrap_or("");
+        assert!(
+            !body_line.contains('-'),
+            "body should not contain the marker (marker is on its own line): {:?}",
+            body_line
+        );
+        let leading_spaces = body_line.len() - body_line.trim_start().len();
+        assert!(
+            leading_spaces >= 35,
+            "li body should be right-aligned within effective_width, got {} leading spaces: {:?}",
+            leading_spaces,
+            body_line
+        );
+    }
+
+    #[test]
+    fn browser_selectors_split_for_lists() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .use_alignment(PageComponent::Ul, PageAlignment::Center)
+            .use_alignment(PageComponent::Ol, PageAlignment::Right)
+            .with_fill(PageComponent::Li, PageFill::Max(WidthUnit::Fixed(30)));
+        let md: Markdown = "- item\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        // Concrete variants should each have their own selector.
+        assert!(html.contains(".darkmatter-page ul {"), "should have ul selector: {}", html);
+        assert!(html.contains(".darkmatter-page ol {"), "should have ol selector: {}", html);
+        assert!(html.contains(".darkmatter-page li {"), "should have li selector: {}", html);
+        // Deprecated Lists selector should NOT appear since Lists has no explicit style.
+        assert!(
+            !html.contains(".darkmatter-page ul, ol {"),
+            "should not have deprecated Lists selector when Lists is unset"
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn browser_selectors_include_deprecated_lists_when_set() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .use_alignment(PageComponent::Lists, PageAlignment::Center)
+            .use_alignment(PageComponent::Ul, PageAlignment::Right);
+        let md: Markdown = "- item\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        // Deprecated selector should appear first.
+        assert!(html.contains(".darkmatter-page ul, ol {"), "should have deprecated selector: {}", html);
+        // Concrete selector should also appear to override.
+        assert!(html.contains(".darkmatter-page ul {"), "should have ul selector: {}", html);
+    }
+
+    #[test]
+    fn browser_ul_left_margin_css() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(4));
+        let md: Markdown = "- item\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains("margin-left: 4ch;"),
+            "should emit margin-left CSS for ul, got: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn li_independent_of_ul_ol() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .use_alignment(PageComponent::Ul, PageAlignment::Left)
+            .use_alignment(PageComponent::Ol, PageAlignment::Center)
+            .use_alignment(PageComponent::Li, PageAlignment::Right)
+            .with_fill(PageComponent::Ul, PageFill::Max(WidthUnit::Fixed(30)))
+            .with_fill(PageComponent::Ol, PageFill::Max(WidthUnit::Fixed(40)))
+            .with_fill(PageComponent::Li, PageFill::Max(WidthUnit::Fixed(50)));
+
+        // Each component retains its own alignment independently.
+        assert_eq!(page.alignment_for(PageComponent::Ul), PageAlignment::Left);
+        assert_eq!(page.alignment_for(PageComponent::Ol), PageAlignment::Center);
+        assert_eq!(page.alignment_for(PageComponent::Li), PageAlignment::Right);
+
+        // Each component retains its own fill independently.
+        assert_eq!(
+            page.fill_for(PageComponent::Ul),
+            PageFill::Max(WidthUnit::Fixed(30))
+        );
+        assert_eq!(
+            page.fill_for(PageComponent::Ol),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+        assert_eq!(
+            page.fill_for(PageComponent::Li),
+            PageFill::Max(WidthUnit::Fixed(50))
+        );
+    }
+
+    // ---------- Phase 1: color API tests ----------
+
+    use crate::style::StyleColor;
+    use renderable::color::{Color, Tailwind};
+
+    fn red_color() -> StyleColor {
+        StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: None,
+        }
+    }
+
+    fn blue_color() -> StyleColor {
+        StyleColor {
+            color: Color::Tailwind(Tailwind::Blue500),
+            opacity: None,
+        }
+    }
+
+    #[test]
+    fn color_setters_and_getters() {
+        let page = page()
+            .with_page_color(red_color())
+            .with_page_bg_color(blue_color())
+            .with_component_color(PageComponent::Tables, red_color())
+            .with_component_bg_color(PageComponent::Tables, blue_color());
+
+        assert_eq!(page.page_color(), Some(&red_color()));
+        assert_eq!(page.page_bg_color(), Some(&blue_color()));
+        assert_eq!(
+            page.color_for(PageComponent::Tables),
+            Some(&red_color())
+        );
+        assert_eq!(
+            page.bg_color_for(PageComponent::Tables),
+            Some(&blue_color())
+        );
+    }
+
+    #[test]
+    fn color_inheritance_from_page() {
+        let page = page()
+            .with_page_color(red_color())
+            .with_page_bg_color(blue_color());
+
+        // Components without explicit color inherit page color.
+        assert_eq!(
+            page.color_for(PageComponent::Tables),
+            Some(&red_color())
+        );
+        assert_eq!(
+            page.bg_color_for(PageComponent::Tables),
+            Some(&blue_color())
+        );
+        assert_eq!(
+            page.color_for(PageComponent::Hyperlinks),
+            Some(&red_color())
+        );
+    }
+
+    #[test]
+    fn component_color_overrides_page_color() {
+        let page = page()
+            .with_page_color(red_color())
+            .with_component_color(PageComponent::Tables, blue_color());
+
+        assert_eq!(
+            page.color_for(PageComponent::Tables),
+            Some(&blue_color())
+        );
+        // Other components still inherit page color.
+        assert_eq!(
+            page.color_for(PageComponent::Images),
+            Some(&red_color())
+        );
+    }
+
+    #[test]
+    fn component_bg_color_overrides_page_bg_color() {
+        let page = page()
+            .with_page_bg_color(red_color())
+            .with_component_bg_color(PageComponent::Tables, blue_color());
+
+        assert_eq!(
+            page.bg_color_for(PageComponent::Tables),
+            Some(&blue_color())
+        );
+        assert_eq!(
+            page.bg_color_for(PageComponent::Images),
+            Some(&red_color())
+        );
+    }
+
+    #[test]
+    fn color_only_page_is_not_default_layout() {
+        let page = page().with_page_color(red_color());
+        assert!(!page.is_default_layout(), "page with color should not be default");
+    }
+
+    #[test]
+    fn bg_color_only_page_is_not_default_layout() {
+        let page = page().with_page_bg_color(red_color());
+        assert!(!page.is_default_layout(), "page with bg-color should not be default");
+    }
+
+    #[test]
+    fn component_color_only_page_is_not_default_layout() {
+        let page = page().with_component_color(PageComponent::Tables, red_color());
+        assert!(!page.is_default_layout(), "page with component color should not be default");
+    }
+
+    // ---------- Phase 5: render-level color tests ----------
+
+    #[test]
+    fn terminal_page_color_applies_sgr_to_components() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term).with_page_color(red_color());
+        let md: Markdown = "# Hello\n".into();
+
+        let out = page.render(&md).unwrap();
+        // The heading text should be wrapped with the page color SGR
+        // and properly reset.
+        assert!(
+            out.contains("\x1b[38;2;"),
+            "page color should emit foreground SGR; got: {out:?}"
+        );
+        assert!(
+            out.contains("\x1b[0m"),
+            "page color scope should end with reset; got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_component_color_overrides_page_color_in_output() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_page_color(red_color())
+            .with_component_color(PageComponent::Tables, blue_color());
+        let md: Markdown = "| a | b |\n|---|---|\n| 1 | 2 |\n".into();
+
+        let out = page.render(&md).unwrap();
+        // Table output should contain blue SGR, not just red.
+        // Both colors may appear (red for heading, blue for table), so we
+        // just verify the table-specific color is present.
+        assert!(
+            out.contains("\x1b[38;2;"),
+            "component color should emit SGR; got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_color_depth_none_omits_sgr_for_colors() {
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown = "# Hello\n".into();
+        let out = DarkmatterPage::new(&term)
+            .with_page_color(red_color())
+            .with_color_depth(ColorDepth::None)
+            .render(&md)
+            .unwrap();
+
+        assert!(
+            !out.contains("\x1b[38;2;"),
+            "ColorDepth::None must suppress color SGR; got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_reset_boundary_scopes_component_colors() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_component_color(PageComponent::Tables, red_color());
+        let md: Markdown = "| a | b |\n|---|---|\n| 1 | 2 |\n".into();
+
+        let out = page.render(&md).unwrap();
+        // The table output should be wrapped with an opening SGR and a reset.
+        assert!(
+            out.contains("\x1b[0m"),
+            "component color must be scoped with reset; got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn browser_page_color_emits_wrapper_css() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term).with_page_color(red_color());
+        let md: Markdown = "# Hello\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains("color: rgb("),
+            "page color should emit CSS on wrapper; got: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_page_bg_color_overrides_page_background_css() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_page_background(PageBackground::Subtle)
+            .with_page_bg_color(red_color());
+        let md: Markdown = "# Hello\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        // The wrapper should have the explicit bg-color after the computed one.
+        let bg_count = html.matches("background-color:").count();
+        assert!(
+            bg_count >= 1,
+            "wrapper should have background-color; got: {html}"
+        );
+        assert!(
+            html.contains("background-color: rgb("),
+            "page bg-color should be rgb(...); got: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_component_color_emits_per_component_css() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_component_color(PageComponent::Tables, red_color())
+            .with_component_bg_color(PageComponent::BlockQuotes, blue_color());
+        let md: Markdown = "# Hello\n\n> Quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains(".darkmatter-page table {"),
+            "table selector should be present; got: {html}"
+        );
+        assert!(
+            html.contains("color: rgb("),
+            "table color CSS should be emitted; got: {html}"
+        );
+        assert!(
+            html.contains(".darkmatter-page blockquote {"),
+            "blockquote selector should be present; got: {html}"
+        );
+        assert!(
+            html.contains("background-color: rgb("),
+            "blockquote bg-color CSS should be emitted; got: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_opacity_preserved_as_rgba() {
+        let term = Terminal::new_optimistic(120);
+        let semi = StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: Some(50),
+        };
+        let page = DarkmatterPage::new(&term).with_page_color(semi);
+        let md: Markdown = "# Hello\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains("rgba(") && html.contains("0.5"),
+            "opacity should produce rgba CSS; got: {html}"
+        );
+    }
+
+    #[test]
+    fn terminal_opacity_dropped_from_sgr() {
+        let term = Terminal::new_optimistic(80);
+        let semi = StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: Some(50),
+        };
+        let page = DarkmatterPage::new(&term).with_page_color(semi);
+        let md: Markdown = "# Hello\n".into();
+
+        let out = page.render(&md).unwrap();
+        // SGR should NOT contain opacity; it should be a plain 24-bit color.
+        assert!(
+            out.contains("\x1b[38;2;"),
+            "terminal should still emit 24-bit SGR without opacity; got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn browser_css_special_colors_passthrough() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_component_color(PageComponent::Tables, StyleColor {
+                color: Color::Tailwind(Tailwind::Transparent),
+                opacity: None,
+            })
+            .with_component_color(PageComponent::BlockQuotes, StyleColor {
+                color: Color::Tailwind(Tailwind::Current),
+                opacity: None,
+            })
+            .with_component_bg_color(PageComponent::Images, StyleColor {
+                color: Color::Tailwind(Tailwind::Inherit),
+                opacity: None,
+            });
+        let md: Markdown = "# Hello\n\n> Quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains("color: transparent;") || html.contains("color:transparent"),
+            "transparent should pass through; got: {html}"
+        );
+        assert!(
+            html.contains("color: currentColor;") || html.contains("color:currentColor"),
+            "currentColor should pass through; got: {html}"
+        );
+        assert!(
+            html.contains("background-color: inherit;") || html.contains("background-color:inherit"),
+            "inherit should pass through; got: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_list_selectors_emit_separate_rules_with_colors() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_component_color(PageComponent::Ul, red_color())
+            .with_component_color(PageComponent::Ol, blue_color())
+            .with_component_color(PageComponent::Li, StyleColor {
+                color: Color::Tailwind(Tailwind::Green500),
+                opacity: None,
+            });
+        let md: Markdown = "- one\n\n1. two\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains(".darkmatter-page ul {"),
+            "ul selector should be emitted; got: {html}"
+        );
+        assert!(
+            html.contains(".darkmatter-page ol {"),
+            "ol selector should be emitted; got: {html}"
+        );
+        assert!(
+            html.contains(".darkmatter-page li {"),
+            "li selector should be emitted; got: {html}"
+        );
+    }
+
+    #[test]
+    fn terminal_hyperlink_color_preserves_osc8_sequences() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_hyperlink_mode(HyperlinkMode::Always)
+            .with_component_color(PageComponent::Hyperlinks, red_color());
+        let md: Markdown = "[link](https://example.com)\n".into();
+
+        let out = page.render(&md).unwrap();
+        // OSC8 sequences must still be present.
+        assert!(
+            out.contains("\x1b]8;;https://example.com\x1b\\")
+                || out.contains("\x1b]8;;https://example.com\x07"),
+            "OSC8 open sequence must be preserved; got: {out:?}"
+        );
+        assert!(
+            out.contains("\x1b]8;;\x1b\\") || out.contains("\x1b]8;;\x07"),
+            "OSC8 close sequence must be preserved; got: {out:?}"
+        );
+        // The hyperlink text should also have the color SGR applied.
+        assert!(
+            out.contains("\x1b[38;2;"),
+            "hyperlink color SGR should be present; got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn code_block_bg_color_override_does_not_clobber_highlighting() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_component_bg_color(PageComponent::CodeBlocks, red_color());
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+
+        let out = page.render(&md).unwrap();
+        // The code block should still contain syntax-highlighting SGRs
+        // (multiple different colors for keywords, identifiers, etc.).
+        let sgr_count = out.matches("\x1b[38;2;").count();
+        assert!(
+            sgr_count >= 2,
+            "code block should retain multiple syntax highlight colors; got: {out:?}"
+        );
+    }
+
+    // ---------- Review-5 follow-ups: terminal layout fidelity ----------
+
+    /// With `ColorDepth::None`, a styled page must still render the full
+    /// table layout (box-drawing characters and cell contents) — the
+    /// pipeline no longer falls back to raw Markdown source.
+    #[test]
+    fn color_depth_none_preserves_table_layout_when_page_color_set() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_page_color(red_color())
+            .with_color_depth(ColorDepth::None);
+        let md: Markdown = "| H |\n|---|\n| C |\n".into();
+
+        let out = page.render(&md).unwrap();
+        assert!(
+            !out.contains("\x1b[38;2;"),
+            "ColorDepth::None must suppress color SGR even with style.page.color; got: {out:?}"
+        );
+        assert!(
+            out.contains('H') && out.contains('C'),
+            "table cell text must survive ColorDepth::None; got: {out:?}"
+        );
+        assert!(
+            out.contains('┌') || out.contains('+') || out.contains('|'),
+            "table structure must render under ColorDepth::None; got: {out:?}"
+        );
+    }
+
+    /// `style.ul.color` must apply to list-item body text even when
+    /// `style.li.color` is unset — list items inherit through their
+    /// container scope just like CSS. The Tailwind Red-500 SGR triplet
+    /// resolves at render time, so we look up the canonical bytes from the
+    /// shared lowering helper rather than hard-coding RGB values.
+    #[test]
+    fn ul_color_inherits_into_li_body_when_li_color_unset() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_component_color(PageComponent::Ul, red_color());
+        let md: Markdown = "- alpha\n- beta\n".into();
+
+        let out = page.render(&md).unwrap();
+        let red_sgr = crate::style::lower_to_sgr(&red_color(), ColorDepth::TrueColor, false)
+            .expect("red_color must lower to truecolor SGR");
+        // The ul color should wrap the marker AND the body, even though the
+        // li scope has no explicit color of its own (the body would
+        // otherwise inherit a None scope from li).
+        let occurrences = out.matches(&red_sgr).count();
+        assert!(
+            occurrences >= 2,
+            "ul color must wrap each item's body; got: {out:?}"
+        );
+    }
+
+    /// `style.hyperlinks.color` must wrap link label text inside table
+    /// cells, while preserving the OSC8 sequence — and it overrides the
+    /// surrounding table color.
+    #[test]
+    fn browser_hr_bg_color_targets_rendered_element() {
+        // The HR component emits `<svg class="darkmatter-hr">`, so the
+        // page-component bg-color rule must target `.darkmatter-hr` rather
+        // than the non-existent `<hr>` element. This guards against the
+        // review-6 finding where `style.hr.bg-color` had no visible effect
+        // because the generated CSS rule matched no element.
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_component_bg_color(PageComponent::Hr, red_color());
+        let md: Markdown = "Before\n\n---\n\nAfter\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+
+        assert!(
+            html.contains(".darkmatter-page .darkmatter-hr {"),
+            "HR component rule must target `.darkmatter-hr` (the class on \
+             the emitted SVG); got: {html}"
+        );
+        assert!(
+            html.contains("background-color: rgb("),
+            "HR bg-color CSS must be emitted; got: {html}"
+        );
+        assert!(
+            html.contains(r#"class="darkmatter-hr""#),
+            "HR SVG must carry the `darkmatter-hr` class so the CSS rule \
+             matches; got: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_hr_color_emits_rule_for_svg_target() {
+        // `style.hr.color` reaches the SVG via CSS `color` inheritance →
+        // the SVG primitives reference `currentColor` through
+        // `var(--hr-color, currentColor)`. The selector must match the
+        // SVG (via `.darkmatter-hr`) for either path to take effect.
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_component_color(PageComponent::Hr, red_color());
+        let md: Markdown = "---\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+
+        assert!(
+            html.contains(".darkmatter-page .darkmatter-hr {"),
+            "HR color rule must target `.darkmatter-hr`; got: {html}"
+        );
+        assert!(
+            html.contains("color: rgb("),
+            "HR color CSS must be emitted; got: {html}"
+        );
+    }
+
+    #[test]
+    fn hyperlink_color_applies_inside_table_cells() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_hyperlink_mode(HyperlinkMode::Always)
+            .with_component_color(PageComponent::Tables, blue_color())
+            .with_component_color(PageComponent::Hyperlinks, red_color());
+        let md: Markdown = "| col |\n|---|\n| [click](https://example.com) |\n".into();
+
+        let out = page.render(&md).unwrap();
+        // OSC8 sequences must still be present so the link remains clickable.
+        assert!(
+            out.contains("\x1b]8;;https://example.com\x07")
+                || out.contains("\x1b]8;;https://example.com\x1b\\"),
+            "OSC8 open sequence must be preserved in table; got: {out:?}"
+        );
+        let red_sgr = crate::style::lower_to_sgr(&red_color(), ColorDepth::TrueColor, false)
+            .expect("red_color must lower to truecolor SGR");
+        assert!(
+            out.contains(&red_sgr),
+            "hyperlink color must wrap table-link text; got: {out:?}"
         );
     }
 }

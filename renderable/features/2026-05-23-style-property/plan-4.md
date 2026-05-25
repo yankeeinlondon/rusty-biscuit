@@ -2,6 +2,56 @@
 phases: 6
 created: 2026-05-23
 start_phase: 1
+source_files_during_phase_1:
+  - darkmatter/lib/src/layout/types.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/layout/context.rs
+  - darkmatter/lib/src/markdown/output/terminal.rs
+  - darkmatter/lib/src/style/apply.rs
+  - darkmatter/cli/src/output.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/style/apply.rs
+  - darkmatter/lib/src/style/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages_during_phase_2:
+  - darkmatter
+source_files_during_phase_3:
+  - darkmatter/cli/src/args.rs
+  - darkmatter/cli/src/output.rs
+  - darkmatter/cli/tests/cli.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages_during_phase_3:
+  - darkmatter-cli
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/output/terminal.rs
+  - darkmatter/lib/src/layout/page.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - darkmatter/lib/src/style/parse.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/cli/tests/cli.rs
+  - darkmatter/lib/tests/style_frontmatter.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - darkmatter/docs/rendering/style.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages:
+  - darkmatter
+  - darkmatter-cli
 ---
 
 # Execution Plan: Sub-Spec #4 — `ul` / `ol` / `li` Split + Wiring

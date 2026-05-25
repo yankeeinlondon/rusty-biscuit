@@ -128,6 +128,7 @@ impl CodeRenderer for TerminalCodeRenderer {
             &code_meta,
             color_mode,
             Some(context.width() as u16),
+            None,
         )
         .ok()?;
 

@@ -13,11 +13,12 @@
 
 mod common;
 
-use biscuit_test_harness::{TerminalHarness, skip_with_reason};
+use biscuit_test_harness::TerminalHarness;
 use common::pane_geometry::{find_row_of, parse_debug_cursor_before, parse_debug_cursor_rows};
 use common::send_bt_command;
 use serial_test::serial;
 use std::time::Duration;
+use test_toolkit::{Level, require_level};
 use unicode_width::UnicodeWidthStr;
 
 /// Extra settle time after spawning a WezTerm shell to avoid racing
@@ -47,10 +48,11 @@ fn position_cursor(harness: &mut impl TerminalHarness, row: u32) {
 fn level2_cursor_lands_below_rendered_image() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -162,10 +164,11 @@ fn level2_cursor_lands_below_rendered_image() {
 fn level2_no_orphan_save_restore_sequences() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -206,10 +209,11 @@ fn level2_no_orphan_save_restore_sequences() {
 fn level2_dir_command_unicode_widths_in_capture() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");

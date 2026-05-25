@@ -1,8 +1,8 @@
 ---
 description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
 root: "{{ctx.repo_root}}"
-area: "{{ctx.current_package_area}}"
-dir: "$(dirname '{{ spec || design }}')"
+area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
+dir: "$(dirname '{{ spec }}')"
 spec: ""
 design: ""
 plan: "plan.md"
@@ -38,7 +38,7 @@ You are a planning agent. Convert the following documents into a high confidence
 
 ## Closure
 
-- Save the plan as "{{ctx.repo_root}}/{{ctx.current_package_area}}/{{dir}}/{{plan}}" in the same directory as the design document(s).
+- Save the plan as "{{ctx.repo_root}}{{area}}/{{dir}}/{{plan}}" in the same directory as the design document(s).
 - Add frontmatter to the plan document and set:
     - `phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format

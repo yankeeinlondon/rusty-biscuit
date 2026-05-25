@@ -137,9 +137,8 @@ its `render_tree_node` override is in place so cross-target adapters
 consume it structurally. However `FileSystem::render` still calls the
 bespoke directory-tree renderer because the connector geometry (`├──`,
 `└──`, `│`) plus per-entry `Style` lowering through
-`render_tree_connector_list` is not yet at parity. Per Stage 3 §S3-1c
-the resolution chose outcome (iii) — defer to Stage 4 — and the named
-follow-on criteria live in
+`render_tree_connector_list` is not yet at parity. Stage 3 resolved this
+as a Stage 4 deferral, and the named follow-on criteria live in
 [`stage1-and-2/lessons-learned.md`](../features/2026-05-19-pushing-toward-ir/stage1-and-2/lessons-learned.md)
 ("Stage 4 acceptance criterion" under the FileSystem decision).
 
@@ -240,25 +239,15 @@ flipped to the tree.
 ### Known gaps
 
 - **`FileSystem`'s terminal path is still bespoke.** Browser and Markdown
-  flow through the tree; `FileSystem::render` does not. The Stage 3 spec
-  (`stage3-spec.md` §S3-1c) decides between flipping, documenting as a
-  permanent escape hatch, or deferring.
-- **Three components are missing the `render_tree_node` override.**
-  `BlockQuote`, `StatusBlock`, and `FileSystem` implement
-  `TreeRenderable::render_tree` but their compat hook
-  (`TerminalRenderable::render_tree_node`) returns `None`. Their own
-  `.render` works correctly; the gap manifests only when one of them is
-  nested inside another component's tree, where the container falls back
-  to render-then-strip instead of pulling the structural subtree.
-  Stage 3 §S3-1a adds these overrides.
-- **Nested non-`Prose` block components flatten to text.** When a
-  container holds a nested component whose `render_tree_node` returns
-  `None`, the projector under `RenderStrictness::Warn` renders it to
-  ANSI, strips colors, and wraps the result in a `Text` node — so a
-  `BlockQuote` inside a `TwoColumn`, for example, appears as `Paragraph`
-  containing `Text("│ quoted")` instead of `NodeKind::BlockQuote`.
-  Stage 3 §S3-2 tightens the container parity tests once §S3-1 closes
-  the override gap.
+  flow through the tree; `FileSystem::render` does not. Stage 3 deferred
+  the terminal flip to Stage 4 because connector-list style lowering and
+  icon-name spacing still need parity work.
+- **Fallback projection still exists for non-migrated components.** The
+  Stage 3-adopted components now provide structural `render_tree_node`
+  overrides, but a future component that returns `None` from that hook can
+  still degrade to an ANSI-stripped text fallback under `Warn` / `Lossy`.
+  The fallback now logs with `TerminalRenderable::type_name` so the missing
+  projection is observable.
 - **`as_html` and `for_terminal` still run legacy code.** The darkmatter
   side of Flow A is parity-tested but not yet repointed at the tree.
 - **Lossy projection fidelity is characterized, not eliminated.** Text
@@ -305,20 +294,20 @@ own feature with its own parity gate.
    Browser CSS and MarkdownPlus HTML lowering for `ColumnsHints`)
    gave Stage 2 the renderer vocabulary it needed.
 
-### Stage 3 — structural-projection completion
+### Done in Stage 3 — structural-projection completion
 
 See [`stage3-spec.md`](../features/2026-05-19-pushing-toward-ir/stage3-spec.md)
-for the full plan. The work items:
+for the full plan. The completed work:
 
-- Add the missing `render_tree_node` overrides on `BlockQuote`,
+- Added the missing `render_tree_node` overrides on `BlockQuote`,
   `StatusBlock`, and `FileSystem`.
-- Decide `FileSystem`'s terminal `render` path (flip, document, or defer).
-- Tighten every container's nested-component parity test from "text
-  survives" to "structural `NodeKind` survives" once the overrides
-  land.
-- Strengthen the `to_tree_nodes` warn-once fallback policy and add a
-  stable `type_name()` hook to `TerminalRenderable` so missing overrides
-  are observable in CI.
+- Deferred `FileSystem`'s terminal `render` flip to Stage 4 with explicit
+  parity criteria.
+- Tightened container nested-component parity tests from "text survives" to
+  "structural `NodeKind` survives" for migrated children.
+- Strengthened the `to_tree_nodes` fallback policy and added a stable
+  `type_name()` hook to `TerminalRenderable` so missing overrides are
+  observable in logs and CI.
 
 ### darkmatter migration
 

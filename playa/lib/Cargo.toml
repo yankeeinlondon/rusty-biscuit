@@ -79,3 +79,8 @@ windows = { version = "0.62", optional = true, features = [
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
+
+# Opt-out of benchmarking: this crate has no algorithmic hot paths.
+[package.metadata.benchmarks]
+required = false
+reason = "Audio playback dispatch dominated by OS-native player processes; no measurable in-process hot paths."

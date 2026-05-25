@@ -4,6 +4,9 @@
 //! for running operations in three phases:
 //!
 //! **Inline Pre** (serial):
+//! 0. **Schema Validation** - Validate frontmatter against `$schema` or
+//!    `ComposeOptions::baseline_schema`. Runs after `--set` / `--state`
+//!    overrides are applied but before interpolation or shell expansion.
 //! 1. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
 //!    When shell expansion is enabled, templated keys that reference
 //!    shell-pending values (top-level `$(...)`) are deferred for a second
@@ -56,6 +59,7 @@ mod frontmatter_interpolation;
 pub(crate) mod frontmatter_shell_expansion;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
+mod schema_validation;
 mod state;
 mod types;
 
@@ -491,6 +495,14 @@ impl Markdown {
                 &options,
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion),
             );
+
+            // Schema Validation: check frontmatter against $schema or baseline
+            // after overrides are applied but before interpolation/shell expansion.
+            let sv_start = perf.is_enabled().then(std::time::Instant::now);
+            schema_validation::run(self, &options)?;
+            if let Some(start) = sv_start {
+                perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
+            }
 
             let shell_expansion_enabled =
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
@@ -4549,6 +4561,251 @@ Rounded: {{ round(pi) }}"#;
                 err_string.contains("Unexpected '|'") || err_string.contains("logical OR"),
                 "Expected bare pipe error in condition, got: {}",
                 err_string
+            );
+        }
+    }
+
+    // ============================================
+    // Schema Validation integration tests
+    // ============================================
+
+    mod schema_validation_integration {
+        use super::*;
+
+        #[test]
+        fn schema_validation_fails_fast_before_shell_expansion() {
+            // Document matching the shape of the failing planner prompt:
+            // spec is empty, and dir uses shell expansion that would fail
+            // if spec stays empty.
+            let content = "---\n$schema:\n  spec: 'file(required)'\nspec: \"\"\ndir: \"$(dirname '{{ spec }}')\"\n---\nBody\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::FrontmatterShellExpansion,
+                ComposeOperation::Interpolation,
+            ]);
+
+            let err = md.compose_with(options).unwrap_err();
+            let err_string = format!("{err}");
+            assert!(
+                err_string.contains("Schema validation failed"),
+                "Expected schema validation error, got: {err_string}"
+            );
+            assert!(
+                !err_string.contains("dirname"),
+                "Shell expansion should not have run, got: {err_string}"
+            );
+
+            // The error variant itself should name the failing property.
+            match err {
+                MarkdownError::SchemaValidationFailed { problems, .. } => {
+                    assert!(
+                        problems.iter().any(|p| {
+                            p.property.as_deref() == Some("spec") || p.path == "/spec"
+                        }),
+                        "Error should mention the spec property, got: {problems:?}"
+                    );
+                }
+                other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn schema_validation_reports_zero_shell_replacements() {
+            let content = "---\n$schema:\n  spec: 'file(required)'\nspec: \"\"\ndir: \"$(dirname '{{ spec }}')\"\n---\nBody\n";
+            let md: Markdown = content.into();
+
+            // Even with fail_fast=false, schema validation is a hard error.
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_fail_fast(false);
+
+            let err = md.compose_with(options).unwrap_err();
+            match err {
+                MarkdownError::SchemaValidationFailed { .. } => {}
+                other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn parent_set_overlay_satisfies_child_schema() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+
+            // Child has a schema requiring child_input
+            std::fs::write(
+                &child,
+                "---\n$schema:\n  child_input: 'string(required)'\n---\nChild body\n",
+            )
+            .unwrap();
+
+            // Parent transcludes child with set.child_input="ok"
+            std::fs::write(
+                &root,
+                "# Parent\n\n::file ./child.md set.child_input=\"ok\"\n",
+            )
+            .unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new().with_source_file(root);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            assert!(composed.content().contains("Child body"));
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        #[test]
+        fn parent_set_overlay_missing_child_schema_fails() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+
+            // Child has a schema requiring child_input
+            std::fs::write(
+                &child,
+                "---\n$schema:\n  child_input: 'string(required)'\n---\nChild body\n",
+            )
+            .unwrap();
+
+            // Parent transcludes child WITHOUT the set overlay
+            std::fs::write(&root, "# Parent\n\n::file ./child.md\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            // fail_fast=true so the schema validation error propagates rather
+            // than being downgraded to a transclusion warning.
+            let options = ComposeOptions::new()
+                .with_source_file(root)
+                .with_fail_fast(true);
+            let err = md.compose_with(options).unwrap_err();
+
+            match err {
+                MarkdownError::SchemaValidationFailed { problems, .. } => {
+                    assert!(
+                        problems.iter().any(|p| p.property.as_deref() == Some("child_input")),
+                        "Expected problem on child_input, got: {problems:?}"
+                    );
+                }
+                other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+            }
+        }
+
+        /// Different baseline schemas must not share cache entries for the same
+        /// transcluded child. Compose the same parent+child three times against
+        /// a shared persistent cache:
+        ///
+        /// 1. baseline A → cold cache, child is computed and written to the
+        ///    persistent store (`persistent_hits == 0`, `persistent_writes >= 1`).
+        /// 2. baseline A again → cache is warm and the child compose entry is
+        ///    reused (`persistent_hits >= 1`).
+        /// 3. baseline B → baseline differs, so the persistent cache key
+        ///    differs; the child must be recomputed rather than reuse the
+        ///    baseline-A entry (`persistent_hits == 0` again).
+        ///
+        /// This proves `options_hash` includes `baseline_schema` in a way that
+        /// actually invalidates the persistent cache — guarding against the
+        /// "stale success keyed without baseline" regression.
+        #[test]
+        fn baseline_cache_does_not_reuse_across_distinct_baselines() {
+            use crate::markdown::compose::CacheAccessMode;
+            use crate::markdown::schemas::{
+                Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
+                SimplifiedType,
+            };
+            use indexmap::IndexMap;
+
+            fn baseline_required(prop: &str) -> SimplifiedSchema {
+                let mut properties = IndexMap::new();
+                properties.insert(
+                    prop.into(),
+                    PropertyDef::Single(PropertyAtom {
+                        ty: SimplifiedType::String,
+                        is_array: false,
+                        constraints: vec![Constraint::Required],
+                        array_constraints: vec![],
+                        description: None,
+                    }),
+                );
+                SimplifiedSchema::Single(SchemaShape { properties })
+            }
+
+            let dir = tempfile::tempdir().unwrap();
+            let cache_root = dir.path().join("cache");
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+
+            // Parent supplies both `alpha` and `beta` so it (and its effective
+            // state inherited by the child) satisfies either baseline under
+            // test. Cache invalidation is the contract we care about here, not
+            // the validation outcome.
+            std::fs::write(&child, "---\nalpha: ok\nbeta: ok\n---\nChild body\n").unwrap();
+            std::fs::write(
+                &root,
+                "---\nalpha: ok\nbeta: ok\n---\n# Parent\n\n::file ./child.md\n",
+            )
+            .unwrap();
+
+            let mk_options = |baseline_prop: &str| {
+                ComposeOptions::new()
+                    .with_source_file(&root)
+                    .with_baseline_schema(baseline_required(baseline_prop))
+                    .with_cache_access_mode(CacheAccessMode::ReadWrite)
+                    .with_cache_root(&cache_root)
+                    .with_cache_namespace("baseline_cache_regression")
+                    .with_fail_fast(true)
+            };
+
+            // ── Run 1: cold cache under baseline A ─────────────────────
+            let md1 = Markdown::try_from(root.as_path()).unwrap();
+            let (_, report1) = md1
+                .compose_with(mk_options("alpha"))
+                .expect("run 1 (baseline alpha, cold cache) should succeed");
+            let stats1 = report1
+                .cache_stats
+                .expect("expected cache stats with cache enabled");
+            assert_eq!(
+                stats1.persistent_hits, 0,
+                "run 1 should have a cold persistent cache, got {stats1:?}"
+            );
+            assert!(
+                stats1.persistent_writes >= 1,
+                "run 1 must write the child compose to the persistent cache, got {stats1:?}"
+            );
+
+            // ── Run 2: same baseline A → cache should be warm ──────────
+            let md2 = Markdown::try_from(root.as_path()).unwrap();
+            let (_, report2) = md2
+                .compose_with(mk_options("alpha"))
+                .expect("run 2 (baseline alpha, warm cache) should succeed");
+            let stats2 = report2
+                .cache_stats
+                .expect("expected cache stats with cache enabled");
+            assert!(
+                stats2.persistent_hits >= 1,
+                "run 2 must reuse the warmed persistent entry, got {stats2:?}",
+            );
+
+            // ── Run 3: baseline B → distinct key, must not reuse run 1 ─
+            let md3 = Markdown::try_from(root.as_path()).unwrap();
+            let (_, report3) = md3
+                .compose_with(mk_options("beta"))
+                .expect("run 3 (baseline beta) should succeed");
+            let stats3 = report3
+                .cache_stats
+                .expect("expected cache stats with cache enabled");
+            assert_eq!(
+                stats3.persistent_hits, 0,
+                "run 3 must NOT reuse the baseline-A entry — options_hash must include \
+                 baseline_schema. got {stats3:?}",
+            );
+            assert!(
+                stats3.persistent_writes >= 1,
+                "run 3 must compute and write a fresh entry under the new baseline, got {stats3:?}"
             );
         }
     }

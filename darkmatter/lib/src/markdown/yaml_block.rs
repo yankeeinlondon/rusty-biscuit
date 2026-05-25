@@ -224,6 +224,7 @@ impl TerminalRenderable for YamlBlock {
             &meta,
             color_mode,
             Some(available as u16),
+            None,
         )
         .unwrap_or_else(|_| {
             // Fallback: plain text with minimal escaping

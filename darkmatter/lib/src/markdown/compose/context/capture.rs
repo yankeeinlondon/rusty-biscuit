@@ -785,6 +785,30 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
         "timestamp_ms".into(),
         Value::Number(now_utc.timestamp_millis().into()),
     );
+
+    // Backward-compatible aliases (documented in `context-variables.md`).
+    // Keep these in sync with the docs: any documented alias must resolve to
+    // the same value as its canonical key so interpolation and the
+    // `claudine context --values` report agree.
+    populate_datetime_aliases(values);
+}
+
+/// Insert documented backward-compatible aliases for date/time keys.
+///
+/// Each alias mirrors the value of an existing canonical key. Aliases are
+/// inserted only when the canonical key is present so a missing canonical
+/// value cannot leak as a populated alias.
+fn populate_datetime_aliases(values: &mut Map<String, Value>) {
+    const ALIASES: &[(&str, &str)] = &[
+        ("utc", "now_utc"),
+        ("dow", "day"),
+        ("dow_abbr", "day_abbr"),
+    ];
+    for (alias, canonical) in ALIASES {
+        if let Some(value) = values.get(*canonical).cloned() {
+            values.insert((*alias).to_string(), value);
+        }
+    }
 }
 
 // ── Repo context ──────────────────────────────────────────────────
@@ -1524,6 +1548,37 @@ mod tests {
         assert!(values.contains_key("season"));
         assert!(values.contains_key("timestamp"));
         assert!(values.contains_key("timestamp_ms"));
+    }
+
+    /// Regression: documented backward-compatible aliases (`utc`, `dow`,
+    /// `dow_abbr`) must be populated by `populate_datetime` so they
+    /// resolve in interpolation and in `claudine context --values` reports
+    /// instead of rendering as `null`.
+    #[test]
+    fn populate_datetime_populates_documented_aliases() {
+        let mut values = Map::new();
+        populate_datetime(&mut values);
+
+        for (alias, canonical) in [
+            ("utc", "now_utc"),
+            ("dow", "day"),
+            ("dow_abbr", "day_abbr"),
+        ] {
+            let alias_value = values
+                .get(alias)
+                .unwrap_or_else(|| panic!("alias `{alias}` must be present"));
+            let canonical_value = values
+                .get(canonical)
+                .unwrap_or_else(|| panic!("canonical `{canonical}` must be present"));
+            assert!(
+                !alias_value.is_null(),
+                "alias `{alias}` must not be null",
+            );
+            assert_eq!(
+                alias_value, canonical_value,
+                "alias `{alias}` must mirror canonical `{canonical}`",
+            );
+        }
     }
 
     #[test]

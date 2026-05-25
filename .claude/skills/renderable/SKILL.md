@@ -18,6 +18,36 @@ Browser, and Terminal **tree renderers** fold that tree into output.
 > `TreeRenderable` **replaces** the removed placeholder `AstRenderable` trait —
 > there is no longer an "AST" render target. See [Tree Module](./tree.md).
 
+## Start Here
+
+- Use `TreeRenderable` when a component should render to multiple targets from
+  one structural projection.
+- Use `Layout` for block positioning and wrapping.
+- Use `Style` for target-agnostic appearance carried on `RenderNode` attrs.
+- Use `CssStyle` / `Stylesheet` for browser CSS declaration blocks and scoped
+  component stylesheets.
+- Use `RenderTarget` when a value must resolve differently for Markdown,
+  MarkdownPlus, Browser, or Terminal.
+
+## Progressive Disclosure
+
+Open only the topic file needed for the task:
+
+| Topic | File |
+|-------|------|
+| Render tree, diagnostics, validation, renderers | `tree.md` |
+| Target-agnostic layout | `layout.md` |
+| Target-agnostic appearance | `style.md` |
+| Browser rendering and fragments | `browser.md` |
+| HTML page assembly | `html.md` |
+| CSS builder | `stylesheet.md` |
+| Color model | `color.md` |
+| Markdown trait/rendering | `markdown.md` |
+| Architecture decisions | `design-decisions.md` |
+
+For terminal folding, switch to the `biscuit-terminal` skill. For Markdown
+parsing/composition or `style:` frontmatter, switch to the `darkmatter` skill.
+
 ## Render Targets
 
 | Target       | Trait                | Crate              |
@@ -47,6 +77,22 @@ Terminal from the single tree it produces.
 | [Tree Module](./tree.md)                  | Render tree: `RenderNode`, `Document`, `TreeRenderable`, component projection, render hints, `CodeRenderer`, tree renderers |
 | [Migrating a Component to the IR](../../../renderable/docs/migrate-component-to-ir.md) | Canonical recipe — flip-from-bespoke (Variant A) and born-on-the-tree (Variant B), escape-hatch rules, doc-update obligations |
 | [Design Decisions](./design-decisions.md) | Key architecture decisions, naming conventions, migration notes                                                |
+
+## Darkmatter `style:` Frontmatter
+
+Darkmatter's document-level `style:` frontmatter is implemented in
+`darkmatter::style`, but it intentionally uses renderable primitives:
+`Length`, `Alignment`, and color-backed values. Active wiring covers
+sub-specs 1 through 7 from
+`renderable/features/2026-05-23-style-property/`: schema/parser, page layout,
+table/image/block-quote layout, `ul`/`ol`/`li` layout, page/component
+`color` / `bg-color`, `style.hr.*`, and the bespoke knobs
+`page.stylesheet`, `page.meta`, `page.code.theme`, hyperlink style, and
+local hyperlink/image style.
+
+This pipeline is separate from `renderable::style::Style`. Frontmatter applies
+policy to `DarkmatterPage`; `Style` is the render-tree appearance attribute
+carried by `NodeAttrs`.
 
 ## Quick Start
 
@@ -124,7 +170,7 @@ The **renderable** library can and should be used by any renderable components w
     - provides all sorts of utilities for discovering features of a given terminal as well as how to render to a terminal (with good fallbacks)
     - because it is so concentrated on terminal features, the `TerminalRenderable` trait resides in **biscuit-terminal** instead of **renderable**
     - current IR migration goal: every IR-aware component should share one private projection helper between `TreeRenderable::render_tree` and `TerminalRenderable::render_tree_node`; nested `RenderableTerminalContent::Component` values should project structurally instead of falling back to ANSI-stripped text
-    - Stage 3 closes the remaining structural-projection gap for `BlockQuote`, `StatusBlock`, and `FileSystem`, decides whether `FileSystem::render` can flip from its bespoke terminal path, and retires or documents each remaining `render_bespoke` compatibility hook
+    - Stage 3 closed the remaining structural-projection gap for `BlockQuote`, `StatusBlock`, and `FileSystem`, deferred the `FileSystem::render` terminal flip to Stage 4, and retired or documented each remaining `render_bespoke` compatibility hook
     - **biscuit-terminal** also provides these important components:
         - `Prose`
         - `Table`

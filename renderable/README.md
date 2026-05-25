@@ -165,6 +165,25 @@ Terminal renderer first). A component never hand-writes ANSI or CSS.
 all derive `serde` with `snake_case` casing. The Markdown renderer ignores
 `Style` entirely, so Markdown output is unaffected by appearance.
 
+### Darkmatter `style:` frontmatter
+
+Darkmatter also has a document-level `style:` frontmatter pipeline built on
+renderable primitives. This is separate from the render-tree `Style` attribute:
+frontmatter is parsed by `darkmatter::style` and applied to `DarkmatterPage`
+before terminal/HTML rendering.
+
+Implemented wiring currently covers sub-specs 1 through 5 from
+[`features/2026-05-23-style-property`](./features/2026-05-23-style-property/):
+schema/parser, page layout, table/image/block-quote layout, `ul`/`ol`/`li`
+layout, and page/component `color` / `bg-color`. The active phase is
+`ACTIVE_STYLE_WIRING_SUB_SPEC = 5`; HR migration and bespoke knobs such as
+`page.stylesheet`, `page.meta`, code theme defaults, and local link/image
+style remain planned.
+
+CLI precedence is field-level: invocation flags win over frontmatter. Use
+`md --strict-style` to fail on unknown or deprecated `style:` keys while still
+allowing valid future-phase keys to report as `KnownButInactive`.
+
 ### Markdown (`markdown.rs`)
 
 The `MarkdownRenderable` trait and related types.

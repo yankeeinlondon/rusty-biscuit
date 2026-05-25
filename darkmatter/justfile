@@ -50,30 +50,74 @@ build *args="":
     @just _build darkmatter "{{ LIB_NAME }}" {{ args }}
     @just _build darkmatter-cli "CLI_NAME" {{ args }}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity {{ LIBRARY }}
+    @just _sanity {{ CLI }}
+
 # Test both library and CLI.
 test *args="":
-    @just _test darkmatter {{ args }}
-    @just _test darkmatter-cli {{ args }}
+    @just _test {{ LIBRARY }} {{ args }}
+    @just _test {{ CLI }} {{ args }}
 
-# Run the Level-2 (real-terminal) render-tree tests, enforced.
+# Level-2 (real-terminal) render-tree tests for both crates.
 #
-# Sets DARKMATTER_LEVEL2_REQUIRED=1 so the suite hard-fails if WezTerm is not
-# reachable — matching the spec's expectation that terminal user-observable
-# rendering is verified in an actual terminal pane, not as in-process strings.
-# Requires WEZTERM_UNIX_SOCKET to point at a running WezTerm instance and the
-# `wezterm` CLI on PATH.
+# By default, missing harnesses (WezTerm / tmux) cause the suite to skip
+# cleanly. Set `BISCUIT_TEST_LEVEL_REQUIRED=2` in the environment to convert
+# missing harnesses into hard failures (CI use).
 test-l2 *args="":
     @echo
     @echo -e "Running {{ BOLD }}Level-2{{ RESET }} render-tree terminal tests"
-    @echo -e "{{ DIM }}- requires WezTerm: WEZTERM_UNIX_SOCKET + wezterm on PATH{{ RESET }}"
+    @echo -e "{{ DIM }}- export BISCUIT_TEST_LEVEL_REQUIRED=2 to hard-fail on missing harness{{ RESET }}"
     @echo
-    @DARKMATTER_LEVEL2_REQUIRED=1 cargo test -p darkmatter \
-        --test level2_render_tree_terminal {{ args }}
+    @just _test_l2 {{ LIBRARY }} {{ args }}
+    @just _test_l2 {{ CLI }} {{ args }}
+
+# not applicable: darkmatter has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for darkmatter"
+
+# Headless-browser tests (chromiumoxide). Selects every `browser_*` test in
+# the library crate. Skips cleanly when Chrome is absent unless
+# `BISCUIT_BROWSER_REQUIRED=1` is set.
+test-browser *args="":
+    @just _test_browser {{ LIBRARY }} {{ args }}
+
+# not applicable: darkmatter has no real-resource (device / network) tier
+test-real:
+    @echo "test-real: not applicable for darkmatter"
 
 # Lint both the library and CLI
 lint:
-    @just _lint darkmatter
-    @just _lint darkmatter-cli
+    @just _lint {{ LIBRARY }}
+    @just _lint {{ CLI }}
+
+# Per-package LCOV coverage for the library and CLI.
+coverage *args="":
+    @just _coverage {{ LIBRARY }} {{ args }}
+    @just _coverage {{ CLI }} {{ args }}
+
+# Doctests for the library and CLI.
+doctest *args="":
+    @just _doctest {{ LIBRARY }} {{ args }}
+    @just _doctest {{ CLI }} {{ args }}
+
+# Fuzz target for darkmatter markdown parser.
+fuzz *args="":
+    @just _fuzz lib markdown_parser {{ args }}
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
 commit:

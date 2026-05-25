@@ -5,6 +5,12 @@ edition = "2024"
 description = "File format utilities for PDF, TOML, and YAML"
 license = "MIT"
 
+[lib]
+name = "biscuit_file"
+path = "src/lib.rs"
+# Disable the default bench harness so `cargo bench` only runs Criterion targets.
+bench = false
+
 [features]
 default = ["toml", "yaml", "json5", "extract", "lopdf", "file-reference"]
 
@@ -66,3 +72,8 @@ serde_yaml_ng = "0.10"
 tempfile = "3"
 git2 = "0.20"
 serial_test = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "parsers"
+harness = false

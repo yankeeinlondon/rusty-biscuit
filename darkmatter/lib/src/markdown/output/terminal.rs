@@ -32,6 +32,7 @@
 // this module still consumes them while that migration completes.
 #[allow(deprecated)]
 use crate::layout::{LayoutContext, PageAlignment, PageComponent, PageFill};
+use crate::style::color::{StyleColor, lower_to_sgr, wrap_with_color};
 use crate::markdown::{
     Markdown, MarkdownError,
     block::{RuleProcessor, build_rule_with_defaults, hr_defaults_from_frontmatter},
@@ -39,7 +40,7 @@ use crate::markdown::{
     highlighting::{
         CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
     },
-    inline::{InlineEvent, InlineStyleProcessor, InlineTag},
+    inline::{HorizontalRuleAttrs, InlineEvent, InlineStyleProcessor, InlineTag},
     output::code_block,
 };
 use biscuit_terminal::components::horizontal_rule::HorizontalRule;
@@ -778,6 +779,11 @@ pub struct TerminalOptions {
     /// - `Always`: Always emit OSC 8 escape codes (for pre-rendering)
     /// - `Never`: Never emit OSC 8 codes; use fallback format `text [url]`
     pub hyperlink_mode: HyperlinkMode,
+    /// Resolved HR defaults from `style.hr` frontmatter (or `DarkmatterPage`
+    /// builder calls). When present, terminal rendering uses these as the
+    /// default horizontal-rule style instead of reading the deprecated top-level
+    /// `hr:` frontmatter block.
+    pub hr_defaults: Option<crate::markdown::inline::HorizontalRuleAttrs>,
 }
 
 static DETECTED_COLOR_MODE: std::sync::OnceLock<ColorMode> = std::sync::OnceLock::new();
@@ -805,6 +811,7 @@ impl Default for TerminalOptions {
             max_width: None,
             mermaid_mode: MermaidMode::default(),
             hyperlink_mode: HyperlinkMode::default(),
+            hr_defaults: None,
         }
     }
 }
@@ -893,12 +900,6 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
 ) -> Result<(), MarkdownError> {
     let color_depth = options.color_depth.unwrap_or_else(ColorDepth::auto_detect);
 
-    // Early return if no color support
-    if color_depth == ColorDepth::None {
-        write!(writer, "{}", md.content()).ok();
-        return Ok(());
-    }
-
     // Resolve italic mode once at start (avoids repeated capability detection)
     let emit_italic = options.italic_mode.should_emit_italic();
 
@@ -931,7 +932,11 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
             .background
             .unwrap_or(Color::BLACK),
     );
-    let hr_defaults = hr_defaults_from_frontmatter(md);
+    let hr_fallback = hr_defaults_from_frontmatter(md);
+    let hr_defaults: Option<&HorizontalRuleAttrs> = options
+        .hr_defaults
+        .as_ref()
+        .or(hr_fallback.as_ref());
 
     // Load prose theme for ProseHighlighter
     let prose_syntect_theme =
@@ -939,7 +944,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
     let prose_highlighter = ProseHighlighter::new(&prose_syntect_theme);
 
     // Use LineWrapper for proper word wrapping at terminal width
-    let mut wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks);
+    let mut wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks, color_depth);
 
     // Track scope stack for prose highlighting (functional style)
     let mut scope_stack: Vec<Scope> = vec![prose_highlighter.base_scope()];
@@ -1062,8 +1067,15 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
             InlineEvent::HorizontalRule(attrs) => {
                 // Build the rule from attributes via the shared helper so the
                 // terminal and HTML code paths stay consistent (Phase 5).
-                let rule = build_rule_with_defaults(hr_defaults.as_ref(), &attrs);
-                write_horizontal_rule(&mut wrapper, &rule, &render_terminal, terminal_width);
+                let rule = build_rule_with_defaults(hr_defaults, &attrs);
+                write_horizontal_rule(
+                    &mut wrapper,
+                    &rule,
+                    &render_terminal,
+                    terminal_width,
+                    color_depth,
+                    layout_ctx,
+                );
             }
             // Phase 5 (B4): bare `---` / `***` / `___` lines surface as
             // pulldown-cmark `Event::Rule`. Handle them explicitly so the
@@ -1071,10 +1083,17 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
             // through the catch-all arm.
             InlineEvent::Standard(Event::Rule) => {
                 let rule = build_rule_with_defaults(
-                    hr_defaults.as_ref(),
+                    hr_defaults,
                     &crate::markdown::inline::HorizontalRuleAttrs::default(),
                 );
-                write_horizontal_rule(&mut wrapper, &rule, &render_terminal, terminal_width);
+                write_horizontal_rule(
+                    &mut wrapper,
+                    &rule,
+                    &render_terminal,
+                    terminal_width,
+                    color_depth,
+                    layout_ctx,
+                );
             }
 
             // Standard pulldown-cmark events
@@ -1127,6 +1146,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                                 code_color_mode,
                                 terminal_width,
                                 layout_ctx,
+                                color_depth,
                             )?;
                         }
                         MermaidMode::Image => {
@@ -1134,7 +1154,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                             // (don't emit header yet - we'll emit after knowing if rendering succeeds)
                             write!(writer, "{}", wrapper.output()).ok();
                             writer.flush().ok();
-                            wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks);
+                            wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks, color_depth);
 
                             // Render mermaid diagram as image using mmdc CLI
                             let diagram = crate::mermaid::Mermaid::new(&code_buffer);
@@ -1190,6 +1210,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                                     code_color_mode,
                                     terminal_width,
                                     layout_ctx,
+                                    color_depth,
                                 )?;
                             }
                         }
@@ -1213,6 +1234,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         code_color_mode,
                         terminal_width,
                         layout_ctx,
+                        color_depth,
                     )?;
                 }
             }
@@ -1289,18 +1311,56 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
+                // Push hyperlink color scope
+                if let Some(ctx) = layout_ctx {
+                    let is_local = crate::style::bespoke::is_local_hyperlink(dest_url);
+                    let (fg, bg) = ctx.hyperlink_color(is_local);
+                    wrapper.push_component_color(fg, bg);
+                }
             }
             InlineEvent::Standard(Event::End(TagEnd::Link)) => {
                 if in_table {
                     scope_stack.pop();
                     let style = table_link_style(&prose_highlighter, &scope_stack);
+                    // Resolve the effective hyperlink color: prefer an explicit
+                    // `style.hyperlinks.*`, then fall back to the surrounding
+                    // table color, then the page color. Links in regular prose
+                    // use the wrapper's nested color stack; table cells render
+                    // outside that stack, so the lookup happens directly here.
+                    let is_local = crate::style::bespoke::is_local_hyperlink(&current_link_url);
+                    let (hyper_fg, hyper_bg) = layout_ctx
+                        .map(|ctx| {
+                            let (fg, bg) = ctx.hyperlink_color(is_local);
+                            let fg = fg
+                                .or_else(|| ctx.component_colors.get(&PageComponent::Tables).cloned())
+                                .or_else(|| ctx.page_color.clone());
+                            let bg = bg
+                                .or_else(|| ctx.component_bg_colors.get(&PageComponent::Tables).cloned())
+                                .or_else(|| ctx.page_bg_color.clone());
+                            (fg, bg)
+                        })
+                        .unwrap_or((None, None));
+                    let display_text = layout_ctx
+                        .and_then(|ctx| {
+                            ctx.effective_hyperlink_style(is_local).map(|common| {
+                                crate::style::bespoke::apply_inline_text_layout(
+                                    &current_link_text,
+                                    Some(&common),
+                                    ctx.effective_width,
+                                )
+                            })
+                        })
+                        .unwrap_or_else(|| current_link_text.clone());
                     push_table_link(
                         &mut current_cell,
-                        &current_link_text,
+                        &display_text,
                         &current_link_url,
                         style,
                         emit_italic,
                         emit_hyperlinks,
+                        hyper_fg.as_ref(),
+                        hyper_bg.as_ref(),
+                        color_depth,
                     );
                 } else {
                     // Pop link scope to get parent scopes, then query theme for link styling
@@ -1331,12 +1391,30 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         style.font_style |= syntect::highlighting::FontStyle::UNDERLINE;
                     }
 
+                    // Apply per-link width/max-width/alignment before OSC 8
+                    // wrapping so the visible label sits inside the requested
+                    // text box. The merged style (local-style over base) is
+                    // resolved by `effective_hyperlink_style`.
+                    let display_text = layout_ctx
+                        .and_then(|ctx| {
+                            let is_local =
+                                crate::style::bespoke::is_local_hyperlink(&current_link_url);
+                            ctx.effective_hyperlink_style(is_local).map(|common| {
+                                crate::style::bespoke::apply_inline_text_layout(
+                                    &current_link_text,
+                                    Some(&common),
+                                    ctx.effective_width,
+                                )
+                            })
+                        })
+                        .unwrap_or_else(|| current_link_text.clone());
+
                     // Emit styled hyperlink with OSC8 escape sequences
                     // IMPORTANT: Styling must be applied INSIDE the OSC8 sequence, not outside.
                     // OSC8 format: ESC]8;;URL BEL <styled_text> ESC]8;; BEL
                     // The styled text appears between the OSC8 open and close sequences.
                     wrapper.emit_styled_hyperlink(
-                        &current_link_text,
+                        &display_text,
                         &current_link_url,
                         style,
                         emit_italic,
@@ -1346,6 +1424,8 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                 in_link = false;
                 current_link_url.clear();
                 current_link_text.clear();
+                // Pop hyperlink color scope
+                wrapper.pop_component_color();
             }
 
             // List handling
@@ -1359,22 +1439,54 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     }
                 }
 
+                let list_component = match start_num {
+                    None => PageComponent::Ul,
+                    Some(_) => PageComponent::Ol,
+                };
+
+                // Push list container color scope
+                if let Some(ctx) = layout_ctx {
+                    let fg = ctx.component_color(list_component).cloned();
+                    let bg = ctx.component_bg_color(list_component).cloned();
+                    wrapper.push_component_color(fg, bg);
+                }
+
                 // Apply page-level layout for top-level lists.
                 if list_stack.is_empty()
                     && let Some(ctx) = layout_ctx
                 {
-                    let component = PageComponent::Lists;
+                    let component = list_component;
                     let component_width = ctx
                         .resolve_component_width(component)
                         .unwrap_or(terminal_width);
-                    wrapper.push_component_width(component_width as usize);
-                    let pad = ctx.alignment_padding(component, component_width);
-                    wrapper.alignment_offset = pad as usize;
+
+                    // For unordered lists, resolve left-margin against the
+                    // effective width first, then cap the body width so the
+                    // body still wraps at the component's resolved width
+                    // (e.g. `ul.max-width`). The left margin is an additional
+                    // offset outside the body, not subtracted from it.
+                    let left_margin = if component == PageComponent::Ul {
+                        ctx.list_left_margin(PageComponent::Ul)
+                            .and_then(|u| u.resolve(ctx.effective_width).ok())
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    let available_for_body = ctx.effective_width.saturating_sub(left_margin);
+                    let body_width = component_width.min(available_for_body);
+                    wrapper.push_component_width(body_width as usize);
+                    // Treat (left_margin + body) as a single aligned block so
+                    // a right/center alignment does not push the body past the
+                    // effective width.
+                    let block_width = body_width.saturating_add(left_margin);
+                    let pad = ctx.alignment_padding(component, block_width);
+                    wrapper.alignment_offset = (left_margin + pad) as usize;
                 }
 
                 list_stack.push(start_num);
             }
             InlineEvent::Standard(Event::End(TagEnd::List(_))) => {
+                wrapper.pop_component_color();
                 list_stack.pop();
                 // Add blank line after top-level list ends
                 if list_stack.is_empty() {
@@ -1384,6 +1496,28 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                 }
             }
             InlineEvent::Standard(Event::Start(Tag::Item)) => {
+                // Per spec, `style.li.*` affects the item body only; the marker
+                // is governed by the containing Ul/Ol and must keep its column.
+                // We emit the marker first under the existing list
+                // alignment_offset, then push Li overrides for body wrapping.
+                //
+                // Two flavors of Li override:
+                //   * width-only (Left alignment): the body stays inline with
+                //     the marker but wraps at the Li width. push_indent keeps
+                //     wrapped continuation lines aligned with the body.
+                //   * alignment != Left: the body becomes its own block on a
+                //     new line so its alignment_offset can take effect without
+                //     dragging the marker along.
+                let (li_width_active, li_alignment_active) = layout_ctx
+                    .map(|ctx| {
+                        let li_alignment = ctx.component_alignment(PageComponent::Li);
+                        let li_fill = ctx.component_fill(PageComponent::Li);
+                        #[allow(deprecated)]
+                        (li_fill != PageFill::Full, li_alignment != PageAlignment::Left)
+                    })
+                    .unwrap_or((false, false));
+                let li_block_body = li_alignment_active;
+
                 // Calculate indentation based on nesting level
                 let indent = "  ".repeat(list_stack.len().saturating_sub(1));
 
@@ -1396,7 +1530,12 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                             let marker = format!("{}{}. ", indent, num);
                             let marker_width = UnicodeWidthStr::width(marker.as_str());
                             wrapper.emit_styled_marker(&marker, style, emit_italic);
-                            wrapper.push_indent(marker_width);
+                            // When the body is a block (Li alignment shifts it),
+                            // skip push_indent so the body's own alignment_offset
+                            // controls placement on the new line.
+                            if !li_block_body {
+                                wrapper.push_indent(marker_width);
+                            }
                             *num += 1;
                         }
                         None => {
@@ -1405,14 +1544,61 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                             let marker = format!("{}- ", indent);
                             let marker_width = UnicodeWidthStr::width(marker.as_str());
                             wrapper.emit_styled_marker(&marker, style, emit_italic);
-                            wrapper.push_indent(marker_width);
+                            if !li_block_body {
+                                wrapper.push_indent(marker_width);
+                            }
                         }
+                    }
+                }
+
+                // Push Li color scope after the marker so the marker keeps
+                // the Ul/Ol container color and the body gets the Li color.
+                if let Some(ctx) = layout_ctx {
+                    let fg = ctx.component_color(PageComponent::Li).cloned();
+                    let bg = ctx.component_bg_color(PageComponent::Li).cloned();
+                    wrapper.push_component_color(fg, bg);
+                }
+
+                // Apply Li-scoped overrides for the body. Width is always
+                // pushed when set; the alignment_offset only matters once the
+                // body actually starts on a new line.
+                if (li_width_active || li_alignment_active)
+                    && let Some(ctx) = layout_ctx
+                {
+                    let li_width = ctx
+                        .resolve_component_width(PageComponent::Li)
+                        .unwrap_or(terminal_width);
+                    wrapper.push_component_width(li_width as usize);
+                    if li_block_body {
+                        let li_pad = ctx.alignment_padding(PageComponent::Li, li_width);
+                        // Newline so the body starts on a fresh line where the
+                        // new alignment_offset takes effect.
+                        wrapper.newline();
+                        wrapper.push_alignment_offset(li_pad as usize);
                     }
                 }
             }
             InlineEvent::Standard(Event::End(TagEnd::Item)) => {
+                let (li_width_active, li_alignment_active) = layout_ctx
+                    .map(|ctx| {
+                        let li_alignment = ctx.component_alignment(PageComponent::Li);
+                        let li_fill = ctx.component_fill(PageComponent::Li);
+                        #[allow(deprecated)]
+                        (li_fill != PageFill::Full, li_alignment != PageAlignment::Left)
+                    })
+                    .unwrap_or((false, false));
+                let li_block_body = li_alignment_active;
+
+                wrapper.pop_component_color();
                 wrapper.newline();
-                wrapper.pop_indent();
+                if li_width_active || li_alignment_active {
+                    wrapper.pop_component_width();
+                }
+                if li_block_body {
+                    wrapper.pop_alignment_offset();
+                } else {
+                    wrapper.pop_indent();
+                }
             }
 
             InlineEvent::Standard(Event::Start(Tag::Paragraph)) => {
@@ -1556,6 +1742,12 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                 } else {
                     table_output
                 };
+                let table_output = wrap_with_color(
+                    &table_output,
+                    layout_ctx.and_then(|ctx| ctx.component_color(PageComponent::Tables)),
+                    layout_ctx.and_then(|ctx| ctx.component_bg_color(PageComponent::Tables)),
+                    color_depth,
+                );
                 wrapper.push_with_newlines(&table_output);
                 // Add blank line after table for spacing from following content
                 wrapper.push_with_newlines("\n\n");
@@ -1603,22 +1795,47 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     continue;
                 }
 
+                let is_local = crate::style::bespoke::is_local_image(&current_image_path);
+                let (image_fg, image_bg) = layout_ctx
+                    .map(|ctx| ctx.image_color(is_local))
+                    .unwrap_or((None, None));
+                // Effective local image style applies width/max-width/alignment
+                // to the rendered fallback alt text (per sub-spec #7). It does
+                // NOT alter raster decoding or protocol output.
+                let local_image_common = if is_local {
+                    layout_ctx.and_then(|ctx| ctx.local_image_style.clone())
+                } else {
+                    None
+                };
+                let layout_alt = |alt: &str| -> String {
+                    match (&local_image_common, layout_ctx) {
+                        (Some(common), Some(ctx)) => {
+                            crate::style::bespoke::apply_inline_text_layout(
+                                alt,
+                                Some(common),
+                                ctx.effective_width,
+                            )
+                        }
+                        _ => alt.to_string(),
+                    }
+                };
+
                 if let Some(ref renderer) = image_renderer {
                     // Flush accumulated output before viuer prints to stdout
                     if renderer.graphics_supported() {
                         write!(writer, "{}", wrapper.output()).ok();
                         writer.flush().ok();
                         // Clear the wrapper by creating a new one (preserving max_width)
-                        wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks);
+                        wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks, color_depth);
                         // render_image returns protocol output on success,
                         // fallback text on failure
-                        let result =
+                        let mut result =
                             renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
-                        let result = if let Some(ctx) = layout_ctx {
-                            apply_component_layout(&result, PageComponent::Images, ctx)
-                        } else {
-                            result
-                        };
+                        result = layout_alt(&result);
+                        if let Some(ctx) = layout_ctx {
+                            result = apply_component_layout(&result, PageComponent::Images, ctx);
+                        }
+                        let result = wrap_with_color(&result, image_fg.as_ref(), image_bg.as_ref(), color_depth);
                         if !result.is_empty() {
                             // Print rendered output (or fallback text on failure)
                             write!(writer, "{}", result).ok();
@@ -1628,17 +1845,21 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     } else {
                         let mut result =
                             renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
+                        result = layout_alt(&result);
                         if let Some(ctx) = layout_ctx {
                             result = apply_component_layout(&result, PageComponent::Images, ctx);
                         }
+                        let result = wrap_with_color(&result, image_fg.as_ref(), image_bg.as_ref(), color_depth);
                         wrapper.push_with_newlines(&result);
                         just_rendered_image = true;
                     }
                 } else {
                     let mut result = format!("▉ IMAGE[{}]\n", parsed_alt);
+                    result = layout_alt(&result);
                     if let Some(ctx) = layout_ctx {
                         result = apply_component_layout(&result, PageComponent::Images, ctx);
                     }
+                    let result = wrap_with_color(&result, image_fg.as_ref(), image_bg.as_ref(), color_depth);
                     wrapper.push_with_newlines(&result);
                     just_rendered_image = true;
                 }
@@ -1676,12 +1897,19 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
+                // Push blockquote color scope
+                if let Some(ctx) = layout_ctx {
+                    let fg = ctx.component_color(PageComponent::BlockQuotes).cloned();
+                    let bg = ctx.component_bg_color(PageComponent::BlockQuotes).cloned();
+                    wrapper.push_component_color(fg, bg);
+                }
                 // Emit the blockquote prefix for the first line of this blockquote level
                 wrapper.emit_blockquote_prefix(blockquote_depth, blockquote_bg);
             }
             InlineEvent::Standard(Event::End(TagEnd::BlockQuote(_))) => {
                 blockquote_depth = blockquote_depth.saturating_sub(1);
                 scope_stack.pop();
+                wrapper.pop_component_color();
                 // Update wrapper's blockquote state
                 if blockquote_depth == 0 {
                     // Pop any layout overrides applied at blockquote entry.
@@ -1710,11 +1938,33 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
     // Always emit terminal reset at end
     output.push_str("\x1b[0m");
 
+    // When color depth is `None`, the terminal cannot render any color SGR;
+    // the visible text and layout must still be preserved. We strip CSI
+    // sequences (which carry SGR codes such as `\x1b[38;2;...m` and
+    // `\x1b[0m`) while leaving OSC sequences (OSC8 hyperlinks) intact, so
+    // the page layout, table structure, and bullets are unaffected.
+    if color_depth == ColorDepth::None {
+        output = strip_csi_sequences(&output);
+    }
+
     // Write final output
     write!(writer, "{}", output).ok();
     writer.flush().ok();
 
     Ok(())
+}
+
+/// Strip CSI (Control Sequence Introducer) sequences from text while
+/// preserving OSC sequences (e.g. OSC8 hyperlinks).
+///
+/// Used by [`write_terminal_with_layout`] when `ColorDepth::None` is in
+/// effect so the visible text/layout survives but no color SGR escapes
+/// reach a terminal that cannot interpret them.
+fn strip_csi_sequences(text: &str) -> String {
+    static CSI_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\x1b\[[0-9;?]*[A-Za-z]").expect("invalid CSI regex")
+    });
+    CSI_RE.replace_all(text, "").into_owned()
 }
 
 /// Emits prose text with foreground color and font style (bold, italic, underline).
@@ -1752,6 +2002,9 @@ fn emit_prose_text(
         blockquote_bg,
         in_dim,
         emit_dim,
+        None,
+        None,
+        ColorDepth::TrueColor,
     );
     result
 }
@@ -1767,6 +2020,9 @@ fn push_prose_text(
     blockquote_bg: Option<Color>,
     in_dim: bool,
     emit_dim: bool,
+    component_fg: Option<StyleColor>,
+    component_bg: Option<StyleColor>,
+    color_depth: ColorDepth,
 ) {
     use syntect::highlighting::FontStyle;
 
@@ -1795,7 +2051,13 @@ fn push_prose_text(
         // Yellow highlight background (255, 243, 184) - matches CSS var(--highlight-bg, #fff3b8)
         output.push_str("\x1b[48;2;255;243;184m");
         // Use dark text for contrast on yellow background
-        let _ = write!(output, "\x1b[38;2;0;0;0m{}\x1b[0m", text);
+        let mut sgr = String::new();
+        sgr.push_str("\x1b[38;2;0;0;0m");
+        if let Some(cfg) = component_fg
+            && let Some(seq) = lower_to_sgr(&cfg, color_depth, false) {
+                sgr.push_str(&seq);
+            }
+        let _ = write!(output, "{sgr}{text}\x1b[0m");
     } else if let Some(bg) = blockquote_bg {
         // Apply blockquote background color with foreground color.
         //
@@ -1816,18 +2078,31 @@ fn push_prose_text(
         // while leaving the background (48) intact.
         //
         // See biscuit-terminal skill → "Terminal rendering: background gaps" for more.
-        let _ = write!(
-            output,
-            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[22;23;24;25;27;28;29;39m",
-            bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text
-        );
+        let mut sgr = String::new();
+        sgr.push_str(&format!("\x1b[48;2;{};{};{}m", bg.r, bg.g, bg.b));
+        if let Some(cbg) = component_bg
+            && let Some(seq) = lower_to_sgr(&cbg, color_depth, true) {
+                sgr.push_str(&seq);
+            }
+        sgr.push_str(&format!("\x1b[38;2;{};{};{}m", fg.r, fg.g, fg.b));
+        if let Some(cfg) = component_fg
+            && let Some(seq) = lower_to_sgr(&cfg, color_depth, false) {
+                sgr.push_str(&seq);
+            }
+        let _ = write!(output, "{sgr}{text}\x1b[22;23;24;25;27;28;29;39m");
     } else {
         // Apply foreground color and text
-        let _ = write!(
-            output,
-            "\x1b[38;2;{};{};{}m{}\x1b[0m",
-            fg.r, fg.g, fg.b, text
-        );
+        let mut sgr = String::new();
+        sgr.push_str(&format!("\x1b[38;2;{};{};{}m", fg.r, fg.g, fg.b));
+        if let Some(cfg) = component_fg
+            && let Some(seq) = lower_to_sgr(&cfg, color_depth, false) {
+                sgr.push_str(&seq);
+            }
+        if let Some(cbg) = component_bg
+            && let Some(seq) = lower_to_sgr(&cbg, color_depth, true) {
+                sgr.push_str(&seq);
+            }
+        let _ = write!(output, "{sgr}{text}\x1b[0m");
     }
 }
 
@@ -1949,6 +2224,12 @@ fn table_link_style(prose_highlighter: &ProseHighlighter<'_>, scope_stack: &[Sco
 }
 
 /// Renders a table-cell hyperlink while honoring hyperlink mode behavior.
+///
+/// When `hyper_fg` or `hyper_bg` are provided they wrap the link's styled
+/// text with an SGR foreground/background and a `\x1b[0m` reset so the
+/// `style.hyperlinks.color` overrides the surrounding table color without
+/// breaking the OSC8 sequence.
+#[allow(clippy::too_many_arguments)]
 fn push_table_link(
     output: &mut String,
     text: &str,
@@ -1956,11 +2237,25 @@ fn push_table_link(
     style: Style,
     emit_italic: bool,
     emit_hyperlinks: bool,
+    hyper_fg: Option<&StyleColor>,
+    hyper_bg: Option<&StyleColor>,
+    color_depth: ColorDepth,
 ) {
+    // Render the styled link text into a temporary buffer first, then wrap
+    // with the hyperlink color so the SGR sits between the OSC8 open/close
+    // sequences and does not break the hyperlink target.
+    // Pass `hyper_fg`/`hyper_bg` as the inner component color so the
+    // user's `style.hyperlinks.color` wins over the theme fallback blue
+    // emitted from `table_link_style` — the inner SGR appears AFTER the
+    // theme foreground and therefore overrides it. The outer
+    // `wrap_with_color` is kept as the reset boundary so attribute leaks
+    // can't bleed into the next cell.
+    let mut link_buf = String::new();
     if emit_hyperlinks {
-        let _ = write!(output, "\x1b]8;;{}\x07", url);
+        let _ = write!(link_buf, "\x1b]8;;{}\x07", url);
+        let mut styled = String::new();
         push_prose_text(
-            output,
+            &mut styled,
             text,
             style,
             emit_italic,
@@ -1969,11 +2264,17 @@ fn push_table_link(
             None,
             false,
             true,
+            hyper_fg.cloned(),
+            hyper_bg.cloned(),
+            color_depth,
         );
-        output.push_str("\x1b]8;;\x07");
+        let styled = crate::style::wrap_with_color(&styled, hyper_fg, hyper_bg, color_depth);
+        link_buf.push_str(&styled);
+        link_buf.push_str("\x1b]8;;\x07");
     } else {
+        let mut styled = String::new();
         push_prose_text(
-            output,
+            &mut styled,
             text,
             style,
             emit_italic,
@@ -1982,9 +2283,15 @@ fn push_table_link(
             None,
             false,
             true,
+            hyper_fg.cloned(),
+            hyper_bg.cloned(),
+            color_depth,
         );
-        let _ = write!(output, " [{}]", url);
+        let styled = crate::style::wrap_with_color(&styled, hyper_fg, hyper_bg, color_depth);
+        link_buf.push_str(&styled);
+        let _ = write!(link_buf, " [{}]", url);
     }
+    output.push_str(&link_buf);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2021,6 +2328,9 @@ fn push_table_cell_text(
             None,
             state.in_dim,
             emit_dim,
+            None,
+            None,
+            ColorDepth::TrueColor,
         );
         return;
     }
@@ -2078,6 +2388,9 @@ fn push_table_cell_text(
         None,
         state.in_dim,
         emit_dim,
+        None,
+        None,
+        ColorDepth::TrueColor,
     );
 }
 
@@ -2280,11 +2593,21 @@ struct LineWrapper {
     /// wrap width). The active wrap width is always `self.max_width`; this
     /// stack only exists so `pop_component_width` can restore the prior value.
     previous_widths: Vec<usize>,
+    /// Stack of *previous* alignment_offset values saved when a nested
+    /// component overrides alignment (e.g. a list item with explicit
+    /// alignment inside a list with different alignment).
+    previous_alignment_offsets: Vec<usize>,
+    /// Terminal color depth for SGR lowering.
+    color_depth: ColorDepth,
+    /// Stack of active component colors. The top entry is the current color
+    /// scope; inner components override outer ones.
+    component_color_stack: Vec<(Option<StyleColor>, Option<StyleColor>)>,
 }
 
 impl LineWrapper {
-    /// Creates a new LineWrapper with the given maximum width and hyperlink support flag.
-    fn new(max_width: usize, supports_hyperlinks: bool) -> Self {
+    /// Creates a new LineWrapper with the given maximum width, hyperlink support flag,
+    /// and terminal color depth.
+    fn new(max_width: usize, supports_hyperlinks: bool, color_depth: ColorDepth) -> Self {
         Self {
             current_col: 0,
             max_width,
@@ -2295,7 +2618,49 @@ impl LineWrapper {
             indent_stack: Vec::new(),
             alignment_offset: 0,
             previous_widths: Vec::new(),
+            previous_alignment_offsets: Vec::new(),
+            color_depth,
+            component_color_stack: Vec::new(),
         }
+    }
+
+    /// Push a component color scope onto the stack.
+    fn push_component_color(&mut self, fg: Option<StyleColor>, bg: Option<StyleColor>) {
+        self.component_color_stack.push((fg, bg));
+    }
+
+    /// Pop the most recent component color scope.
+    fn pop_component_color(&mut self) {
+        self.component_color_stack.pop();
+    }
+
+    /// Return the active component foreground and background colors.
+    ///
+    /// Walks the stack from innermost to outermost so an inner scope only
+    /// overrides a slot when it explicitly sets that slot. This mirrors CSS
+    /// inheritance: an `<li>` with no `color` inherits its `<ul>`'s color
+    /// instead of clearing it. Without this, pushing a list-item scope with
+    /// `(None, None)` would mask the list container's color for the body
+    /// text.
+    fn active_component_color(&self) -> (Option<StyleColor>, Option<StyleColor>) {
+        let mut fg: Option<StyleColor> = None;
+        let mut bg: Option<StyleColor> = None;
+        for (entry_fg, entry_bg) in self.component_color_stack.iter().rev() {
+            if fg.is_none()
+                && let Some(value) = entry_fg
+            {
+                fg = Some(value.clone());
+            }
+            if bg.is_none()
+                && let Some(value) = entry_bg
+            {
+                bg = Some(value.clone());
+            }
+            if fg.is_some() && bg.is_some() {
+                break;
+            }
+        }
+        (fg, bg)
     }
 
     /// Push a component-specific max-width override.
@@ -2308,6 +2673,19 @@ impl LineWrapper {
     fn pop_component_width(&mut self) {
         if let Some(w) = self.previous_widths.pop() {
             self.max_width = w;
+        }
+    }
+
+    /// Push a nested alignment_offset override.
+    fn push_alignment_offset(&mut self, offset: usize) {
+        self.previous_alignment_offsets.push(self.alignment_offset);
+        self.alignment_offset = offset;
+    }
+
+    /// Pop the most recent alignment_offset override.
+    fn pop_alignment_offset(&mut self) {
+        if let Some(o) = self.previous_alignment_offsets.pop() {
+            self.alignment_offset = o;
         }
     }
 
@@ -2556,6 +2934,7 @@ impl LineWrapper {
         }
 
         // Emit the styled word with blockquote background if applicable
+        let (comp_fg, comp_bg) = self.active_component_color();
         push_prose_text(
             &mut self.output,
             word,
@@ -2566,6 +2945,9 @@ impl LineWrapper {
             self.blockquote_bg,
             in_dim,
             emit_dim,
+            comp_fg,
+            comp_bg,
+            self.color_depth,
         );
         self.current_col += word_width;
     }
@@ -2589,6 +2971,7 @@ impl LineWrapper {
     /// These are emitted directly without word-wrap logic.
     fn emit_styled_marker(&mut self, text: &str, style: Style, emit_italic: bool) {
         self.ensure_prefix();
+        let (comp_fg, comp_bg) = self.active_component_color();
         push_prose_text(
             &mut self.output,
             text,
@@ -2599,6 +2982,9 @@ impl LineWrapper {
             self.blockquote_bg,
             false,
             true,
+            comp_fg,
+            comp_bg,
+            self.color_depth,
         );
         self.current_col += UnicodeWidthStr::width(text);
     }
@@ -2616,6 +3002,7 @@ impl LineWrapper {
     /// Fallback Format: `<styled_text> [url]`
     fn emit_styled_hyperlink(&mut self, text: &str, url: &str, style: Style, emit_italic: bool) {
         self.ensure_prefix();
+        let (comp_fg, comp_bg) = self.active_component_color();
         if self.supports_hyperlinks {
             // OSC8 hyperlink start: ESC ] 8 ; ; <url> BEL
             self.output.push_str("\x1b]8;;");
@@ -2634,6 +3021,9 @@ impl LineWrapper {
                 self.blockquote_bg,
                 false,
                 true,
+                comp_fg,
+                comp_bg,
+                self.color_depth,
             );
 
             // OSC8 hyperlink end: ESC ] 8 ; ; BEL
@@ -2652,6 +3042,9 @@ impl LineWrapper {
                 self.blockquote_bg,
                 false,
                 true,
+                comp_fg,
+                comp_bg,
+                self.color_depth,
             );
             self.current_col += UnicodeWidthStr::width(text);
 
@@ -2755,6 +3148,8 @@ fn write_horizontal_rule(
     rule: &HorizontalRule,
     term: &Terminal,
     terminal_width: u16,
+    color_depth: ColorDepth,
+    layout_ctx: Option<&crate::layout::LayoutContext>,
 ) {
     use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::utils::layout::{Length, TargetValue};
@@ -2773,7 +3168,16 @@ fn write_horizontal_rule(
     // `render` returns the rule content without a trailing newline; use
     // `push_with_newlines` + an explicit `\n` so wrapper column tracking
     // resets correctly.
-    wrapper.push_with_newlines(&rule.render(term));
+    let mut rendered = rule.render(term);
+    if let Some(ctx) = layout_ctx {
+        rendered = wrap_with_color(
+            &rendered,
+            ctx.component_color(PageComponent::Hr),
+            ctx.component_bg_color(PageComponent::Hr),
+            color_depth,
+        );
+    }
+    wrapper.push_with_newlines(&rendered);
     wrapper.push_with_newlines("\n");
 
     let bottom_is_default = layout.margin.bottom == TargetValue::universal(Length::Zero);
@@ -2815,12 +3219,25 @@ fn emit_highlighted_code_block(
     code_color_mode: ColorMode,
     terminal_width: u16,
     layout_ctx: Option<&LayoutContext>,
+    _color_depth: ColorDepth,
 ) -> Result<(), MarkdownError> {
-    let bg_color = highlighter
+    let theme_bg = highlighter
         .theme()
         .settings
         .background
         .unwrap_or(Color::BLACK);
+
+    // Resolve component/page background color override for code blocks.
+    // When set, this replaces the theme background for the panel fill so
+    // the code block honors page/component styling. Token-level syntax
+    // highlighting foregrounds are left untouched.
+    let override_bg = layout_ctx
+        .and_then(|ctx| ctx.component_bg_color(PageComponent::CodeBlocks))
+        .and_then(|sc| {
+            let (r, g, b) = sc.color.to_rgb()?;
+            Some(Color { r, g, b, a: 255 })
+        });
+    let bg_color = override_bg.unwrap_or(theme_bg);
 
     // Ensure the header starts on a fresh line (not appended to previous content).
     if wrapper.current_col() > 0 {
@@ -2863,6 +3280,7 @@ fn emit_highlighted_code_block(
         meta,
         code_color_mode,
         body_width,
+        override_bg,
     )?;
     let highlighted = if let Some(ctx) = layout_ctx {
         apply_component_layout(&highlighted, PageComponent::CodeBlocks, ctx)
@@ -3036,6 +3454,7 @@ mod tests {
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
+            hr_defaults: None,
         }
     }
 
@@ -3573,6 +3992,7 @@ fn main() {}
             &meta,
             ColorMode::Dark,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -3596,6 +4016,7 @@ fn main() {}
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
         );
 
@@ -3635,6 +4056,7 @@ fn main() {}
             &meta,
             ColorMode::Dark,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -3667,6 +4089,7 @@ fn main() {}
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
         );
 
@@ -3708,6 +4131,7 @@ fn main() {}
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
         );
 
@@ -3752,6 +4176,7 @@ fn main() {}
             &meta,
             ColorMode::Dark,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -3790,6 +4215,7 @@ fn main() {}
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
         );
 
@@ -3834,6 +4260,7 @@ fn main() {}
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
         );
 
@@ -3880,6 +4307,7 @@ fn main() {}
             &meta,
             ColorMode::Dark,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -3920,6 +4348,7 @@ fn main() {}
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
         );
 
@@ -3979,6 +4408,7 @@ fn main() {}
             &meta,
             ColorMode::Dark,
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -4023,6 +4453,7 @@ fn main() {}
             &options,
             &meta,
             ColorMode::Dark,
+            None,
             None,
         );
 
@@ -4128,7 +4559,7 @@ fn main() {}
     }
 
     #[test]
-    fn test_color_depth_no_color_returns_plain_text() {
+    fn test_color_depth_no_color_emits_no_csi_but_keeps_layout() {
         let md: Markdown = "# Test\n\n```rust\nfn main() {}\n```".into();
 
         let mut options = test_options();
@@ -4136,14 +4567,24 @@ fn main() {}
 
         let output = for_terminal(&md, options).unwrap();
 
-        // Should not contain ANSI codes
-        assert!(!output.contains("\x1b["));
+        // No CSI/SGR sequences should reach a terminal that cannot interpret
+        // them. (OSC8 hyperlinks would start with `\x1b]` and are preserved.)
+        assert!(
+            !output.contains("\x1b["),
+            "ColorDepth::None must suppress CSI sequences; got: {output:?}"
+        );
 
-        // Should return plain content
-        assert_eq!(output, md.content());
+        // Layout still runs: the heading text is present and the code-fence
+        // pipeline renders its panel (with the language tag) rather than
+        // returning the raw `# Test` markdown.
+        assert!(output.contains("Test"), "heading text should be present");
+        assert!(
+            output.contains("fn main() {}"),
+            "code block body should be present"
+        );
     }
 
-    /// Test that ColorDepth::None still renders table structure with box-drawing characters
+    /// Test that ColorDepth::None still renders table structure with box-drawing characters.
     #[test]
     fn test_color_depth_none_tables_still_render() {
         let md: Markdown = "| Header |\n|--------|\n| Data |".into();
@@ -4153,14 +4594,21 @@ fn main() {}
 
         let output = for_terminal(&md, options).unwrap();
 
-        // With ColorDepth::None, we return plain markdown (early return)
-        // So tables won't be rendered with box-drawing - they'll be plain markdown
-        assert!(!output.contains("\x1b["), "Should not have ANSI codes");
-        assert_eq!(output, md.content(), "Should return plain markdown content");
-
-        // To actually test that tables CAN render without colors (if we didn't early return),
-        // we'd need to modify the implementation. But the current behavior is correct:
-        // ColorDepth::None means "no formatting at all", so we return raw markdown.
+        // Per spec #5 #5, visible text/layout must survive when color is
+        // disabled — only color SGR is stripped.
+        assert!(!output.contains("\x1b["), "Should not have CSI sequences");
+        assert!(
+            output.contains("Header"),
+            "table header text should be present; got: {output:?}"
+        );
+        assert!(
+            output.contains("Data"),
+            "table body text should be present; got: {output:?}"
+        );
+        assert!(
+            output.contains('┌') || output.contains('+'),
+            "table structure (box-drawing or ascii) should be rendered; got: {output:?}"
+        );
     }
 
     #[test]
@@ -6870,7 +7318,7 @@ fn line6() {}
         };
 
         // Create wrapper with narrow width (no hyperlink support for this test)
-        let mut wrapper = LineWrapper::new(20, false);
+        let mut wrapper = LineWrapper::new(20, false, ColorDepth::TrueColor);
         wrapper.emit_styled(
             "Hello world this is a test",
             style,
@@ -6927,7 +7375,7 @@ fn line6() {}
             font_style: syntect::highlighting::FontStyle::empty(),
         };
 
-        let mut wrapper = LineWrapper::new(30, false);
+        let mut wrapper = LineWrapper::new(30, false, ColorDepth::TrueColor);
         wrapper.emit_raw("Command: ");
         wrapper.emit_inline_code("cargo build", style);
         wrapper.emit_raw(" runs the build");
@@ -7012,7 +7460,7 @@ fn line6() {}
             font_style: FontStyle::ITALIC,
         };
 
-        let mut wrapper = LineWrapper::new(40, true);
+        let mut wrapper = LineWrapper::new(40, true, ColorDepth::TrueColor);
         wrapper.emit_styled("This has ", bold_style, true, false, false, false, true);
         wrapper.emit_styled(
             "mixed styles",
@@ -7371,7 +7819,7 @@ fn bar() {}
 
         // Test at various widths to find where the bug appears
         for width in [60, 70, 75, 78, 79, 80, 81, 82, 85, 90, 100] {
-            let mut wrapper = LineWrapper::new(width, true);
+            let mut wrapper = LineWrapper::new(width, true, ColorDepth::TrueColor);
 
             // Simulate: "prefix ==highlighted== suffix"
             wrapper.emit_styled(

@@ -19,9 +19,19 @@
 
 mod common;
 
+use biscuit_test_harness::TerminalHarness;
+use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{TerminalHarness, skip_with_reason};
 use serial_test::serial;
+use test_toolkit::{Level, LevelDecision, evaluate_level};
+
+/// Process-shared WezTerm pane reused across every test in this file.
+///
+/// Real-terminal spawns cost 2–3 s each; with `#[serial(level2_terminal)]`
+/// every test runs sequentially anyway, so a single pane is enough to
+/// cut wall-clock time without changing observable behaviour. `clear` is
+/// sent before every command to reset visible state.
+static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
 /// A sentinel printed on its own line immediately before `bt` runs, so the
 /// rendered output can be isolated from the (possibly line-wrapped) shell
@@ -33,19 +43,38 @@ const START_SENTINEL: &str = "__BTL2_START__";
 ///
 /// Returns `None` when WezTerm is unavailable.
 fn run_bt(args: &str) -> Option<Vec<String>> {
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return None;
+    // Evaluate at the helper boundary so callers stay `let Some(lines) = …`;
+    // mirrors the `require_level!` macro but returns `None` on skip so the
+    // `Option`-returning helper signature can stand.
+    match evaluate_level(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    ) {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return None;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
     }
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    // Reset the pane so prior tests' rendered output cannot leak into
+    // this run's capture window.
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
     // `printf` emits the sentinel on its own line after the command echo (and
     // any echo line-wrapping) but before `bt`'s output.
     harness
         .send_text(format!("printf '{START_SENTINEL}\\n'; bt {args}\n").as_bytes())
         .expect("send_text failed");
     harness.settle();
-    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
     std::thread::sleep(std::time::Duration::from_millis(200));
     let frame = harness.capture().expect("capture failed");
 

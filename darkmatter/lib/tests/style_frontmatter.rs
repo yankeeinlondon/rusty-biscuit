@@ -12,8 +12,10 @@ use biscuit_terminal::terminal::Terminal;
 use darkmatter::layout::{DarkmatterPage, PageAlignment, PageBackground, PageComponent};
 use darkmatter::markdown::Markdown;
 use darkmatter::style::warning::StyleWarningKind;
+use darkmatter::markdown::highlighting::ThemePair;
 use darkmatter::style::{
-    PageStyleOverrides, StyleFrontmatter, apply_page_style, from_frontmatter, into_strict,
+    BespokeStyleOverrides, PageStyleOverrides, StyleFrontmatter, apply_bespoke_style,
+    apply_page_style, from_frontmatter, into_strict,
 };
 use renderable::layout::{Alignment, Length};
 
@@ -75,7 +77,9 @@ fn fixture_parses_to_expected_style_frontmatter() {
         .iter()
         .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
         .count();
-    assert!(inactive_count > 0, "expected KnownButInactive warnings");
+    // After sub-specs #2–#4 land, all keys in the fixture are wired and
+    // produce no KnownButInactive warnings.
+    assert_eq!(inactive_count, 0, "expected zero KnownButInactive warnings");
 }
 
 #[test]
@@ -132,9 +136,8 @@ fn fixture_applies_expected_page_margins() {
 
 #[test]
 fn fixture_no_known_but_inactive_for_page_keys() {
-    // After sub-spec #2 lands, page-level keys must NOT emit
-    // `KnownButInactive`. Table / ul / ol keys still emit them (they are
-    // wired in sub-specs #3+).
+    // After sub-specs #2–#4 land, page-level keys and list keys must NOT emit
+    // `KnownButInactive`.
     let raw = fs::read_to_string(fixture_path()).expect("read fixture");
     let md = Markdown::try_from_content(&raw).expect("parse markdown");
     let (_style, warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
@@ -274,4 +277,88 @@ fn page_alignment_broadcasts_to_all_components() {
     // Sanity: the broadcast came from frontmatter (not CLI), and the type
     // round-trips.
     let _ = (Alignment::Center, PageBackground::Transparent);
+}
+
+#[test]
+fn color_keys_do_not_emit_known_but_inactive() {
+    // Sub-spec #5 keys (color, bg-color) should be wired and silent.
+    let yaml = "---\nstyle:\n    page:\n        color: red-500\n        bg-color: blue-500\n    table:\n        color: green-500\n        bg-color: orange-500\n---\n\n# Doc\n";
+    let md = Markdown::try_from_content(yaml).expect("parse markdown");
+    let (_style, warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
+
+    let color_inactive: Vec<_> = warnings
+        .iter()
+        .filter(|w| {
+            matches!(w.kind, StyleWarningKind::KnownButInactive { .. })
+                && (w.path.contains("color") || w.path.contains("bg-color"))
+        })
+        .collect();
+    assert!(
+        color_inactive.is_empty(),
+        "color/bg-color keys should not be KnownButInactive; got: {:?}",
+        color_inactive
+    );
+}
+
+#[test]
+fn color_frontmatter_applies_to_page_via_apply_color_style() {
+    use darkmatter::style::apply_color_style;
+
+    let yaml = "---\nstyle:\n    page:\n        color: red-500\n        bg-color: blue-500\n    table:\n        color: green-500\n---\n\n# Doc\n";
+    let md = Markdown::try_from_content(yaml).expect("parse markdown");
+    let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
+
+    let page = page_with_width(80);
+    let page = apply_page_style(page, &style, PageStyleOverrides::default())
+        .expect("apply_page_style");
+    let page = apply_color_style(page, &style).expect("apply_color_style");
+
+    assert!(
+        page.page_color().is_some(),
+        "page color should be set from frontmatter"
+    );
+    assert!(
+        page.page_bg_color().is_some(),
+        "page bg-color should be set from frontmatter"
+    );
+    assert!(
+        page.color_for(PageComponent::Tables).is_some(),
+        "table color should be set from frontmatter"
+    );
+}
+
+#[test]
+fn code_theme_frontmatter_applies_via_apply_bespoke_style() {
+    let yaml = "---\nstyle:\n    page:\n        code:\n            theme: dracula\n---\n\n# Doc\n";
+    let md = Markdown::try_from_content(yaml).expect("parse markdown");
+    let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
+
+    let page = page_with_width(80);
+    let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        .expect("apply_bespoke_style");
+
+    assert_eq!(
+        page.page_code_theme(),
+        Some(&ThemePair::Dracula),
+        "page code theme should be set from frontmatter"
+    );
+}
+
+#[test]
+fn code_theme_cli_override_skips_frontmatter_in_bespoke_apply() {
+    let yaml = "---\nstyle:\n    page:\n        code:\n            theme: dracula\n---\n\n# Doc\n";
+    let md = Markdown::try_from_content(yaml).expect("parse markdown");
+    let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
+
+    let page = page_with_width(80);
+    let overrides = BespokeStyleOverrides {
+        code_theme: true,
+        ..BespokeStyleOverrides::default()
+    };
+    let page = apply_bespoke_style(page, &style, overrides, None).expect("apply_bespoke_style");
+
+    assert!(
+        page.page_code_theme().is_none(),
+        "CLI code_theme override should skip frontmatter value"
+    );
 }

@@ -1,13 +1,19 @@
-use std::path::PathBuf;
-
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
+use biscuit_terminal::utils::block_constraint::visible_width;
+use biscuit_terminal::utils::layout::Alignment;
 use clap::Args;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::compose::ComposeContext;
 
 use crate::log;
+
+const CONTEXT_VARIABLES_MD: &str =
+    include_str!("../../../../darkmatter/docs/topics/context-variables.md");
+const EXPRESSIONS_MD: &str =
+    include_str!("../../../../darkmatter/docs/topics/darkmatter-expressions.md");
 
 /// Arguments for the `claudine context` subcommand.
 #[derive(Debug, Args)]
@@ -47,30 +53,9 @@ pub struct ContextSection {
     pub variables: Vec<ContextVariable>,
 }
 
-/// Path to the context-variables documentation file.
-fn context_variables_path() -> PathBuf {
-    // Resolve relative to the repo root by walking up from CWD.
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let mut dir = cwd.as_path();
-    loop {
-        let candidate = dir.join("darkmatter/docs/topics/context-variables.md");
-        if candidate.exists() {
-            return candidate;
-        }
-        if let Some(parent) = dir.parent() {
-            dir = parent;
-        } else {
-            // Fallback: assume running from repo root.
-            return PathBuf::from("darkmatter/docs/topics/context-variables.md");
-        }
-    }
-}
-
-/// Parse the context-variables.md file into sections.
+/// Parse the embedded context-variables.md into sections.
 pub fn parse_context_variables() -> Vec<ContextSection> {
-    let path = context_variables_path();
-    let content = std::fs::read_to_string(&path).unwrap_or_default();
-    parse_context_variables_content(&content)
+    parse_context_variables_content(CONTEXT_VARIABLES_MD)
 }
 
 /// Parse context variables from markdown content.
@@ -80,6 +65,7 @@ fn parse_context_variables_content(content: &str) -> Vec<ContextSection> {
     let mut current_subsection: Option<String> = None;
     let mut in_table = false;
     let mut pending_variables: Vec<ContextVariable> = Vec::new();
+    let mut current_table_header: Option<String> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -96,6 +82,7 @@ fn parse_context_variables_content(content: &str) -> Vec<ContextSection> {
             current_section = Some(heading.trim().to_string());
             current_subsection = None;
             in_table = false;
+            current_table_header = None;
             continue;
         }
 
@@ -109,6 +96,20 @@ fn parse_context_variables_content(content: &str) -> Vec<ContextSection> {
             );
             current_subsection = Some(subheading.trim().to_string());
             in_table = false;
+            current_table_header = None;
+            continue;
+        }
+
+        // Table header row (appears before the separator)
+        if trimmed.starts_with('|') && !in_table && !trimmed.starts_with("|---") {
+            let cells = split_table_cells(trimmed);
+            // Skip the first empty cell if line starts with |
+            let first_cell = if cells.first().map(|s| s.trim().is_empty()).unwrap_or(false) {
+                cells.get(1).map(|s| s.trim().to_string())
+            } else {
+                cells.first().map(|s| s.trim().to_string())
+            };
+            current_table_header = first_cell;
             continue;
         }
 
@@ -118,9 +119,11 @@ fn parse_context_variables_content(content: &str) -> Vec<ContextSection> {
             continue;
         }
 
-        // Table row
+        // Table row — only collect from Variable tables
         if trimmed.starts_with('|') && in_table {
-            if let Some(var) = parse_table_row(trimmed) {
+            if current_table_header.as_deref() == Some("Variable")
+                && let Some(var) = parse_table_row(trimmed)
+            {
                 pending_variables.push(var);
             }
             continue;
@@ -129,6 +132,7 @@ fn parse_context_variables_content(content: &str) -> Vec<ContextSection> {
         // Blank line or non-table line ends table mode
         if trimmed.is_empty() {
             in_table = false;
+            current_table_header = None;
         }
     }
 
@@ -235,9 +239,114 @@ fn strip_backticks(s: &str) -> String {
     s.trim_matches('`').to_string()
 }
 
+/// Format a property name for display with the required `ctx.` prefix.
+fn display_property(property: &str) -> String {
+    let key = strip_backticks(property);
+    format!("ctx.{key}")
+}
+
+/// Determine the string type variant (csv, list, new-line) from the property key and description.
+fn string_type_variant(key: &str, description: &str) -> Option<&'static str> {
+    if key.ends_with("_list") {
+        return Some("list");
+    }
+    if key == "dirty_files" {
+        return Some("new-line");
+    }
+    if description.contains("Comma-separated") || description.contains("comma-separated") {
+        return Some("csv");
+    }
+    None
+}
+
+/// Convert a raw type string to display text, applying bracket-to-postfix and string variants.
+fn type_to_display_text(type_name: &str, key: &str, description: &str) -> String {
+    let inner = strip_backticks(type_name);
+    let variant = string_type_variant(key, description);
+
+    inner
+        .split(" | ")
+        .map(|token| {
+            let token = token.trim();
+            // Convert [X] to X[]
+            let display_token =
+                if let Some(inner) = token.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                    format!("{inner}[]")
+                } else {
+                    token.to_string()
+                };
+
+            // Apply variant to String or String[]
+            if let Some(variant) = variant
+                && (display_token == "String" || display_token == "String[]")
+            {
+                format!("String({variant})")
+            } else {
+                display_token
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+/// Map a type token to its display color.
+fn type_token_color(token: &str) -> Option<&'static str> {
+    if token.starts_with("String") {
+        Some("blue")
+    } else if token == "Number" || token == "Number[]" {
+        Some("green")
+    } else if token == "File" || token == "File[]" {
+        Some("violet")
+    } else if token == "null" {
+        Some("grey")
+    } else if token == "Bool" || token == "Bool[]" {
+        Some("orange")
+    } else {
+        None
+    }
+}
+
+/// Render each type token in its designated color.
+fn format_type_for_display(
+    type_name: &str,
+    key: &str,
+    description: &str,
+    term: &biscuit_terminal::terminal::Terminal,
+) -> String {
+    let display = type_to_display_text(type_name, key, description);
+    let colored = display
+        .split(" | ")
+        .map(|token| {
+            let token = token.trim();
+            match type_token_color(token) {
+                Some(color) => format!("<{color}>{token}</{color}>"),
+                None => token.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" | ");
+    Prose::new(colored).render(term)
+}
+
+/// Replace backticks with single quotes in description text.
+fn format_description_for_display(description: &str) -> String {
+    description.replace('`', "'")
+}
+
+/// Compute the visible width of the longest display property across all sections.
+fn max_property_width(sections: &[ContextSection]) -> usize {
+    sections
+        .iter()
+        .flat_map(|s| s.variables.iter())
+        .map(|v| visible_width(&display_property(&v.property)) as usize)
+        .max()
+        .unwrap_or(0)
+}
+
 /// Render the default context report (Property, Type, Description).
 fn render_default_report(sections: &[ContextSection]) {
     let term = log::terminal();
+    let property_width = max_property_width(sections);
 
     for section in sections {
         if let Some(ref subsection) = section.subsection {
@@ -252,8 +361,10 @@ fn render_default_report(sections: &[ContextSection]) {
         }
 
         let columns = vec![
-            TableColumn::new("Property"),
-            TableColumn::new("Type"),
+            TableColumn::new("Property").with_min_width(property_width),
+            TableColumn::new("Type")
+                .with_alignment(Alignment::Center)
+                .drop_when_space_is_limited::<String>(None),
             TableColumn::new("Description"),
         ];
         let mut table = Table::new().with_columns(columns);
@@ -262,10 +373,11 @@ fn render_default_report(sections: &[ContextSection]) {
         );
 
         for var in &section.variables {
+            let key = strip_backticks(&var.property);
             let row: Vec<TableCellContent> = vec![
-                var.property.clone().into(),
-                var.type_name.clone().into(),
-                var.description.clone().into(),
+                display_property(&var.property).into(),
+                format_type_for_display(&var.type_name, &key, &var.description, &term).into(),
+                format_description_for_display(&var.description).into(),
             ];
             table.add_row(row);
         }
@@ -280,6 +392,7 @@ fn render_values_report(sections: &[ContextSection]) {
     let term = log::terminal();
     let ctx = ComposeContext::capture();
     let values = ctx.values();
+    let property_width = max_property_width(sections);
 
     for section in sections {
         if let Some(ref subsection) = section.subsection {
@@ -294,8 +407,10 @@ fn render_values_report(sections: &[ContextSection]) {
         }
 
         let columns = vec![
-            TableColumn::new("Property"),
-            TableColumn::new("Type"),
+            TableColumn::new("Property").with_min_width(property_width),
+            TableColumn::new("Type")
+                .with_alignment(Alignment::Center)
+                .drop_when_space_is_limited::<String>(None),
             TableColumn::new("Value"),
         ];
         let mut table = Table::new().with_columns(columns);
@@ -306,7 +421,7 @@ fn render_values_report(sections: &[ContextSection]) {
         for var in &section.variables {
             let key = strip_backticks(&var.property);
             let value_str = match values.get(&key) {
-                Some(v) if v.is_null() => "<dim>null</dim>".to_string(),
+                Some(v) if v.is_null() => Prose::new("<dim>null</dim>").render(&term),
                 Some(v) => match v {
                     serde_json::Value::String(s) => s.clone(),
                     serde_json::Value::Bool(b) => b.to_string(),
@@ -316,14 +431,14 @@ fn render_values_report(sections: &[ContextSection]) {
                         items.join(", ")
                     }
                     serde_json::Value::Object(_) => v.to_string(),
-                    serde_json::Value::Null => "<dim>null</dim>".to_string(),
+                    serde_json::Value::Null => Prose::new("<dim>null</dim>").render(&term),
                 },
-                None => "<dim>null</dim>".to_string(),
+                None => Prose::new("<dim>null</dim>").render(&term),
             };
 
             let row: Vec<TableCellContent> = vec![
-                var.property.clone().into(),
-                var.type_name.clone().into(),
+                display_property(&var.property).into(),
+                format_type_for_display(&var.type_name, &key, &var.description, &term).into(),
                 value_str.into(),
             ];
             table.add_row(row);
@@ -340,37 +455,31 @@ fn render_side_effects_report() {
 }
 
 /// Render the footer messages to stderr.
-fn render_footer() {
+fn render_footer(show_values_hint: bool) {
     let term = log::terminal();
 
-    let msg1 = Prose::new(
+    if show_values_hint {
+        let msg = Status::from_prose(
+            "<dim><i>use <blue>--values</blue> to convert the descriptions to actual host values</i></dim>",
+        )
+        .state(StatusState::Info);
+        log::message(&msg.render(&term));
+    }
+
+    let msg1 = Status::from_prose(
         "<dim><i>use <blue>--expressions</blue> to see the expression engine's operations and functions</i></dim>",
-    );
+    )
+    .state(StatusState::Info);
     log::message(&msg1.render(&term));
 
-    let msg2 = Prose::new(
-        "<dim><i>use <blue>--side-effects</blue> to see the available safe side effects that <b>Claudine</b> provides without need for being white listed.</i></dim>",
-    );
+    let msg2 = Status::from_prose(
+        "<dim><i>use <blue>--side-effects</blue> to see the safe side effects that <b>Claudine</b> provides without need for being white listed</i></dim>",
+    )
+    .state(StatusState::Info);
     log::message(&msg2.render(&term));
 }
 
 // --- Expression doc parsing ---
-
-fn expressions_path() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let mut dir = cwd.as_path();
-    loop {
-        let candidate = dir.join("darkmatter/docs/topics/darkmatter-expressions.md");
-        if candidate.exists() {
-            return candidate;
-        }
-        if let Some(parent) = dir.parent() {
-            dir = parent;
-        } else {
-            return PathBuf::from("darkmatter/docs/topics/darkmatter-expressions.md");
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 struct ExprSection {
@@ -392,9 +501,7 @@ enum ExprBlock {
 }
 
 fn parse_expressions_doc() -> Vec<ExprSection> {
-    let path = expressions_path();
-    let content = std::fs::read_to_string(&path).unwrap_or_default();
-    parse_expressions_content(&content)
+    parse_expressions_content(EXPRESSIONS_MD)
 }
 
 fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
@@ -404,6 +511,11 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
 
     let mut in_table = false;
     let mut table_lines: Vec<String> = Vec::new();
+    // The Markdown table header row appears BEFORE the `|---` separator. We
+    // stash a candidate header line here so the separator can promote it
+    // into the first entry of `table_lines`; otherwise `build_expr_table`
+    // mistakes the first data row for the headers.
+    let mut pending_table_header: Option<String> = None;
     let mut in_code_block = false;
     let mut code_block_lines: Vec<String> = Vec::new();
     let mut in_ordered_list = false;
@@ -416,11 +528,15 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
 
         // Headings
         if let Some(h2) = trimmed.strip_prefix("## ") {
+            // A non-`|---` line after a pending header means the candidate
+            // was not actually a table; drop it.
+            pending_table_header = None;
             flush_expr_current(&mut sections, &mut current_heading, &mut current_blocks);
             current_heading = Some((h2.trim().to_string(), 2));
             continue;
         }
         if let Some(h3) = trimmed.strip_prefix("### ") {
+            pending_table_header = None;
             flush_expr_current(&mut sections, &mut current_heading, &mut current_blocks);
             current_heading = Some((h3.trim().to_string(), 3));
             continue;
@@ -428,6 +544,7 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
 
         // Code blocks
         if trimmed.starts_with("```") {
+            pending_table_header = None;
             if in_code_block {
                 in_code_block = false;
                 current_blocks.push(ExprBlock::CodeBlock(code_block_lines.join("\n")));
@@ -458,11 +575,22 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
                 &mut in_ordered_list,
                 &mut in_unordered_list,
             );
+            // Promote the pending header line into the table so
+            // `build_expr_table` sees `lines[0]` as the actual headers.
+            if let Some(header) = pending_table_header.take() {
+                table_lines.push(header);
+            }
             in_table = true;
             continue;
         }
         if in_table && trimmed.starts_with('|') {
             table_lines.push(trimmed.to_string());
+            continue;
+        }
+        if !in_table && trimmed.starts_with('|') {
+            // Candidate table header — keep it aside until we see the
+            // `|---` separator on the next line.
+            pending_table_header = Some(trimmed.to_string());
             continue;
         }
         if in_table && !trimmed.starts_with('|') {
@@ -472,6 +600,9 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
             table_lines.clear();
             in_table = false;
         }
+        // If we had a pending header line but the next line is not a
+        // separator, it was not a table after all.
+        pending_table_header = None;
 
         // List items
         if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
@@ -632,6 +763,83 @@ fn build_expr_table(lines: &[String]) -> Option<(Vec<String>, Vec<Vec<String>>)>
     Some((headers, rows))
 }
 
+/// Render a sequence of expression doc blocks to the terminal.
+fn render_expr_blocks(term: &biscuit_terminal::terminal::Terminal, blocks: &[ExprBlock]) {
+    for block in blocks {
+        match block {
+            ExprBlock::Paragraph(text) => {
+                let prose = Prose::new(text.clone());
+                log::data(&prose.render(term));
+            }
+            ExprBlock::Table { headers, rows } => {
+                let columns: Vec<TableColumn> = headers
+                    .iter()
+                    .map(|h| TableColumn::new(h.as_str()))
+                    .collect();
+                let mut table = Table::new().with_columns(columns);
+                table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+                    biscuit_terminal::utils::layout::Length::ch(1),
+                );
+                for row in rows {
+                    let cells: Vec<TableCellContent> =
+                        row.iter().map(|c| c.clone().into()).collect();
+                    table.add_row(cells);
+                }
+                log::data(&table.render(term));
+            }
+            ExprBlock::UnorderedList(items) => {
+                for item in items {
+                    let prose = Prose::new(format!("• {item}"));
+                    log::data(&prose.render(term));
+                }
+            }
+            ExprBlock::OrderedList(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    let prose = Prose::new(format!("{}. {item}", i + 1));
+                    log::data(&prose.render(term));
+                }
+            }
+            ExprBlock::CodeBlock(code) => {
+                for line in code.lines() {
+                    let prose = Prose::new(format!("<dim>    {line}</dim>"));
+                    log::data(&prose.render(term));
+                }
+            }
+        }
+    }
+}
+
+/// Render an H2 section and any following H3 subsections from the expression doc.
+fn render_section_with_subsections(
+    term: &biscuit_terminal::terminal::Terminal,
+    sections: &[ExprSection],
+    heading: &str,
+) {
+    let Some(idx) = sections.iter().position(|s| s.heading == heading) else {
+        return;
+    };
+
+    let section = &sections[idx];
+    let heading_prose = Prose::new(format!("<blue><b>{}</b></blue>", section.heading));
+    log::data(&heading_prose.render(term));
+    log::data("");
+
+    render_expr_blocks(term, &section.blocks);
+
+    // Render H3 subsections
+    let mut i = idx + 1;
+    while i < sections.len() && sections[i].level == 3 {
+        let sub = &sections[i];
+        let sub_heading = Prose::new(format!("<b>{}</b>", sub.heading));
+        log::data(&sub_heading.render(term));
+        log::data("");
+        render_expr_blocks(term, &sub.blocks);
+        i += 1;
+    }
+
+    log::data("");
+}
+
 // --- Expression report rendering ---
 
 fn render_expressions_report() {
@@ -659,10 +867,25 @@ fn render_expressions_report() {
     // Unary operators (brief)
     render_unary_operators(&term, &sections);
 
+    // Comparison Operators
+    render_section_with_subsections(&term, &sections, "Comparison Operators");
+
+    // Arithmetic Operators
+    render_section_with_subsections(&term, &sections, "Arithmetic Operators");
+
+    // Variable Access
+    render_section_with_subsections(&term, &sections, "Variable Access");
+
+    // Interpolation vs. Condition Mode
+    render_section_with_subsections(&term, &sections, "Interpolation vs. Condition Mode");
+
+    // Null Propagation Summary
+    render_section_with_subsections(&term, &sections, "Null Propagation Summary");
+
     // Functions
     render_functions(&term, &sections);
 
-    render_footer();
+    render_footer(true);
 }
 
 fn render_precedence_table(term: &biscuit_terminal::terminal::Terminal, sections: &[ExprSection]) {
@@ -852,7 +1075,7 @@ pub fn run(args: ContextArgs) -> Result<()> {
 
     if args.side_effects {
         render_side_effects_report();
-        render_footer();
+        render_footer(true);
         return Ok(());
     }
 
@@ -860,11 +1083,12 @@ pub fn run(args: ContextArgs) -> Result<()> {
 
     if args.values {
         render_values_report(&sections);
+        render_footer(false);
     } else {
         render_default_report(&sections);
+        render_footer(true);
     }
 
-    render_footer();
     Ok(())
 }
 
@@ -936,11 +1160,6 @@ mod tests {
 
     #[test]
     fn test_parse_real_context_variables_file() {
-        let path = context_variables_path();
-        if !path.exists() {
-            // Skip if file not found (e.g., running outside repo)
-            return;
-        }
         let sections = parse_context_variables();
         assert!(!sections.is_empty(), "should discover at least one section");
 
@@ -1015,12 +1234,78 @@ mod tests {
         assert!(math.is_some(), "should find Math subsection");
     }
 
+    /// Regression: review-2 finding noted that the table header row was lost
+    /// because the parser only began collecting after the `|---` separator.
+    /// `build_expr_table` then treated the first data row as headers. This
+    /// asserts the actual documented headers survive parsing and the first
+    /// data row remains a body row.
+    #[test]
+    fn expressions_table_keeps_header_row_and_first_data_row() {
+        let sections = parse_expressions_content(TEST_EXPR_MD);
+
+        let truthiness = sections
+            .iter()
+            .find(|s| s.heading == "Truthiness")
+            .expect("Truthiness section must be present");
+
+        let table = truthiness
+            .blocks
+            .iter()
+            .find_map(|b| match b {
+                ExprBlock::Table { headers, rows } => Some((headers, rows)),
+                _ => None,
+            })
+            .expect("Truthiness section must include a Table block");
+
+        let (headers, rows) = table;
+        assert_eq!(
+            headers,
+            &vec!["Value".to_string(), "Falsy".to_string()],
+            "headers must come from the row above `|---`, not the first data row",
+        );
+        assert_eq!(rows.len(), 2, "both data rows must survive");
+        assert_eq!(
+            rows[0],
+            vec!["`null`".to_string(), "yes".to_string()],
+            "first data row must be preserved as a body row",
+        );
+        assert_eq!(rows[1], vec!["`false`".to_string(), "no".to_string()]);
+    }
+
+    /// Regression: the real `darkmatter-expressions.md` Truthiness table
+    /// previously parsed with `null`/`yes` as headers. Make sure the
+    /// production document parses with the documented `Value`/`Falsy`
+    /// headers.
+    #[test]
+    fn real_expressions_truthiness_table_has_correct_headers() {
+        let sections = parse_expressions_doc();
+        let truthiness = sections
+            .iter()
+            .find(|s| s.heading == "Truthiness")
+            .expect("Truthiness section must exist in real document");
+
+        let (headers, rows) = truthiness
+            .blocks
+            .iter()
+            .find_map(|b| match b {
+                ExprBlock::Table { headers, rows } => Some((headers, rows)),
+                _ => None,
+            })
+            .expect("Truthiness section in real doc must have a Table");
+
+        assert!(
+            headers.iter().any(|h| h.eq_ignore_ascii_case("Value")),
+            "Truthiness headers must include `Value`, got {headers:?}",
+        );
+        assert!(
+            headers.iter().any(|h| h.eq_ignore_ascii_case("Falsy")),
+            "Truthiness headers must include `Falsy`, got {headers:?}",
+        );
+        assert!(!rows.is_empty(), "Truthiness table must have rows");
+    }
+
     #[test]
     fn test_parse_real_expressions_file() {
-        let path = expressions_path();
-        if !path.exists() {
-            return;
-        }
         let sections = parse_expressions_doc();
         assert!(!sections.is_empty(), "should discover at least one section");
 
@@ -1038,5 +1323,77 @@ mod tests {
 
         let has_function_sub = sections.iter().any(|s| s.heading == "Logical Helpers");
         assert!(has_function_sub, "should discover a function subsection");
+    }
+
+    /// Regression: when `plan_widths` succeeds by dropping a
+    /// `drop_when_space_is_limited` column, the live `render` path must do
+    /// the same. The context command's three-column "Property / Type /
+    /// Description" layout was rendering the "Table could not be rendered"
+    /// error string inline at narrow widths because the render-tree path
+    /// disagreed with `plan_widths` about whether the Type column should
+    /// be dropped.
+    #[test]
+    fn render_drops_optional_column_consistently_with_plan_widths() {
+        use biscuit_terminal::components::renderable::TerminalRenderable;
+        use biscuit_terminal::terminal::Terminal;
+
+        let columns = vec![
+            TableColumn::new("Property").with_min_width(41),
+            TableColumn::new("Type")
+                .with_min_width(14)
+                .with_alignment(Alignment::Center)
+                .drop_when_space_is_limited::<String>(None),
+            TableColumn::new("Description"),
+        ];
+        let mut table = Table::new().with_columns(columns);
+        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+            biscuit_terminal::utils::layout::Length::ch(1),
+        );
+
+        table.add_row(vec![
+            "ctx.docs_readme".into(),
+            "String(csv)".into(),
+            "Comma-separated README paths, scope-filtered".into(),
+        ]);
+        table.add_row(vec![
+            "ctx.docs_blast_radius".into(),
+            "String(csv)".into(),
+            "Comma-separated docs with 'blast_radius' frontmatter, scope-filtered".into(),
+        ]);
+
+        // `plan_widths` resolves the layout by dropping the optional Type
+        // column when 78 columns minus the x:1 margin (= 76) cannot fit all
+        // three columns with their minimum widths.
+        let plan = table
+            .plan_widths(76)
+            .expect("plan_widths should drop the optional Type column and succeed");
+        assert_eq!(
+            plan.dropped_column_indices,
+            vec![1],
+            "planner must drop the Type column to fit",
+        );
+        assert_eq!(
+            plan.visible_column_indices,
+            vec![0, 2],
+            "Property and Description must remain visible",
+        );
+
+        // The live render path must agree — no inline "could not be
+        // rendered" error text in the user-visible output.
+        let term = Terminal::new_optimistic(78);
+        let output = table.render(&term);
+        assert!(
+            !output.contains("Table could not be rendered"),
+            "render must drop the optional column instead of emitting the \
+             width-error string inline; output was:\n{output}",
+        );
+        assert!(
+            output.contains("Property") && output.contains("Description"),
+            "render must show Property and Description headers; output was:\n{output}",
+        );
+        assert!(
+            !output.contains("Type"),
+            "render must omit the dropped Type column header; output was:\n{output}",
+        );
     }
 }

@@ -38,3 +38,8 @@ reverse = []
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6"
+
+# Opt-out of benchmarking: this crate has no algorithmic hot paths.
+[package.metadata.benchmarks]
+required = false
+reason = "Geocoding/IP-location lookups dominated by network and DB I/O; no measurable in-process hot paths."
