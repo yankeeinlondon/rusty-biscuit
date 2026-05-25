@@ -26,13 +26,14 @@
 
 mod common;
 
-use biscuit_test_harness::{TerminalHarness, skip_with_reason};
+use biscuit_test_harness::TerminalHarness;
 use common::pane_geometry::{
     find_row_of, parse_debug_cursor_before, parse_debug_cursor_rows, parse_debug_image_height,
 };
 use common::send_bt_command;
 use serial_test::serial;
 use std::time::Duration;
+use test_toolkit::{Level, require_level};
 
 /// Extra settle time after spawning a WezTerm shell to avoid racing
 /// shell initialization (custom prompts, completions, etc.).
@@ -83,10 +84,11 @@ fn has_image_protocol_bytes(raw: &str) -> bool {
 fn level2_image_renders_in_wezterm() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -135,10 +137,11 @@ fn level2_image_renders_in_wezterm() {
 fn level2_image_renders_in_kitty() {
     use biscuit_test_harness::kitty::KittyHarness;
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
     let mut harness = KittyHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -163,10 +166,11 @@ fn level2_image_renders_in_kitty() {
 fn level2_image_scroll_compensation_at_bottom_margin() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -251,10 +255,11 @@ fn level2_image_scroll_compensation_at_bottom_margin() {
 fn level2_warp_uses_floor_rounding() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -319,10 +324,11 @@ fn level2_warp_uses_floor_rounding() {
 fn level2_image_default_uses_ceil_rounding() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -373,10 +379,11 @@ fn level2_image_default_uses_ceil_rounding() {
 fn level2_image_meta_to_stderr() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -417,10 +424,11 @@ fn level2_image_meta_to_stderr() {
 fn level2_image_kitty_row_advance() {
     use biscuit_test_harness::kitty::KittyHarness;
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
     let mut harness = KittyHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");

@@ -12,9 +12,10 @@
 
 mod common;
 
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use common::send_bt_command;
 use serial_test::serial;
+use test_toolkit::{Level, require_level};
 use unicode_width::UnicodeWidthStr;
 
 // ------------------------------------------------------------------
@@ -26,10 +27,11 @@ use unicode_width::UnicodeWidthStr;
 fn level2_prose_emits_sgr_in_real_terminal() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     // `WezTermHarness::new()` spawns into a dedicated background
     // workspace, so the pane never grabs focus or steals the desktop.
@@ -75,10 +77,11 @@ fn level2_prose_emits_sgr_in_real_terminal() {
 fn level2_prose_osc8_link_renders() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -97,10 +100,11 @@ fn level2_prose_osc8_link_renders() {
 fn level2_no_color_strips_sgr_in_real_terminal() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -125,10 +129,11 @@ fn level2_no_color_strips_sgr_in_real_terminal() {
 fn level2_prose_emits_sgr_in_kitty() {
     use biscuit_test_harness::kitty::KittyHarness;
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
     // `KittyHarness::new()` passes `--keep-focus` so the spawned OS
     // window never steals focus from the developer's session.
@@ -165,10 +170,11 @@ fn level2_prose_emits_sgr_in_kitty() {
 fn level2_prose_osc8_link_renders_in_kitty() {
     use biscuit_test_harness::kitty::KittyHarness;
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
     let mut harness = KittyHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -191,10 +197,11 @@ fn level2_prose_osc8_link_renders_in_kitty() {
 fn level2_pad_columns_respect_actual_pane_width() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -240,10 +247,11 @@ fn level2_pad_columns_respect_actual_pane_width() {
 fn level2_columns_word_wrap_in_pane() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -422,10 +430,11 @@ fn assert_rich_prose_sgr<H: TerminalHarness>(harness: &mut H) {
 fn level2_prose_rich_styling_emits_sgr_in_wezterm() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -437,10 +446,11 @@ fn level2_prose_rich_styling_emits_sgr_in_wezterm() {
 fn level2_prose_rich_styling_emits_sgr_in_kitty() {
     use biscuit_test_harness::kitty::KittyHarness;
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
     let mut harness = KittyHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -534,10 +544,11 @@ fn segment_selects_red(segment: &str) -> bool {
 fn level2_prose_code_block_restores_parent_style_in_wezterm() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -549,10 +560,11 @@ fn level2_prose_code_block_restores_parent_style_in_wezterm() {
 fn level2_prose_code_block_restores_parent_style_in_kitty() {
     use biscuit_test_harness::kitty::KittyHarness;
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
     let mut harness = KittyHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -564,10 +576,11 @@ fn level2_prose_code_block_restores_parent_style_in_kitty() {
 fn level2_prose_nested_emphasis_visible_text_in_wezterm() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");

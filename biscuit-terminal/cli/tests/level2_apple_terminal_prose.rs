@@ -6,11 +6,12 @@
 //!
 //! ## Skip-clean contract
 //!
-//! Every test checks `AppleTerminalHarness::available()` before
-//! spawning. When Terminal.app cannot be addressed (off-macOS, `CI=1`,
-//! or `osascript` unavailable) the test prints
-//! `skipping: requires Terminal.app` via [`skip_with_reason`] and
-//! returns OK. No `#[ignore]` markers are used.
+//! Every test gates on [`AppleTerminalHarness::available`] via
+//! [`test_toolkit::require_level!`]. When Terminal.app cannot be
+//! addressed (off-macOS, `CI=1`, or `osascript` unavailable) the test
+//! prints `skipping: requires Terminal.app` and returns OK. Setting
+//! `BISCUIT_TEST_LEVEL_REQUIRED=2` converts that skip into a panic.
+//! No `#[ignore]` markers are used.
 //!
 //! ## Capture limitation
 //!
@@ -33,11 +34,12 @@
 
 mod common;
 
+use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::apple_terminal::AppleTerminalHarness;
-use biscuit_test_harness::{TerminalHarness, skip_with_reason};
 use serial_test::serial;
 use std::process::{Command, Stdio};
 use std::time::Duration;
+use test_toolkit::{Level, require_level};
 
 /// Extra settle time after spawning a Terminal.app shell to absorb the
 /// AppleScript dispatch latency before sending commands. Apple Terminal's
@@ -59,10 +61,11 @@ const SHELL_READY_MS: u64 = 2500;
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_link_fallback_visible() {
-    if !AppleTerminalHarness::available() {
-        skip_with_reason("Terminal.app");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        AppleTerminalHarness::available(),
+        "Terminal.app",
+    );
 
     let mut harness = AppleTerminalHarness::new().preserve_capabilities(true);
     harness.spawn_shell().expect("spawn_shell failed");
@@ -138,10 +141,11 @@ fn level2_apple_terminal_link_fallback_visible() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_double_underline_plain_text_visible() {
-    if !AppleTerminalHarness::available() {
-        skip_with_reason("Terminal.app");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        AppleTerminalHarness::available(),
+        "Terminal.app",
+    );
 
     let mut harness = AppleTerminalHarness::new().preserve_capabilities(true);
     harness.spawn_shell().expect("spawn_shell failed");
@@ -214,13 +218,14 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_harness_lifecycle() {
-    if !AppleTerminalHarness::available() {
-        // AC-6: clean skip path. No osascript invocations, no window
-        // ever opened. Test exits OK without touching the host
-        // application state.
-        skip_with_reason("Terminal.app");
-        return;
-    }
+    // AC-6: clean skip path. No osascript invocations, no window
+    // ever opened. Test exits OK without touching the host
+    // application state.
+    require_level!(
+        Level::L2,
+        AppleTerminalHarness::available(),
+        "Terminal.app",
+    );
 
     // Snapshot the set of Terminal.app window ids *before* the harness
     // spawns. After the harness drops we check that no NEW window ids

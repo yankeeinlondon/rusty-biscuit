@@ -19,9 +19,10 @@
 
 mod common;
 
+use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{TerminalHarness, skip_with_reason};
 use serial_test::serial;
+use test_toolkit::{Level, LevelDecision, evaluate_level};
 
 /// A sentinel printed on its own line immediately before `bt` runs, so the
 /// rendered output can be isolated from the (possibly line-wrapped) shell
@@ -33,9 +34,20 @@ const START_SENTINEL: &str = "__BTL2_START__";
 ///
 /// Returns `None` when WezTerm is unavailable.
 fn run_bt(args: &str) -> Option<Vec<String>> {
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return None;
+    // Evaluate at the helper boundary so callers stay `let Some(lines) = …`;
+    // mirrors the `require_level!` macro but returns `None` on skip so the
+    // `Option`-returning helper signature can stand.
+    match evaluate_level(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    ) {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return None;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
     }
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");

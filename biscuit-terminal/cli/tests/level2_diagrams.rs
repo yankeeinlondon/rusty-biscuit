@@ -36,12 +36,13 @@
 
 mod common;
 
-use biscuit_test_harness::{TerminalHarness, skip_with_reason};
+use biscuit_test_harness::TerminalHarness;
 use common::pane_geometry::{extract_kitty_apc_columns, parse_debug_image_width};
 use common::{capture_until, send_bt_command};
 use serial_test::serial;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
+use test_toolkit::{Level, require_level};
 
 /// Short settle buffer after spawning a WezTerm shell.
 ///
@@ -134,10 +135,11 @@ fn case_for(cmd: &str) -> &'static DiagramCase {
 fn assert_renders_in_kitty(case: &DiagramCase) {
     use biscuit_test_harness::kitty::KittyHarness;
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
     let mut harness = KittyHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -166,10 +168,11 @@ fn assert_renders_in_kitty(case: &DiagramCase) {
 fn assert_renders_in_wezterm(case: &DiagramCase) {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -358,10 +361,11 @@ fn level2_graph_expression_renders_in_wezterm() {
 fn level2_diagram_width_respects_pane_columns() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -413,10 +417,11 @@ fn level2_diagram_width_respects_pane_columns() {
 fn level2_diagram_width_kitty_apc_columns() {
     use biscuit_test_harness::kitty::KittyHarness;
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
     let mut harness = KittyHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -494,10 +499,11 @@ fn level2_diagram_width_kitty_apc_columns() {
 fn level2_inverse_flag_changes_background_in_capture() {
     use biscuit_test_harness::kitty::KittyHarness;
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
     // Default render
     let mut h1 = KittyHarness::new();
@@ -551,10 +557,7 @@ fn level2_inverse_flag_changes_background_in_capture() {
 fn level2_diagram_fallback_when_no_image_protocol() {
     use biscuit_test_harness::tmux::TmuxHarness;
 
-    if !TmuxHarness::available() {
-        skip_with_reason("tmux");
-        return;
-    }
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
