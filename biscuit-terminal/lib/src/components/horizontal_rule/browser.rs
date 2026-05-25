@@ -200,8 +200,12 @@ impl HorizontalRule {
         // renderers don't honor `var()` inside geometry attributes. The
         // `--hr-width` variable is still declared for downstream CSS that
         // may want to use it (e.g., authors styling the ancestor).
+        //
+        // The `darkmatter-hr` class is the page-component selector hook so
+        // `style.hr.color` and `style.hr.bg-color` can target the actual
+        // emitted HR element instead of a non-existent `<hr>`.
         format!(
-            r#"<svg width="{width}" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: {top} auto {bot} auto; --hr-weight: {weight}; --hr-color: {color}; --hr-width: {width};">
+            r#"<svg class="darkmatter-hr" width="{width}" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: {top} auto {bot} auto; --hr-weight: {weight}; --hr-color: {color}; --hr-width: {width};">
   {content}
 </svg>"#,
             width = width_attr,
