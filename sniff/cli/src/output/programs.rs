@@ -343,277 +343,342 @@ struct ProgramJsonEntry {
     website: String,
 }
 
+fn build_json_entry(
+    name: &str,
+    binary: &str,
+    installed: bool,
+    path: Option<std::path::PathBuf>,
+    version: Option<String>,
+    desc: &str,
+    website: &str,
+) -> ProgramJsonEntry {
+    ProgramJsonEntry {
+        name: name.to_string(),
+        binary_name: binary.to_string(),
+        installed,
+        path: path.map(|p| p.display().to_string()),
+        version,
+        description: desc.to_string(),
+        website: website.to_string(),
+    }
+}
+
+fn json_editors(programs: &ProgramsInfo) -> Vec<ProgramJsonEntry> {
+    use rayon::prelude::*;
+    use sniff::programs::ProgramMetadata;
+    use strum::IntoEnumIterator;
+    sniff::programs::Editor::iter()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|editor| {
+            let path_info = programs.editors.path_with_source(editor);
+            let installed = path_info.is_some();
+            let path = path_info.as_ref().map(|(p, _)| p.clone());
+            let source = path_info.as_ref().map(|(_, source)| *source);
+            let version = if version_allowed(true, source) {
+                programs.editors.version(editor).ok()
+            } else {
+                None
+            };
+            build_json_entry(
+                editor.display_name(),
+                editor.binary_name(),
+                installed,
+                path,
+                version,
+                editor.description(),
+                editor.website(),
+            )
+        })
+        .collect()
+}
+
+fn json_utilities(programs: &ProgramsInfo) -> Vec<ProgramJsonEntry> {
+    use rayon::prelude::*;
+    use sniff::programs::ProgramMetadata;
+    use strum::IntoEnumIterator;
+    sniff::programs::Utility::iter()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|util| {
+            let path_info = programs.utilities.path_with_source(util);
+            let installed = path_info.is_some();
+            let path = path_info.as_ref().map(|(p, _)| p.clone());
+            let source = path_info.as_ref().map(|(_, source)| *source);
+            let version = if version_allowed(true, source) {
+                programs.utilities.version(util).ok()
+            } else {
+                None
+            };
+            build_json_entry(
+                util.display_name(),
+                util.binary_name(),
+                installed,
+                path,
+                version,
+                util.description(),
+                util.website(),
+            )
+        })
+        .collect()
+}
+
+fn json_language_package_managers(programs: &ProgramsInfo) -> Vec<ProgramJsonEntry> {
+    use rayon::prelude::*;
+    use sniff::programs::ProgramMetadata;
+    use strum::IntoEnumIterator;
+    sniff::programs::LanguagePackageManager::iter()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|pm| {
+            let path_info = programs.language_package_managers.path_with_source(pm);
+            let installed = path_info.is_some();
+            let path = path_info.as_ref().map(|(p, _)| p.clone());
+            let source = path_info.as_ref().map(|(_, source)| *source);
+            let version = if version_allowed(true, source) {
+                programs.language_package_managers.version(pm).ok()
+            } else {
+                None
+            };
+            build_json_entry(
+                pm.display_name(),
+                pm.binary_name(),
+                installed,
+                path,
+                version,
+                pm.description(),
+                pm.website(),
+            )
+        })
+        .collect()
+}
+
+fn json_os_package_managers(programs: &ProgramsInfo) -> Vec<ProgramJsonEntry> {
+    use rayon::prelude::*;
+    use sniff::programs::ProgramMetadata;
+    use strum::IntoEnumIterator;
+    sniff::programs::OsPackageManager::iter()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|pm| {
+            let path_info = programs.os_package_managers.path_with_source(pm);
+            let installed = path_info.is_some();
+            let path = path_info.as_ref().map(|(p, _)| p.clone());
+            let source = path_info.as_ref().map(|(_, source)| *source);
+            let version = if version_allowed(true, source) {
+                programs.os_package_managers.version(pm).ok()
+            } else {
+                None
+            };
+            build_json_entry(
+                pm.display_name(),
+                pm.binary_name(),
+                installed,
+                path,
+                version,
+                pm.description(),
+                pm.website(),
+            )
+        })
+        .collect()
+}
+
+fn json_tts_clients(programs: &ProgramsInfo) -> Vec<ProgramJsonEntry> {
+    use rayon::prelude::*;
+    use sniff::programs::ProgramMetadata;
+    use strum::IntoEnumIterator;
+    sniff::programs::TtsClient::iter()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|client| {
+            let path_info = programs.tts_clients.path_with_source(client);
+            let installed = path_info.is_some();
+            let path = path_info.as_ref().map(|(p, _)| p.clone());
+            let source = path_info.as_ref().map(|(_, source)| *source);
+            let version = if version_allowed(true, source) {
+                programs.tts_clients.version(client).ok()
+            } else {
+                None
+            };
+            build_json_entry(
+                client.display_name(),
+                client.binary_name(),
+                installed,
+                path,
+                version,
+                client.description(),
+                client.website(),
+            )
+        })
+        .collect()
+}
+
+fn json_terminal_apps(programs: &ProgramsInfo) -> Vec<ProgramJsonEntry> {
+    use rayon::prelude::*;
+    use sniff::programs::ProgramMetadata;
+    use strum::IntoEnumIterator;
+    sniff::programs::TerminalApp::iter()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|app| {
+            let path_info = programs.terminal_apps.path_with_source(app);
+            let installed = path_info.is_some();
+            let path = path_info.as_ref().map(|(p, _)| p.clone());
+            let source = path_info.as_ref().map(|(_, source)| *source);
+            let version = if version_allowed(true, source) {
+                programs.terminal_apps.version(app).ok()
+            } else {
+                None
+            };
+            build_json_entry(
+                app.display_name(),
+                app.binary_name(),
+                installed,
+                path,
+                version,
+                app.description(),
+                app.website(),
+            )
+        })
+        .collect()
+}
+
+fn json_headless_audio(programs: &ProgramsInfo) -> Vec<ProgramJsonEntry> {
+    use rayon::prelude::*;
+    use sniff::programs::ProgramMetadata;
+    use strum::IntoEnumIterator;
+    sniff::programs::HeadlessAudio::iter()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|player| {
+            let path_info = programs.headless_audio.path_with_source(player);
+            let installed = path_info.is_some();
+            let path = path_info.as_ref().map(|(p, _)| p.clone());
+            let source = path_info.as_ref().map(|(_, source)| *source);
+            let version = if version_allowed(true, source) {
+                programs.headless_audio.version(player).ok()
+            } else {
+                None
+            };
+            build_json_entry(
+                player.display_name(),
+                player.binary_name(),
+                installed,
+                path,
+                version,
+                player.description(),
+                player.website(),
+            )
+        })
+        .collect()
+}
+
+fn json_ai_clients(programs: &ProgramsInfo) -> Vec<ProgramJsonEntry> {
+    use rayon::prelude::*;
+    use sniff::programs::ProgramMetadata;
+    use strum::IntoEnumIterator;
+    sniff::programs::AiCli::iter()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|client| {
+            let path_info = programs.ai_clients.path_with_source(client);
+            let installed = path_info.is_some();
+            let path = path_info.as_ref().map(|(p, _)| p.clone());
+            let source = path_info.as_ref().map(|(_, source)| *source);
+            let version = if version_allowed(true, source) {
+                programs.ai_clients.version(client).ok()
+            } else {
+                None
+            };
+            build_json_entry(
+                client.display_name(),
+                client.binary_name(),
+                installed,
+                path,
+                version,
+                client.description(),
+                client.website(),
+            )
+        })
+        .collect()
+}
+
 /// Print programs information as JSON.
 /// Build a JSON value for the given program filter.
+///
+/// Version detection spawns one `--version` subprocess per installed program
+/// (50-800 ms each). Sequential probing of all 70+ installed programs takes
+/// many seconds, so the work is parallelized two ways via Rayon: across
+/// the eight categories (using nested `rayon::join`) and within each category
+/// (using `par_iter`). Wall-clock time becomes roughly the slowest single
+/// program probe rather than the sum of all probes.
 pub fn build_programs_json(
     programs: &ProgramsInfo,
     filter: OutputFilter,
 ) -> serde_json::Result<serde_json::Value> {
-    use sniff::programs::ProgramMetadata;
+    let entries: Vec<ProgramJsonEntry> = match filter {
+        OutputFilter::Editors => json_editors(programs),
+        OutputFilter::Utilities => json_utilities(programs),
+        OutputFilter::LanguagePackageManagers => json_language_package_managers(programs),
+        OutputFilter::OsPackageManagers => json_os_package_managers(programs),
+        OutputFilter::TtsClients => json_tts_clients(programs),
+        OutputFilter::TerminalApps => json_terminal_apps(programs),
+        OutputFilter::HeadlessAudio => json_headless_audio(programs),
+        OutputFilter::AiClients => json_ai_clients(programs),
+        OutputFilter::Programs => {
+            // Run all 8 categories concurrently. Nested rayon::join cooperates
+            // with the inner par_iter calls via the shared thread pool.
+            let ((editors, utilities), (lang_pms, os_pms)) = rayon::join(
+                || {
+                    rayon::join(
+                        || json_editors(programs),
+                        || json_utilities(programs),
+                    )
+                },
+                || {
+                    rayon::join(
+                        || json_language_package_managers(programs),
+                        || json_os_package_managers(programs),
+                    )
+                },
+            );
+            let ((tts, terms), (audio, ai)) = rayon::join(
+                || {
+                    rayon::join(
+                        || json_tts_clients(programs),
+                        || json_terminal_apps(programs),
+                    )
+                },
+                || {
+                    rayon::join(
+                        || json_headless_audio(programs),
+                        || json_ai_clients(programs),
+                    )
+                },
+            );
 
-    // JSON output always includes rich metadata with version and path info
-    let build_entry = |name: &str,
-                       binary: &str,
-                       installed: bool,
-                       path: Option<std::path::PathBuf>,
-                       version: Option<String>,
-                       desc: &str,
-                       website: &str|
-     -> ProgramJsonEntry {
-        ProgramJsonEntry {
-            name: name.to_string(),
-            binary_name: binary.to_string(),
-            installed,
-            path: path.map(|p| p.display().to_string()),
-            version,
-            description: desc.to_string(),
-            website: website.to_string(),
+            let mut all = Vec::with_capacity(
+                editors.len()
+                    + utilities.len()
+                    + lang_pms.len()
+                    + os_pms.len()
+                    + tts.len()
+                    + terms.len()
+                    + audio.len()
+                    + ai.len(),
+            );
+            all.extend(editors);
+            all.extend(utilities);
+            all.extend(lang_pms);
+            all.extend(os_pms);
+            all.extend(tts);
+            all.extend(terms);
+            all.extend(audio);
+            all.extend(ai);
+            all
         }
+        _ => Vec::new(),
     };
 
-    let mut entries: Vec<ProgramJsonEntry> = Vec::new();
-
-    // Collect entries based on filter
-    match filter {
-        OutputFilter::Programs | OutputFilter::Editors => {
-            use strum::IntoEnumIterator;
-            for editor in sniff::programs::Editor::iter() {
-                let path_info = programs.editors.path_with_source(editor);
-                let installed = path_info.is_some();
-                let path = path_info.as_ref().map(|(p, _)| p.clone());
-                let source = path_info.as_ref().map(|(_, source)| *source);
-                let version = if version_allowed(true, source) {
-                    programs.editors.version(editor).ok()
-                } else {
-                    None
-                };
-                entries.push(build_entry(
-                    editor.display_name(),
-                    editor.binary_name(),
-                    installed,
-                    path,
-                    version,
-                    editor.description(),
-                    editor.website(),
-                ));
-            }
-            if filter == OutputFilter::Editors {
-                return serde_json::to_value(&entries);
-            }
-        }
-        _ => {}
-    }
-
-    match filter {
-        OutputFilter::Programs | OutputFilter::Utilities => {
-            use strum::IntoEnumIterator;
-            for util in sniff::programs::Utility::iter() {
-                let path_info = programs.utilities.path_with_source(util);
-                let installed = path_info.is_some();
-                let path = path_info.as_ref().map(|(p, _)| p.clone());
-                let source = path_info.as_ref().map(|(_, source)| *source);
-                let version = if version_allowed(true, source) {
-                    programs.utilities.version(util).ok()
-                } else {
-                    None
-                };
-                entries.push(build_entry(
-                    util.display_name(),
-                    util.binary_name(),
-                    installed,
-                    path,
-                    version,
-                    util.description(),
-                    util.website(),
-                ));
-            }
-            if filter == OutputFilter::Utilities {
-                return serde_json::to_value(&entries);
-            }
-        }
-        _ => {}
-    }
-
-    match filter {
-        OutputFilter::Programs | OutputFilter::LanguagePackageManagers => {
-            use strum::IntoEnumIterator;
-            for pm in sniff::programs::LanguagePackageManager::iter() {
-                let path_info = programs.language_package_managers.path_with_source(pm);
-                let installed = path_info.is_some();
-                let path = path_info.as_ref().map(|(p, _)| p.clone());
-                let source = path_info.as_ref().map(|(_, source)| *source);
-                let version = if version_allowed(true, source) {
-                    programs.language_package_managers.version(pm).ok()
-                } else {
-                    None
-                };
-                entries.push(build_entry(
-                    pm.display_name(),
-                    pm.binary_name(),
-                    installed,
-                    path,
-                    version,
-                    pm.description(),
-                    pm.website(),
-                ));
-            }
-            if filter == OutputFilter::LanguagePackageManagers {
-                return serde_json::to_value(&entries);
-            }
-        }
-        _ => {}
-    }
-
-    match filter {
-        OutputFilter::Programs | OutputFilter::OsPackageManagers => {
-            use strum::IntoEnumIterator;
-            for pm in sniff::programs::OsPackageManager::iter() {
-                let path_info = programs.os_package_managers.path_with_source(pm);
-                let installed = path_info.is_some();
-                let path = path_info.as_ref().map(|(p, _)| p.clone());
-                let source = path_info.as_ref().map(|(_, source)| *source);
-                let version = if version_allowed(true, source) {
-                    programs.os_package_managers.version(pm).ok()
-                } else {
-                    None
-                };
-                entries.push(build_entry(
-                    pm.display_name(),
-                    pm.binary_name(),
-                    installed,
-                    path,
-                    version,
-                    pm.description(),
-                    pm.website(),
-                ));
-            }
-            if filter == OutputFilter::OsPackageManagers {
-                return serde_json::to_value(&entries);
-            }
-        }
-        _ => {}
-    }
-
-    match filter {
-        OutputFilter::Programs | OutputFilter::TtsClients => {
-            use strum::IntoEnumIterator;
-            for client in sniff::programs::TtsClient::iter() {
-                let path_info = programs.tts_clients.path_with_source(client);
-                let installed = path_info.is_some();
-                let path = path_info.as_ref().map(|(p, _)| p.clone());
-                let source = path_info.as_ref().map(|(_, source)| *source);
-                let version = if version_allowed(true, source) {
-                    programs.tts_clients.version(client).ok()
-                } else {
-                    None
-                };
-                entries.push(build_entry(
-                    client.display_name(),
-                    client.binary_name(),
-                    installed,
-                    path,
-                    version,
-                    client.description(),
-                    client.website(),
-                ));
-            }
-            if filter == OutputFilter::TtsClients {
-                return serde_json::to_value(&entries);
-            }
-        }
-        _ => {}
-    }
-
-    match filter {
-        OutputFilter::Programs | OutputFilter::TerminalApps => {
-            use strum::IntoEnumIterator;
-            for app in sniff::programs::TerminalApp::iter() {
-                let path_info = programs.terminal_apps.path_with_source(app);
-                let installed = path_info.is_some();
-                let path = path_info.as_ref().map(|(p, _)| p.clone());
-                let source = path_info.as_ref().map(|(_, source)| *source);
-                let version = if version_allowed(true, source) {
-                    programs.terminal_apps.version(app).ok()
-                } else {
-                    None
-                };
-                entries.push(build_entry(
-                    app.display_name(),
-                    app.binary_name(),
-                    installed,
-                    path,
-                    version,
-                    app.description(),
-                    app.website(),
-                ));
-            }
-            if filter == OutputFilter::TerminalApps {
-                return serde_json::to_value(&entries);
-            }
-        }
-        _ => {}
-    }
-
-    match filter {
-        OutputFilter::Programs | OutputFilter::HeadlessAudio => {
-            use strum::IntoEnumIterator;
-            for player in sniff::programs::HeadlessAudio::iter() {
-                let path_info = programs.headless_audio.path_with_source(player);
-                let installed = path_info.is_some();
-                let path = path_info.as_ref().map(|(p, _)| p.clone());
-                let source = path_info.as_ref().map(|(_, source)| *source);
-                let version = if version_allowed(true, source) {
-                    programs.headless_audio.version(player).ok()
-                } else {
-                    None
-                };
-                entries.push(build_entry(
-                    player.display_name(),
-                    player.binary_name(),
-                    installed,
-                    path,
-                    version,
-                    player.description(),
-                    player.website(),
-                ));
-            }
-            if filter == OutputFilter::HeadlessAudio {
-                return serde_json::to_value(&entries);
-            }
-        }
-        _ => {}
-    }
-
-    match filter {
-        OutputFilter::Programs | OutputFilter::AiClients => {
-            use strum::IntoEnumIterator;
-            for client in sniff::programs::AiCli::iter() {
-                let path_info = programs.ai_clients.path_with_source(client);
-                let installed = path_info.is_some();
-                let path = path_info.as_ref().map(|(p, _)| p.clone());
-                let source = path_info.as_ref().map(|(_, source)| *source);
-                let version = if version_allowed(true, source) {
-                    programs.ai_clients.version(client).ok()
-                } else {
-                    None
-                };
-                entries.push(build_entry(
-                    client.display_name(),
-                    client.binary_name(),
-                    installed,
-                    path,
-                    version,
-                    client.description(),
-                    client.website(),
-                ));
-            }
-            if filter == OutputFilter::AiClients {
-                return serde_json::to_value(&entries);
-            }
-        }
-        _ => {}
-    }
-
-    // For OutputFilter::Programs, return all collected entries
     serde_json::to_value(&entries)
 }
