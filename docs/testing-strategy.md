@@ -126,6 +126,20 @@ These select tests via stable name prefixes (`level2_`, `level3_`,
 `test-toolkit` decides whether a selected test should skip cleanly or panic
 based on `BISCUIT_TEST_LEVEL_REQUIRED` and `BISCUIT_BROWSER_REQUIRED`.
 
+`test-l2` additionally pre-spawns one shared terminal pane per backend
+(WezTerm, kitty, tmux, Apple Terminal) via `biscuit-harness-broker`
+before invoking nextest, exports the pane ids via `BISCUIT_SHARED_*`
+env vars, and runs nextest with `-j 1`. Tests call
+`<Backend>Harness::shared_or_spawn()` from their `SharedHarness` init
+closures, which attaches to the pre-spawned pane when the env var is
+set and spawns a fresh background pane otherwise. The recipe tears
+the shared panes down in a trap after nextest exits, so a single
+2–3 s spawn cost per backend is paid once per `just test-l2`
+invocation instead of once per test. Backends whose tooling is
+missing on the host (e.g. no `WEZTERM_UNIX_SOCKET`) are silently
+skipped at spawn time and tests fall back to per-process spawning,
+which itself skips cleanly via `require_level!`.
+
 ### `test-real`
 Real-resource tests are typically `#[ignore]`d and gated on per-package env
 vars (e.g. `ARCAM_REAL_HOST`, `SONY_REAL_HOST`). The recipe selects them via
