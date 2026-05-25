@@ -27,7 +27,7 @@ use jsonschema::{Draft, PatternOptions, Validator, error::ValidationErrorKind};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use super::{ValidationProblem, errors::SchemaError, format};
+use super::{ValidationProblem, ValidationProblemKind, errors::SchemaError, format};
 
 /// Map of top-level frontmatter key → 1-based `(line, column)` within the
 /// serialised frontmatter YAML, used to annotate [`ValidationProblem`] sites
@@ -244,6 +244,7 @@ fn build_problem(
         ValidationErrorKind::Required { property } => property.as_str().map(str::to_string),
         _ => None,
     };
+    let kind = classify_kind(err.kind());
     let (line, column) = key
         .as_deref()
         .and_then(|k| positions.get(k).copied())
@@ -252,10 +253,25 @@ fn build_problem(
     ValidationProblem {
         path,
         message: err.to_string(),
+        kind,
         property,
         line,
         column,
         arm_index,
+    }
+}
+
+/// Maps a `jsonschema::ValidationErrorKind` onto the coarse
+/// [`ValidationProblemKind`] used by renderers.
+///
+/// Renderers must not infer the category from `property.is_some()` or by
+/// substring-matching `message`; both lose information as soon as the
+/// validator grows new error shapes.
+fn classify_kind(kind: &ValidationErrorKind) -> ValidationProblemKind {
+    match kind {
+        ValidationErrorKind::Required { .. } => ValidationProblemKind::Missing,
+        ValidationErrorKind::Type { .. } => ValidationProblemKind::Type,
+        _ => ValidationProblemKind::Invalid,
     }
 }
 

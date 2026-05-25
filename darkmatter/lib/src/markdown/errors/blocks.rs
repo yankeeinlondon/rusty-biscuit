@@ -19,7 +19,7 @@ use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{ErrorHeader, SourceContext, StatusBlockExt};
 
-use crate::markdown::schemas::ValidationProblem;
+use crate::markdown::schemas::{ValidationProblem, ValidationProblemKind};
 
 /// Build the [`StatusBlock`] for [`MarkdownError::FileLoad`].
 pub(crate) fn file_load_block(source: &std::io::Error) -> StatusBlock {
@@ -194,7 +194,10 @@ pub(crate) fn schema_validation_failed_block(
             );
     }
 
-    // One bullet per problem
+    // One bullet per problem. The category label is chosen from
+    // `ValidationProblem::kind` rather than inferred from `property.is_some()`
+    // or substring-matched against `message`, so the renderer cannot drift
+    // when the underlying validator surfaces new error shapes.
     for problem in problems {
         let loc = match (problem.line, problem.column) {
             (Some(l), Some(c)) => format!(" at {l}:{c}"),
@@ -218,22 +221,18 @@ pub(crate) fn schema_validation_failed_block(
             }
         };
 
-        let bullet = if problem.property.is_some() {
-            format!(
+        let bullet = match problem.kind {
+            ValidationProblemKind::Missing => format!(
                 "<red>missing</red> <inverse>{target}</inverse>: required but not provided{loc}{arm}"
-            )
-        } else if problem.message.to_ascii_lowercase().contains("is not of type")
-            || problem.message.to_ascii_lowercase().contains("type")
-        {
-            format!(
+            ),
+            ValidationProblemKind::Type => format!(
                 "<red>type</red> <inverse>{target}</inverse>: {}{loc}{arm}",
                 Prose::escape_text(&problem.message)
-            )
-        } else {
-            format!(
+            ),
+            ValidationProblemKind::Invalid => format!(
                 "<red>invalid</red> <inverse>{target}</inverse>: {}{loc}{arm}",
                 Prose::escape_text(&problem.message)
-            )
+            ),
         };
 
         body_lines.push(bullet);

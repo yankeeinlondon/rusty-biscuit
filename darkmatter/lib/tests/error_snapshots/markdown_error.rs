@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::TransclusionError;
-use darkmatter::markdown::schemas::ValidationProblem;
+use darkmatter::markdown::schemas::{ValidationProblem, ValidationProblemKind};
 
 use crate::helpers::{assert_contains_all, render};
 
@@ -134,6 +134,7 @@ fn schema_validation_missing_required_renders_block() {
             path: "".to_string(),
             property: Some("spec".to_string()),
             message: "\"spec\" is a required property".to_string(),
+            kind: ValidationProblemKind::Missing,
             line: Some(3),
             column: Some(1),
             arm_index: None,
@@ -153,6 +154,7 @@ fn schema_validation_wrong_type_renders_block() {
             path: "/count".to_string(),
             property: None,
             message: "42 is not of type \"string\"".to_string(),
+            kind: ValidationProblemKind::Type,
             line: Some(4),
             column: Some(8),
             arm_index: None,
@@ -172,6 +174,7 @@ fn schema_validation_format_failure_renders_block() {
             path: "/cover".to_string(),
             property: None,
             message: "\"\" is not a valid \"darkmatter-file\" format".to_string(),
+            kind: ValidationProblemKind::Invalid,
             line: Some(5),
             column: Some(7),
             arm_index: None,
@@ -222,6 +225,7 @@ fn schema_validation_multiple_problems_renders_block() {
                 path: "".to_string(),
                 property: Some("title".to_string()),
                 message: "\"title\" is a required property".to_string(),
+                kind: ValidationProblemKind::Missing,
                 line: Some(2),
                 column: Some(1),
                 arm_index: None,
@@ -230,6 +234,7 @@ fn schema_validation_multiple_problems_renders_block() {
                 path: "/version".to_string(),
                 property: None,
                 message: "\"alpha\" is not of type \"number\"".to_string(),
+                kind: ValidationProblemKind::Type,
                 line: Some(4),
                 column: Some(10),
                 arm_index: None,

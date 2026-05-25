@@ -8,7 +8,9 @@ use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaError, ValidationProblem};
+use darkmatter::markdown::schemas::{
+    DarkmatterSchemas, SchemaError, ValidationProblem, ValidationProblemKind,
+};
 use std::path::{Path, PathBuf};
 
 /// Environment variable used as a fallback baseline when `--schema` is absent.
@@ -333,6 +335,7 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
                         "path": p.path,
                         "property": p.property,
                         "message": p.message,
+                        "kind": kind_str(p.kind),
                         "line": p.line,
                         "column": p.column,
                         "arm_index": p.arm_index,
@@ -364,6 +367,15 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
         }),
     };
     println!("{}", value);
+}
+
+/// Stable lowercase token for a [`ValidationProblemKind`], used in JSON output.
+fn kind_str(kind: ValidationProblemKind) -> &'static str {
+    match kind {
+        ValidationProblemKind::Missing => "missing",
+        ValidationProblemKind::Type => "type",
+        ValidationProblemKind::Invalid => "invalid",
+    }
 }
 
 fn format_location(problem: &ValidationProblem) -> String {
