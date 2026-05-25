@@ -408,6 +408,7 @@ impl Drop for ChromeHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_toolkit::EnvGuard;
 
     #[test]
     fn wrap_fragment_adds_body_background() {
@@ -421,24 +422,14 @@ mod tests {
     #[serial_test::serial]
     fn browser_decision_runs_when_available() {
         // Even with BISCUIT_BROWSER_REQUIRED set, available=true → Run.
-        let prev = std::env::var(BISCUIT_BROWSER_REQUIRED).ok();
-        unsafe {
-            std::env::set_var(BISCUIT_BROWSER_REQUIRED, "1");
-        }
+        let _g = EnvGuard::set_safe(BISCUIT_BROWSER_REQUIRED, "1");
         assert_eq!(browser_decision(true), BrowserDecision::Run);
-        match prev {
-            Some(v) => unsafe { std::env::set_var(BISCUIT_BROWSER_REQUIRED, v) },
-            None => unsafe { std::env::remove_var(BISCUIT_BROWSER_REQUIRED) },
-        }
     }
 
     #[test]
     #[serial_test::serial]
     fn browser_decision_panics_when_unavailable_and_required() {
-        let prev = std::env::var(BISCUIT_BROWSER_REQUIRED).ok();
-        unsafe {
-            std::env::set_var(BISCUIT_BROWSER_REQUIRED, "1");
-        }
+        let _g = EnvGuard::set_safe(BISCUIT_BROWSER_REQUIRED, "1");
         match browser_decision(false) {
             BrowserDecision::Panic(msg) => {
                 assert!(msg.contains(BISCUIT_BROWSER_REQUIRED));
@@ -446,50 +437,26 @@ mod tests {
             }
             other => panic!("expected Panic, got {other:?}"),
         }
-        match prev {
-            Some(v) => unsafe { std::env::set_var(BISCUIT_BROWSER_REQUIRED, v) },
-            None => unsafe { std::env::remove_var(BISCUIT_BROWSER_REQUIRED) },
-        }
     }
 
     #[test]
     #[serial_test::serial]
     fn browser_decision_skips_when_unavailable_and_not_required() {
-        let prev = std::env::var(BISCUIT_BROWSER_REQUIRED).ok();
-        unsafe {
-            std::env::remove_var(BISCUIT_BROWSER_REQUIRED);
-        }
+        let _g = EnvGuard::remove_safe(BISCUIT_BROWSER_REQUIRED);
         match browser_decision(false) {
             BrowserDecision::Skip(msg) => assert!(msg.contains("Chrome")),
             other => panic!("expected Skip, got {other:?}"),
-        }
-        if let Some(v) = prev {
-            unsafe {
-                std::env::set_var(BISCUIT_BROWSER_REQUIRED, v);
-            }
         }
     }
 
     #[test]
     #[serial_test::serial]
     fn browser_required_reads_env() {
-        // Use the test-toolkit env guard transitively via std env is
-        // racy; this test only verifies the function reads the var.
-        let prev = std::env::var(BISCUIT_BROWSER_REQUIRED).ok();
-        // SAFETY: This test is exclusively reading/writing the
-        // BISCUIT_BROWSER_REQUIRED variable; no other thread inside
-        // this small crate touches it.
-        unsafe {
-            std::env::set_var(BISCUIT_BROWSER_REQUIRED, "1");
-        }
+        let g_on = EnvGuard::set_safe(BISCUIT_BROWSER_REQUIRED, "1");
         assert!(browser_required());
-        unsafe {
-            std::env::set_var(BISCUIT_BROWSER_REQUIRED, "0");
-        }
+        drop(g_on);
+
+        let _g_off = EnvGuard::set_safe(BISCUIT_BROWSER_REQUIRED, "0");
         assert!(!browser_required());
-        match prev {
-            Some(v) => unsafe { std::env::set_var(BISCUIT_BROWSER_REQUIRED, v) },
-            None => unsafe { std::env::remove_var(BISCUIT_BROWSER_REQUIRED) },
-        }
     }
 }

@@ -16,7 +16,9 @@ tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "time"] }
 
 [dev-dependencies]
 serial_test = "3"
+test-toolkit = { path = "../tools/test-toolkit" }
 
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]
 required = false
+reason = "Test/dev infrastructure crate; no measurable hot paths."
