@@ -57,6 +57,11 @@ let options = ComposeOptions::new()
     .disable(ComposeOperation::Cleanup)
     .disable(ComposeOperation::Normalization);
 
+// With a baseline schema (library-only; no CLI flag)
+let baseline: darkmatter::markdown::schemas::SimplifiedSchema = /* ... */;
+let options = ComposeOptions::new()
+    .with_baseline_schema(baseline);
+
 // In-place mutation (no clone)
 let report = md.compose_mut()?;
 
@@ -261,6 +266,7 @@ epilogue: ./footer.md
 darkmatter/lib/src/markdown/compose/
 ├── mod.rs           # Public API, pipeline orchestration
 ├── types.rs         # ComposeOperation, ComposeOptions, ComposeReport, etc.
+├── schema_validation.rs # Always-on schema validation stage
 ├── state.rs         # EffectiveState, merge logic
 ├── replacement.rs   # Text replacement engine
 ├── link_resolve.rs  # Link resolution (absolute paths)
