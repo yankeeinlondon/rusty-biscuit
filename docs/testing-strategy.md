@@ -25,8 +25,21 @@ For the short, agent-facing summary see `.claude/skills/rust-testing/SKILL.md`
 | Real  | `real_`    | Tests against real devices, networks, or provider APIs. | Always `--ignored` unless explicitly opted-in via the relevant env vars. |
 | Slow  | `slow_`    | Otherwise-ordinary tests that exceed the sanity time budget. | Excluded from `sanity`, included in `test`. |
 
-The full machine-readable contract lives in `.config/nextest.toml` as
-`set:level2`, `set:level3`, `set:browser`, `set:real`, and `set:slow`.
+Nextest does not yet expose user-named filterset aliases as a stable feature, so
+the canonical filter expressions live in the shared `_sanity`, `_test_l2`,
+`_test_l3`, `_test_browser`, and `_test_real` recipes in `just/devops.just` and
+are passed to `cargo nextest run -E '...'` directly. `.config/nextest.toml`
+documents the expressions in its header comment and contains only the retry
+and slow-timeout profiles — not the tier filtersets. The authoritative
+expressions are:
+
+```
+level2  = test(/level2_/)
+level3  = test(/level3_/)
+browser = test(/browser_/)
+real    = test(/real_/)
+slow    = test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/)
+```
 
 Runtime skip-vs-fail behavior is enforced via the `require_level!` macro and
 helpers in the `tools/test-toolkit` crate.
@@ -41,12 +54,12 @@ across areas.
 
 | Recipe         | Purpose |
 | -------------- | ------- |
-| `sanity`       | Fast confidence (≤15s). `cargo nextest run --lib --bins -E '!set:slow'`. |
+| `sanity`       | Fast confidence (≤15s). `cargo nextest run --lib --bins -E '!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/))'`. |
 | `test`         | Full L1 suite for this area. |
-| `test-l2`      | Real-terminal tests via `set:level2`. |
-| `test-l3`      | OS keyboard/mouse tests via `set:level3` (`RUN_LEVEL3=1`). |
-| `test-browser` | Browser tests via `set:browser`. |
-| `test-real`    | Real-resource tests via `set:real`. |
+| `test-l2`      | Real-terminal tests via `test(/level2_/)`. |
+| `test-l3`      | OS keyboard/mouse tests via `test(/level3_/)` (`RUN_LEVEL3=1`). |
+| `test-browser` | Browser tests via `test(/browser_/)`. |
+| `test-real`    | Real-resource tests via `test(/real_/)`. |
 | `lint`         | `cargo clippy -- -D warnings`. |
 | `bench`        | Criterion benchmarks. |
 | `coverage`     | Per-package LCOV via `cargo llvm-cov`. |
@@ -117,7 +130,8 @@ based on `BISCUIT_TEST_LEVEL_REQUIRED` and `BISCUIT_BROWSER_REQUIRED`.
 ### `test-real`
 Real-resource tests are typically `#[ignore]`d and gated on per-package env
 vars (e.g. `ARCAM_REAL_HOST`, `SONY_REAL_HOST`). The recipe selects them via
-`set:real` but they remain skip-clean when the resource is absent.
+the `test(/real_/)` filter expression but they remain skip-clean when the
+resource is absent.
 
 ### `bench`
 Pure data crates or crates without measurable hot paths may opt out via
@@ -211,4 +225,5 @@ See also:
 - `biscuit-test-harness/README.md` — L2 harness backends and `SharedHarness`.
 - `biscuit-browser-harness/README.md` — browser harness API.
 - `just/devops.just` — shared `_*` lifecycle recipes and `_check_canonical`.
-- `.config/nextest.toml` — filterset definitions.
+- `.config/nextest.toml` — retry and slow-timeout profiles; documents the
+  canonical filter expressions in its header comment.
