@@ -136,10 +136,16 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
 }
 
 /// Build the [`StatusBlock`] for [`MarkdownError::SchemaValidationFailed`].
+///
+/// When `problems` is empty the failure represents a schema *preparation*
+/// error (malformed `$schema`, unresolved reference, baseline build failure,
+/// etc.) rather than an instance validation failure. In that case the
+/// `summary` carries the underlying diagnostic and is rendered as a body
+/// line so authors see the root cause instead of an empty problem list.
 pub(crate) fn schema_validation_failed_block(
     path: &std::path::Path,
     problems: &[ValidationProblem],
-    _summary: &str,
+    summary: &str,
     description: &Option<String>,
 ) -> StatusBlock {
     let path_attr = Prose::quoted_attr(&path.to_string_lossy());
@@ -156,6 +162,36 @@ pub(crate) fn schema_validation_failed_block(
     // Description line when present
     if let Some(desc) = description {
         body_lines.push(format!("<i><dim>{}</dim></i>", Prose::escape_text(desc)));
+    }
+
+    // Preparation failures arrive with an empty problem list; render the
+    // summary so authors see the actual diagnostic (e.g. "schema could not
+    // be prepared: ...") instead of just the path.
+    if problems.is_empty() {
+        let hint = if summary.is_empty() {
+            "schema could not be prepared"
+        } else {
+            summary
+        };
+        let (label, detail) = match hint.split_once(':') {
+            Some((head, tail)) => (head.trim(), tail.trim()),
+            None => ("schema preparation failed", hint),
+        };
+        body_lines.push(format!(
+            "<red>{}</red>: {}",
+            Prose::escape_text(label),
+            Prose::escape_text(detail),
+        ));
+
+        return StatusBlock::new(StatusState::Error)
+            .error_header(ErrorHeader::new(
+                "MarkdownError",
+                "schema validation failed",
+            ))
+            .body(body_lines.join("\n"))
+            .hint(
+                "Check that the document's $schema (or the baseline schema) is well-formed and resolvable.",
+            );
     }
 
     // One bullet per problem
@@ -330,6 +366,31 @@ mod tests {
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
         assert!(out.contains("transform failed"), "missing summary: {out}");
         assert!(out.contains("pipeline stalled"), "missing message: {out}");
+    }
+
+    /// Preparation failures (malformed `$schema`, unresolved baseline) arrive
+    /// with an empty problem list and stash the underlying diagnostic in
+    /// `summary`. The rendered block must surface that summary so the user
+    /// sees the actual root cause instead of just the path.
+    #[test]
+    fn schema_validation_failed_block_renders_summary_when_problems_empty() {
+        let path = std::path::PathBuf::from("/tmp/test/bad-schema.md");
+        let summary = "schema could not be prepared: could not resolve ./missing.yaml";
+        let block = schema_validation_failed_block(&path, &[], summary, &None);
+        let out = render_block(&block);
+        assert!(out.contains("schema could not be prepared"), "missing summary: {out}");
+        assert!(out.contains("could not resolve ./missing.yaml"), "missing detail: {out}");
+        assert!(out.contains("bad-schema.md"), "missing path: {out}");
+    }
+
+    /// When the summary is empty the block should still render a non-empty
+    /// body so the user understands schema preparation failed.
+    #[test]
+    fn schema_validation_failed_block_handles_empty_summary() {
+        let path = std::path::PathBuf::from("/tmp/test/empty.md");
+        let block = schema_validation_failed_block(&path, &[], "", &None);
+        let out = render_block(&block);
+        assert!(out.contains("schema could not be prepared"), "missing fallback summary: {out}");
     }
 
     /// `reqwest::Error` cannot be constructed without firing a real HTTP
