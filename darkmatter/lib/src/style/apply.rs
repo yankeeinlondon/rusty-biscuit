@@ -185,6 +185,34 @@ pub enum StyleApplyError {
     /// channel in this sub-spec.
     #[error("list left margin only accepts `PageComponent::Ul`")]
     InvalidListLeftMarginComponent,
+
+    /// A local stylesheet referenced by `style.page.stylesheet` was not found
+    /// on disk.
+    #[error("stylesheet not found: {path}")]
+    StylesheetNotFound { path: String },
+
+    /// A local stylesheet referenced by `style.page.stylesheet` could not be
+    /// read.
+    #[error("failed to read stylesheet `{path}`: {reason}")]
+    StylesheetRead { path: String, reason: String },
+
+    /// The value of `style.page.stylesheet` was empty.
+    #[error("empty stylesheet value")]
+    EmptyStylesheet,
+
+    /// `style.page.stylesheet` used a `file://` scheme, which is rejected in
+    /// v1.
+    #[error("unsupported stylesheet scheme: {scheme}")]
+    UnsupportedStylesheetScheme { scheme: String },
+
+    /// `style.page.meta` was not an object, or a nested value had an
+    /// unexpected shape.
+    #[error("invalid meta shape at `{path}`: {reason}")]
+    InvalidMetaShape { path: String, reason: String },
+
+    /// `style.page.code.theme` specified an unknown theme name.
+    #[error("invalid code theme: `{theme}`")]
+    InvalidCodeTheme { theme: String },
 }
 
 /// Lower a [`Length`] onto a [`WidthUnit`] for component fill application.

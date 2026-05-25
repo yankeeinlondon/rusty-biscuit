@@ -8,9 +8,10 @@ use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
 use darkmatter::markdown::block::scan_inline_hr_warnings;
 use darkmatter::style::{
-    ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides, PageStyleOverrides,
-    StyleWarning, StyleWarningKind, apply_color_style, apply_component_style, apply_hr_style,
-    apply_list_style, apply_page_style, from_frontmatter, into_strict,
+    BespokeStyleOverrides, ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides,
+    PageStyleOverrides, StyleWarning, StyleWarningKind, apply_bespoke_style, apply_color_style,
+    apply_component_style, apply_hr_style, apply_list_style, apply_page_style, from_frontmatter,
+    into_strict,
 };
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -54,7 +55,7 @@ pub fn render_terminal_output(
 
     // Apply page-level frontmatter style after CLI flags so CLI wins on
     // overlapping fields via PageStyleOverrides.
-    page = apply_style_frontmatter(page, md, cli)?;
+    page = apply_style_frontmatter(page, md, cli, input_path)?;
 
     // Handle line numbers: CLI flag overrides default.
     if let Some(on) = cli.line_numbers {
@@ -305,6 +306,18 @@ pub fn hr_style_overrides_from_cli(_cli: &Cli) -> HrStyleOverrides {
     HrStyleOverrides::default()
 }
 
+/// Build a [`BespokeStyleOverrides`] reflecting which bespoke frontmatter
+/// fields the CLI has already claimed.
+///
+/// Mirrors the CLI precedence in [`apply_cli_layout_flags`]: `--code-theme`
+/// claims the `style.page.code.theme` field so the frontmatter value is
+/// skipped.
+pub fn bespoke_style_overrides_from_cli(cli: &Cli) -> BespokeStyleOverrides {
+    BespokeStyleOverrides {
+        code_theme: cli.code_theme.is_some(),
+    }
+}
+
 /// Parse the `style:` frontmatter (if any), promote schema warnings to errors
 /// when `--strict-style` is set, log remaining warnings, and apply the
 /// page-level subset to `page` using the CLI's override summary.
@@ -312,6 +325,7 @@ pub fn apply_style_frontmatter(
     page: DarkmatterPage,
     md: &Markdown,
     cli: &Cli,
+    input_path: Option<&PathBuf>,
 ) -> Result<DarkmatterPage> {
     let (style, all_warnings) =
         from_frontmatter(md.frontmatter()).context("Failed to parse `style:` frontmatter")?;
@@ -352,7 +366,14 @@ pub fn apply_style_frontmatter(
     let page = apply_hr_style(page, &style, hr_overrides)
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
 
-    apply_color_style(page, &style)
+    let page = apply_color_style(page, &style)
+        .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
+
+    let bespoke_overrides = bespoke_style_overrides_from_cli(cli);
+    let source_path = input_path
+        .filter(|p| p.to_str() != Some("-"))
+        .map(|p| p.as_path());
+    apply_bespoke_style(page, &style, bespoke_overrides, source_path)
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))
 }
 
@@ -398,6 +419,7 @@ pub fn html_artifact(
     code_theme: ThemePair,
     color_mode: ColorMode,
     cli: &Cli,
+    input_path: Option<&PathBuf>,
 ) -> Result<OutputArtifact> {
     let term = Terminal::new_optimistic(120);
     let mut page = apply_cli_layout_flags(
@@ -408,7 +430,7 @@ pub fn html_artifact(
         cli,
     );
 
-    page = apply_style_frontmatter(page, md, cli)?;
+    page = apply_style_frontmatter(page, md, cli, input_path)?;
 
     let content = page
         .render_to_browser(md)
@@ -1145,6 +1167,24 @@ mod tests {
     }
 
     // -----------------------------------------------------------------
+    // Bespoke style overrides
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn bespoke_overrides_default_empty_when_no_flags() {
+        let cli = cli_from(&["md", "doc.md"]);
+        let o = bespoke_style_overrides_from_cli(&cli);
+        assert!(!o.code_theme);
+    }
+
+    #[test]
+    fn code_theme_flag_claims_code_theme() {
+        let cli = cli_from(&["md", "doc.md", "--code-theme", "dracula"]);
+        let o = bespoke_style_overrides_from_cli(&cli);
+        assert!(o.code_theme);
+    }
+
+    // -----------------------------------------------------------------
     // Strict-style preserves informational `KnownButInactive` warnings
     // -----------------------------------------------------------------
 
@@ -1155,42 +1195,33 @@ mod tests {
 
     #[test]
     #[tracing_test::traced_test]
-    fn strict_style_still_emits_known_but_inactive_event() {
-        // A schema-clean fixture whose only warnings are `KnownButInactive`
-        // (the `page.stylesheet` leaf is planned for sub-spec #7). Under
-        // `--strict-style`, `into_strict` must succeed (no schema issues),
-        // and the informational future-phase event must still reach
-        // `log_style_warnings`. The old code replaced the warning list with
-        // `Vec::new()` in strict mode and silently swallowed it.
+    fn strict_style_succeeds_on_schema_clean_sub_spec_7_key() {
+        // After sub-spec #7, `page.stylesheet` is wired and produces no
+        // `KnownButInactive` warning. `--strict-style` must still succeed
+        // because the document is schema-clean.
         let raw = "---\n\
 style:\n\
 \x20   page:\n\
-\x20       stylesheet: main.css\n\
+\x20       stylesheet: https://example.com/main.css\n\
 ---\n\n# Doc\n";
         let md = Markdown::try_from_content(raw).unwrap();
         let cli = cli_from(&["md", "doc.md", "--strict-style"]);
-        apply_style_frontmatter(test_page(), &md, &cli)
-            .expect("strict-style must succeed on schema-clean future-phase key");
-        assert!(
-            logs_contain("style key parsed but not yet wired"),
-            "informational KnownButInactive event must survive --strict-style"
-        );
+        apply_style_frontmatter(test_page(), &md, &cli, None)
+            .expect("strict-style must succeed on schema-clean wired key");
     }
 
     #[test]
     #[tracing_test::traced_test]
-    fn non_strict_style_emits_known_but_inactive_event() {
+    fn non_strict_style_applies_sub_spec_7_key_silently() {
+        // After sub-spec #7, `page.stylesheet` is wired and silent.
         let raw = "---\n\
 style:\n\
 \x20   page:\n\
-\x20       stylesheet: main.css\n\
+\x20       stylesheet: https://example.com/main.css\n\
 ---\n\n# Doc\n";
         let md = Markdown::try_from_content(raw).unwrap();
         let cli = cli_from(&["md", "doc.md"]);
-        apply_style_frontmatter(test_page(), &md, &cli).expect("apply");
-        assert!(
-            logs_contain("style key parsed but not yet wired"),
-            "informational KnownButInactive event must be logged in non-strict mode"
-        );
+        let page = apply_style_frontmatter(test_page(), &md, &cli, None).expect("apply");
+        assert!(page.stylesheet().is_some(), "sub-spec #7 key should be applied");
     }
 }

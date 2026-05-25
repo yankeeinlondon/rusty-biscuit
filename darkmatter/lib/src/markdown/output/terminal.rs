@@ -1313,8 +1313,8 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                 }
                 // Push hyperlink color scope
                 if let Some(ctx) = layout_ctx {
-                    let fg = ctx.component_color(PageComponent::Hyperlinks).cloned();
-                    let bg = ctx.component_bg_color(PageComponent::Hyperlinks).cloned();
+                    let is_local = crate::style::bespoke::is_local_hyperlink(dest_url);
+                    let (fg, bg) = ctx.hyperlink_color(is_local);
                     wrapper.push_component_color(fg, bg);
                 }
             }
@@ -1327,20 +1327,16 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     // table color, then the page color. Links in regular prose
                     // use the wrapper's nested color stack; table cells render
                     // outside that stack, so the lookup happens directly here.
+                    let is_local = crate::style::bespoke::is_local_hyperlink(&current_link_url);
                     let (hyper_fg, hyper_bg) = layout_ctx
                         .map(|ctx| {
-                            let fg = ctx
-                                .component_colors
-                                .get(&PageComponent::Hyperlinks)
-                                .or_else(|| ctx.component_colors.get(&PageComponent::Tables))
-                                .or(ctx.page_color.as_ref())
-                                .cloned();
-                            let bg = ctx
-                                .component_bg_colors
-                                .get(&PageComponent::Hyperlinks)
-                                .or_else(|| ctx.component_bg_colors.get(&PageComponent::Tables))
-                                .or(ctx.page_bg_color.as_ref())
-                                .cloned();
+                            let (fg, bg) = ctx.hyperlink_color(is_local);
+                            let fg = fg
+                                .or_else(|| ctx.component_colors.get(&PageComponent::Tables).cloned())
+                                .or_else(|| ctx.page_color.clone());
+                            let bg = bg
+                                .or_else(|| ctx.component_bg_colors.get(&PageComponent::Tables).cloned())
+                                .or_else(|| ctx.page_bg_color.clone());
                             (fg, bg)
                         })
                         .unwrap_or((None, None));
@@ -1770,6 +1766,11 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     continue;
                 }
 
+                let is_local = crate::style::bespoke::is_local_image(&current_image_path);
+                let (image_fg, image_bg) = layout_ctx
+                    .map(|ctx| ctx.image_color(is_local))
+                    .unwrap_or((None, None));
+
                 if let Some(ref renderer) = image_renderer {
                     // Flush accumulated output before viuer prints to stdout
                     if renderer.graphics_supported() {
@@ -1779,13 +1780,12 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks, color_depth);
                         // render_image returns protocol output on success,
                         // fallback text on failure
-                        let result =
+                        let mut result =
                             renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
-                        let result = if let Some(ctx) = layout_ctx {
-                            apply_component_layout(&result, PageComponent::Images, ctx)
-                        } else {
-                            result
-                        };
+                        if let Some(ctx) = layout_ctx {
+                            result = apply_component_layout(&result, PageComponent::Images, ctx);
+                        }
+                        let result = wrap_with_color(&result, image_fg.as_ref(), image_bg.as_ref(), color_depth);
                         if !result.is_empty() {
                             // Print rendered output (or fallback text on failure)
                             write!(writer, "{}", result).ok();
@@ -1798,12 +1798,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         if let Some(ctx) = layout_ctx {
                             result = apply_component_layout(&result, PageComponent::Images, ctx);
                         }
-                        let result = wrap_with_color(
-                            &result,
-                            layout_ctx.and_then(|ctx| ctx.component_color(PageComponent::Images)),
-                            layout_ctx.and_then(|ctx| ctx.component_bg_color(PageComponent::Images)),
-                            color_depth,
-                        );
+                        let result = wrap_with_color(&result, image_fg.as_ref(), image_bg.as_ref(), color_depth);
                         wrapper.push_with_newlines(&result);
                         just_rendered_image = true;
                     }
@@ -1812,12 +1807,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     if let Some(ctx) = layout_ctx {
                         result = apply_component_layout(&result, PageComponent::Images, ctx);
                     }
-                    let result = wrap_with_color(
-                        &result,
-                        layout_ctx.and_then(|ctx| ctx.component_color(PageComponent::Images)),
-                        layout_ctx.and_then(|ctx| ctx.component_bg_color(PageComponent::Images)),
-                        color_depth,
-                    );
+                    let result = wrap_with_color(&result, image_fg.as_ref(), image_bg.as_ref(), color_depth);
                     wrapper.push_with_newlines(&result);
                     just_rendered_image = true;
                 }

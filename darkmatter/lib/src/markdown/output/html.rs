@@ -104,6 +104,12 @@ pub struct HtmlOptions {
     /// default horizontal-rule style instead of reading the deprecated top-level
     /// `hr:` frontmatter block.
     pub hr_defaults: Option<crate::markdown::inline::HorizontalRuleAttrs>,
+    /// Global hyperlink style from `style.hyperlinks.*`.
+    pub hyperlink_style: Option<crate::style::schema::CommonStyle>,
+    /// Local hyperlink override from `style.hyperlinks.local-style`.
+    pub local_hyperlink_style: Option<crate::style::schema::CommonStyle>,
+    /// Local image override from `style.images.local-style`.
+    pub local_image_style: Option<crate::style::schema::CommonStyle>,
 }
 
 impl Default for HtmlOptions {
@@ -117,6 +123,9 @@ impl Default for HtmlOptions {
             mermaid_mode: MermaidMode::default(),
             hr_css_variables: std::collections::HashMap::new(),
             hr_defaults: None,
+            hyperlink_style: None,
+            local_hyperlink_style: None,
+            local_image_style: None,
         }
     }
 }
@@ -195,6 +204,11 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     let mut current_image_alt = String::new();
     let mut current_image_src = String::new();
     let mut current_image_title = String::new();
+
+    // Capture hyperlink and image styles for frontmatter injection.
+    let hyperlink_style = options.hyperlink_style.clone();
+    let local_hyperlink_style = options.local_hyperlink_style.clone();
+    let local_image_style = options.local_image_style.clone();
 
     for event in events {
         match event {
@@ -363,7 +377,31 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             })) => {
                 // Parse title for structured content (class, style, prompt, etc.).
                 // We use a placeholder display since we're streaming; actual text follows.
-                let link = Link::with_title_parsed("", &*dest_url, &title).ok();
+                let mut link = Link::with_title_parsed("", &*dest_url, &title).ok();
+
+                // Apply frontmatter hyperlink styles.
+                if let Some(ref mut l) = link {
+                    let is_local = l.is_file();
+                    let base_style = hyperlink_style.as_ref();
+                    let local_style = local_hyperlink_style.as_ref();
+                    let merged = if is_local {
+                        local_style.map(|local| {
+                            if let Some(base) = base_style {
+                                crate::style::bespoke::merge_common_style(base, local)
+                            } else {
+                                local.clone()
+                            }
+                        }).or_else(|| base_style.cloned())
+                    } else {
+                        base_style.cloned()
+                    };
+                    if let Some(common) = merged
+                        && let Some(css) = common.to_css_overlay()
+                    {
+                        let merged_css = merge_css_style(css, l.style());
+                        *l = l.clone().with_style(merged_css);
+                    }
+                }
 
                 // Build anchor tag with parsed attributes
                 let mut attrs = format!(r#"href="{}""#, html_escape::encode_text(&dest_url));
@@ -425,11 +463,23 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             }
             InlineEvent::Standard(Event::End(TagEnd::Image)) => {
                 if in_image {
-                    if let Some(image_ref) = image_ref_from_parts(
+                    let mut image_ref = image_ref_from_parts(
                         &current_image_alt,
                         &current_image_src,
                         &current_image_title,
-                    ) {
+                    );
+
+                    // Apply local image style for local references.
+                    if let Some(ref mut image_ref) = image_ref
+                        && crate::style::bespoke::is_local_image(&current_image_src)
+                        && let Some(ref local) = local_image_style
+                        && let Some(css) = local.to_css_overlay()
+                    {
+                        let merged = merge_css_style(css, image_ref.style());
+                        *image_ref = image_ref.clone().with_style(merged);
+                    }
+
+                    if let Some(image_ref) = image_ref {
                         output.push_str(&image_ref.to_html());
                     } else {
                         output.push_str(&format!(
@@ -558,6 +608,23 @@ fn generate_hr_root_block(vars: &std::collections::HashMap<String, String>) -> S
     }
     block.push_str("}\n</style>\n");
     block
+}
+
+/// Merge frontmatter CSS into an existing inline `style` attribute.
+///
+/// Existing properties win over frontmatter for the same property; frontmatter
+/// only contributes declarations that the existing inline style does not
+/// already set. Used by both the link and image render paths to honor the
+/// sub-spec #7 per-element precedence rule.
+fn merge_css_style(
+    frontmatter: renderable::stylesheet::CssStyle,
+    existing: Option<&renderable::stylesheet::CssStyle>,
+) -> renderable::stylesheet::CssStyle {
+    let Some(existing) = existing else {
+        return frontmatter;
+    };
+    let combined = format!("{}\n{}", frontmatter.to_css(), existing.to_css());
+    renderable::stylesheet::CssStyle::try_from(combined.as_str()).unwrap_or(frontmatter)
 }
 
 fn image_ref_from_parts(alt: &str, src: &str, title: &str) -> Option<ImageRef> {

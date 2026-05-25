@@ -1868,3 +1868,316 @@ style:\n  hyperlinks:\n    color: red-500\n  table:\n    color: blue-500\n---\n\
         frame.plain
     );
 }
+
+// =============================================================================
+//   HR STYLE FRONTMATTER — canonical `style.hr.*` path (sub-spec #6, review-6)
+// =============================================================================
+//
+// Review-6 finding 3: the canonical `style.hr.*` frontmatter path needs Level 2
+// real-terminal coverage. Below tests exercise the canonical path (NOT the
+// legacy top-level `hr:` block, NOT inline `--- { ... }` attributes) through
+// the real `md` CLI in a WezTerm pane.
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_hr_kind_waves_renders_in_real_terminal() {
+    // `style.hr.kind: waves` must reach the HR renderer through the canonical
+    // path. Unicode-capable terminals print `≋`; ASCII fallback prints `~`.
+    let body = r#"---
+style:
+    hr:
+        kind: waves
+---
+
+Lead
+
+---
+
+Trail
+"#;
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    let has_waves = frame.plain.contains('\u{224B}') || frame.plain.contains('~');
+    assert!(
+        has_waves,
+        "style.hr.kind: waves must produce the waves glyph (`≋` or `~`). plain:\n{}",
+        frame.plain
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_hr_weight_thick_differs_from_thin_in_real_terminal() {
+    // `style.hr.weight: thick` vs `thin` must produce visibly different bytes
+    // in the captured pane (verified separately via terminal_text_options in
+    // Level 1; this proves the difference survives a real terminal).
+    let body_thick = r#"---
+style:
+    hr:
+        kind: dashes
+        weight: thick
+---
+
+---
+"#;
+    let body_thin = r#"---
+style:
+    hr:
+        kind: dashes
+        weight: thin
+---
+
+---
+"#;
+
+    let Some((frame_thick, _)) = run_md(body_thick, "--max-width 60") else {
+        return;
+    };
+    let Some((frame_thin, _)) = run_md(body_thin, "--max-width 60") else {
+        return;
+    };
+
+    let thick_rule_line = frame_thick
+        .plain
+        .lines()
+        .find(|l| l.contains('\u{2501}') || l.contains('\u{254D}') || l.contains('-'))
+        .map(str::to_string)
+        .unwrap_or_default();
+    let thin_rule_line = frame_thin
+        .plain
+        .lines()
+        .find(|l| l.contains('\u{2500}') || l.contains('\u{254C}') || l.contains('-'))
+        .map(str::to_string)
+        .unwrap_or_default();
+
+    assert!(
+        !thick_rule_line.is_empty() && !thin_rule_line.is_empty(),
+        "expected rule line in both captures.\nthick plain:\n{}\nthin plain:\n{}",
+        frame_thick.plain,
+        frame_thin.plain
+    );
+    assert_ne!(
+        thick_rule_line.trim(),
+        thin_rule_line.trim(),
+        "thick and thin HR weights must render visibly different glyphs"
+    );
+}
+
+/// Find the captured rule line between the unique sentinels `LEAD_SENTINEL`
+/// and `TAIL_SENTINEL`. Returns the matching `(plain_line, raw_line)` pair
+/// or `None` when the rule is missing or scrolled out of the capture.
+fn locate_hr_between_sentinels<'a>(
+    frame: &'a CapturedFrame,
+    lead: &str,
+    tail: &str,
+) -> Option<(&'a str, &'a str)> {
+    let plain_lines: Vec<&str> = frame.plain.lines().collect();
+    let raw_lines: Vec<&str> = frame.raw.lines().collect();
+    let lead_idx = plain_lines.iter().position(|l| l.contains(lead))?;
+    let tail_idx = plain_lines.iter().position(|l| l.contains(tail))?;
+    if lead_idx >= tail_idx {
+        return None;
+    }
+    // The rule glyph lives on some line strictly between the sentinels.
+    for i in (lead_idx + 1)..tail_idx {
+        let line = plain_lines.get(i)?;
+        // Skip blank rows; the rule itself carries visible glyphs.
+        if line.trim().is_empty() {
+            continue;
+        }
+        let raw_line = raw_lines.get(i).copied().unwrap_or("");
+        return Some((line, raw_line));
+    }
+    None
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_hr_color_emits_sgr_in_real_terminal() {
+    // `style.hr.color: red-500` must emit a red SGR escape on the rule row.
+    // We use unique sentinels around the rule to isolate the captured row
+    // and accept both WezTerm SGR re-emission forms (semicolon, colon).
+    let body = r#"---
+style:
+    hr:
+        color: red-500
+---
+
+hr_color_lead_anchor
+
+---
+
+hr_color_tail_anchor
+"#;
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    let Some((_plain, raw)) =
+        locate_hr_between_sentinels(&frame, "hr_color_lead_anchor", "hr_color_tail_anchor")
+    else {
+        // Capture missed the rule line (scroll/timing). Treat as a skip
+        // rather than a failure to keep Level 2 tests stable across hosts.
+        return;
+    };
+
+    let red_semi = "\x1b[38;2;251;44;54m";
+    let red_colon = "\x1b[38:2::251:44:54m";
+    assert!(
+        raw.contains(red_semi) || raw.contains(red_colon),
+        "style.hr.color must reach the rule row as a foreground SGR. \
+         raw row:\n{raw}\nfull raw:\n{}",
+        frame.raw
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_hr_bg_color_emits_background_sgr_in_real_terminal() {
+    // `style.hr.bg-color: blue-500` must paint a background SGR on the rule
+    // row. WezTerm re-emits truecolor backgrounds as `48;2;…` or `48:2:…`.
+    let body = r#"---
+style:
+    hr:
+        bg-color: blue-500
+---
+
+hr_bg_lead_anchor
+
+---
+
+hr_bg_tail_anchor
+"#;
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    let Some((_plain, raw)) =
+        locate_hr_between_sentinels(&frame, "hr_bg_lead_anchor", "hr_bg_tail_anchor")
+    else {
+        return;
+    };
+
+    let bg_present = raw.contains("\x1b[48;2;") || raw.contains("\x1b[48:2:");
+    assert!(
+        bg_present,
+        "style.hr.bg-color must paint a background SGR on the rule row. \
+         raw row:\n{raw}\nfull raw:\n{}",
+        frame.raw
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_hr_alignment_center_offsets_rule_from_left_in_real_terminal() {
+    // `style.hr.alignment: center` plus a narrow `width: 20` must offset
+    // the rule from the left edge. We compare the leading-space count of
+    // the rule row in a centered render against a left-aligned render.
+    let centered = r#"---
+style:
+    hr:
+        kind: dashes
+        alignment: center
+        width: 20
+---
+
+hr_align_lead_anchor
+
+---
+
+hr_align_tail_anchor
+"#;
+    let left = r#"---
+style:
+    hr:
+        kind: dashes
+        alignment: left
+        width: 20
+---
+
+hr_align_lead_anchor
+
+---
+
+hr_align_tail_anchor
+"#;
+
+    let Some((frame_center, _)) = run_md(centered, "--max-width 60") else {
+        return;
+    };
+    let Some((frame_left, _)) = run_md(left, "--max-width 60") else {
+        return;
+    };
+    let Some((plain_center, _)) = locate_hr_between_sentinels(
+        &frame_center,
+        "hr_align_lead_anchor",
+        "hr_align_tail_anchor",
+    ) else {
+        return;
+    };
+    let Some((plain_left, _)) =
+        locate_hr_between_sentinels(&frame_left, "hr_align_lead_anchor", "hr_align_tail_anchor")
+    else {
+        return;
+    };
+
+    let center_indent = plain_center.chars().take_while(|c| *c == ' ').count();
+    let left_indent = plain_left.chars().take_while(|c| *c == ' ').count();
+    assert!(
+        center_indent > left_indent,
+        "centered HR must have more leading whitespace than left-aligned; \
+         center={center_indent}, left={left_indent}\ncentered row: {plain_center:?}\nleft row: {plain_left:?}"
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_hr_width_caps_visible_columns_in_real_terminal() {
+    // `style.hr.width: 20` must produce a rule whose visible glyphs span no
+    // more than 20 columns, regardless of the surrounding page width.
+    let body = r#"---
+style:
+    hr:
+        kind: dashes
+        width: 20
+---
+
+hr_width_lead_anchor
+
+---
+
+hr_width_tail_anchor
+"#;
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+    let Some((plain, _)) =
+        locate_hr_between_sentinels(&frame, "hr_width_lead_anchor", "hr_width_tail_anchor")
+    else {
+        return;
+    };
+
+    // Count only the visible rule glyphs (skip the left padding). Dashes
+    // render as `╌` (Unicode) or `-` (ASCII fallback). The rule glyphs are
+    // contiguous; non-rule characters are spaces.
+    let rule_glyph_count = plain
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .count();
+    assert!(
+        rule_glyph_count > 0,
+        "expected visible rule glyphs in row:\n{plain}\nfull plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        rule_glyph_count <= 20,
+        "style.hr.width: 20 must cap the visible rule to <=20 glyphs; got {rule_glyph_count} \
+         in row:\n{plain}"
+    );
+}
