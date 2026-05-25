@@ -806,6 +806,7 @@ impl DarkmatterPage {
     /// renderer fails.
     pub fn render(&self, md: &Markdown) -> Result<String, PageRenderError> {
         self.validate_fills()?;
+        crate::style::bespoke::validate_terminal_inline_lengths(self)?;
         let ctx = LayoutContext::from_page(
             self.terminal_width,
             self.margin,

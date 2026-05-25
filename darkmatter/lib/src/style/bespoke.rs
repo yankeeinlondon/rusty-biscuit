@@ -6,7 +6,10 @@
 
 use std::path::Path;
 
-use crate::layout::DarkmatterPage;
+use biscuit_terminal::utils::{UnicodeWidthChar, UnicodeWidthStr};
+use renderable::layout::{Alignment, Length};
+
+use crate::layout::{DarkmatterPage, PageRenderError};
 use crate::markdown::highlighting::ThemePair;
 use crate::style::apply::StyleApplyError;
 use crate::style::schema::{CommonStyle, StyleFrontmatter};
@@ -345,6 +348,159 @@ pub fn merge_common_style(base: &CommonStyle, local: &CommonStyle) -> CommonStyl
         color: local.color.clone().or_else(|| base.color.clone()),
         bg_color: local.bg_color.clone().or_else(|| base.bg_color.clone()),
     }
+}
+
+/// Validate that no `Length::Css(_)` value appears in the bespoke style buckets
+/// for fields that would affect terminal layout.
+///
+/// HTML accepts arbitrary CSS lengths for inline link/image style, but terminal
+/// layout works in cells. Per sub-spec #7 design decision #3, CSS lengths on
+/// `style.hyperlinks.{width,max-width}`,
+/// `style.hyperlinks.local-style.{width,max-width}`, and
+/// `style.images.local-style.{width,max-width}` must be rejected with
+/// [`PageRenderError::InvalidInlineCssLength`] when the terminal renderer would
+/// otherwise have to honor them.
+///
+/// ## Errors
+///
+/// Returns [`PageRenderError::InvalidInlineCssLength`] when a `Length::Css(_)`
+/// is set on a width/max-width field of any of the three buckets.
+pub fn validate_terminal_inline_lengths(page: &DarkmatterPage) -> Result<(), PageRenderError> {
+    check_inline_css(page.hyperlink_style(), "hyperlinks")?;
+    check_inline_css(page.local_hyperlink_style(), "hyperlinks.local-style")?;
+    check_inline_css(page.local_image_style(), "images.local-style")?;
+    Ok(())
+}
+
+fn check_inline_css(
+    style: Option<&CommonStyle>,
+    bucket: &'static str,
+) -> Result<(), PageRenderError> {
+    let Some(style) = style else {
+        return Ok(());
+    };
+    if matches!(style.width, Some(Length::Css(_))) {
+        return Err(PageRenderError::InvalidInlineCssLength {
+            bucket,
+            field: "width",
+        });
+    }
+    if matches!(style.max_width, Some(Length::Css(_))) {
+        return Err(PageRenderError::InvalidInlineCssLength {
+            bucket,
+            field: "max-width",
+        });
+    }
+    Ok(())
+}
+
+/// Resolve a [`Length`] to a terminal cell width against `base_width`.
+///
+/// `Length::Css(_)` returns `None` because the caller is expected to have
+/// already rejected CSS lengths via [`validate_terminal_inline_lengths`].
+fn length_to_cells(length: &Length, base_width: u16) -> Option<u16> {
+    match length {
+        Length::Zero => Some(0),
+        Length::Ch(n) => Some(u16::try_from(*n).unwrap_or(u16::MAX)),
+        Length::Percent(p) => {
+            if !p.is_finite() || !(0.0..=100.0).contains(p) {
+                return None;
+            }
+            Some(((f32::from(base_width) * (p / 100.0)).round() as u16).min(base_width))
+        }
+        Length::Css(_) => None,
+    }
+}
+
+/// Lay out an inline text fragment (a hyperlink display text or an image
+/// fallback alt) inside a width-bound box.
+///
+/// Resolves [`CommonStyle`]'s `width`/`max-width`/`alignment` against
+/// `base_width` (typically the terminal effective width):
+///
+/// - When `width` is set, truncates or pads to that exact cell count.
+/// - When only `max-width` is set, truncates to that cell count if the text
+///   is wider; otherwise returns the text unchanged.
+/// - When neither is set, returns the text unchanged.
+///
+/// Padding is added per `alignment` (default `Left`). Truncation appends `…`
+/// when the target width is at least 2 cells.
+///
+/// Returns the input text unchanged when `common` is `None` or when no
+/// width-affecting field is set.
+pub fn apply_inline_text_layout(
+    text: &str,
+    common: Option<&CommonStyle>,
+    base_width: u16,
+) -> String {
+    let Some(common) = common else {
+        return text.to_string();
+    };
+
+    let visible = UnicodeWidthStr::width(text) as u16;
+    let target_width = if let Some(width) = common.width.as_ref() {
+        length_to_cells(width, base_width)
+    } else if let Some(max) = common.max_width.as_ref() {
+        let max_cells = length_to_cells(max, base_width)?;
+        if visible > max_cells {
+            Some(max_cells)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let Some(target) = target_width else {
+        return text.to_string();
+    };
+
+    let alignment = common.alignment.unwrap_or(Alignment::Left);
+
+    let bounded = if visible > target {
+        truncate_to_cells(text, target)
+    } else {
+        text.to_string()
+    };
+
+    let bounded_width = UnicodeWidthStr::width(bounded.as_str()) as u16;
+    let pad = target.saturating_sub(bounded_width) as usize;
+
+    match alignment {
+        Alignment::Left => format!("{}{}", bounded, " ".repeat(pad)),
+        Alignment::Right => format!("{}{}", " ".repeat(pad), bounded),
+        Alignment::Center => {
+            let left = pad / 2;
+            let right = pad - left;
+            format!("{}{}{}", " ".repeat(left), bounded, " ".repeat(right))
+        }
+    }
+}
+
+/// Truncate `text` so its display width fits in `max_cells`, appending `…`
+/// when there is at least 2 cells of room.
+fn truncate_to_cells(text: &str, max_cells: u16) -> String {
+    let max = max_cells as usize;
+    if max == 0 {
+        return String::new();
+    }
+    let reserve_ellipsis = max >= 2;
+    let limit = if reserve_ellipsis { max - 1 } else { max };
+
+    let mut acc = String::new();
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + cw > limit {
+            break;
+        }
+        acc.push(ch);
+        used += cw;
+    }
+    if reserve_ellipsis && UnicodeWidthStr::width(text) as usize > max {
+        acc.push('…');
+    }
+    acc
 }
 
 fn json_type_name(v: &serde_json::Value) -> &'static str {
@@ -961,6 +1117,61 @@ mod tests {
         assert!(
             html.contains("color: rgb(251, 44, 54)"),
             "remote link should be red. html={}",
+            html
+        );
+    }
+
+    #[test]
+    fn hyperlink_per_link_inline_css_wins_over_frontmatter() {
+        use biscuit_terminal::terminal::Terminal;
+        use crate::layout::DarkmatterPage;
+        use crate::markdown::Markdown;
+        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use renderable::color::{Color, Tailwind};
+        use crate::style::color::StyleColor;
+
+        // Per-link inline `color: green` declares `color`, so frontmatter's
+        // `color: red-500` must NOT replace it. Frontmatter still contributes
+        // properties the per-link style does not set (here: `background-color`).
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term);
+        let style = StyleFrontmatter {
+            hyperlinks: Some(HyperlinkStyle {
+                common: CommonStyle {
+                    color: Some(StyleColor {
+                        color: Color::Tailwind(Tailwind::Red500),
+                        opacity: None,
+                    }),
+                    bg_color: Some(StyleColor {
+                        color: Color::Tailwind(Tailwind::Blue500),
+                        opacity: None,
+                    }),
+                    ..CommonStyle::default()
+                },
+                local_style: None,
+            }),
+            ..StyleFrontmatter::default()
+        };
+
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+            .unwrap();
+        let md: Markdown =
+            "[x](https://example.com \"style='color: green'\")".into();
+        let html = page.render_to_browser(&md).unwrap();
+
+        assert!(
+            html.contains("color: green"),
+            "per-link `color: green` must survive. html={}",
+            html
+        );
+        assert!(
+            !html.contains("color: rgb(251, 44, 54)"),
+            "frontmatter red must NOT overwrite the per-link color. html={}",
+            html
+        );
+        assert!(
+            html.contains("background-color: rgb(43, 127, 255)"),
+            "frontmatter `background-color` must fill the unset property. html={}",
             html
         );
     }

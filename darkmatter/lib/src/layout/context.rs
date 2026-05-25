@@ -312,6 +312,24 @@ impl LayoutContext {
         (fg, bg)
     }
 
+    /// Resolve the effective hyperlink [`CommonStyle`] for a link.
+    ///
+    /// For local links (`is_local == true`), merges `local_hyperlink_style`
+    /// over `hyperlink_style`. For remote links, returns `hyperlink_style`.
+    pub fn effective_hyperlink_style(&self, is_local: bool) -> Option<CommonStyle> {
+        if is_local {
+            self.local_hyperlink_style.as_ref().map(|local| {
+                if let Some(base) = self.hyperlink_style.as_ref() {
+                    crate::style::bespoke::merge_common_style(base, local)
+                } else {
+                    local.clone()
+                }
+            }).or_else(|| self.hyperlink_style.clone())
+        } else {
+            self.hyperlink_style.clone()
+        }
+    }
+
     /// Resolve effective image foreground/background colors for fallback text.
     ///
     /// For local images (`is_local == true`), merges `local_image_style`
