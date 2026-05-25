@@ -58,7 +58,41 @@ pub fn from_json_value(
     // Pass 3: emit `KnownButInactive` for every leaf that is in the schema.
     annotate_known_but_inactive(value, &mut warnings);
 
+    // Pass 4: detect deprecated typed-enum spellings that serde's `alias`
+    // attribute accepts silently. Currently this covers
+    // `style.hr.alignment: centered`, which is accepted as an alias for
+    // `center` but must surface a `Deprecated` warning so `--strict-style`
+    // rejects it.
+    scan_deprecated_enum_aliases(value, &mut warnings);
+
     Ok((parsed, warnings))
+}
+
+/// Detect typed-enum aliases that serde's `#[serde(alias = ...)]` accepts
+/// without surfacing the spelling used by the document.
+///
+/// Today this covers a single case: `style.hr.alignment: "centered"` is
+/// accepted as an alias for `"center"`, but Design Decision #10 of sub-spec #6
+/// requires a `Deprecated { replacement: "center" }` warning so strict mode
+/// can reject the legacy spelling. The schema walker only handles
+/// snake-case → kebab-case aliasing, so this special case lives here.
+fn scan_deprecated_enum_aliases(value: &Value, warnings: &mut Vec<StyleWarning>) {
+    let Value::Object(root) = value else {
+        return;
+    };
+    let Some(Value::Object(hr)) = root.get("hr") else {
+        return;
+    };
+    if let Some(Value::String(s)) = hr.get("alignment") {
+        if s == "centered" {
+            warnings.push(StyleWarning::new(
+                "style.hr.alignment",
+                StyleWarningKind::Deprecated {
+                    replacement: "center".into(),
+                },
+            ));
+        }
+    }
 }
 
 /// Walk the raw style value and validate every known typed leaf. Returns
@@ -1013,6 +1047,75 @@ mod tests {
         let (_, w) = from_frontmatter(&fm).unwrap();
         assert!(w.iter().any(|w| w.path == "hr.style"));
         assert!(w.iter().any(|w| w.path == "hr.alignment"));
+    }
+
+    #[test]
+    fn hr_alignment_centered_emits_deprecated_warning() {
+        // `style.hr.alignment: centered` is accepted as an alias for
+        // `center` (serde alias). The typed value must still parse to
+        // `HrAlignment::Center`, but a `Deprecated` warning must be
+        // emitted so `--strict-style` rejects the legacy spelling.
+        let (s, w) = from_json_value(&json!({"hr": {"alignment": "centered"}})).unwrap();
+        let hr = s.hr.expect("hr should be populated");
+        assert_eq!(
+            hr.alignment,
+            Some(crate::style::schema::hr::HrAlignment::Center)
+        );
+
+        let deprecated: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. }))
+            .collect();
+        assert_eq!(
+            deprecated.len(),
+            1,
+            "expected exactly one Deprecated warning, got {:?}",
+            w
+        );
+        assert_eq!(deprecated[0].path, "style.hr.alignment");
+        match &deprecated[0].kind {
+            StyleWarningKind::Deprecated { replacement } => {
+                assert_eq!(replacement, "center");
+            }
+            other => panic!("expected Deprecated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn hr_alignment_center_emits_no_warning() {
+        // The canonical spelling must produce zero warnings.
+        let (s, w) = from_json_value(&json!({"hr": {"alignment": "center"}})).unwrap();
+        let hr = s.hr.expect("hr should be populated");
+        assert_eq!(
+            hr.alignment,
+            Some(crate::style::schema::hr::HrAlignment::Center)
+        );
+        assert!(
+            w.is_empty(),
+            "canonical `center` must not produce warnings, got {:?}",
+            w
+        );
+    }
+
+    #[test]
+    fn into_strict_fails_on_hr_alignment_centered_alias() {
+        let parsed = from_json_value(&json!({"hr": {"alignment": "centered"}})).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert!(
+                    warnings
+                        .iter()
+                        .any(|w| w.path == "style.hr.alignment"
+                            && matches!(
+                                &w.kind,
+                                StyleWarningKind::Deprecated { replacement } if replacement == "center"
+                            )),
+                    "expected style.hr.alignment deprecation with replacement=center, got {:?}",
+                    warnings
+                );
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
     }
 
     #[test]

@@ -211,8 +211,8 @@ pub enum StyleApplyError {
     InvalidMetaShape { path: String, reason: String },
 
     /// `style.page.code.theme` specified an unknown theme name.
-    #[error("invalid code theme: `{theme}`")]
-    InvalidCodeTheme { theme: String },
+    #[error("invalid code theme: `{value}`")]
+    InvalidCodeTheme { value: String },
 }
 
 /// Lower a [`Length`] onto a [`WidthUnit`] for component fill application.
