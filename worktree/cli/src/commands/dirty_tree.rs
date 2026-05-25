@@ -8,6 +8,17 @@
 //! Source-code files (per `sniff::filesystem::path_kind::is_source_code_path`)
 //! are wrapped in `<red>...</red>`; other files in `<yellow>...</yellow>`;
 //! directories in `<dim>...</dim>`.
+//!
+//! ## Why a custom implementation?
+//!
+//! `darkmatter::markdown::reference::file_tree::FileTree` is purpose-built for
+//! Markdown reference graphs: it walks real files on disk, renders
+//! transclusion edges, validation overlays, and toc-linking indicators. The
+//! `wt remove` command needs the opposite: render an arbitrary `Vec<PathBuf>`
+//! (git status output) as a static tree with per-file source-code
+//! color-coding. Rather than fighting FileTree's Markdown-centric model,
+//! this small module produces exactly the markup we need with no unused
+//! features.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
