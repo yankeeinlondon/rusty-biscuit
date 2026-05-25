@@ -10,8 +10,9 @@
 //! assert the styling escapes are present where the spec requires them.
 //!
 //! The tests follow the gating and harness pattern established by
-//! `level2_validation_reporter_pty.rs` — `#[cfg(unix)]` + `#[ignore]` so
-//! they mirror the rest of the PTY suite.
+//! `level2_validation_reporter_pty.rs` — `#![cfg(unix)]` and gated by
+//! `require_level!(Level::L2, pty_available(), ...)` so they skip cleanly
+//! when no PTY is available and panic when `BISCUIT_TEST_LEVEL_REQUIRED=2`.
 
 #![cfg(unix)]
 
@@ -23,6 +24,10 @@ use std::io::Write;
 use std::process::Command;
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
+use test_toolkit::{Level, require_level};
+
+mod common;
+use common::pty_available;
 
 /// Drain whatever bytes are currently buffered on the PTY master side.
 ///
@@ -77,8 +82,9 @@ fn run_context_under_pty(args: &[&str]) -> String {
 }
 
 #[test]
-#[ignore = "PTY tests are timing-sensitive; gated identically to claudine pty_tests.rs"]
-fn pty_context_default_emits_sgr_styling_in_output() {
+#[serial_test::serial(pty)]
+fn level2_pty_context_default_emits_sgr_styling_in_output() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
     let transcript = run_context_under_pty(&[]);
 
     assert!(
@@ -103,8 +109,9 @@ fn pty_context_default_emits_sgr_styling_in_output() {
 }
 
 #[test]
-#[ignore = "PTY tests are timing-sensitive; gated identically to claudine pty_tests.rs"]
-fn pty_context_footer_uses_blue_for_flag_names() {
+#[serial_test::serial(pty)]
+fn level2_pty_context_footer_uses_blue_for_flag_names() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
     let transcript = run_context_under_pty(&[]);
 
     // The footer hint reads roughly:
@@ -133,8 +140,9 @@ fn pty_context_footer_uses_blue_for_flag_names() {
 }
 
 #[test]
-#[ignore = "PTY tests are timing-sensitive; gated identically to claudine pty_tests.rs"]
-fn pty_context_renders_table_box_drawing() {
+#[serial_test::serial(pty)]
+fn level2_pty_context_renders_table_box_drawing() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
     let transcript = run_context_under_pty(&[]);
 
     // `biscuit-terminal::Table` draws its borders with Unicode box-drawing
@@ -151,8 +159,9 @@ fn pty_context_renders_table_box_drawing() {
 }
 
 #[test]
-#[ignore = "PTY tests are timing-sensitive; gated identically to claudine pty_tests.rs"]
-fn pty_context_values_resolves_aliases_with_styling() {
+#[serial_test::serial(pty)]
+fn level2_pty_context_values_resolves_aliases_with_styling() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
     let transcript = run_context_under_pty(&["--values"]);
 
     // Locate the row for `ctx.utc` (alias for `now_utc`) and confirm the

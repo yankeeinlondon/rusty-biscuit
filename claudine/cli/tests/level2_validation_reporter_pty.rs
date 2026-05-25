@@ -24,11 +24,13 @@
 //!
 //! # Gating
 //!
-//! Marked `#[cfg(unix)]` and `#[ignore]` to mirror the existing PTY tests in
-//! `level2_pty_tests.rs`. Run locally with:
+//! Marked `#![cfg(unix)]` and gated by `require_level!(Level::L2,
+//! pty_available(), ...)` so the test skips cleanly when no PTY is
+//! available and panics under `BISCUIT_TEST_LEVEL_REQUIRED=2`. Run via
+//! the canonical recipe:
 //!
 //! ```text
-//! cargo test -p claudine --test level2_validation_reporter_pty -- --ignored
+//! just test-l2
 //! ```
 
 #![cfg(unix)]
@@ -41,6 +43,10 @@ use std::io::Write;
 use std::process::Command;
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
+use test_toolkit::{Level, require_level};
+
+mod common;
+use common::pty_available;
 
 /// Drain whatever bytes are currently buffered on the PTY master side.
 ///
@@ -113,8 +119,10 @@ fn run_harness_under_pty(fixture_abs_path: &str) -> String {
 }
 
 #[test]
-#[ignore = "PTY tests are timing-sensitive; gated identically to claudine level2_pty_tests.rs"]
-fn pty_pre_check_failure_emits_osc8_link_and_styled_header() {
+#[serial_test::serial(pty)]
+fn level2_pty_pre_check_failure_emits_osc8_link_and_styled_header() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+
     // The fixture path is propagated into the harness binary, which then
     // emits a `RuleSource { file: <abs-path>, .. }`. We assert the
     // resulting transcript carries the OSC-8 link target referencing this

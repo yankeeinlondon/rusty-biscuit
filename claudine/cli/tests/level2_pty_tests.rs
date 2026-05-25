@@ -1,16 +1,20 @@
+#![cfg(unix)]
+
 #[allow(deprecated)]
 use assert_cmd::cargo::cargo_bin;
 use expectrl::{Expect, Session};
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
+use test_toolkit::{Level, require_level};
 mod common;
-use common::write_executable;
+use common::{pty_available, write_executable};
 
-#[cfg(unix)]
 #[test]
-#[ignore = "PTY smoke tests are timing-sensitive in this harness; wrapper behavior is covered by non-PTY integration tests"]
-fn pty_wrapper_summary_shows_badges() {
+#[serial_test::serial(pty)]
+fn level2_pty_wrapper_summary_shows_badges() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
@@ -26,14 +30,17 @@ fn pty_wrapper_summary_shows_badges() {
     p.expect("Claudine").unwrap();
     p.expect("Goose").unwrap();
     p.expect("YOLO").unwrap();
-    p.expect("Non-Interactive").unwrap();
+    // `-n` records `INTERACTIVE=false` in the environment-variables
+    // table the wrapper prints before delegating to the child binary.
+    p.expect("INTERACTIVE").unwrap();
     p.expect("child-output").unwrap();
 }
 
-#[cfg(unix)]
 #[test]
-#[ignore = "PTY smoke tests are timing-sensitive in this harness; wrapper behavior is covered by non-PTY integration tests"]
-fn pty_non_interactive_detection() {
+#[serial_test::serial(pty)]
+fn level2_pty_non_interactive_detection() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
