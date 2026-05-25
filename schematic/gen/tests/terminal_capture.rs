@@ -9,11 +9,39 @@
 //! The tests **self-skip** when `tmux` is not available on `PATH`,
 //! keeping CI environments without a terminal multiplexer green.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
+
+/// Per-process tmux socket path. Lives under `std::env::temp_dir()` in a
+/// directory created with mode 0700 so tmux does not refuse it as unsafe
+/// (which happens when the shared `/tmp/tmux-$UID` directory is left
+/// world-writable by some other process).
+fn tmux_socket() -> &'static Path {
+    static SOCKET: OnceLock<PathBuf> = OnceLock::new();
+    SOCKET.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("schematic-gen-tmux-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create tmux socket dir");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+                .expect("chmod 700 tmux socket dir");
+        }
+        dir.join("default")
+    })
+}
+
+/// Build a `tmux` command pre-wired with `-S <socket>` so every call in
+/// this test binary uses our private socket dir.
+fn tmux() -> Command {
+    let mut c = Command::new("tmux");
+    c.arg("-S").arg(tmux_socket());
+    c
+}
 
 /// Returns true when the `tmux` binary is on PATH and responds to `-V`.
 fn tmux_available() -> bool {
@@ -79,7 +107,7 @@ fn run_in_tmux(session_prefix: &str, cmd: &str) -> Result<String, String> {
     let printed_marker = format!("{marker_token}_{marker_value}");
 
     // Create a wide, tall detached session.
-    let status = Command::new("tmux")
+    let status = tmux()
         .args([
             "new-session",
             "-d",
@@ -98,7 +126,7 @@ fn run_in_tmux(session_prefix: &str, cmd: &str) -> Result<String, String> {
     }
 
     // Bump the scrollback buffer so large outputs are fully captured.
-    let _ = Command::new("tmux")
+    let _ = tmux()
         .args(["set-option", "-t", &session, "history-limit", "100000"])
         .status();
 
@@ -112,7 +140,7 @@ fn run_in_tmux(session_prefix: &str, cmd: &str) -> Result<String, String> {
         "READY_VAR={marker_value}; env -u NO_COLOR CLICOLOR_FORCE=1 TERM=xterm-256color {cmd}; printf '{marker_token}_%s\\n' \"$READY_VAR\""
     );
 
-    let send_status = Command::new("tmux")
+    let send_status = tmux()
         .args(["send-keys", "-t", &session, &full_cmd, "Enter"])
         .status()
         .map_err(|e| format!("tmux send-keys failed: {e}"))?;
@@ -126,7 +154,7 @@ fn run_in_tmux(session_prefix: &str, cmd: &str) -> Result<String, String> {
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut last_capture = String::new();
     while Instant::now() < deadline {
-        let out = Command::new("tmux")
+        let out = tmux()
             .args(["capture-pane", "-t", &session, "-p", "-e", "-S", "-"])
             .output();
         match out {
@@ -159,7 +187,7 @@ fn run_in_tmux(session_prefix: &str, cmd: &str) -> Result<String, String> {
 }
 
 fn kill_session(name: &str) {
-    let _ = Command::new("tmux")
+    let _ = tmux()
         .args(["kill-session", "-t", name])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
