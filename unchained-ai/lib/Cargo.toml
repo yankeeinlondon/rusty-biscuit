@@ -31,3 +31,4 @@ tracing-test = "0.2"
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]
 required = false
+reason = "LLM pipeline orchestration dominated by provider HTTP calls; no measurable in-process hot paths."
