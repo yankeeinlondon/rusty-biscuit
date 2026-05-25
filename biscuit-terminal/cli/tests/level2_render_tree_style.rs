@@ -124,11 +124,8 @@ fn level2_block_quote_style_border_in_wezterm() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -144,11 +141,8 @@ fn level2_block_quote_style_border_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -160,11 +154,8 @@ fn level2_block_quote_style_border_in_kitty() {
 fn level2_block_quote_style_border_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX.get_or_init(|| {
-        let mut h = TmuxHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -268,11 +259,8 @@ fn level2_block_quote_styled_inline_content_in_wezterm() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -288,11 +276,8 @@ fn level2_block_quote_styled_inline_content_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -656,11 +641,8 @@ fn level2_render_tree_style_in_wezterm() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -685,11 +667,8 @@ fn level2_render_tree_style_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -710,11 +689,8 @@ fn level2_render_tree_style_in_kitty() {
 fn level2_render_tree_style_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX.get_or_init(|| {
-        let mut h = TmuxHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();

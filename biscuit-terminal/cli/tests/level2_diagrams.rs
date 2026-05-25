@@ -61,15 +61,6 @@ static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 /// in this file.
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 
-/// Short settle buffer after spawning a WezTerm shell.
-///
-/// `spawn_shell()` already calls `wait_for_prompt()`, and every diagram
-/// capture polls for real render evidence via [`capture_until`], so any
-/// remaining shell-init slack is absorbed by polling. This buffer only
-/// covers the brief gap between prompt detection and the shell being
-/// ready to read stdin.
-const SHELL_READY_MS: u64 = 500;
-
 /// Upper bound on how long a diagram render may take before its
 /// terminal evidence (APC graphics bytes or `--meta` JSON) appears.
 ///
@@ -156,11 +147,8 @@ fn assert_renders_in_kitty(case: &DiagramCase) {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     // Reset the pane so prior tests' rendered output cannot leak into
     // this run's capture window.
@@ -195,12 +183,8 @@ fn assert_renders_in_wezterm(case: &DiagramCase) {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     // Reset the pane so prior tests' rendered output cannot leak into
     // this run's capture window.
@@ -394,12 +378,8 @@ fn level2_diagram_width_respects_pane_columns() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -454,11 +434,8 @@ fn level2_diagram_width_kitty_apc_columns() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -540,11 +517,8 @@ fn level2_inverse_flag_changes_background_in_capture() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
 
     // Default render. Clear so the prior test's APC payload cannot leak
@@ -602,11 +576,8 @@ fn level2_inverse_flag_changes_background_in_capture() {
 fn level2_diagram_fallback_when_no_image_protocol() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX.get_or_init(|| {
-        let mut h = TmuxHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();

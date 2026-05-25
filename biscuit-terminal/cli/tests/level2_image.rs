@@ -38,10 +38,6 @@ use serial_test::serial;
 use std::time::Duration;
 use test_toolkit::{Level, require_level};
 
-/// Extra settle time after spawning a WezTerm shell to avoid racing
-/// shell initialization (custom prompts, completions, etc.).
-const SHELL_READY_MS: u64 = 1500;
-
 /// Process-shared WezTerm pane reused across the WezTerm image tests.
 /// A `clear` is sent before each test's first interaction so prior
 /// renders cannot leak into the capture window.
@@ -99,12 +95,8 @@ fn level2_image_renders_in_wezterm() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     // Clear screen and position cursor high so image doesn't scroll.
@@ -154,11 +146,8 @@ fn level2_image_renders_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -187,12 +176,8 @@ fn level2_image_scroll_compensation_at_bottom_margin() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     let pane_size = harness.pane_size().expect("pane_size failed");
@@ -278,12 +263,8 @@ fn level2_warp_uses_floor_rounding() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     harness.send_text(b"clear\n").expect("send_text failed");
@@ -349,12 +330,8 @@ fn level2_image_default_uses_ceil_rounding() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     harness.send_text(b"clear\n").expect("send_text failed");
@@ -406,12 +383,8 @@ fn level2_image_meta_to_stderr() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -455,11 +428,8 @@ fn level2_image_kitty_row_advance() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
