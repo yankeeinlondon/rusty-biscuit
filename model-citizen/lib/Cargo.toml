@@ -47,3 +47,4 @@ tempfile = "3.26"
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]
 required = false
+reason = "Local LLM model management dominated by GGUF metadata reads and provider HTTP calls; no measurable in-process hot paths."

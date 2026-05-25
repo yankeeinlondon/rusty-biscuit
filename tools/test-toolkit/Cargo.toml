@@ -15,3 +15,4 @@ serial_test = "3"
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]
 required = false
+reason = "Test helper crate; no measurable hot paths."
