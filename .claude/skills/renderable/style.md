@@ -12,8 +12,9 @@ renderers apply it. A component never hand-writes ANSI or CSS.
 The style rides on render-tree nodes via `NodeAttrs::set_style` and is
 consumed by the Terminal renderer first (lowered to ANSI SGR, box-drawing
 characters, and background bands, with capability-aware degradation). The
+Browser renderer lowers text appearance and box colors to HTML/CSS. The
 Markdown renderer deliberately ignores it, so Markdown output is unaffected
-by appearance. Browser lowering to CSS is sketched but deferred.
+by appearance.
 
 `Style` may attach to **block nodes and inline `Span` nodes** — it is not
 block-only (unlike `Layout`).
@@ -156,3 +157,11 @@ rather than scattered bespoke fields:
 bespoke builder methods (`with_text_color`, `alternate_background_color`, …)
 remain available as compatibility shims that write into the declared `Style`
 or the typed slot struct.
+
+## Browser Coverage
+
+Browser lowering currently covers `color`, `background`, and `emphasis`:
+inline bold/italic/strikethrough use semantic wrappers, block-level emphasis
+uses CSS declarations, and underline variants, dim, and blink lower to CSS.
+`border` and `fill` are not lowered to Browser CSS yet; Terminal remains the
+only target that renders border glyphs and fill bands.

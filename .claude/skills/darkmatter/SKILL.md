@@ -35,7 +35,7 @@ terminal components, images, Mermaid, and graph rendering are delegated to
 ## `style:` Frontmatter Status
 
 The active style-frontmatter wiring phase is
-`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC = 5`.
+`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC = 7`.
 
 Implemented:
 
@@ -47,18 +47,14 @@ Implemented:
 - page and component `color` / `bg-color` wiring
 - `md --strict-style`, which fails on unknown/deprecated schema keys but not
   on valid future-phase keys
-
-Implemented:
-
 - sub-spec #6 HR migration: top-level `hr:` merges into `style.hr.*` with
   `Deprecated` warnings; inline `{ style: ... }` is parsed as a deprecated alias
-  for `{ kind: ... }`; `apply_hr_style` wires `style.hr.*` onto `DarkmatterPage`;
-  `ACTIVE_STYLE_WIRING_SUB_SPEC` advanced to `6`
+  for `{ kind: ... }`; `apply_hr_style` wires `style.hr.*` onto `DarkmatterPage`
+- sub-spec #7 bespoke knobs: `page.stylesheet`, `page.meta`, `page.code.theme`,
+  hyperlink/image local-style behavior; `apply_bespoke_style` wired into the
+  CLI render pipeline; `ACTIVE_STYLE_WIRING_SUB_SPEC` advanced to `7`
 
-Still planned:
-
-- sub-spec #7 bespoke knobs: `page.stylesheet`, `page.meta`,
-  `page.code.theme`, hyperlink/image local-style behavior
+No valid v1 schema keys remain unwired.
 
 CLI flags win over frontmatter field-by-field. For implementation details, read
 `darkmatter/lib/src/style/{parse.rs,apply.rs}` and

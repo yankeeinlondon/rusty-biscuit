@@ -48,18 +48,17 @@ under `Warn`, and are dropped under `Lossy`.
 fn render_tree_node(&self) -> Option<RenderNode> { None }
 ```
 
-A component overrides it to opt into tree rendering. The first wave covered
-`Section`, `OrderedList`, `UnorderedList`, `Progress`, `TwoColumn`, and
-`Table` (plus darkmatter's `YamlBlock`). The current migration target is
-broader: IR-aware components should implement
-`TreeRenderable`, `MarkdownRenderable`, `BrowserRenderable`, and
+A component overrides it to opt into tree rendering. IR-aware components should
+implement `TreeRenderable`, `MarkdownRenderable`, `BrowserRenderable`, and
 `TerminalRenderable::render_tree_node`, with `render_tree_node` delegating to
 the same private projection helper as `TreeRenderable::render_tree`.
 
-Stage 3 focuses on structural projection for nested components. As of the
-Stage 2 closeout, `BlockQuote`, `StatusBlock`, and `FileSystem` still need
-`render_tree_node` overrides; `FileSystem::render` also still uses its
-bespoke terminal path until parity work decides whether it can flip.
+Stage 3 closed the structural projection gap for nested components:
+`BlockQuote`, `StatusBlock`, and `FileSystem` now provide `render_tree_node`
+overrides, and containers project migrated children structurally instead of
+falling back to ANSI-stripped text. `FileSystem::render` still uses its
+bespoke terminal path; that terminal flip is deferred to Stage 4 pending
+connector-list `Style` lowering and icon-name spacing parity.
 
 The **projection layer** (`render_tree::projection`) converts
 `RenderableTerminalContent` into tree nodes:
@@ -76,9 +75,8 @@ RenderableTerminalContent::to_tree_nodes(
 - A `String` projects to a `Text` node; a `Component` calls its
   `render_tree_node()`. A component returning `None` becomes an `Unsupported`
   node (Strict) or an ANSI-stripped fallback + diagnostic (Warn / Lossy).
-  Stage 3 plans to make this fallback louder by logging once per concrete
-  component type, using a stable `TerminalRenderable::type_name()` helper
-  instead of parsing the component's `Debug` output.
+  The fallback logs with the stable `TerminalRenderable::type_name()` hook so
+  missing projections are observable in logs and CI.
 
 ## Native Rendering
 

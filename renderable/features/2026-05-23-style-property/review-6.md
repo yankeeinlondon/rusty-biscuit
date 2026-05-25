@@ -1,12 +1,38 @@
 ---
-ready: false
+ready: true
 agent: codex
 model: ""
 ---
 
 # Review: `style:` Frontmatter Sub-Spec #6
 
-## Findings
+## Resolution (2026-05-24)
+
+All three High findings are resolved:
+
+1. **Strict-style alias detection** — `merge_deprecated_top_level_hr` now
+   emits `Deprecated` warnings on alias *presence* rather than on successful
+   typed migration. Non-mapping `hr:`, empty `hr: {}`, and invalid-but-
+   legacy-tolerated shapes (e.g. `alignment: true`) all trip strict mode.
+   Coverage: `into_strict_fails_on_top_level_hr_alias_with_invalid_typed_field`,
+   `into_strict_fails_on_non_mapping_top_level_hr`, and
+   `into_strict_fails_on_empty_top_level_hr_mapping` in
+   `darkmatter/lib/src/style/parse.rs`; CLI counterparts in
+   `darkmatter/cli/tests/cli.rs`.
+2. **Browser HR bg-color wiring** — the SVG renderer now emits
+   `<svg class="darkmatter-hr">` and `component_selectors(PageComponent::Hr)`
+   returns `.darkmatter-hr`, so the generated rule
+   `.darkmatter-page .darkmatter-hr { background-color: … }` matches the
+   actual rendered element. Coverage: `browser_hr_bg_color_targets_rendered_element`
+   and `browser_hr_color_emits_rule_for_svg_target` in
+   `darkmatter/lib/src/layout/page.rs`.
+3. **HR visual behavior verification depth** — six Level 2 tests added in
+   `darkmatter/cli/tests/level2_layout.rs` covering `style.hr.kind` (waves),
+   `weight` (thick vs thin), `alignment` (center), `width`, `color`, and
+   `bg-color` through the canonical `style.hr.*` frontmatter path via the
+   real `md` CLI in a WezTerm pane.
+
+## Original Findings
 
 ### High: `--strict-style` can miss deprecated top-level `hr:` alias usage
 

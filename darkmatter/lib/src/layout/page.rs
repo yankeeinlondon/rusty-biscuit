@@ -95,6 +95,18 @@ pub struct DarkmatterPage {
     markdown: Option<Markdown>,
     /// Layout for [`TerminalRenderable`] trait compliance.
     layout: Layout,
+    /// Page-level stylesheet for HTML output.
+    stylesheet: Option<crate::style::bespoke::PageStylesheet>,
+    /// Page-level HTML meta tags.
+    page_meta: Option<crate::style::bespoke::PageMeta>,
+    /// Page-level code block theme override.
+    page_code_theme: Option<ThemePair>,
+    /// Global hyperlink style from `style.hyperlinks.*`.
+    hyperlink_style: Option<crate::style::schema::CommonStyle>,
+    /// Local hyperlink override from `style.hyperlinks.local-style`.
+    local_hyperlink_style: Option<crate::style::schema::CommonStyle>,
+    /// Local image override from `style.images.local-style`.
+    local_image_style: Option<crate::style::schema::CommonStyle>,
 }
 
 impl DarkmatterPage {
@@ -129,6 +141,12 @@ impl DarkmatterPage {
             options: TerminalOptions::default(),
             markdown: None,
             layout: Layout::default(),
+            stylesheet: None,
+            page_meta: None,
+            page_code_theme: None,
+            hyperlink_style: None,
+            local_hyperlink_style: None,
+            local_image_style: None,
         }
     }
 
@@ -274,6 +292,36 @@ impl DarkmatterPage {
     /// Configured HR width string, if any.
     pub fn hr_width(&self) -> Option<&str> {
         self.hr_width.as_deref()
+    }
+
+    /// Configured page stylesheet, if any.
+    pub fn stylesheet(&self) -> Option<&crate::style::bespoke::PageStylesheet> {
+        self.stylesheet.as_ref()
+    }
+
+    /// Configured page meta tags, if any.
+    pub fn page_meta(&self) -> Option<&crate::style::bespoke::PageMeta> {
+        self.page_meta.as_ref()
+    }
+
+    /// Configured page code theme, if any.
+    pub fn page_code_theme(&self) -> Option<&ThemePair> {
+        self.page_code_theme.as_ref()
+    }
+
+    /// Configured global hyperlink style, if any.
+    pub fn hyperlink_style(&self) -> Option<&crate::style::schema::CommonStyle> {
+        self.hyperlink_style.as_ref()
+    }
+
+    /// Configured local hyperlink style override, if any.
+    pub fn local_hyperlink_style(&self) -> Option<&crate::style::schema::CommonStyle> {
+        self.local_hyperlink_style.as_ref()
+    }
+
+    /// Configured local image style override, if any.
+    pub fn local_image_style(&self) -> Option<&crate::style::schema::CommonStyle> {
+        self.local_image_style.as_ref()
     }
 
     /// Build [`HorizontalRuleAttrs`] from the page's resolved HR fields.
@@ -608,6 +656,56 @@ impl DarkmatterPage {
         Ok(self)
     }
 
+    // ---------- Bespoke style builders (sub-spec #7) ----------
+
+    /// Set the page stylesheet for HTML output.
+    pub fn with_stylesheet(
+        mut self,
+        stylesheet: crate::style::bespoke::PageStylesheet,
+    ) -> Self {
+        self.stylesheet = Some(stylesheet);
+        self
+    }
+
+    /// Set the page meta tags for HTML output.
+    pub fn with_page_meta(mut self, meta: crate::style::bespoke::PageMeta) -> Self {
+        self.page_meta = Some(meta);
+        self
+    }
+
+    /// Set the page-level code block theme.
+    pub fn with_page_code_theme(mut self, theme: ThemePair) -> Self {
+        self.page_code_theme = Some(theme);
+        self
+    }
+
+    /// Set the global hyperlink style.
+    pub fn with_hyperlink_style(
+        mut self,
+        style: crate::style::schema::CommonStyle,
+    ) -> Self {
+        self.hyperlink_style = Some(style);
+        self
+    }
+
+    /// Set the local hyperlink style override.
+    pub fn with_local_hyperlink_style(
+        mut self,
+        style: crate::style::schema::CommonStyle,
+    ) -> Self {
+        self.local_hyperlink_style = Some(style);
+        self
+    }
+
+    /// Set the local image style override.
+    pub fn with_local_image_style(
+        mut self,
+        style: crate::style::schema::CommonStyle,
+    ) -> Self {
+        self.local_image_style = Some(style);
+        self
+    }
+
     // ---------- TerminalOptions passthrough ----------
 
     /// Replace the entire underlying [`TerminalOptions`] in one call.
@@ -708,6 +806,7 @@ impl DarkmatterPage {
     /// renderer fails.
     pub fn render(&self, md: &Markdown) -> Result<String, PageRenderError> {
         self.validate_fills()?;
+        crate::style::bespoke::validate_terminal_inline_lengths(self)?;
         let ctx = LayoutContext::from_page(
             self.terminal_width,
             self.margin,
@@ -723,6 +822,9 @@ impl DarkmatterPage {
             self.page_bg_color.clone(),
             self.component_colors.clone(),
             self.component_bg_colors.clone(),
+            self.hyperlink_style.clone(),
+            self.local_hyperlink_style.clone(),
+            self.local_image_style.clone(),
         )?;
 
         // Build derived TerminalOptions.
@@ -750,6 +852,11 @@ impl DarkmatterPage {
         options.include_line_numbers = self.line_numbers;
         options.color_mode = ctx.render_color_mode;
         options.hr_defaults = self.hr_defaults();
+
+        // Apply page-level code theme override if set via frontmatter.
+        if let Some(theme) = self.page_code_theme {
+            options.code_theme = theme;
+        }
 
         // Delegate to the existing terminal renderer. When no layout builder
         // has been called we must NOT thread a layout context — doing so leaks
@@ -817,11 +924,14 @@ impl DarkmatterPage {
             self.page_bg_color.clone(),
             self.component_colors.clone(),
             self.component_bg_colors.clone(),
+            self.hyperlink_style.clone(),
+            self.local_hyperlink_style.clone(),
+            self.local_image_style.clone(),
         )?;
 
         // Build HtmlOptions from TerminalOptions.
         let html_options = HtmlOptions {
-            code_theme: self.options.code_theme,
+            code_theme: self.page_code_theme.unwrap_or(self.options.code_theme),
             prose_theme: self.options.prose_theme,
             color_mode: ctx.render_color_mode,
             include_line_numbers: self.line_numbers,
@@ -829,17 +939,20 @@ impl DarkmatterPage {
             mermaid_mode: self.options.mermaid_mode,
             hr_css_variables: std::collections::HashMap::new(),
             hr_defaults: self.hr_defaults(),
+            hyperlink_style: self.hyperlink_style.clone(),
+            local_hyperlink_style: self.local_hyperlink_style.clone(),
+            local_image_style: self.local_image_style.clone(),
         };
 
         let body = md
             .as_html(html_options)
             .map_err(|e| PageRenderError::Render(e.to_string()))?;
 
-        if !ctx.needs_decoration() && !ctx.has_component_styles() {
+        if !ctx.needs_decoration() && !ctx.has_component_styles() && self.stylesheet().is_none() && self.page_meta().is_none() {
             return Ok(body);
         }
 
-        Ok(wrap_browser_html(&body, &ctx))
+        Ok(wrap_browser_html(&body, &ctx, self))
     }
 
     // ---------- Validation ----------
@@ -863,6 +976,9 @@ impl DarkmatterPage {
             && self.page_bg_color.is_none()
             && self.component_colors.is_empty()
             && self.component_bg_colors.is_empty()
+            && self.hyperlink_style.is_none()
+            && self.local_hyperlink_style.is_none()
+            && self.local_image_style.is_none()
             && self.hr_kind.is_none()
             && self.hr_weight.is_none()
             && self.hr_alignment.is_none()
@@ -1109,8 +1225,64 @@ impl TerminalRenderable for DarkmatterPage {
 // which takes the `Markdown` explicitly.
 
 /// Wrap HTML markdown body in a page-level container with layout CSS.
-fn wrap_browser_html(body: &str, ctx: &LayoutContext) -> String {
+fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> String {
     let mut output = String::new();
+
+    // Emit page-level meta tags first.
+    if let Some(meta) = page.page_meta() {
+        for tag in &meta.tags {
+            match tag {
+                crate::style::bespoke::MetaTag::Charset(charset) => {
+                    output.push_str(&format!(
+                        r#"<meta charset="{}" />"#,
+                        html_escape::encode_text(charset)
+                    ));
+                    output.push('\n');
+                }
+                crate::style::bespoke::MetaTag::Name { name, content } => {
+                    output.push_str(&format!(
+                        r#"<meta name="{}" content="{}" />"#,
+                        html_escape::encode_text(name),
+                        html_escape::encode_text(content)
+                    ));
+                    output.push('\n');
+                }
+                crate::style::bespoke::MetaTag::Property { property, content } => {
+                    output.push_str(&format!(
+                        r#"<meta property="{}" content="{}" />"#,
+                        html_escape::encode_text(property),
+                        html_escape::encode_text(content)
+                    ));
+                    output.push('\n');
+                }
+            }
+        }
+    }
+
+    // Emit page-level stylesheet.
+    if let Some(sheet) = page.stylesheet() {
+        match sheet {
+            crate::style::bespoke::PageStylesheet::Inline { source, css } => {
+                output.push_str(&format!(
+                    r#"<style data-darkmatter-source="{}">"#,
+                    html_escape::encode_text(&source.display().to_string())
+                ));
+                output.push('\n');
+                output.push_str(css);
+                if !css.ends_with('\n') {
+                    output.push('\n');
+                }
+                output.push_str("</style>\n");
+            }
+            crate::style::bespoke::PageStylesheet::Remote { href } => {
+                output.push_str(&format!(
+                    r#"<link rel="stylesheet" href="{}" />"#,
+                    html_escape::encode_text(href)
+                ));
+                output.push('\n');
+            }
+        }
+    }
 
     // Build page-level wrapper styles.
     let mut wrapper_styles = String::new();
@@ -1330,7 +1502,10 @@ fn component_selectors(component: PageComponent) -> &'static str {
         PageComponent::Ul => "ul",
         PageComponent::Ol => "ol",
         PageComponent::Li => "li",
-        PageComponent::Hr => "hr",
+        // The HR component's browser renderer emits `<svg class="darkmatter-hr">`
+        // (see `biscuit_terminal::components::horizontal_rule::browser`), so
+        // targeting `hr` here would generate rules that match no element.
+        PageComponent::Hr => ".darkmatter-hr",
         PageComponent::Hyperlinks => "a",
         #[allow(deprecated)]
         PageComponent::Lists => "ul, ol",
@@ -3149,6 +3324,59 @@ mod tests {
     /// `style.hyperlinks.color` must wrap link label text inside table
     /// cells, while preserving the OSC8 sequence — and it overrides the
     /// surrounding table color.
+    #[test]
+    fn browser_hr_bg_color_targets_rendered_element() {
+        // The HR component emits `<svg class="darkmatter-hr">`, so the
+        // page-component bg-color rule must target `.darkmatter-hr` rather
+        // than the non-existent `<hr>` element. This guards against the
+        // review-6 finding where `style.hr.bg-color` had no visible effect
+        // because the generated CSS rule matched no element.
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_component_bg_color(PageComponent::Hr, red_color());
+        let md: Markdown = "Before\n\n---\n\nAfter\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+
+        assert!(
+            html.contains(".darkmatter-page .darkmatter-hr {"),
+            "HR component rule must target `.darkmatter-hr` (the class on \
+             the emitted SVG); got: {html}"
+        );
+        assert!(
+            html.contains("background-color: rgb("),
+            "HR bg-color CSS must be emitted; got: {html}"
+        );
+        assert!(
+            html.contains(r#"class="darkmatter-hr""#),
+            "HR SVG must carry the `darkmatter-hr` class so the CSS rule \
+             matches; got: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_hr_color_emits_rule_for_svg_target() {
+        // `style.hr.color` reaches the SVG via CSS `color` inheritance →
+        // the SVG primitives reference `currentColor` through
+        // `var(--hr-color, currentColor)`. The selector must match the
+        // SVG (via `.darkmatter-hr`) for either path to take effect.
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_component_color(PageComponent::Hr, red_color());
+        let md: Markdown = "---\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+
+        assert!(
+            html.contains(".darkmatter-page .darkmatter-hr {"),
+            "HR color rule must target `.darkmatter-hr`; got: {html}"
+        );
+        assert!(
+            html.contains("color: rgb("),
+            "HR color CSS must be emitted; got: {html}"
+        );
+    }
+
     #[test]
     fn hyperlink_color_applies_inside_table_cells() {
         let term = Terminal::new_optimistic(80);

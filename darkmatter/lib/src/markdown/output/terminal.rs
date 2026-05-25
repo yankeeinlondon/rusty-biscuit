@@ -1313,8 +1313,8 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                 }
                 // Push hyperlink color scope
                 if let Some(ctx) = layout_ctx {
-                    let fg = ctx.component_color(PageComponent::Hyperlinks).cloned();
-                    let bg = ctx.component_bg_color(PageComponent::Hyperlinks).cloned();
+                    let is_local = crate::style::bespoke::is_local_hyperlink(dest_url);
+                    let (fg, bg) = ctx.hyperlink_color(is_local);
                     wrapper.push_component_color(fg, bg);
                 }
             }
@@ -1327,26 +1327,33 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     // table color, then the page color. Links in regular prose
                     // use the wrapper's nested color stack; table cells render
                     // outside that stack, so the lookup happens directly here.
+                    let is_local = crate::style::bespoke::is_local_hyperlink(&current_link_url);
                     let (hyper_fg, hyper_bg) = layout_ctx
                         .map(|ctx| {
-                            let fg = ctx
-                                .component_colors
-                                .get(&PageComponent::Hyperlinks)
-                                .or_else(|| ctx.component_colors.get(&PageComponent::Tables))
-                                .or(ctx.page_color.as_ref())
-                                .cloned();
-                            let bg = ctx
-                                .component_bg_colors
-                                .get(&PageComponent::Hyperlinks)
-                                .or_else(|| ctx.component_bg_colors.get(&PageComponent::Tables))
-                                .or(ctx.page_bg_color.as_ref())
-                                .cloned();
+                            let (fg, bg) = ctx.hyperlink_color(is_local);
+                            let fg = fg
+                                .or_else(|| ctx.component_colors.get(&PageComponent::Tables).cloned())
+                                .or_else(|| ctx.page_color.clone());
+                            let bg = bg
+                                .or_else(|| ctx.component_bg_colors.get(&PageComponent::Tables).cloned())
+                                .or_else(|| ctx.page_bg_color.clone());
                             (fg, bg)
                         })
                         .unwrap_or((None, None));
+                    let display_text = layout_ctx
+                        .and_then(|ctx| {
+                            ctx.effective_hyperlink_style(is_local).map(|common| {
+                                crate::style::bespoke::apply_inline_text_layout(
+                                    &current_link_text,
+                                    Some(&common),
+                                    ctx.effective_width,
+                                )
+                            })
+                        })
+                        .unwrap_or_else(|| current_link_text.clone());
                     push_table_link(
                         &mut current_cell,
-                        &current_link_text,
+                        &display_text,
                         &current_link_url,
                         style,
                         emit_italic,
@@ -1384,12 +1391,30 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         style.font_style |= syntect::highlighting::FontStyle::UNDERLINE;
                     }
 
+                    // Apply per-link width/max-width/alignment before OSC 8
+                    // wrapping so the visible label sits inside the requested
+                    // text box. The merged style (local-style over base) is
+                    // resolved by `effective_hyperlink_style`.
+                    let display_text = layout_ctx
+                        .and_then(|ctx| {
+                            let is_local =
+                                crate::style::bespoke::is_local_hyperlink(&current_link_url);
+                            ctx.effective_hyperlink_style(is_local).map(|common| {
+                                crate::style::bespoke::apply_inline_text_layout(
+                                    &current_link_text,
+                                    Some(&common),
+                                    ctx.effective_width,
+                                )
+                            })
+                        })
+                        .unwrap_or_else(|| current_link_text.clone());
+
                     // Emit styled hyperlink with OSC8 escape sequences
                     // IMPORTANT: Styling must be applied INSIDE the OSC8 sequence, not outside.
                     // OSC8 format: ESC]8;;URL BEL <styled_text> ESC]8;; BEL
                     // The styled text appears between the OSC8 open and close sequences.
                     wrapper.emit_styled_hyperlink(
-                        &current_link_text,
+                        &display_text,
                         &current_link_url,
                         style,
                         emit_italic,
@@ -1770,6 +1795,31 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     continue;
                 }
 
+                let is_local = crate::style::bespoke::is_local_image(&current_image_path);
+                let (image_fg, image_bg) = layout_ctx
+                    .map(|ctx| ctx.image_color(is_local))
+                    .unwrap_or((None, None));
+                // Effective local image style applies width/max-width/alignment
+                // to the rendered fallback alt text (per sub-spec #7). It does
+                // NOT alter raster decoding or protocol output.
+                let local_image_common = if is_local {
+                    layout_ctx.and_then(|ctx| ctx.local_image_style.clone())
+                } else {
+                    None
+                };
+                let layout_alt = |alt: &str| -> String {
+                    match (&local_image_common, layout_ctx) {
+                        (Some(common), Some(ctx)) => {
+                            crate::style::bespoke::apply_inline_text_layout(
+                                alt,
+                                Some(common),
+                                ctx.effective_width,
+                            )
+                        }
+                        _ => alt.to_string(),
+                    }
+                };
+
                 if let Some(ref renderer) = image_renderer {
                     // Flush accumulated output before viuer prints to stdout
                     if renderer.graphics_supported() {
@@ -1779,13 +1829,13 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks, color_depth);
                         // render_image returns protocol output on success,
                         // fallback text on failure
-                        let result =
+                        let mut result =
                             renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
-                        let result = if let Some(ctx) = layout_ctx {
-                            apply_component_layout(&result, PageComponent::Images, ctx)
-                        } else {
-                            result
-                        };
+                        result = layout_alt(&result);
+                        if let Some(ctx) = layout_ctx {
+                            result = apply_component_layout(&result, PageComponent::Images, ctx);
+                        }
+                        let result = wrap_with_color(&result, image_fg.as_ref(), image_bg.as_ref(), color_depth);
                         if !result.is_empty() {
                             // Print rendered output (or fallback text on failure)
                             write!(writer, "{}", result).ok();
@@ -1795,29 +1845,21 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     } else {
                         let mut result =
                             renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
+                        result = layout_alt(&result);
                         if let Some(ctx) = layout_ctx {
                             result = apply_component_layout(&result, PageComponent::Images, ctx);
                         }
-                        let result = wrap_with_color(
-                            &result,
-                            layout_ctx.and_then(|ctx| ctx.component_color(PageComponent::Images)),
-                            layout_ctx.and_then(|ctx| ctx.component_bg_color(PageComponent::Images)),
-                            color_depth,
-                        );
+                        let result = wrap_with_color(&result, image_fg.as_ref(), image_bg.as_ref(), color_depth);
                         wrapper.push_with_newlines(&result);
                         just_rendered_image = true;
                     }
                 } else {
                     let mut result = format!("▉ IMAGE[{}]\n", parsed_alt);
+                    result = layout_alt(&result);
                     if let Some(ctx) = layout_ctx {
                         result = apply_component_layout(&result, PageComponent::Images, ctx);
                     }
-                    let result = wrap_with_color(
-                        &result,
-                        layout_ctx.and_then(|ctx| ctx.component_color(PageComponent::Images)),
-                        layout_ctx.and_then(|ctx| ctx.component_bg_color(PageComponent::Images)),
-                        color_depth,
-                    );
+                    let result = wrap_with_color(&result, image_fg.as_ref(), image_bg.as_ref(), color_depth);
                     wrapper.push_with_newlines(&result);
                     just_rendered_image = true;
                 }

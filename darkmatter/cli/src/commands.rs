@@ -429,7 +429,7 @@ pub fn run_render(
             emit_or_show_artifact(markdown_artifact(&md), show)?;
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&md, theme.prose, theme.code, theme.color_mode, cli)?;
+            let artifact = html_artifact(&md, theme.prose, theme.code, theme.color_mode, cli, input)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {
@@ -781,7 +781,7 @@ pub fn run_compose(
         }
         OutputFormat::Html => {
             let artifact =
-                html_artifact(&composed, theme.prose, theme.code, theme.color_mode, cli)?;
+                html_artifact(&composed, theme.prose, theme.code, theme.color_mode, cli, input)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {
