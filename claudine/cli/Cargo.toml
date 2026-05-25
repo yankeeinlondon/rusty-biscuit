@@ -9,7 +9,7 @@ description = "cross-agent abstraction and meta-agent harness"
 name = "claudine"
 path = "src/main.rs"
 
-# Test-only PTY harness used by `tests/validation_reporter_pty.rs` to observe
+# Test-only PTY harness used by `tests/level2_validation_reporter_pty.rs` to observe
 # the exact ANSI/OSC-8 output of the harness validation failure reporter
 # under a real PTY. Not intended for end-user invocation.
 [[bin]]
@@ -24,7 +24,7 @@ playa = { path = "../../playa/lib", features = ["sound-effects"] }
 sniff = { path = "../../sniff/lib" }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 tui-chrome = { path = "../../biscuit-tui/lib" }
-clap = { version = "4.5", features = ["derive", "unstable-ext"] }
+clap = { version = "4.5", features = ["derive", "env", "unstable-ext"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1"

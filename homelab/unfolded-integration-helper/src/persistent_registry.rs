@@ -168,13 +168,12 @@ impl PersistentRegistry {
             .assignments
             .iter()
             .find(|a| a.remote_id == remote_id)
+            && assignment.device_ids.iter().any(|id| id == device_id)
         {
-            if assignment.device_ids.iter().any(|id| id == device_id) {
-                return Err(RegistryError::AlreadyAssigned(
-                    device_id.to_string(),
-                    remote_id.to_string(),
-                ));
-            }
+            return Err(RegistryError::AlreadyAssigned(
+                device_id.to_string(),
+                remote_id.to_string(),
+            ));
         }
 
         if let Some(assignment) = inner

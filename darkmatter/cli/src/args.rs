@@ -1,3 +1,9 @@
+// The CLI maps `--align-*` / `--fill-*` arguments onto the deprecated
+// page-layout types (`PageAlignment`, `PageFill`, `WidthUnit`), which remain
+// the public construction path through the `DarkmatterPage` builder. The
+// migration to `renderable::layout::Layout` is tracked separately.
+#![allow(deprecated)]
+
 use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
@@ -299,6 +305,13 @@ pub enum Command {
         strict: bool,
     },
 
+    /// Schema authoring and validation commands.
+    Schema {
+        /// Schema sub-command
+        #[command(subcommand)]
+        target: SchemaTarget,
+    },
+
     /// Visualize a markdown file's dependency graph.
     Graph {
         /// Input file path or file reference
@@ -367,6 +380,81 @@ pub enum ValidateOutputFormat {
     Json,
 }
 
+/// Schema sub-targets.
+#[derive(Clone, Debug, Subcommand)]
+pub enum SchemaTarget {
+    /// Validate markdown frontmatter against a schema.
+    ///
+    /// Positional arguments are either Markdown file paths or
+    /// `<prop>=<value>` assignments applied to every document's frontmatter
+    /// before validation. An argument is treated as an assignment when it
+    /// contains `=` and the text before the first `=` is a dot-separated
+    /// property path (e.g. `title=Hello`, `user.email=ken@ken.net`).
+    /// File paths that contain `=` should be disambiguated with `./` —
+    /// e.g. `./weird=name.md`.
+    Validate {
+        /// Markdown file paths and `<prop>=<value>` assignments
+        #[arg(
+            value_name = "FILE_OR_PROP=VALUE",
+            required = true,
+            num_args = 1..,
+            add = ArgValueCompleter::new(complete_compose_args)
+        )]
+        inputs: Vec<String>,
+
+        /// Baseline schema path (YAML SimplifiedSchema or JSON Schema)
+        #[arg(long, value_name = "PATH")]
+        schema: Option<PathBuf>,
+
+        /// Output format
+        #[arg(long, value_enum, default_value_t = SchemaValidateFormat::Pretty)]
+        format: SchemaValidateFormat,
+
+        /// Suppress success lines; only failures print
+        #[arg(long)]
+        quiet: bool,
+    },
+
+    /// Detect a SimplifiedSchema from one or more markdown documents.
+    Detect {
+        /// Input markdown files
+        #[arg(
+            value_name = "FILE",
+            required = true,
+            num_args = 1..,
+            add = ArgValueCompleter::new(complete_markdown_files)
+        )]
+        files: Vec<PathBuf>,
+
+        /// Output format
+        #[arg(long, value_enum, default_value_t = SchemaDetectFormat::Yaml)]
+        format: SchemaDetectFormat,
+
+        /// Merge multiple files: widen disagreeing types and mark
+        /// properties required only if present in every input file.
+        #[arg(long)]
+        merge: bool,
+    },
+}
+
+/// Output format for `md schema validate`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum SchemaValidateFormat {
+    /// Pretty (terminal) output.
+    Pretty,
+    /// Newline-delimited JSON, one object per file.
+    Json,
+}
+
+/// Output format for `md schema detect`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum SchemaDetectFormat {
+    /// SimplifiedSchema YAML.
+    Yaml,
+    /// JSON Schema (Draft 2020-12).
+    Json,
+}
+
 /// Graph visualization format.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum GraphFormat {
@@ -388,11 +476,11 @@ pub struct Cli {
     pub input: Option<PathBuf>,
 
     /// Theme for prose content (kebab-case name)
-    #[arg(long, value_parser = parse_theme_name)]
+    #[arg(long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
     pub theme: Option<ThemePair>,
 
     /// Theme for code blocks (overrides derived theme)
-    #[arg(long, value_parser = parse_theme_name)]
+    #[arg(long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
     pub code_theme: Option<ThemePair>,
 
     /// List available themes
@@ -511,6 +599,18 @@ pub struct Cli {
     #[arg(long, value_enum, value_name = "ALIGN")]
     pub align_lists: Option<PageAlignmentArg>,
 
+    /// Unordered list alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_ul: Option<PageAlignmentArg>,
+
+    /// Ordered list alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_ol: Option<PageAlignmentArg>,
+
+    /// List item alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_li: Option<PageAlignmentArg>,
+
     /// Block quote alignment
     #[arg(long, value_enum, value_name = "ALIGN")]
     pub align_block_quotes: Option<PageAlignmentArg>,
@@ -535,6 +635,18 @@ pub struct Cli {
     #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
     pub fill_lists: Option<PageFill>,
 
+    /// Unordered list fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_ul: Option<PageFill>,
+
+    /// Ordered list fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_ol: Option<PageFill>,
+
+    /// List item fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_li: Option<PageFill>,
+
     /// Block quote fill
     #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
     pub fill_block_quotes: Option<PageFill>,
@@ -546,6 +658,10 @@ pub struct Cli {
     /// Code block fill
     #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
     pub fill_code_blocks: Option<PageFill>,
+
+    /// Promote schema-validation warnings (unknown / deprecated keys) to errors.
+    #[arg(long)]
+    pub strict_style: bool,
 
     /// Increase verbosity for styled user-facing output (-v summary, -vv detailed)
     #[arg(
@@ -686,6 +802,27 @@ fn complete_indent_values(current: &OsStr) -> Vec<CompletionCandidate> {
         .collect();
     candidates.sort_by(|a, b| a.get_value().cmp(b.get_value()));
     candidates
+}
+
+/// Completes theme names for `--theme` / `--code-theme`.
+///
+/// Enumerates every available [`ThemePair`](darkmatter::markdown::highlighting::ThemePair)
+/// by its kebab-case name (the same set `--list-themes` prints), attaching each
+/// theme's description as completion help. Without this completer the dynamic
+/// completion engine has no value source for the theme flags, so `--theme <tab>`
+/// offers nothing.
+fn complete_theme_names(current: &OsStr) -> Vec<CompletionCandidate> {
+    use darkmatter::markdown::highlighting::ColorMode;
+
+    let current_str = current.to_string_lossy();
+    darkmatter::markdown::highlighting::ThemePair::all()
+        .iter()
+        .filter(|pair| pair.kebab_name().starts_with(current_str.as_ref()))
+        .map(|pair| {
+            CompletionCandidate::new(pair.kebab_name())
+                .help(Some(pair.description(ColorMode::Dark).into()))
+        })
+        .collect()
 }
 
 /// Parses and validates list indentation width.
@@ -845,6 +982,26 @@ mod tests {
 
         let values = completion_values(complete_indent_values(OsStr::new("4")));
         assert_eq!(values, vec!["4"]);
+    }
+
+    #[test]
+    fn test_complete_theme_names() {
+        // Empty prefix enumerates every theme `--list-themes` knows about.
+        let values = completion_values(complete_theme_names(OsStr::new("")));
+        let expected: Vec<String> = darkmatter::markdown::highlighting::ThemePair::all()
+            .iter()
+            .map(|pair| pair.kebab_name().to_string())
+            .collect();
+        assert_eq!(values, expected);
+        assert!(values.contains(&"dracula".to_string()));
+        assert!(values.contains(&"nord".to_string()));
+
+        // A prefix narrows the candidates by kebab name.
+        let values = completion_values(complete_theme_names(OsStr::new("gru")));
+        assert_eq!(values, vec!["gruvbox"]);
+
+        // A non-matching prefix yields nothing.
+        assert!(completion_values(complete_theme_names(OsStr::new("zzz"))).is_empty());
     }
 
     #[test]

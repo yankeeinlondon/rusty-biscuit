@@ -26,7 +26,14 @@ pub struct WrapperArgs {
     pub help: bool,
 
     /// Enable provider-specific YOLO/auto-approval mode.
-    #[arg(short = 'y', long)]
+    ///
+    /// `CLAUDINE_YOLO=true` in the environment is equivalent to `--yolo`
+    /// on the command line; both activate the same single intent signal.
+    /// Note: yolo intent does not mean yolo *applied* — interactive
+    /// launches that don't expose a non-interactive bypass (e.g.
+    /// OpenCode TUI) will suppress the flag and the reporter's
+    /// `effective_yolo` field will be `false` for those sessions.
+    #[arg(short = 'y', long, env = "CLAUDINE_YOLO")]
     pub yolo: bool,
 
     /// Preserve this env var even when it matches sensitive-name filters.

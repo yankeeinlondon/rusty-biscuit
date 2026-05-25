@@ -177,12 +177,12 @@ Common patterns include:
 - env gates like `env.AGENT == 'claude'`
 - truthy checks like `draft`
 - negation like `!env.AGENT`
-- compound conditions like `And(release.enabled, env.CI)`
+- compound conditions like `and(release.enabled, env.CI)`
 
 Example:
 
 ```md
-::file ./possibly-interesting.md when="Or(env.OPENAI_API_KEY, env.ANTHROPIC_API_KEY)"
+::file ./possibly-interesting.md when="or(env.OPENAI_API_KEY, env.ANTHROPIC_API_KEY)"
 ```
 
 in this example:

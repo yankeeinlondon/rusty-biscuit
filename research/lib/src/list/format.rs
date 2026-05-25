@@ -447,7 +447,7 @@ mod tests {
             vec!["overview.md".to_string()]
         );
         assert_eq!(parsed[0].missing_output, vec![ResearchOutput::Brief]);
-        assert_eq!(parsed[0].needs_migration, false);
+        assert!(!parsed[0].needs_migration);
     }
 
     #[test]
@@ -506,7 +506,7 @@ mod tests {
         assert_eq!(parsed[1].topic_type, TopicType::Framework);
         assert_eq!(parsed[1].additional_files.len(), 2);
         assert_eq!(parsed[1].missing_output.len(), 2);
-        assert_eq!(parsed[1].needs_migration, false);
+        assert!(!parsed[1].needs_migration);
 
         assert_eq!(parsed[2].name, "lib-three");
         assert_eq!(parsed[2].topic_type, TopicType::Software);

@@ -56,7 +56,7 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
-        let operator_hint = "Operators: <cyan>&&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  .</cyan> | Helpers: <cyan>HasKey, Contains, Length, number, round, min, max, abs, first, last, IsString, IsNumber, IsArray, IsNull, IsObject, IsEmpty, StartsWith, EndsWith, Lower, Upper, Capitalize, KebabCase, SnakeCase, CamelCase, PascalCase, TitleCase, IsDate, IsDateTime, IsToday, IsYesterday, IsTomorrow, IsThisMonth, IsThisYear</cyan>";
+        let operator_hint = "Operators: <cyan>&&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  .</cyan> | Helpers: <cyan>has_key, contains, length, number, round, min, max, abs, first, last, is_string, is_number, is_array, is_null, is_object, is_empty, starts_with, ends_with, lower, upper, capitalize, kebab_case, snake_case, camel_case, pascal_case, title_case, is_date, is_date_time, is_today, is_yesterday, is_tomorrow, is_this_month, is_this_year</cyan>";
 
         match self {
             ConditionError::Parse {
@@ -366,14 +366,14 @@ mod tests {
     #[test]
     fn evaluates_has_key() {
         let state = test_state(json!({ "user": {"name": "Alice"} }));
-        assert!(evaluate_condition(r#"HasKey(user, "name")"#, &state, 1, dummy_ctx()).unwrap());
+        assert!(evaluate_condition(r#"has_key(user, "name")"#, &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn evaluates_and_or() {
         let state = test_state(json!({ "a": true, "b": false }));
-        assert!(!evaluate_condition("And(a, b)", &state, 1, dummy_ctx()).unwrap());
-        assert!(evaluate_condition("Or(a, b)", &state, 1, dummy_ctx()).unwrap());
+        assert!(!evaluate_condition("and(a, b)", &state, 1, dummy_ctx()).unwrap());
+        assert!(evaluate_condition("or(a, b)", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
@@ -526,8 +526,8 @@ mod tests {
     #[test]
     fn legacy_and_or_function_still_works() {
         let state = test_state(json!({ "a": true, "b": false }));
-        assert!(!evaluate_condition("And(a, b)", &state, 1, dummy_ctx()).unwrap());
-        assert!(evaluate_condition("Or(a, b)", &state, 1, dummy_ctx()).unwrap());
+        assert!(!evaluate_condition("and(a, b)", &state, 1, dummy_ctx()).unwrap());
+        assert!(evaluate_condition("or(a, b)", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
@@ -548,7 +548,7 @@ mod tests {
     fn function_and_short_circuits_on_false() {
         let state = test_state(json!({}));
         assert!(
-            !evaluate_condition("And(false_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap()
+            !evaluate_condition("and(false_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap()
         );
     }
 
@@ -556,7 +556,7 @@ mod tests {
     fn function_or_short_circuits_on_true() {
         let state = test_state(json!({ "truthy_flag": true }));
         assert!(
-            evaluate_condition("Or(truthy_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap()
+            evaluate_condition("or(truthy_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap()
         );
     }
 
@@ -630,7 +630,7 @@ mod tests {
                 .unwrap()
         );
         assert!(
-            evaluate_condition_against("HasKey(user, 'name')", &data, std::path::Path::new("."))
+            evaluate_condition_against("has_key(user, 'name')", &data, std::path::Path::new("."))
                 .unwrap()
         );
     }
@@ -662,9 +662,9 @@ mod tests {
     fn shortcut_and_or_functions() {
         let data = json!({ "a": true, "b": false });
         assert!(
-            !evaluate_condition_against("And(a, b)", &data, std::path::Path::new(".")).unwrap()
+            !evaluate_condition_against("and(a, b)", &data, std::path::Path::new(".")).unwrap()
         );
-        assert!(evaluate_condition_against("Or(a, b)", &data, std::path::Path::new(".")).unwrap());
+        assert!(evaluate_condition_against("or(a, b)", &data, std::path::Path::new(".")).unwrap());
     }
 
     #[test]
@@ -941,11 +941,11 @@ mod tests {
             let state = test_state(json!({
                 "tags": ["one", "two"], "title": "doc", "missing_field": null
             }));
-            assert!(eval_cond("IsArray(tags)", &state, 1).unwrap());
-            assert!(eval_cond("IsString(title)", &state, 1).unwrap());
-            assert!(eval_cond("IsNull(missing_field)", &state, 1).unwrap());
-            assert!(eval_cond("IsEmpty(missing)", &state, 1).unwrap());
-            assert!(!eval_cond("IsEmpty(tags)", &state, 1).unwrap());
+            assert!(eval_cond("is_array(tags)", &state, 1).unwrap());
+            assert!(eval_cond("is_string(title)", &state, 1).unwrap());
+            assert!(eval_cond("is_null(missing_field)", &state, 1).unwrap());
+            assert!(eval_cond("is_empty(missing)", &state, 1).unwrap());
+            assert!(!eval_cond("is_empty(tags)", &state, 1).unwrap());
         }
 
         #[test]
@@ -966,17 +966,17 @@ mod tests {
         #[test]
         fn string_predicates_in_when_clause() {
             let state = test_state(json!({ "title": "Hello World" }));
-            assert!(eval_cond(r#"StartsWith(title, "Hello")"#, &state, 1).unwrap());
-            assert!(eval_cond(r#"EndsWith(title, "World")"#, &state, 1).unwrap());
-            assert!(!eval_cond(r#"StartsWith(title, "world")"#, &state, 1).unwrap());
+            assert!(eval_cond(r#"starts_with(title, "Hello")"#, &state, 1).unwrap());
+            assert!(eval_cond(r#"ends_with(title, "World")"#, &state, 1).unwrap());
+            assert!(!eval_cond(r#"starts_with(title, "world")"#, &state, 1).unwrap());
         }
 
         #[test]
         fn string_mutations_in_when_clause() {
             let state = test_state(json!({ "title": "Hello World" }));
-            assert!(eval_cond("Lower(title) == 'hello world'", &state, 1).unwrap());
-            assert!(eval_cond("KebabCase(title) == 'hello-world'", &state, 1).unwrap());
-            assert!(eval_cond("Upper(title) == 'HELLO WORLD'", &state, 1).unwrap());
+            assert!(eval_cond("lower(title) == 'hello world'", &state, 1).unwrap());
+            assert!(eval_cond("kebab_case(title) == 'hello-world'", &state, 1).unwrap());
+            assert!(eval_cond("upper(title) == 'HELLO WORLD'", &state, 1).unwrap());
         }
 
         #[test]
@@ -986,10 +986,10 @@ mod tests {
                 "bad_date": "06-15-2024",
                 "dt": "2024-06-15T12:30:00Z"
             }));
-            assert!(eval_cond("IsDate(good_date)", &state, 1).unwrap());
-            assert!(!eval_cond("IsDate(bad_date)", &state, 1).unwrap());
-            assert!(eval_cond("IsDateTime(dt)", &state, 1).unwrap());
-            assert!(!eval_cond("IsDate(missing)", &state, 1).unwrap());
+            assert!(eval_cond("is_date(good_date)", &state, 1).unwrap());
+            assert!(!eval_cond("is_date(bad_date)", &state, 1).unwrap());
+            assert!(eval_cond("is_date_time(dt)", &state, 1).unwrap());
+            assert!(!eval_cond("is_date(missing)", &state, 1).unwrap());
         }
 
         #[test]
@@ -1022,7 +1022,7 @@ mod tests {
             let data = json!({ "items": [1, 2, 3], "title": "Important Notes" });
             assert!(
                 evaluate_condition_against(
-                    "IsArray(items) && Length(items) >= 2",
+                    "is_array(items) && length(items) >= 2",
                     &data,
                     std::path::Path::new(".")
                 )
@@ -1030,7 +1030,7 @@ mod tests {
             );
             assert!(
                 evaluate_condition_against(
-                    r#"StartsWith(Lower(title), "important")"#,
+                    r#"starts_with(lower(title), "important")"#,
                     &data,
                     std::path::Path::new(".")
                 )
@@ -1064,10 +1064,10 @@ mod tests {
                 "[]",
                 "min, max, abs",
                 "first, last",
-                "IsString",
-                "StartsWith",
-                "KebabCase",
-                "IsDate",
+                "is_string",
+                "starts_with",
+                "kebab_case",
+                "is_date",
             ] {
                 assert!(
                     rendered.contains(needle),

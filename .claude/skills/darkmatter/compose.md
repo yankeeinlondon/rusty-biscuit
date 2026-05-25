@@ -6,13 +6,14 @@ The darkmatter compose pipeline provides document preparation through three phas
 
 **Inline Pre** (serial):
 
-1. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
-2. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter
-3. **Text Replacement** - `replace:` frontmatter replaces literal strings
-4. **Page Blocks** - `::block`/`::end-block` conditional regions
-5. **Interpolation** - `{{ variable }}` expressions expand to values
-6. **Shell Expansion** - Execute `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
-7. **Link Resolve** - Resolve all local link targets (Markdown hyperlinks/images and supported HTML embeds) to absolute paths
+1. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides are applied but before interpolation or shell expansion
+2. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
+3. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter
+4. **Text Replacement** - `replace:` frontmatter replaces literal strings
+5. **Page Blocks** - `::block`/`::end-block` conditional regions
+6. **Interpolation** - `{{ variable }}` expressions expand to values
+7. **Shell Expansion** - Execute `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
+8. **Link Resolve** - Resolve all local link targets (Markdown hyperlinks/images and supported HTML embeds) to absolute paths
 
 **Transclusion** (prepared serially, resolved concurrently via Rayon):
 

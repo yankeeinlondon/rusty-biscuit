@@ -4,14 +4,53 @@ use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::BehindStatus;
-use sniff::filesystem::repo::{DependencyEntry, Package, RepoInfo};
+use sniff::filesystem::repo::{DependencyEntry, Package, RepoIdentity, RepoInfo};
 
 use super::language::render_framework_summary;
 use super::packages::select_repo_packages;
 use super::{format_number, relative_path};
+
+/// Render `sniff repo name` output.
+///
+/// At verbosity `0`, emits just the bare repo name followed by a newline so
+/// the command pipes cleanly. At verbosity `>= 1`, decorates the name with
+/// version and a language-or-monorepo-package-count suffix, styled through
+/// Prose so terminal-aware fallbacks apply.
+pub fn render_repo_name(identity: &RepoIdentity, verbose: u8) -> String {
+    if verbose == 0 {
+        return format!("{}\n", identity.name);
+    }
+
+    let mut markup = format!("**{}**", identity.name);
+    if let Some(version) = identity.version.as_deref() {
+        markup.push_str(&format!(" v{version}"));
+    }
+
+    let suffix = if identity.is_monorepo {
+        identity
+            .package_count
+            .map(|count| format!(" [<dim>{} package monorepo</dim>]", format_number(count)))
+    } else {
+        identity
+            .language
+            .as_deref()
+            .map(|lang| format!(" [{lang}]"))
+    };
+    if let Some(suffix) = suffix {
+        markup.push_str(&suffix);
+    }
+
+    let term = Terminal::default();
+    let rendered = Prose::new(&markup).render(&term);
+    if rendered.ends_with('\n') {
+        rendered
+    } else {
+        format!("{rendered}\n")
+    }
+}
 
 fn area_parent(area: &str) -> Option<String> {
     if area == "root" {
@@ -46,10 +85,10 @@ pub(super) fn build_area_hierarchy(
     (top_areas, children)
 }
 
-fn append_package_items(items: &mut Vec<RenderableContent>, pkg: &Package, verbose: u8) {
+fn append_package_items(items: &mut Vec<RenderableTerminalContent>, pkg: &Package, verbose: u8) {
     let formatted = format_package_items(pkg, verbose);
     let main = Prose::new(&formatted[0]).render_optimistic(None);
-    items.push(RenderableContent::String(main));
+    items.push(RenderableTerminalContent::String(main));
 
     if formatted.len() > 1 {
         let detail_items: Vec<String> = formatted[1..]
@@ -57,21 +96,21 @@ fn append_package_items(items: &mut Vec<RenderableContent>, pkg: &Package, verbo
             .map(|s| Prose::new(s).render_optimistic(None))
             .collect();
         let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
-        items.push(RenderableContent::Component(Rc::new(detail_list)));
+        items.push(RenderableTerminalContent::Component(Rc::new(detail_list)));
     }
 }
 
 fn append_area_section(
-    output: &mut Vec<RenderableContent>,
+    output: &mut Vec<RenderableTerminalContent>,
     area: &str,
     area_packages: &std::collections::HashMap<String, Vec<&Package>>,
     area_children: &std::collections::HashMap<String, Vec<String>>,
     verbose: u8,
 ) {
     let label = Prose::new(format!("<blue><b>{}</b></blue>", area)).render_optimistic(None);
-    output.push(RenderableContent::String(label));
+    output.push(RenderableTerminalContent::String(label));
 
-    let mut inner_items: Vec<RenderableContent> = Vec::new();
+    let mut inner_items: Vec<RenderableTerminalContent> = Vec::new();
     if let Some(packages) = area_packages.get(area) {
         for pkg in packages {
             append_package_items(&mut inner_items, pkg, verbose);
@@ -92,7 +131,7 @@ fn append_area_section(
 
     if !inner_items.is_empty() {
         let inner_list = UnorderedList::from(inner_items);
-        output.push(RenderableContent::Component(Rc::new(inner_list)));
+        output.push(RenderableTerminalContent::Component(Rc::new(inner_list)));
     }
 }
 /// Format a MonorepoTool for display.
@@ -467,7 +506,7 @@ pub fn render_repo_section(
         }
         let (top_areas, area_children) = build_area_hierarchy(&areas);
 
-        let mut outer_items: Vec<RenderableContent> = Vec::new();
+        let mut outer_items: Vec<RenderableTerminalContent> = Vec::new();
         for area in &top_areas {
             append_area_section(
                 &mut outer_items,
@@ -832,10 +871,10 @@ pub fn render_filesystem_section(
         writeln!(out, "{}", header.render_optimistic(None)).unwrap();
 
         if let Some(ref packages) = repo.packages {
-            let mut items: Vec<RenderableContent> = Vec::new();
+            let mut items: Vec<RenderableTerminalContent> = Vec::new();
             for pkg in packages {
                 let package_items = format_package_items(pkg, verbose);
-                items.push(RenderableContent::String(
+                items.push(RenderableTerminalContent::String(
                     Prose::new(&package_items[0]).render_optimistic(None),
                 ));
                 if package_items.len() > 1 {
@@ -844,7 +883,7 @@ pub fn render_filesystem_section(
                         .map(|item| Prose::new(item).render_optimistic(None))
                         .collect::<Vec<_>>();
                     let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
-                    items.push(RenderableContent::Component(Rc::new(detail_list)));
+                    items.push(RenderableTerminalContent::Component(Rc::new(detail_list)));
                 }
             }
 

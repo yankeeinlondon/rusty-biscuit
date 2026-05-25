@@ -3,6 +3,32 @@ use super::{
 };
 use clap::Subcommand;
 
+/// Layout direction for `sniff repo deps` visual rendering.
+///
+/// Maps to `biscuit_visualized::graph::GraphOrientation` in the renderer.
+/// Aliased so users can write the long form (`left-to-right`/`horizontal`,
+/// `top-to-bottom`/`vertical`) at the command line, while shell completions
+/// suggest the short canonical forms.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum OrientationArg {
+    /// Left-to-right — hub graphs scroll vertically (default for `repo deps`).
+    #[value(name = "lr", alias = "left-to-right", alias = "horizontal")]
+    LeftToRight,
+    /// Top-to-bottom — good for deep chain-like graphs.
+    #[value(name = "tb", alias = "top-to-bottom", alias = "vertical")]
+    TopToBottom,
+}
+
+impl OrientationArg {
+    /// Canonical short form passed through `RepoAction::Deps::orientation`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LeftToRight => "lr",
+            Self::TopToBottom => "tb",
+        }
+    }
+}
+
 /// Normalized repo action — decoupled from clap parse shape.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -19,6 +45,13 @@ pub enum RepoAction {
         compact: bool,
         package: Option<String>,
         package_area: Option<String>,
+        /// Branch filter: `None` = flag absent, `Some(None)` = flag present
+        /// with no value (use current branch), `Some(Some(name))` = explicit
+        /// branch name.
+        branch: Option<Option<String>>,
+        /// Worktree filter: name of a linked worktree (matches the worktree's
+        /// branch or its directory basename). Mutually exclusive with `branch`.
+        worktree: Option<String>,
     },
     Hash {
         sha: String,
@@ -33,13 +66,22 @@ pub enum RepoAction {
         package_area: Option<String>,
     },
     Remote {
-        remote: String,
+        remote: Option<String>,
     },
     Deps {
         filter: Vec<String>,
         ui: bool,
+        /// Emit the raw SVG document instead of a terminal-image render.
+        /// Mutually exclusive with `ui`.
+        svg: bool,
         package: Option<String>,
         package_area: Option<String>,
+        /// Width spec for `--ui` rendering. Accepts `75%`, `120` (chars),
+        /// `120ch`, or `fill`. `None` uses the deps-specific default (75%).
+        width: Option<String>,
+        /// Layout direction for `--ui` / `--svg` rendering. Accepts `lr`
+        /// (left-to-right, default) or `tb` (top-to-bottom).
+        orientation: Option<String>,
     },
     Packages {
         filter: Vec<String>,
@@ -140,6 +182,12 @@ pub enum RepoAction {
         no_error: bool,
         on_error: Option<String>,
     },
+    Worktrees {
+        list: bool,
+        csv: bool,
+        verbose: bool,
+    },
+    Name,
 }
 
 // ---------------------------------------------------------------------------
@@ -186,10 +234,13 @@ pub(crate) fn repo_package_area_candidates() -> Vec<clap_complete::engine::Compl
     after_help = REPO_AFTER_HELP,
 )]
 pub enum RepoSubcommand {
-    /// Show repository structure (default when no subcommand given)
+    /// Show repository structure
     Structure {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Query package registries for latest dependency versions and report available updates
+        #[arg(long)]
+        latest_versions: bool,
         /// Scope to a specific package
         #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
         package: Option<String>,
@@ -213,8 +264,16 @@ pub enum RepoSubcommand {
         #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
         package: Option<String>,
         /// Scope to a specific package area
-        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        #[arg(short = 'a', long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
         package_area: Option<String>,
+        /// Show commits from a specific branch (defaults to current branch
+        /// when the flag is given without a value)
+        #[arg(long, value_name = "BRANCH", conflicts_with = "worktree")]
+        branch: Option<Option<String>>,
+        /// Show commits and working-tree status from a linked worktree.
+        /// Accepts the worktree's branch name or its directory basename.
+        #[arg(long, value_name = "WORKTREE")]
+        worktree: Option<String>,
     },
     /// Show details for a specific commit hash
     Hash {
@@ -260,14 +319,21 @@ pub enum RepoSubcommand {
     /// Inspect a remote repository (URL, name, or owner/repo shorthand)
     Remote {
         /// Git remote URL, remote name, or owner/repo shorthand
+        ///
+        /// When omitted inside a git repo, defaults to the origin remote URL
+        /// (or the first configured remote if origin is not set).
         #[arg(value_name = "REMOTE")]
-        remote: String,
+        remote: Option<String>,
     },
     /// Render an internal dependency diagram
     Deps {
-        /// Use visual (Mermaid) rendering instead of text
-        #[arg(long)]
+        /// Use visual graph rendering instead of text
+        #[arg(long, conflicts_with = "svg")]
         ui: bool,
+        /// Emit the raw SVG source for the dependency diagram. Useful for
+        /// piping to a file, an HTML page, or a browser-side renderer.
+        #[arg(long, conflicts_with = "ui")]
+        svg: bool,
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
         /// Scope to a specific package
@@ -276,6 +342,12 @@ pub enum RepoSubcommand {
         /// Scope to a specific package area
         #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
         package_area: Option<String>,
+        /// Width for `--ui` rendering: percentage (`75%`), column count (`120` or `120ch`), or `fill`. Default: 75%.
+        #[arg(long, value_name = "WIDTH", requires = "ui")]
+        width: Option<String>,
+        /// Layout direction for `--ui` / `--svg` rendering: `lr` (left-to-right, default — hub graphs scroll vertically) or `tb` (top-to-bottom — good for deep chains).
+        #[arg(long, value_name = "DIR", value_enum)]
+        orientation: Option<OrientationArg>,
     },
     /// Output only package names as a comma-separated list
     Packages {
@@ -512,4 +584,17 @@ pub enum RepoSubcommand {
         #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },
+    /// List all worktrees in the repository
+    #[command(name = "worktrees")]
+    Worktrees {
+        /// Output as bullet list (one item per line with `- ` prefix)
+        #[arg(long, conflicts_with = "csv")]
+        list: bool,
+
+        /// Output as comma-separated values on a single line
+        #[arg(long, conflicts_with = "list")]
+        csv: bool,
+    },
+    /// Output the repository name (plain text); use -v for version + language/monorepo info
+    Name,
 }

@@ -450,6 +450,27 @@ impl WsHandler for ArcamIntegrationHandler {
     }
 }
 
+fn setup_string(msg_data: &Value, key: &str) -> Option<String> {
+    msg_data
+        .get("input_values")
+        .and_then(|value| value.get(key))
+        .or_else(|| msg_data.get("setup_data").and_then(|value| value.get(key)))
+        .or_else(|| msg_data.get("user_data").and_then(|value| value.get(key)))
+        .or_else(|| msg_data.get(key))
+        .and_then(setup_value_to_string)
+}
+
+fn setup_value_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Object(map) => map
+            .get("value")
+            .and_then(setup_value_to_string)
+            .or_else(|| map.get("id").and_then(setup_value_to_string)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -670,26 +691,5 @@ mod tests {
             .as_deref(),
             Some("office")
         );
-    }
-}
-
-fn setup_string(msg_data: &Value, key: &str) -> Option<String> {
-    msg_data
-        .get("input_values")
-        .and_then(|value| value.get(key))
-        .or_else(|| msg_data.get("setup_data").and_then(|value| value.get(key)))
-        .or_else(|| msg_data.get("user_data").and_then(|value| value.get(key)))
-        .or_else(|| msg_data.get(key))
-        .and_then(setup_value_to_string)
-}
-
-fn setup_value_to_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(value) => Some(value.clone()),
-        Value::Object(map) => map
-            .get("value")
-            .and_then(setup_value_to_string)
-            .or_else(|| map.get("id").and_then(setup_value_to_string)),
-        _ => None,
     }
 }

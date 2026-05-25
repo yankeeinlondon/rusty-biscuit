@@ -15,6 +15,7 @@ clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
 dirs = "6"
 inquire = "0.9"
+sniff = { path = "../../sniff/lib" }
 worktree = { path = "../lib" }
 
 [dev-dependencies]

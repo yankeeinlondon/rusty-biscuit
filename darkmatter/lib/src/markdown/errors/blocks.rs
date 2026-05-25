@@ -19,6 +19,8 @@ use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{ErrorHeader, SourceContext, StatusBlockExt};
 
+use crate::markdown::schemas::{ValidationProblem, ValidationProblemKind};
+
 /// Build the [`StatusBlock`] for [`MarkdownError::FileLoad`].
 pub(crate) fn file_load_block(source: &std::io::Error) -> StatusBlock {
     let kind = format!("{:?}", source.kind());
@@ -133,11 +135,120 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
         .hint("Review the transform pipeline inputs and any configured rules.")
 }
 
+/// Build the [`StatusBlock`] for [`MarkdownError::SchemaValidationFailed`].
+///
+/// When `problems` is empty the failure represents a schema *preparation*
+/// error (malformed `$schema`, unresolved reference, baseline build failure,
+/// etc.) rather than an instance validation failure. In that case the
+/// `summary` carries the underlying diagnostic and is rendered as a body
+/// line so authors see the root cause instead of an empty problem list.
+pub(crate) fn schema_validation_failed_block(
+    path: &std::path::Path,
+    problems: &[ValidationProblem],
+    summary: &str,
+    description: &Option<String>,
+) -> StatusBlock {
+    let path_attr = Prose::quoted_attr(&path.to_string_lossy());
+    let path_escaped = Prose::escape_text(&path.to_string_lossy());
+
+    let mut body_lines: Vec<String> = Vec::new();
+
+    // OSC8 link to the source file
+    body_lines.push(format!(
+        "<blue><a href={}>{}</a></blue>",
+        path_attr, path_escaped
+    ));
+
+    // Description line when present
+    if let Some(desc) = description {
+        body_lines.push(format!("<i><dim>{}</dim></i>", Prose::escape_text(desc)));
+    }
+
+    // Preparation failures arrive with an empty problem list; render the
+    // summary so authors see the actual diagnostic (e.g. "schema could not
+    // be prepared: ...") instead of just the path.
+    if problems.is_empty() {
+        let hint = if summary.is_empty() {
+            "schema could not be prepared"
+        } else {
+            summary
+        };
+        let (label, detail) = match hint.split_once(':') {
+            Some((head, tail)) => (head.trim(), tail.trim()),
+            None => ("schema preparation failed", hint),
+        };
+        body_lines.push(format!(
+            "<red>{}</red>: {}",
+            Prose::escape_text(label),
+            Prose::escape_text(detail),
+        ));
+
+        return StatusBlock::new(StatusState::Error)
+            .error_header(ErrorHeader::new(
+                "MarkdownError",
+                "schema validation failed",
+            ))
+            .body(body_lines.join("\n"))
+            .hint(
+                "Check that the document's $schema (or the baseline schema) is well-formed and resolvable.",
+            );
+    }
+
+    // One bullet per problem. The category label is chosen from
+    // `ValidationProblem::kind` rather than inferred from `property.is_some()`
+    // or substring-matched against `message`, so the renderer cannot drift
+    // when the underlying validator surfaces new error shapes.
+    for problem in problems {
+        let loc = match (problem.line, problem.column) {
+            (Some(l), Some(c)) => format!(" at {l}:{c}"),
+            (Some(l), None) => format!(" at {l}:1"),
+            _ => String::new(),
+        };
+
+        let arm = match problem.arm_index {
+            Some(idx) => format!(" (schema arm {idx})"),
+            None => String::new(),
+        };
+
+        let target = if let Some(ref prop) = problem.property {
+            Prose::escape_text(prop)
+        } else {
+            let trimmed = problem.path.trim_start_matches('/');
+            if trimmed.is_empty() {
+                "<root>".to_string()
+            } else {
+                Prose::escape_text(trimmed.split('/').next().unwrap_or(trimmed))
+            }
+        };
+
+        let bullet = match problem.kind {
+            ValidationProblemKind::Missing => format!(
+                "<red>missing</red> <inverse>{target}</inverse>: required but not provided{loc}{arm}"
+            ),
+            ValidationProblemKind::Type => format!(
+                "<red>type</red> <inverse>{target}</inverse>: {}{loc}{arm}",
+                Prose::escape_text(&problem.message)
+            ),
+            ValidationProblemKind::Invalid => format!(
+                "<red>invalid</red> <inverse>{target}</inverse>: {}{loc}{arm}",
+                Prose::escape_text(&problem.message)
+            ),
+        };
+
+        body_lines.push(bullet);
+    }
+
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "schema validation failed"))
+        .body(body_lines.join("\n"))
+        .hint("Correct the frontmatter so it satisfies the declared $schema (or baseline schema).")
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 
     use super::*;
@@ -256,6 +367,31 @@ mod tests {
         assert!(out.contains("pipeline stalled"), "missing message: {out}");
     }
 
+    /// Preparation failures (malformed `$schema`, unresolved baseline) arrive
+    /// with an empty problem list and stash the underlying diagnostic in
+    /// `summary`. The rendered block must surface that summary so the user
+    /// sees the actual root cause instead of just the path.
+    #[test]
+    fn schema_validation_failed_block_renders_summary_when_problems_empty() {
+        let path = std::path::PathBuf::from("/tmp/test/bad-schema.md");
+        let summary = "schema could not be prepared: could not resolve ./missing.yaml";
+        let block = schema_validation_failed_block(&path, &[], summary, &None);
+        let out = render_block(&block);
+        assert!(out.contains("schema could not be prepared"), "missing summary: {out}");
+        assert!(out.contains("could not resolve ./missing.yaml"), "missing detail: {out}");
+        assert!(out.contains("bad-schema.md"), "missing path: {out}");
+    }
+
+    /// When the summary is empty the block should still render a non-empty
+    /// body so the user understands schema preparation failed.
+    #[test]
+    fn schema_validation_failed_block_handles_empty_summary() {
+        let path = std::path::PathBuf::from("/tmp/test/empty.md");
+        let block = schema_validation_failed_block(&path, &[], "", &None);
+        let out = render_block(&block);
+        assert!(out.contains("schema could not be prepared"), "missing fallback summary: {out}");
+    }
+
     /// `reqwest::Error` cannot be constructed without firing a real HTTP
     /// request. This smoke test exercises the helper by sending a request to
     /// an address that is guaranteed to refuse connections, producing a real
@@ -263,20 +399,29 @@ mod tests {
     ///
     /// ## Notes
     ///
-    /// The request targets `http://0.0.0.0:1` which has no listener and fails
-    /// instantly. If this proves flaky in CI, the test can be replaced with a
-    /// compile-time assertion that `url_fetch_block` accepts `&reqwest::Error`.
+    /// The request targets a loopback port whose listener has been bound
+    /// then dropped, guaranteeing `ECONNREFUSED` immediately on both Linux
+    /// and macOS. `no_proxy()` skips system-proxy detection (which can be
+    /// slow on macOS via SCDynamicStore) and `tcp_nodelay`/short timeouts
+    /// ensure the test exits quickly even if the kernel queues the RST.
     #[tokio::test]
     async fn url_fetch_block_renders_with_reqwest_error() {
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let port = listener.local_addr().expect("local_addr").port();
+        drop(listener);
+        let url = format!("http://127.0.0.1:{port}");
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_millis(100))
+            .no_proxy()
+            .connect_timeout(std::time::Duration::from_millis(500))
+            .timeout(std::time::Duration::from_secs(1))
             .build()
             .expect("client builder should not fail");
-        let result = client.get("http://0.0.0.0:1").send().await;
-        let err = result.expect_err("request to 0.0.0.0:1 should fail");
+        let result = client.get(&url).send().await;
+        let err = result.expect_err("request to closed port should fail");
         let out = render_block(&url_fetch_block(&err));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
         assert!(out.contains("URL fetch failed"), "missing summary: {out}");
-        assert!(out.contains("http://0.0.0.0:1"), "missing URL: {out}");
+        assert!(out.contains(&url), "missing URL: {out}");
     }
 }

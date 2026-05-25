@@ -20,9 +20,7 @@ use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputF
 use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
-use super::system_prompt::{
-    SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
-};
+use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};

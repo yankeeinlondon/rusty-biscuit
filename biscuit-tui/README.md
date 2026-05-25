@@ -177,10 +177,13 @@ for full details:
   specific and would otherwise produce flaky failures during a normal
   developer workflow.
 
-The harness implementations live in `cli/tests/common/real_terminal/`. A
-modifier-press requirement covered only by Level-1 tests is **not** "production
-ready" — Level 2 with kitty bytes through `wezterm cli send-text` is the
-minimum for end-to-end terminal rendering verification.
+The Level 2/3 harness implementations live in the shared
+[`biscuit-test-harness`](../biscuit-test-harness/README.md) crate — see its
+README for the harness variants, when to use each, and the environment each
+requires. A modifier-press requirement covered only by Level-1 tests is
+**not** "production ready" — Level 2 with kitty bytes through
+`wezterm cli send-text` is the minimum for end-to-end terminal rendering
+verification.
 
 ## License
 

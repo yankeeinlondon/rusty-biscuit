@@ -42,6 +42,8 @@ mod inline_html;
 pub mod normalize;
 pub mod output;
 pub mod reference;
+pub mod render_tree;
+pub mod schemas;
 pub mod toc;
 mod types;
 pub mod yaml_block;
@@ -60,6 +62,7 @@ pub use reference::{
     ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
     ReferenceSet, TransclusionRef,
 };
+pub use render_tree::TerminalCodeRenderer;
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
 pub use yaml_block::{YamlBlock, YamlBlockError};
@@ -1405,6 +1408,7 @@ title: Test
             max_width: Some(80),
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
+            hr_defaults: None,
         };
         let output = for_terminal(&md, options).unwrap();
 
@@ -1467,6 +1471,7 @@ title: Test
             max_width: Some(80),
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
+            hr_defaults: None,
         };
         let terminal_output = for_terminal(&md, terminal_options).unwrap();
         let terminal_plain = strip_ansi_codes(&terminal_output);

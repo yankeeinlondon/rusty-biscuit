@@ -46,6 +46,7 @@ members = [
     "tree-hugger/lib",
     "biscuit-tui/cli",
     "biscuit-tui/lib",
+    "renderable",
     "unchained-ai/cli",
     "unchained-ai/gen",
     "unchained-ai/lib",
@@ -57,6 +58,7 @@ members = [
     "worktree/cli",
     "darkmatter/dmls",
     "tools/test-toolkit",
+    "biscuit-browser-harness",
 ]
 exclude = ["schematic/schema"]
 

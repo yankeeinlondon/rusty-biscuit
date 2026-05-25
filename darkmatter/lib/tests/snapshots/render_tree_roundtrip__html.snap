@@ -1,0 +1,13 @@
+---
+source: darkmatter/lib/tests/render_tree_roundtrip.rs
+expression: rendered.output
+---
+<div class="callout">
+
+
+A block of raw HTML wrapping Markdown body content.
+
+</div>
+
+
+A paragraph with <strong>inline HTML</strong> in the middle.

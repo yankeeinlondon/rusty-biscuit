@@ -17,7 +17,7 @@ use tracing::{Span, info_span};
 
 use std::sync::Mutex;
 
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 
 use super::super::section::SectionTracker;
@@ -662,8 +662,7 @@ pub(crate) fn run_child_stream_semantic(
     let stdout_byte_metrics = live_metrics.clone();
     // Opt-in raw NDJSON capture for post-mortem analysis. Activated by
     // `CLAUDINE_RAW_STREAM_DIR`; `None` (and zero overhead) otherwise.
-    let stream_capture_owned =
-        StreamCapture::open(timeout_config.provider, child.id(), started_at);
+    let stream_capture_owned = StreamCapture::open(timeout_config.provider, child.id(), started_at);
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();

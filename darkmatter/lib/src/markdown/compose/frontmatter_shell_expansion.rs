@@ -445,6 +445,7 @@ mod tests {
         super::scan_frontmatter(frontmatter, pre_interpolation_snapshot, &test_ctx())
     }
 
+    #[allow(dead_code)]
     fn execute_frontmatter_shell_expansion(
         frontmatter: &mut Frontmatter,
         options: &ComposeOptions,
@@ -681,7 +682,7 @@ mod execution_tests {
     use serial_test::serial;
     use std::path::PathBuf;
     use std::sync::Arc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     use tempfile::TempDir;
 
     fn fm_from_json(data: serde_json::Value) -> Frontmatter {
@@ -887,17 +888,22 @@ mod execution_tests {
             return;
         };
 
+        // Each command records a wall-clock start timestamp, then sleeps briefly.
+        // Concurrent execution => both commands start within startup jitter of
+        // each other. Serial execution => the second start is delayed by the
+        // first command's full sleep. Comparing start offsets (rather than total
+        // wall-clock time) keeps the test fast and immune to interpreter startup
+        // variance.
         let temp_dir = TempDir::new().unwrap();
-        let sleep_cmd = |label: &str| {
+        let stamp_cmd = || {
             format!(
-                "$({} -c \"import time; time.sleep(0.35); print('{}', end='')\")",
-                python.display(),
-                label
+                "$({} -c \"import time; print(time.time(), end=''); time.sleep(0.3)\")",
+                python.display()
             )
         };
         let mut fm = fm_from_json(json!({
-            "one": sleep_cmd("one"),
-            "two": sleep_cmd("two")
+            "one": stamp_cmd(),
+            "two": stamp_cmd()
         }));
         let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
             timeout: Duration::from_secs(2),
@@ -907,17 +913,23 @@ mod execution_tests {
         });
         let mut runtime = make_runtime();
 
-        let start = Instant::now();
         let report =
             execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        let elapsed = start.elapsed();
 
         assert_eq!(report.replacements, 2);
-        assert_eq!(fm.as_map().get("one"), Some(&json!("one")));
-        assert_eq!(fm.as_map().get("two"), Some(&json!("two")));
+        let start_time = |key: &str| -> f64 {
+            fm.as_map()
+                .get(key)
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .parse()
+                .unwrap_or_else(|_| panic!("expected numeric start timestamp for `{key}`"))
+        };
+        let start_skew = (start_time("one") - start_time("two")).abs();
         assert!(
-            elapsed < Duration::from_millis(650),
-            "expected concurrent execution under 650ms, got {elapsed:?}"
+            start_skew < 0.2,
+            "expected commands to start concurrently (skew < 0.2s), got {start_skew}s \
+             — commands appear to have run serially"
         );
     }
 }

@@ -17,7 +17,9 @@ pub use crate::components::mermaid::{
 pub use crate::components::pad::{PadLeft, PadRight};
 pub use crate::components::progress::Progress;
 pub use crate::components::prose::Prose;
-pub use crate::components::renderable::{BrowserRenderable, Renderable, RenderableContent};
+pub use crate::components::renderable::{
+    BrowserRenderable, RenderableTerminalContent, TerminalRenderable,
+};
 pub use crate::components::section::{HeadingLevel, Section};
 pub use crate::components::status::{Status, StatusState, StatusTheme};
 pub use crate::components::status_block::StatusBlock;
@@ -43,5 +45,5 @@ pub use crate::utils::escape_codes::{
     strip_color_codes, strip_cursor_movement_codes, strip_escape_codes, strip_osc8_links,
     strip_query_codes,
 };
-pub use crate::utils::layout::{Alignment, Layout, Margin, RowFill};
+pub use crate::utils::layout::{Alignment, Layout, LayoutTerminalExt, Length, Margin, TargetValue};
 pub use crate::utils::wrap_policy::WordWrap;

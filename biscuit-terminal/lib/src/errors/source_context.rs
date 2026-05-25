@@ -24,11 +24,7 @@ pub struct SourceContext {
 
 impl SourceContext {
     /// Create a new [`SourceContext`] with automatic frontmatter detection.
-    pub fn new(
-        absolute: PathBuf,
-        display: PathBuf,
-        content: impl Into<Arc<str>>,
-    ) -> Self {
+    pub fn new(absolute: PathBuf, display: PathBuf, content: impl Into<Arc<str>>) -> Self {
         let content: Arc<str> = content.into();
         let frontmatter = detect_frontmatter_range(&content);
         Self {
@@ -95,12 +91,7 @@ impl SourceContext {
         for (idx, l) in lines[start..end].iter().enumerate() {
             let n = start + idx + 1;
             let gutter = if n == line { ">" } else { " " };
-            writeln!(
-                buf,
-                "{gutter} {n:>width$} │ {l}",
-                width = width
-            )
-            .unwrap();
+            writeln!(buf, "{gutter} {n:>width$} │ {l}", width = width).unwrap();
         }
         buf.push_str("```");
         Prose::new(buf)
@@ -132,10 +123,7 @@ fn detect_frontmatter_range(content: &str) -> Option<std::ops::Range<usize>> {
     // Find closing `---`
     let mut closing_idx = None;
     for (idx, line) in lines {
-        let trimmed = line
-            .trim_end_matches('\n')
-            .trim_end_matches('\r')
-            .trim();
+        let trimmed = line.trim_end_matches('\n').trim_end_matches('\r').trim();
         if trimmed == "---" {
             closing_idx = Some(idx);
             break;
@@ -186,16 +174,10 @@ mod tests {
     #[test]
     fn frontmatter_detection_basic() {
         let content = "---\ntitle: Test\n---\n# Body\n";
-        let ctx = SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            content,
-        );
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), content);
         assert!(ctx.frontmatter.is_some());
         let range = ctx.frontmatter.unwrap();
-        assert_eq!(&content[range],
-            "---\ntitle: Test\n---\n"
-        );
+        assert_eq!(&content[range], "---\ntitle: Test\n---\n");
     }
 
     #[test]
@@ -211,11 +193,7 @@ mod tests {
     #[test]
     fn frontmatter_prose_renders_yaml_block() {
         let content = "---\ntitle: Test\n---\n# Body\n";
-        let ctx = SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            content,
-        );
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), content);
         let prose = ctx.frontmatter_prose().unwrap();
         assert!(prose.content().starts_with("```yaml"));
         assert!(prose.content().contains("title: Test"));
@@ -224,11 +202,7 @@ mod tests {
     #[test]
     fn excerpt_prose_gutters_offending_line() {
         let content = "line 1\nline 2\nline 3\nline 4\nline 5\n";
-        let ctx = SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            content,
-        );
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), content);
         let prose = ctx.excerpt_prose(3, 1, "md");
         let text = prose.content();
         assert!(text.contains("> 3 │ line 3"));
@@ -239,11 +213,7 @@ mod tests {
     #[test]
     fn excerpt_prose_near_start() {
         let content = "line 1\nline 2\nline 3\n";
-        let ctx = SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            content,
-        );
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), content);
         let prose = ctx.excerpt_prose(1, 2, "md");
         let text = prose.content();
         assert!(text.contains("> 1 │ line 1"));
@@ -255,11 +225,7 @@ mod tests {
     fn frontmatter_detection_ends_at_eof() {
         // File ends immediately after the closing `---` with no trailing newline.
         let content = "---\ntitle: Test\n---";
-        let ctx = SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            content,
-        );
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), content);
         assert!(ctx.frontmatter.is_some());
         let range = ctx.frontmatter.as_ref().unwrap().clone();
         assert_eq!(&content[range], content);
@@ -272,11 +238,7 @@ mod tests {
     #[test]
     fn frontmatter_detection_crlf() {
         let content = "---\r\ntitle: Test\r\n---\r\n# Body\r\n";
-        let ctx = SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            content,
-        );
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), content);
         assert!(ctx.frontmatter.is_some());
         let range = ctx.frontmatter.unwrap();
         assert_eq!(&content[range], "---\r\ntitle: Test\r\n---\r\n");

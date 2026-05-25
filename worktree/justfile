@@ -9,6 +9,7 @@ import "../just/review.just"
 import "../just/notify.just"
 import "../just/ai.just"
 import "../just/devops.just"
+import "../just/spec.just"
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -27,7 +28,6 @@ CLI := lowercase(PACKAGE) + "-cli"
 DOCS := ""
 TODAY := `date +%F`
 
-
 default:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -37,7 +37,7 @@ default:
     fi
 
     echo
-    echo -e "{{BOLD}}{{PACKAGE}} ({{RESET}}Library & CLI{{BOLD}}){{RESET}}"
+    echo -e "{{ BOLD }}{{ PACKAGE }} ({{ RESET }}Library & CLI{{ BOLD }}){{ RESET }}"
     echo "======================================================================================"
     echo ""
     just --list | grep -v 'default'
@@ -46,13 +46,13 @@ default:
 # Build the library and CLI
 # Build the library and CLI
 build *args="":
-    @just _build worktree "Worktree Library" {{args}}
-    @just _build worktree-cli "Worktree CLI" {{args}}
+    @just _build worktree "Worktree Library" {{ args }}
+    @just _build worktree-cli "Worktree CLI" {{ args }}
 
 # Test both library and CLI.
 test:
     @just _test worktree
-    @just _test worktree-cli
+    @just _test worktree-cli --no-tests=pass
 
 # Lint both the library and CLI
 
@@ -65,20 +65,24 @@ lint-fix:
     @just _lint worktree || just _fix_lint worktree
     @just _lint worktree-cli || just _fix_lint worktree-cli
 
+# install the worktree CLI binary (wt)
+install:
+    @just build --release
+    @just _install "./cli" "Worktree (wt)"
+
 # Validate the source code without doing a full build
 check:
-    @cargo check -p {{LIBRARY}} -p {{CLI}}
+    @cargo check -p {{ LIBRARY }} -p {{ CLI }}
 
 # Show the dependencies for this package
 deps:
     @echo "Dependencies:"
-    @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{LIBRARY}}*:"
+    @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{ LIBRARY }}*:"
 
 # Build and open rustdoc
 docs:
-    @cargo doc -p {{LIBRARY}} --open
-
+    @cargo doc -p {{ LIBRARY }} --open
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{DIM}} {{TODAY}} {{DOCS}} >/dev/null || true
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ DIM }} {{ TODAY }} {{ DOCS }} >/dev/null || true

@@ -442,7 +442,8 @@ fn scan_one_frontmatter(
     let mut fm_clone = markdown.clone();
     let pre_interpolation_snapshot = prepare_frontmatter_for_compose(&mut fm_clone, options, true);
     if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
-        let _ = interpolate_frontmatter(fm_clone.frontmatter_mut(), options.context(), false);
+        let _ =
+            interpolate_frontmatter(fm_clone.frontmatter_mut(), options.context(), false, false);
     }
 
     let scan_ctx = fm_clone.source_context_for_errors();

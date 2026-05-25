@@ -1,6 +1,107 @@
 use crate::markdown::inline::{HorizontalRuleAttrs, InlineEvent};
+use crate::style::warning::{StyleWarning, StyleWarningKind};
 use pulldown_cmark::{Event, Tag, TagEnd};
 use std::collections::VecDeque;
+
+/// Parses a darkmatter HR-attribute paragraph body — `---|***|___` followed by
+/// an optional `{ ... }` attribute block — into [`HorizontalRuleAttrs`].
+///
+/// Returns `None` when `body` is not a recognized HR-attribute paragraph. The
+/// span-aware fold uses this to detect and rewrite HR-attribute paragraphs
+/// without re-implementing the matcher.
+#[must_use]
+pub fn try_parse_hr_attrs(body: &str) -> Option<HorizontalRuleAttrs> {
+    // The matcher requires an attribute block (`{ ... }`); a bare `---`
+    // already arrives from pulldown-cmark as `Event::Rule`, so this helper
+    // intentionally returns `None` for it.
+    let (_, attribute_str) = matches_horizontal_rule_pattern(body)?;
+    Some(parse_attribute_block(&attribute_str))
+}
+
+/// Matches `body` against the HR-attribute paragraph pattern, returning
+/// `(marker, attribute-string)` when the body is a single-line directive.
+fn matches_horizontal_rule_pattern(text: &str) -> Option<(String, String)> {
+    let trimmed = text.trim();
+    if trimmed.len() < 3 {
+        return None;
+    }
+    let first_char = trimmed.chars().next()?;
+    if !['-', '_', '*'].contains(&first_char) {
+        return None;
+    }
+    let mut marker_end = 0;
+    for (i, ch) in trimmed.char_indices() {
+        if ch != first_char {
+            marker_end = i;
+            break;
+        }
+    }
+    if marker_end == 0 {
+        marker_end = trimmed.len();
+    }
+    if marker_end < 3 {
+        return None;
+    }
+    let after_markers = trimmed[marker_end..].trim_start();
+    if !after_markers.starts_with('{') || !after_markers.ends_with('}') {
+        return None;
+    }
+    let attributes = after_markers[1..after_markers.len() - 1].trim();
+    let marker_str = trimmed[..marker_end].to_string();
+    Some((marker_str, attributes.to_string()))
+}
+
+/// Parses an HR attribute string (the content between `{` and `}`) into
+/// [`HorizontalRuleAttrs`] using the same YAML-flow-mapping logic as the
+/// in-place [`RuleProcessor::parse_attributes`] method.
+fn parse_attribute_block(attribute_str: &str) -> HorizontalRuleAttrs {
+    // This is a free-function clone of `RuleProcessor::parse_attributes` so
+    // the span-aware fold can call it without instantiating the generic
+    // processor.
+    if attribute_str.trim().is_empty() {
+        return HorizontalRuleAttrs::default();
+    }
+
+    let yaml_src = format!("{{ {attribute_str} }}");
+    match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&yaml_src) {
+        Ok(serde_yaml_ng::Value::Mapping(map)) => attrs_from_mapping(&map),
+        _ => HorizontalRuleAttrs::default(),
+    }
+}
+
+/// Builds [`HorizontalRuleAttrs`] from a YAML flow mapping, coercing scalars
+/// to strings and dropping unknown keys.
+fn attrs_from_mapping(map: &serde_yaml_ng::Mapping) -> HorizontalRuleAttrs {
+    let mut attrs = HorizontalRuleAttrs::default();
+    for (yaml_key, yaml_value) in map {
+        let Some(key) = yaml_value_as_string(yaml_key) else {
+            continue;
+        };
+        let Some(value) = yaml_value_as_string(yaml_value) else {
+            continue;
+        };
+        match key.as_str() {
+            "kind" => attrs.kind = Some(value),
+            "style" => attrs.legacy_style = Some(value),
+            "alignment" => attrs.alignment = Some(value),
+            "weight" => attrs.weight = Some(value),
+            "width" => attrs.width = Some(value),
+            "color" => attrs.color = Some(value),
+            _ => {}
+        }
+    }
+    attrs
+}
+
+/// Coerces a YAML scalar to a string, returning `None` for non-scalar shapes.
+fn yaml_value_as_string(value: &serde_yaml_ng::Value) -> Option<String> {
+    match value {
+        serde_yaml_ng::Value::String(s) => Some(s.clone()),
+        serde_yaml_ng::Value::Number(n) => Some(n.to_string()),
+        serde_yaml_ng::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
 
 /// Iterator adapter that processes paragraph events for horizontal rule syntax with attributes.
 ///
@@ -33,6 +134,29 @@ use std::collections::VecDeque;
 ///
 /// // The paragraph will be converted to a HorizontalRule event
 /// ```
+/// Scan markdown content for inline horizontal-rule deprecation warnings.
+///
+/// Runs the full inline event pipeline (pulldown-cmark → [`InlineStyleProcessor`]
+/// → [`RuleProcessor`]) and returns any deprecation warnings emitted for legacy
+/// inline `style` attributes (`--- { style: waves }`).
+///
+/// This is a preflight helper for `--strict-style`: callers can check the
+/// returned warnings before rendering and promote them to errors when strict
+/// mode is enabled.
+pub fn scan_inline_hr_warnings(content: &str) -> Vec<StyleWarning> {
+    let preprocessed = crate::markdown::inline::preprocess_escaped_markers(content);
+    let parser = pulldown_cmark::Parser::new_ext(
+        &preprocessed,
+        pulldown_cmark::Options::ENABLE_TABLES | pulldown_cmark::Options::ENABLE_STRIKETHROUGH,
+    );
+    let mut processor = RuleProcessor::new(crate::markdown::inline::InlineStyleProcessor::new(
+        parser,
+    ));
+    // Consume all events to populate warnings.
+    for _ in &mut processor {}
+    processor.warnings.into_iter().collect()
+}
+
 pub struct RuleProcessor<'a, I>
 where
     I: Iterator<Item = InlineEvent<'a>>,
@@ -45,6 +169,8 @@ where
     in_paragraph: bool,
     /// Track if the current paragraph has only text (no nested elements)
     paragraph_is_simple: bool,
+    /// Deprecation warnings collected while parsing inline HR attributes.
+    warnings: Vec<StyleWarning>,
 }
 
 impl<'a, I> RuleProcessor<'a, I>
@@ -59,7 +185,13 @@ where
             paragraph_buffer: Vec::new(),
             in_paragraph: false,
             paragraph_is_simple: true,
+            warnings: Vec::new(),
         }
+    }
+
+    /// Returns any deprecation warnings collected while parsing.
+    pub fn warnings(&self) -> &[StyleWarning] {
+        &self.warnings
     }
 
     /// Checks if the text matches the horizontal rule pattern with attributes.
@@ -188,7 +320,8 @@ where
             };
 
             match key.as_str() {
-                "style" => attrs.style = Some(value),
+                "kind" => attrs.kind = Some(value),
+                "style" => attrs.legacy_style = Some(value),
                 "alignment" => attrs.alignment = Some(value),
                 "weight" => attrs.weight = Some(value),
                 "width" => attrs.width = Some(value),
@@ -252,7 +385,8 @@ where
             };
 
             match key {
-                "style" => attrs.style = Some(clean_value),
+                "kind" => attrs.kind = Some(clean_value),
+                "style" => attrs.legacy_style = Some(clean_value),
                 "alignment" => attrs.alignment = Some(clean_value),
                 "weight" => attrs.weight = Some(clean_value),
                 "width" => attrs.width = Some(clean_value),
@@ -283,6 +417,14 @@ where
             && let Some((_, attributes)) = Self::matches_horizontal_rule_pattern(text)
         {
             let attrs = Self::parse_attributes(&attributes);
+            if attrs.legacy_style.is_some() {
+                self.warnings.push(StyleWarning::new(
+                    "hr.inline.style",
+                    StyleWarningKind::Deprecated {
+                        replacement: "hr.inline.kind".into(),
+                    },
+                ));
+            }
             self.pending.push_back(InlineEvent::HorizontalRule(attrs));
             return;
         }
@@ -363,7 +505,8 @@ mod tests {
         assert!(matches!(events[0], InlineEvent::HorizontalRule(_)));
 
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
-            assert_eq!(attrs.style, Some("waves".to_string()));
+            assert_eq!(attrs.legacy_style, Some("waves".to_string()));
+            assert_eq!(attrs.kind, None);
             assert_eq!(attrs.alignment, None);
             assert_eq!(attrs.weight, None);
             assert_eq!(attrs.width, None);
@@ -378,7 +521,8 @@ mod tests {
         assert!(matches!(events[0], InlineEvent::HorizontalRule(_)));
 
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
-            assert_eq!(attrs.style, Some("dots".to_string()));
+            assert_eq!(attrs.legacy_style, Some("dots".to_string()));
+            assert_eq!(attrs.kind, None);
             assert_eq!(attrs.alignment, Some("centered".to_string()));
             assert_eq!(attrs.weight, Some("thick".to_string()));
             assert_eq!(attrs.width, None);
@@ -497,7 +641,8 @@ mod tests {
         assert!(matches!(events[0], InlineEvent::HorizontalRule(_)));
 
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
-            assert_eq!(attrs.style, Some("line star".to_string()));
+            assert_eq!(attrs.legacy_style, Some("line star".to_string()));
+            assert_eq!(attrs.kind, None);
             assert_eq!(attrs.alignment, Some("left".to_string()));
         }
     }
@@ -509,7 +654,8 @@ mod tests {
         assert!(matches!(events[0], InlineEvent::HorizontalRule(_)));
 
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
-            assert_eq!(attrs.style, None);
+            assert_eq!(attrs.kind, None);
+            assert_eq!(attrs.legacy_style, None);
             assert_eq!(attrs.alignment, None);
             assert_eq!(attrs.weight, None);
             assert_eq!(attrs.width, None);
@@ -524,7 +670,8 @@ mod tests {
         assert!(matches!(events[0], InlineEvent::HorizontalRule(_)));
 
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
-            assert_eq!(attrs.style, Some("waves".to_string()));
+            assert_eq!(attrs.legacy_style, Some("waves".to_string()));
+            assert_eq!(attrs.kind, None);
         }
     }
 
@@ -550,7 +697,8 @@ mod tests {
     #[test]
     fn test_horizontal_rule_attrs_default() {
         let attrs = HorizontalRuleAttrs::default();
-        assert_eq!(attrs.style, None);
+        assert_eq!(attrs.kind, None);
+        assert_eq!(attrs.legacy_style, None);
         assert_eq!(attrs.alignment, None);
         assert_eq!(attrs.weight, None);
         assert_eq!(attrs.width, None);
@@ -560,14 +708,16 @@ mod tests {
     #[test]
     fn test_horizontal_rule_attrs_clone() {
         let attrs1 = HorizontalRuleAttrs {
-            style: Some("test".to_string()),
+            kind: Some("test".to_string()),
+            legacy_style: None,
             alignment: Some("centered".to_string()),
             weight: Some("medium".to_string()),
             width: Some("50%".to_string()),
             color: Some("red".to_string()),
         };
         let attrs2 = attrs1.clone();
-        assert_eq!(attrs1.style, attrs2.style);
+        assert_eq!(attrs1.kind, attrs2.kind);
+        assert_eq!(attrs1.legacy_style, attrs2.legacy_style);
         assert_eq!(attrs1.alignment, attrs2.alignment);
         assert_eq!(attrs1.weight, attrs2.weight);
         assert_eq!(attrs1.width, attrs2.width);
@@ -577,17 +727,110 @@ mod tests {
     #[test]
     fn test_horizontal_rule_attrs_partial() {
         let attrs = HorizontalRuleAttrs {
-            style: Some("waves".to_string()),
+            kind: None,
+            legacy_style: Some("waves".to_string()),
             alignment: None,
             weight: Some("thick".to_string()),
             width: None,
             color: Some("blue".to_string()),
         };
-        assert_eq!(attrs.style, Some("waves".to_string()));
+        assert_eq!(attrs.kind, None);
+        assert_eq!(attrs.legacy_style, Some("waves".to_string()));
         assert_eq!(attrs.alignment, None);
         assert_eq!(attrs.weight, Some("thick".to_string()));
         assert_eq!(attrs.width, None);
         assert_eq!(attrs.color, Some("blue".to_string()));
+    }
+
+    // Phase 2 / Sub-spec #6 — inline `kind` is canonical; `style` is deprecated.
+
+    #[test]
+    fn test_inline_kind_parses_without_warning() {
+        let mut processor = RuleProcessor::new(crate::markdown::inline::MarkProcessor::new(
+            pulldown_cmark::Parser::new("--- { kind: waves }"),
+        ));
+        let events: Vec<_> = processor.by_ref().collect();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], InlineEvent::HorizontalRule(_)));
+        if let InlineEvent::HorizontalRule(attrs) = &events[0] {
+            assert_eq!(attrs.kind, Some("waves".to_string()));
+            assert_eq!(attrs.legacy_style, None);
+        }
+        assert!(processor.warnings().is_empty());
+    }
+
+    #[test]
+    fn test_inline_legacy_style_emits_deprecation_warning() {
+        let mut processor = RuleProcessor::new(crate::markdown::inline::MarkProcessor::new(
+            pulldown_cmark::Parser::new("--- { style: waves }"),
+        ));
+        let events: Vec<_> = processor.by_ref().collect();
+        assert_eq!(events.len(), 1);
+        if let InlineEvent::HorizontalRule(attrs) = &events[0] {
+            assert_eq!(attrs.legacy_style, Some("waves".to_string()));
+            assert_eq!(attrs.kind, None);
+        }
+        assert_eq!(processor.warnings().len(), 1);
+        assert_eq!(processor.warnings()[0].path, "hr.inline.style");
+        assert!(
+            matches!(
+                &processor.warnings()[0].kind,
+                StyleWarningKind::Deprecated { replacement } if replacement == "hr.inline.kind"
+            ),
+            "expected Deprecated warning for inline style, got {:?}",
+            processor.warnings()[0].kind
+        );
+    }
+
+    #[test]
+    fn test_inline_kind_beats_legacy_style() {
+        let mut processor = RuleProcessor::new(crate::markdown::inline::MarkProcessor::new(
+            pulldown_cmark::Parser::new("--- { kind: dots, style: waves }"),
+        ));
+        let events: Vec<_> = processor.by_ref().collect();
+        assert_eq!(events.len(), 1);
+        if let InlineEvent::HorizontalRule(attrs) = &events[0] {
+            assert_eq!(attrs.kind, Some("dots".to_string()));
+            assert_eq!(attrs.legacy_style, Some("waves".to_string()));
+        }
+        // Legacy key is still present, so deprecation warning fires even when
+        // canonical wins.
+        assert_eq!(processor.warnings().len(), 1);
+    }
+
+    // ----- scan_inline_hr_warnings preflight -----
+
+    #[test]
+    fn scan_inline_hr_warnings_empty_for_clean_doc() {
+        let warnings = scan_inline_hr_warnings("# Hello\n\n---\n\nSome text.");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn scan_inline_hr_warnings_detects_legacy_style() {
+        let warnings = scan_inline_hr_warnings("--- { style: waves }");
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].path, "hr.inline.style");
+        assert!(
+            matches!(
+                &warnings[0].kind,
+                StyleWarningKind::Deprecated { replacement } if replacement == "hr.inline.kind"
+            )
+        );
+    }
+
+    #[test]
+    fn scan_inline_hr_warnings_detects_multiple_legacy_rules() {
+        let warnings = scan_inline_hr_warnings(
+            "--- { style: waves }\n\nSome text.\n\n--- { style: dots }\n",
+        );
+        assert_eq!(warnings.len(), 2);
+    }
+
+    #[test]
+    fn scan_inline_hr_warnings_empty_for_canonical_kind() {
+        let warnings = scan_inline_hr_warnings("--- { kind: waves }");
+        assert!(warnings.is_empty());
     }
 
     // Phase 5 B1: validation — unknown enum values are captured verbatim so the
@@ -601,7 +844,8 @@ mod tests {
         let events = process_text("--- { style: bogus }");
         assert_eq!(events.len(), 1);
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
-            assert_eq!(attrs.style, Some("bogus".to_string()));
+            assert_eq!(attrs.legacy_style, Some("bogus".to_string()));
+            assert_eq!(attrs.kind, None);
         } else {
             panic!("expected HorizontalRule event");
         }
@@ -636,7 +880,8 @@ mod tests {
         let events = process_text("--- { margin: 4 }");
         assert_eq!(events.len(), 1);
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
-            assert_eq!(attrs.style, None);
+            assert_eq!(attrs.kind, None);
+            assert_eq!(attrs.legacy_style, None);
             assert_eq!(attrs.alignment, None);
             assert_eq!(attrs.weight, None);
             assert_eq!(attrs.width, None);
@@ -684,7 +929,8 @@ mod tests {
         assert_eq!(events.len(), 1);
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
             // Unknown key is dropped with a warn.
-            assert_eq!(attrs.style, None);
+            assert_eq!(attrs.kind, None);
+            assert_eq!(attrs.legacy_style, None);
             assert_eq!(attrs.color, None);
         } else {
             panic!("expected HorizontalRule event");
@@ -699,7 +945,8 @@ mod tests {
         let events = process_text("--- { style: }");
         assert_eq!(events.len(), 1);
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
-            assert_eq!(attrs.style, None);
+            assert_eq!(attrs.kind, None);
+            assert_eq!(attrs.legacy_style, None);
             assert_eq!(attrs.alignment, None);
             assert_eq!(attrs.weight, None);
             assert_eq!(attrs.width, None);

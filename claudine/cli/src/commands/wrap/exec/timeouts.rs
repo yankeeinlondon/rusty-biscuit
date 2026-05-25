@@ -634,5 +634,4 @@ mod tests {
         assert_eq!(config.timeout, Some(Duration::from_secs(7200)));
         assert_eq!(config.step_timeout, Some(Duration::from_secs(1800)));
     }
-
 }

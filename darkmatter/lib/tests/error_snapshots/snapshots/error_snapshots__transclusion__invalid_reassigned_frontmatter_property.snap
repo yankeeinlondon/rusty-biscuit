@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+assertion_line: 262
 expression: out
 ---
-⨫ TransclusionError: duplicate frontmatter property
+⤫ TransclusionError: duplicate frontmatter property
 ┃ Duplicate assignment to property title found in:
 ┃ 
 ┃     5 │ line 5

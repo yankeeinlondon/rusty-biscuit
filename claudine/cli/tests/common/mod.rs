@@ -93,13 +93,30 @@ pub fn strip_ansi(input: &str) -> String {
 
     while let Some(ch) = chars.next() {
         if ch == '\u{1b}' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                for code in chars.by_ref() {
-                    if ('@'..='~').contains(&code) {
-                        break;
+            match chars.peek() {
+                Some(&'[') => {
+                    chars.next();
+                    for code in chars.by_ref() {
+                        if ('@'..='~').contains(&code) {
+                            break;
+                        }
                     }
                 }
+                Some(&']') => {
+                    chars.next();
+                    for code in chars.by_ref() {
+                        if code == '\u{7}' {
+                            break;
+                        }
+                        if code == '\u{1b}' {
+                            if chars.peek() == Some(&'\\') {
+                                chars.next();
+                            }
+                            break;
+                        }
+                    }
+                }
+                _ => {}
             }
             continue;
         }
@@ -107,6 +124,29 @@ pub fn strip_ansi(input: &str) -> String {
     }
 
     out
+}
+
+/// Probe for a usable pseudo-terminal on the host.
+///
+/// On Unix, attempts to open `/dev/ptmx` (the master multiplexer). Returns
+/// `true` when allocation succeeds, which is the precondition every
+/// `expectrl::Session::spawn` call in this crate's L2 PTY tests requires.
+/// On non-Unix targets returns `false` (the PTY test files are themselves
+/// `#[cfg(unix)]`, so this branch is unreachable from those tests).
+#[allow(dead_code)]
+pub fn pty_available() -> bool {
+    #[cfg(unix)]
+    {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/ptmx")
+            .is_ok()
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
 
 pub fn write_executable(path: &Path, content: &str) {

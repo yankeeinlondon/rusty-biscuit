@@ -33,8 +33,8 @@ exit 0
     (workspace, path_dir, md_file)
 }
 
-fn make_workspace_with_goose_inline()
--> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+fn make_workspace_with_goose_inline() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf)
+{
     // inline-compose requires a frontmatter `prompt:` property because
     // the prompt body is composed inline (a separate `prompt` block) and
     // injected into the agent invocation. The plain compose flow has no

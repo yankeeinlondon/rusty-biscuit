@@ -1,7 +1,8 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/reference.rs
+assertion_line: 71
 expression: out
 ---
-⨫ MarkdownError: transform failed
+⤫ MarkdownError: transform failed
 ┃ stalled
 Review the transform pipeline inputs and any configured rules.

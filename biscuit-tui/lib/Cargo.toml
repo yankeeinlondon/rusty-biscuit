@@ -17,3 +17,10 @@ nucleo-matcher = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# Opt-out of benchmarking: interactive TUI component library; performance
+# is dominated by terminal I/O and ratatui's own rendering, neither of
+# which benefit from per-crate microbenchmarks.
+[package.metadata.benchmarks]
+required = false
+reason = "Interactive TUI component library; no measurable hot paths."

@@ -50,15 +50,74 @@ build *args="":
     @just _build darkmatter "{{ LIB_NAME }}" {{ args }}
     @just _build darkmatter-cli "CLI_NAME" {{ args }}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity {{ LIBRARY }}
+    @just _sanity {{ CLI }}
+
 # Test both library and CLI.
 test *args="":
-    @just _test darkmatter {{ args }}
-    @just _test darkmatter-cli {{ args }}
+    @just _test {{ LIBRARY }} {{ args }}
+    @just _test {{ CLI }} {{ args }}
+
+# Level-2 (real-terminal) render-tree tests for both crates.
+#
+# By default, missing harnesses (WezTerm / tmux) cause the suite to skip
+# cleanly. Set `BISCUIT_TEST_LEVEL_REQUIRED=2` in the environment to convert
+# missing harnesses into hard failures (CI use).
+test-l2 *args="":
+    @echo
+    @echo -e "Running {{ BOLD }}Level-2{{ RESET }} render-tree terminal tests"
+    @echo -e "{{ DIM }}- export BISCUIT_TEST_LEVEL_REQUIRED=2 to hard-fail on missing harness{{ RESET }}"
+    @echo
+    @just _test_l2 {{ LIBRARY }} {{ args }}
+    @just _test_l2 {{ CLI }} {{ args }}
+
+# not applicable: darkmatter has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for darkmatter"
+
+# Headless-browser tests (chromiumoxide). Selects every `browser_*` test in
+# the library crate. Skips cleanly when Chrome is absent unless
+# `BISCUIT_BROWSER_REQUIRED=1` is set.
+test-browser *args="":
+    @just _test_browser {{ LIBRARY }} {{ args }}
+
+# not applicable: darkmatter has no real-resource (device / network) tier
+test-real:
+    @echo "test-real: not applicable for darkmatter"
 
 # Lint both the library and CLI
 lint:
-    @just _lint darkmatter
-    @just _lint darkmatter-cli
+    @just _lint {{ LIBRARY }}
+    @just _lint {{ CLI }}
+
+# Per-package LCOV coverage for the library and CLI.
+coverage *args="":
+    @just _coverage {{ LIBRARY }} {{ args }}
+    @just _coverage {{ CLI }} {{ args }}
+
+# Doctests for the library and CLI.
+doctest *args="":
+    @just _doctest {{ LIBRARY }} {{ args }}
+    @just _doctest {{ CLI }} {{ args }}
+
+# Fuzz target for darkmatter markdown parser.
+fuzz *args="":
+    @just _fuzz lib markdown_parser {{ args }}
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
 commit:
@@ -91,6 +150,35 @@ install *args="":
 # Validate the source code without doing a full build
 check:
     @cargo check -p {{ LIBRARY }} -p {{ CLI }}
+
+# ---------- benchmarking + profiling ----------
+
+# run the full Criterion bench suite for darkmatter
+bench *args="":
+    @echo -e "Running Criterion benches for {{ BOLD }}{{ LIB_NAME }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} --benches -- {{ args }}
+
+# run only the schema validation benches (1000-doc corpus, warm + cold cache)
+bench-schema *args="":
+    @cargo bench -p {{ LIBRARY }} --bench schema_validation -- {{ args }}
+
+# run only the compose pipeline benches (per-stage isolation)
+bench-compose *args="":
+    @cargo bench -p {{ LIBRARY }} --bench compose_pipeline -- {{ args }}
+
+# run only the render pipeline benches (parse, terminal, html, highlight)
+bench-render *args="":
+    @cargo bench -p {{ LIBRARY }} --bench render_pipeline -- {{ args }}
+
+# capture a saved baseline for trend tracking (usage: `just bench-baseline main`)
+bench-baseline name:
+    @echo -e "Saving Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} --benches -- --save-baseline {{ name }}
+
+# compare current bench timings against a saved baseline
+bench-compare name:
+    @echo -e "Comparing against Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} --benches -- --baseline {{ name }}
 
 # Run the latest debug build of the Claudine CLI
 cli *args="":

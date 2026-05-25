@@ -20,3 +20,8 @@ chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["full"] }
 wiremock = "0.6"
 tempfile = "3"
+
+# Opt-out of benchmarking: this crate has no algorithmic hot paths.
+[package.metadata.benchmarks]
+required = false
+reason = "OAuth flow helper dominated by HTTP round-trips; no measurable in-process hot paths."

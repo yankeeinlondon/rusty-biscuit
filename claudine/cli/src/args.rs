@@ -107,4 +107,6 @@ pub(crate) enum Commands {
     InlineCompose(commands::compose::InlineComposeArgs),
     /// Run a serial sequence of composition steps from a single document.
     Sequence(commands::sequence::SequenceArgs),
+    /// Show Darkmatter runtime context, expression engine, and side effects.
+    Context(commands::context::ContextArgs),
 }

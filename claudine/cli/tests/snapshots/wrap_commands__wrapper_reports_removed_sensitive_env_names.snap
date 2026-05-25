@@ -15,38 +15,13 @@ Environment Variables:
 • INTERACTIVE=true
 • PACKAGE=claudine-cli
 • PACKAGE_AREA=claudine
+• PWD=/Users/ken/.claudine/worktrees/rusty-biscuit/renderable/
 • YOLO=false
 
 - Info: potentially dangerous ENV variables were removed; if you need one of
    these to be included use the --include <ENV> CLI switch
-System Prompt(appended):
-  ▌ ## Context
-  ▌ 
-  ▌ - you are working in the **rusty-biscuit** monorepo
-  ▌ - this session was started with a focus on the **claudine** package area
-  ▌ 
-  ▌     - you must use the 'claudine' agent skill
-  ▌ 
-  ▌ ## Best Practices
-  ▌ 
-  ▌ - when rendering to the terminal use the `biscuit-terminal` and
-  ▌ `darkmatter` skills!
-  ▌ 
-  ▌     - leverage the [`Prose`](biscuit-terminal/docs/components/prose.md)
-  ▌ struct from biscuit-terminal for rich text (color, style), hyperlinks
-  ▌ (OS8), and more
-  ▌ 
-  ▌ - when attempting to do host discovery (hardware, software, os, file-
-  ▌ system, repo/git) you should use the `sniff` skill
-  ▌ - when doing file conversions between JSON, YAML, TOML always use the
-  ▌ `biscuit-file` skill
-  ▌ - whenever you are attempt to convert a string based file reference to a
-  ▌ real file path in the filesystem you should use `FileReference` struct
-  ▌ from `biscuit-file` and use the `biscuit-file` skill
-  ▌ - when a package area has both a library and CLI (as many do) the naming
-  ▌ convention is:
-  ▌ 
-  ▌     - `{name}` for library
-  ▌     - `{name}-cli` for the CLI
+ 📔 System Prompt(appended) 
+  The system prompt was appended to; the content was composed from ./system-prom
+  pt.md. The composed system prompt is roughly 280 tokens.
 
 ✓ Pre-flight checks have passed

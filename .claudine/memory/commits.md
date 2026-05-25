@@ -26,10 +26,13 @@ description: A record of novel things learned about how to best perform commits 
 
 - `git commit --only -m "message" -- path1 path2` is the recommended form when committing a specific subset of staged files. Always use `--only` to explicitly limit the commit to only the named paths.
 - All options must come before the `--` pathspec separator. `git commit --only -- path -m "message"` is wrong because `-m` is then parsed as a path.
-- For committing a single file with path-limiting, use `git commit -m "message" -- path` without `--only`. The `--only` flag is mutually exclusive with a single pathspec argument in git.
+- `git commit -m "message" -- path` WITHOUT `--only` commits ALL staged files, not just the named paths. The paths after `--` are purely to disambiguate `-m` from a path argument; they do not scope the commit. Always use `--only` when committing specific staged files:
+  - `git commit --only -m "message" -- path1 path2` — commits only path1 and path2
+  - `git commit -m "message" -- path1 path2` — commits ALL staged files (the paths are informational only)
 - Quote paths that contain spaces when passing them to `git commit`.
-- Be careful with renames. Committing only the new path records an add and leaves the delete staged. Committing only the old path records the delete but leaves the new file staged as an add. To preserve a rename atomically, either commit without path-limiting (let git infer the paths) or include both old and new paths explicitly.
-  - **Recovery:** If you accidentally committed only the new path (leaving old paths staged as deleted), stage those deletions and make a separate cleanup commit: `git commit -m "chore: complete rename" -- <old_path1> <old_path2>`.
+- Be careful with renames. When files are staged as renamed (R100), `git commit --only` with only the new path can produce incomplete commits that record only the deletion of the old path, not the addition of the new path. To preserve a rename atomically, either commit without path-limiting (let git infer the paths) or include both old and new paths explicitly.
+  - **Recovery:** If a rename commit only recorded deletions (missing the new files), extract the file content from the index blobs directly and create a new commit. Use `git ls-files --stage` to find blob hashes, `git show <hash> > path` to restore content, then `git add` and `git commit` normally.
+  - **Better approach for multi-agent workflows:** Avoid using `--only` with renamed files. Instead, have the orchestrator stage files one group at a time and have subagents commit sequentially, rather than pre-staging all groups and using concurrent `--only` commits.
 - `git commit --only -m "message" -- path` also works for a newly added file, as long as the file has already been staged.
 
 ## History and Verification
@@ -49,13 +52,16 @@ description: A record of novel things learned about how to best perform commits 
     - Without `--only`, concurrent commits are unsafe because `git commit path` commits the path AND removes it from the staging area, racing against other agents.
     - With `--only`, concurrent commits are safe because only the specified paths are committed; other staged files remain staged.
 - If another worker already committed some assigned files, a later commit may legitimately report `nothing to commit`. That does not mean the earlier commit was missing.
+- **Staged file overlap with concurrent agents:** When using concurrent subagents with pre-staged files, if ANY subagent uses `git commit` without `--only` (e.g., to handle renames atomically), it will commit ALL currently staged files, potentially including files assigned to other semantic groups. In this session, the kickoff docs commit (handling R100 renames without `--only`) inadvertently included the spec files that were semantically group 6. Either stage files one-group-at-a-time sequentially, or ensure no subagent needs to bypass `--only` for rename handling when running concurrent agents against the same pre-staged set.
 - Auto-formatting workflows (e.g., rustfmt on save) may pre-commit files before an orchestrator assigns them. If a subagent finds no staged changes for an assigned file, it was likely auto-committed by a formatting hook.
 - **Concurrent `git commit` invocations can hit `.git/index.lock: File exists` (or `refs/heads/<branch>.lock`)** even when each uses `--only`. Git's locks are fail-fast, not queuing. This is not corruption — wait 1–3 seconds and retry the same `git commit --only ...` command. Up to 5 retries with short backoff is a reasonable budget. Always brief subagents on this retry policy when dispatching parallel commits.
 - **`git log -1` after a concurrent commit may show a sibling subagent's commit, not yours.** Verify your own commit landed by capturing the hash from the `git commit` output and using `git show <hash>` or `git log --oneline -N` (with N large enough to span the parallel batch), not by assuming HEAD points at your work.
+- **Merge-in-progress state blocks `--only` partial commits.** When the repo is in a merge state (conflicts resolved, merge not yet committed), `git commit --only` cannot do partial commits — Git requires a full merge commit to conclude the merge. Subagents should detect this with `git status` (look for "All conflicts fixed but are still committing") and either complete the merge first or stage files one-group-at-a-time sequentially. The orchestrator should verify no merge is in progress before launching concurrent subagents.
 
 ## Git Path Handling in Workspaces
 
 - When the worktree is a Cargo workspace member (e.g., running from `darkmatter/darkmatter/`), git interprets relative paths as relative to the current working directory, not the repo root. Use paths relative to the workspace member directory when committing from within a package subdirectory, not paths from the repo root like `darkmatter/lib/src/...`.
+- **Never `cd` out of the current git worktree to run inspection commands.** The wrapper has already placed you at the worktree root. Specifically, do NOT prefix `sniff repo` (or any other diagnostic) with `cd ~/.claudine/worktrees/<repo>/` — that path is the *parent* directory containing all linked worktrees of `<repo>` and is OUTSIDE the active worktree. OpenCode's permission engine treats it as `external_directory` and surfaces a permission ask (auto-allowed under `--dangerously-skip-permissions` but noise either way). All sniff and git subcommands are already worktree-aware; run them plainly from the inherited cwd.
 
 ## Shell Gotchas
 

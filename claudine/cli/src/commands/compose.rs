@@ -6,6 +6,14 @@
 //! Both commands are thin request builders that delegate to
 //! [`execute_composition_request`] for wrapper-grade execution.
 
+// `CompositionError` carries variants with several `PathBuf` and other
+// owned fields (e.g. `LoopIterationFailed`, `LoopRateLimited`) so the
+// enum-on-the-stack is sizable. Boxing the inner data would ripple
+// through every existing call site for marginal benefit; the closures
+// in this file legitimately propagate the typed error and that's the
+// shape they need to keep.
+#![allow(clippy::result_large_err)]
+
 use std::collections::BTreeSet;
 
 use clap::Args;
@@ -77,7 +85,14 @@ pub struct SharedComposeArgs {
     pub exclude: Vec<Provider>,
 
     /// Enable provider-specific YOLO/auto-approval mode.
-    #[arg(short = 'y', long)]
+    ///
+    /// `CLAUDINE_YOLO=true` (or `=1`, `=yes`, `=on`) in the environment
+    /// is equivalent to passing `--yolo` on the command line; both
+    /// activate the same single intent signal that drives the provider's
+    /// native bypass flag. The legacy short `YOLO` env var is no longer
+    /// honored here — the reporter previously read it independently,
+    /// producing diverging signals between launch behavior and reporting.
+    #[arg(short = 'y', long, env = "CLAUDINE_YOLO")]
     pub yolo: bool,
 
     /// Run the provider session in interactive mode.
@@ -172,6 +187,40 @@ pub struct SharedComposeArgs {
     /// Maximum number of loop iterations (overrides `loop.max` frontmatter).
     #[arg(long = "max-iterations", value_name = "N")]
     pub max_iterations: Option<usize>,
+
+    /// What to do when a completed loop iteration reports a provider
+    /// rate-limit signal. Overrides `loop.on_rate_limit` frontmatter.
+    ///
+    /// `pause` (default) sleeps until the provider's reset time, then runs
+    /// the next iteration. `abort` halts the loop with a structured error
+    /// (exit code 75 — `EX_TEMPFAIL`). `continue` proceeds without pausing.
+    /// If `reset_at` is missing or already past, `pause` falls back to
+    /// `abort` to avoid unbounded sleeps.
+    #[arg(long = "on-rate-limit", value_name = "POLICY", value_enum)]
+    pub on_rate_limit: Option<OnRateLimitArg>,
+}
+
+/// CLI-facing wrapper for [`claudine::composition::OnRateLimit`], exposed
+/// as a [`clap::ValueEnum`] so that `--on-rate-limit` accepts the canonical
+/// `pause | abort | continue` tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum OnRateLimitArg {
+    /// Pause until the provider's reset time, then continue (default).
+    Pause,
+    /// Halt the loop with a structured error (exit code 75).
+    Abort,
+    /// Proceed without pausing.
+    Continue,
+}
+
+impl From<OnRateLimitArg> for claudine::composition::OnRateLimit {
+    fn from(value: OnRateLimitArg) -> Self {
+        match value {
+            OnRateLimitArg::Pause => Self::Pause,
+            OnRateLimitArg::Abort => Self::Abort,
+            OnRateLimitArg::Continue => Self::Continue,
+        }
+    }
 }
 
 impl SharedComposeArgs {
@@ -287,7 +336,7 @@ fn run_compose_inner(
     // existing execution header's detail rules — which include emitting
     // the brief one-liner — so the banner appears under `--quiet`.
     if !shared.silent {
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::components::status::Status;
         let term = crate::log::terminal();
         let status = Status::from_prose(format!("→ Composing {file}…"));
@@ -402,6 +451,10 @@ fn run_compose_inner(
             .max_iterations
             .or(claudine::composition::resolve_max_iterations_from_env()),
         fail_fast: claudine::composition::resolve_fail_fast_from_env(),
+        on_rate_limit: shared.on_rate_limit.map(Into::into),
+        // Engine polls this during rate-limit pause sleeps so Ctrl+C
+        // surfaces as `LoopInterrupted` instead of waiting out the timer.
+        interrupt_check: Some(crate::output::user_interrupt_observed),
     };
 
     let file_for_loop = file.clone();
@@ -461,20 +514,24 @@ fn run_compose_inner(
                 None,
                 shared.perf,
             )
-            .map_err(|e| claudine::composition::CompositionError::LoopInvalid(e.to_string()))?;
+            .map_err(|e| {
+                // Pre-spawn execution wiring failed (binary lookup, env
+                // build, etc.). Surface as an iteration failure — these
+                // are runtime problems, not malformed loop frontmatter.
+                claudine::composition::CompositionError::LoopIterationFailed {
+                    iteration: ctx.iteration,
+                    prompt_path: source.resolved_path.clone(),
+                    exit_code: 1,
+                    reason: e.to_string(),
+                    exit_reason: None,
+                }
+            })?;
 
-            if outcome.exit_code == 0 {
-                Ok(claudine::composition::LoopIterationOutput::success(""))
-            } else {
-                Ok(claudine::composition::LoopIterationOutput::failure(
-                    "",
-                    outcome.exit_code,
-                    claudine::composition::CompositionError::LoopInvalid(format!(
-                        "provider exited with code {}",
-                        outcome.exit_code
-                    )),
-                ))
-            }
+            Ok(build_loop_iteration_output(
+                ctx.iteration,
+                &source.resolved_path,
+                outcome,
+            ))
         })?
     {
         if let Some(error) = loop_result.error {
@@ -486,6 +543,18 @@ fn run_compose_inner(
                 claudine::composition::CompositionError::LoopInterrupted { .. }
             ) {
                 return Ok(loop_result.final_exit_code);
+            }
+            // Rate-limit halt has its own conventional exit code
+            // (`EX_TEMPFAIL` = 75) so shell wrappers can recognize a
+            // transient halt and retry-after-cool-off. Render the styled
+            // error block inline, then return `Ok(75)` so the outer
+            // process exits with the right code.
+            if matches!(
+                error,
+                claudine::composition::CompositionError::LoopRateLimited { .. }
+            ) {
+                emit_rate_limit_halt(&error);
+                return Ok(claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE);
             }
             return Err(error.into());
         }
@@ -533,13 +602,13 @@ fn run_compose_inner(
         silent: shared.silent,
         env_overrides,
         shared_approval_cache: Some(shared_approval_cache),
-                sequence: false,
-                installed_snapshot: Some(prep_context.installed_snapshot.clone()),
-                prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
-                prep_launch_context: Some(prep_context.launch_context.clone()),
-                prep_env_context: Some(prep_context.env_context.clone()),
-                prep_launch_detection_error: prep_context.launch_detection_error.clone(),
-            };
+        sequence: false,
+        installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+        prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+        prep_launch_context: Some(prep_context.launch_context.clone()),
+        prep_env_context: Some(prep_context.env_context.clone()),
+        prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+    };
 
     if let Some(ref mut timings) = startup_timings {
         timings.prep_phase = compose_entry.elapsed();
@@ -565,7 +634,7 @@ fn run_inline_compose_inner(
     // existing execution header's detail rules — which include emitting
     // the brief one-liner — so the banner appears under `--quiet`.
     if !shared.silent {
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::components::status::Status;
         let term = crate::log::terminal();
         let status = Status::from_prose(format!("→ Composing {file}…"));
@@ -712,6 +781,10 @@ fn run_inline_compose_inner(
             .max_iterations
             .or(claudine::composition::resolve_max_iterations_from_env()),
         fail_fast: claudine::composition::resolve_fail_fast_from_env(),
+        on_rate_limit: shared.on_rate_limit.map(Into::into),
+        // Engine polls this during rate-limit pause sleeps so Ctrl+C
+        // surfaces as `LoopInterrupted` instead of waiting out the timer.
+        interrupt_check: Some(crate::output::user_interrupt_observed),
     };
 
     let file_for_loop = file.clone();
@@ -771,20 +844,24 @@ fn run_inline_compose_inner(
                 None,
                 shared.perf,
             )
-            .map_err(|e| claudine::composition::CompositionError::LoopInvalid(e.to_string()))?;
+            .map_err(|e| {
+                // Pre-spawn execution wiring failed (binary lookup, env
+                // build, etc.). Surface as an iteration failure — these
+                // are runtime problems, not malformed loop frontmatter.
+                claudine::composition::CompositionError::LoopIterationFailed {
+                    iteration: ctx.iteration,
+                    prompt_path: source.resolved_path.clone(),
+                    exit_code: 1,
+                    reason: e.to_string(),
+                    exit_reason: None,
+                }
+            })?;
 
-            if outcome.exit_code == 0 {
-                Ok(claudine::composition::LoopIterationOutput::success(""))
-            } else {
-                Ok(claudine::composition::LoopIterationOutput::failure(
-                    "",
-                    outcome.exit_code,
-                    claudine::composition::CompositionError::LoopInvalid(format!(
-                        "provider exited with code {}",
-                        outcome.exit_code
-                    )),
-                ))
-            }
+            Ok(build_loop_iteration_output(
+                ctx.iteration,
+                &source.resolved_path,
+                outcome,
+            ))
         })?
     {
         if let Some(error) = loop_result.error {
@@ -796,6 +873,18 @@ fn run_inline_compose_inner(
                 claudine::composition::CompositionError::LoopInterrupted { .. }
             ) {
                 return Ok(loop_result.final_exit_code);
+            }
+            // Rate-limit halt has its own conventional exit code
+            // (`EX_TEMPFAIL` = 75) so shell wrappers can recognize a
+            // transient halt and retry-after-cool-off. Render the styled
+            // error block inline, then return `Ok(75)` so the outer
+            // process exits with the right code.
+            if matches!(
+                error,
+                claudine::composition::CompositionError::LoopRateLimited { .. }
+            ) {
+                emit_rate_limit_halt(&error);
+                return Ok(claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE);
             }
             return Err(error.into());
         }
@@ -856,6 +945,72 @@ fn run_inline_compose_inner(
     }
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
+}
+
+/// Render a `LoopRateLimited` error inline so the user sees the styled
+/// halt notice before the wrapper exits with `EX_TEMPFAIL`.
+fn emit_rate_limit_halt(error: &claudine::composition::CompositionError) {
+    use biscuit_terminal::errors::BlockError;
+    let term = crate::log::terminal();
+    let rendered = error.report_block_error(&term);
+    crate::log::message("");
+    crate::log::message(&rendered);
+    crate::log::message("");
+}
+
+/// Translate a [`SingleCompositionOutcome`] into a
+/// [`claudine::composition::LoopIterationOutput`] that the loop engine can
+/// inspect for rate-limit policy and honest error classification.
+///
+/// On a non-zero `outcome.exit_code` this builds a
+/// [`claudine::composition::CompositionError::LoopIterationFailed`] with a
+/// `reason` and `exit_reason` pulled from the iteration's session_end
+/// signals (e.g. `step_timeout`) — never the old
+/// `LoopInvalid("provider exited with code N")` overload, which was
+/// reserved for malformed `loop:` frontmatter.
+///
+/// Always attaches the iteration's rate-limit trailer and
+/// provider/model attribution so the engine can apply the configured
+/// [`claudine::composition::OnRateLimit`] policy between iterations.
+fn build_loop_iteration_output(
+    iteration: usize,
+    prompt_path: &std::path::Path,
+    outcome: super::wrap::composition::SingleCompositionOutcome,
+) -> claudine::composition::LoopIterationOutput {
+    let signals = outcome.iteration_signals.unwrap_or_default();
+    let rate_limit = signals.rate_limit.clone();
+    let exit_reason = signals.exit_reason.clone();
+    let provider_id = signals.provider_id.clone();
+    let model_id = signals.model_id.clone();
+
+    if outcome.exit_code == 0 {
+        claudine::composition::LoopIterationOutput::success("")
+            .with_rate_limit(rate_limit)
+            .with_exit_reason(exit_reason)
+            .with_attribution(provider_id, model_id)
+    } else {
+        // Build a human-readable cause that surfaces the structured
+        // exit_reason at the top. Watchdog detail (e.g. "no stream
+        // activity for 30m; terminating due to step_timeout") rides
+        // along on the next line.
+        let reason = match (&exit_reason, &signals.error_message) {
+            (Some(kind), Some(detail)) => format!("{kind}\n  ↳ {detail}"),
+            (Some(kind), None) => kind.clone(),
+            (None, Some(detail)) => detail.clone(),
+            (None, None) => "provider exited non-zero".to_string(),
+        };
+        let error = claudine::composition::CompositionError::LoopIterationFailed {
+            iteration,
+            prompt_path: prompt_path.to_path_buf(),
+            exit_code: outcome.exit_code,
+            reason,
+            exit_reason: exit_reason.clone(),
+        };
+        claudine::composition::LoopIterationOutput::failure("", outcome.exit_code, error)
+            .with_rate_limit(rate_limit)
+            .with_exit_reason(exit_reason)
+            .with_attribution(provider_id, model_id)
+    }
 }
 
 /// Run a composition loop with CLI `--set` / shorthand setter overrides
@@ -1029,7 +1184,7 @@ pub(crate) fn install_user_interrupt_guard(prompt_argv: &str) -> UserInterruptGu
 /// canonicalisation fails (path doesn't exist yet, permission denied,
 /// etc.) we fall back to a plain (non-hyperlinked) prose line.
 fn format_user_interrupt_message(prompt_argv: &str) -> String {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::components::status::{Status, StatusState};
 
     let absolute = std::env::current_dir()

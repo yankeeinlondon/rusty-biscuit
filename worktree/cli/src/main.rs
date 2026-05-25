@@ -3,7 +3,7 @@ mod commands;
 
 use args::{Cli, Commands};
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable as _;
+use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
@@ -34,6 +34,11 @@ fn run() -> Result<(), worktree::WorktreeError> {
         Commands::List => commands::list(width, verbose),
         Commands::Create { branch, stay } => commands::create(&branch, stay),
         Commands::Go { name, .. } => commands::go(&name),
+        Commands::Remove {
+            name,
+            force,
+            branch,
+        } => commands::remove(&name, force, branch),
     }
 }
 

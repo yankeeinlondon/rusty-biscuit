@@ -8,7 +8,9 @@ use crate::discovery::raw_mode::{RawModeGuard, TERMINAL_QUERY_MUTEX};
 use crate::discovery::detection::{TerminalApp, get_terminal_app, is_tty};
 use crate::discovery::os_detection::is_ci;
 
-use super::parse::{ansi_index_to_rgb, parse_colorfgbg, parse_osc_color_response};
+#[cfg(unix)]
+use super::parse::parse_osc_color_response;
+use super::parse::{ansi_index_to_rgb, parse_colorfgbg};
 use super::types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};
 
 /// Human-readable name for an OSC color query code.
@@ -36,6 +38,9 @@ pub(super) fn query_osc_color(code: u8) -> Option<RgbValue> {
 
 /// Query terminal color with a custom timeout.
 pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Option<RgbValue> {
+    // Silence unused warning on non-Unix platforms; used inside #[cfg(unix)] below.
+    let _ = timeout;
+
     // Skip if not a TTY or in CI
     if !is_tty() {
         tracing::debug!(code, "OSC{} query skipped: not a TTY", code);
@@ -205,6 +210,7 @@ pub(super) fn detect_multiplexer() -> Option<&'static str> {
 #[cfg(unix)]
 pub fn query_osc_actual(code: u8, timeout: Duration) -> Result<RgbValue, OscQueryError> {
     use std::io::{Read, Write};
+    use std::os::unix::io::AsRawFd;
 
     // Pre-flight checks
     if !is_tty() {
@@ -217,28 +223,38 @@ pub fn query_osc_actual(code: u8, timeout: Duration) -> Result<RgbValue, OscQuer
         return Err(OscQueryError::Multiplexer(mux.to_string()));
     }
 
+    // Open /dev/tty for the query I/O so the request bytes reach the
+    // controlling terminal even when stdout is redirected to a pipe (as
+    // happens when the binary is invoked under `output="$(...)"`).
+    // Writing to `std::io::stdout()` there would land the query in the
+    // captured stream; the terminal would never receive it; and any
+    // wrapper re-emitting `$output` later would trigger a delayed reply
+    // that arrives as garbage on the next shell prompt.
+    let mut tty = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .map_err(|e| OscQueryError::IoError(format!("open /dev/tty: {e}")))?;
+    let fd = tty.as_raw_fd();
+
     let _lock = TERMINAL_QUERY_MUTEX
         .lock()
         .map_err(|_| OscQueryError::IoError("terminal query mutex poisoned".into()))?;
 
-    let _guard = RawModeGuard::stdin().map_err(OscQueryError::IoError)?;
+    let _guard = RawModeGuard::new(fd).map_err(OscQueryError::IoError)?;
 
     let query = format!("\x1b]{};?\x07", code);
-    let mut stdout = std::io::stdout();
-    stdout
-        .write_all(query.as_bytes())
+    tty.write_all(query.as_bytes())
         .map_err(|e| OscQueryError::IoError(e.to_string()))?;
-    stdout
-        .flush()
+    tty.flush()
         .map_err(|e| OscQueryError::IoError(e.to_string()))?;
 
     let mut buffer = [0u8; 64];
     let mut response = Vec::new();
     let start = std::time::Instant::now();
-    let mut stdin = std::io::stdin();
 
     while start.elapsed() < timeout {
-        match stdin.read(&mut buffer) {
+        match tty.read(&mut buffer) {
             Ok(0) => {
                 std::thread::sleep(Duration::from_millis(10));
             }

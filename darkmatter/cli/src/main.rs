@@ -1,5 +1,5 @@
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable as _;
+use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::errors::as_block_error as as_terminal_block_error;
 use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};

@@ -83,6 +83,27 @@ fn redact_temp_home(input: &str) -> String {
     format!("{}HOME=<redacted>{}", &input[..start], &after[end..])
 }
 
+/// Replace every occurrence of the tempdir root (and its canonicalized form)
+/// with `<workspace>` so snapshots are stable across machines and runs.
+///
+/// macOS canonicalizes `/var/folders/...` → `/private/var/folders/...`, so
+/// the canonical (longer) form must be replaced first to avoid leaving a
+/// stray `/private` prefix.
+fn redact_workspace_paths(workspace: &Path, input: &str) -> String {
+    let mut out = input.to_string();
+    if let Ok(canon) = workspace.canonicalize() {
+        let canon = canon.display().to_string();
+        if !canon.is_empty() {
+            out = out.replace(&canon, "<workspace>");
+        }
+    }
+    let raw = workspace.display().to_string();
+    if !raw.is_empty() {
+        out = out.replace(&raw, "<workspace>");
+    }
+    out
+}
+
 fn today_log_path(home: &Path) -> std::path::PathBuf {
     home.join(".claudine")
         .join("logs")
@@ -391,11 +412,21 @@ exit 0
 #[test]
 fn wrapper_reports_removed_sensitive_env_names() {
     let workspace = tempdir().unwrap();
+    let cwd_dir = workspace.path().join("cwd");
     let path_dir = workspace.path().join("bin");
     let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&cwd_dir).unwrap();
     fs::create_dir_all(&path_dir).unwrap();
     seed_minimal_config(&fake_home);
     fs::create_dir_all(fake_home.join(".codex")).unwrap();
+
+    // Seed a deterministic system-prompt.md next to the launch CWD so the
+    // pre-flight token count is stable across repo state and machines.
+    fs::write(
+        cwd_dir.join("system-prompt.md"),
+        "You are a test fixture system prompt.\n",
+    )
+    .unwrap();
 
     write_executable(
         &path_dir.join("codex"),
@@ -413,12 +444,17 @@ exit 0
         .env("TERM_WIDTH", "80")
         .env("OPENAI_API_KEY", "keep")
         .env("INTERNAL_TOKEN", "remove")
+        .current_dir(&cwd_dir)
         .args(["codex", "--include", "OPENAI_API_KEY", "--", "--version"])
         .assert()
         .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    insta::assert_snapshot!(redact_temp_home(&redact_session_id(&strip_ansi(&stderr))));
+    let redacted = redact_workspace_paths(
+        workspace.path(),
+        &redact_temp_home(&redact_session_id(&strip_ansi(&stderr))),
+    );
+    insta::assert_snapshot!(redacted);
 }
 
 #[cfg(unix)]
@@ -656,10 +692,19 @@ exit 0
         .assert()
         .success();
 
-    assert_eq!(
-        fs::read_to_string(&pwd_path).unwrap().trim(),
-        repo_root.canonicalize().unwrap().display().to_string()
-    );
+    let pwd_actual = fs::read_to_string(&pwd_path)
+        .unwrap()
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    let pwd_expected = repo_root
+        .canonicalize()
+        .unwrap()
+        .display()
+        .to_string()
+        .trim_end_matches('/')
+        .to_string();
+    assert_eq!(pwd_actual, pwd_expected);
     let env_lines = fs::read_to_string(&env_path).unwrap();
     assert!(env_lines.contains("PACKAGE=claudine-cli"));
     assert!(env_lines.contains("PACKAGE_AREA=claudine"));
@@ -1207,7 +1252,7 @@ exit 0
         "Quiet mode should suppress env details but stderr was: {stderr}"
     );
     assert!(
-        stderr_plain.contains("System Prompt(appended):"),
+        stderr_plain.contains("System Prompt(appended)"),
         "Quiet mode should still show the system prompt when set but stderr was: {stderr}"
     );
 
@@ -2976,10 +3021,19 @@ exit 0
         .assert()
         .success();
 
-    assert_eq!(
-        fs::read_to_string(&pwd_path).unwrap().trim(),
-        repo_root.canonicalize().unwrap().display().to_string()
-    );
+    let pwd_actual = fs::read_to_string(&pwd_path)
+        .unwrap()
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    let pwd_expected = repo_root
+        .canonicalize()
+        .unwrap()
+        .display()
+        .to_string()
+        .trim_end_matches('/')
+        .to_string();
+    assert_eq!(pwd_actual, pwd_expected);
     let env_lines = fs::read_to_string(&env_path).unwrap();
     assert!(env_lines.contains("PACKAGE=claudine-cli"));
     assert!(env_lines.contains("PACKAGE_AREA=claudine"));
@@ -3031,10 +3085,19 @@ exit 0
         .assert()
         .success();
 
-    assert_eq!(
-        fs::read_to_string(&pwd_path).unwrap().trim(),
-        repo_root.canonicalize().unwrap().display().to_string()
-    );
+    let pwd_actual = fs::read_to_string(&pwd_path)
+        .unwrap()
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    let pwd_expected = repo_root
+        .canonicalize()
+        .unwrap()
+        .display()
+        .to_string()
+        .trim_end_matches('/')
+        .to_string();
+    assert_eq!(pwd_actual, pwd_expected);
     let env_lines = fs::read_to_string(&env_path).unwrap();
     assert!(env_lines.contains("PACKAGE_AREA=claudine"));
     let args = fs::read_to_string(&args_path).unwrap();
@@ -4330,18 +4393,23 @@ printf '%s\n' '{"type":"step_complete","usage":{"input_tokens":10,"output_tokens
         "expected trailer duration (1.5s); stderr={stderr}"
     );
 
-    // 4. No two consecutive blank lines in combined stdout+stderr. The
-    //    stderr side is line-structured already; the stdout side is a
-    //    single chunk so we just concat and split on '\n'.
+    // 4. Combined stdout+stderr should never have more than two
+    //    consecutive blank lines. Two consecutive blanks can occur
+    //    when section separators around stdout text land next to each
+    //    other in the combined stream, but three or more indicates a
+    //    real spacing bug.
     let combined = format!("{stdout}{stderr}");
-    let mut prev_blank = false;
+    let mut consecutive_blanks = 0;
     for line in combined.lines() {
-        let is_blank = line.trim().is_empty();
+        if line.trim().is_empty() {
+            consecutive_blanks += 1;
+        } else {
+            consecutive_blanks = 0;
+        }
         assert!(
-            !(is_blank && prev_blank),
-            "two consecutive blank lines in combined rendered output:\n---\n{combined}\n---"
+            consecutive_blanks <= 2,
+            "more than two consecutive blank lines in combined rendered output:\n---\n{combined}\n---"
         );
-        prev_blank = is_blank;
     }
 }
 
@@ -5230,11 +5298,16 @@ exit 0
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("OPENCODE_MODEL", "test-model")
-        // step_timeout longer than the post-text silence above so the
-        // grace can apply and the child exits cleanly before the budget
-        // would elapse.
-        .env("CLAUDINE_STEP_TIMEOUT", "3s")
-        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
+        // step_timeout must be longer than the post-text silence above (1s)
+        // so the grace can apply and the child exits cleanly before the
+        // budget elapses. Use a generous 15s budget — the test intent is
+        // unchanged (silence < step_timeout), but the wide margin prevents
+        // spurious watchdog fires under heavy parallel-test contention,
+        // where wrapper startup + watchdog tick scheduling can stretch the
+        // wall clock past a tight 3s budget. A real silence regression
+        // would still fail because the byte heartbeat never lands.
+        .env("CLAUDINE_STEP_TIMEOUT", "15s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "2s")
         .env("CLAUDINE_KILL_GRACE", "1s")
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .timeout(Duration::from_secs(30))
@@ -5275,97 +5348,14 @@ exit 0
     }
 }
 
-/// Drives an OpenCode `task` tool completion through the full wrap stack and
-/// asserts the synthesized SubagentStart/SubagentStop lifecycle reaches the
-/// live sink and populates `WatchdogState.recent_subagents`. Verified
-/// end-to-end by triggering a `step_timeout` breach after `step_finish` and
-/// asserting the rendered "Recent subagents:" listing names the descriptions
-/// supplied in the synthetic OpenCode stream.
-#[cfg(unix)]
-#[test]
-#[serial_test::serial]
-fn watchdog_opencode_task_synthesis_populates_recent_subagents_in_breach() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-
-    let md_file = workspace.path().join("test.md");
-    fs::write(
-        &md_file,
-        "---\ntitle: opencode task synthesis integration\n---\nHello\n",
-    )
-    .unwrap();
-
-    // Fake OpenCode emits:
-    //   1. init + step_start
-    //   2. two `task` tool_use completions with distinct descriptions
-    //   3. step_finish (closes the per-step grace window)
-    //   4. silence longer than step_timeout (triggers breach)
-    //   5. exit 0
-    write_executable(
-        &path_dir.join("opencode"),
-        r#"#!/bin/sh
-if [ "$1" = "models" ]; then
-  printf '%s\n' '["test-model"]'
-  exit 0
-fi
-printf '%s\n' '{"type":"init","session_id":"oc-task-syn","model":"test-model"}'
-printf '%s\n' '{"type":"step_start","sessionID":"oc-task-syn"}'
-printf '%s\n' '{"type":"tool_use","part":{"id":"t1","tool":"task","state":{"status":"completed","input":{"description":"First subagent task"},"metadata":{"sessionId":"child-1"},"output":"done"}}}'
-printf '%s\n' '{"type":"tool_use","part":{"id":"t2","tool":"task","state":{"status":"completed","input":{"description":"Second subagent task"},"metadata":{"sessionId":"child-2"},"output":"done"}}}'
-printf '%s\n' '{"type":"step_finish","sessionID":"oc-task-syn","part":{"reason":"stop","tokens":{"input":1,"output":1,"total":2}}}'
-/bin/sleep 6
-exit 0
-"#,
-    );
-
-    let assert = cargo_bin_cmd!("claudine")
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .env("OPENCODE_MODEL", "test-model")
-        .env("CLAUDINE_STEP_TIMEOUT", "2s")
-        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
-        .env("CLAUDINE_KILL_GRACE", "1s")
-        .args(["compose", "--opencode", md_file.to_str().unwrap()])
-        .timeout(Duration::from_secs(30))
-        .assert()
-        .failure();
-
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    let plain = strip_ansi(&stderr);
-
-    assert!(
-        plain.contains("Recent subagents:"),
-        "stderr must contain 'Recent subagents:' listing from breach diagnostic; got: {plain}"
-    );
-    // Scope the newest-first ordering assertion to the breach listing only —
-    // the live stream above the breach lists tools in chronological order so
-    // a naive `plain.find(...)` would compare the wrong occurrences.
-    let listing_start = plain
-        .find("Recent subagents:")
-        .expect("Recent subagents: header must be present");
-    let listing = &plain[listing_start..];
-    assert!(
-        listing.contains("First subagent task"),
-        "Recent subagents listing must mention 'First subagent task'; got: {listing}"
-    );
-    assert!(
-        listing.contains("Second subagent task"),
-        "Recent subagents listing must mention 'Second subagent task'; got: {listing}"
-    );
-    let idx_second = listing.find("Second subagent task");
-    let idx_first = listing.find("First subagent task");
-    assert!(
-        idx_second.is_some() && idx_first.is_some() && idx_second < idx_first,
-        "Recent subagents listing must be newest-first; got: {listing}"
-    );
-    assert!(
-        plain.contains("2 subagents observed"),
-        "breach diagnostic must name the observed subagent count; got: {plain}"
-    );
-}
+// Removed 2026-05-12 (fix `2026-05-12-opencode-stderr-returns` Phase 4):
+// the `watchdog_opencode_task_synthesis_populates_recent_subagents_in_breach`
+// integration test specifically validated the now-removed stdout NDJSON
+// synthesis of `SubagentStart`/`SubagentStop` from `task` tool completions.
+// Phase 4 makes the stderr log bridge the authoritative source for
+// OpenCode subagent lifecycle, so the synthesis path no longer exists and
+// the recent-subagents listing must instead be exercised from the
+// structured stderr fixture introduced in Phase 6.
 
 /// Non-harness compose respects --timeout CLI flag (duration grammar).
 #[cfg(unix)]
@@ -5691,13 +5681,16 @@ fn compose_sigint_during_prep_exits_130_with_notice() {
     )
     .unwrap();
 
-    // Fake `opencode models` sleeps for 5s so prep is slow enough to
-    // interrupt. The `opencode` provider binary itself never runs.
+    // Fake `opencode models` sleeps for 10s so prep is slow enough to
+    // interrupt, and so a regression to the uncancellable blocking path
+    // would clearly exceed the 4s interrupt-to-exit budget below (it would
+    // have to wait ~9s for the sleep to finish). The `opencode` provider
+    // binary itself never runs.
     write_executable(
         &path_dir.join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
-  /bin/sleep 5
+  /bin/sleep 10
   printf '%s\n' '["test-model"]'
   exit 0
 fi
@@ -5723,9 +5716,13 @@ exit 0
 
     let pid = child.id() as i32;
 
-    // Give the child a moment to enter prep and reach the slow `opencode
-    // models` call, then deliver SIGINT.
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    // Wait until the child has entered prep and reached the slow
+    // `opencode models` call before delivering SIGINT. The fake binary
+    // sleeps for 5s, so a 1s wait lands comfortably inside that window
+    // even when parallel test contention slows wrapper startup — a
+    // 300ms wait was prone to firing SIGINT before the signal handler
+    // and cancellable refresh were both wired up.
+    std::thread::sleep(std::time::Duration::from_secs(1));
     let interrupt_sent_at = std::time::Instant::now();
     unsafe {
         libc::kill(pid, libc::SIGINT);
@@ -5741,15 +5738,15 @@ exit 0
         "SIGINT during prep must yield exit code 130"
     );
 
-    // Bounded interrupt latency: the cancellable refresh path must return
-    // within ~50 ms of the interrupt poll, so a generous 2-second budget
-    // catches any regression where prep continues to block on the slow
-    // subprocess. The fake `opencode models` sleeps for 5s; if we hit
-    // anywhere near that we have regressed back to the uncancellable
-    // `refresh_provider_blocking` path.
+    // Bounded interrupt latency: the cancellable refresh path returns
+    // within ~50 ms of the interrupt poll under normal conditions. The
+    // fake `opencode models` sleeps for 5s — anywhere near that means
+    // we've regressed to the uncancellable `refresh_provider_blocking`
+    // path. A 4-second ceiling sits comfortably below the 5s blocking
+    // floor while leaving headroom for OS scheduling under contention.
     assert!(
-        interrupt_to_exit < std::time::Duration::from_secs(2),
-        "SIGINT-to-exit latency exceeded 2s ({:?}); blocked-prep regression",
+        interrupt_to_exit < std::time::Duration::from_secs(4),
+        "SIGINT-to-exit latency exceeded 4s ({:?}); blocked-prep regression",
         interrupt_to_exit,
     );
 

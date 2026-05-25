@@ -31,7 +31,7 @@ use schematic_define::params::{EndpointParams, QueryParamType};
 use schematic_define::{
     ApiRequest, ApiResponse, AuthStrategy, Endpoint, FormField, RestApi, RestMethod, Schema,
 };
-use schematic_gen::postman_output::{build_postman_collection, build_postman_collection_grouped};
+use schematic_gen::export::postman::{build_postman_collection, build_postman_collection_grouped};
 use serde_json::Value;
 
 // --- Schema validator ------------------------------------------------------

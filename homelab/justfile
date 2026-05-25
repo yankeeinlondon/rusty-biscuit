@@ -54,14 +54,86 @@ build *args="":
     @cargo build -p homelab -p homelab-cli -p homelab-server -p unfolded-integration-helper -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration {{args}}
 
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity homelab
+    @just _sanity homelab-cli
+    @just _sanity homelab-server
+    @just _sanity unfolded-integration-helper
+    @just _sanity arcam-amp-integration
+    @just _sanity eversolo-integration
+    @just _sanity sony-receiver-integration
+
 # run tests for Homelab packages
 test *args="":
-    @echo ""
-    @echo -e "Testing {{BOLD}}Homelab{{RESET}} ({{ITALIC}}Library, Homey CLI, Server{{RESET}})"
-    @echo "-----------------------------------------------"
-    @echo ""
-    @cargo test -p homelab -p homelab-cli -p homelab-server -p unfolded-integration-helper -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration {{args}}
+    @just _test homelab {{ args }}
+    @just _test homelab-cli {{ args }}
+    @just _test homelab-server {{ args }}
+    @just _test unfolded-integration-helper {{ args }}
+    @just _test arcam-amp-integration {{ args }}
+    @just _test eversolo-integration {{ args }}
+    @just _test sony-receiver-integration {{ args }}
     @just test-frontend
+
+# not applicable: homelab has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for homelab"
+
+# not applicable: homelab has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for homelab"
+
+# not applicable today; planned with the homelab-server SPA
+test-browser:
+    @echo "test-browser: not applicable for homelab yet"
+
+# Real-device integration tests (read-only). See test-integrations-real-base
+# for the legacy single-shot form retained for backwards compatibility.
+test-real *args="":
+    @just _test_real arcam-amp-integration {{ args }}
+    @just _test_real sony-receiver-integration {{ args }}
+    @just _test_real eversolo-integration {{ args }}
+
+# not applicable: homelab has no criterion benches (work is device-bound I/O)
+bench:
+    @echo "bench: not applicable for homelab"
+
+# Per-package LCOV coverage across the homelab crates.
+coverage *args="":
+    @just _coverage homelab {{ args }}
+    @just _coverage homelab-cli {{ args }}
+    @just _coverage homelab-server {{ args }}
+    @just _coverage unfolded-integration-helper {{ args }}
+    @just _coverage arcam-amp-integration {{ args }}
+    @just _coverage eversolo-integration {{ args }}
+    @just _coverage sony-receiver-integration {{ args }}
+
+# Doctests across the homelab crates.
+doctest *args="":
+    @just _doctest homelab {{ args }}
+    @just _doctest homelab-cli {{ args }}
+    @just _doctest homelab-server {{ args }}
+    @just _doctest unfolded-integration-helper {{ args }}
+    @just _doctest arcam-amp-integration {{ args }}
+    @just _doctest eversolo-integration {{ args }}
+    @just _doctest sony-receiver-integration {{ args }}
+
+# not applicable: homelab has no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for homelab"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # run opt-in ignored tests against real devices
 test-integrations-real-base *args="":
@@ -205,10 +277,7 @@ server *args="":
 
 # run tests for server only
 test-server *args="":
-    @echo ""
-    @echo "Testing {{BOLD}}Homelab Server{{RESET}}"
-    @echo ""
-    @cargo test -p homelab-server {{args}}
+    @just _test homelab-server {{ args }}
 
 
 # build frontend SPA (installs deps if needed)

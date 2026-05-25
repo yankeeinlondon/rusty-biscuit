@@ -1,0 +1,2 @@
+$schema:
+  flag: [boolean(required), string]

@@ -11,7 +11,7 @@ use std::path::Path;
 
 use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
-use biscuit_terminal::prelude::Renderable;
+use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use serde::{Deserialize, Serialize};
 use tracing::warn;

@@ -20,3 +20,9 @@ strum = { version = "0.28", features = ["derive"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# Opt-out of benchmarking: code-generation binary; runs offline against
+# provider APIs and has no runtime hot paths worth tracking.
+[package.metadata.benchmarks]
+required = false
+reason = "Code-generation binary; no measurable hot paths."

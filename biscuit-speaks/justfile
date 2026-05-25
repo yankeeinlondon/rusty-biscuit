@@ -47,15 +47,68 @@ build *args="":
     @just _build biscuit-speaks "Biscuit Speaks Library" {{args}}
     @just _build biscuit-speaks-cli "Biscuit Speaks CLI" {{args}}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity biscuit-speaks
+    @just _sanity biscuit-speaks-cli
+
 # Test both library and CLI.
 test *args="":
-    @just _test claudine {{args}}
-    @just _test claudine-cli {{args}}
+    @just _test biscuit-speaks {{args}}
+    @just _test biscuit-speaks-cli {{args}}
+
+# not applicable: biscuit-speaks has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for biscuit-speaks"
+
+# not applicable: biscuit-speaks has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for biscuit-speaks"
+
+# not applicable: biscuit-speaks emits audio, not HTML
+test-browser:
+    @echo "test-browser: not applicable for biscuit-speaks"
+
+# Real-resource TTS provider tests. Skip-clean when provider credentials absent.
+test-real *args="":
+    @just _test_real biscuit-speaks {{args}}
+    @just _test_real biscuit-speaks-cli {{args}}
 
 # Lint both the library and CLI
 lint:
     @just _lint biscuit-speaks
     @just _lint biscuit-speaks-cli
+
+# not applicable: no criterion benches (audio synthesis is provider-bound)
+bench:
+    @echo "bench: not applicable for biscuit-speaks"
+
+# Per-package LCOV coverage for the library and CLI.
+coverage *args="":
+    @just _coverage biscuit-speaks {{args}}
+    @just _coverage biscuit-speaks-cli {{args}}
+
+# Doctests for the library and CLI.
+doctest *args="":
+    @just _doctest biscuit-speaks {{args}}
+    @just _doctest biscuit-speaks-cli {{args}}
+
+# not applicable: no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for biscuit-speaks"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # Lint (and fix) both the library and CLI
 lint-fix:

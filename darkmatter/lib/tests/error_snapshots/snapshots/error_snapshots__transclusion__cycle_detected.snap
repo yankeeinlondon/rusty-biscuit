@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+assertion_line: 138
 expression: out
 ---
-⨫ TransclusionError: cycle detected
+⤫ TransclusionError: cycle detected
 ┃ Chain:
 ┃ 
 ┃   a.md :line 3

@@ -52,9 +52,16 @@
 use std::env;
 use std::io;
 use std::process::{Command, Stdio};
+use std::sync::Once;
 use std::time::Duration;
 
-use super::{CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, TerminalHarness, run_with_timeout};
+use super::{
+    CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, TerminalHarness, current_process_id,
+    pid_from_tag, process_is_alive, run_with_timeout,
+};
+
+const WINDOW_TITLE_PREFIX: &str = "biscuit-test-terminal-";
+static CLEANUP_ONCE: Once = Once::new();
 
 /// Harness that drives Terminal.app via `osascript`.
 ///
@@ -79,6 +86,7 @@ use super::{CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, TerminalHarness, run_
 /// keystrokes being typed into the test window.
 pub struct AppleTerminalHarness {
     window_id: Option<i64>,
+    window_tag: Option<String>,
     preserve_capabilities: bool,
 }
 
@@ -89,6 +97,7 @@ impl AppleTerminalHarness {
     pub fn new() -> Self {
         Self {
             window_id: None,
+            window_tag: None,
             preserve_capabilities: false,
         }
     }
@@ -147,6 +156,7 @@ impl AppleTerminalHarness {
     /// Best-effort: errors are surfaced via `eprintln!` so a stuck
     /// window in CI is diagnosable, but they are not propagated up.
     fn close_window(&mut self) {
+        self.window_tag = None;
         if let Some(id) = self.window_id.take() {
             let script = format!(
                 "tell application \"Terminal\" to close (every window whose id is {id}) saving no",
@@ -180,14 +190,12 @@ impl AppleTerminalHarness {
                             .args(["-e", &check])
                             .stdout(Stdio::null())
                             .stderr(Stdio::null());
-                        if let Ok(out) = run_with_timeout(&mut check_cmd, Duration::from_secs(2)) {
-                            if out.status.success() {
-                                if let Ok(s) = std::str::from_utf8(&out.stdout) {
-                                    if s.trim() == "0" {
-                                        break;
-                                    }
-                                }
-                            }
+                        if let Ok(out) = run_with_timeout(&mut check_cmd, Duration::from_secs(2))
+                            && out.status.success()
+                            && let Ok(s) = std::str::from_utf8(&out.stdout)
+                            && s.trim() == "0"
+                        {
+                            break;
                         }
                     }
                 }
@@ -212,6 +220,60 @@ impl AppleTerminalHarness {
             )));
         }
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+}
+
+/// Removes stale Terminal.app windows created by earlier
+/// [`AppleTerminalHarness`] instances whose owning test process no longer
+/// exists.
+///
+/// Windows created by current harness versions are tagged with a custom title
+/// of `biscuit-test-terminal-<pid>-<seq>`. Cleanup only closes tagged windows
+/// whose `<pid>` is dead, leaving interactive Terminal.app windows and active
+/// concurrent test runs alone.
+pub fn cleanup_stale_apple_terminal_windows() {
+    if !AppleTerminalHarness::available() {
+        return;
+    }
+    let script = format!(
+        r#"set out to ""
+        tell application "Terminal"
+            repeat with w in windows
+                try
+                    set t to custom title of w
+                    if t starts with "{prefix}" then
+                        set out to out & ((id of w) as text) & tab & t & linefeed
+                    end if
+                end try
+            end repeat
+        end tell
+        return out"#,
+        prefix = WINDOW_TITLE_PREFIX,
+    );
+    let Ok(stdout) = AppleTerminalHarness::run_script(&script) else {
+        return;
+    };
+    for line in stdout.lines() {
+        let Some((id, title)) = line.split_once('\t') else {
+            continue;
+        };
+        let Ok(id) = id.parse::<i64>() else {
+            continue;
+        };
+        let Some(pid) = pid_from_tag(title, WINDOW_TITLE_PREFIX) else {
+            continue;
+        };
+        if pid == current_process_id() || process_is_alive(pid) {
+            continue;
+        }
+        let close = format!(
+            "tell application \"Terminal\" to close (every window whose id is {id}) saving no",
+        );
+        let mut cmd = Command::new("osascript");
+        cmd.args(["-e", &close])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
     }
 }
 
@@ -257,12 +319,14 @@ impl TerminalHarness for AppleTerminalHarness {
         if !Self::available() {
             return Err(io::Error::other("Terminal.app via osascript not available"));
         }
+        CLEANUP_ONCE.call_once(cleanup_stale_apple_terminal_windows);
         // Brief pause to let Terminal.app settle after any preceding
         // window close. AppleScript window operations are asynchronous
         // inside Terminal.app; spawning immediately after a close can
         // race on stale window lists.
         std::thread::sleep(Duration::from_millis(300));
         let shell = super::detect_shell();
+        let window_tag = unique_window_tag();
         let mut shell_cmd = String::new();
 
         if let Some(bin_dir) =
@@ -325,6 +389,9 @@ impl TerminalHarness for AppleTerminalHarness {
                 set newTab to do script "{cmd}"
                 delay 0.3
                 set winId to id of front window
+                try
+                    set custom title of front window to "{window_tag}"
+                end try
             end tell
             if prevApp is not "" and prevApp is not "Terminal" then
                 try
@@ -333,12 +400,14 @@ impl TerminalHarness for AppleTerminalHarness {
             end if
             return winId as text"#,
             cmd = applescript_escape(&shell_cmd),
+            window_tag = applescript_escape(&window_tag),
         );
         let stdout = Self::run_script(&script)?;
         let id: i64 = stdout
             .parse()
             .map_err(|e| io::Error::other(format!("unparseable window id {stdout:?}: {e}")))?;
         self.window_id = Some(id);
+        self.window_tag = Some(window_tag);
 
         // Poll for the shell prompt instead of sleeping a fixed
         // 800 ms — `wait_for_prompt` returns early once `$`/`#`/`%`
@@ -488,6 +557,13 @@ fn is_applescript_safe(ch: char) -> bool {
     )
 }
 
+fn unique_window_tag() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("{WINDOW_TITLE_PREFIX}{}-{n}", current_process_id())
+}
+
 /// Wraps `s` in single quotes and escapes embedded single quotes using
 /// the POSIX `'\''` trick, matching the convention used by
 /// [`crate::TerminalHarness::send_command_with_env`].
@@ -564,6 +640,13 @@ mod tests {
     #[test]
     fn shell_quote_embedded_single_quote() {
         assert_eq!(shell_quote("it's"), r"'it'\''s'");
+    }
+
+    #[test]
+    fn unique_window_tag_includes_harness_prefix_and_pid() {
+        let tag = unique_window_tag();
+        assert!(tag.starts_with(WINDOW_TITLE_PREFIX));
+        assert_eq!(pid_from_tag(&tag, WINDOW_TITLE_PREFIX), Some(current_process_id()));
     }
 
     /// On non-macOS hosts `available()` must be false unconditionally so

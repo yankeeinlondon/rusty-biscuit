@@ -74,7 +74,10 @@ exit 0
     let n = stderr.read(&mut buf).expect("read stderr");
     let ttff = started.elapsed();
 
-    assert!(n > 0, "first stderr read returned 0 bytes (process exited silently)");
+    assert!(
+        n > 0,
+        "first stderr read returned 0 bytes (process exited silently)"
+    );
 
     // Drain the rest in the background so the child doesn't stall
     // waiting on a full pipe.
@@ -93,8 +96,7 @@ exit 0
     );
     let received = String::from_utf8_lossy(&buf[..n]);
     assert!(
-        received.contains("→ Composing")
-            || received.contains("Composing"),
+        received.contains("→ Composing") || received.contains("Composing"),
         "first stderr chunk should be the receipt banner; got: {received:?}",
     );
 }

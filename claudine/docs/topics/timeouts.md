@@ -401,12 +401,15 @@ inert).
 | Gemini | parsed | parsed | (n/a — Gemini does not expose subagents) | (n/a) | parsed | parsed |
 | Goose | parsed | parsed | (n/a) | (n/a) | parsed | parsed |
 | Kimi Code | parsed | parsed | (n/a) | (n/a) | parsed | parsed |
-| OpenCode | **silent** | parsed | **silent** | parsed | parsed | parsed |
+| OpenCode | **silent** | parsed | **stderr-promoted** | **stderr-promoted** | parsed | parsed |
 | Qwen Code | parsed | parsed | (n/a) | (n/a) | parsed | parsed |
 | Roo Code | parsed | parsed | parsed | parsed | parsed | parsed |
 
 The OpenCode row is the structurally important one and is detailed
-below.
+below. "stderr-promoted" entries mean the event is not on stdout NDJSON
+but is reconstructed from OpenCode's structured stderr stream — see
+[OpenCode Event Sources](../../../.claude/skills/claudine/opencode-event-sources.md)
+for the full signal-to-event mapping.
 
 ### OpenCode
 
@@ -421,11 +424,13 @@ emitted in practice by current OpenCode releases.
 
 The functional consequence: during OpenCode runs,
 `LiveMetricsState.in_flight` and `in_flight_subagents` are **never
-populated**. The in-flight gate from
-[Stuck-aware suppression](#stuck-aware-suppression) is a no-op for
-OpenCode — there is nothing for the gate to suppress against. Two
-complementary mechanisms compensate so legitimate work is not
-misclassified as a hang:
+populated from stdout NDJSON**. The in-flight gate from
+[Stuck-aware suppression](#stuck-aware-suppression) is a no-op for the
+stdout source on OpenCode. **Four** complementary mechanisms compensate
+so legitimate work is not misclassified as a hang and the silence-rule
+diagnostic still has signal to report. Mechanisms 1–3 keep the silence
+clock honest; mechanism 4 reconstructs lifecycle visibility from a
+second source:
 
 1. **Raw-byte heartbeat.** The byte-stream clock `last_byte_at` (see
    [Raw-byte clock](#raw-byte-clock-last_byte_at)) refreshes whenever
@@ -442,12 +447,30 @@ misclassified as a hang:
    first step. The wall-clock `timeout` rule is **not** suppressed; it
    remains the unconditional backstop. The guard fires only for
    OpenCode; richer-stream providers do not need it.
-3. **Synthesized subagent lifecycle.** When OpenCode completes a
-   `task` tool, Claudine synthesizes `SubagentStart` → `SubagentStop`
-   events from the `tool_use` payload so the breach diagnostic can
-   report how many subagents have been observed and when the last one
-   finished, even though OpenCode never emits native `task_started` /
-   `task_completed` events.
+3. **Synthesized subagent lifecycle (legacy path, removed).** Earlier
+   releases synthesized `SubagentStart` → `SubagentStop` from the
+   `task` `tool_use` payload at completion time. That path was removed
+   on 2026-05-12 (fix: `2026-05-12-opencode-stderr-returns`) in favor
+   of the stderr-promoted lifecycle below; it is documented here only
+   to clarify why the NDJSON parser no longer emits subagent events
+   for `task` completions.
+4. **Stderr-promoted activity and lifecycle.** Claudine opts the
+   OpenCode wrapper into the structured stderr stream
+   (`--print-logs --log-level INFO`) and classifies INFO log records
+   through [`OpenCodeLogBridge`](../../lib/src/stream/logs/opencode/reasoning.rs).
+   Boot, `service=session` (parent + child), `service=llm` LLM calls,
+   `service=session.prompt` step loops and exits, `service=permission`
+   evaluations, and `service=default` HTTP responses are promoted to
+   `SemanticEvent` variants. Every promoted event is in
+   `SemanticEvent::is_activity()` so the structured-event clock
+   (`last_event_at`) advances throughout long NDJSON silences, and
+   subagent lifecycle is reconstructed by emitting `SubagentStart`
+   when a `parentID`-bearing session is created and `SubagentStop`
+   when its `service=session.prompt ... exiting loop` closure
+   arrives. `service=bus` lines are filtered before classification —
+   they refresh the byte heartbeat only. See
+   [OpenCode Event Sources](../../../.claude/skills/claudine/opencode-event-sources.md)
+   for the full mapping table and dedup rules.
 
 This matters most for two flow shapes:
 
@@ -527,3 +550,55 @@ budget for the next run:
 ```sh
 CLAUDINE_STEP_TIMEOUT=2m claudine compose ...
 ```
+
+## Loop iteration failures: honest classification
+
+When `claudine compose --loop` runs across multiple iterations and the
+**inner provider exits non-zero**, the top-level error reports the
+*actual* cause — `step_timeout`, `wall-clock timeout`, signal, or a
+plain provider exit — pulled from the iteration's session_end JSONL
+row (`extra.exit_reason`). The phrase `invalid loop definition` is
+reserved for malformed `loop:` frontmatter and **never** appears for
+runtime failures.
+
+```text
+Error: loop iteration 2 of fixes/.../plan.md: step_timeout (exit code 1)
+       ↳ no stream activity for 30m 0s; terminating due to step_timeout
+```
+
+Practically: if a long `cargo test` (or any tool) inside an iteration
+trips the silence watchdog, the resulting error names the silence rule
+that fired — not the loop frontmatter. Loop-config validation errors
+still surface as `LoopInvalid` as before.
+
+## Loop iteration rate-limit handling
+
+When a completed iteration emits a provider rate-limit trailer
+(`summary.rate_limit.is_throttled = true`), the loop engine consults
+the **`on_rate_limit` policy** between iterations:
+
+| Policy     | Behavior                                                                                                                  |
+|------------|---------------------------------------------------------------------------------------------------------------------------|
+| `pause`    | Default. Sleep until `reset_at` + 5s safety margin, then run the next iteration. If `reset_at` is missing or already past, falls back to `abort` to avoid an unbounded sleep. The pause is interruptible by Ctrl+C. |
+| `abort`    | Halt the loop with a structured `LoopRateLimited` error. Exits with code `75` (`EX_TEMPFAIL` from `sysexits.h`) so shell wrappers can distinguish a transient rate-limit halt from a generic non-zero exit. |
+| `continue` | Run the next iteration immediately, ignoring the trailer. Reserved for soft per-request limits that won't recur; not recommended as a default. |
+
+Set the policy at the document level via `loop.on_rate_limit:` in
+frontmatter, or override per run with `--on-rate-limit <pause|abort|continue>`.
+CLI > frontmatter > default precedence applies, identical to
+`--max-iterations` and `--step-timeout`.
+
+```yaml
+---
+loop:
+    until: "phase > total_phases"
+    action: increment(phase)
+    on_rate_limit: pause   # default; values: pause | abort | continue
+---
+```
+
+The check runs against every completed iteration regardless of exit
+code — including successful ones — because providers commonly attach
+rate-limit trailers after a successful completion summary. On the very
+last iteration the policy is skipped (the loop is about to exit
+anyway, so pausing or aborting would be a false positive).

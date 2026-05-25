@@ -660,7 +660,7 @@ mod tests {
 "#;
 
         let versions = parse_changelog_file(content);
-        assert!(versions.len() >= 1);
+        assert!(!versions.is_empty());
         assert!(versions.iter().any(|v| v.version == "1.0.0"));
     }
 

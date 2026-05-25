@@ -15,6 +15,8 @@
 
 #![allow(dead_code)]
 
+use std::time::{Duration, Instant};
+
 #[allow(unused_imports)]
 pub use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
 
@@ -28,4 +30,40 @@ pub fn send_bt_command(harness: &mut impl TerminalHarness, args: &str) {
     let cmd = format!("bt {}\n", args);
     harness.send_text(cmd.as_bytes()).expect("send_text failed");
     harness.settle();
+}
+
+/// Polls [`TerminalHarness::capture`] until `predicate` accepts a frame
+/// or `timeout` elapses, returning the most recent frame either way.
+///
+/// Real-terminal renders (diagrams, images) finish anywhere from a few
+/// tens of milliseconds to ~1 s on a cold cache. A blind
+/// `sleep(worst_case)` before `capture()` pays the worst case on every
+/// run; polling lets the fast path return as soon as the expected
+/// evidence appears while still bounding the slow / failure path.
+///
+/// The caller still asserts on the returned frame — `predicate` only
+/// decides *when to stop waiting*, never *whether the test passes*. A
+/// timed-out poll returns the last frame so the caller's assertion
+/// produces its normal diagnostic.
+pub fn capture_until(
+    harness: &mut impl TerminalHarness,
+    timeout: Duration,
+    predicate: impl Fn(&CapturedFrame) -> bool,
+) -> CapturedFrame {
+    let deadline = Instant::now() + timeout;
+    let mut last = harness.capture().expect("capture failed");
+    if predicate(&last) {
+        return last;
+    }
+    while Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+        if let Ok(frame) = harness.capture() {
+            let satisfied = predicate(&frame);
+            last = frame;
+            if satisfied {
+                break;
+            }
+        }
+    }
+    last
 }

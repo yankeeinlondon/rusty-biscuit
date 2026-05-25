@@ -1,0 +1,1182 @@
+//! Parse entry points for the style frontmatter.
+
+use serde_json::Value;
+
+use crate::style::color;
+use crate::style::descriptor::{
+    self, LeafType, SchemaLeaf, is_canonical_container, join_path, kebabify, leaf_for_canonical,
+};
+use crate::style::error::StyleParseError;
+use crate::style::length::{HorizontalLengthError, parse_horizontal_typed};
+use crate::style::schema::StyleFrontmatter;
+use crate::style::walker;
+use crate::style::warning::{StyleWarning, StyleWarningKind};
+
+/// Highest sub-spec number whose wiring is live in the renderer.
+///
+/// A schema leaf whose `sub_spec` is **greater than** this constant still
+/// emits a [`StyleWarningKind::KnownButInactive`] warning; leaves whose
+/// `sub_spec` is `<=` this constant are considered wired and stay silent.
+///
+/// Advance this constant whenever a future sub-spec wires its keys.
+pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 7;
+
+/// Parse a `serde_json::Value` representing the value at the `style:` key.
+///
+/// Returns `(StyleFrontmatter::default(), vec![])` for `Value::Null`.
+///
+/// ## Errors
+///
+/// - `StyleParseError::Structure` — wrong JSON type at a known path
+///   (e.g. `top-margin: "2ch"`).
+/// - `StyleParseError::InvalidLength` — string that can't be parsed as a
+///   horizontal length (e.g. `"2px"`, `"-2"`).
+/// - `StyleParseError::InvalidPercent` — percent value outside `0.0..=100.0`.
+/// - `StyleParseError::InvalidColor` — color string that doesn't match any
+///   accepted form.
+/// - `StyleParseError::Serde` — fallback for serde-level failures not caught
+///   by the pre-validator (currently: bad `background` enum variant, wrong
+///   shape for `code`).
+pub fn from_json_value(
+    value: &Value,
+) -> Result<(StyleFrontmatter, Vec<StyleWarning>), StyleParseError> {
+    if value.is_null() {
+        return Ok((StyleFrontmatter::default(), Vec::new()));
+    }
+
+    // Pass 1: collect schema-validation warnings (unknown keys, snake aliases).
+    let mut warnings = walker::walk(value);
+
+    // Pass 2a: typed pre-validation. Catches typed-leaf failures with full
+    // path-aware diagnostics before serde sees them.
+    pre_validate(value)?;
+
+    // Pass 2b: typed deserialize. Serde's `alias` accepts both spellings, so
+    // the value is parsed in its original form — no rewriting needed.
+    let parsed: StyleFrontmatter = serde_json::from_value(value.clone())?;
+
+    // Pass 3: emit `KnownButInactive` for every leaf that is in the schema.
+    annotate_known_but_inactive(value, &mut warnings);
+
+    // Pass 4: detect deprecated typed-enum spellings that serde's `alias`
+    // attribute accepts silently. Currently this covers
+    // `style.hr.alignment: centered`, which is accepted as an alias for
+    // `center` but must surface a `Deprecated` warning so `--strict-style`
+    // rejects it.
+    scan_deprecated_enum_aliases(value, &mut warnings);
+
+    Ok((parsed, warnings))
+}
+
+/// Detect typed-enum aliases that serde's `#[serde(alias = ...)]` accepts
+/// without surfacing the spelling used by the document.
+///
+/// Today this covers a single case: `style.hr.alignment: "centered"` is
+/// accepted as an alias for `"center"`, but Design Decision #10 of sub-spec #6
+/// requires a `Deprecated { replacement: "center" }` warning so strict mode
+/// can reject the legacy spelling. The schema walker only handles
+/// snake-case → kebab-case aliasing, so this special case lives here.
+fn scan_deprecated_enum_aliases(value: &Value, warnings: &mut Vec<StyleWarning>) {
+    let Value::Object(root) = value else {
+        return;
+    };
+    let Some(Value::Object(hr)) = root.get("hr") else {
+        return;
+    };
+    if let Some(Value::String(s)) = hr.get("alignment") {
+        if s == "centered" {
+            warnings.push(StyleWarning::new(
+                "style.hr.alignment",
+                StyleWarningKind::Deprecated {
+                    replacement: "center".into(),
+                },
+            ));
+        }
+    }
+}
+
+/// Walk the raw style value and validate every known typed leaf. Returns
+/// the first typed error encountered; serde-level failures (alignment
+/// strings, enums) are deferred to `serde_json::from_value` so this stays
+/// focused on the four named typed variants.
+fn pre_validate(value: &Value) -> Result<(), StyleParseError> {
+    pre_validate_inner(value, "")
+}
+
+fn pre_validate_inner(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
+    let Value::Object(map) = value else {
+        // A non-object at the root is reported by serde as a structural
+        // error. We can't form a "style." path here without ambiguity, so
+        // let serde handle it.
+        return Ok(());
+    };
+    for (key, child) in map {
+        let canonical_segment = kebabify(key);
+        let canonical_child = join_path(canonical_path, &canonical_segment);
+
+        if let Some(leaf) = leaf_for_canonical(&canonical_child) {
+            validate_leaf(leaf, child, &canonical_child)?;
+            continue;
+        }
+        if is_canonical_container(&canonical_child) {
+            pre_validate_inner(child, &canonical_child)?;
+        }
+        // Unknown keys are reported by the walker; pre_validate skips them.
+    }
+    Ok(())
+}
+
+fn validate_leaf(
+    leaf: &SchemaLeaf,
+    value: &Value,
+    canonical_path: &str,
+) -> Result<(), StyleParseError> {
+    match leaf.leaf_type {
+        LeafType::HorizontalLength => validate_horizontal_length(value, canonical_path),
+        LeafType::RowCount => validate_row_count(value, canonical_path),
+        LeafType::Color => validate_color(value, canonical_path),
+        // Alignment, BackgroundEnum, StringValue, OpaqueValue — let serde
+        // handle these. Bad alignment / background variants surface as Serde
+        // errors; StringValue and OpaqueValue are permissive by design.
+        LeafType::Alignment
+        | LeafType::BackgroundEnum
+        | LeafType::StringValue
+        | LeafType::OpaqueValue
+        | LeafType::HrKind
+        | LeafType::HrWeight
+        | LeafType::HrAlignment => Ok(()),
+    }
+}
+
+fn validate_horizontal_length(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
+    match value {
+        Value::Null => Ok(()),
+        Value::Number(n) => {
+            // u32 in range is fine; everything else is an InvalidLength.
+            if n.as_u64().is_some_and(|v| v <= u32::MAX as u64) {
+                Ok(())
+            } else {
+                Err(StyleParseError::InvalidLength {
+                    path: format!("style.{}", canonical_path),
+                    raw: n.to_string(),
+                    reason: "integer length must fit in 0..=4294967295",
+                })
+            }
+        }
+        Value::String(s) => match parse_horizontal_typed(s) {
+            Ok(_) => Ok(()),
+            Err(HorizontalLengthError::PercentOutOfRange(v)) => {
+                Err(StyleParseError::InvalidPercent {
+                    path: format!("style.{}", canonical_path),
+                    value: v,
+                })
+            }
+            Err(other) => Err(StyleParseError::InvalidLength {
+                path: format!("style.{}", canonical_path),
+                raw: s.clone(),
+                reason: other.as_static_reason(),
+            }),
+        },
+        other => Err(StyleParseError::Structure {
+            path: format!("style.{}", canonical_path),
+            expected: "string or non-negative integer",
+            actual: json_type_name(other).to_string(),
+        }),
+    }
+}
+
+fn validate_row_count(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
+    match value {
+        Value::Null => Ok(()),
+        Value::Number(n) => {
+            if n.as_u64().is_some_and(|v| v <= u16::MAX as u64) {
+                Ok(())
+            } else {
+                Err(StyleParseError::Structure {
+                    path: format!("style.{}", canonical_path),
+                    expected: "integer in 0..=65535",
+                    actual: format!("number `{}`", n),
+                })
+            }
+        }
+        other => Err(StyleParseError::Structure {
+            path: format!("style.{}", canonical_path),
+            expected: "integer",
+            actual: json_type_name(other).to_string(),
+        }),
+    }
+}
+
+fn validate_color(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
+    match value {
+        Value::Null => Ok(()),
+        Value::String(s) => match color::parse(s) {
+            Ok(_) => Ok(()),
+            Err(reason) => Err(StyleParseError::InvalidColor {
+                path: format!("style.{}", canonical_path),
+                raw: s.clone(),
+                reason,
+            }),
+        },
+        other => Err(StyleParseError::Structure {
+            path: format!("style.{}", canonical_path),
+            expected: "string",
+            actual: json_type_name(other).to_string(),
+        }),
+    }
+}
+
+fn json_type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+/// Walk the raw style value and emit `KnownButInactive` for every leaf that
+/// *is* in the schema but whose wiring sub-spec is greater than 1.
+///
+/// Per-segment kebabify mirrors the walker, so a document like
+/// `style.block_quote.max_width` still produces a single `KnownButInactive`
+/// at the canonical path `style.block-quote.max-width`.
+fn annotate_known_but_inactive(value: &Value, warnings: &mut Vec<StyleWarning>) {
+    annotate_inner(value, "", warnings);
+}
+
+fn annotate_inner(value: &Value, canonical_path: &str, warnings: &mut Vec<StyleWarning>) {
+    let Value::Object(map) = value else {
+        return;
+    };
+    for (key, child) in map {
+        let canonical_segment = kebabify(key);
+        let canonical_child = join_path(canonical_path, &canonical_segment);
+
+        if let Some(leaf) = leaf_for_canonical(&canonical_child) {
+            if leaf.sub_spec > ACTIVE_STYLE_WIRING_SUB_SPEC {
+                warnings.push(StyleWarning::new(
+                    format!("style.{}", leaf.canonical),
+                    StyleWarningKind::KnownButInactive {
+                        sub_spec: leaf.sub_spec,
+                    },
+                ));
+            }
+            // Leaves don't recurse.
+            continue;
+        }
+
+        // Containers and unknowns: recurse if it's a container, ignore
+        // unknown (walker already reported them).
+        if is_canonical_container(&canonical_child) && child.is_object() {
+            annotate_inner(child, &canonical_child, warnings);
+        }
+    }
+}
+
+use crate::markdown::Frontmatter;
+use crate::style::schema::hr::HrStyle;
+
+/// Parse the `style:` value from a `Frontmatter`. Returns
+/// `(StyleFrontmatter::default(), vec![])` when no `style:` key is present.
+///
+/// If a top-level `hr:` key exists in the frontmatter, its values are merged
+/// into `style.hr` as a deprecated alias, emitting
+/// [`StyleWarningKind::Deprecated`] for every field that is used.
+///
+/// ## Errors
+///
+/// Propagates any `StyleParseError` returned by [`from_json_value`].
+pub fn from_frontmatter(
+    fm: &Frontmatter,
+) -> Result<(StyleFrontmatter, Vec<StyleWarning>), StyleParseError> {
+    let (mut style, mut warnings) = match fm.as_map().get("style") {
+        Some(value) => from_json_value(value)?,
+        None => (StyleFrontmatter::default(), Vec::new()),
+    };
+
+    if let Some(hr_value) = fm.as_map().get("hr") {
+        merge_deprecated_top_level_hr(hr_value, &mut style, &mut warnings);
+    }
+
+    Ok((style, warnings))
+}
+
+/// Merge a deprecated top-level `hr:` frontmatter block into
+/// `StyleFrontmatter::hr`, field-by-field, emitting deprecation warnings.
+///
+/// Warnings are emitted on **alias presence**, not on successful typed
+/// migration: any top-level `hr:` key (or a non-mapping `hr:` value) produces
+/// a `Deprecated` warning even if the typed `HrStyle` deserialization fails.
+/// This keeps `--strict-style` honest — strict mode rejects the deprecated
+/// alias regardless of whether the legacy block happens to also be typed-valid.
+///
+/// `style.hr` wins when a field is present in both; top-level `hr` only fills
+/// missing values when typed deserialization of the legacy block succeeds.
+fn merge_deprecated_top_level_hr(
+    hr_value: &serde_json::Value,
+    style: &mut StyleFrontmatter,
+    warnings: &mut Vec<StyleWarning>,
+) {
+    let serde_json::Value::Object(map) = hr_value else {
+        // Non-mapping top-level `hr:` (scalar, null, array, ...) is still
+        // alias usage. Emit a single deprecation warning so strict mode
+        // rejects the document.
+        warnings.push(StyleWarning::new(
+            "hr",
+            StyleWarningKind::Deprecated {
+                replacement: "style.hr".into(),
+            },
+        ));
+        return;
+    };
+
+    // Pass 1: emit a Deprecated warning for every recognized legacy key
+    // present in the raw map. This must happen before any typed
+    // deserialization so invalid-but-legacy-tolerated shapes (e.g.
+    // `alignment: true`) still trip strict mode.
+    let mut emitted_any = false;
+    for key in map.keys() {
+        let (canonical_legacy_path, replacement) = match key.as_str() {
+            "width" => ("hr.width", "style.hr.width"),
+            "max-width" | "max_width" => ("hr.max-width", "style.hr.max-width"),
+            "color" => ("hr.color", "style.hr.color"),
+            "bg-color" | "bg_color" => ("hr.bg-color", "style.hr.bg-color"),
+            "alignment" => ("hr.alignment", "style.hr.alignment"),
+            "style" => ("hr.style", "style.hr.kind"),
+            "kind" => ("hr.kind", "style.hr.kind"),
+            "weight" => ("hr.weight", "style.hr.weight"),
+            _ => continue,
+        };
+        warnings.push(StyleWarning::new(
+            canonical_legacy_path,
+            StyleWarningKind::Deprecated {
+                replacement: replacement.into(),
+            },
+        ));
+        emitted_any = true;
+    }
+
+    // If the map has no recognized HR keys, the alias itself is still in
+    // use (and would have been a no-op silently before). Emit a top-level
+    // deprecation so strict mode rejects it.
+    if !emitted_any {
+        warnings.push(StyleWarning::new(
+            "hr",
+            StyleWarningKind::Deprecated {
+                replacement: "style.hr".into(),
+            },
+        ));
+    }
+
+    // Pass 2: best-effort typed migration. Build a temporary JSON object
+    // that maps the legacy top-level `hr` keys onto the `HrStyle` schema
+    // (style -> kind, everything else passes through unchanged), then merge
+    // any fields that deserialize cleanly into `style.hr`. If the typed
+    // deserialization fails, the alias warnings above still ensure strict
+    // mode rejects the document; non-strict callers just lose the legacy
+    // values, which matches the prior behavior.
+    let mut mapped = serde_json::Map::new();
+    for (key, value) in map {
+        let canonical_key = match key.as_str() {
+            "style" => "kind",
+            other => other,
+        };
+        mapped.insert(canonical_key.to_string(), value.clone());
+    }
+
+    let hr_style: HrStyle = match serde_json::from_value(serde_json::Value::Object(mapped)) {
+        Ok(h) => h,
+        Err(_) => return,
+    };
+
+    // Ensure `style.hr` exists so we can fill missing fields.
+    let target = style.hr.get_or_insert_with(HrStyle::default);
+
+    // Values are merged only when `style.hr` is missing that field. Warnings
+    // were already emitted in pass 1 from the raw map keys.
+    if hr_style.width.is_some() && target.width.is_none() {
+        target.width = hr_style.width;
+    }
+    if hr_style.max_width.is_some() && target.max_width.is_none() {
+        target.max_width = hr_style.max_width;
+    }
+    if hr_style.color.is_some() && target.color.is_none() {
+        target.color = hr_style.color;
+    }
+    if hr_style.bg_color.is_some() && target.bg_color.is_none() {
+        target.bg_color = hr_style.bg_color;
+    }
+    if hr_style.alignment.is_some() && target.alignment.is_none() {
+        target.alignment = hr_style.alignment;
+    }
+    if hr_style.kind.is_some() && target.kind.is_none() {
+        target.kind = hr_style.kind;
+    }
+    if hr_style.weight.is_some() && target.weight.is_none() {
+        target.weight = hr_style.weight;
+    }
+}
+
+/// Promote schema-validation warnings (`UnknownKey`, `Deprecated`) to errors.
+///
+/// `KnownButInactive` warnings are deliberately ignored so a strict caller
+/// does not fail on a forward-compatible document.
+///
+/// ## Errors
+///
+/// Returns `StyleParseError::Strict` when any `UnknownKey` or `Deprecated`
+/// warnings are present in the parsed result.
+pub fn into_strict(
+    parsed: (StyleFrontmatter, Vec<StyleWarning>),
+) -> Result<StyleFrontmatter, StyleParseError> {
+    let (style, warnings) = parsed;
+    let schema: Vec<StyleWarning> = warnings
+        .into_iter()
+        .filter(|w| w.is_schema_issue())
+        .collect();
+    if schema.is_empty() {
+        Ok(style)
+    } else {
+        Err(StyleParseError::Strict { warnings: schema })
+    }
+}
+
+// Re-export the SCHEMA so test modules that already imported `descriptor::SCHEMA`
+// through this file continue to compile. Anything else from `descriptor` is
+// imported directly at the top of this file.
+pub use descriptor::SCHEMA;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markdown::Frontmatter;
+    use renderable::layout::{Alignment, Length};
+    use serde_json::json;
+
+    #[test]
+    fn null_yields_default() {
+        let (s, w) = from_json_value(&Value::Null).unwrap();
+        assert_eq!(s, StyleFrontmatter::default());
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn empty_object_yields_default() {
+        let (s, w) = from_json_value(&json!({})).unwrap();
+        assert_eq!(s, StyleFrontmatter::default());
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn page_left_margin_parses() {
+        let (s, w) = from_json_value(&json!({"page": {"left-margin": "2ch"}})).unwrap();
+        let schema_warnings: Vec<_> = w.iter().filter(|w| w.is_schema_issue()).collect();
+        assert!(schema_warnings.is_empty());
+        assert_eq!(s.page.unwrap().left_margin, Some(Length::Ch(2)));
+    }
+
+    #[test]
+    fn unknown_key_produces_warning_but_parse_succeeds() {
+        let (s, w) = from_json_value(&json!({"page": {"lft-margin": "2ch"}})).unwrap();
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].path, "style.page.lft-margin");
+        assert!(s.page.is_some());
+    }
+
+    #[test]
+    fn deprecated_alias_produces_warning_but_parse_succeeds() {
+        let (s, w) = from_json_value(&json!({"page": {"left_margin": "2ch"}})).unwrap();
+        let schema_warnings: Vec<_> = w.iter().filter(|w| w.is_schema_issue()).collect();
+        assert_eq!(schema_warnings.len(), 1);
+        assert!(matches!(
+            schema_warnings[0].kind,
+            StyleWarningKind::Deprecated { .. }
+        ));
+        assert_eq!(s.page.unwrap().left_margin, Some(Length::Ch(2)));
+    }
+
+    #[test]
+    fn invalid_length_returns_typed_variant() {
+        let err = from_json_value(&json!({"page": {"left-margin": "2px"}})).unwrap_err();
+        match err {
+            StyleParseError::InvalidLength { path, raw, reason } => {
+                assert_eq!(path, "style.page.left-margin");
+                assert_eq!(raw, "2px");
+                assert!(reason.contains("unsupported unit"), "got: {}", reason);
+            }
+            other => panic!("expected InvalidLength, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn invalid_percent_returns_typed_variant() {
+        let err = from_json_value(&json!({"page": {"max-width": "150%"}})).unwrap_err();
+        match err {
+            StyleParseError::InvalidPercent { path, value } => {
+                assert_eq!(path, "style.page.max-width");
+                assert_eq!(value, 150.0);
+            }
+            other => panic!("expected InvalidPercent, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn invalid_color_returns_typed_variant() {
+        let err = from_json_value(&json!({"page": {"color": "puce"}})).unwrap_err();
+        match err {
+            StyleParseError::InvalidColor { path, raw, reason } => {
+                assert_eq!(path, "style.page.color");
+                assert_eq!(raw, "puce");
+                assert!(!reason.is_empty());
+            }
+            other => panic!("expected InvalidColor, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn vertical_margin_string_returns_structure() {
+        // Spec test #4: `top-margin: "2ch"` must surface as Structure with
+        // the canonical path.
+        let err = from_json_value(&json!({"page": {"top-margin": "2ch"}})).unwrap_err();
+        match err {
+            StyleParseError::Structure {
+                path,
+                expected,
+                actual,
+            } => {
+                assert_eq!(path, "style.page.top-margin");
+                assert_eq!(expected, "integer");
+                assert_eq!(actual, "string");
+            }
+            other => panic!("expected Structure, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn vertical_margin_integer_succeeds() {
+        let (s, _) = from_json_value(&json!({"page": {"top-margin": 1}})).unwrap();
+        assert_eq!(s.page.unwrap().top_margin, Some(1));
+    }
+
+    #[test]
+    fn non_object_color_returns_structure() {
+        let err = from_json_value(&json!({"page": {"color": 42}})).unwrap_err();
+        match err {
+            StyleParseError::Structure {
+                path,
+                expected,
+                actual,
+            } => {
+                assert_eq!(path, "style.page.color");
+                assert_eq!(expected, "string");
+                assert_eq!(actual, "number");
+            }
+            other => panic!("expected Structure, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn typed_error_uses_canonical_path_even_when_user_wrote_alias() {
+        // The user spelled `max_width` (deprecated alias); the typed error's
+        // path is the canonical kebab form.
+        let err = from_json_value(&json!({"page": {"max_width": "150%"}})).unwrap_err();
+        match err {
+            StyleParseError::InvalidPercent { path, value } => {
+                assert_eq!(path, "style.page.max-width");
+                assert_eq!(value, 150.0);
+            }
+            other => panic!("expected InvalidPercent, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn typed_error_path_handles_nested_local_style() {
+        let err = from_json_value(&json!({
+            "hyperlinks": {"local-style": {"max-width": "150%"}}
+        }))
+        .unwrap_err();
+        match err {
+            StyleParseError::InvalidPercent { path, .. } => {
+                assert_eq!(path, "style.hyperlinks.local-style.max-width");
+            }
+            other => panic!("expected InvalidPercent, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn page_keys_suppress_known_but_inactive() {
+        // Sub-spec #2 wires page-level keys, so they no longer emit
+        // `KnownButInactive` warnings.
+        let (_, w) = from_json_value(&json!({
+            "page": {"left-margin": "2ch"}
+        }))
+        .unwrap();
+        let inactive: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+            .collect();
+        assert!(inactive.is_empty(), "page leaves should be wired: {:?}", w);
+    }
+
+    #[test]
+    fn deprecated_alias_for_wired_page_key_still_warns_only_deprecated() {
+        let (_, w) = from_json_value(&json!({
+            "page": {"left_margin": "2ch"}
+        }))
+        .unwrap();
+        let inactive: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+            .collect();
+        assert!(
+            inactive.is_empty(),
+            "wired page leaves should not emit inactive"
+        );
+
+        let deprecated: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. }))
+            .collect();
+        assert_eq!(deprecated.len(), 1);
+        assert_eq!(deprecated[0].path, "style.page.left_margin");
+    }
+
+    #[test]
+    fn sub_spec_7_keys_no_longer_emit_known_but_inactive() {
+        // After sub-spec #7 lands, all its keys are wired and silent.
+        let cases = [
+            json!({"hyperlinks": {"local-style": {"color": "red-500"}}}),
+            json!({"page": {"stylesheet": "https://example.com/style.css"}}),
+            json!({"page": {"meta": {"description": "A page"}}}),
+            json!({"page": {"code": {"theme": "dracula"}}}),
+            json!({"hyperlinks": {"width": "40ch"}}),
+            json!({"images": {"local-style": {"color": "blue-500"}}}),
+        ];
+        for v in &cases {
+            let (_, w) = from_json_value(v).unwrap();
+            let inactive: Vec<_> = w
+                .iter()
+                .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+                .collect();
+            assert!(
+                inactive.is_empty(),
+                "sub-spec #7 key in {:?} should not emit KnownButInactive; got: {:?}",
+                v,
+                inactive,
+            );
+        }
+    }
+
+    #[test]
+    fn sub_spec_3_keys_no_longer_emit_known_but_inactive() {
+        // Phase 4 of sub-spec #3: table/images/block-quote width, max-width,
+        // and alignment are now wired. They must not emit KnownButInactive.
+        let cases = [
+            json!({"table": {"width": "40ch"}}),
+            json!({"table": {"max-width": "50%"}}),
+            json!({"table": {"alignment": "right"}}),
+            json!({"images": {"width": "40ch"}}),
+            json!({"images": {"max-width": "50%"}}),
+            json!({"images": {"alignment": "center"}}),
+            json!({"block-quote": {"width": "40ch"}}),
+            json!({"block-quote": {"max-width": "50%"}}),
+            json!({"block-quote": {"alignment": "left"}}),
+        ];
+        for v in &cases {
+            let (_, w) = from_json_value(v).unwrap();
+            let inactive: Vec<_> = w
+                .iter()
+                .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+                .collect();
+            assert!(
+                inactive.is_empty(),
+                "sub-spec #3 key in {:?} should not emit KnownButInactive; got: {:?}",
+                v,
+                inactive,
+            );
+        }
+    }
+
+    #[test]
+    fn sub_spec_6_keys_no_longer_emit_known_but_inactive() {
+        // Phase 3 of sub-spec #6: HR keys are now wired. They must not emit
+        // KnownButInactive.
+        let cases = [
+            json!({"hr": {"color": "red-500"}}),
+            json!({"hr": {"bg-color": "blue-200"}}),
+            json!({"hr": {"kind": "waves"}}),
+            json!({"hr": {"weight": "thick"}}),
+            json!({"hr": {"width": "50%"}}),
+            json!({"hr": {"max-width": "20ch"}}),
+            json!({"hr": {"alignment": "center"}}),
+        ];
+        for v in &cases {
+            let (_, w) = from_json_value(v).unwrap();
+            let inactive: Vec<_> = w
+                .iter()
+                .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+                .collect();
+            assert!(
+                inactive.is_empty(),
+                "sub-spec #6 key in {:?} should not emit KnownButInactive; got: {:?}",
+                v,
+                inactive,
+            );
+        }
+    }
+
+    #[test]
+    fn no_known_but_inactive_for_any_valid_v1_key() {
+        // After sub-spec #7, every valid v1 schema key is wired.
+        let v = json!({
+            "page": {
+                "left-margin": "2ch", "right-margin": "4ch",
+                "top-margin": 1, "bottom-margin": 0,
+                "max-width": "80%", "alignment": "center",
+                "background": "subtle",
+                "stylesheet": "https://example.com/style.css",
+                "meta": { "description": "Test" },
+                "code": { "theme": "dracula" }
+            },
+            "table": { "alignment": "right", "max-width": "50%", "color": "red-500" },
+            "images": { "width": "40ch", "alignment": "center", "local-style": { "color": "blue-500" } },
+            "block-quote": { "max-width": "60ch", "alignment": "left" },
+            "ul": { "alignment": "left", "left-margin": "4ch", "max-width": "40" },
+            "ol": { "alignment": "right" },
+            "li": { "alignment": "center" },
+            "hr": { "kind": "waves", "weight": "thick", "alignment": "center", "color": "slate-400" },
+            "hyperlinks": { "color": "cyan-400", "local-style": { "color": "blue-300" } }
+        });
+        let (_, w) = from_json_value(&v).unwrap();
+        let inactive: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+            .collect();
+        assert!(inactive.is_empty(), "expected zero KnownButInactive warnings; got: {:?}", inactive);
+    }
+
+    #[test]
+    fn nested_alias_emits_two_deprecated_warnings() {
+        // Spec test #8 + Finding 1 regression: `block_quote.max_width` must
+        // emit exactly two `Deprecated` warnings (one per snake-cased
+        // segment). After sub-spec #3 phase 4 it no longer emits
+        // `KnownButInactive` because `block-quote.max-width` is now wired.
+        let (_, w) = from_json_value(&json!({
+            "block_quote": {"max_width": "50%"}
+        }))
+        .unwrap();
+        let deprecated: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. }))
+            .collect();
+        let inactive: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+            .collect();
+        assert_eq!(deprecated.len(), 2, "got: {:?}", deprecated);
+        assert!(
+            inactive.is_empty(),
+            "block-quote.max-width is wired in sub-spec #3; got: {:?}",
+            inactive
+        );
+    }
+
+    #[test]
+    fn test_doc_all_known_but_inactive() {
+        let v = json!({
+            "page":  {"left-margin": "2ch", "right-margin": "4ch",
+                       "top-margin": 1, "bottom-margin": 0},
+            "table": {"alignment": "right", "max-width": "50%"},
+            "ol":    {"alignment": "right"},
+            "ul":    {"alignment": "left", "left-margin": "4ch", "max-width": "40"}
+        });
+        let (_, w) = from_json_value(&v).unwrap();
+        let schema: Vec<_> = w.iter().filter(|w| w.is_schema_issue()).collect();
+        assert!(
+            schema.is_empty(),
+            "should not produce schema warnings: {:?}",
+            schema
+        );
+        let inactive: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+            .collect();
+        // Sub-specs #2, #3, and #4 wire the page leaves, the table
+        // alignment/max-width leaves, and all list leaves. No inactive
+        // warnings remain for this document.
+        assert_eq!(inactive.len(), 0, "got {:?}", inactive);
+    }
+
+    #[test]
+    fn matches_test_doc_acceptance_criteria() {
+        let v = json!({
+            "page": {
+                "left-margin": "2ch",
+                "right-margin": "4ch",
+                "top-margin": 1,
+                "bottom-margin": 0
+            },
+            "table": {
+                "alignment": "right",
+                "max-width": "50%"
+            },
+            "ol": {"alignment": "right"},
+            "ul": {
+                "alignment": "left",
+                "left-margin": "4ch",
+                "max-width": "40"
+            }
+        });
+
+        let (s, _w) = from_json_value(&v).unwrap();
+        let p = s.page.expect("page");
+        assert_eq!(p.left_margin, Some(Length::Ch(2)));
+        assert_eq!(p.right_margin, Some(Length::Ch(4)));
+        assert_eq!(p.top_margin, Some(1));
+        assert_eq!(p.bottom_margin, Some(0));
+
+        let t = s.table.expect("table");
+        assert_eq!(t.common.alignment, Some(Alignment::Right));
+        assert_eq!(t.common.max_width, Some(Length::Percent(50.0)));
+
+        let ol = s.ol.expect("ol");
+        assert_eq!(ol.common.alignment, Some(Alignment::Right));
+
+        let ul = s.ul.expect("ul");
+        assert_eq!(ul.common.alignment, Some(Alignment::Left));
+        assert_eq!(ul.left_margin, Some(Length::Ch(4)));
+        assert_eq!(ul.common.max_width, Some(Length::Ch(40)));
+    }
+
+    #[test]
+    fn from_frontmatter_no_style_key_yields_default() {
+        let fm = Frontmatter::new();
+        let (s, w) = from_frontmatter(&fm).unwrap();
+        assert_eq!(s, StyleFrontmatter::default());
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn from_frontmatter_with_style_key() {
+        let mut fm = Frontmatter::new();
+        fm.insert("style", json!({"page": {"left-margin": "2ch"}}))
+            .unwrap();
+        let (s, _w) = from_frontmatter(&fm).unwrap();
+        assert!(s.page.is_some());
+    }
+
+    #[test]
+    fn from_frontmatter_top_level_hr_merges_into_style_hr() {
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!({"style": "waves", "color": "red-500"}))
+            .unwrap();
+        let (s, w) = from_frontmatter(&fm).unwrap();
+        let hr = s.hr.expect("hr should be populated from top-level alias");
+        assert_eq!(hr.kind, Some(crate::style::schema::hr::HrKind::Waves));
+        assert!(hr.color.is_some());
+
+        let deprecated: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. }))
+            .collect();
+        assert_eq!(deprecated.len(), 2, "expected 2 deprecated warnings: {:?}", w);
+        assert!(deprecated.iter().any(|w| w.path == "hr.style"));
+        assert!(deprecated.iter().any(|w| w.path == "hr.color"));
+    }
+
+    #[test]
+    fn from_frontmatter_style_hr_beats_top_level_hr() {
+        let mut fm = Frontmatter::new();
+        fm.insert("style", json!({"hr": {"kind": "dots"}})).unwrap();
+        fm.insert("hr", json!({"style": "waves"})).unwrap();
+        let (s, w) = from_frontmatter(&fm).unwrap();
+        let hr = s.hr.expect("hr should exist");
+        assert_eq!(hr.kind, Some(crate::style::schema::hr::HrKind::Dots));
+
+        // Top-level `hr.style` is still deprecated even when overridden.
+        assert!(w.iter().any(|w| w.path == "hr.style"));
+    }
+
+    #[test]
+    fn from_frontmatter_top_level_hr_only_fills_missing_fields() {
+        let mut fm = Frontmatter::new();
+        fm.insert("style", json!({"hr": {"kind": "waves", "weight": "thick"}}))
+            .unwrap();
+        fm.insert("hr", json!({"style": "dots", "weight": "thin", "color": "red"}))
+            .unwrap();
+        let (s, w) = from_frontmatter(&fm).unwrap();
+        let hr = s.hr.expect("hr should exist");
+        // style.hr values win.
+        assert_eq!(hr.kind, Some(crate::style::schema::hr::HrKind::Waves));
+        assert_eq!(hr.weight, Some(crate::style::schema::hr::HrWeight::Thick));
+        // Missing in style.hr, filled from top-level.
+        assert!(hr.color.is_some());
+
+        // Every key present in the deprecated top-level block emits a warning.
+        assert!(w.iter().any(|w| w.path == "hr.color"));
+        assert!(w.iter().any(|w| w.path == "hr.style"));
+        assert!(w.iter().any(|w| w.path == "hr.weight"));
+    }
+
+    #[test]
+    fn into_strict_passes_clean_parse() {
+        let parsed = from_json_value(&json!({"page": {"left-margin": "2ch"}})).unwrap();
+        let s = into_strict(parsed).unwrap();
+        assert!(s.page.is_some());
+    }
+
+    #[test]
+    fn into_strict_fails_on_unknown_key() {
+        let parsed = from_json_value(&json!({"page": {"lft-margin": "2ch"}})).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert_eq!(warnings.len(), 1);
+                assert_eq!(warnings[0].path, "style.page.lft-margin");
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn into_strict_fails_on_deprecated_alias() {
+        let parsed = from_json_value(&json!({"page": {"left_margin": "2ch"}})).unwrap();
+        assert!(matches!(
+            into_strict(parsed),
+            Err(StyleParseError::Strict { .. })
+        ));
+    }
+
+    #[test]
+    fn into_strict_ignores_known_but_inactive() {
+        let parsed = from_json_value(&json!({
+            "table": {"alignment": "right", "max-width": "50%"}
+        }))
+        .unwrap();
+        assert!(into_strict(parsed).is_ok());
+    }
+
+    #[test]
+    fn into_strict_fails_on_top_level_hr_alias() {
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!({"style": "waves"})).unwrap();
+        let parsed = from_frontmatter(&fm).unwrap();
+        assert!(matches!(
+            into_strict(parsed),
+            Err(StyleParseError::Strict { .. })
+        ));
+    }
+
+    #[test]
+    fn into_strict_fails_on_top_level_hr_alias_with_invalid_typed_field() {
+        // `alignment: true` cannot deserialize as `HrAlignment`. Before the
+        // fix, this silently slipped past strict mode because the typed
+        // `HrStyle` deserialization failed and no deprecation warning was
+        // ever emitted. The alias presence — not typed-success — is what
+        // strict mode must reject.
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!({"style": "waves", "alignment": true}))
+            .unwrap();
+        let parsed = from_frontmatter(&fm).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert!(
+                    warnings.iter().any(|w| w.path == "hr.style"),
+                    "expected hr.style deprecation, got {:?}",
+                    warnings
+                );
+                assert!(
+                    warnings.iter().any(|w| w.path == "hr.alignment"),
+                    "expected hr.alignment deprecation, got {:?}",
+                    warnings
+                );
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn into_strict_fails_on_non_mapping_top_level_hr() {
+        // A scalar top-level `hr: dashes` is still alias usage and must
+        // trip strict mode even though it can't deserialize as `HrStyle`.
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!("dashes")).unwrap();
+        let parsed = from_frontmatter(&fm).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert!(
+                    warnings.iter().any(|w| w.path == "hr"
+                        && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
+                    "expected hr deprecation, got {:?}",
+                    warnings
+                );
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn into_strict_fails_on_empty_top_level_hr_mapping() {
+        // Even an empty `hr: {}` block names the deprecated alias; strict
+        // mode should still reject the document.
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!({})).unwrap();
+        let parsed = from_frontmatter(&fm).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert!(
+                    warnings.iter().any(|w| w.path == "hr"
+                        && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
+                    "expected hr deprecation, got {:?}",
+                    warnings
+                );
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn top_level_hr_with_invalid_typed_field_still_emits_warnings() {
+        // Non-strict callers also see the deprecation warnings, even when
+        // the typed migration drops the field.
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!({"style": "waves", "alignment": true}))
+            .unwrap();
+        let (_, w) = from_frontmatter(&fm).unwrap();
+        assert!(w.iter().any(|w| w.path == "hr.style"));
+        assert!(w.iter().any(|w| w.path == "hr.alignment"));
+    }
+
+    #[test]
+    fn hr_alignment_centered_emits_deprecated_warning() {
+        // `style.hr.alignment: centered` is accepted as an alias for
+        // `center` (serde alias). The typed value must still parse to
+        // `HrAlignment::Center`, but a `Deprecated` warning must be
+        // emitted so `--strict-style` rejects the legacy spelling.
+        let (s, w) = from_json_value(&json!({"hr": {"alignment": "centered"}})).unwrap();
+        let hr = s.hr.expect("hr should be populated");
+        assert_eq!(
+            hr.alignment,
+            Some(crate::style::schema::hr::HrAlignment::Center)
+        );
+
+        let deprecated: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. }))
+            .collect();
+        assert_eq!(
+            deprecated.len(),
+            1,
+            "expected exactly one Deprecated warning, got {:?}",
+            w
+        );
+        assert_eq!(deprecated[0].path, "style.hr.alignment");
+        match &deprecated[0].kind {
+            StyleWarningKind::Deprecated { replacement } => {
+                assert_eq!(replacement, "center");
+            }
+            other => panic!("expected Deprecated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn hr_alignment_center_emits_no_warning() {
+        // The canonical spelling must produce zero warnings.
+        let (s, w) = from_json_value(&json!({"hr": {"alignment": "center"}})).unwrap();
+        let hr = s.hr.expect("hr should be populated");
+        assert_eq!(
+            hr.alignment,
+            Some(crate::style::schema::hr::HrAlignment::Center)
+        );
+        assert!(
+            w.is_empty(),
+            "canonical `center` must not produce warnings, got {:?}",
+            w
+        );
+    }
+
+    #[test]
+    fn into_strict_fails_on_hr_alignment_centered_alias() {
+        let parsed = from_json_value(&json!({"hr": {"alignment": "centered"}})).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert!(
+                    warnings
+                        .iter()
+                        .any(|w| w.path == "style.hr.alignment"
+                            && matches!(
+                                &w.kind,
+                                StyleWarningKind::Deprecated { replacement } if replacement == "center"
+                            )),
+                    "expected style.hr.alignment deprecation with replacement=center, got {:?}",
+                    warnings
+                );
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn active_wiring_warnings_for_list_keys() {
+        let v = json!({
+            "ul": {
+                "width": "40ch",
+                "max-width": "50%",
+                "alignment": "left",
+                "left-margin": "4ch",
+                "color": "red-500",
+                "bg-color": "blue-500"
+            },
+            "ol": {
+                "width": "40ch",
+                "max-width": "50%",
+                "alignment": "right",
+                "color": "red-500",
+                "bg-color": "blue-500"
+            },
+            "li": {
+                "width": "40ch",
+                "max-width": "50%",
+                "alignment": "center",
+                "color": "red-500",
+                "bg-color": "blue-500"
+            }
+        });
+        let (_parsed, warnings) = from_json_value(&v).unwrap();
+
+        let inactive: Vec<&StyleWarning> = warnings
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+            .collect();
+
+        // All list keys including color/bg-color (sub_spec 4 and 5) should NOT
+        // produce inactive warnings.
+        for path in [
+            "style.ul.width",
+            "style.ul.max-width",
+            "style.ul.alignment",
+            "style.ul.left-margin",
+            "style.ul.color",
+            "style.ul.bg-color",
+            "style.ol.width",
+            "style.ol.max-width",
+            "style.ol.alignment",
+            "style.ol.color",
+            "style.ol.bg-color",
+            "style.li.width",
+            "style.li.max-width",
+            "style.li.alignment",
+            "style.li.color",
+            "style.li.bg-color",
+        ] {
+            assert!(
+                !inactive.iter().any(|w| w.path == path),
+                "wired list key `{}` should not produce KnownButInactive, got: {:?}",
+                path,
+                inactive
+            );
+        }
+    }
+}

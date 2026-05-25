@@ -18,17 +18,22 @@ use std::env;
 use std::ffi::OsString;
 use std::io;
 use std::process::{Command, Stdio};
+use std::sync::Once;
 use std::time::Duration;
 
 use super::{
     CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, SEND_TIMEOUT, SPAWN_TIMEOUT,
-    SpawnVisibility, TerminalHarness, run_with_stdin_timeout, run_with_timeout, wait_for_prompt,
+    SpawnVisibility, TerminalHarness, current_process_id, pid_from_tag, process_is_alive,
+    run_with_stdin_timeout, run_with_timeout, wait_for_prompt,
 };
 
 /// Workspace name used when [`SpawnVisibility::Background`] is in
 /// effect. Picked to be distinct from any name a developer is likely
 /// to use interactively so the window is created out-of-sight.
 const BACKGROUND_WORKSPACE: &str = "biscuit-bg";
+const PANE_TITLE_PREFIX: &str = "biscuit-test-pane-";
+const LEGACY_BACKGROUND_PANE_LIMIT: usize = 64;
+static CLEANUP_ONCE: Once = Once::new();
 
 /// Geometry returned by [`WezTermHarness::pane_size`].
 ///
@@ -122,7 +127,21 @@ impl WezTermHarness {
     /// pane id (already unique within a WezTerm instance) so concurrent
     /// runs of the same harness don't collide.
     fn unique_window_title(&self) -> String {
-        format!("biscuit-test-pane-{}", self.pane_id())
+        format!(
+            "{PANE_TITLE_PREFIX}{}-{}",
+            current_process_id(),
+            self.pane_id()
+        )
+    }
+
+    fn tag_spawned_pane(&self) {
+        let id = self.pane_id();
+        let title = self.unique_window_title();
+        let mut cmd = Command::new("wezterm");
+        cmd.args(["cli", "set-tab-title", "--pane-id", id, &title])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
     }
 
     /// Returns the spawned pane's geometry as `(rows, cols, pixel_width,
@@ -339,6 +358,9 @@ impl TerminalHarness for WezTermHarness {
         if !Self::available() {
             return Err(io::Error::other("WezTerm not available"));
         }
+        if self.spawn_visibility == SpawnVisibility::Background {
+            CLEANUP_ONCE.call_once(cleanup_stale_wezterm_panes);
+        }
         let shell = super::detect_shell();
         let mut cmd = Command::new("wezterm");
         cmd.args(["cli", "spawn", "--new-window"]);
@@ -377,6 +399,7 @@ impl TerminalHarness for WezTermHarness {
             return Err(io::Error::other("wezterm cli spawn returned empty pane id"));
         }
         self.pane_id = Some(pane_id);
+        self.tag_spawned_pane();
         wait_for_prompt(self)?;
         Ok(())
     }
@@ -388,6 +411,9 @@ impl TerminalHarness for WezTermHarness {
     fn spawn_program(&mut self, program: &str, args: &[&str]) -> io::Result<()> {
         if !Self::available() {
             return Err(io::Error::other("WezTerm not available"));
+        }
+        if self.spawn_visibility == SpawnVisibility::Background {
+            CLEANUP_ONCE.call_once(cleanup_stale_wezterm_panes);
         }
         let mut cmd = Command::new("wezterm");
         cmd.args(["cli", "spawn", "--new-window"]);
@@ -411,6 +437,7 @@ impl TerminalHarness for WezTermHarness {
             return Err(io::Error::other("wezterm cli spawn returned empty pane id"));
         }
         self.pane_id = Some(pane_id);
+        self.tag_spawned_pane();
         std::thread::sleep(Duration::from_millis(400));
         Ok(())
     }
@@ -443,6 +470,78 @@ impl TerminalHarness for WezTermHarness {
         let raw = String::from_utf8_lossy(&out.stdout).into_owned();
         Ok(CapturedFrame::from_raw(raw))
     }
+}
+
+/// Removes stale panes from the harness-owned WezTerm background
+/// workspace.
+///
+/// New panes are tagged with `biscuit-test-pane-<pid>-<pane_id>` and are
+/// removed only when `<pid>` is no longer alive. Older harness versions did
+/// not tag background panes; when the background workspace has grown past a
+/// conservative limit, this function also removes untagged panes from that
+/// workspace to recover from historical leaks.
+pub fn cleanup_stale_wezterm_panes() {
+    if !WezTermHarness::available() {
+        return;
+    }
+    let mut cmd = Command::new("wezterm");
+    cmd.args(["cli", "list", "--format", "json"]);
+    let Ok(out) = run_with_timeout(&mut cmd, QUERY_TIMEOUT) else {
+        return;
+    };
+    if !out.status.success() {
+        return;
+    }
+    let Ok(entries) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
+        return;
+    };
+    let Some(entries) = entries.as_array() else {
+        return;
+    };
+
+    let background_count = entries
+        .iter()
+        .filter(|entry| string_field(entry, "workspace") == Some(BACKGROUND_WORKSPACE))
+        .count();
+    let sweep_legacy = background_count > LEGACY_BACKGROUND_PANE_LIMIT
+        || env::var("BISCUIT_TEST_HARNESS_SWEEP_LEGACY_WEZTERM").as_deref() == Ok("1");
+
+    for entry in entries {
+        if string_field(entry, "workspace") != Some(BACKGROUND_WORKSPACE) {
+            continue;
+        }
+        let Some(pane_id) = entry.get("pane_id").and_then(|v| v.as_u64()) else {
+            continue;
+        };
+        let title = string_field(entry, "tab_title")
+            .filter(|s| !s.is_empty())
+            .or_else(|| string_field(entry, "window_title").filter(|s| !s.is_empty()))
+            .or_else(|| string_field(entry, "title").filter(|s| !s.is_empty()));
+
+        let should_kill = match title {
+            Some(title) if title.starts_with(PANE_TITLE_PREFIX) => {
+                pid_from_tag(title, PANE_TITLE_PREFIX)
+                    .map(|pid| pid != current_process_id() && !process_is_alive(pid))
+                    .unwrap_or(false)
+            }
+            _ => sweep_legacy,
+        };
+        if should_kill {
+            kill_wezterm_pane(pane_id);
+        }
+    }
+}
+
+fn string_field<'a>(entry: &'a serde_json::Value, field: &str) -> Option<&'a str> {
+    entry.get(field).and_then(|v| v.as_str())
+}
+
+fn kill_wezterm_pane(pane_id: u64) {
+    let mut cmd = Command::new("wezterm");
+    cmd.args(["cli", "kill-pane", "--pane-id", &pane_id.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
 }
 
 fn which(bin: &str) -> bool {

@@ -48,11 +48,11 @@ pub use topics::render_topics_table;
 pub(crate) use filesystem::{
     collect_repo_package_area_names, collect_repo_package_names, print_current_package_area_dirty,
     print_package_area_has_source_code_changes, render_dirty_package_areas, render_dirty_packages,
-    render_files_section, render_filesystem_section, render_language_section,
-    render_repo_deps_text, render_repo_deps_visual, render_repo_language, render_repo_package,
-    render_repo_package_area, render_repo_package_area_root, render_repo_package_areas_formatted,
-    render_repo_package_root, render_repo_packages_formatted, render_repo_root,
-    render_repo_section, render_staged_package_areas, render_staged_packages,
+    render_files_section, render_filesystem_section, render_language_section, render_repo_deps_svg,
+    render_repo_deps_text, render_repo_deps_visual, render_repo_language, render_repo_name,
+    render_repo_package, render_repo_package_area, render_repo_package_area_root,
+    render_repo_package_areas_formatted, render_repo_package_root, render_repo_packages_formatted,
+    render_repo_root, render_repo_section, render_staged_package_areas, render_staged_packages,
     render_unstaged_package_areas, render_unstaged_packages,
 };
 pub(crate) use hardware::{
@@ -456,19 +456,32 @@ pub fn render_text(
                 }
                 Some(RepoAction::Deps {
                     ui,
+                    svg,
                     filter,
                     package,
                     package_area,
+                    width,
+                    orientation,
                 }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref repo) = filesystem.repo
                     {
-                        if *ui {
+                        if *svg {
+                            out.push_str(&render_repo_deps_svg(
+                                repo,
+                                filter,
+                                package.as_deref(),
+                                package_area.as_deref(),
+                                orientation.as_deref(),
+                            ));
+                        } else if *ui {
                             out.push_str(&render_repo_deps_visual(
                                 repo,
                                 filter,
                                 package.as_deref(),
                                 package_area.as_deref(),
+                                width.as_deref(),
+                                orientation.as_deref(),
                             ));
                         } else {
                             out.push_str(&render_repo_deps_text(
@@ -512,11 +525,43 @@ pub fn render_text(
                     // Side-effect only: calls std::process::exit
                     print_package_area_has_source_code_changes(result, base_dir, verbose);
                 }
-                Some(RepoAction::GitStatus { compact, .. }) => {
+                Some(RepoAction::GitStatus {
+                    compact,
+                    branch,
+                    worktree,
+                    ..
+                }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref git) = filesystem.git
                     {
-                        out.push_str(&render_git_section(git, history_count, verbose, *compact));
+                        // `--worktree` takes precedence; the worktree handler
+                        // upstream already replaced `current_branch` with the
+                        // worktree's branch, so use that for the heading.
+                        let target_worktree =
+                            worktree.as_deref().zip(git.current_branch.as_deref());
+
+                        // Annotate the Status heading only when the user
+                        // explicitly named a branch different from the
+                        // currently checked-out one. `--branch` with no
+                        // value (Some(None)) resolves to current and is a
+                        // no-op for both data and heading.
+                        let target_branch = match branch {
+                            Some(Some(name))
+                                if !name.is_empty()
+                                    && git.current_branch.as_deref() != Some(name.as_str()) =>
+                            {
+                                Some(name.as_str())
+                            }
+                            _ => None,
+                        };
+                        out.push_str(&render_git_section(
+                            git,
+                            history_count,
+                            verbose,
+                            *compact,
+                            target_branch,
+                            target_worktree,
+                        ));
                     }
                 }
                 Some(RepoAction::Language { breakdown: true }) => {

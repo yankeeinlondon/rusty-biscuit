@@ -1,10 +1,190 @@
 //! Shared test lifecycle helpers for the Rusty Biscuit workspace.
+//!
+//! ## Test level vocabulary
+//!
+//! The monorepo uses a unified Level 1 / 2 / 3 taxonomy for tests:
+//!
+//! - **Level 1 (`L1`)** — In-process or PTY-based tests. No real terminal,
+//!   browser, device, or external service required.
+//! - **Level 2 (`L2`)** — Run-in-real-terminal tests, headless-browser tests,
+//!   and similar harness-backed tests that exercise a real rendering or
+//!   tooling surface.
+//! - **Level 3 (`L3`)** — OS-level keyboard or mouse injection tests
+//!   (`cliclick`, `xdotool`, etc.).
+//!
+//! Use [`require_level!`] inside a test body to skip cleanly when the
+//! requested level's harness is unavailable, or to hard-fail when the env
+//! contract demands enforcement.
+//!
+//! ## Standard env contract
+//!
+//! - `BISCUIT_TEST_LEVEL=1|2|3` — runtime gate. Tests above this level skip
+//!   cleanly. Defaults to `3` (run every level for which a harness is
+//!   available).
+//! - `BISCUIT_TEST_LEVEL_REQUIRED=2|3` — CI use. When set and the harness
+//!   for the matching level is unavailable, [`require_level!`] panics
+//!   instead of skipping.
+//! - `RUN_LEVEL3=1` — explicit opt-in for Level 3 tests, on top of the
+//!   normal availability probe. Level 3 tests skip when this is unset.
 
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::sync::{Mutex, Once};
 
 static INIT_TRACING: Once = Once::new();
+
+/// Environment variable that sets the maximum test level to run.
+///
+/// Values: `1`, `2`, or `3`. Tests above this level skip cleanly. When
+/// unset, defaults to `3` (run every level for which a harness is
+/// available).
+pub const BISCUIT_TEST_LEVEL: &str = "BISCUIT_TEST_LEVEL";
+
+/// Environment variable that converts harness-unavailable skips into
+/// hard failures for the matching level.
+///
+/// Values: `1`, `2`, or `3`. When set and the harness for that level is
+/// unavailable, [`require_level!`] panics instead of skipping. Intended
+/// for CI jobs that provision the relevant tooling.
+pub const BISCUIT_TEST_LEVEL_REQUIRED: &str = "BISCUIT_TEST_LEVEL_REQUIRED";
+
+/// Environment variable that opts in to Level 3 OS-keyboard-injection
+/// tests. Set to `1` to enable.
+pub const RUN_LEVEL3: &str = "RUN_LEVEL3";
+
+/// Test-level taxonomy used across the rusty-biscuit workspace.
+///
+/// See the module-level documentation for the definition of each level
+/// and the standard env contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Level {
+    /// In-process or PTY-based tests.
+    L1 = 1,
+    /// Real-terminal, headless-browser, or other harness-backed tests.
+    L2 = 2,
+    /// OS-level keyboard/mouse injection tests.
+    L3 = 3,
+}
+
+impl Level {
+    /// Returns the numeric level (`1`, `2`, or `3`).
+    #[must_use]
+    pub const fn as_u8(self) -> u8 {
+        self as u8
+    }
+}
+
+/// Decision returned by [`evaluate_level`] for a given test level and
+/// harness availability check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LevelDecision {
+    /// The test should run.
+    Run,
+    /// The test should skip cleanly. Carries a human-readable reason.
+    Skip(String),
+    /// The test should panic. Carries the panic message.
+    Panic(String),
+}
+
+/// Decide whether a test at `level` should run, skip, or panic, given a
+/// harness-availability result.
+///
+/// `available` is the result of the test's local probe (e.g.
+/// `WezTermHarness::available()`). `harness_label` is a short string used
+/// in skip/panic messages (e.g. `"WezTerm"`, `"Chrome"`).
+///
+/// Decision rules:
+///
+/// 1. If `BISCUIT_TEST_LEVEL=N` is set and `level > N`, return
+///    `Skip("BISCUIT_TEST_LEVEL=N")`.
+/// 2. If `level == L3` and `RUN_LEVEL3` is not `1`, return
+///    `Skip("set RUN_LEVEL3=1")`.
+/// 3. If `available == false`:
+///     - If `BISCUIT_TEST_LEVEL_REQUIRED == level`, return `Panic(...)`.
+///     - Otherwise return `Skip("harness unavailable")`.
+/// 4. Otherwise return `Run`.
+#[must_use]
+pub fn evaluate_level(level: Level, available: bool, harness_label: &str) -> LevelDecision {
+    if let Some(max) = read_level_env(BISCUIT_TEST_LEVEL)
+        && level.as_u8() > max
+    {
+        return LevelDecision::Skip(format!(
+            "skipping: {BISCUIT_TEST_LEVEL}={max} excludes level {}",
+            level.as_u8()
+        ));
+    }
+
+    if level == Level::L3 && !is_truthy(env::var(RUN_LEVEL3).ok().as_deref()) {
+        return LevelDecision::Skip(format!(
+            "skipping: set {RUN_LEVEL3}=1 to enable Level 3 ({harness_label})"
+        ));
+    }
+
+    if !available {
+        if let Some(required) = read_level_env(BISCUIT_TEST_LEVEL_REQUIRED)
+            && required == level.as_u8()
+        {
+            return LevelDecision::Panic(format!(
+                "{BISCUIT_TEST_LEVEL_REQUIRED}={required} but {harness_label} is unavailable. \
+                 Provision the required harness in this environment or unset the variable."
+            ));
+        }
+        return LevelDecision::Skip(format!("skipping: requires {harness_label}"));
+    }
+
+    LevelDecision::Run
+}
+
+fn read_level_env(key: &str) -> Option<u8> {
+    let raw = env::var(key).ok()?;
+    raw.trim().parse::<u8>().ok().filter(|n| (1..=3).contains(n))
+}
+
+fn is_truthy(value: Option<&str>) -> bool {
+    matches!(value.map(str::trim), Some("1" | "true" | "TRUE" | "True"))
+}
+
+/// Gate a test body on the requested [`Level`].
+///
+/// `$level` is a [`Level`] value (`Level::L1` / `Level::L2` / `Level::L3`).
+/// `$available` is an expression returning `bool` — typically the test's
+/// harness availability probe (e.g. `WezTermHarness::available()`).
+/// `$label` is a short string describing what the test needs, used in
+/// the skip/panic message (e.g. `"WezTerm"`, `"Chrome/Chromium"`).
+///
+/// The macro evaluates [`evaluate_level`] and either:
+///
+/// - emits a `skipping: ...` line to stderr and `return`s from the
+///   enclosing function, or
+/// - `panic!`s with the enforcement message, or
+/// - falls through so the test body runs.
+///
+/// ## Examples
+///
+/// ```ignore
+/// use test_toolkit::{require_level, Level};
+///
+/// #[test]
+/// fn level2_renders_in_real_terminal() {
+///     require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
+///     // ... test body runs only when WezTerm is available.
+/// }
+/// ```
+#[macro_export]
+macro_rules! require_level {
+    ($level:expr, $available:expr, $label:expr $(,)?) => {{
+        match $crate::evaluate_level($level, $available, $label) {
+            $crate::LevelDecision::Run => {}
+            $crate::LevelDecision::Skip(msg) => {
+                eprintln!("{}", msg);
+                return;
+            }
+            $crate::LevelDecision::Panic(msg) => {
+                panic!("{}", msg);
+            }
+        }
+    }};
+}
 
 /// Global lock that serializes process-environment mutation inside
 /// [`EnvGuard`]'s safe constructors.
@@ -231,13 +411,16 @@ fn previous_value(key: &OsStr) -> PreviousEnvValue {
 
 #[cfg(test)]
 mod tests {
-    use super::{init_test_tracing, EnvGuard};
+    use super::{
+        BISCUIT_TEST_LEVEL, BISCUIT_TEST_LEVEL_REQUIRED, EnvGuard, Level, LevelDecision, RUN_LEVEL3,
+        evaluate_level, init_test_tracing,
+    };
     use std::env;
     use std::sync::{Arc, Mutex};
     use tracing::Subscriber;
+    use tracing_subscriber::Registry;
     use tracing_subscriber::layer::{Context, Layer};
     use tracing_subscriber::prelude::*;
-    use tracing_subscriber::Registry;
 
     const RESTORE_KEY: &str = "TEST_TOOLKIT_ENV_GUARD_RESTORE";
     const REMOVE_KEY: &str = "TEST_TOOLKIT_ENV_GUARD_REMOVE";
@@ -403,6 +586,115 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
+    fn evaluate_level_runs_when_available_and_no_env() {
+        let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
+        let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
+        let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+
+        assert_eq!(
+            evaluate_level(Level::L2, true, "WezTerm"),
+            LevelDecision::Run,
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn evaluate_level_skips_when_above_test_level_max() {
+        let _g1 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL, "1");
+        let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
+        let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+
+        match evaluate_level(Level::L2, true, "WezTerm") {
+            LevelDecision::Skip(msg) => assert!(msg.contains("BISCUIT_TEST_LEVEL=1")),
+            other => panic!("expected Skip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn evaluate_level_skips_when_harness_unavailable_and_not_required() {
+        let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
+        let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
+        let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+
+        match evaluate_level(Level::L2, false, "WezTerm") {
+            LevelDecision::Skip(msg) => assert!(msg.contains("WezTerm")),
+            other => panic!("expected Skip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn evaluate_level_panics_when_required_level_matches_and_unavailable() {
+        let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
+        let _g2 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL_REQUIRED, "2");
+        let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+
+        match evaluate_level(Level::L2, false, "WezTerm") {
+            LevelDecision::Panic(msg) => {
+                assert!(msg.contains("BISCUIT_TEST_LEVEL_REQUIRED=2"));
+                assert!(msg.contains("WezTerm"));
+            }
+            other => panic!("expected Panic, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn evaluate_level_does_not_panic_when_required_level_differs() {
+        let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
+        let _g2 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL_REQUIRED, "3");
+        let _g3 = EnvGuard::set_safe(RUN_LEVEL3, "1");
+
+        // Level 2 unavailable, but REQUIRED=3 → should skip, not panic.
+        match evaluate_level(Level::L2, false, "WezTerm") {
+            LevelDecision::Skip(_) => {}
+            other => panic!("expected Skip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn evaluate_level_l3_skips_without_run_level3() {
+        let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
+        let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
+        let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+
+        match evaluate_level(Level::L3, true, "cliclick") {
+            LevelDecision::Skip(msg) => assert!(msg.contains("RUN_LEVEL3")),
+            other => panic!("expected Skip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn evaluate_level_l3_runs_with_run_level3_and_available() {
+        let _g1 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL);
+        let _g2 = EnvGuard::remove_safe(BISCUIT_TEST_LEVEL_REQUIRED);
+        let _g3 = EnvGuard::set_safe(RUN_LEVEL3, "1");
+
+        assert_eq!(
+            evaluate_level(Level::L3, true, "cliclick"),
+            LevelDecision::Run,
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn evaluate_level_test_level_max_takes_precedence_over_required() {
+        // BISCUIT_TEST_LEVEL=1 forces a skip even when REQUIRED=2 would panic.
+        let _g1 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL, "1");
+        let _g2 = EnvGuard::set_safe(BISCUIT_TEST_LEVEL_REQUIRED, "2");
+        let _g3 = EnvGuard::remove_safe(RUN_LEVEL3);
+
+        match evaluate_level(Level::L2, false, "WezTerm") {
+            LevelDecision::Skip(_) => {}
+            other => panic!("expected Skip (max wins), got {other:?}"),
+        }
+    }
+
+    #[test]
     fn init_test_tracing_is_idempotent() {
         init_test_tracing();
         init_test_tracing(); // should not panic
@@ -423,7 +715,10 @@ mod tests {
                 _id: &tracing::span::Id,
                 _ctx: Context<'_, S>,
             ) {
-                self.0.lock().unwrap().push(attrs.metadata().name().to_string());
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(attrs.metadata().name().to_string());
             }
         }
 

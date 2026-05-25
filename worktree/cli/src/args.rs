@@ -53,6 +53,25 @@ pub enum Commands {
         #[arg(long, action = clap::ArgAction::Help, hide = true)]
         help: Option<bool>,
     },
+
+    /// Remove a worktree (and optionally its branch)
+    Remove {
+        /// Worktree name to remove
+        #[arg(add = ArgValueCompleter::new(complete_worktree_names))]
+        name: String,
+
+        /// Force removal. Pass twice (-ff) to skip all confirmation.
+        ///
+        /// - `-f` / `--force`: skip confirmation when safe (clean, or <10 files
+        ///   with no source code). Confirm when uncommitted source/many files exist.
+        /// - `-ff`: remove immediately regardless of state.
+        #[arg(long, short = 'f', action = clap::ArgAction::Count)]
+        force: u8,
+
+        /// Also attempt a soft delete (`git branch -d`) of the worktree's branch
+        #[arg(long, short = 'b')]
+        branch: bool,
+    },
 }
 
 fn complete_worktree_names(_current: &std::ffi::OsStr) -> Vec<clap_complete::CompletionCandidate> {
@@ -70,6 +89,10 @@ Examples:
   wt create fix/y --stay Create without changing directory
   wt go feature-x       Navigate to a worktree
   wt go base            Navigate back to the base checkout
+  wt remove feature-x   Remove a worktree (prompts on dirty files)
+  wt remove feature-x -f Remove (skip confirm when safe)
+  wt remove feature-x -ff Remove immediately, no confirmation
+  wt remove feature-x -b Remove worktree AND soft-delete its branch
 
 Shell Integration (cd wrapper + completions):
   source <(wt --completions bash)              Add to ~/.bashrc

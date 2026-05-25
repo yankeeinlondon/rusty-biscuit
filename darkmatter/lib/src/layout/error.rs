@@ -42,4 +42,27 @@ pub enum PageRenderError {
     /// An underlying markdown render failure surfaced through page rendering.
     #[error("markdown render failed: {0}")]
     Render(String),
+
+    /// A list left-margin builder was called with a non-`Ul` component.
+    ///
+    /// Only [`PageComponent::Ul`](super::PageComponent::Ul) supports the
+    /// independent left-margin channel in the current sub-spec.
+    #[error("list left margin only accepts `PageComponent::Ul`")]
+    InvalidListLeftMarginComponent,
+
+    /// A `Length::Css(_)` value was set on `style.hyperlinks.*`,
+    /// `style.hyperlinks.local-style.*`, or `style.images.local-style.*` for a
+    /// field that affects terminal layout (`width` or `max-width`). HTML can
+    /// represent CSS lengths inline, but terminal layout works in cells, so
+    /// the CSS length cannot be honored on this target.
+    #[error(
+        "`style.{bucket}.{field}` uses a CSS length which is not supported for terminal layout"
+    )]
+    InvalidInlineCssLength {
+        /// Source bucket in canonical kebab-case (`hyperlinks`,
+        /// `hyperlinks.local-style`, or `images.local-style`).
+        bucket: &'static str,
+        /// Field name in canonical kebab-case (`width` or `max-width`).
+        field: &'static str,
+    },
 }

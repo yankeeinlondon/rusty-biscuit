@@ -1,0 +1,5 @@
+$schema:
+  title: string
+  active: boolean
+  count: number(integer)
+  rating: number

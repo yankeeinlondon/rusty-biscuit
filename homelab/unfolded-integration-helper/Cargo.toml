@@ -22,3 +22,9 @@ mdns-sd = { version = "0.12", optional = true }
 [dev-dependencies]
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "sync"] }
 tempfile = "3.15"
+
+# Opt-out of benchmarking: device-integration helper library; no measurable
+# hot paths.
+[package.metadata.benchmarks]
+required = false
+reason = "Device-integration helper; no measurable hot paths."

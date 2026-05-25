@@ -1,0 +1,307 @@
+name: fuzz-nightly
+
+# Nightly scheduled fuzz run for all targets.
+# Requires nightly Rust. Opens an issue on a NEW crash (presence of
+# fuzz/artifacts/** entries). Non-crash job failures (toolchain install,
+# cache, runner outage, …) upload diagnostic logs but do NOT file issues.
+# Not a PR gate — fuzzing is advisory only.
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch: {}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: fuzz-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  biscuit-file:
+    name: Fuzz biscuit-file targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: fuzz-biscuit-file
+
+      # Replay committed crash fixtures before extending fuzzing. libFuzzer
+      # treats positional paths as additional corpora; `-runs=0` makes it
+      # execute each input exactly once and exit, so any committed crash
+      # that has regressed will fail this step deterministically.
+      - name: Replay committed crash fixtures
+        run: |
+          set -euo pipefail
+          cd biscuit-file/lib/fuzz
+          for target in pdf_extract toml_roundtrip yaml_roundtrip json5_roundtrip; do
+            if [[ -d "crashes/${target}" ]] \
+               && find "crashes/${target}" -mindepth 1 -type f \
+                    -not -name 'README.md' -not -name '.gitkeep' \
+                    | grep -q .; then
+              echo "::group::Replaying crashes/${target}"
+              cargo +nightly fuzz run "${target}" "crashes/${target}" -- -runs=0
+              echo "::endgroup::"
+            else
+              echo "no committed crash fixtures for ${target}; skipping replay"
+            fi
+          done
+
+      - name: Run PDF extract fuzz target
+        run: |
+          cd biscuit-file/lib/fuzz
+          cargo +nightly fuzz run pdf_extract -- -runs=10000 -max_total_time=300
+
+      - name: Run TOML roundtrip fuzz target
+        run: |
+          cd biscuit-file/lib/fuzz
+          cargo +nightly fuzz run toml_roundtrip -- -runs=10000 -max_total_time=300
+
+      - name: Run YAML roundtrip fuzz target
+        run: |
+          cd biscuit-file/lib/fuzz
+          cargo +nightly fuzz run yaml_roundtrip -- -runs=10000 -max_total_time=300
+
+      - name: Run JSON5 roundtrip fuzz target
+        run: |
+          cd biscuit-file/lib/fuzz
+          cargo +nightly fuzz run json5_roundtrip -- -runs=10000 -max_total_time=300
+
+      - name: Detect crash artifacts
+        id: detect_crash
+        if: always()
+        run: |
+          set -euo pipefail
+          artifacts_dir=biscuit-file/lib/fuzz/artifacts
+          if [[ -d "$artifacts_dir" ]] \
+             && find "$artifacts_dir" -mindepth 1 -type f \
+                  \( -name 'crash-*' -o -name 'leak-*' -o -name 'timeout-*' -o -name 'oom-*' \) \
+                  | grep -q .; then
+            echo "has_crash=true" >> "$GITHUB_OUTPUT"
+            # Capture first crash filename as a stable signature for de-dup.
+            sig=$(find "$artifacts_dir" -mindepth 1 -type f \
+                    \( -name 'crash-*' -o -name 'leak-*' -o -name 'timeout-*' -o -name 'oom-*' \) \
+                    -printf '%f\n' | sort | head -n 1)
+            echo "signature=${sig}" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_crash=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload fuzz crash artifacts
+        if: always() && steps.detect_crash.outputs.has_crash == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-biscuit-file
+          path: biscuit-file/lib/fuzz/artifacts/**
+          if-no-files-found: ignore
+
+      - name: Upload non-crash failure logs
+        if: failure() && steps.detect_crash.outputs.has_crash != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failure-logs-biscuit-file
+          path: |
+            biscuit-file/lib/fuzz/target/**/*.log
+            biscuit-file/lib/fuzz/Cargo.lock
+          if-no-files-found: ignore
+
+      - name: Open issue on new fuzz crash
+        if: steps.detect_crash.outputs.has_crash == 'true'
+        uses: actions/github-script@v7
+        env:
+          CRASH_SIGNATURE: ${{ steps.detect_crash.outputs.signature }}
+        with:
+          script: |
+            const signature = process.env.CRASH_SIGNATURE || 'unknown';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // De-duplicate: search open `fuzz` issues for either the
+            // crash signature or the target marker `[fuzz:biscuit-file]`
+            // and skip if one already exists.
+            const marker = '[fuzz:biscuit-file]';
+            const search = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open label:fuzz "${marker}"`,
+              per_page: 50,
+            });
+            const dup = search.data.items.find(it =>
+              it.title.includes(marker) &&
+              (it.title.includes(signature) || it.body?.includes(signature))
+            );
+            if (dup) {
+              core.info(`Skipping issue creation: open issue #${dup.number} already tracks signature ${signature}`);
+              return;
+            }
+
+            const title = `${marker} crash ${signature}`;
+            const body = [
+              `Nightly fuzz job \`biscuit-file\` produced a crash artifact.`,
+              ``,
+              `- Crash signature: \`${signature}\``,
+              `- Workflow run: ${runUrl}`,
+              `- Commit: \`${context.sha}\``,
+              `- Crash artifacts: download \`fuzz-crashes-biscuit-file\` from the run.`,
+              ``,
+              `Reproduce locally:`,
+              `\`\`\`bash`,
+              `cd biscuit-file/lib/fuzz`,
+              `cargo +nightly fuzz run <target> artifacts/<target>/${signature}`,
+              `\`\`\``,
+              ``,
+              `Minimize and commit the input under \`fuzz/crashes/<target>/\` per the corpus policy.`,
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['fuzz', 'bug'],
+            });
+
+  darkmatter:
+    name: Fuzz darkmatter target
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: fuzz-darkmatter
+
+      # Replay committed crash fixtures before extending fuzzing. libFuzzer
+      # treats positional paths as additional corpora; `-runs=0` makes it
+      # execute each input exactly once and exit, so any committed crash
+      # that has regressed will fail this step deterministically.
+      - name: Replay committed crash fixtures
+        run: |
+          set -euo pipefail
+          cd darkmatter/lib/fuzz
+          for target in markdown_parser; do
+            if [[ -d "crashes/${target}" ]] \
+               && find "crashes/${target}" -mindepth 1 -type f \
+                    -not -name 'README.md' -not -name '.gitkeep' \
+                    | grep -q .; then
+              echo "::group::Replaying crashes/${target}"
+              cargo +nightly fuzz run "${target}" "crashes/${target}" -- -runs=0
+              echo "::endgroup::"
+            else
+              echo "no committed crash fixtures for ${target}; skipping replay"
+            fi
+          done
+
+      - name: Run markdown parser fuzz target
+        run: |
+          cd darkmatter/lib/fuzz
+          cargo +nightly fuzz run markdown_parser -- -runs=10000 -max_total_time=300
+
+      - name: Detect crash artifacts
+        id: detect_crash
+        if: always()
+        run: |
+          set -euo pipefail
+          artifacts_dir=darkmatter/lib/fuzz/artifacts
+          if [[ -d "$artifacts_dir" ]] \
+             && find "$artifacts_dir" -mindepth 1 -type f \
+                  \( -name 'crash-*' -o -name 'leak-*' -o -name 'timeout-*' -o -name 'oom-*' \) \
+                  | grep -q .; then
+            echo "has_crash=true" >> "$GITHUB_OUTPUT"
+            sig=$(find "$artifacts_dir" -mindepth 1 -type f \
+                    \( -name 'crash-*' -o -name 'leak-*' -o -name 'timeout-*' -o -name 'oom-*' \) \
+                    -printf '%f\n' | sort | head -n 1)
+            echo "signature=${sig}" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_crash=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload fuzz crash artifacts
+        if: always() && steps.detect_crash.outputs.has_crash == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-darkmatter
+          path: darkmatter/lib/fuzz/artifacts/**
+          if-no-files-found: ignore
+
+      - name: Upload non-crash failure logs
+        if: failure() && steps.detect_crash.outputs.has_crash != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failure-logs-darkmatter
+          path: |
+            darkmatter/lib/fuzz/target/**/*.log
+            darkmatter/lib/fuzz/Cargo.lock
+          if-no-files-found: ignore
+
+      - name: Open issue on new fuzz crash
+        if: steps.detect_crash.outputs.has_crash == 'true'
+        uses: actions/github-script@v7
+        env:
+          CRASH_SIGNATURE: ${{ steps.detect_crash.outputs.signature }}
+        with:
+          script: |
+            const signature = process.env.CRASH_SIGNATURE || 'unknown';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const marker = '[fuzz:darkmatter]';
+            const search = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open label:fuzz "${marker}"`,
+              per_page: 50,
+            });
+            const dup = search.data.items.find(it =>
+              it.title.includes(marker) &&
+              (it.title.includes(signature) || it.body?.includes(signature))
+            );
+            if (dup) {
+              core.info(`Skipping issue creation: open issue #${dup.number} already tracks signature ${signature}`);
+              return;
+            }
+
+            const title = `${marker} crash ${signature}`;
+            const body = [
+              `Nightly fuzz job \`darkmatter\` produced a crash artifact.`,
+              ``,
+              `- Crash signature: \`${signature}\``,
+              `- Workflow run: ${runUrl}`,
+              `- Commit: \`${context.sha}\``,
+              `- Crash artifacts: download \`fuzz-crashes-darkmatter\` from the run.`,
+              ``,
+              `Reproduce locally:`,
+              `\`\`\`bash`,
+              `cd darkmatter/lib/fuzz`,
+              `cargo +nightly fuzz run markdown_parser artifacts/markdown_parser/${signature}`,
+              `\`\`\``,
+              ``,
+              `Minimize and commit the input under \`fuzz/crashes/markdown_parser/\` per the corpus policy.`,
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['fuzz', 'bug'],
+            });

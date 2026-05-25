@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use biscuit_terminal::components::status::{Status, StatusState};
-use biscuit_terminal::prelude::Renderable;
+use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;

@@ -48,6 +48,31 @@ Themes come in light/dark pairs with automatic mode detection:
 | `Monokai` | Monokai | Monokai |
 | `VisualStudioDark` | VS Dark | VS Dark |
 
+**`ThemePair` is an abstract, mode-agnostic name.** `ThemePair::resolve(ColorMode)`
+maps the name **plus** a mode to a concrete light/dark theme (`(Github, Dark) →
+GithubDark`). The bottom four pairs are **single-variant by design** — they ignore
+the mode and resolve to one theme. Do not confuse the user-facing name with a
+concrete light/dark theme.
+
+### Code blocks invert for page contrast (terminal and HTML)
+
+Code blocks resolve their theme *variant* against the **inverted** terminal mode
+(`ColorMode::inverted`): a *light* code panel in a dark terminal, and vice versa.
+This lifts the code panel off the page. Prose, headings, tables, and the page
+background follow the terminal's real mode so body text stays readable.
+
+- Paired themes contrast correctly (dark terminal → light variant).
+- Single-variant themes (`dracula`/`nord`/`monokai`/`vs-dark`) are a deliberate
+  no-op — they have no opposite variant, so they cannot lift contrast. Documented,
+  not a bug.
+- The panel's *internal* contrast (header-pill text color, highlight-line
+  background math) keys off the **resolved** theme background
+  (`code_block::mode_for_background`), not the requested mode — so a single-variant
+  dark theme still gets light header text.
+- **HTML inverts too** (Defect D): the `color_mode` is the caller-declared page
+  mode, and the code theme resolves against its inverse just like the terminal,
+  so a Markdown code fence and a `YamlBlock` render byte-identically.
+
 ## Color Mode Detection
 
 ```rust

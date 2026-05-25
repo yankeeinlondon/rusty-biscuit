@@ -19,27 +19,34 @@ Pure-Rust visualization rendering backend for diagrams and graphs. Generates SVG
 ```rust
 use biscuit_visualized::mermaid::{MermaidDiagram, MermaidTheme};
 use biscuit_visualized::graph::{GraphDiagram, GraphInputSyntax};
-use biscuit_visualized::artifact::{RenderRequest, OutputFormat};
+use biscuit_visualized::artifact::{OutputFormat, RenderRequest};
 
-// Mermaid diagram
+// Mermaid diagram, vector SVG export
 let diagram = MermaidDiagram::new("flowchart LR\n    A --> B --> C")
     .with_theme(MermaidTheme::Dark);
-let artifact = diagram.render(RenderRequest::new(OutputFormat::Svg))?;
-println!("SVG at: {}", artifact.path.display());
+let svg_req = RenderRequest { format: OutputFormat::Svg, ..RenderRequest::default() };
+let artifact = diagram.render(&svg_req)?;
 
-// Graph from expression syntax
+// Graph from expression syntax, rasterised at a known display width
 let graph = GraphDiagram::from_expression("a -> b -> c")?;
-let artifact = graph.render(RenderRequest::new(OutputFormat::Png).with_scale(2.0))?;
+let artifact = graph.render(&RenderRequest::default().with_target_width(1600))?;
+// PNG is 1600 px wide; height derived from SVG aspect ratio.
 ```
+
+For the legacy HiDPI multiplier path, omit `target_width` and set `scale: N` directly. See [Rasterization](./rasterization.md) for when each is appropriate.
 
 ## Topics
 
 | Topic | Description |
 |-------|-------------|
 | [Mermaid Rendering](./mermaid-rendering.md) | MermaidDiagram API, themes, config, quadrant charts |
-| [Graph Rendering](./graph-rendering.md) | Expression syntax, DOT format, GraphBuilder, orientation, color themes |
+| [Graph Rendering](./graph-rendering.md) | Expression syntax, DOT format, GraphBuilder, orientation, color themes, terminal resolution tuning |
 | [Artifacts & Caching](./artifacts-caching.md) | RenderRequest, RenderedArtifact, FileCache, cache layout |
-| [Rasterization](./rasterization.md) | SVG-to-PNG via resvg, scale factors, font handling |
+| [Rasterization](./rasterization.md) | SVG-to-PNG via resvg, scale factors, font handling, terminal protocol ceiling |
+
+### In-repo deep dive
+
+`biscuit-visualized/docs/dot-graph.md` — full reference for the DOT graph subset accepted by this library, including supported / rejected features, cluster syntax, and the resolution-tuning case study from `sniff repo deps --ui`.
 
 ## Mermaid Diagrams
 
@@ -121,17 +128,27 @@ let graph = GraphDiagram::from_expression("a -> b")?
 
 ### RenderRequest
 
+`RenderRequest` is a plain struct; use struct literal syntax (no fluent builder beyond `with_target_width`):
+
 ```rust
-use biscuit_visualized::artifact::{RenderRequest, OutputFormat};
+use biscuit_visualized::artifact::{OutputFormat, RenderRequest};
 
-// SVG (default scale 1.0)
-let req = RenderRequest::new(OutputFormat::Svg);
+// SVG export
+let req = RenderRequest { format: OutputFormat::Svg, ..RenderRequest::default() };
 
-// PNG at 2x scale, transparent background
-let req = RenderRequest::new(OutputFormat::Png)
-    .with_scale(2.0)
-    .with_transparent_background(true);
+// PNG at a known display width (preferred for inline display)
+let req = RenderRequest::default().with_target_width(1600);
+
+// PNG at a fixed HiDPI multiplier (no display target)
+let req = RenderRequest {
+    format: OutputFormat::Png,
+    scale: 2,
+    target_width: None,
+    transparent_background: true,
+};
 ```
+
+`target_width: Some(px)` takes precedence over `scale`. See [Rasterization](./rasterization.md) for the trade-off.
 
 ### Cache Behavior
 

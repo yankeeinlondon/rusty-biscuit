@@ -42,7 +42,11 @@ fn create_service_skill_link(
 ) -> SkillAction {
     match creation::create_skill_symlink(source_path, target) {
         Ok(()) => {
-            tracing::info!("Created skill symlink for {} at {}", topic_name, service_name);
+            tracing::info!(
+                "Created skill symlink for {} at {}",
+                topic_name,
+                service_name
+            );
             SkillAction::CreatedLink
         }
         Err(creation::CreationError::InvalidSource(_)) => SkillAction::NoneSkillDirectoryInvalid,
@@ -54,12 +58,18 @@ fn create_service_skill_link(
                 topic_name,
                 e
             );
-            errors.push((topic_name.to_string(), format!("{} skill: {}", service_name, e)));
+            errors.push((
+                topic_name.to_string(),
+                format!("{} skill: {}", service_name, e),
+            ));
             SkillAction::FailedPermissionDenied(e.to_string())
         }
         Err(e) => {
             tracing::error!("Failed to create skill symlink for {}: {}", topic_name, e);
-            errors.push((topic_name.to_string(), format!("{} skill: {}", service_name, e)));
+            errors.push((
+                topic_name.to_string(),
+                format!("{} skill: {}", service_name, e),
+            ));
             SkillAction::FailedOther(e.to_string())
         }
     }
@@ -97,7 +107,10 @@ fn create_service_doc_link(
                 topic_name,
                 e
             );
-            errors.push((topic_name.to_string(), format!("{} doc: {}", service_name, e)));
+            errors.push((
+                topic_name.to_string(),
+                format!("{} doc: {}", service_name, e),
+            ));
             SkillAction::FailedPermissionDenied(e.to_string())
         }
         Err(e) => {
@@ -106,7 +119,10 @@ fn create_service_doc_link(
                 topic_name,
                 e
             );
-            errors.push((topic_name.to_string(), format!("{} doc: {}", service_name, e)));
+            errors.push((
+                topic_name.to_string(),
+                format!("{} doc: {}", service_name, e),
+            ));
             SkillAction::FailedOther(e.to_string())
         }
     }
@@ -426,13 +442,8 @@ mod tests {
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
 
         let mut errors = Vec::new();
-        let action = create_service_skill_link(
-            &source,
-            &target,
-            "TestService",
-            "test-skill",
-            &mut errors,
-        );
+        let action =
+            create_service_skill_link(&source, &target, "TestService", "test-skill", &mut errors);
 
         assert_eq!(action, SkillAction::CreatedLink);
         assert!(target.exists() || target.is_symlink());
@@ -450,13 +461,8 @@ mod tests {
         std::os::unix::fs::symlink(&source, &target).unwrap();
 
         let mut errors = Vec::new();
-        let action = create_service_doc_link(
-            &source,
-            &target,
-            "TestService",
-            "test-topic",
-            &mut errors,
-        );
+        let action =
+            create_service_doc_link(&source, &target, "TestService", "test-topic", &mut errors);
 
         assert_eq!(action, SkillAction::NoneAlreadyLinked);
         assert!(errors.is_empty());
@@ -472,13 +478,8 @@ mod tests {
         std::fs::write(&target, "local content").unwrap();
 
         let mut errors = Vec::new();
-        let action = create_service_doc_link(
-            &source,
-            &target,
-            "TestService",
-            "test-topic",
-            &mut errors,
-        );
+        let action =
+            create_service_doc_link(&source, &target, "TestService", "test-topic", &mut errors);
 
         assert_eq!(action, SkillAction::NoneLocalDefinition);
     }

@@ -1,12 +1,12 @@
 use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::prelude::StatusBlock;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::Margin;
+use biscuit_terminal::utils::layout::{Length, TargetValue};
 use claudine::provider::Provider;
 use claudine::stream::semantic::SemanticErrorKind;
 
@@ -209,8 +209,8 @@ impl AgentErrorReport {
         let block = StatusBlock::new(StatusState::Error)
             .body(Prose::new(compose.render(term)))
             .border_color(border_color)
-            .left_margin(Margin::Chars(2))
-            .right_margin(Margin::Chars(2));
+            .left_margin(TargetValue::universal(Length::ch(2)))
+            .right_margin(TargetValue::universal(Length::ch(2)));
 
         log::message("");
         log::message(&block.render(term));

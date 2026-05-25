@@ -3314,7 +3314,10 @@ fn test_repo_packages_on_error_message() {
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    assert!(stderr.contains("nothing here"), "stderr should contain custom error message, got: {stderr}");
+    assert!(
+        stderr.contains("nothing here"),
+        "stderr should contain custom error message, got: {stderr}"
+    );
 }
 
 #[test]
@@ -4870,6 +4873,243 @@ fn test_repo_worktree_help_mentions_subcommand() {
         .assert()
         .success()
         .stdout(predicate::str::contains("worktree"));
+}
+
+// ============================================================================
+// Phase 3 — `repo worktrees` CLI integration tests
+// ============================================================================
+
+#[test]
+fn test_repo_worktrees_default_output() {
+    let (_dir, repo_path, worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", repo_path.to_str().unwrap(), "repo", "worktrees"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let lines: Vec<&str> = stdout.trim().lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "expected main + 1 linked worktree: {stdout}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("my-worktree")),
+        "should list linked worktree: {stdout}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_list_output() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--list",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    for line in stdout.trim().lines() {
+        assert!(
+            line.starts_with("- "),
+            "list output should start with '- ': {line}"
+        );
+    }
+}
+
+#[test]
+fn test_repo_worktrees_csv_output() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--csv",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let trimmed = stdout.trim();
+    assert!(
+        trimmed.contains("my-worktree"),
+        "csv should contain worktree name: {stdout}"
+    );
+    assert!(
+        !trimmed.contains('\n'),
+        "csv should be single line: {stdout}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_verbose_output() {
+    let (_dir, repo_path, worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "-v",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(
+        stdout.contains("my-worktree"),
+        "verbose should list worktree name: {stdout}"
+    );
+    assert!(
+        stdout.contains("located at"),
+        "verbose should include path: {stdout}"
+    );
+    assert!(
+        stdout.contains(worktree_path.to_str().unwrap()),
+        "verbose should contain worktree path: {stdout}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_json_output() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    let arr = value["worktrees"]
+        .as_array()
+        .expect("worktrees must be array");
+    assert_eq!(arr.len(), 2, "expected main + 1 linked worktree");
+    assert!(
+        arr.iter().any(|w| w["name"] == "my-worktree"),
+        "should include linked worktree: {value}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_plain_verbose_no_escape_codes() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "-v",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(
+        !stdout.contains('\x1b'),
+        "plain output must not contain escape codes: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("located at"),
+        "plain verbose should still show words: {stdout}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_current_marker_from_main_worktree() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .current_dir(&repo_path)
+        .args(["repo", "worktrees"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let lines: Vec<&str> = stdout.trim().lines().collect();
+    let current_line = lines
+        .iter()
+        .find(|l| l.starts_with("* "))
+        .expect("should have a current marker line");
+    assert!(
+        current_line.contains(repo_path.file_name().unwrap().to_str().unwrap()),
+        "current marker should be on main worktree: {stdout}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_current_marker_from_linked_worktree() {
+    let (_dir, _repo_path, worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .current_dir(&worktree_path)
+        .args(["repo", "worktrees"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let lines: Vec<&str> = stdout.trim().lines().collect();
+    let current_line = lines
+        .iter()
+        .find(|l| l.starts_with("* "))
+        .expect("should have a current marker line");
+    assert!(
+        current_line.contains("my-worktree"),
+        "current marker should be on linked worktree: {stdout}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_detached_head() {
+    let (dir, repo_path) = create_test_repo();
+    let repo = git2::Repository::open(&repo_path).unwrap();
+
+    let worktree_path = repo_path.join("detached-wt");
+    let _wt = repo.worktree("detached-wt", &worktree_path, None).unwrap();
+
+    // Detach HEAD in the linked worktree.
+    let wt_repo = git2::Repository::open(&worktree_path).unwrap();
+    let head_commit = wt_repo.head().unwrap().peel_to_commit().unwrap();
+    wt_repo.set_head_detached(head_commit.id()).unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "-v",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(
+        stdout.contains("detached HEAD"),
+        "verbose should show detached HEAD fallback: {stdout}"
+    );
 }
 
 // ============================================================================

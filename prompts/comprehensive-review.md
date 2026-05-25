@@ -1,9 +1,3 @@
-<<<<<<< HEAD
----
-
----
-||||||| a8e59b48
-=======
 ---
 area: "{{ctx.current_package_area}}"
 ---
@@ -186,4 +180,3 @@ Now perform the review and save the results to {{area}}/reviews/{{ctx.today}}-co
 - now set the `created` frontmatter property of {{area}}/reviews/{{ctx.today}}-comprehensive/review.md to "{{ctx.now}}"
 - now set the `agent` frontmatter property of {{area}}/reviews/{{ctx.today}}-comprehensive/review.md  to "{{env.AGENT}}"
 - now set the `yolo` frontmatter property of {{area}}/reviews/{{ctx.today}}-comprehensive/review.md to "{{env.YOLO}}"
->>>>>>> main

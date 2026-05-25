@@ -24,3 +24,9 @@ assert_cmd = "2"
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 expectrl = "0.8"
 predicates = "3"
+test-toolkit = { path = "../../tools/test-toolkit" }
+
+# Opt-out of benchmarking: thin CLI wrapper around the tui-chrome library.
+[package.metadata.benchmarks]
+required = false
+reason = "Thin CLI wrapper around tui-chrome; no measurable hot paths."

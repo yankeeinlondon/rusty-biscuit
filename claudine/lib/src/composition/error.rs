@@ -6,12 +6,22 @@ use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
 use biscuit_terminal::terminal::Terminal;
+use chrono::{DateTime, Utc};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
 use super::types::ResolutionMode;
 use crate::provider::Provider;
 use thiserror::Error;
+
+/// Exit code emitted when a loop run halts because a provider rate-limit
+/// signal was observed and the configured policy was `abort` (or pause was
+/// unsafe due to a missing `reset_at`).
+///
+/// Mirrors `EX_TEMPFAIL` (`75`) from BSD `sysexits.h` so shell wrappers can
+/// distinguish a transient rate-limit halt from a generic non-zero exit
+/// (typically `1`).
+pub const LOOP_RATE_LIMITED_EXIT_CODE: i32 = 75;
 
 /// Errors that can occur during composition workflows.
 #[derive(Error, Debug)]
@@ -300,6 +310,61 @@ pub enum CompositionError {
         /// Prompt file being executed when the interrupt was observed.
         prompt_path: PathBuf,
     },
+
+    /// A loop iteration's provider exited non-zero.
+    ///
+    /// This is a *runtime* failure distinct from [`Self::LoopInvalid`] (a
+    /// frontmatter parse problem) and from [`Self::LoopInterrupted`]
+    /// (Ctrl+C). The `reason` field carries a human-readable cause derived
+    /// from the iteration's `session_end` JSONL row (e.g. `step_timeout`,
+    /// `wall-clock timeout`, `signal SIGTERM`, `provider exited non-zero`).
+    /// The `exit_reason` field carries the structured `error_kind` string
+    /// for downstream tooling.
+    #[error(
+        "loop iteration {iteration} of {prompt_path}: {reason} (exit code {exit_code})",
+        prompt_path = prompt_path.display()
+    )]
+    LoopIterationFailed {
+        /// 1-based iteration that failed.
+        iteration: usize,
+        /// Prompt file being executed.
+        prompt_path: PathBuf,
+        /// Process-style exit code for the failed iteration.
+        exit_code: i32,
+        /// Human-readable cause. Never empty.
+        reason: String,
+        /// Structured `error_kind` from the iteration's session_end row when
+        /// one is present (e.g. `step_timeout`, `wall_clock_timeout`,
+        /// `signal`, `usage_limit_reached`). `None` when no row was written.
+        exit_reason: Option<String>,
+    },
+
+    /// A loop iteration completed but reported a provider rate limit, and
+    /// either the configured `on_rate_limit` policy was `abort` or no
+    /// `reset_at` was available to safely pause.
+    ///
+    /// Maps to exit code [`LOOP_RATE_LIMITED_EXIT_CODE`] (`75`, `EX_TEMPFAIL`).
+    #[error(
+        "loop halted at iteration {iteration} of {prompt_path}: provider rate limited{}{}{}",
+        provider.as_ref().map(|p| format!(" ({p})")).unwrap_or_default(),
+        reset_at.as_ref().map(|r| format!("; resets at {}", r.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S"))).unwrap_or_default(),
+        message.as_ref().map(|m| format!("\n  ↳ {m}")).unwrap_or_default(),
+        prompt_path = prompt_path.display()
+    )]
+    LoopRateLimited {
+        /// 1-based iteration that produced the rate-limit trailer.
+        iteration: usize,
+        /// Prompt file being executed.
+        prompt_path: PathBuf,
+        /// Provider id reported by the throttling source, when known.
+        provider: Option<String>,
+        /// Model id reported by the throttling source, when known.
+        model: Option<String>,
+        /// When the cap is reported to reset, when known.
+        reset_at: Option<DateTime<Utc>>,
+        /// Provider-supplied human-readable message, when known.
+        message: Option<String>,
+    },
 }
 
 /// Per-step failure information for sequence selection errors.
@@ -357,6 +422,35 @@ impl BlockError for CompositionError {
                     .body(body)
                     .hint("Check the lifecycle frontmatter section in your prompt file.")
             }
+            CompositionError::LoopIterationFailed {
+                iteration,
+                exit_code,
+                reason,
+                exit_reason,
+                ..
+            } => {
+                // Surface the actionable cause (`step_timeout`,
+                // `wall-clock timeout`, signal, …) in the header instead of
+                // the generic `composition failed` line. The cause comes
+                // from the iteration's session_end JSONL row's
+                // `extra.exit_reason` — not from `LoopInvalid` (which is
+                // reserved for frontmatter parse errors).
+                let title = exit_reason
+                    .clone()
+                    .unwrap_or_else(|| "iteration failed".to_string());
+                let body =
+                    format!("Iteration {iteration} exited with code {exit_code}.\n\n{reason}");
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("CompositionError", &title))
+                    .body(body)
+            }
+            CompositionError::LoopRateLimited { .. } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "rate limited"))
+                .body(self.to_string())
+                .hint(
+                    "Re-run after the listed reset time, or use \
+                         `--on-rate-limit pause` to wait automatically.",
+                ),
             _ => {
                 let msg = self.to_string();
                 StatusBlock::new(StatusState::Error)
@@ -379,4 +473,104 @@ fn escape_prose_path(input: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loop_iteration_failed_display_surfaces_reason_and_iteration() {
+        let err = CompositionError::LoopIterationFailed {
+            iteration: 2,
+            prompt_path: PathBuf::from("fixes/plan.md"),
+            exit_code: 1,
+            reason: "step_timeout after 30m of stream silence".to_string(),
+            exit_reason: Some("step_timeout".to_string()),
+        };
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("loop iteration 2 of fixes/plan.md"),
+            "got: {rendered}"
+        );
+        assert!(
+            rendered.contains("step_timeout after 30m of stream silence"),
+            "got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("invalid loop definition"),
+            "got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn loop_rate_limited_display_includes_reset_time_when_present() {
+        let reset = DateTime::parse_from_rfc3339("2026-05-12T18:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let err = CompositionError::LoopRateLimited {
+            iteration: 1,
+            prompt_path: PathBuf::from("plan.md"),
+            provider: Some("k2p6".to_string()),
+            model: Some("kimi-for-coding".to_string()),
+            reset_at: Some(reset),
+            message: Some("Usage limit reached for k2p6".to_string()),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("k2p6"), "got: {rendered}");
+        assert!(rendered.contains("resets at"), "got: {rendered}");
+        assert!(rendered.contains("Usage limit reached"), "got: {rendered}");
+    }
+
+    #[test]
+    fn loop_rate_limited_display_omits_optional_fields_when_absent() {
+        let err = CompositionError::LoopRateLimited {
+            iteration: 3,
+            prompt_path: PathBuf::from("plan.md"),
+            provider: None,
+            model: None,
+            reset_at: None,
+            message: None,
+        };
+        let rendered = err.to_string();
+        assert!(
+            rendered.starts_with("loop halted at iteration 3 of plan.md"),
+            "got: {rendered}"
+        );
+        assert!(
+            rendered.contains("provider rate limited"),
+            "got: {rendered}"
+        );
+        // No reset clause when reset_at is absent
+        assert!(!rendered.contains("resets at"), "got: {rendered}");
+    }
+
+    #[test]
+    fn loop_iteration_failed_falls_back_when_no_exit_reason() {
+        let err = CompositionError::LoopIterationFailed {
+            iteration: 4,
+            prompt_path: PathBuf::from("plan.md"),
+            exit_code: 1,
+            reason: "provider exited non-zero".to_string(),
+            exit_reason: None,
+        };
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("provider exited non-zero"),
+            "got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn loop_invalid_still_reserved_for_frontmatter_problems() {
+        // Sanity: LoopInvalid is still the right variant for malformed
+        // frontmatter and renders distinctly from the runtime-fault
+        // variants above.
+        let err = CompositionError::LoopInvalid("`loop.max` must be greater than zero".to_string());
+        let rendered = err.to_string();
+        assert!(
+            rendered.starts_with("invalid loop definition:"),
+            "got: {rendered}"
+        );
+    }
 }

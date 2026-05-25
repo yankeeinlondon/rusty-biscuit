@@ -203,15 +203,62 @@ See the darkmatter registry in
 [`darkmatter/lib/src/markdown/errors/mod.rs`](../darkmatter/lib/src/markdown/errors/mod.rs)
 for a concrete example.
 
+## Render Tree
+
+The `render_tree` module is biscuit-terminal's **terminal renderer for the
+canonical [`renderable`](../renderable/README.md) render tree**. The render
+tree (`renderable::tree`) is a single, owned, target-agnostic representation;
+this module folds a `RenderNode` tree into terminal output by reusing the
+existing components above rather than re-implementing terminal formatting.
+
+```rust
+use renderable::tree::RenderNode;
+use biscuit_terminal::render_tree::{render_terminal_node, TerminalRenderOptions};
+
+let tree = RenderNode::root(vec![RenderNode::paragraph(vec![
+    RenderNode::text("Hello, terminal"),
+])]);
+let rendered = render_terminal_node(&tree, &TerminalRenderOptions::default())?;
+println!("{}", rendered.output);
+```
+
+Entry points:
+
+- `render_terminal_node` / `render_terminal_document` — render a `RenderNode`
+  tree or a whole `Document` to a terminal string, returning a `Rendered`
+  value carrying the output plus any non-fatal diagnostics.
+- `TerminalRenderOptions` / `TerminalRenderContext` — render options and the
+  terminal-capability snapshot the renderer consults. `TerminalRenderContext`
+  does not re-detect capabilities; build one from an existing `Terminal`.
+- `TreeComponent<T>` — adapts any `T: TreeRenderable` into an infallible
+  `TerminalRenderable`. The wrapped value projects itself into a render tree
+  via `render_tree()`, which is then folded for the terminal. Because
+  `TerminalRenderable::render` is infallible, `TreeComponent` always renders
+  non-strict and emits a visible diagnostic fallback string if rendering still
+  fails — it never panics.
+
+```rust
+use biscuit_terminal::components::block_quote::BlockQuote;
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::render_tree::TreeComponent;
+
+// BlockQuote is the first component to implement `TreeRenderable`.
+let component = TreeComponent::new(BlockQuote::from("quoted text"));
+let rendered = component.render_optimistic(Some(80));
+```
+
 ## Testing
 
-biscuit-terminal follows the **Level 1 / 2 / 3** testing vocabulary:
+biscuit-terminal follows the **Level 1 / 2 / 3** testing vocabulary. The
+Level 2 and Level 3 harnesses, the choice of harness variant, and the
+environment they require are documented in
+[`biscuit-test-harness/README.md`](../biscuit-test-harness/README.md).
 
 | Level | Description | Location |
 |-------|-------------|----------|
 | **Level 1** | PTY-based tests using `expectrl` — no real terminal required | `lib/tests/level1_*.rs` |
 | **Level 2** | Real-terminal tests using the shared `biscuit-test-harness` crate | `cli/tests/level2_*.rs` |
-| **Level 3** | OS-level keyboard injection (not applicable — biscuit-terminal has no interactive input) | — |
+| **Level 3** | OS-level keyboard injection (not applicable — biscuit-terminal has no interactive input). See [`biscuit-test-harness/README.md`](../biscuit-test-harness/README.md). | — |
 
 ### Running Level-2 tests locally
 

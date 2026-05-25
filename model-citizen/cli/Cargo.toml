@@ -39,3 +39,8 @@ tokio = { version = "1.48", features = ["full"] }
 assert_cmd = "2.0"
 insta = "1"
 predicates = "3.1"
+
+# Opt-out of benchmarking: thin CLI wrapper around the model-citizen library.
+[package.metadata.benchmarks]
+required = false
+reason = "Thin CLI wrapper around model-citizen; no measurable hot paths."

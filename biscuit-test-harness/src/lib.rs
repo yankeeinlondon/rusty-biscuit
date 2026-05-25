@@ -29,8 +29,17 @@ use std::time::Duration;
 pub mod apple_terminal;
 pub mod cliclick;
 pub mod kitty;
+pub mod layout_invariants;
+pub mod shared;
 pub mod tmux;
 pub mod wezterm;
+
+/// Prefix used to mark resources owned by this test harness.
+///
+/// Backends include the process id immediately after the backend-specific
+/// prefix, which lets later test runs clean resources from dead test
+/// processes without touching an active concurrent run.
+pub const HARNESS_RESOURCE_PREFIX: &str = "biscuit-test-";
 
 /// Controls whether a freshly spawned harness window is allowed to
 /// take keyboard focus / be visible on the active desktop.
@@ -427,6 +436,42 @@ pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
     Ok(())
 }
 
+/// Best-effort cleanup for stale resources owned by the real-terminal
+/// harnesses.
+///
+/// This is safe to call before a test starts. Tagged resources are removed
+/// only when their owning process id is no longer alive. Backend-specific
+/// cleanup functions intentionally ignore errors so missing terminal tools or
+/// unavailable GUI automation never make tests fail.
+pub fn cleanup_stale_terminal_harness_resources() {
+    wezterm::cleanup_stale_wezterm_panes();
+    tmux::cleanup_stale_tmux_sessions();
+    apple_terminal::cleanup_stale_apple_terminal_windows();
+}
+
+pub(crate) fn current_process_id() -> u32 {
+    std::process::id()
+}
+
+pub(crate) fn process_is_alive(pid: u32) -> bool {
+    if pid == current_process_id() {
+        return true;
+    }
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+pub(crate) fn pid_from_tag(tag: &str, prefix: &str) -> Option<u32> {
+    let rest = tag.strip_prefix(prefix)?;
+    let pid = rest.split('-').next()?;
+    pid.parse().ok()
+}
+
 fn which(bin: &str) -> bool {
     Command::new("which")
         .arg(bin)
@@ -722,5 +767,23 @@ mod tests {
             // skip the strict assertion.
             assert!(!shell.is_empty());
         }
+    }
+
+    #[test]
+    fn pid_from_tag_extracts_owner_pid() {
+        assert_eq!(pid_from_tag("biscuit-test-pane-123-456", "biscuit-test-pane-"), Some(123));
+    }
+
+    #[test]
+    fn pid_from_tag_rejects_wrong_prefix() {
+        assert_eq!(pid_from_tag("other-123-456", "biscuit-test-pane-"), None);
+    }
+
+    #[test]
+    fn pid_from_tag_rejects_invalid_pid() {
+        assert_eq!(
+            pid_from_tag("biscuit-test-pane-not-a-pid-456", "biscuit-test-pane-"),
+            None,
+        );
     }
 }
