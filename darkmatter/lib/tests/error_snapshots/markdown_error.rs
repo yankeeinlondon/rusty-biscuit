@@ -184,6 +184,36 @@ fn schema_validation_format_failure_renders_block() {
 }
 
 #[test]
+fn schema_validation_preparation_failure_renders_summary() {
+    // When the schema itself cannot be prepared (malformed `$schema`,
+    // unresolved reference, etc.) the validation stage emits an empty
+    // problem list and stuffs the underlying diagnostic into `summary`.
+    // The rendered block must surface that summary so authors see the
+    // actual root cause instead of just the path.
+    let err = MarkdownError::SchemaValidationFailed {
+        path: PathBuf::from("/tmp/test/bad-schema.md"),
+        problems: vec![],
+        summary: "schema could not be prepared: $schema must be a mapping or array of mappings"
+            .to_string(),
+        description: None,
+    };
+    let out = render(&err);
+    insta::assert_snapshot!(out);
+}
+
+#[test]
+fn schema_validation_preparation_failure_with_description_renders_summary() {
+    let err = MarkdownError::SchemaValidationFailed {
+        path: PathBuf::from("/tmp/test/unresolved.md"),
+        problems: vec![],
+        summary: "schema could not be prepared: could not resolve ./missing.yaml".to_string(),
+        description: Some("Planner prompt".to_string()),
+    };
+    let out = render(&err);
+    insta::assert_snapshot!(out);
+}
+
+#[test]
 fn schema_validation_multiple_problems_renders_block() {
     let err = MarkdownError::SchemaValidationFailed {
         path: PathBuf::from("/tmp/test/multi.md"),
