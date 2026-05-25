@@ -215,13 +215,28 @@ _sanity pkg *args="":
     echo
     echo -e "🩺 Sanity check {{ bold }}{{ pkg }}{{ reset }} {{ dim }}(lib + bins, !slow){{ reset }}"
     echo
-    meta="$(cargo metadata --no-deps --format-version 1)"
+    # Capture cargo metadata to a tempfile and have jq read it from
+    # the file. The previous `"$(cargo metadata)" <<< | jq | head`
+    # pipeline deadlocked from `bash -c` in sub-workspace dirs
+    # (e.g. `schematic/`, `tree-hugger/`, `unchained-ai/`) because
+    # `head -n 1` closing its stdin early left the `jq` end of the
+    # pipe in a state the enclosing command-substitution couldn't
+    # reap. Using a file plus `first(...)` in jq removes both the pipe
+    # and the early-close behaviour. `first(...)` short-circuits on
+    # the first match so we don't pay for full enumeration either.
+    #
+    # `mktemp` here uses the template form (no `-t`) so the same line
+    # works on macOS (BSD mktemp), Linux (GNU mktemp), and Windows
+    # git-bash — `-t` has incompatible semantics across implementations.
+    meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-sanity-meta.XXXXXX")"
+    trap 'rm -f "${meta_file}"' EXIT
+    cargo metadata --no-deps --format-version 1 > "${meta_file}"
     has_lib="$(jq -r --arg p '{{ pkg }}' \
-        '.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="lib") | .name' \
-        <<< "$meta" | head -n 1)"
+        'first(.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="lib") | .name) // ""' \
+        "${meta_file}")"
     has_bin="$(jq -r --arg p '{{ pkg }}' \
-        '.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="bin") | .name' \
-        <<< "$meta" | head -n 1)"
+        'first(.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="bin") | .name) // ""' \
+        "${meta_file}")"
     targets=()
     [[ -n "$has_lib" ]] && targets+=("--lib")
     [[ -n "$has_bin" ]] && targets+=("--bins")
@@ -274,8 +289,21 @@ _test_l2 pkg *args="":
     # Build the broker once (no-op if already up to date) and resolve
     # its absolute path through cargo metadata.
     cargo build -p biscuit-test-harness --bin biscuit-harness-broker --quiet
-    target_dir="$(cargo metadata --no-deps --format-version 1 | jq -r '.target_directory')"
-    broker="${target_dir}/debug/biscuit-harness-broker"
+    # Read cargo metadata via a tempfile to avoid the `bash -c`
+    # subprocess hang documented in `_sanity` above. The portable
+    # `mktemp` template form works on macOS BSD, Linux GNU, and
+    # Windows git-bash; `-t` has incompatible semantics across them.
+    meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-test-l2-meta.XXXXXX")"
+    cargo metadata --no-deps --format-version 1 > "${meta_file}"
+    target_dir="$(jq -r '.target_directory' "${meta_file}")"
+    rm -f "${meta_file}"
+    # Append `.exe` on Windows so the broker resolves under git-bash;
+    # `MSYSTEM` is set by MSYS2 / git-bash. macOS and Linux ignore it.
+    bin_suffix=""
+    if [[ -n "${MSYSTEM:-}" || "${OS:-}" == "Windows_NT" ]]; then
+        bin_suffix=".exe"
+    fi
+    broker="${target_dir}/debug/biscuit-harness-broker${bin_suffix}"
     if [[ ! -x "${broker}" ]]; then
         echo -e "{{ yellow }}warning: ${broker} not executable; falling back to per-test spawning{{ reset }}"
         cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass {{ args }}
@@ -284,7 +312,7 @@ _test_l2 pkg *args="":
 
     # Registry of (backend id) pairs the trap uses to tear down panes
     # the broker spawned. The trap consumes the registry on EXIT.
-    SHARED_REGISTRY="$(mktemp -t biscuit-shared-XXXXXX)"
+    SHARED_REGISTRY="$(mktemp "${TMPDIR:-/tmp}/biscuit-shared.XXXXXX")"
     trap 'while read -r b i; do "${broker}" kill "${b}" "${i}" >/dev/null 2>&1 || true; done < "${SHARED_REGISTRY}"; rm -f "${SHARED_REGISTRY}"' EXIT
 
     # spawn one shared pane per backend. Backends whose tooling is
@@ -353,10 +381,15 @@ _doctest pkg *args="":
     echo
     echo -e "📚 Doctests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
-    meta="$(cargo metadata --no-deps --format-version 1)"
+    # See `_sanity` above for why we use a tempfile + `first(...)` jq
+    # filter instead of `cargo metadata | jq | head` piping, and for
+    # the portable `mktemp` template form.
+    meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-doctest-meta.XXXXXX")"
+    trap 'rm -f "${meta_file}"' EXIT
+    cargo metadata --no-deps --format-version 1 > "${meta_file}"
     has_lib="$(jq -r --arg p '{{ pkg }}' \
-        '.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="lib") | .name' \
-        <<< "$meta" | head -n 1)"
+        'first(.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="lib") | .name) // ""' \
+        "${meta_file}")"
     if [[ -z "$has_lib" ]]; then
         echo -e "{{ yellow }}skipping doctests for {{ pkg }}: no lib target{{ reset }}"
         exit 0
