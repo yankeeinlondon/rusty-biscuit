@@ -441,11 +441,9 @@ pub fn apply_inline_text_layout(
     let target_width = if let Some(width) = common.width.as_ref() {
         length_to_cells(width, base_width)
     } else if let Some(max) = common.max_width.as_ref() {
-        let max_cells = length_to_cells(max, base_width)?;
-        if visible > max_cells {
-            Some(max_cells)
-        } else {
-            None
+        match length_to_cells(max, base_width) {
+            Some(max_cells) if visible > max_cells => Some(max_cells),
+            _ => None,
         }
     } else {
         None
@@ -1443,6 +1441,249 @@ mod tests {
             "Terminal output should contain red SGR for local image fallback. output={}",
             output
         );
+    }
+
+    // ---------- Phase 6 (review-7): width/max-width/alignment + CSS rejection ----------
+
+    #[test]
+    fn hyperlink_width_pads_terminal_display_text() {
+        use biscuit_terminal::terminal::Terminal;
+        use crate::layout::DarkmatterPage;
+        use crate::markdown::Markdown;
+        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use renderable::layout::{Alignment, Length};
+
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term);
+        let style = StyleFrontmatter {
+            hyperlinks: Some(HyperlinkStyle {
+                common: CommonStyle {
+                    width: Some(Length::Ch(10)),
+                    alignment: Some(Alignment::Left),
+                    ..CommonStyle::default()
+                },
+                local_style: None,
+            }),
+            ..StyleFrontmatter::default()
+        };
+
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+            .unwrap();
+        let md: Markdown = "[hi](https://example.com)".into();
+        let output = page.render(&md).unwrap();
+
+        // Width 10 + Left alignment over text "hi" (2 cells) must pad with
+        // 8 trailing spaces between the label and the OSC8 close sequence.
+        assert!(
+            output.contains("hi        \x1b]8;;\x07"),
+            "padded display text not present. output={:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn hyperlink_max_width_truncates_terminal_display_text() {
+        use biscuit_terminal::terminal::Terminal;
+        use crate::layout::DarkmatterPage;
+        use crate::markdown::Markdown;
+        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use renderable::layout::Length;
+
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term);
+        let style = StyleFrontmatter {
+            hyperlinks: Some(HyperlinkStyle {
+                common: CommonStyle {
+                    max_width: Some(Length::Ch(5)),
+                    ..CommonStyle::default()
+                },
+                local_style: None,
+            }),
+            ..StyleFrontmatter::default()
+        };
+
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+            .unwrap();
+        let md: Markdown = "[abcdefghij](https://example.com)".into();
+        let output = page.render(&md).unwrap();
+
+        // max-width 5 over "abcdefghij" (10 cells) must truncate to "abcd…"
+        // (4 cells of label + 1 cell ellipsis).
+        assert!(
+            output.contains("abcd…\x1b]8;;\x07"),
+            "max-width truncation missing. output={:?}",
+            output
+        );
+        assert!(
+            !output.contains("abcdefghij"),
+            "full label leaked past truncation. output={:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn hyperlink_alignment_center_pads_both_sides() {
+        use biscuit_terminal::terminal::Terminal;
+        use crate::layout::DarkmatterPage;
+        use crate::markdown::Markdown;
+        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use renderable::layout::{Alignment, Length};
+
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term);
+        let style = StyleFrontmatter {
+            hyperlinks: Some(HyperlinkStyle {
+                common: CommonStyle {
+                    width: Some(Length::Ch(8)),
+                    alignment: Some(Alignment::Center),
+                    ..CommonStyle::default()
+                },
+                local_style: None,
+            }),
+            ..StyleFrontmatter::default()
+        };
+
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+            .unwrap();
+        let md: Markdown = "[ab](https://example.com)".into();
+        let output = page.render(&md).unwrap();
+
+        // Width 8, "ab" (2 cells), Center => 3 left + ab + 3 right.
+        assert!(
+            output.contains("   ab   \x1b]8;;\x07"),
+            "center-padded display text missing. output={:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn hyperlink_css_length_rejected_for_terminal() {
+        use biscuit_terminal::terminal::Terminal;
+        use crate::layout::{DarkmatterPage, PageRenderError};
+        use crate::markdown::Markdown;
+        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use renderable::layout::Length;
+        use renderable::stylesheet::CssSizing;
+
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term);
+        let style = StyleFrontmatter {
+            hyperlinks: Some(HyperlinkStyle {
+                common: CommonStyle {
+                    width: Some(Length::Css(CssSizing::px(320.0))),
+                    ..CommonStyle::default()
+                },
+                local_style: None,
+            }),
+            ..StyleFrontmatter::default()
+        };
+
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+            .unwrap();
+        let md: Markdown = "[x](https://example.com)".into();
+        let err = page.render(&md).unwrap_err();
+        assert_eq!(
+            err,
+            PageRenderError::InvalidInlineCssLength {
+                bucket: "hyperlinks",
+                field: "width",
+            }
+        );
+    }
+
+    #[test]
+    fn local_image_css_length_rejected_for_terminal() {
+        use biscuit_terminal::terminal::Terminal;
+        use crate::layout::{DarkmatterPage, PageRenderError};
+        use crate::markdown::Markdown;
+        use crate::style::schema::{ImageStyle, StyleFrontmatter};
+        use renderable::layout::Length;
+        use renderable::stylesheet::CssSizing;
+
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term);
+        let style = StyleFrontmatter {
+            images: Some(ImageStyle {
+                common: CommonStyle::default(),
+                local_style: Some(Box::new(CommonStyle {
+                    max_width: Some(Length::Css(CssSizing::px(120.0))),
+                    ..CommonStyle::default()
+                })),
+            }),
+            ..StyleFrontmatter::default()
+        };
+
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+            .unwrap();
+        let md: Markdown = "![alt](./local.png)".into();
+        let err = page.render(&md).unwrap_err();
+        assert_eq!(
+            err,
+            PageRenderError::InvalidInlineCssLength {
+                bucket: "images.local-style",
+                field: "max-width",
+            }
+        );
+    }
+
+    #[test]
+    fn local_image_alignment_pads_terminal_fallback() {
+        use biscuit_terminal::terminal::Terminal;
+        use crate::layout::DarkmatterPage;
+        use crate::markdown::Markdown;
+        use crate::style::schema::{ImageStyle, StyleFrontmatter};
+        use renderable::layout::{Alignment, Length};
+
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term);
+        let style = StyleFrontmatter {
+            images: Some(ImageStyle {
+                common: CommonStyle::default(),
+                local_style: Some(Box::new(CommonStyle {
+                    width: Some(Length::Ch(40)),
+                    alignment: Some(Alignment::Right),
+                    ..CommonStyle::default()
+                })),
+            }),
+            ..StyleFrontmatter::default()
+        };
+
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+            .unwrap();
+        let md: Markdown = "![a](./local.png)".into();
+        let output = page.render(&md).unwrap();
+
+        // Fallback text "▉ IMAGE[a]\n" is 10 cells visible; padded to 40 with
+        // Right alignment puts 30 spaces before it.
+        let expected_lead = " ".repeat(30);
+        assert!(
+            output.contains(&format!("{}▉ IMAGE[a]", expected_lead)),
+            "right-padded fallback missing. output={:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn apply_inline_text_layout_passthrough_when_no_style() {
+        assert_eq!(apply_inline_text_layout("hello", None, 80), "hello");
+        assert_eq!(
+            apply_inline_text_layout("hello", Some(&CommonStyle::default()), 80),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn apply_inline_text_layout_percent_width() {
+        use renderable::layout::Length;
+        let style = CommonStyle {
+            width: Some(Length::Percent(50.0)),
+            ..CommonStyle::default()
+        };
+        let out = apply_inline_text_layout("ab", Some(&style), 20);
+        // 50% of 20 = 10 cells, Left default => "ab        "
+        assert_eq!(out.chars().count(), 10);
+        assert!(out.starts_with("ab"));
+        assert!(out.ends_with("        "));
     }
 
     #[test]
