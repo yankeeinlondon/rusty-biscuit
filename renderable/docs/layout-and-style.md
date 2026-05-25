@@ -338,9 +338,10 @@ Known gaps:
   two columns narrower than the content row — the interior padding spaces are
   not counted in the rule width. It affects square and rounded borders alike
   and predates the `Style` migration; tracked for a separate fix.
-- **The `style` frontmatter namespace and `hr_css_variables` retirement** are
-  deferred to a follow-on sub-spec (Spec B D9), as is full darkmatter
-  page-style migration.
+- **Darkmatter `style:` frontmatter is a separate policy layer.** Its v1
+  schema is now wired through sub-spec #7 (see §7), but it applies page and
+  component policy to `DarkmatterPage`; it does not mean Markdown frontmatter
+  is automatically converted into render-tree `Style` attributes.
 
 ## 7. darkmatter migration
 
@@ -363,7 +364,7 @@ conversion bridges:
 ### `style:` frontmatter status
 
 Darkmatter's document-level `style:` frontmatter pipeline is now active through
-sub-spec #5 of `renderable/features/2026-05-23-style-property/`:
+sub-spec #7 of `renderable/features/2026-05-23-style-property/`:
 
 - **#1 schema/parser** — parses sparse `style:` YAML into
   `darkmatter::style::StyleFrontmatter`, using `renderable::layout::Length`,
@@ -381,19 +382,27 @@ sub-spec #5 of `renderable/features/2026-05-23-style-property/`:
 - **#5 color wiring** — applies `color` / `bg-color` at page and wired
   component scopes. Page colors are inherited defaults; component colors
   override them.
+- **#6 HR migration** — makes `style.hr.*` the canonical horizontal-rule
+  styling namespace, keeps top-level `hr:` and inline `{ style: ... }` as
+  deprecated aliases, and wires HR kind/weight/alignment/width/color settings.
+- **#7 bespoke knobs** — wires `style.page.stylesheet`,
+  `style.page.meta`, `style.page.code.theme`, `style.hyperlinks.*`,
+  `style.hyperlinks.local-style.*`, and `style.images.local-style.*`.
+  Local stylesheets are inlined for HTML; remote stylesheets are emitted as
+  links and are not fetched by the renderer.
 
 The active wiring phase is recorded in
-`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC` and is currently `5`.
-Valid keys from future phases still parse but emit `KnownButInactive` warnings.
-The remaining planned work is **#6 HR migration** and **#7 bespoke knobs**
-(`page.stylesheet`, `page.meta`, `page.code.theme`, hyperlink/image
-local-style behavior).
+`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC` and is currently `7`.
+No valid v1 schema keys should emit `KnownButInactive`; unsupported or
+ambiguous v1 combinations are rejected with documented `StyleApplyError`
+variants instead.
 
 This frontmatter pipeline is adjacent to, but not the same thing as,
 `renderable::style::Style`. The frontmatter applicator writes into
-`DarkmatterPage`'s page/component layout and color maps; the render-tree
-`Style` primitive remains the target-agnostic appearance value carried by
-`RenderNode` attributes.
+`DarkmatterPage`'s page/component layout, color, HR, stylesheet, metadata,
+code-theme, hyperlink, and image-style state; the render-tree `Style`
+primitive remains the target-agnostic appearance value carried by `RenderNode`
+attributes.
 
 ## 8. See also
 
