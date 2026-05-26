@@ -162,7 +162,6 @@ impl Storage {
         Ok(storage)
     }
 
-    /// Filesystem path of the underlying redb file.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path

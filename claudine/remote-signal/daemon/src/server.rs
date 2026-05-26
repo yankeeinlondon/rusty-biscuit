@@ -204,14 +204,11 @@ pub struct ServerHandle {
 }
 
 impl ServerHandle {
-    /// Path of the Unix Domain Socket the daemon is bound to.
     #[must_use]
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
     }
 
-    /// Hex-encoded public-key identifier of the daemon's signing
-    /// identity.
     #[must_use]
     pub fn node_id(&self) -> String {
         self.identity.node_id()

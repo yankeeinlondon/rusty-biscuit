@@ -114,8 +114,7 @@ impl Projection {
         })
     }
 
-    /// Filesystem path of the underlying DuckDB database. Returns
-    /// `":memory:"` for in-memory databases.
+    /// Filesystem path of the underlying DuckDB database, or the sentinel `":memory:"` when constructed via [`Self::in_memory`].
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
