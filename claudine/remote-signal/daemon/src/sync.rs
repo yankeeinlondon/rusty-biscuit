@@ -167,7 +167,6 @@ impl SyncService {
         }
     }
 
-    /// Local node id (hex-encoded public key).
     #[must_use]
     pub fn node_id(&self) -> String {
         self.identity.node_id()
@@ -209,12 +208,12 @@ impl SyncService {
 
     /// Validate, apply, and persist a single incoming delta envelope.
     ///
-    /// The CRDT payload is imported into the session log *before* the
-    /// accepted envelope is persisted so that structurally invalid Loro
-    /// data is rejected without leaving a durable row in redb. This
-    /// ordering ensures [`Self::replay_accepted_envelopes_on_startup`]
-    /// never encounters a malformed accepted envelope that was inserted
-    /// through the sync path.
+    /// The CRDT payload is staged in memory and validated against the
+    /// session-log schema, then the accepted envelope is persisted to
+    /// redb, and finally the staged snapshot is committed. This ordering
+    /// ensures that if envelope persistence fails, no snapshot exists on
+    /// disk, and if snapshot persistence fails after the envelope was
+    /// saved, startup replay recovers from the persisted envelope.
     ///
     /// Returns `true` when the local chunk state advanced.
     pub(crate) fn receive_delta(
@@ -263,9 +262,16 @@ impl SyncService {
         }
         let payload = inbox.accept(envelope)?.to_vec();
 
-        let advanced = match self.session_log.apply_remote_update(chunk, &payload) {
-            Ok(a) => a,
+        // Stage the import and validate schema WITHOUT persisting.
+        let staged = match self.session_log.stage_remote_update(chunk, &payload) {
+            Ok(s) => s,
             Err(crate::session_log::SessionLogError::Loro(reason)) => {
+                return Err(SyncError::MalformedPayload {
+                    chunk_id: chunk.as_path(),
+                    reason,
+                });
+            }
+            Err(crate::session_log::SessionLogError::SchemaValidation { reason }) => {
                 return Err(SyncError::MalformedPayload {
                     chunk_id: chunk.as_path(),
                     reason,
@@ -274,10 +280,8 @@ impl SyncService {
             Err(other) => return Err(SyncError::SessionLog(other)),
         };
 
-        if advanced {
-            self.session_log.submit_chunk_to_projection(chunk)?;
-        }
-
+        // Persist the accepted envelope BEFORE the snapshot so a failure
+        // here leaves no durable snapshot on disk.
         let now_unix_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -297,6 +301,14 @@ impl SyncService {
             &msg_id_hex,
             &accepted,
         )?;
+
+        // Now commit the staged snapshot. If this fails after the envelope
+        // was persisted, startup replay will recover.
+        let advanced = self.session_log.commit_staged_update(chunk, staged)?;
+
+        if advanced {
+            self.session_log.submit_chunk_to_projection(chunk)?;
+        }
 
         Ok(advanced)
     }
@@ -1009,6 +1021,202 @@ mod tests {
         let snapshot = make_valid_loro_snapshot("docid-test");
         let envelope = harness.peer_sealer.seal(
             other_chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn envelope_persistence_failure_leaves_no_snapshot_nor_envelope() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "envelope-fail-session", 0);
+        let snapshot = make_valid_loro_snapshot("envelope-fail-entry");
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+
+        harness.storage.inject_accepted_envelope_failure();
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(
+            result.is_err(),
+            "receive_delta must fail when envelope persistence fails",
+        );
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+            "no snapshot should be persisted when envelope save fails",
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+            "no accepted envelope should exist when envelope save fails",
+        );
+        harness.worker.shutdown();
+    }
+
+    fn make_schema_invalid_snapshot_non_string_entry() -> Vec<u8> {
+        let doc = LoroDoc::new();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        list.insert(0, 42).unwrap();
+        doc.commit();
+        doc.export(ExportMode::Snapshot).unwrap()
+    }
+
+    fn make_schema_invalid_snapshot_bad_json() -> Vec<u8> {
+        let doc = LoroDoc::new();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        list.push("not valid entry json").unwrap();
+        doc.commit();
+        doc.export(ExportMode::Snapshot).unwrap()
+    }
+
+    fn make_schema_invalid_snapshot_non_monotonic() -> Vec<u8> {
+        let doc = LoroDoc::new();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        let entry1 = Entry {
+            sequence: 5,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "first".into(),
+            metadata: None,
+        };
+        let entry2 = Entry {
+            sequence: 3,
+            created_at_unix_ms: 6_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "second".into(),
+            metadata: None,
+        };
+        list.push(serde_json::to_string(&entry1).unwrap().as_str()).unwrap();
+        list.push(serde_json::to_string(&entry2).unwrap().as_str()).unwrap();
+        doc.commit();
+        doc.export(ExportMode::Snapshot).unwrap()
+    }
+
+    #[test]
+    fn schema_invalid_non_string_entry_rejected_without_persistence() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "schema-non-string", 0);
+        let snapshot = make_schema_invalid_snapshot_non_string_entry();
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn schema_invalid_bad_entry_json_rejected_without_persistence() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "schema-bad-json", 0);
+        let snapshot = make_schema_invalid_snapshot_bad_json();
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn schema_invalid_non_monotonic_sequence_rejected_without_persistence() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "schema-non-monotonic", 0);
+        let snapshot = make_schema_invalid_snapshot_non_monotonic();
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
             PayloadKind::Snapshot,
             snapshot,
         );
