@@ -2,6 +2,15 @@
 phases: 5
 created: 2026-05-16
 start_phase: 1
+source_files_during_phase_1:
+  - claudine/lib/src/stream/logs/opencode/events.rs
+  - claudine/lib/src/stream/logs/opencode/errors.rs
+  - claudine/lib/src/stream/logs/opencode/reasoning.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - claudine
 ---
 
 # Plan — OpenCode 429 Classification Refinement
