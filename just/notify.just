@@ -10,8 +10,12 @@ _play effect:
 _play_background effect:
     @playa effect "{{effect}}" --background >/dev/null 2>&1 || exit 0
 
+# Send a desktop notification via `messenger` when it is on PATH. When
+# `messenger` is unavailable (fresh checkouts, CI runners) this falls back
+# to a plain stderr echo and still exits 0, so callers like `just test`
+# never mask a real test exit code with a 127 "command not found".
 _message msg:
-    @messenger send "{{msg}}"
+    @command -v messenger >/dev/null 2>&1 && messenger send "{{msg}}" || echo "{{msg}}" >&2
 
 _notify message title:
     #!/usr/bin/env bash

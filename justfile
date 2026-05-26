@@ -116,6 +116,12 @@ test *args="":
     fi
 
 # detect which monorepo areas have changed files compared to the upstream branch
+#
+# `[no-cd]` lets callers (and Level 1 tests) invoke this recipe inside a
+# different git working tree without `just` resetting the shell cwd back
+# to the justfile's directory. In production the pre-push hook already
+# runs at the repo root, so the attribute is a no-op there.
+[no-cd]
 changed-areas:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -137,6 +143,17 @@ changed-areas:
 # pre-push hook entry point (default areas: claudine darkmatter)
 pre-push *areas="claudine darkmatter":
     @just test {{ areas }}
+
+# run Level 1 tests for the .githooks/pre-push shell hook itself
+test-pre-push-hook:
+    @./.githooks/tests/test-pre-push.sh
+
+# run Level 1 tests for the `changed-areas` recipe heuristic itself
+test-changed-areas:
+    @./.githooks/tests/test-changed-areas.sh
+
+# run Level 1 tests for both the pre-push hook and the changed-areas recipe
+test-githooks: test-pre-push-hook test-changed-areas
 
 # run doctests (all workspace crates, or specific areas: just doctest claudine playa)
 doctest *args="":
