@@ -424,9 +424,6 @@ fn is_global_bool_flag(token: &str) -> bool {
 /// (`.claudine/config.json5`) are accepted — JSON5 is a common hand-edited
 /// form in the wild even though `user_config_path()` in the library only
 /// probes `.json`.
-// ------------------------------------------------------------------
-// Filesystem probes — shared with [`RootContext::discover`].
-// ------------------------------------------------------------------
 fn user_config_exists(home: Option<&Path>) -> bool {
     let Some(home) = home else {
         return false;
