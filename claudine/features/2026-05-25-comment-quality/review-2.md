@@ -40,3 +40,59 @@ Verification level present: Level 1 unit tests were added around some remote met
 ## Verdict
 
 Not ready for production. The checker/test gap from the first review is mostly addressed, but the required cleanup baseline is still not clean, and the change set still contains non-comment functional changes outside the feature scope.
+
+## Response (2026-05-26)
+
+### Finding #1 — Addressed
+
+Cleaned up the three `long-doc-short-fn` findings in `claudine/lib/src` and
+`claudine/cli/src`:
+
+- `claudine/lib/src/prompt_reporting/system_prompt.rs:32`
+  (`resolve_display_label`) — rewrote the docblock to drop the numbered
+  branch-by-branch HOW narration, the `\u{F02A2}` codepoint quote, and the
+  literal `<blue-400>[label](file://abs)</blue-400>` Prose-syntax quote that
+  would drift if the constant or Prose API changed. Kept the contract: plain
+  text out, callers handle styling/OSC8, and the three conditions that
+  determine label form (linked to [`NERD_FONT_REPO_GLYPH`] instead of
+  quoting it).
+- `claudine/lib/src/composition/prepare.rs:233`
+  (`parse_selection_hints_from_frontmatter`) — trimmed the contract paragraph
+  to fold the "literal vs templated" rule into the eager-resolution WHY,
+  bringing the docblock under the 15-line heuristic threshold while keeping
+  both the criterion-B (why eager) and criterion-A (literal-only contract)
+  content.
+- `claudine/cli/src/completion/composition/magic_at.rs:20` (`gather_magic`)
+  — collapsed the file-tier shadow prose that duplicated the module-level
+  `//!` block and dropped the spec §5.5 table (mirroring spec inline is
+  exactly the drift trap the rubric flags). Kept the `dir`-argument
+  narrowing contract because it is a non-obvious coupling not derivable
+  from the type.
+
+`just check-comments claudine/lib/src claudine/cli/src` now exits 0 with no
+findings. `cargo test -p claudine --lib prompt_reporting::` (115 tests),
+`cargo test -p claudine --lib composition::prepare` (20 tests), and
+`cargo test -p claudine-cli --bins magic` (16 tests) all pass after the
+edits. `./scripts/check-comments-tests.sh` still passes all 11 fixture
+cases.
+
+### Finding #2 — Rejected (out-of-scope scoping error)
+
+The reviewer saw the full branch diff and conflated two independently
+tracked features that share the `claudine` working branch. The
+`remote-signal/daemon/src/sync.rs` and `remote-signal/daemon/src/session_log.rs`
+changes belong to feature
+[`2026-05-24-remote-signal`](../2026-05-24-remote-signal/spec.md), which is
+on its own review cycle (currently at
+[`review-12.md`](../2026-05-24-remote-signal/review-12.md)). They are not
+part of the `2026-05-25-comment-quality` change set — they are part of a
+parallel feature that happens to be developed on the same branch.
+
+Verifying: `git log --oneline main..HEAD` shows 44 commits across both
+feature directories; the remote-signal commits (`2d6c75097`, `b1e164a35`,
+`7cf53770d`, etc.) have `refactor(remote-signal…)` / `fix(remote-signal…)`
+subjects and were never claimed as comment-quality work in any of this
+feature's commits. The comment-quality spec's "comments only" rule applies
+to *this feature's* commits — which it does.
+
+No remote-signal changes were reverted as part of this response.
