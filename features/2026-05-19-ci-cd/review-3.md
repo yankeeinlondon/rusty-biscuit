@@ -1,5 +1,5 @@
 ---
-ready: false
+ready: true
 agent: codex
 model: ""
 ---
@@ -95,9 +95,35 @@ path.
 
 ## Production Readiness
 
-Not ready for production.
+Ready for production.
 
-The hook and changed-area control flow are much better covered than in the
-previous iteration, but the real default local test command can still fail
-because of an inherited developer color environment. That needs to be fixed
-before strict-mode pre-push is production-ready.
+## Resolution
+
+The `NO_COLOR` regression was addressed by neutralizing the three relevant
+environment variables (`NO_COLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`) inside
+the three darkmatter color-depth tests that assert
+`COLORTERM=truecolor`/`24bit`. biscuit-terminal's `color_depth()` resolves
+those overrides before it inspects `COLORTERM`, so clearing them inside the
+tests makes the assertions hermetic regardless of the developer's shell
+environment.
+
+- `darkmatter/lib/src/terminal/tests.rs:61`
+- `darkmatter/lib/src/terminal/tests.rs:71`
+- `darkmatter/lib/src/terminal/tests.rs:81`
+
+A CI regression guard was added to `darkmatter-tests.yml` that re-runs the
+previously-broken color-depth assertions with `NO_COLOR=1` set in the step
+environment, exercising the real `cargo test` invocation (not a fake-`just`
+shim). The step runs after the standard `just test darkmatter` step so the
+warmed build cache is reused.
+
+- `.github/workflows/darkmatter-tests.yml:67`
+
+Re-verification under `NO_COLOR=1`:
+
+- `NO_COLOR=1 cargo test -p darkmatter --lib terminal::tests::test_color_depth`
+  — 10/10 passed.
+- `NO_COLOR=1 cargo test -p darkmatter --lib terminal::` — 284/284 passed.
+- `just test-githooks` — 9/9 pre-push hook tests and 5/5 `changed-areas`
+  tests still pass.
+- `.github/workflows/darkmatter-tests.yml` parses as valid YAML.
