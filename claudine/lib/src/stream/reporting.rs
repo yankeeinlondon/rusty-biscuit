@@ -10,14 +10,8 @@ use super::summary::StreamExecutionSummary;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta};
 use crate::reporting::paths;
 
-/// Convert a `StreamExecutionSummary` into an `EventMeta` suitable for JSONL logging.
-///
-/// The resulting `EventMeta` has:
-/// - `event = SessionEnd`
-/// - `extra.synthetic = true`
-/// - `extra.synthetic_kind = "stream_wrapper_summary"`
-/// - `extra.stream_protocol` set to the protocol name
-/// - Token usage, cost, duration, and other fields mapped into `extra`
+/// Convert a `StreamExecutionSummary` into a synthetic `SessionEnd`
+/// [`EventMeta`] for JSONL logging.
 pub fn summary_to_event_meta(
     summary: &StreamExecutionSummary,
     protocol: StreamProtocol,
@@ -159,27 +153,14 @@ pub fn summary_to_event_meta_with_context(
     }
 }
 
-/// Convert a [`SemanticEvent`] into an [`EventMeta`] suitable for JSONL logging.
+/// Convert a [`SemanticEvent`] into a synthetic [`EventMeta`] for JSONL logging.
 ///
-/// The resulting `EventMeta`:
-///
-/// - Uses [`AgenticEvent::Notification`] as the envelope event so the row
-///   doesn't collide with the canonical `SessionEnd` summary row.
-/// - Uses `provider` for the [`EventMeta::provider`] slot (semantic typed
-///   variants don't carry the provider inline; callers already know which
-///   provider's stream they're reading).
-/// - Stores the full serialized semantic event under `extra["semantic_event"]`,
-///   preserving [`SemanticEvent::ProviderExtension::payload`] untouched for
-///   downstream fidelity.
-/// - Marks the row with `extra.synthetic = true`,
-///   `extra.synthetic_kind = "stream_semantic_event"`, and
-///   `extra.semantic_kind = <kind_str>`.
-/// - Populates one-to-one `EventMeta` slots where they fit
-///   (`tool_name`, `tool_input`, `tool_response`, `session_id`, `error`,
-///   `notification_type`, `notification_message`) so existing JSONL/SQLite
-///   ingest columns stay queryable.
-/// - Merges `context_extra` (composition metadata, etc.) into `extra` the
-///   same way [`summary_to_event_meta_with_context`] does.
+/// The envelope event is mapped per variant rather than reusing `SessionEnd`
+/// so semantic rows don't collide with the canonical summary row. The full
+/// serialized event is preserved under `extra["semantic_event"]` so downstream
+/// consumers retain [`SemanticEvent::ProviderExtension::payload`] fidelity,
+/// while the typed `EventMeta` slots are populated where they fit so existing
+/// JSONL/SQLite ingest columns stay queryable.
 pub fn semantic_event_to_event_meta(
     event: &SemanticEvent,
     provider: crate::provider_id::Provider,

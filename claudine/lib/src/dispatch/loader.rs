@@ -204,7 +204,8 @@ fn compile_canonical_mapper(mapper: &Mapper, event: AgenticEvent) -> Result<Comp
 /// Bridge [`ClaudineConfig`] TTS settings to legacy [`GlobalSettings`].
 ///
 /// Constructs a minimal [`GlobalSettings`] containing only the TTS
-/// configuration, suitable for [`LifecycleRuntimeContext`].
+/// configuration, suitable for
+/// [`LifecycleRuntimeContext`](crate::composition::lifecycle::LifecycleRuntimeContext).
 pub fn bridge_tts_settings(config: &ClaudineConfig) -> GlobalSettings {
     use crate::config::tts::{Gender, TtsValue, VoiceSelection};
     use crate::events::TtsSettings;
@@ -240,7 +241,8 @@ pub fn bridge_tts_settings(config: &ClaudineConfig) -> GlobalSettings {
 
 /// Bridge [`ClaudineConfig`] messenger settings to [`RuntimeMessagingSettings`].
 ///
-/// Reuses [`bridge_messenger_to_runtime`] from [`compile_canonical_runtime`].
+/// Reuses the private `bridge_messenger_to_runtime` helper from
+/// [`compile_canonical_runtime`].
 pub fn bridge_messaging_settings(config: &ClaudineConfig) -> RuntimeMessagingSettings {
     config
         .messenger

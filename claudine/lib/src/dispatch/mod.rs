@@ -163,7 +163,8 @@ pub async fn dispatch_event_meta_with_runtime(
 
 /// High-level canonical dispatch entry point.
 ///
-/// Parses raw provider JSON, loads the new [`ClaudineConfig`], compiles the
+/// Parses raw provider JSON, loads the new
+/// [`ClaudineConfig`](crate::config::ClaudineConfig), compiles the
 /// canonical runtime, and delegates to [`dispatch_canonical_with_runtime`].
 pub async fn dispatch_canonical(
     raw: &Value,

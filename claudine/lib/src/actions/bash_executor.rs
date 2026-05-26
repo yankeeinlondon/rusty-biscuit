@@ -14,7 +14,7 @@ use crate::error::{ClaudineError, Result};
 /// allow it to run.
 ///
 /// The authoritative command-gating surface is
-/// [`ProtectService`](crate::protect::protect) (see
+/// [`ProtectService`](crate::protect::ProtectService) (see
 /// `claudine/docs/topics/protect-service.md`), which is regex-backed and
 /// applies to provider tool invocations across every supported CLI.
 pub const BLOCKED_COMMANDS: &[&str] = &[
@@ -43,8 +43,8 @@ pub enum ValidatedCommand {
 ///
 /// A suspicious basename matching [`BLOCKED_COMMANDS`] only emits a
 /// `tracing::warn!`; the real command-gating control is
-/// [`ProtectService`](crate::protect::protect). See the constant's rustdoc
-/// for the reasoning.
+/// [`ProtectService`](crate::protect::ProtectService). See the constant's
+/// rustdoc for the reasoning.
 ///
 /// ## Errors
 ///
