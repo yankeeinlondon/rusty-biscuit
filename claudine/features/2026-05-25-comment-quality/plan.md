@@ -66,6 +66,34 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
 packages_during_phase_4:
   - claudine
+source_files_during_phase_5:
+  - claudine/cli/src/perf.rs
+  - claudine/cli/src/commands/wrap/exec/timeouts.rs
+  - claudine/cli/src/completion/mod.rs
+  - claudine/cli/src/completion/engine.rs
+  - claudine/cli/src/commands/config_tui/tabs/services.rs
+  - claudine/cli/src/commands/wrap/exec/wiring.rs
+  - claudine/cli/src/commands/wrap/profile/mod.rs
+  - claudine/cli/src/commands/context.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages_during_phase_5:
+  - claudine
+source_files_during_phase_6:
+  - claudine/remote-signal/core/src/identity.rs
+  - claudine/remote-signal/core/src/envelope.rs
+  - claudine/remote-signal/daemon/src/quic.rs
+  - claudine/remote-signal/daemon/src/sync.rs
+  - claudine/remote-signal/daemon/src/server.rs
+  - claudine/remote-signal/daemon/src/session_log.rs
+  - claudine/remote-signal/daemon/src/projection.rs
+  - claudine/remote-signal/daemon/src/storage.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages_during_phase_6:
+  - claudine
 ---
 
 # Plan: Comment Quality Rubric and Cleanup
@@ -147,22 +175,50 @@ Complete the cleanup of the library crate.
 
 Apply the rubric to the CLI crate.
 
-- [ ] **Task 5.1: Cleanup CLI Core**
-    - Target: `claudine/cli/src/main.rs`.
-- [ ] **Task 5.2: Cleanup CLI Modules**
-    - Target: `claudine/cli/src/argv/`, `completion/`, and `commands/`.
-- [ ] **Task 5.3: Verify CLI Build and Docs**
-    - Run `cargo test -p claudine-cli`.
-    - Run `cargo doc -p claudine-cli`.
+- [x] **Task 5.1: Cleanup CLI Core**
+    - Target: `claudine/cli/src/main.rs`, `perf.rs`.
+    - Removed one redundant accessor doc in `perf.rs`. `main.rs` had no rubric
+      violations in scope.
+- [x] **Task 5.2: Cleanup CLI Modules**
+    - Target: `claudine/cli/src/argv/`, `completion/`, `commands/`.
+    - Removed redundant accessor docs in `commands/wrap/exec/timeouts.rs`.
+    - Trimmed HOW-narration summary on `completion/mod.rs::maybe_complete`,
+      preserving the hidden-coupling Notes.
+    - Removed all banner-style `// -----` section-marker comments across
+      `completion/engine.rs`, `commands/config_tui/tabs/services.rs`,
+      `commands/wrap/exec/wiring.rs`, `commands/wrap/profile/mod.rs`, and
+      `commands/context.rs`. One stale banner in `profile/mod.rs` also
+      labelled a re-export that no longer sat above it (anti-pattern 8).
+- [x] **Task 5.3: Verify CLI Build and Docs**
+    - `bash scripts/check-comments.sh claudine/cli/src/` → empty.
+    - `just lint` (from `claudine/`) → clean.
+    - `cargo test -p claudine-cli` → passed.
+    - `cargo doc -p claudine-cli --no-deps` → warning count unchanged from
+      baseline (only `///` content was preserved; deletions were `//` banners).
 
 ## Phase 6: Final Validation
 
 Ensure the codebase meets the acceptance criteria and the tooling reports zero findings.
 
-- [ ] **Task 6.1: Final Heuristic Check**
-    - Run `just check-comments` on `claudine/`.
-    - Ensure zero findings (or document/fix any remaining outliers).
-- [ ] **Task 6.2: Documentation Verification**
-    - Confirm `CLAUDE.md` and `docs/comment-quality.md` are correct and links work.
-- [ ] **Task 6.3: Behavior Check**
-    - Confirm no functional changes were introduced during the comment cleanup.
+- [x] **Task 6.1: Final Heuristic Check**
+    - `bash scripts/check-comments.sh claudine/` → zero findings.
+    - Cleared 11 outstanding `redundant-accessor` flags in `claudine/remote-signal/`
+      (core/identity.rs, core/envelope.rs, daemon/quic.rs, daemon/sync.rs,
+      daemon/server.rs, daemon/session_log.rs, daemon/storage.rs). Removed
+      one-line docs whose semantics were already conveyed by the function
+      name and return type.
+    - `claudine/remote-signal/daemon/src/projection.rs::Projection::path`
+      kept its doc but was rewritten so the `:memory:` sentinel return shape
+      (criterion C — semantics of complex return shape) stays visible. The
+      single-line phrasing also takes it off the heuristic's redundant-accessor
+      list.
+- [x] **Task 6.2: Documentation Verification**
+    - `CLAUDE.md` "Comment Quality" section is present and links to
+      `docs/comment-quality.md`; the link target exists.
+- [x] **Task 6.3: Behavior Check**
+    - `just lint` (claudine area) → clean for `claudine` and `claudine-cli`.
+    - `just test` (claudine area) → passing.
+    - `cargo nextest run -p remote-signal-core -p remote-signal-daemon -p remote-signal-client`
+      → 117 tests passed (1 leaky, pre-existing).
+    - Only doc comments and `///` lines were removed/rewritten; no
+      functional code was touched.
