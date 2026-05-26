@@ -862,24 +862,13 @@ impl SessionLogManager {
 
         let mut inner = self.inner.lock();
         for (chunk_id, snapshot) in &to_load {
-            let metadata = ChunkMetadata {
-                owner_node_id: chunk_id.owner_node_id.clone(),
-                session_id: chunk_id.session_id.clone(),
-                chunk_index: chunk_id.chunk_index,
-                created_at_unix_ms: 0,
-                previous_chunk_id: if chunk_id.chunk_index == 0 {
-                    None
-                } else {
-                    Some(
-                        ChunkId::new(
-                            chunk_id.owner_node_id.clone(),
-                            chunk_id.session_id.clone(),
-                            chunk_id.chunk_index - 1,
-                        )
-                        .as_path(),
-                    )
-                },
-            };
+            let doc = LoroDoc::from_snapshot(snapshot)?;
+            let metadata = validate_and_extract_metadata(
+                &doc,
+                &chunk_id.owner_node_id,
+                &chunk_id.session_id,
+                chunk_id.chunk_index,
+            )?;
             let state = ChunkState::from_snapshot(snapshot, metadata)?;
             let session_key = chunk_id.session_key();
             let cursor = inner
