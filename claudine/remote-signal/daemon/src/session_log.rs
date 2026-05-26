@@ -900,7 +900,18 @@ impl SessionLogManager {
         })?;
 
         for (chunk_id, payload) in &to_replay {
-            let _ = self.apply_remote_update(chunk_id, payload)?;
+            match self.apply_remote_update(chunk_id, payload) {
+                Ok(_) => {}
+                Err(SessionLogError::Loro(reason)) => {
+                    tracing::warn!(
+                        target: "remote_signal_daemon::session_log",
+                        chunk_id = %chunk_id.as_path(),
+                        %reason,
+                        "skipping malformed accepted envelope during replay",
+                    );
+                }
+                Err(other) => return Err(other),
+            }
         }
 
         Ok(())
@@ -1612,7 +1623,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_loro_payload_in_accepted_envelope_breaks_restart() {
+    fn malformed_loro_payload_in_accepted_envelope_skipped_on_restart() {
         let tmp = TempDir::new().expect("tempdir");
         let storage_path = tmp.path().join("session.redb");
         let storage = Storage::open(&storage_path).expect("storage");
@@ -1663,18 +1674,22 @@ mod tests {
             flush_interval: std::time::Duration::from_millis(20),
             flush_size: 16,
         });
-        let result = SessionLogManager::with_clock(
+        let manager = SessionLogManager::with_clock(
             storage,
             worker.handle(),
             Projection::in_memory().expect("projection2"),
             ChunkConfig::default(),
             identity,
             Arc::new(FixedClock::new(1)),
-        );
+        )
+        .expect("restarting with a malformed accepted envelope must succeed (tolerant replay)");
+
+        let entries = manager.list_chunk_entries(&sender_chunk).expect("list");
         assert!(
-            result.is_err(),
-            "restarting with a malformed accepted envelope must fail"
+            entries.is_empty(),
+            "malformed payload should be skipped; got {entries:?}"
         );
+
         worker.shutdown();
         drop(tmp);
     }

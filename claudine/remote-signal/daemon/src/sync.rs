@@ -207,6 +207,100 @@ impl SyncService {
         Ok(())
     }
 
+    /// Validate, apply, and persist a single incoming delta envelope.
+    ///
+    /// The CRDT payload is imported into the session log *before* the
+    /// accepted envelope is persisted so that structurally invalid Loro
+    /// data is rejected without leaving a durable row in redb. This
+    /// ordering ensures [`Self::replay_accepted_envelopes_on_startup`]
+    /// never encounters a malformed accepted envelope that was inserted
+    /// through the sync path.
+    ///
+    /// Returns `true` when the local chunk state advanced.
+    pub(crate) fn receive_delta(
+        &self,
+        peer_node_id_hex: &str,
+        chunk: &ChunkId,
+        delta_chunk_id: &str,
+        envelope: &remote_signal_core::SignedEnvelope,
+        is_snapshot: bool,
+        inbox: &mut EnvelopeInbox,
+    ) -> Result<bool, SyncError> {
+        if hex_encode(&envelope.sender) != peer_node_id_hex {
+            return Err(SyncError::protocol(
+                "delta envelope sender does not match hello node_id",
+            ));
+        }
+        if envelope.document_id != delta_chunk_id {
+            return Err(SyncError::protocol(format!(
+                "envelope document_id {:?} does not match delta chunk_id {:?}",
+                envelope.document_id, delta_chunk_id,
+            )));
+        }
+        if chunk.owner_node_id != peer_node_id_hex {
+            return Err(SyncError::OwnershipViolation {
+                sender: peer_node_id_hex.to_string(),
+                owner: chunk.owner_node_id.clone(),
+            });
+        }
+        let expected_kind = if is_snapshot {
+            PayloadKind::Snapshot
+        } else {
+            PayloadKind::Delta
+        };
+        if envelope.payload_kind != expected_kind {
+            return Err(SyncError::protocol(format!(
+                "envelope payload_kind {:?} does not match delta is_snapshot {:?}",
+                envelope.payload_kind, is_snapshot,
+            )));
+        }
+        let msg_id_hex = envelope.message_id_hex();
+        let sender_hex = envelope.sender_node_id();
+        if self.storage.has_accepted_envelope(&sender_hex, &msg_id_hex)? {
+            return Err(SyncError::Envelope(
+                EnvelopeError::DuplicateMessageId(msg_id_hex),
+            ));
+        }
+        let payload = inbox.accept(envelope)?.to_vec();
+
+        let advanced = match self.session_log.apply_remote_update(chunk, &payload) {
+            Ok(a) => a,
+            Err(crate::session_log::SessionLogError::Loro(reason)) => {
+                return Err(SyncError::MalformedPayload {
+                    chunk_id: chunk.as_path(),
+                    reason,
+                });
+            }
+            Err(other) => return Err(SyncError::SessionLog(other)),
+        };
+
+        if advanced {
+            self.session_log.submit_chunk_to_projection(chunk)?;
+        }
+
+        let now_unix_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let accepted = AcceptedEnvelope {
+            sender_hex: sender_hex.clone(),
+            message_id_hex: msg_id_hex.clone(),
+            document_id: envelope.document_id.clone(),
+            payload_kind: envelope.payload_kind.to_byte(),
+            content_hash_hex: hex_encode(&envelope.content_hash),
+            signature_hex: hex_encode(&envelope.signature),
+            payload_bytes: payload,
+            accepted_at_unix_ms: i64::try_from(now_unix_ms).unwrap_or(i64::MAX),
+        };
+        self.storage.save_accepted_envelope(
+            &sender_hex,
+            &msg_id_hex,
+            &accepted,
+        )?;
+
+        Ok(advanced)
+    }
+
     async fn run_session(
         &self,
         mut send: SendStream,
@@ -396,78 +490,14 @@ impl SyncService {
                             .envelope
                             .ok_or_else(|| SyncError::protocol("delta missing envelope"))?;
                         let envelope = wire.into_envelope()?;
-                        if hex_encode(&envelope.sender) != peer_node_id_hex {
-                            return Err(SyncError::protocol(
-                                "delta envelope sender does not match hello node_id",
-                            ));
-                        }
-                        if envelope.document_id != delta.chunk_id {
-                            return Err(SyncError::protocol(format!(
-                                "envelope document_id {:?} does not match delta chunk_id {:?}",
-                                envelope.document_id, delta.chunk_id,
-                            )));
-                        }
-                        if chunk.owner_node_id != peer_node_id_hex {
-                            return Err(SyncError::OwnershipViolation {
-                                sender: peer_node_id_hex,
-                                owner: chunk.owner_node_id.clone(),
-                            });
-                        }
-                        let expected_kind = if delta.is_snapshot {
-                            PayloadKind::Snapshot
-                        } else {
-                            PayloadKind::Delta
-                        };
-                        if envelope.payload_kind != expected_kind {
-                            return Err(SyncError::protocol(format!(
-                                "envelope payload_kind {:?} does not match delta is_snapshot {:?}",
-                                envelope.payload_kind, delta.is_snapshot,
-                            )));
-                        }
-                        let msg_id_hex = envelope.message_id_hex();
-                        let sender_hex = envelope.sender_node_id();
-                        if self.storage.has_accepted_envelope(&sender_hex, &msg_id_hex)? {
-                            return Err(SyncError::Envelope(
-                                EnvelopeError::DuplicateMessageId(msg_id_hex),
-                            ));
-                        }
-                        let payload = inbox.accept(&envelope)?.to_vec();
-
-                        let now_unix_ms = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis();
-                        let accepted = AcceptedEnvelope {
-                            sender_hex: sender_hex.clone(),
-                            message_id_hex: msg_id_hex.clone(),
-                            document_id: envelope.document_id.clone(),
-                            payload_kind: envelope.payload_kind.to_byte(),
-                            content_hash_hex: hex_encode(&envelope.content_hash),
-                            signature_hex: hex_encode(&envelope.signature),
-                            payload_bytes: payload.clone(),
-                            accepted_at_unix_ms: i64::try_from(now_unix_ms)
-                                .unwrap_or(i64::MAX),
-                        };
-                        self.storage.save_accepted_envelope(
-                            &sender_hex,
-                            &msg_id_hex,
-                            &accepted,
+                        let advanced = self.receive_delta(
+                            &peer_node_id_hex,
+                            &chunk,
+                            &delta.chunk_id,
+                            &envelope,
+                            delta.is_snapshot,
+                            &mut inbox,
                         )?;
-
-                        let advanced = match self.session_log.apply_remote_update(&chunk, &payload) {
-                            Ok(a) => a,
-                            Err(crate::session_log::SessionLogError::Loro(reason)) => {
-                                return Err(SyncError::MalformedPayload {
-                                    chunk_id: chunk.as_path(),
-                                    reason,
-                                });
-                            }
-                            Err(other) => return Err(SyncError::SessionLog(other)),
-                        };
-
-                        if advanced {
-                            self.session_log.submit_chunk_to_projection(&chunk)?;
-                        }
                         let entry = chunk_outcomes.entry(chunk.as_path()).or_insert(
                             SyncChunkOutcome {
                                 chunk_id: chunk.as_path(),
@@ -547,4 +577,464 @@ fn hex_encode(bytes: &[u8]) -> String {
         let _ = write!(out, "{byte:02x}");
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::batcher::{BatcherConfig, BatcherWorker, spawn};
+    use crate::projection::Projection;
+    use crate::session_log::Clock;
+    use loro::{ExportMode, LoroDoc};
+    use remote_signal_core::{
+        ChunkConfig, ChunkId, EnvelopeSealer, Entry, NodeIdentity, PayloadKind,
+    };
+
+    const ENTRIES_CONTAINER: &str = "entries";
+    use std::sync::atomic::{AtomicI64, Ordering};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    struct FixedClock {
+        next: AtomicI64,
+    }
+
+    impl FixedClock {
+        fn new(start: i64) -> Self {
+            Self {
+                next: AtomicI64::new(start),
+            }
+        }
+    }
+
+    impl Clock for FixedClock {
+        fn now_unix_ms(&self) -> i64 {
+            self.next.fetch_add(1, Ordering::SeqCst)
+        }
+    }
+
+    struct Harness {
+        service: SyncService,
+        storage: Storage,
+        peer_identity: NodeIdentity,
+        peer_sealer: EnvelopeSealer,
+        worker: BatcherWorker,
+        _tmp: TempDir,
+    }
+
+    fn build_harness() -> Harness {
+        let tmp = TempDir::new().expect("tempdir");
+        let storage = Storage::open(tmp.path().join("session.redb")).expect("open storage");
+        let projection = Projection::in_memory().expect("projection");
+        let worker = spawn(projection.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+
+        let identity = Arc::new(NodeIdentity::from_seed([10u8; 32]));
+
+        let manager = crate::session_log::SessionLogManager::with_clock(
+            storage.clone(),
+            worker.handle(),
+            projection,
+            ChunkConfig::default(),
+            Arc::clone(&identity),
+            Arc::new(FixedClock::new(1_000)),
+        )
+        .expect("manager");
+
+        let peer_identity = NodeIdentity::from_seed([20u8; 32]);
+        let peer_hex = peer_identity.node_id();
+        storage
+            .upsert_pairing(&peer_hex, 1_000, "test peer")
+            .expect("pair");
+
+        let service = SyncService::new(manager, storage.clone(), identity);
+        let peer_sealer = EnvelopeSealer::new(peer_identity.clone());
+
+        Harness {
+            service,
+            storage,
+            peer_identity,
+            peer_sealer,
+            worker,
+            _tmp: tmp,
+        }
+    }
+
+    fn make_valid_loro_snapshot(message: &str) -> Vec<u8> {
+        let doc = LoroDoc::new();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: message.into(),
+            metadata: None,
+        };
+        list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
+        doc.commit();
+        doc.export(ExportMode::Snapshot).unwrap()
+    }
+
+    fn baseline_snapshot_count(harness: &Harness) -> u64 {
+        harness.storage.snapshot_count().expect("snapshot count")
+    }
+
+    fn baseline_envelope_count(harness: &Harness) -> u64 {
+        harness.storage.accepted_envelope_count().expect("envelope count")
+    }
+
+    #[test]
+    fn valid_delta_persists_accepted_envelope_and_snapshot() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "test-session", 0);
+        let snapshot = make_valid_loro_snapshot("hello");
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot.clone(),
+        );
+        let mut inbox = EnvelopeInbox::new();
+
+        let advanced = harness
+            .service
+            .receive_delta(
+                &peer_hex,
+                &chunk,
+                &chunk.as_path(),
+                &envelope,
+                true,
+                &mut inbox,
+            )
+            .expect("receive_delta");
+
+        assert!(advanced);
+        assert!(
+            harness.storage.snapshot_count().expect("count") >= 1,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            1,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn malformed_crdt_payload_leaves_no_accepted_envelope_or_snapshot() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "malformed-session", 0);
+        let garbage = b"not valid loro data at all".to_vec();
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            garbage,
+        );
+        let mut inbox = EnvelopeInbox::new();
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err(), "malformed payload must be rejected");
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+            "no snapshot should be persisted for malformed payload",
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+            "no accepted envelope should be persisted for malformed payload",
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn invalid_signature_rejected_without_storage_mutation() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "sig-session", 0);
+        let snapshot = make_valid_loro_snapshot("sig-test");
+        let mut envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+        envelope.signature[0] ^= 0xFF;
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn payload_hash_mismatch_rejected_without_storage_mutation() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "hash-session", 0);
+        let snapshot = make_valid_loro_snapshot("hash-test");
+        let mut envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+        envelope.payload = b"tampered payload".to_vec();
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn mismatched_sender_rejected_without_storage_mutation() {
+        let harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "sender-session", 0);
+        let snapshot = make_valid_loro_snapshot("sender-test");
+
+        let impostor = NodeIdentity::from_seed([99u8; 32]);
+        let mut impostor_sealer = EnvelopeSealer::new(impostor);
+        let envelope = impostor_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn foreign_namespace_rejected_without_storage_mutation() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let local_hex = harness.service.node_id();
+        let foreign_chunk = ChunkId::new(&local_hex, "stolen-session", 0);
+        let snapshot = make_valid_loro_snapshot("namespace-test");
+        let envelope = harness.peer_sealer.seal(
+            foreign_chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &foreign_chunk,
+            &foreign_chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn duplicate_message_id_rejected_without_storage_mutation() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "dup-session", 0);
+        let snapshot = make_valid_loro_snapshot("dup-test");
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot.clone(),
+        );
+
+        let mut inbox = EnvelopeInbox::new();
+
+        let first = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+        assert!(first.is_ok());
+
+        let snapshots_after_first = harness.storage.snapshot_count().expect("count");
+        let envelopes_after_first = harness.storage.accepted_envelope_count().expect("count");
+
+        let second = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+        assert!(second.is_err(), "duplicate must be rejected");
+
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_after_first,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_after_first,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn payload_kind_mismatch_rejected_without_storage_mutation() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "kind-session", 0);
+        let snapshot = make_valid_loro_snapshot("kind-test");
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Delta,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn document_id_mismatch_rejected_without_storage_mutation() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "docid-session", 0);
+        let other_chunk = ChunkId::new(&peer_hex, "other-session", 0);
+        let snapshot = make_valid_loro_snapshot("docid-test");
+        let envelope = harness.peer_sealer.seal(
+            other_chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
 }
