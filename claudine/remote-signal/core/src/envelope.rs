@@ -264,13 +264,11 @@ impl EnvelopeInbox {
         Ok(payload)
     }
 
-    /// Number of distinct envelopes the inbox has accepted so far.
     #[must_use]
     pub fn len(&self) -> usize {
         self.seen.len()
     }
 
-    /// Returns `true` when the inbox has accepted nothing yet.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.seen.is_empty()

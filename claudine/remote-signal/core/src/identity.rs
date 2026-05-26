@@ -85,7 +85,6 @@ impl NodeIdentity {
         self.signing_key.to_bytes()
     }
 
-    /// 32-byte compressed public key.
     #[must_use]
     pub fn public_key_bytes(&self) -> [u8; PUBLIC_KEY_LENGTH] {
         self.signing_key.verifying_key().to_bytes()
