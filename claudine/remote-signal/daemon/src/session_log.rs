@@ -64,6 +64,10 @@ pub enum SessionLogError {
     /// typed [`Entry`] schema.
     #[error("decoded entry has unexpected shape: {reason}")]
     DecodeEntry { reason: String },
+
+    /// A remote CRDT payload failed session-log schema validation.
+    #[error("remote document schema validation failed: {reason}")]
+    SchemaValidation { reason: String },
 }
 
 impl From<loro::LoroError> for SessionLogError {
@@ -101,6 +105,15 @@ pub struct AppendOutcome {
     /// `true` if appending caused the active chunk to rotate to a new
     /// one.
     pub rotated: bool,
+}
+
+/// Opaque staged result of importing a remote update without persisting
+/// the resulting snapshot. The sync path uses this to persist the
+/// accepted envelope before committing the snapshot. Drop without
+/// calling [`SessionLogManager::commit_staged_update`] to discard.
+pub(crate) struct StagedRemoteUpdate {
+    advanced: bool,
+    state: ChunkState,
 }
 
 /// In-memory state for one chunk.
@@ -297,7 +310,6 @@ impl SessionLogManager {
         Ok(manager)
     }
 
-    /// Identity used to sign outgoing Loro deltas.
     #[must_use]
     pub fn identity(&self) -> &NodeIdentity {
         &self.identity
@@ -341,7 +353,6 @@ impl SessionLogManager {
         Ok(Some(envelope))
     }
 
-    /// Active chunk-rotation configuration.
     #[must_use]
     pub fn config(&self) -> ChunkConfig {
         self.config
@@ -471,17 +482,16 @@ impl SessionLogManager {
 
         drop(inner);
 
-        // Fan out to the projection batcher. A closed batcher is a
-        // non-fatal condition for the in-memory model and we
-        // intentionally surface it as an error to the caller so tests
-        // can observe shutdown ordering issues.
+        // Fan out to the projection batcher. redb is the source of truth
+        // so a closed/failed batcher must not cause the caller to retry
+        // and create a duplicate entry.
         let metadata_json = entry
             .metadata
             .as_ref()
             .map(serde_json::to_string)
             .transpose()?
             .unwrap_or_default();
-        self.batcher.submit(ProjectionRow {
+        if let Err(err) = self.batcher.submit(ProjectionRow {
             chunk: chunk_id.clone(),
             sequence,
             created_at_unix_ms: entry.created_at_unix_ms,
@@ -489,7 +499,13 @@ impl SessionLogManager {
             level: entry.level.clone(),
             message: entry.message.clone(),
             metadata_json,
-        })?;
+        }) {
+            tracing::warn!(
+                target: "remote_signal_daemon::session_log",
+                %err,
+                "projection enqueue failed after redb durability; entry is still authoritative in redb",
+            );
+        }
 
         Ok(AppendOutcome {
             chunk: chunk_id,
@@ -618,27 +634,20 @@ impl SessionLogManager {
         }
     }
 
-    /// Apply a delta or snapshot received from a peer. The bytes are
-    /// imported into the in-memory chunk state (creating it if
-    /// necessary) and the resulting snapshot is persisted to redb so
-    /// the on-disk view stays authoritative.
-    ///
-    /// Returns `true` when the local chunk advanced as a result of the
-    /// import (the version vector grew or a new chunk was created).
-    pub fn apply_remote_update(
+    /// Stage a remote update by importing the payload into a temporary
+    /// Loro doc, validating the document schema, but WITHOUT persisting
+    /// the resulting snapshot. The caller must follow this with
+    /// [`Self::commit_staged_update`] to persist and apply, or drop the
+    /// result to discard.
+    pub(crate) fn stage_remote_update(
         &self,
         chunk: &ChunkId,
         update_bytes: &[u8],
-    ) -> Result<bool, SessionLogError> {
-        if update_bytes.is_empty() {
-            return Ok(false);
-        }
+    ) -> Result<StagedRemoteUpdate, SessionLogError> {
         let key = chunk.as_path();
-        let mut inner = self.inner.lock();
+        let inner = self.inner.lock();
         let now = self.clock.now_unix_ms();
 
-        // Stage the import in a separate doc so a persistence failure does
-        // not leave rejected remote data in the live in-memory state.
         let (advanced, staged_state) = if let Some(state) = inner.chunks.get(&key) {
             let pre_snapshot = state.snapshot_bytes()?;
             let staged_doc = LoroDoc::from_snapshot(&pre_snapshot)?;
@@ -646,6 +655,9 @@ impl SessionLogManager {
             staged_doc.import(update_bytes)?;
             let after = staged_doc.oplog_vv();
             let advanced = before != after;
+
+            validate_remote_entries(&staged_doc, state.entry_count)?;
+
             let list = staged_doc.get_list(ENTRIES_CONTAINER);
             let mut bytes = 0u64;
             let mut count = 0u64;
@@ -666,6 +678,9 @@ impl SessionLogManager {
         } else {
             let staged_doc = LoroDoc::new();
             staged_doc.import(update_bytes)?;
+
+            validate_remote_entries(&staged_doc, 0)?;
+
             let list = staged_doc.get_list(ENTRIES_CONTAINER);
             let mut bytes = 0u64;
             let mut count = 0u64;
@@ -703,16 +718,26 @@ impl SessionLogManager {
             })
         };
 
-        let snapshot_bytes = staged_state.snapshot_bytes()?;
+        drop(inner);
+        Ok(StagedRemoteUpdate { advanced, state: staged_state })
+    }
 
-        // Persist BEFORE mutating the live in-memory state.
+    /// Commit a previously staged remote update by persisting the
+    /// snapshot to redb and swapping the staged state into the live
+    /// in-memory map. Returns whether the local chunk advanced.
+    pub(crate) fn commit_staged_update(
+        &self,
+        chunk: &ChunkId,
+        staged: StagedRemoteUpdate,
+    ) -> Result<bool, SessionLogError> {
+        let key = chunk.as_path();
+        let snapshot_bytes = staged.state.snapshot_bytes()?;
+
         self.storage.save_snapshot(chunk, &snapshot_bytes)?;
 
-        // Swap the staged state into the live map.
-        inner.chunks.insert(key.clone(), staged_state);
+        let mut inner = self.inner.lock();
+        inner.chunks.insert(key.clone(), staged.state);
 
-        // Bump the session cursor so subsequent local appends use the
-        // next sequence number after whatever we just merged in.
         let session_key = chunk.session_key();
         let state = inner.chunks.get(&key).expect("just inserted");
         let mut highest_seq = None;
@@ -739,7 +764,26 @@ impl SessionLogManager {
             cursor.next_sequence = seq + 1;
         }
 
-        Ok(advanced)
+        Ok(staged.advanced)
+    }
+
+    /// Apply a delta or snapshot received from a peer. The bytes are
+    /// imported into the in-memory chunk state (creating it if
+    /// necessary) and the resulting snapshot is persisted to redb so
+    /// the on-disk view stays authoritative.
+    ///
+    /// Returns `true` when the local chunk advanced as a result of the
+    /// import (the version vector grew or a new chunk was created).
+    pub fn apply_remote_update(
+        &self,
+        chunk: &ChunkId,
+        update_bytes: &[u8],
+    ) -> Result<bool, SessionLogError> {
+        if update_bytes.is_empty() {
+            return Ok(false);
+        }
+        let staged = self.stage_remote_update(chunk, update_bytes)?;
+        self.commit_staged_update(chunk, staged)
     }
 
     /// After a remote update has been applied to a chunk, submit every
@@ -914,6 +958,64 @@ impl SessionLogManager {
             }
         }
 
+        Ok(())
+    }
+}
+
+fn validate_remote_entries(
+    doc: &LoroDoc,
+    existing_entry_count: u64,
+) -> Result<(), SessionLogError> {
+    let list = doc.get_list(ENTRIES_CONTAINER);
+    let len = list.len() as u64;
+
+    if len < existing_entry_count {
+        return Err(SessionLogError::SchemaValidation {
+            reason: format!(
+                "entry count decreased from {existing_entry_count} to {len}"
+            ),
+        });
+    }
+
+    let mut validation_error: Option<SessionLogError> = None;
+    let mut last_seq: Option<u64> = None;
+
+    list.for_each(|value| {
+        if validation_error.is_some() {
+            return;
+        }
+        match value_to_string(&value) {
+            Some(json) => match serde_json::from_str::<Entry>(&json) {
+                Ok(entry) => {
+                    if let Some(last) = last_seq
+                        && entry.sequence <= last
+                    {
+                        validation_error = Some(SessionLogError::SchemaValidation {
+                            reason: format!(
+                                "non-monotonic sequence: {} follows {}",
+                                entry.sequence, last
+                            ),
+                        });
+                    }
+                    last_seq = Some(entry.sequence);
+                }
+                Err(err) => {
+                    validation_error = Some(SessionLogError::SchemaValidation {
+                        reason: format!("entry JSON decode failed: {err}"),
+                    });
+                }
+            },
+            None => {
+                validation_error = Some(SessionLogError::SchemaValidation {
+                    reason: "entries list contained a non-string value".into(),
+                });
+            }
+        }
+    });
+
+    if let Some(err) = validation_error {
+        Err(err)
+    } else {
         Ok(())
     }
 }
@@ -2060,5 +2162,38 @@ mod tests {
         worker2.shutdown();
         worker3.shutdown();
         drop(tmp);
+    }
+
+    #[test]
+    fn append_succeeds_after_batcher_shutdown_without_retry_ambiguity() {
+        let harness = build_harness(ChunkConfig::default());
+
+        let first = harness
+            .manager
+            .append_entry("node-a", "session-1", "test", "info", "before-shutdown", None)
+            .expect("first append");
+        assert_eq!(first.sequence, 0);
+
+        harness.worker.shutdown();
+
+        let second = harness
+            .manager
+            .append_entry("node-a", "session-1", "test", "info", "after-shutdown", None)
+            .expect("append must succeed even with closed batcher");
+        assert_eq!(second.sequence, 1);
+
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            1,
+            "snapshot must be durable in redb",
+        );
+
+        let entries = harness
+            .manager
+            .list_chunk_entries(&first.chunk)
+            .expect("list");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].message, "before-shutdown");
+        assert_eq!(entries[1].message, "after-shutdown");
     }
 }
