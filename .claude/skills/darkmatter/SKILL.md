@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: f2684be908858a21
+hash: d57f54767f869d83-2fb62553a55befa8
 ---
 
 # darkmatter
@@ -27,6 +27,7 @@ terminal components, images, Mermaid, and graph rendering are delegated to
 | CommonMark/GFM parsing | `darkmatter` |
 | Compose pipeline, interpolation, shell directives, transclusion | `darkmatter` |
 | Frontmatter extraction and Markdown-aware hashing | `darkmatter` / `md hash` |
+| `$schema` / SimplifiedSchema validation, detection, compose integration | `darkmatter::markdown::schemas` |
 | `style:` frontmatter parsing and application | `darkmatter::style` |
 | HTML and terminal Markdown renderers | `darkmatter` |
 | Terminal capability detection, images, Mermaid, graph adapters | `biscuit-terminal` |
@@ -114,6 +115,18 @@ The compose pipeline runs in three phases:
 
 See `compose.md` for the full API, interpolation syntax, and transclusion details.
 
+## Schema Validation
+
+Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via **SimplifiedSchema** — a single-line YAML grammar that compiles to Draft 2020-12 JSON Schema. Key surfaces:
+
+- `$schema` frontmatter property (inline, file reference, or root-level union).
+- `md schema validate` and `md schema detect` CLI subcommands.
+- `DarkmatterSchemas` library API with baseline merging and LRU validator cache.
+- Always-on compose pipeline stage (after `--set`/`--state`, before interpolation).
+- `ComposeOptions::with_baseline_schema(...)` for programmatic baseline injection.
+
+See `darkmatter/docs/topics/schema-definition.md` for the full topic documentation.
+
 ## Progressive Disclosure
 
 Open only the topic file needed for the task:
@@ -121,6 +134,7 @@ Open only the topic file needed for the task:
 | Topic | File |
 |-------|------|
 | Compose pipeline | `compose.md` |
+| Schema validation | `darkmatter/docs/topics/schema-definition.md` |
 | Terminal rendering options | `terminal.md` |
 | Frontmatter model | `frontmatter.md` |
 | Error/status block conventions | `errors.md` |

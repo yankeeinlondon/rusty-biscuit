@@ -2,7 +2,7 @@
 
 Darkmatter can **define**, **detect**, and **evaluate** schemas for Markdown frontmatter. Authors declare the shape of their frontmatter with **SimplifiedSchema** — a single-line YAML grammar that compiles deterministically to a Draft 2020-12 JSON Schema. Every validation runs through the `jsonschema` crate; SimplifiedSchema is a surface, not a parallel validator.
 
-This topic covers the practical usage. The full specification lives in [`features/2026-05-11-schemas/spec.md`](../../features/2026-05-11-schemas/spec.md).
+This topic covers the practical usage of schemas for standalone validation, schema detection, and validation within the compose pipeline. The original specification lives in [`features/_completed/2026-05-11-schemas/spec.md`](../../features/_completed/2026-05-11-schemas/spec.md); the compose integration is specified in [`features/2026-05-23-compose-schema/spec.md`](../../features/2026-05-23-compose-schema/spec.md).
 
 ## What You Get
 
@@ -596,6 +596,69 @@ All failure modes are variants of `SchemaError`:
 
 Every variant implements `biscuit_terminal::errors::BlockError`, so failures render as rich status blocks in CLI output and integrate with the rest of darkmatter's error rendering.
 
+## Compose Pipeline Integration
+
+Darkmatter runs an **always-on Schema Validation stage** inside `md compose`. It validates the document's effective frontmatter against the resolved `$schema` (and optional baseline) after `--set` / `--state` overrides are applied, but **before** frontmatter interpolation or shell expansion. This means schema violations fail fast with a clear error naming the offending property, rather than producing cryptic downstream failures (e.g. `dirname ''` from an empty interpolation).
+
+### Pipeline Placement
+
+```
+Load markdown
+  └─ Apply --set / --state overrides
+      └─ Schema Validation  ──► fails fast on violation
+          └─ Frontmatter Interpolation   ({{ var }})
+              └─ Frontmatter Shell Expansion ($(cmd))
+                  └─ …remaining stages…
+```
+
+The stage is **not** part of the `ComposeOperation` enum — it cannot be excluded via `ComposeOptions::only(...)` or `disable(...)`.
+
+### Behaviour
+
+- When the document declares `$schema` **and** validation fails, compose aborts with `MarkdownError::SchemaValidationFailed`.
+- When a baseline schema is set via `ComposeOptions::with_baseline_schema(...)` and the document lacks `$schema`, the baseline alone is validated.
+- When neither `$schema` nor a baseline is present, the stage is a **no-op** — compose proceeds unchanged.
+- `--set` and `--state` overrides are applied **before** validation, so they can fulfill required properties. A document with `spec: ""` plus `--set spec=design.md` validates successfully.
+- Recursive compose runs validate every child document after its parent `set=` overlay is applied.
+- The baseline schema participates in transclusion cache keys and persistent cache option hashing, so cached results are not reused across different baselines.
+
+### Library API
+
+```rust
+use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::schemas::SimplifiedSchema;
+
+let baseline: SimplifiedSchema = /* ... */;
+
+let options = ComposeOptions::new()
+    .with_baseline_schema(baseline);
+
+let (composed, report) = md.compose_with(options)?;
+```
+
+`with_baseline_schema` accepts a pre-built `SimplifiedSchema` (not a file path). When both baseline and document `$schema` declare the same property, the **document wins** — matching the existing `schemas::resolve::merge` rule.
+
+There is no CLI flag for baseline injection in this version; `md compose` honors document-level `$schema` only. Library callers (e.g. claudine) inject baselines programmatically.
+
+### Error Rendering
+
+`MarkdownError::SchemaValidationFailed` implements `biscuit_terminal::errors::BlockError`. The rendered status block shows:
+
+- **Header**: `Schema validation failed` plus an OSC8 link to the source file.
+- **Description line**: the document's `description:` frontmatter (if present), rendered dimmed and italic.
+- **One bullet per problem**: styled with the property name inverted and colour-coded by category:
+  - Missing required: `missing <inverse>property</inverse>: required but not provided`.
+  - Wrong type: `type <inverse>property</inverse>: <message>`.
+  - Constraint / format failure: `invalid <inverse>property</inverse>: <message>`.
+- Each bullet carries the YAML source `line:col` when available.
+- Root-union failures include the arm index (e.g. `schema arm 2`).
+
+Schema-preparation errors (unparseable `$schema`, missing referenced file, etc.) produce a block with `schema could not be prepared: <detail>` and an empty problems list, distinguishing them from validation failures (`frontmatter did not satisfy the schema`).
+
+### Compose Report Parity
+
+`md compose` and `md schema validate` share the same `DarkmatterSchemas::validate` call, so their outcomes agree by construction. A document that fails `md schema validate` will also fail `md compose`, and vice versa.
+
 ## Limitations (v1)
 
 - **No remote `$schema`.** Download referenced schemas locally for now.
@@ -608,7 +671,8 @@ Every variant implements `biscuit_terminal::errors::BlockError`, so failures ren
 
 ## See Also
 
-- [Full specification](../../features/2026-05-11-schemas/spec.md) — authoritative behaviour, EBNF grammar, ADRs.
+- [Schemas specification](../../features/_completed/2026-05-11-schemas/spec.md) — authoritative behaviour, EBNF grammar, ADRs.
+- [Compose schema specification](../../features/2026-05-23-compose-schema/spec.md) — schema validation in the compose pipeline.
 - [`json-schema-primitives.md`](./json-schema-primitives.md) — JSON Schema primitives reused under the hood.
 - [`magic-paths.md`](./magic-paths.md) — `FileReference` resolution rules.
 - [`frontmatter-recursion.md`](./frontmatter-recursion.md) — how frontmatter is layered through the compose pipeline.
