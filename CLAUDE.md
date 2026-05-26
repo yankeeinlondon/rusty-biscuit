@@ -32,6 +32,33 @@ Root `justfile` exposes `just test|lint|build|install|doctest`, iterating a **cu
 - `## H2` sections: `Examples`, `Returns`, `Errors`, `Panics`, `Safety`, `Notes`.
 - Order: summary → `Examples` → `Returns` → `Errors` → `Panics` → `Safety` → `Notes`.
 
+## Comment Quality
+
+Structural rules above are silent on *content*. Prefer comments that carry information the code does not. See [`docs/comment-quality.md`](docs/comment-quality.md) for worked before/after examples.
+
+Anti-patterns — remove on sight:
+
+1. **HOW-narration** — prose that restates the implementation step-by-step.
+2. **Tautological examples** — assertions guaranteed by the function signature.
+3. **`## Arguments` / `## Returns` blocks that duplicate field docs** — use only when adding a constraint not expressed by the type.
+4. **Format-string, color, or glyph narration** — quoting literal `format!` strings, ANSI colors, or emoji codepoints in prose. They drift.
+5. **Redundant accessor docs** — one-line `///` on `fn foo() -> bool { self.foo }`. Prefer `#[allow(missing_docs)]` at impl level.
+6. **Section-marker `//` comments** — `// Protocol` immediately above `extra.insert("protocol", …)`.
+7. **Heavy-setup doc examples** — >20-line fixtures for one assertion. Link to a real test or omit.
+8. **Stale comments past their code** — comments that no longer match what the code does. Worse than no comment.
+
+Positive criteria — comments worth their length:
+
+- **A. Contract or invariant** not derivable from types (e.g. `atomic_write`'s `last-rename-wins` semantics).
+- **B. WHY a counter-intuitive choice was made** — at the surprising line, not in the surrounding docblock.
+- **C. Semantics of complex return shapes** (e.g. `extract_frontmatter_text`'s `base_line`).
+- **D. Hidden coupling or external surprise** (e.g. "serialize-compatible with X", "persisted to disk").
+- **E. Link to authoritative design** at module (`//!`) / module-defining-type (`///`) level only. Per-function linking is a treadmill.
+
+**Authoring discipline.** Any edit that changes a symbol's behavior must include a pass over its `///`/`//!` docs and inline `//` comments. Fix or delete drifted ones in the same change. Reviewers should flag behavior-changing PRs that do not touch the relevant comments.
+
+When in doubt, ask: *would deleting this comment lose information a future reader needs?* If no, delete.
+
 ## Drift Maintenance
 
 Update alongside code changes:
