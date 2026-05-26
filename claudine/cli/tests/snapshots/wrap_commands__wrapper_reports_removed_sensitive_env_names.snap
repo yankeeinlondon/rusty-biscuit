@@ -17,10 +17,11 @@ Environment Variables:
 • YOLO=false
 - Info: potentially dangerous ENV variables were removed; if you need one of
    these to be included use the --include <ENV> CLI switch
- 📔 System Prompt(appended) 
-  The system prompt was appended to; the content was composed from ./system-prom
-  pt.md. The composed system prompt is roughly 9 tokens.
-  
-  You are a test fixture system prompt.
+
+■ System Prompt (appended)
+┃ The system prompt was appended to; the content was composed from ./system-prom
+┃ pt.md. The composed system prompt is roughly 9 tokens.
+┃ 
+┃ You are a test fixture system prompt.
 
 ✓ Pre-flight checks have passed

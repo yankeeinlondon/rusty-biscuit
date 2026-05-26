@@ -24,7 +24,7 @@ const NERD_FONT_REPO_GLYPH: char = '\u{F02A2}';
 /// Render the system-prompt header line. `action` is `appended` or `replaced`.
 pub fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
     Prose::new(format!(
-        "<bg-orange-500><white><b> 📔 System Prompt(<i>{action}</i>) </b></white></bg-orange-500>"
+        "\n<orange-500><b>■ System Prompt (<i>{action}</i>)</b></orange-500>"
     ))
     .render(term)
 }
@@ -44,7 +44,7 @@ pub(crate) fn resolve_display_label(
 ) -> String {
     let rel = base.and_then(|b| absolute.strip_prefix(b).ok());
     match (rel, term.is_nerd_font) {
-        (Some(rel), Some(true)) => format!("{NERD_FONT_REPO_GLYPH}/{}", rel.display()),
+        (Some(rel), Some(true)) => format!("{NERD_FONT_REPO_GLYPH} /{}", rel.display()),
         (Some(rel), _) => format!("./{}", rel.display()),
         (None, _) => absolute.display().to_string(),
     }
@@ -291,7 +291,7 @@ mod tests {
     fn header_contains_marker_glyph() {
         let term = test_terminal();
         let header = render_system_prompt_header("appended", &term);
-        assert!(header.contains("📔"));
+        assert!(header.contains("■"));
     }
 
     #[test]
@@ -439,7 +439,7 @@ mod tests {
         // path inside the repo.
         assert_eq!(
             label,
-            format!("{NERD_FONT_REPO_GLYPH}/.claude/system-prompt.md")
+            format!("{NERD_FONT_REPO_GLYPH} /.claude/system-prompt.md")
         );
     }
 
@@ -633,7 +633,7 @@ mod tests {
         };
         let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
-        assert!(output.contains("📔"));
+        assert!(output.contains("■"));
         assert!(output.contains("System Prompt"));
         assert!(output.contains("appended"));
         assert!(output.contains("tokens"));
@@ -652,7 +652,7 @@ mod tests {
         let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📔"));
+        assert!(plain.contains("■"));
         assert!(plain.contains("replaced"));
         assert!(plain.contains("Full prompt body"));
     }
@@ -674,7 +674,7 @@ mod tests {
         let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📔"));
+        assert!(plain.contains("■"));
         assert!(plain.contains("Line 1"));
         // Because of line wrapping, "Line 50" may be split across lines
         assert!(plain.contains(" 50"), "should contain the last line number");
@@ -725,7 +725,7 @@ mod tests {
         let result = report_system_prompt_empty(&EffectiveSystemPrompt::None, config, &term);
         let output = result.expect("should produce output in full mode");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📔"));
+        assert!(plain.contains("■"));
         assert!(plain.contains("none"));
         assert!(plain.contains("not been modified"));
     }
@@ -744,7 +744,7 @@ mod tests {
             report_system_prompt_empty(&EffectiveSystemPrompt::Disabled { source }, config, &term);
         let output = result.expect("should produce output in full mode");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📔"));
+        assert!(plain.contains("■"));
         assert!(plain.contains("disabled"));
         assert!(plain.contains("been disabled"));
     }
@@ -768,18 +768,16 @@ mod tests {
         let plain = strip_ansi_codes(&output);
         let mut lines = plain.lines().filter(|l| !l.trim().is_empty());
         let header = lines.next().expect("header line");
-        assert!(header.contains("📔"), "header line should contain 📔");
+        assert!(header.contains("■"), "header line should contain ■");
         // At least one subsequent non-empty line must begin with the
-        // BlockQuote prefix. The system bar is rendered as
-        // `\x1b[48;2;…m \x1b[49m `, so after ANSI stripping the prefix
-        // is two spaces.
+        // BlockQuote prefix.
         let mut saw_quote = false;
         for line in lines {
             if line.trim().is_empty() {
                 continue;
             }
             assert!(
-                line.starts_with("  "),
+                line.starts_with("┃ "),
                 "expected BlockQuote prefix on body line, got {line:?}"
             );
             saw_quote = true;
