@@ -50,12 +50,10 @@ impl ReportingStore {
         })
     }
 
-    /// Return the directory containing source JSONL logs.
     pub fn logs_dir(&self) -> &Path {
         &self.logs_dir
     }
 
-    /// Return the SQLite database path.
     pub fn db_path(&self) -> &Path {
         &self.db_path
     }

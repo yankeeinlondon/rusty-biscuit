@@ -13,52 +13,14 @@ use super::{
 };
 
 /// Render the user-prompt header line.
-///
-/// Format: `🗣️ <b>Agent Prompt</b>`
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::render_user_prompt_header;
-/// use biscuit_terminal::terminal::Terminal;
-///
-/// let term = Terminal::new();
-/// let header = render_user_prompt_header(&term);
-/// assert!(header.contains("Agent Prompt"));
-/// ```
 pub fn render_user_prompt_header(term: &Terminal) -> String {
     Prose::new("\n<green-500>■ <b>Agent Prompt</b></green-500>").render(term)
 }
 
-/// Render the user-prompt body according to the selected format.
+/// Render the user-prompt body inside a green block quote.
 ///
-/// - `Summary` → empty string (no body).
-/// - `PartialPrompt` → `FrontBack` truncated text inside a green block quote.
-/// - `FullPrompt` → full text inside a green block quote.
-///
-/// The text is first stripped of all leading whitespace before rendering.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::{
-///     render_user_prompt_body, PromptReportFormat, TruncationMode,
-/// };
-/// use biscuit_terminal::terminal::Terminal;
-///
-/// let term = Terminal::new();
-/// let body = render_user_prompt_body(
-///     "  Line 1\n  Line 2\n  Line 3",
-///     PromptReportFormat::FullPrompt,
-///     TruncationMode::FrontBack,
-///     &term,
-/// );
-/// // Strip ANSI escapes for assertion; the body is wrapped in a block quote
-/// // with color codes.
-/// let plain = biscuit_terminal::discovery::eval::strip_ansi_codes(&body);
-/// assert!(plain.contains("Line 1"));
-/// assert!(!plain.contains("  Line"), "leading whitespace should be stripped");
-/// ```
+/// Leading whitespace is stripped from `text` before rendering. `Summary`
+/// returns the empty string; `PartialPrompt` truncates per `truncation`.
 pub fn render_user_prompt_body(
     text: &str,
     format: PromptReportFormat,
@@ -92,44 +54,8 @@ pub fn render_user_prompt_body(
     }
 }
 
-/// Top-level user-prompt reporter.
-///
-/// Wires together header rendering and body rendering. Returns `None` when
-/// the config suppresses output (`show_header` is false).
-///
-/// ## Arguments
-///
-/// - `text` — the raw user prompt text.
-/// - `config` — the resolved reporting configuration.
-/// - `term` — terminal for capability-aware rendering.
-///
-/// ## Returns
-///
-/// `Some(String)` with the fully rendered report, or `None` if suppressed.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::{
-///     report_user_prompt, UserPromptReportConfig,
-///     PromptReportFormat, TruncationMode,
-/// };
-/// use biscuit_terminal::terminal::Terminal;
-///
-/// let term = Terminal::new();
-/// let config = UserPromptReportConfig {
-///     show_header: true,
-///     show_body: true,
-///     format: PromptReportFormat::FullPrompt,
-///     truncation: TruncationMode::FrontBack,
-/// };
-/// let output = report_user_prompt("Hello agent", config, &term);
-/// let plain = biscuit_terminal::discovery::eval::strip_ansi_codes(
-///     &output.expect("should produce output"),
-/// );
-/// assert!(plain.contains("Agent Prompt"));
-/// assert!(plain.contains("Hello agent"));
-/// ```
+/// Top-level user-prompt reporter. Returns `None` when `config.show_header`
+/// is `false`.
 pub fn report_user_prompt(
     text: &str,
     config: UserPromptReportConfig,
@@ -139,12 +65,8 @@ pub fn report_user_prompt(
         return None;
     }
 
-    let mut parts = Vec::new();
+    let mut parts = vec![render_user_prompt_header(term)];
 
-    // Header line
-    parts.push(render_user_prompt_header(term));
-
-    // Body
     if config.show_body {
         let body = render_user_prompt_body(text, config.format, config.truncation, term);
         if !body.is_empty() {
@@ -185,10 +107,10 @@ mod tests {
     // --- Header tests ---
 
     #[test]
-    fn header_contains_speaking_head_emoji() {
+    fn header_contains_marker_glyph() {
         let term = test_terminal();
         let header = render_user_prompt_header(&term);
-        assert!(header.contains("🗣️"));
+        assert!(header.contains("■"));
     }
 
     #[test]
@@ -307,7 +229,7 @@ mod tests {
         // the digit tokens.
         let body_content: String = plain
             .lines()
-            .map(|l| l.trim_start_matches(|c: char| c.is_whitespace() || c == '█'))
+            .map(|l| l.trim_start_matches(|c: char| c.is_whitespace() || c == '┃'))
             .collect::<Vec<_>>()
             .join("\n");
         assert!(body_content.contains("Line 1"));
@@ -370,7 +292,7 @@ mod tests {
         let result = report_user_prompt("Full prompt body.", config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("🗣️"));
+        assert!(plain.contains("■"));
         assert!(plain.contains("Agent Prompt"));
         assert!(plain.contains("Full prompt body"));
     }
@@ -391,7 +313,7 @@ mod tests {
         let result = report_user_prompt(&text, config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("🗣️"));
+        assert!(plain.contains("■"));
         assert!(plain.contains("Agent Prompt"));
         assert!(plain.contains("Line 1"));
         // Because of line wrapping, "Line 50" may be split across lines
@@ -453,16 +375,16 @@ mod tests {
         let result = report_user_prompt("Body line one", config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        let mut lines = plain.lines();
+        let mut lines = plain.lines().filter(|l| !l.trim().is_empty());
         let header = lines.next().expect("header line");
-        assert!(header.contains("🗣"), "header line should contain 🗣");
+        assert!(header.contains("■"), "header line should contain ■");
         let mut saw_quote = false;
         for line in lines {
             if line.trim().is_empty() {
                 continue;
             }
             assert!(
-                line.starts_with("█ "),
+                line.starts_with("┃ "),
                 "expected BlockQuote prefix on body line, got {line:?}"
             );
             saw_quote = true;

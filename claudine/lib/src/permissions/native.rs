@@ -63,7 +63,6 @@ impl NativePolicyLayer {
         }
     }
 
-    /// Attempts to downcast the payload to a concrete type.
     pub fn payload<T: 'static>(&self) -> Option<&T> {
         self.inner.downcast_ref()
     }
@@ -102,7 +101,6 @@ impl NativeEffectivePolicy {
         }
     }
 
-    /// Attempts to downcast the payload to a concrete type.
     pub fn payload<T: 'static>(&self) -> Option<&T> {
         self.inner.downcast_ref()
     }
@@ -143,7 +141,6 @@ impl ProviderCliOverrides {
         }
     }
 
-    /// Attempts to downcast the payload to a concrete type.
     pub fn payload<T: 'static>(&self) -> Option<&T> {
         self.inner.downcast_ref()
     }

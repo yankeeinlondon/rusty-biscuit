@@ -66,12 +66,10 @@ impl DispatchRuntimeContext {
         }
     }
 
-    /// Return true when a compiled runtime config is available.
     pub fn has_config(&self) -> bool {
         self.canonical_config.is_some()
     }
 
-    /// Get the canonical runtime config, if loaded.
     pub fn canonical_config(&self) -> Option<&loader::CanonicalRuntimeConfig> {
         self.canonical_config.as_deref()
     }

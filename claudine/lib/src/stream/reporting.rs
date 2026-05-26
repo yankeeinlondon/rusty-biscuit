@@ -36,21 +36,18 @@ pub fn summary_to_event_meta_with_context(
 ) -> EventMeta {
     let mut extra = HashMap::new();
 
-    // Merge caller-provided context (e.g. composition metadata).
     if let Some(ctx) = context_extra {
         for (key, value) in ctx {
             extra.insert(key.clone(), value.clone());
         }
     }
 
-    // Synthetic markers
     extra.insert("synthetic".into(), Value::Bool(true));
     extra.insert(
         "synthetic_kind".into(),
         Value::String("stream_wrapper_summary".into()),
     );
 
-    // Protocol
     let protocol_str = match protocol {
         StreamProtocol::StreamJson => "stream-json",
         StreamProtocol::Ndjson => "ndjson",
@@ -59,12 +56,10 @@ pub fn summary_to_event_meta_with_context(
     };
     extra.insert("stream_protocol".into(), Value::String(protocol_str.into()));
 
-    // Model
     if let Some(model) = &summary.model {
         extra.insert("model".into(), Value::String(model.clone()));
     }
 
-    // Token usage
     if let Some(usage) = &summary.token_usage {
         let mut usage_map = serde_json::Map::new();
         if let Some(v) = usage.input {
@@ -82,14 +77,12 @@ pub fn summary_to_event_meta_with_context(
         extra.insert("token_usage".into(), Value::Object(usage_map));
     }
 
-    // Cost
     if let Some(cost) = summary.cost_usd
         && let Some(n) = serde_json::Number::from_f64(cost)
     {
         extra.insert("cost_usd".into(), Value::Number(n));
     }
 
-    // Duration
     if let Some(ms) = summary.duration_ms {
         extra.insert("duration_ms".into(), Value::Number(ms.into()));
     }
@@ -97,27 +90,20 @@ pub fn summary_to_event_meta_with_context(
         extra.insert("duration_api_ms".into(), Value::Number(ms.into()));
     }
 
-    // Exit code
     extra.insert("exit_code".into(), Value::Number(summary.exit_code.into()));
 
-    // Exit reason (mirrors `summary.error_kind`). Present only when the
-    // summary recorded a typed termination kind (e.g. `timeout`,
-    // `step_timeout`, `billing_error`).
     if let Some(kind) = &summary.error_kind {
         extra.insert("exit_reason".into(), Value::String(kind.clone()));
     }
 
-    // Provider status
     if let Some(status) = &summary.provider_status {
         extra.insert("provider_status".into(), Value::String(status.clone()));
     }
 
-    // Tool calls
     if let Some(tc) = summary.tool_calls {
         extra.insert("tool_calls".into(), Value::Number(tc.into()));
     }
 
-    // Permission activity counters (Codex today; omitted when absent)
     if let Some(pp) = summary.permission_prompts {
         extra.insert("permission_prompts".into(), Value::Number(pp.into()));
     }
