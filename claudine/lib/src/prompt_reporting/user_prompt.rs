@@ -14,7 +14,7 @@ use super::{
 
 /// Render the user-prompt header line.
 pub fn render_user_prompt_header(term: &Terminal) -> String {
-    Prose::new("\n<green-500>■ <b>Agent Prompt</b></green-500>").render(term)
+    Prose::new("🗣️ <b>Agent Prompt</b>").render(term)
 }
 
 /// Render the user-prompt body inside a green block quote.
@@ -110,7 +110,7 @@ mod tests {
     fn header_contains_marker_glyph() {
         let term = test_terminal();
         let header = render_user_prompt_header(&term);
-        assert!(header.contains("■"));
+        assert!(header.contains("🗣"));
     }
 
     #[test]
@@ -229,7 +229,7 @@ mod tests {
         // the digit tokens.
         let body_content: String = plain
             .lines()
-            .map(|l| l.trim_start_matches(|c: char| c.is_whitespace() || c == '┃'))
+            .map(|l| l.trim_start_matches(|c: char| c.is_whitespace() || c == '█'))
             .collect::<Vec<_>>()
             .join("\n");
         assert!(body_content.contains("Line 1"));
@@ -292,7 +292,7 @@ mod tests {
         let result = report_user_prompt("Full prompt body.", config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("■"));
+        assert!(plain.contains("🗣"));
         assert!(plain.contains("Agent Prompt"));
         assert!(plain.contains("Full prompt body"));
     }
@@ -313,7 +313,7 @@ mod tests {
         let result = report_user_prompt(&text, config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("■"));
+        assert!(plain.contains("🗣"));
         assert!(plain.contains("Agent Prompt"));
         assert!(plain.contains("Line 1"));
         // Because of line wrapping, "Line 50" may be split across lines
@@ -377,14 +377,14 @@ mod tests {
         let plain = strip_ansi_codes(&output);
         let mut lines = plain.lines().filter(|l| !l.trim().is_empty());
         let header = lines.next().expect("header line");
-        assert!(header.contains("■"), "header line should contain ■");
+        assert!(header.contains("🗣"), "header line should contain 🗣");
         let mut saw_quote = false;
         for line in lines {
             if line.trim().is_empty() {
                 continue;
             }
             assert!(
-                line.starts_with("┃ "),
+                line.starts_with("█ "),
                 "expected BlockQuote prefix on body line, got {line:?}"
             );
             saw_quote = true;

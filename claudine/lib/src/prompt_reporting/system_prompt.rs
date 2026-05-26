@@ -24,28 +24,19 @@ const NERD_FONT_REPO_GLYPH: char = '\u{F02A2}';
 /// Render the system-prompt header line. `action` is `appended` or `replaced`.
 pub fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
     Prose::new(format!(
-        "\n<orange-500><b>■ System Prompt (<i>{action}</i>)</b></orange-500>"
+        "<bg-orange-500><white><b> 📔 System Prompt(<i>{action}</i>) </b></white></bg-orange-500>"
     ))
     .render(term)
 }
 
-/// Resolve the visible label for a prompt-file hyperlink.
+/// Resolve the visible label for a prompt-file hyperlink. Returns plain
+/// text (no markup); callers apply styling and OSC8 wrapping.
 ///
-/// Three branches, in priority order:
-///
-/// 1. **Nerd Font glyph + path** — when the terminal reports Nerd Font
-///    support (`Terminal::is_nerd_font == Some(true)`) **and** `absolute`
-///    resolves inside `base`, return `{f02a2}/{rel}` where `{f02a2}` is the
-///    in-repo glyph [`NERD_FONT_REPO_GLYPH`] (`\u{F02A2}`) standing in for
-///    the repo root and `{rel}` is the path inside `base`.
-/// 2. **Relative path with `./` prefix** — when `absolute` resolves inside
-///    `base` but the terminal lacks Nerd Font support, return `./{rel}`.
-/// 3. **Absolute path** — when `base` is `None` or `absolute` is outside it,
-///    return the absolute path.
-///
-/// The returned label is plain text (no Prose markup). Callers wrap it in
-/// the Prose link/color syntax (`<blue-400>[label](file://abs)</blue-400>`)
-/// so OSC8 emission and the blue styling are handled by Prose.
+/// The form depends on terminal capability and whether `absolute` lies
+/// inside `base`: Nerd Font terminals with an in-base path get
+/// [`NERD_FONT_REPO_GLYPH`] joined to the relative path; non-Nerd-Font
+/// terminals with an in-base path get a `./`-prefixed relative path;
+/// otherwise the absolute path is returned unchanged.
 pub(crate) fn resolve_display_label(
     absolute: &Path,
     base: Option<&Path>,
@@ -53,7 +44,7 @@ pub(crate) fn resolve_display_label(
 ) -> String {
     let rel = base.and_then(|b| absolute.strip_prefix(b).ok());
     match (rel, term.is_nerd_font) {
-        (Some(rel), Some(true)) => format!("{NERD_FONT_REPO_GLYPH} /{}", rel.display()),
+        (Some(rel), Some(true)) => format!("{NERD_FONT_REPO_GLYPH}/{}", rel.display()),
         (Some(rel), _) => format!("./{}", rel.display()),
         (None, _) => absolute.display().to_string(),
     }
@@ -300,7 +291,7 @@ mod tests {
     fn header_contains_marker_glyph() {
         let term = test_terminal();
         let header = render_system_prompt_header("appended", &term);
-        assert!(header.contains("■"));
+        assert!(header.contains("📔"));
     }
 
     #[test]
@@ -448,7 +439,7 @@ mod tests {
         // path inside the repo.
         assert_eq!(
             label,
-            format!("{NERD_FONT_REPO_GLYPH} /.claude/system-prompt.md")
+            format!("{NERD_FONT_REPO_GLYPH}/.claude/system-prompt.md")
         );
     }
 
@@ -642,7 +633,7 @@ mod tests {
         };
         let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
-        assert!(output.contains("■"));
+        assert!(output.contains("📔"));
         assert!(output.contains("System Prompt"));
         assert!(output.contains("appended"));
         assert!(output.contains("tokens"));
@@ -661,7 +652,7 @@ mod tests {
         let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("■"));
+        assert!(plain.contains("📔"));
         assert!(plain.contains("replaced"));
         assert!(plain.contains("Full prompt body"));
     }
@@ -683,7 +674,7 @@ mod tests {
         let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("■"));
+        assert!(plain.contains("📔"));
         assert!(plain.contains("Line 1"));
         // Because of line wrapping, "Line 50" may be split across lines
         assert!(plain.contains(" 50"), "should contain the last line number");
@@ -734,7 +725,7 @@ mod tests {
         let result = report_system_prompt_empty(&EffectiveSystemPrompt::None, config, &term);
         let output = result.expect("should produce output in full mode");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("■"));
+        assert!(plain.contains("📔"));
         assert!(plain.contains("none"));
         assert!(plain.contains("not been modified"));
     }
@@ -753,7 +744,7 @@ mod tests {
             report_system_prompt_empty(&EffectiveSystemPrompt::Disabled { source }, config, &term);
         let output = result.expect("should produce output in full mode");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("■"));
+        assert!(plain.contains("📔"));
         assert!(plain.contains("disabled"));
         assert!(plain.contains("been disabled"));
     }
@@ -777,16 +768,18 @@ mod tests {
         let plain = strip_ansi_codes(&output);
         let mut lines = plain.lines().filter(|l| !l.trim().is_empty());
         let header = lines.next().expect("header line");
-        assert!(header.contains("■"), "header line should contain ■");
+        assert!(header.contains("📔"), "header line should contain 📔");
         // At least one subsequent non-empty line must begin with the
-        // BlockQuote prefix.
+        // BlockQuote prefix. The system bar is rendered as
+        // `\x1b[48;2;…m \x1b[49m `, so after ANSI stripping the prefix
+        // is two spaces.
         let mut saw_quote = false;
         for line in lines {
             if line.trim().is_empty() {
                 continue;
             }
             assert!(
-                line.starts_with("┃ "),
+                line.starts_with("  "),
                 "expected BlockQuote prefix on body line, got {line:?}"
             );
             saw_quote = true;

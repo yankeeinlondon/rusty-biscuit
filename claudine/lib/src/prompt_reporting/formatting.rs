@@ -10,9 +10,9 @@ use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::{Length, Margin};
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 
-pub(crate) const PROMPT_BORDER: &str = "┃ ";
+pub(crate) const PROMPT_BORDER: &str = "█ ";
 
-pub(crate) const SYSTEM_PROMPT_BORDER: &str = "┃ ";
+pub(crate) const SYSTEM_PROMPT_BORDER: &str = "\x1b[48;2;255;105;0m \x1b[49m ";
 
 pub(crate) const PROMPT_BORDER_WIDTH: u32 = 2;
 
@@ -240,7 +240,13 @@ mod tests {
         let quote = create_system_prompt_blockquote("Test content", &term);
         let rendered = quote.render_optimistic(None);
         let stripped = strip_ansi(&rendered);
-        assert!(stripped.starts_with("┃ "), "stripped = {stripped:?}");
+        // System bar is rendered as `\x1b[48;2;…m \x1b[49m `, so after
+        // ANSI stripping the prefix is two spaces.
+        assert!(stripped.starts_with("  "), "stripped = {stripped:?}");
+        assert!(
+            rendered.contains("\x1b[48;2;255;105;0m"),
+            "rendered = {rendered:?}"
+        );
         assert!(stripped.contains("Test content"));
     }
 
@@ -250,7 +256,7 @@ mod tests {
         let quote = create_user_prompt_blockquote("Test content", &term);
         let rendered = quote.render_optimistic(None);
         let stripped = strip_ansi(&rendered);
-        assert!(stripped.starts_with("┃ "), "stripped = {stripped:?}");
+        assert!(stripped.starts_with("█ "), "stripped = {stripped:?}");
         assert!(stripped.contains("Test content"));
     }
 
