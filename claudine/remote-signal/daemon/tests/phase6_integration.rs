@@ -755,3 +755,73 @@ async fn wait_for_messages(
         sleep(Duration::from_millis(100)).await;
     }
 }
+
+/// **Projection idempotence test** — After repeated incremental syncs
+/// of the same chunk, the gRPC `QueryProjection` endpoint must report
+/// exactly one row per sequence (no duplicates).
+#[tokio::test]
+async fn projection_is_idempotent_across_repeated_syncs() {
+    let tmp = TempDir::new().expect("tempdir");
+    let (alice, alice_sock) = boot_daemon(&tmp, "alice").await;
+    let (bob, bob_sock) = boot_daemon(&tmp, "bob").await;
+    let alice_node = alice.node_id();
+    let bob_node = bob.node_id();
+
+    let mut alice_client = connect_uds(alice_sock).await.expect("alice client");
+    let mut bob_client = connect_uds(bob_sock).await.expect("bob client");
+
+    pair_and_connect(&alice, &mut alice_client, &bob, &mut bob_client).await;
+
+    append(&mut alice_client, "proj-idem", "alice", "first").await;
+
+    alice_client
+        .sync_with_peer(SyncWithPeerRequest {
+            node_id: bob_node.clone(),
+        })
+        .await
+        .expect("first sync");
+
+    let expected_first = vec!["first".to_string()];
+    wait_for_messages(&mut bob_client, &alice_node, "proj-idem", &expected_first).await;
+
+    append(&mut alice_client, "proj-idem", "alice", "second").await;
+
+    alice_client
+        .sync_with_peer(SyncWithPeerRequest {
+            node_id: bob_node.clone(),
+        })
+        .await
+        .expect("second sync");
+
+    let expected_both = vec!["first".to_string(), "second".to_string()];
+    wait_for_messages(&mut bob_client, &alice_node, "proj-idem", &expected_both).await;
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let rows = bob_client
+            .query_projection(QueryProjectionRequest {
+                owner_node_id: alice_node.clone(),
+                session_id: "proj-idem".into(),
+            })
+            .await
+            .expect("query projection")
+            .into_inner();
+        if rows.rows.len() == 2 {
+            let mut sequences: Vec<u64> = rows.rows.iter().map(|r| r.sequence).collect();
+            sequences.sort();
+            assert_eq!(
+                sequences,
+                vec![0, 1],
+                "expected exactly one row per sequence",
+            );
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "timed out waiting for projection to flush; got {} rows",
+                rows.rows.len(),
+            );
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+}
