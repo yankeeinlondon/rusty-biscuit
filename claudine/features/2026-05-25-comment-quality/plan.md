@@ -2,6 +2,49 @@
 phases: 6
 created: 2026-05-25
 start_phase: 1
+packages:
+  - claudine
+  - darkmatter
+source_files_during_phase_1:
+  - CLAUDE.md
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/mcp/mod.rs
+  - claudine/lib/src/protect/mod.rs
+  - claudine/lib/src/stream/mod.rs
+  - claudine/lib/src/system_prompt/mod.rs
+  - claudine/lib/src/prompt_reporting/formatting.rs
+  - claudine/lib/src/prompt_reporting/system_prompt.rs
+  - claudine/lib/src/prompt_reporting/user_prompt.rs
+  - claudine/cli/tests/wrap_commands.rs
+  - claudine/cli/tests/snapshots/wrap_commands__wrapper_reports_removed_sensitive_env_names.snap
+  - darkmatter/lib/src/style/bespoke.rs
+  - darkmatter/lib/src/style/parse.rs
+docs_updated_during_phase_1:
+  - CLAUDE.md
+docs_created_during_phase_1:
+  - docs/comment-quality.md
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - scripts/check-comments.sh
+  - justfile
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/lib/src/prompt_reporting/formatting.rs
+  - claudine/lib/src/prompt_reporting/system_prompt.rs
+  - claudine/lib/src/prompt_reporting/user_prompt.rs
+  - claudine/lib/src/prompt_reporting/frontmatter.rs
+  - claudine/lib/src/prompt_reporting/precedence.rs
+  - claudine/lib/src/dispatch/loader.rs
+  - claudine/lib/src/stream/reporting.rs
+  - claudine/lib/src/config/claudine_config.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages_during_phase_3:
+  - claudine
 ---
 
 # Plan: Comment Quality Rubric and Cleanup
@@ -27,32 +70,33 @@ Establish the authoritative rules and provide reference examples for the new com
 
 Create a low-friction script to help identify suspicious comment patterns.
 
-- [ ] **Task 2.1: Implement `scripts/check-comments.sh`**
+- [x] **Task 2.1: Implement `scripts/check-comments.sh`**
     - Implement checks for:
         - Long docblocks (>15 lines) on small functions (<10 lines).
         - Literal `## Arguments` headers.
         - Heavy-setup doc examples (>20 lines).
         - Redundant accessor docs (sequential short `///` on simple `pub fn` getters).
     - Ensure output is parseable (file:line:category).
-- [ ] **Task 2.2: Add `just` recipe**
+- [x] **Task 2.2: Add `just` recipe**
     - Add `check-comments` to the root `justfile` to invoke the script.
-- [ ] **Task 2.3: Initial Baseline Run**
+- [x] **Task 2.3: Initial Baseline Run**
     - Run `just check-comments` on the current state of `claudine/` to identify cleanup targets.
+    - Baseline: 52 findings (4 `arguments-block`, 1 `heavy-example`, 9 `long-doc-short-fn`, 38 `redundant-accessor`).
 
 ## Phase 3: Claudine Library Cleanup (High-Density Targets)
 
 Perform the first pass of manual cleanup on modules identified as having high concentration of anti-patterns.
 
-- [ ] **Task 3.1: Cleanup `prompt_reporting`**
+- [x] **Task 3.1: Cleanup `prompt_reporting`**
     - Target: `claudine/lib/src/prompt_reporting/*`.
     - Focus: HOW-narration, format/color narration, stale comments.
-- [ ] **Task 3.2: Cleanup `dispatch`**
+- [x] **Task 3.2: Cleanup `dispatch`**
     - Target: `claudine/lib/src/dispatch/template.rs` and `loader.rs`.
     - Focus: Redundant accessor docs, tautological examples.
-- [ ] **Task 3.3: Cleanup `stream`**
+- [x] **Task 3.3: Cleanup `stream`**
     - Target: `claudine/lib/src/stream/reporting.rs` and `badges.rs`.
     - Focus: Section-marker `//` comments, HOW-narration.
-- [ ] **Task 3.4: Cleanup `config`**
+- [x] **Task 3.4: Cleanup `config`**
     - Target: `claudine/lib/src/config/claudine_config.rs`.
     - Focus: Redundant docs, field doc duplication in `## Arguments`.
 
