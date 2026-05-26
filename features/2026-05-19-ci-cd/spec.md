@@ -41,15 +41,30 @@ The hook shall run tests for a hardcoded list of workspace areas. The initial li
 
 The hook script must be structured so that adding a new area is a one-line change (e.g., an array or list variable at the top of the script).
 
-#### R2. Pre-Push Hook — Change Detection (Future)
+#### R2. Pre-Push Hook — Change Detection (Future, Deferred)
 
-Within one sprint after initial hook deployment, the hook shall migrate from the hardcoded list to dynamic change detection. It shall:
+**Status:** Partially implemented as a coarse top-level-directory heuristic; full dependency-aware mapping is deferred.
 
-- Inspect the commits being pushed.
-- Map changed files to workspace members via `Cargo.toml` path dependencies.
-- Run tests only for the areas that contain modified files.
+**Current implementation** (in `just changed-areas`):
 
-This gives fast feedback for small changes without punishing developers who touch documentation or unrelated crates.
+- Runs `git diff --name-only` against the configured upstream branch (`@{u}`).
+- Matches the first path segment of each changed file against the curated area list in the root `justfile`.
+- Falls back to `claudine darkmatter` when there is no upstream branch or no segments match.
+- The recipe is decorated with the `[no-cd]` attribute so its shell cwd
+  is the caller's cwd (repo root in production via the pre-push hook,
+  a temporary git repo under Level 1 tests).
+- Level 1 coverage lives in `.githooks/tests/test-changed-areas.sh`
+  and is wrapped by `just test-changed-areas` /
+  `just test-githooks`. The CI workflow `hooks-tests.yml` runs both
+  the pre-push hook tests and the changed-areas recipe tests.
+
+**Deferred to a future sprint:**
+
+- Inspect the commits being pushed via the pre-push stdin refs (instead of the configured upstream).
+- Map changed files to workspace members via `cargo metadata --no-deps --format-version 1`, so changes to workspace members outside the curated top-level directories are detected.
+- Run tests only for the areas that contain modified files (no broad fallback).
+
+This deferral is acceptable for the current scope because the curated area list (R1) plus the heuristic gives useful feedback for the common case; the dependency-aware version is an optimization, not a correctness requirement.
 
 #### R3. Pre-Push Hook — Enforcement Model
 
@@ -79,6 +94,24 @@ New workflows needed:
 - `.github/workflows/darkmatter-tests.yml`
 
 Each workflow runs the corresponding area's tests when files under that area's path are modified.
+
+**Runner-environment notes** (uncovered during R5 sign-off):
+
+- Both workflows set `COLORTERM=truecolor` so that
+  `biscuit_terminal::discovery::detection::color_depth()` reports
+  `TrueColor` on the runner (default `TERM=dumb` otherwise resolves to
+  `ColorDepth::None`). This keeps committed insta snapshots that assert
+  on truecolor escape sequences in sync with CI behavior.
+- `claudine-tests.yml` materializes inert PATH stubs for the AI provider
+  CLIs that `sniff` detects (`claude`, `opencode`, `roo`, `gemini`,
+  `aider`, `codex`, `goose`, `kimi`, `qwen`) before running tests. The
+  `claudine compose --dry-run` integration tests require at least one
+  installed provider; the stubs satisfy that check without exercising a
+  real provider.
+- Shared `just/notify.just`'s `_message` recipe degrades gracefully to a
+  stderr echo when `messenger` is not on PATH, so a failing `just test`
+  step in CI surfaces the real test exit code instead of being masked by
+  `messenger: not found` (exit 127).
 
 #### R6. GitHub Actions CI — Node.js 20 Deprecation Fix
 
