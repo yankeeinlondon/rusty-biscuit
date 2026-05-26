@@ -52,7 +52,7 @@ comments that *do* carry load-bearing information.
 
 ## The rubric
 
-Seven anti-patterns to remove, four positive criteria to preserve.
+Eight anti-patterns to remove, five positive criteria to preserve.
 
 ### Anti-patterns — comments that fail the test
 
@@ -95,6 +95,28 @@ Seven anti-patterns to remove, four positive criteria to preserve.
    (`See [`tests/foo.rs::test_bar`])` or omit. Reserve doc examples for
    APIs where the example *teaches the type*.
 
+8. **Stale comments past their code.** When a function's body changes,
+   comments that describe its behavior must be re-evaluated in the same
+   change. A comment that was accurate when written and is now wrong is
+   worse than no comment — it actively misleads. The drifted
+   `render_system_prompt_header` doc (still describing a `📔` glyph
+   the code no longer emits) is the failure mode.
+
+### Authoring discipline
+
+Anti-pattern #8 is not just a pattern to spot in existing code — it is
+also the discipline that keeps the rubric applied after this cleanup
+lands. Any edit that changes a symbol's behavior must include a pass
+over:
+
+- the symbol's doc comment (`///` or `//!`),
+- the surrounding module's doc, and
+- any inline `//` comments inside the symbol.
+
+If a comment still applies verbatim, leave it. If it has drifted, fix
+it or delete it. Behavior-changing PRs that do not touch the relevant
+comments are an invitation for drift and should be flagged in review.
+
 ### Positive criteria — comments worth their length
 
 A comment earns its length when it carries information the code itself
@@ -114,6 +136,14 @@ D. **Hidden coupling or external surprise** — e.g. "this struct must
    serialize compatibly with `X`," or "this enum's discriminants are
    persisted to disk."
 
+E. **Link to authoritative design.** Module-level (`//!`) and
+   module-defining-type (`///`) docs should link to the design or topic
+   doc that is the source of truth for that area, when one exists. Use
+   intra-doc links or relative markdown paths so the link is reachable
+   from both rustdoc and the source. **Per-function linking is not
+   required** — module/type level is the right granularity. Per-function
+   links become a maintenance treadmill of their own.
+
 When in doubt, ask: *would deleting this comment lose information that a
 future reader needs?* If no, delete.
 
@@ -123,9 +153,9 @@ Two places. Both ship as part of this spec.
 
 1. **Repo-root `CLAUDE.md`** gains a new section, "Comment Quality,"
    placed immediately after the existing "Rustdoc Convention." Contents:
-   the seven anti-patterns and four positive criteria as a tight bullet
-   list, with a one-line pointer to the detail doc. Target length: 25
-   lines or fewer.
+   the eight anti-patterns and five positive criteria as a tight bullet
+   list (one line each), plus the authoring-discipline rule, with a
+   one-line pointer to the detail doc. Target length: 30 lines or fewer.
 
 2. **`docs/comment-quality.md`** is created at repo root. Contents: each
    anti-pattern and positive criterion expanded with a real before/after
@@ -194,6 +224,12 @@ What it does **not** try to flag:
 - Format-string drift (would require parsing the doc and comparing to
   literals).
 - Section-marker `//` comments (too many false positives).
+- **Stale comments past their code (#8)** — fundamentally requires
+  understanding what the code does vs what the comment claims. The
+  authoring discipline is the only practical safeguard.
+- **Missing links to design docs (Criterion E)** — too many
+  reasonable cases where no topic doc yet exists; a heuristic would
+  produce more noise than signal. Reviewer judgement applies.
 
 These remain judgement calls for human review.
 
@@ -229,13 +265,19 @@ authoritative policy.
 
 ## Acceptance criteria
 
-- `CLAUDE.md` contains a new "Comment Quality" section (≤ 25 lines)
-  immediately after "Rustdoc Convention," listing all seven anti-patterns
-  and four positive criteria, with a one-line link to
-  `docs/comment-quality.md`.
+- `CLAUDE.md` contains a new "Comment Quality" section (≤ 30 lines)
+  immediately after "Rustdoc Convention," listing all eight anti-patterns
+  and five positive criteria, plus the authoring-discipline rule, with a
+  one-line link to `docs/comment-quality.md`.
 - `docs/comment-quality.md` exists at repo root with one expanded
   before/after pair per anti-pattern and per positive criterion, each
-  citing a real file path in the codebase.
+  citing a real file path in the codebase. Criterion E's examples cite
+  existing `docs/topics/*` documents where the link pattern already
+  applies.
+- High-traffic module-level (`//!`) docs in `claudine/lib/src/` link to
+  their authoritative topic doc under `claudine/docs/topics/` where one
+  exists (e.g. `composition`, `mcp`, `protect`, `system_prompt`,
+  `stream`). No claim of completeness — this seeds the convention.
 - All `.rs` files under `claudine/lib/src/` and `claudine/cli/src/` have
   been reviewed against the rubric and updated where applicable. No
   behavioral changes.
@@ -253,6 +295,18 @@ authoritative policy.
   `biscuit-terminal`, `homelab`, etc.). Those teams adopt the rubric as
   they touch their own code.
 - Promoting `just check-comments` to a CI gate.
-- Custom clippy lints for any of the seven anti-patterns.
+- Custom clippy lints for any of the eight anti-patterns.
 - Cleanup of `tests/` directories. Test code follows different
   conventions and is not addressed here.
+- **Spec-to-design-doc lifecycle convention.** A separate spec is needed
+  to define how `features/YYYY-MM-DD-<name>/spec.md` transitions to a
+  permanent `{area}/docs/topics/<name>.md` source-of-truth document
+  after implementation completes, what happens to the historical spec,
+  and how fixes (which usually do not change design) are distinguished
+  from features (which often do). Criterion E above already names
+  `docs/topics/` as the link target because those documents largely
+  exist today; the lifecycle spec will formalize the convention.
+- **Drift-detection tooling.** Cross-referencing Criterion E links
+  against design-doc mtimes to surface candidate-drift sites is a
+  useful future extension, but it is tooling — not policy — and
+  needs the lifecycle convention to land first to be reliably useful.
