@@ -21,6 +21,7 @@ use crate::stream::logs::opencode::errors::{
 };
 use crate::stream::logs::opencode::events::{
     AssetType, LogClassification, LogLevel, OpenCodeLogRecord, ParsedOpenCodeStderrLine,
+    ProviderLimitKind,
 };
 
 /// Whether the bridge took ownership of an incoming stderr log line and
@@ -127,7 +128,8 @@ impl SharedStderrState {
 /// Stderr-side integration object for the OpenCode structured wrapper path.
 ///
 /// Responsibilities:
-/// - parse and classify one stderr line at a time via [`parse_line`] +
+/// - parse and classify one stderr line at a time via
+///   [`parse_line`](super::events::parse_line) +
 ///   [`classify`] / [`classify_raw`]
 /// - emit [`SemanticEvent`]s through a shared sink so the live renderer and
 ///   JSONL reporting surface stderr diagnostics alongside stdout events
@@ -233,23 +235,21 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
 
         let classification = classify(&record);
         match classification {
-            LogClassification::RateLimit {
+            LogClassification::ProviderLimit {
                 status_code,
-                ref error_name,
+                kind,
                 reset_at,
                 ref provider_id,
                 ref model_id,
                 ref provider_error,
-                is_fatal,
-            } => self.on_rate_limit(
+            } => self.on_provider_limit(
                 &record,
                 status_code,
-                error_name.clone(),
+                kind,
                 reset_at,
                 provider_id.clone(),
                 model_id.clone(),
                 provider_error.clone(),
-                is_fatal,
             ),
             LogClassification::MalformedAsset {
                 asset_type,
@@ -321,20 +321,22 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn on_rate_limit(
+    fn on_provider_limit(
         &mut self,
         record: &OpenCodeLogRecord,
         status_code: u16,
-        error_name: String,
+        kind: ProviderLimitKind,
         reset_at: Option<DateTime<Utc>>,
         provider_id: Option<String>,
         model_id: Option<String>,
         provider_error: String,
-        is_fatal: bool,
     ) -> StderrIngestOutcome {
         let stdout_seen = self.stdout_event_seen.load(Ordering::SeqCst);
         let rendered_message = render_rate_limit_message(provider_id, model_id, reset_at);
+        let is_terminal = matches!(
+            kind,
+            ProviderLimitKind::UsageCap | ProviderLimitKind::RetriesExhausted
+        );
 
         {
             let mut state = self.state.lock().expect("stderr state poisoned");
@@ -355,8 +357,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
 
         let mut extra_map = base_extra(record, "rate_limit");
         extra_map.insert("status_code".into(), json!(status_code));
-        extra_map.insert("error_name".into(), Value::String(error_name.clone()));
-        extra_map.insert("is_fatal".into(), json!(is_fatal));
+        extra_map.insert("kind".into(), Value::String(format!("{kind:?}")));
         if let Some(reset) = reset_at {
             extra_map.insert(
                 "reset_at".into(),
@@ -367,13 +368,12 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             extra_map.insert("provider_error".into(), Value::String(provider_error));
         }
 
-        if stdout_seen || !is_fatal {
+        if stdout_seen || !is_terminal {
             debug!(
                 status_code,
-                error_name = %error_name,
+                kind = ?kind,
                 reset_at = ?reset_at,
-                is_fatal,
-                "opencode rate-limit classified after stdout activity or non-fatal; emitting warning",
+                "opencode provider-limit classified after stdout activity or non-terminal; emitting warning",
             );
             self.sink.on_semantic_event(SemanticEvent::Warning {
                 message: rendered_message,
@@ -382,10 +382,9 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         } else {
             debug!(
                 status_code,
-                error_name = %error_name,
+                kind = ?kind,
                 reset_at = ?reset_at,
-                is_fatal,
-                "opencode rate-limit classified before any stdout activity and fatal; requesting early termination",
+                "opencode provider-limit classified before any stdout activity and terminal; requesting early termination",
             );
             self.sink.on_semantic_event(SemanticEvent::Error {
                 message: rendered_message.clone(),

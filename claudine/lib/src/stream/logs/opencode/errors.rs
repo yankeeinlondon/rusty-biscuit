@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use regex::Regex;
 
-use crate::stream::logs::opencode::events::{AssetType, LogClassification, OpenCodeLogRecord};
+use crate::stream::logs::opencode::events::{AssetType, LogClassification, OpenCodeLogRecord, ProviderLimitKind};
 use crate::stream::summary::RateLimitInfo;
 
 static RESET_AT_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -301,12 +301,11 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
 
     if is_rate_limit {
         let status_code = status_code.unwrap_or(429);
-        let error_name = if is_fatal {
-            "AI_RetryError"
+        let kind = if is_fatal {
+            ProviderLimitKind::RetriesExhausted
         } else {
-            "AI_APICallError"
-        }
-        .to_string();
+            ProviderLimitKind::RateLimited
+        };
 
         let reset_at = extract_reset_at(haystack);
         let provider_id = record.tags.get("providerID").cloned();
@@ -317,14 +316,13 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
             .cloned()
             .unwrap_or_else(|| haystack.to_string());
 
-        return Some(LogClassification::RateLimit {
+        return Some(LogClassification::ProviderLimit {
             status_code,
-            error_name,
+            kind,
             reset_at,
             provider_id,
             model_id,
             provider_error,
-            is_fatal,
         });
     }
 
@@ -702,21 +700,21 @@ mod tests {
             panic!("expected Structured");
         };
         match classify(&record) {
-            LogClassification::RateLimit {
+            LogClassification::ProviderLimit {
                 status_code,
-                error_name,
+                kind,
                 reset_at,
                 ..
             } => {
                 assert_eq!(status_code, 429);
-                assert_eq!(error_name, "AI_RetryError");
+                assert_eq!(kind, ProviderLimitKind::RetriesExhausted);
                 let reset = reset_at.expect("reset_at should be parsed");
                 assert_eq!(
                     reset.format("%Y-%m-%d %H:%M:%S").to_string(),
                     "2026-04-16 04:18:56"
                 );
             }
-            other => panic!("expected RateLimit, got {other:?}"),
+            other => panic!("expected ProviderLimit, got {other:?}"),
         }
     }
 
@@ -906,14 +904,14 @@ mod tests {
             panic!("rate limit fixture failed to parse");
         };
         match classify(&record) {
-            LogClassification::RateLimit { reset_at, .. } => {
+            LogClassification::ProviderLimit { reset_at, .. } => {
                 let reset = reset_at.expect("reset_at should be parsed from fixture");
                 assert_eq!(
                     reset.format("%Y-%m-%d %H:%M:%S").to_string(),
                     "2026-04-16 04:18:56",
                 );
             }
-            other => panic!("expected RateLimit, got {other:?}"),
+            other => panic!("expected ProviderLimit, got {other:?}"),
         }
     }
 
@@ -944,7 +942,7 @@ mod tests {
         for line in fixture.lines() {
             match parse_line(line) {
                 ParsedOpenCodeStderrLine::Structured(record) => match classify(&record) {
-                    LogClassification::RateLimit { .. } => rate_limit_seen = true,
+                    LogClassification::ProviderLimit { .. } => rate_limit_seen = true,
                     LogClassification::MalformedAsset { .. } => malformed_seen = true,
                     _ => {}
                 },
@@ -1183,8 +1181,8 @@ mod tests {
             panic!("expected Structured");
         };
         match classify(&record) {
-            LogClassification::RateLimit { .. } | LogClassification::ApiFailure { .. } => {}
-            other => panic!("expected ApiFailure/RateLimit, got {other:?}"),
+            LogClassification::ProviderLimit { .. } | LogClassification::ApiFailure { .. } => {}
+            other => panic!("expected ApiFailure/ProviderLimit, got {other:?}"),
         }
     }
 
