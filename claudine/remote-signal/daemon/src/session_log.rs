@@ -22,7 +22,7 @@ use loro::{ExportMode, LoroDoc, VersionVector};
 use parking_lot::Mutex;
 use remote_signal_core::{
     ChunkConfig, ChunkId, ChunkMetadata, EnvelopeSealer, Entry, NodeIdentity, PayloadKind,
-    SignedEnvelope,
+    SignedEnvelope, ENVELOPE_HASH_LENGTH, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
 };
 use serde_json::Value as JsonValue;
 
@@ -650,6 +650,7 @@ impl SessionLogManager {
         let (advanced, staged_state) = if let Some(state) = inner.chunks.get(&key) {
             let pre_snapshot = state.snapshot_bytes()?;
             let staged_doc = LoroDoc::from_snapshot(&pre_snapshot)?;
+            let original_entry_json = collect_entry_json_strings(&staged_doc)?;
             let before = staged_doc.oplog_vv();
             staged_doc.import(update_bytes)?;
             let after = staged_doc.oplog_vv();
@@ -657,6 +658,7 @@ impl SessionLogManager {
 
             validate_metadata_unchanged(&staged_doc, &state.metadata)?;
             validate_remote_entries(&staged_doc, state.entry_count)?;
+            validate_append_only_prefix(&staged_doc, &original_entry_json)?;
 
             let list = staged_doc.get_list(ENTRIES_CONTAINER);
             let mut bytes = 0u64;
@@ -908,20 +910,45 @@ impl SessionLogManager {
     /// safe for envelopes that were already applied. Envelopes whose
     /// `save_snapshot` was lost due to a crash will be recovered here.
     fn replay_accepted_envelopes_on_startup(&self) -> Result<(), SessionLogError> {
-        let mut to_replay: Vec<(ChunkId, Vec<u8>)> = Vec::new();
+        let mut to_replay: Vec<crate::storage::AcceptedEnvelope> = Vec::new();
         self.storage.iter_accepted_envelopes(|envelope| {
-            if envelope.payload_bytes.is_empty() {
-                return Ok(());
-            }
-            let Ok(chunk_id) = envelope.document_id.parse::<ChunkId>() else {
-                return Ok(());
-            };
-            to_replay.push((chunk_id, envelope.payload_bytes.clone()));
+            to_replay.push(envelope);
             Ok(())
         })?;
 
-        for (chunk_id, payload) in &to_replay {
-            match self.apply_remote_update(chunk_id, payload) {
+        for accepted in &to_replay {
+            if accepted.payload_bytes.is_empty() {
+                continue;
+            }
+            let Ok(chunk_id) = accepted.document_id.parse::<ChunkId>() else {
+                tracing::warn!(
+                    target: "remote_signal_daemon::session_log",
+                    document_id = %accepted.document_id,
+                    "skipping accepted envelope with malformed document_id during replay",
+                );
+                continue;
+            };
+
+            let Some(signed) = reconstruct_signed_envelope(accepted) else {
+                tracing::warn!(
+                    target: "remote_signal_daemon::session_log",
+                    chunk_id = %chunk_id.as_path(),
+                    "skipping accepted envelope with corrupt hex fields during replay",
+                );
+                continue;
+            };
+
+            if let Err(err) = signed.verify() {
+                tracing::warn!(
+                    target: "remote_signal_daemon::session_log",
+                    chunk_id = %chunk_id.as_path(),
+                    %err,
+                    "skipping accepted envelope that failed signature verification during replay",
+                );
+                continue;
+            }
+
+            match self.apply_remote_update(&chunk_id, &accepted.payload_bytes) {
                 Ok(_) => {}
                 Err(SessionLogError::Loro(reason)) => {
                     tracing::warn!(
@@ -1015,6 +1042,12 @@ fn validate_and_extract_metadata(
     }
 
     let previous_chunk_id = if expected_chunk_index == 0 {
+        let map = doc.get_map(METADATA_CONTAINER);
+        if map.get("previous_chunk_id").is_some() {
+            return Err(SessionLogError::SchemaValidation {
+                reason: "metadata previous_chunk_id must be absent for chunk 0".into(),
+            });
+        }
         None
     } else {
         let prev = read_map_string(doc, "previous_chunk_id")?;
@@ -1099,18 +1132,11 @@ fn validate_metadata_unchanged(
             }
         }
         None => {
-            use loro::ValueOrContainer;
             let map = doc.get_map(METADATA_CONTAINER);
-            if let Some(voc) = map.get("previous_chunk_id") {
-                if let ValueOrContainer::Value(loro::LoroValue::String(s)) = voc {
-                    if !s.is_empty() {
-                        return Err(SessionLogError::SchemaValidation {
-                            reason: format!(
-                                "metadata previous_chunk_id {s:?} mutated from None"
-                            ),
-                        });
-                    }
-                }
+            if map.get("previous_chunk_id").is_some() {
+                return Err(SessionLogError::SchemaValidation {
+                    reason: "metadata previous_chunk_id mutated from None".into(),
+                });
             }
         }
     }
@@ -1174,6 +1200,86 @@ fn validate_remote_entries(
     } else {
         Ok(())
     }
+}
+
+fn collect_entry_json_strings(doc: &LoroDoc) -> Result<Vec<String>, SessionLogError> {
+    let list = doc.get_list(ENTRIES_CONTAINER);
+    let mut out = Vec::with_capacity(list.len());
+    let mut err: Option<SessionLogError> = None;
+    list.for_each(|value| {
+        if err.is_some() {
+            return;
+        }
+        match value_to_string(&value) {
+            Some(json) => out.push(json),
+            None => {
+                err = Some(SessionLogError::DecodeEntry {
+                    reason: "entries list contained a non-string value".into(),
+                });
+            }
+        }
+    });
+    if let Some(e) = err {
+        Err(e)
+    } else {
+        Ok(out)
+    }
+}
+
+fn validate_append_only_prefix(
+    doc: &LoroDoc,
+    original_json: &[String],
+) -> Result<(), SessionLogError> {
+    let staged_json = collect_entry_json_strings(doc)?;
+    if staged_json.len() < original_json.len() {
+        return Err(SessionLogError::SchemaValidation {
+            reason: format!(
+                "entry count decreased from {} to {}",
+                original_json.len(),
+                staged_json.len()
+            ),
+        });
+    }
+    for (i, original) in original_json.iter().enumerate() {
+        if staged_json[i] != *original {
+            return Err(SessionLogError::SchemaValidation {
+                reason: format!("entry at index {i} mutated in append-only prefix"),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn hex_decode(hex: &str) -> Option<Vec<u8>> {
+    if hex.len() % 2 != 0 {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(hex.len() / 2);
+    for i in (0..hex.len()).step_by(2) {
+        bytes.push(u8::from_str_radix(&hex[i..i + 2], 16).ok()?);
+    }
+    Some(bytes)
+}
+
+fn reconstruct_signed_envelope(accepted: &crate::storage::AcceptedEnvelope) -> Option<SignedEnvelope> {
+    let sender_bytes = hex_decode(&accepted.sender_hex)?;
+    let sender: [u8; PUBLIC_KEY_LENGTH] = sender_bytes.try_into().ok()?;
+    let message_id_bytes = hex_decode(&accepted.message_id_hex)?;
+    let message_id: [u8; ENVELOPE_HASH_LENGTH] = message_id_bytes.try_into().ok()?;
+    let content_hash_bytes = hex_decode(&accepted.content_hash_hex)?;
+    let content_hash: [u8; ENVELOPE_HASH_LENGTH] = content_hash_bytes.try_into().ok()?;
+    let signature_bytes = hex_decode(&accepted.signature_hex)?;
+    let signature: [u8; SIGNATURE_LENGTH] = signature_bytes.try_into().ok()?;
+    let payload_kind = PayloadKind::from_byte(accepted.payload_kind as i32)?;
+    Some(SignedEnvelope {
+        sender,
+        message_id,
+        document_id: accepted.document_id.clone(),
+        payload_kind,
+        content_hash,
+        signature,
+        payload: accepted.payload_bytes.clone(),
+    })
 }
 
 fn value_to_string(value: &loro::ValueOrContainer) -> Option<String> {
@@ -2357,5 +2463,540 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].message, "before-shutdown");
         assert_eq!(entries[1].message, "after-shutdown");
+    }
+
+    #[test]
+    fn existing_entry_message_mutation_rejected_as_append_only_violation() {
+        let harness = build_harness(ChunkConfig::default());
+        let remote_node = "remote-node";
+        let chunk = ChunkId::new(remote_node, "append-only-mutate", 0);
+
+        let entry1 = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "original".into(),
+            metadata: None,
+        };
+        let snapshot1 = make_remote_snapshot(remote_node, "append-only-mutate", 0, &[entry1]);
+        harness
+            .manager
+            .apply_remote_update(&chunk, &snapshot1)
+            .expect("first apply");
+
+        let entries_before = harness.manager.list_chunk_entries(&chunk).expect("list");
+        assert_eq!(entries_before.len(), 1);
+        assert_eq!(entries_before[0].message, "original");
+
+        let doc = LoroDoc::from_snapshot(&snapshot1).unwrap();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        list.delete(0, 1).unwrap();
+        let mutated_entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "mutated".into(),
+            metadata: None,
+        };
+        list.insert(
+            0,
+            serde_json::to_string(&mutated_entry).unwrap().as_str(),
+        )
+        .unwrap();
+        doc.commit();
+        let snapshot2 = doc.export(ExportMode::Snapshot).unwrap();
+
+        let result = harness.manager.apply_remote_update(&chunk, &snapshot2);
+        assert!(
+            result.is_err(),
+            "mutation of existing entry must be rejected"
+        );
+
+        let entries_after = harness.manager.list_chunk_entries(&chunk).expect("list");
+        assert_eq!(entries_after.len(), 1);
+        assert_eq!(entries_after[0].message, "original");
+
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn existing_entry_deletion_with_replacement_rejected_as_append_only_violation() {
+        let harness = build_harness(ChunkConfig::default());
+        let remote_node = "remote-node";
+        let chunk = ChunkId::new(remote_node, "append-only-replace", 0);
+
+        let entry_a = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "alpha".into(),
+            metadata: None,
+        };
+        let entry_b = Entry {
+            sequence: 1,
+            created_at_unix_ms: 6_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "beta".into(),
+            metadata: None,
+        };
+        let snapshot1 =
+            make_remote_snapshot(remote_node, "append-only-replace", 0, &[entry_a, entry_b]);
+        harness
+            .manager
+            .apply_remote_update(&chunk, &snapshot1)
+            .expect("first apply");
+
+        let snapshots_before = harness.storage.snapshot_count().expect("count");
+
+        let doc = LoroDoc::from_snapshot(&snapshot1).unwrap();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        list.delete(0, 1).unwrap();
+        let replacement = Entry {
+            sequence: 0,
+            created_at_unix_ms: 9_000,
+            source: "attacker".into(),
+            level: "warn".into(),
+            message: "replaced".into(),
+            metadata: None,
+        };
+        list.insert(
+            0,
+            serde_json::to_string(&replacement).unwrap().as_str(),
+        )
+        .unwrap();
+        doc.commit();
+        let snapshot2 = doc.export(ExportMode::Snapshot).unwrap();
+
+        let result = harness.manager.apply_remote_update(&chunk, &snapshot2);
+        assert!(
+            result.is_err(),
+            "deletion+replacement of existing entry must be rejected"
+        );
+
+        let entries_after = harness.manager.list_chunk_entries(&chunk).expect("list");
+        assert_eq!(entries_after.len(), 2);
+        assert_eq!(entries_after[0].message, "alpha");
+        assert_eq!(entries_after[1].message, "beta");
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn existing_entry_reordering_rejected_as_append_only_violation() {
+        let harness = build_harness(ChunkConfig::default());
+        let remote_node = "remote-node";
+        let chunk = ChunkId::new(remote_node, "append-only-reorder", 0);
+
+        let entry_a = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "alpha".into(),
+            metadata: None,
+        };
+        let entry_b = Entry {
+            sequence: 1,
+            created_at_unix_ms: 6_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "beta".into(),
+            metadata: None,
+        };
+        let snapshot1 =
+            make_remote_snapshot(remote_node, "append-only-reorder", 0, &[entry_a, entry_b]);
+        harness
+            .manager
+            .apply_remote_update(&chunk, &snapshot1)
+            .expect("first apply");
+
+        let doc = LoroDoc::from_snapshot(&snapshot1).unwrap();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        list.delete(0, 2).unwrap();
+        let swapped_b = Entry {
+            sequence: 0,
+            created_at_unix_ms: 6_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "beta".into(),
+            metadata: None,
+        };
+        let swapped_a = Entry {
+            sequence: 1,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "alpha".into(),
+            metadata: None,
+        };
+        list.insert(
+            0,
+            serde_json::to_string(&swapped_b).unwrap().as_str(),
+        )
+        .unwrap();
+        list.insert(
+            1,
+            serde_json::to_string(&swapped_a).unwrap().as_str(),
+        )
+        .unwrap();
+        doc.commit();
+        let snapshot2 = doc.export(ExportMode::Snapshot).unwrap();
+
+        let result = harness.manager.apply_remote_update(&chunk, &snapshot2);
+        assert!(
+            result.is_err(),
+            "reordering of existing entries must be rejected"
+        );
+
+        let entries_after = harness.manager.list_chunk_entries(&chunk).expect("list");
+        assert_eq!(entries_after[0].message, "alpha");
+        assert_eq!(entries_after[1].message, "beta");
+
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn first_snapshot_with_previous_chunk_id_on_chunk_0_rejected() {
+        let harness = build_harness(ChunkConfig::default());
+        let remote_node = "remote-node";
+        let chunk = ChunkId::new(remote_node, "prev-id-session", 0);
+
+        let doc = loro::LoroDoc::new();
+        let map = doc.get_map(METADATA_CONTAINER);
+        map.insert("owner_node_id", remote_node).unwrap();
+        map.insert("session_id", "prev-id-session").unwrap();
+        map.insert("chunk_index", 0i64).unwrap();
+        map.insert("created_at_unix_ms", 5_000i64).unwrap();
+        map.insert("previous_chunk_id", "bogus-prev-chunk").unwrap();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "bad-prev".into(),
+            metadata: None,
+        };
+        list.push(serde_json::to_string(&entry).unwrap().as_str())
+            .unwrap();
+        doc.commit();
+        let snapshot = doc.export(ExportMode::Snapshot).unwrap();
+
+        let result = harness.manager.apply_remote_update(&chunk, &snapshot);
+        assert!(
+            result.is_err(),
+            "first snapshot with previous_chunk_id for chunk 0 must be rejected"
+        );
+
+        let entries = harness.manager.list_chunk_entries(&chunk).expect("list");
+        assert!(
+            entries.is_empty(),
+            "no entries should be visible; got {entries:?}"
+        );
+
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn first_snapshot_with_integer_previous_chunk_id_on_chunk_0_rejected() {
+        let harness = build_harness(ChunkConfig::default());
+        let remote_node = "remote-node";
+        let chunk = ChunkId::new(remote_node, "prev-int-session", 0);
+
+        let doc = loro::LoroDoc::new();
+        let map = doc.get_map(METADATA_CONTAINER);
+        map.insert("owner_node_id", remote_node).unwrap();
+        map.insert("session_id", "prev-int-session").unwrap();
+        map.insert("chunk_index", 0i64).unwrap();
+        map.insert("created_at_unix_ms", 5_000i64).unwrap();
+        map.insert("previous_chunk_id", 999i64).unwrap();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "int-prev".into(),
+            metadata: None,
+        };
+        list.push(serde_json::to_string(&entry).unwrap().as_str())
+            .unwrap();
+        doc.commit();
+        let snapshot = doc.export(ExportMode::Snapshot).unwrap();
+
+        let result = harness.manager.apply_remote_update(&chunk, &snapshot);
+        assert!(
+            result.is_err(),
+            "first snapshot with integer previous_chunk_id for chunk 0 must be rejected"
+        );
+
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn existing_chunk_0_with_integer_previous_chunk_id_rejected() {
+        let harness = build_harness(ChunkConfig::default());
+        let remote_node = "remote-node";
+        let chunk = ChunkId::new(remote_node, "exist-prev-int", 0);
+
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "initial".into(),
+            metadata: None,
+        };
+        let snapshot1 = make_remote_snapshot(remote_node, "exist-prev-int", 0, &[entry]);
+        harness
+            .manager
+            .apply_remote_update(&chunk, &snapshot1)
+            .expect("first apply");
+
+        let doc = LoroDoc::from_snapshot(&snapshot1).unwrap();
+        let map = doc.get_map(METADATA_CONTAINER);
+        map.insert("previous_chunk_id", 42i64).unwrap();
+        doc.commit();
+        let snapshot2 = doc.export(ExportMode::Snapshot).unwrap();
+
+        let result = harness.manager.apply_remote_update(&chunk, &snapshot2);
+        assert!(
+            result.is_err(),
+            "existing chunk 0 with injected integer previous_chunk_id must be rejected"
+        );
+
+        let entries = harness.manager.list_chunk_entries(&chunk).expect("list");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].message, "initial");
+
+        harness.worker.shutdown();
+    }
+
+    fn build_accepted_envelope(
+        sender_identity: &NodeIdentity,
+        chunk: &ChunkId,
+        payload: Vec<u8>,
+    ) -> (AcceptedEnvelope, remote_signal_core::SignedEnvelope) {
+        let mut sealer = EnvelopeSealer::new(sender_identity.clone());
+        let signed = sealer.seal(chunk.as_path(), PayloadKind::Snapshot, payload.clone());
+        let accepted = AcceptedEnvelope {
+            sender_hex: signed.sender_node_id(),
+            message_id_hex: signed.message_id_hex(),
+            document_id: chunk.as_path(),
+            payload_kind: PayloadKind::Snapshot.to_byte(),
+            content_hash_hex: {
+                let mut out = String::with_capacity(signed.content_hash.len() * 2);
+                for byte in &signed.content_hash {
+                    use std::fmt::Write;
+                    let _ = write!(out, "{byte:02x}");
+                }
+                out
+            },
+            signature_hex: {
+                let mut out = String::with_capacity(signed.signature.len() * 2);
+                for byte in &signed.signature {
+                    use std::fmt::Write;
+                    let _ = write!(out, "{byte:02x}");
+                }
+                out
+            },
+            payload_bytes: payload,
+            accepted_at_unix_ms: 5_001,
+        };
+        (accepted, signed)
+    }
+
+    fn start_fresh_manager(
+        storage: Storage,
+        identity: &Arc<NodeIdentity>,
+        clock_start: i64,
+    ) -> (SessionLogManager, BatcherWorker) {
+        let projection = Projection::in_memory().expect("projection");
+        let worker = spawn(projection.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let manager = SessionLogManager::with_clock(
+            storage,
+            worker.handle(),
+            projection,
+            ChunkConfig::default(),
+            Arc::clone(identity),
+            Arc::new(FixedClock::new(clock_start)),
+        )
+        .expect("manager");
+        (manager, worker)
+    }
+
+    #[test]
+    fn replay_skips_accepted_envelope_with_tampered_signature() {
+        let tmp = TempDir::new().expect("tempdir");
+        let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
+        let identity = Arc::new(NodeIdentity::from_seed([55u8; 32]));
+
+        let sender_identity = NodeIdentity::from_seed([66u8; 32]);
+        let sender_hex = sender_identity.node_id();
+        let chunk = ChunkId::new(&sender_hex, "replay-sig-session", 0);
+
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "replay-sig".into(),
+            metadata: None,
+        };
+        let payload = make_remote_snapshot(&sender_hex, "replay-sig-session", 0, &[entry]);
+
+        let (mut accepted, _signed) =
+            build_accepted_envelope(&sender_identity, &chunk, payload.clone());
+        accepted.signature_hex = {
+            let bytes: Vec<u8> = (0..64).map(|_| 0xFFu8).collect();
+            let mut out = String::with_capacity(128);
+            for byte in &bytes {
+                use std::fmt::Write;
+                let _ = write!(out, "{byte:02x}");
+            }
+            out
+        };
+
+        storage
+            .save_accepted_envelope(&sender_hex, &accepted.message_id_hex, &accepted)
+            .expect("save");
+
+        let (manager, worker) = start_fresh_manager(storage, &identity, 10_000);
+
+        let entries = manager.list_chunk_entries(&chunk).expect("list");
+        assert!(
+            entries.is_empty(),
+            "tampered signature must be skipped during replay; got {entries:?}"
+        );
+
+        worker.shutdown();
+    }
+
+    #[test]
+    fn replay_skips_accepted_envelope_with_tampered_content_hash() {
+        let tmp = TempDir::new().expect("tempdir");
+        let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
+        let identity = Arc::new(NodeIdentity::from_seed([56u8; 32]));
+
+        let sender_identity = NodeIdentity::from_seed([67u8; 32]);
+        let sender_hex = sender_identity.node_id();
+        let chunk = ChunkId::new(&sender_hex, "replay-hash-session", 0);
+
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "replay-hash".into(),
+            metadata: None,
+        };
+        let payload = make_remote_snapshot(&sender_hex, "replay-hash-session", 0, &[entry]);
+
+        let (mut accepted, _signed) =
+            build_accepted_envelope(&sender_identity, &chunk, payload.clone());
+        accepted.content_hash_hex = "ff".repeat(32);
+
+        storage
+            .save_accepted_envelope(&sender_hex, &accepted.message_id_hex, &accepted)
+            .expect("save");
+
+        let (manager, worker) = start_fresh_manager(storage, &identity, 10_000);
+
+        let entries = manager.list_chunk_entries(&chunk).expect("list");
+        assert!(
+            entries.is_empty(),
+            "tampered content hash must be skipped during replay; got {entries:?}"
+        );
+
+        worker.shutdown();
+    }
+
+    #[test]
+    fn replay_skips_accepted_envelope_with_malformed_sender_hex() {
+        let tmp = TempDir::new().expect("tempdir");
+        let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
+        let identity = Arc::new(NodeIdentity::from_seed([57u8; 32]));
+
+        let sender_identity = NodeIdentity::from_seed([68u8; 32]);
+        let sender_hex = sender_identity.node_id();
+        let chunk = ChunkId::new(&sender_hex, "replay-malformed-session", 0);
+
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "replay-malformed".into(),
+            metadata: None,
+        };
+        let payload = make_remote_snapshot(&sender_hex, "replay-malformed-session", 0, &[entry]);
+
+        let (mut accepted, _signed) =
+            build_accepted_envelope(&sender_identity, &chunk, payload.clone());
+        accepted.sender_hex = "ZZZZ_not_valid_hex".to_string();
+
+        storage
+            .save_accepted_envelope(&accepted.sender_hex, &accepted.message_id_hex, &accepted)
+            .expect("save");
+
+        let (manager, worker) = start_fresh_manager(storage, &identity, 10_000);
+
+        let entries = manager.list_chunk_entries(&chunk).expect("list");
+        assert!(
+            entries.is_empty(),
+            "malformed sender hex must be skipped during replay; got {entries:?}"
+        );
+
+        worker.shutdown();
+    }
+
+    #[test]
+    fn replay_skips_accepted_envelope_with_wrong_payload_kind() {
+        let tmp = TempDir::new().expect("tempdir");
+        let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
+        let identity = Arc::new(NodeIdentity::from_seed([58u8; 32]));
+
+        let sender_identity = NodeIdentity::from_seed([69u8; 32]);
+        let sender_hex = sender_identity.node_id();
+        let chunk = ChunkId::new(&sender_hex, "replay-kind-session", 0);
+
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "replay-kind".into(),
+            metadata: None,
+        };
+        let payload = make_remote_snapshot(&sender_hex, "replay-kind-session", 0, &[entry]);
+
+        let (mut accepted, _signed) =
+            build_accepted_envelope(&sender_identity, &chunk, payload.clone());
+        accepted.payload_kind = PayloadKind::Delta.to_byte();
+
+        storage
+            .save_accepted_envelope(&sender_hex, &accepted.message_id_hex, &accepted)
+            .expect("save");
+
+        let (manager, worker) = start_fresh_manager(storage, &identity, 10_000);
+
+        let entries = manager.list_chunk_entries(&chunk).expect("list");
+        assert!(
+            entries.is_empty(),
+            "wrong payload kind must be skipped during replay; got {entries:?}"
+        );
+
+        worker.shutdown();
     }
 }
