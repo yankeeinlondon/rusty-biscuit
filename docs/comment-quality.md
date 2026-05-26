@@ -300,28 +300,51 @@ invitation for drift.
 ## Positive criteria
 
 A comment earns its length when it carries information the code itself
-does not express.
+does not express. Each criterion below is paired with a real before/after
+to calibrate what "load-bearing" looks like.
 
 ### A. Contract or invariant not derivable from types
 
-**Example** (`claudine/lib/src/config/atomic.rs::atomic_write`):
+**Before** (`claudine/lib/src/config/atomic.rs::atomic_write`):
 
 ```rust
+/// Write content to a file atomically.
+pub fn atomic_write(path: &Path, content: &[u8]) -> Result<()> { ... }
+```
+
+The summary is true but leaves the load-bearing question unanswered:
+*what happens when two writers race?* `&Path` and `&[u8]` carry no
+information about concurrency or torn-write resistance.
+
+**After**:
+
+```rust
+/// Write content to a file atomically using temp file + rename.
+///
 /// ## Concurrency
 ///
 /// Each call uses a unique temp file, so concurrent writers never corrupt
 /// each other's in-flight bytes. `rename` serializes on the parent
 /// directory inode; the final content is always an intact copy of exactly
 /// one writer's payload (last-rename-wins).
+pub fn atomic_write(path: &Path, content: &[u8]) -> Result<()> { ... }
 ```
 
-Nothing in the signature `pub fn atomic_write(path: &Path, content: &[u8]) -> Result<()>`
-tells the reader about concurrent-writer behavior or that the function
-guarantees torn-write resistance. Keep this kind of comment.
+The `## Concurrency` block names the invariant — `last-rename-wins` — and
+explains why concurrent calls are safe. Keep this kind of comment.
 
 ### B. WHY a counter-intuitive choice was made
 
-**Example** (`claudine/lib/src/config/atomic.rs::atomic_write`):
+**Before** (`claudine/lib/src/config/atomic.rs::atomic_write`):
+
+```rust
+tmp.persist(path).map_err(|e| e.error)?;
+```
+
+A reader scanning the function might assume the `?` is a forgotten
+fallback — why not retry with a copy on cross-device failure?
+
+**After**:
 
 ```rust
 // `persist` performs an atomic `rename(2)` on the same filesystem.
@@ -331,16 +354,29 @@ guarantees torn-write resistance. Keep this kind of comment.
 tmp.persist(path).map_err(|e| e.error)?;
 ```
 
-The `?` operator looks unremarkable — a reader might assume a fallback
-path was forgotten. This comment lives *at the surprising line* and
-explains why the fallback is intentionally absent. That's where a
-Criterion-B comment belongs, not in the surrounding docblock.
+The comment lives *at the surprising line* and explains why the absence
+of a fallback is intentional. Criterion-B comments belong at the
+surprising line — not in the surrounding function's docblock, where they
+get lost.
 
 ### C. Semantics of complex return shapes
 
-**Example** (`claudine/lib/src/harness/parse/frontmatter.rs::extract_frontmatter_text`):
+**Before** (`claudine/lib/src/harness/parse/frontmatter.rs::extract_frontmatter_text`):
 
 ```rust
+/// Extract the YAML frontmatter text from a Markdown source.
+pub(super) fn extract_frontmatter_text(source: &str) -> Option<(&str, usize)> { ... }
+```
+
+The signature has a tuple return — `(&str, usize)` — and a callers
+reading this can't tell what the `usize` is. Byte offset? Line number?
+Length? Index of the closing fence?
+
+**After**:
+
+```rust
+/// Extract the YAML frontmatter text from a Markdown source.
+///
 /// ## Returns
 ///
 /// `Some((yaml_text, base_line))` where `base_line` is the 1-indexed line
@@ -350,14 +386,29 @@ Criterion-B comment belongs, not in the surrounding docblock.
 pub(super) fn extract_frontmatter_text(source: &str) -> Option<(&str, usize)> { ... }
 ```
 
-The return type is `Option<(&str, usize)>`. The `usize` could be a
-length, a byte offset, an index, or a count. The doc names it: it is a
-1-indexed line number, and the `None` arm has two distinct causes the
-caller may want to distinguish (logging vs. error handling). Keep this.
+The `## Returns` block names the field, fixes the indexing convention,
+and distinguishes the two `None` paths so a caller can decide whether to
+log or error. Keep this — the type alone could not carry it.
 
 ### D. Hidden coupling or external surprise
 
-**Example** (paraphrased from `claudine/lib/src/dispatch/loader.rs`):
+**Before** (paraphrased from `claudine/lib/src/dispatch/loader.rs`):
+
+```rust
+pub struct RuntimeEventBinding {
+    pub enabled: bool,
+    pub actions: Vec<HookAction>,
+    pub matcher: Option<RuntimeMatcher>,
+    pub compiled_mappers: Vec<Option<CompiledMapper>>,
+}
+```
+
+`Vec<HookAction>` and `Vec<Option<CompiledMapper>>` look like two
+independent collections. Nothing in the field types says the two are
+positionally aligned, or that mutating one without the other corrupts
+the binding.
+
+**After**:
 
 ```rust
 /// Event binding ready for dispatch without per-event regex compilation.
@@ -365,12 +416,16 @@ caller may want to distinguish (logging vs. error handling). Keep this.
 /// Note: `compiled_mappers` is aligned with `actions` by index — the two
 /// vectors must stay the same length, and `compiled_mappers[i]` describes
 /// the mapper for `actions[i]`. Callers iterate them in lockstep.
-pub struct RuntimeEventBinding { ... }
+pub struct RuntimeEventBinding {
+    pub enabled: bool,
+    pub actions: Vec<HookAction>,
+    pub matcher: Option<RuntimeMatcher>,
+    pub compiled_mappers: Vec<Option<CompiledMapper>>,
+}
 ```
 
-Nothing in `Vec<HookAction>` and `Vec<Option<CompiledMapper>>` tells the
-reader the two are positionally coupled. Document the coupling once on
-the type, then prune the redundant per-accessor docs (see Anti-pattern 5).
+Document the coupling once on the type, then prune the redundant
+per-accessor docs (see Anti-pattern 5).
 
 Other forms of Criterion D:
 
@@ -382,11 +437,20 @@ Other forms of Criterion D:
 
 ### E. Link to authoritative design
 
-Module-level (`//!`) and module-defining-type (`///`) docs should link
-to the design or topic doc that is the source of truth for that area,
-when one exists.
+**Before** (a module that has a topic doc but no link from `//!`):
 
-**Example**:
+```rust
+//! Composition services for inline and chained document workflows.
+
+use std::path::Path;
+// ...
+```
+
+The module summary is fine, but a reader who wants the design — what
+"inline" means, how `sequence` differs from `compose`, what the
+frontmatter precedence rules are — has no signpost to the topic doc.
+
+**After**:
 
 ```rust
 //! Composition services for inline and chained document workflows.
@@ -394,11 +458,14 @@ when one exists.
 //! See [`claudine/docs/topics/composition.md`](../../docs/topics/composition.md)
 //! for the full design — `compose`, `inline-compose`, `sequence`,
 //! frontmatter precedence, harness validations.
+
+use std::path::Path;
+// ...
 ```
 
 Per-function linking is **not required**. Module-level / type-level is
-the right granularity; threading the same link through every
-`pub fn` produces a maintenance treadmill of broken intra-doc links.
+the right granularity; threading the same link through every `pub fn`
+produces a maintenance treadmill of broken intra-doc links.
 
 When a topic doc doesn't exist yet, leave the link out. A reviewer's
 judgement is the safety net here, not a heuristic.

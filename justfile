@@ -468,6 +468,10 @@ sync-recipe recipe source:
 check-comments *args="":
     @./scripts/check-comments.sh {{ args }}
 
+# run fixture tests for the comment-quality heuristic checker
+check-comments-test:
+    @./scripts/check-comments-tests.sh
+
 # Internal helper: run a named recipe across all curated areas (or specific areas).
 _orchestrate recipe *args="":
     #!/usr/bin/env bash

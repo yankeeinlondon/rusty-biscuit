@@ -70,6 +70,36 @@ function reset_state() {
     watching_doc_lines = 0
     watching_doc_start = 0
     watching_doc_all_short = 0
+    in_signature = 0
+    sig_doc_lines = 0
+    sig_doc_start = 0
+    sig_doc_all_short = 0
+    sig_is_accessor_candidate = 0
+}
+
+function single_line_accessor_check(body, doc_lines, doc_start, doc_all_short) {
+    if (body ~ /\{[ \t]*&?self\.[A-Za-z_][A-Za-z0-9_]*[ \t]*\}/) {
+        if (doc_lines > 0 && doc_all_short) {
+            emit("redundant-accessor", doc_start)
+        }
+    }
+}
+
+function enter_body(line, doc_lines, doc_start, doc_all_short, is_accessor,   delta) {
+    delta = count_braces(line)
+    if (delta <= 0) {
+        if (doc_lines > 15) emit("long-doc-short-fn", doc_start)
+        if (is_accessor) single_line_accessor_check(line, doc_lines, doc_start, doc_all_short)
+        return
+    }
+    watching_fn = 1
+    fn_brace_depth = delta
+    fn_body_lines = 0
+    fn_body_text = ""
+    fn_is_accessor_candidate = is_accessor
+    watching_doc_lines = doc_lines
+    watching_doc_start = doc_start
+    watching_doc_all_short = doc_all_short
 }
 
 BEGIN { reset_state() }
@@ -162,30 +192,29 @@ FNR == 1 { reset_state() }
         next
     }
 
+    # Continuing a multi-line signature; look for the `{` that opens the body.
+    if (in_signature) {
+        if (line ~ /->/) sig_is_accessor_candidate = 1
+        if (line ~ /\{/) {
+            in_signature = 0
+            enter_body(line, sig_doc_lines, sig_doc_start, sig_doc_all_short, sig_is_accessor_candidate)
+        }
+        next
+    }
+
     if (trimmed == "" || trimmed ~ /^#\[/ || trimmed ~ /^#!\[/) next
 
     if (line ~ /^[ \t]*(pub[ \t]*(\([^)]*\))?[ \t]+)?(async[ \t]+)?(const[ \t]+)?(unsafe[ \t]+)?fn[ \t]+[A-Za-z_][A-Za-z0-9_]*/) {
-        # Single-line accessor: `fn foo(...) -> T { self.field }`
-        if (line ~ /\{[ \t]*&?self\.[A-Za-z_][A-Za-z0-9_]*[ \t]*\}[ \t]*$/) {
-            if (pending_doc_lines > 0 && pending_doc_all_short) {
-                emit("redundant-accessor", pending_doc_start)
-            }
-        }
-
-        # Mark this fn as an accessor candidate only when its signature
-        # returns a non-unit type (presence of `->`).
         is_accessor_candidate = (line ~ /->/)
 
-        delta = count_braces(line)
-        if (delta > 0) {
-            watching_fn = 1
-            fn_brace_depth = delta
-            fn_body_lines = 0
-            fn_body_text = ""
-            fn_is_accessor_candidate = is_accessor_candidate
-            watching_doc_lines = pending_doc_lines
-            watching_doc_start = pending_doc_start
-            watching_doc_all_short = pending_doc_all_short
+        if (line ~ /\{/) {
+            enter_body(line, pending_doc_lines, pending_doc_start, pending_doc_all_short, is_accessor_candidate)
+        } else {
+            in_signature = 1
+            sig_doc_lines = pending_doc_lines
+            sig_doc_start = pending_doc_start
+            sig_doc_all_short = pending_doc_all_short
+            sig_is_accessor_candidate = is_accessor_candidate
         }
 
         pending_doc_lines = 0
