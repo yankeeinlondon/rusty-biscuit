@@ -62,3 +62,16 @@ jobs:
 
       - name: Run Darkmatter tests
         run: just test darkmatter
+
+      # Regression guard for the local pre-push path. The hook delegates to
+      # `just test darkmatter`, which previously failed for developers who
+      # exported `NO_COLOR=1` in their shell because the color-depth tests
+      # asserted `COLORTERM=truecolor` without first clearing NO_COLOR.
+      # biscuit-terminal honors NO_COLOR before COLORTERM, so the assertion
+      # silently broke through no fault of the pushed code. This step
+      # exercises the previously-broken tests under `NO_COLOR=1` to ensure
+      # they remain hermetic.
+      - name: Verify color-depth tests are hermetic under NO_COLOR=1
+        env:
+          NO_COLOR: "1"
+        run: cargo test -p darkmatter --lib terminal::tests::test_color_depth
