@@ -57,7 +57,8 @@ Positive criteria — comments worth their length:
 
 **Authoring discipline.** Any edit that changes a symbol's behavior must include a pass over its `///`/`//!` docs and inline `//` comments. Fix or delete drifted ones in the same change. Reviewers should flag behavior-changing PRs that do not touch the relevant comments.
 
-When in doubt, ask: *would deleting this comment lose information a future reader needs?* If no, delete.
+- When in doubt, ask: *would deleting this comment lose information a future reader needs?* If no, delete.
+- when drift between comments and code is detected, always assume the code is correct and the comment is wrong (unless instructed otherwise); take appropriate actions and communicate that this drift was detected and how it was resolved
 
 ## Drift Maintenance
 
