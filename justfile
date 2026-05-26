@@ -464,6 +464,10 @@ _ensure-build-deps:
 sync-recipe recipe source:
     @./scripts/sync-recipe.sh "{{ recipe }}" "{{ source }}"
 
+# heuristic check for comment quality anti-patterns (warn-only)
+check-comments *args="":
+    @./scripts/check-comments.sh {{ args }}
+
 # Internal helper: run a named recipe across all curated areas (or specific areas).
 _orchestrate recipe *args="":
     #!/usr/bin/env bash
