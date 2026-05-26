@@ -61,12 +61,8 @@ fn level2_cursor_lands_below_rendered_image() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     // Clear the screen and position the cursor high in the pane so the
@@ -224,12 +220,8 @@ fn level2_dir_command_unicode_widths_in_capture() {
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell failed");
-        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
     // Reset the pane so prior tests' rendered output cannot leak into
     // this run's capture window.

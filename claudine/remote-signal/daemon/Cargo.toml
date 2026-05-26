@@ -1,0 +1,43 @@
+[package]
+name = "remote-signal-daemon"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Long-running companion daemon for the Claudine CLI. Phase 2 adds Loro/redb/DuckDB session-log persistence on top of the Phase-1 IPC scaffold."
+
+[[bin]]
+name = "remote-signal-daemon"
+path = "src/main.rs"
+
+[lib]
+name = "remote_signal_daemon"
+path = "src/lib.rs"
+
+[dependencies]
+remote-signal-core = { path = "../core" }
+tonic = { version = "0.14", default-features = false, features = ["transport", "codegen", "server", "router"] }
+tonic-prost = "0.14"
+prost = "0.14"
+tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "net", "signal", "fs", "time", "sync"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+loro = "1"
+redb = "2"
+duckdb = { version = "1", features = ["bundled"] }
+flume = "0.11"
+parking_lot = "0.12"
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"] }
+mdns-sd = "0.12"
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+remote-signal-client = { path = "../client" }

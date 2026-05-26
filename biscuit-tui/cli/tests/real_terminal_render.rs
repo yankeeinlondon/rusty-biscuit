@@ -17,17 +17,24 @@
 //!
 //! ## Shared harness reuse
 //!
-//! Level-2 tests in this file reuse a single process-shared shell pane
-//! per terminal backend via [`SharedHarness`]. Each test sends `clear`
-//! followed by the `question` binary as a shell command, captures the
-//! rendered output (and/or sends keys), then terminates the question
-//! process with `Ctrl+C` so the shell returns to a prompt before the
-//! next test runs.
+//! Level-2 tests in this file reuse a single shell pane per terminal
+//! backend. Each test sends `clear` followed by the `question` binary
+//! as a shell command, captures the rendered output (and/or sends
+//! keys), then terminates the question process with `Ctrl+C` so the
+//! shell returns to a prompt before the next test runs.
 //!
-//! Spawning a fresh WezTerm/Kitty/tmux pane costs 2–3 seconds; sharing
-//! eliminates that overhead across the suite. The `#[serial(level2)]`
-//! attribute serialises the level-2 tests so they never contend for the
-//! shared pane.
+//! Spawning a fresh WezTerm/Kitty/tmux pane costs 2–3 seconds. Under
+//! `cargo test` (single-process, libtest), the per-binary
+//! [`SharedHarness`] static amortizes that cost across every test in
+//! this file. Under `just test-l2`/`cargo nextest run` (process-per-
+//! test), `biscuit-harness-broker spawn` pre-spawns one pane per
+//! backend before nextest starts, exports its id via
+//! `BISCUIT_SHARED_*_ID`, and the per-test
+//! `<Backend>Harness::shared_or_spawn()` calls attach to the existing
+//! pane instead of spawning fresh. The `#[serial(level2)]` attribute
+//! serialises tests within a single process so they never contend for
+//! the shared pane; the recipe runs nextest with `-j 1` for the same
+//! reason across processes.
 //!
 //! Level-3 tests (OS keyboard injection via cliclick) still own their
 //! own foreground-visible harness because `focus_spawned_pane` / AXRaise
@@ -133,11 +140,8 @@ static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 fn level2_wezterm_renders_option_labels() {
     require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell in WezTerm");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     harness.send_text(b"clear\n").expect("clear");
@@ -164,11 +168,8 @@ fn level2_wezterm_renders_option_labels() {
 fn level2_kitty_renders_option_labels() {
     require_level!(Level::L2, KittyHarness::available(), "kitty");
 
-    let mut guard = SHARED_KITTY.get_or_init(|| {
-        let mut h = KittyHarness::new();
-        h.spawn_shell().expect("spawn_shell in kitty");
-        h
-    });
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
 
     harness.send_text(b"clear\n").expect("clear");
@@ -195,11 +196,8 @@ fn level2_kitty_renders_option_labels() {
 fn level2_tmux_renders_option_labels() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX.get_or_init(|| {
-        let mut h = TmuxHarness::new();
-        h.spawn_shell().expect("spawn_shell in tmux");
-        h
-    });
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
 
     harness.send_text(b"clear\n").expect("clear");
@@ -235,11 +233,8 @@ fn level2_tmux_renders_option_labels() {
 fn level2_tmux_ctrl_space_reveals_badges() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX.get_or_init(|| {
-        let mut h = TmuxHarness::new();
-        h.spawn_shell().expect("spawn_shell in tmux");
-        h
-    });
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
 
     harness.send_text(b"clear\n").expect("clear");
@@ -313,11 +308,8 @@ fn sgr_param_present(haystack: &str, param: &str) -> bool {
 fn level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX.get_or_init(|| {
-        let mut h = TmuxHarness::new();
-        h.spawn_shell().expect("spawn_shell in tmux");
-        h
-    });
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
 
     harness.send_text(b"clear\n").expect("clear");
@@ -383,11 +375,8 @@ fn level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr() {
 fn level2_tmux_ctrl_c_exits_130() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX.get_or_init(|| {
-        let mut h = TmuxHarness::new();
-        h.spawn_shell().expect("spawn_shell in tmux");
-        h
-    });
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
 
     harness.send_text(b"clear\n").expect("clear");
@@ -451,11 +440,8 @@ fn level2_tmux_ctrl_c_exits_130() {
 fn level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges() {
     require_level!(Level::L2, WezTermHarness::available(), "WezTerm");
 
-    let mut guard = SHARED_WEZTERM.get_or_init(|| {
-        let mut h = WezTermHarness::new();
-        h.spawn_shell().expect("spawn_shell in WezTerm");
-        h
-    });
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     harness.send_text(b"clear\n").expect("clear");

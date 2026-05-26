@@ -59,6 +59,9 @@ members = [
     "darkmatter/dmls",
     "tools/test-toolkit",
     "biscuit-browser-harness",
+    "claudine/remote-signal/core",
+    "claudine/remote-signal/daemon",
+    "claudine/remote-signal/client",
 ]
 exclude = ["schematic/schema"]
 

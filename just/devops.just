@@ -215,13 +215,28 @@ _sanity pkg *args="":
     echo
     echo -e "🩺 Sanity check {{ bold }}{{ pkg }}{{ reset }} {{ dim }}(lib + bins, !slow){{ reset }}"
     echo
-    meta="$(cargo metadata --no-deps --format-version 1)"
+    # Capture cargo metadata to a tempfile and have jq read it from
+    # the file. The previous `"$(cargo metadata)" <<< | jq | head`
+    # pipeline deadlocked from `bash -c` in sub-workspace dirs
+    # (e.g. `schematic/`, `tree-hugger/`, `unchained-ai/`) because
+    # `head -n 1` closing its stdin early left the `jq` end of the
+    # pipe in a state the enclosing command-substitution couldn't
+    # reap. Using a file plus `first(...)` in jq removes both the pipe
+    # and the early-close behaviour. `first(...)` short-circuits on
+    # the first match so we don't pay for full enumeration either.
+    #
+    # `mktemp` here uses the template form (no `-t`) so the same line
+    # works on macOS (BSD mktemp), Linux (GNU mktemp), and Windows
+    # git-bash — `-t` has incompatible semantics across implementations.
+    meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-sanity-meta.XXXXXX")"
+    trap 'rm -f "${meta_file}"' EXIT
+    cargo metadata --no-deps --format-version 1 > "${meta_file}"
     has_lib="$(jq -r --arg p '{{ pkg }}' \
-        '.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="lib") | .name' \
-        <<< "$meta" | head -n 1)"
+        'first(.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="lib") | .name) // ""' \
+        "${meta_file}")"
     has_bin="$(jq -r --arg p '{{ pkg }}' \
-        '.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="bin") | .name' \
-        <<< "$meta" | head -n 1)"
+        'first(.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="bin") | .name) // ""' \
+        "${meta_file}")"
     targets=()
     [[ -n "$has_lib" ]] && targets+=("--lib")
     [[ -n "$has_bin" ]] && targets+=("--bins")
@@ -234,15 +249,98 @@ _sanity pkg *args="":
         --no-tests=pass {{ args }}
 
 # Level 2 tier: real terminal / PTY / harness tests.
-# Skip-clean by default; pass BISCUIT_TEST_LEVEL_REQUIRED=2 to make missing
-# harnesses hard-fail.
+#
+# Skip-clean by default; pass BISCUIT_TEST_LEVEL_REQUIRED=2 to make
+# missing harnesses hard-fail.
+#
+# ## Shared harness amortization
+#
+# `cargo nextest run` executes each test in its own child process, so a
+# process-local `SharedHarness` static cannot reuse a terminal pane
+# across tests. To realise the 2-3 s per-spawn savings the spec
+# promises, this recipe:
+#
+#   1. Builds `biscuit-harness-broker` and uses it to spawn ONE pane /
+#      window / session per backend (WezTerm, kitty, tmux, Apple
+#      Terminal) on the host. Each spawn's id is exported via a
+#      `BISCUIT_SHARED_*` env var so each nextest child can attach via
+#      `<Backend>Harness::shared_or_spawn()` instead of spawning fresh.
+#
+#   2. Runs nextest with `-j 1` so tests share the single pane without
+#      contending for it. L2 tests are `#[serial(level2)]`-tagged
+#      anyway and only one `question` / `bt` process can sensibly own a
+#      pane at a time.
+#
+#   3. Tears every spawned pane down in a trap after nextest exits
+#      (success or failure) via `biscuit-harness-broker kill`.
+#
+# Backends whose tooling is missing return exit code 2 from
+# `broker spawn`; the recipe simply doesn't export that env var and
+# tests fall back to per-process spawning (which themselves skip
+# cleanly via `require_level!`). This means the recipe degrades
+# gracefully on hosts without every terminal installed.
 _test_l2 pkg *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     echo
     echo -e "🖥  Level-2 tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
-    cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass {{ args }}
+
+    # Build the broker once (no-op if already up to date) and resolve
+    # its absolute path through cargo metadata.
+    cargo build -p biscuit-test-harness --bin biscuit-harness-broker --quiet
+    # Read cargo metadata via a tempfile to avoid the `bash -c`
+    # subprocess hang documented in `_sanity` above. The portable
+    # `mktemp` template form works on macOS BSD, Linux GNU, and
+    # Windows git-bash; `-t` has incompatible semantics across them.
+    meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-test-l2-meta.XXXXXX")"
+    cargo metadata --no-deps --format-version 1 > "${meta_file}"
+    target_dir="$(jq -r '.target_directory' "${meta_file}")"
+    rm -f "${meta_file}"
+    # Append `.exe` on Windows so the broker resolves under git-bash;
+    # `MSYSTEM` is set by MSYS2 / git-bash. macOS and Linux ignore it.
+    bin_suffix=""
+    if [[ -n "${MSYSTEM:-}" || "${OS:-}" == "Windows_NT" ]]; then
+        bin_suffix=".exe"
+    fi
+    broker="${target_dir}/debug/biscuit-harness-broker${bin_suffix}"
+    if [[ ! -x "${broker}" ]]; then
+        echo -e "{{ yellow }}warning: ${broker} not executable; falling back to per-test spawning{{ reset }}"
+        cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass {{ args }}
+        exit $?
+    fi
+
+    # Registry of (backend id) pairs the trap uses to tear down panes
+    # the broker spawned. The trap consumes the registry on EXIT.
+    SHARED_REGISTRY="$(mktemp "${TMPDIR:-/tmp}/biscuit-shared.XXXXXX")"
+    trap 'while read -r b i; do "${broker}" kill "${b}" "${i}" >/dev/null 2>&1 || true; done < "${SHARED_REGISTRY}"; rm -f "${SHARED_REGISTRY}"' EXIT
+
+    # spawn one shared pane per backend. Backends whose tooling is
+    # missing exit non-zero; we silently skip them. The corresponding
+    # BISCUIT_SHARED_* env var stays unset and tests fall back to
+    # per-process spawning (which also skip cleanly).
+    if id="$("${broker}" spawn wezterm 2>/dev/null)" && [[ -n "${id}" ]]; then
+        export BISCUIT_SHARED_WEZTERM_PANE_ID="${id}"
+        echo "wezterm ${id}" >> "${SHARED_REGISTRY}"
+        echo -e "  {{ dim }}spawned wezterm pane ${id}{{ reset }}"
+    fi
+    if id="$("${broker}" spawn kitty 2>/dev/null)" && [[ -n "${id}" ]]; then
+        export BISCUIT_SHARED_KITTY_WINDOW_ID="${id}"
+        echo "kitty ${id}" >> "${SHARED_REGISTRY}"
+        echo -e "  {{ dim }}spawned kitty window ${id}{{ reset }}"
+    fi
+    if id="$("${broker}" spawn tmux 2>/dev/null)" && [[ -n "${id}" ]]; then
+        export BISCUIT_SHARED_TMUX_SESSION="${id}"
+        echo "tmux ${id}" >> "${SHARED_REGISTRY}"
+        echo -e "  {{ dim }}spawned tmux session ${id}{{ reset }}"
+    fi
+    if id="$("${broker}" spawn apple-terminal 2>/dev/null)" && [[ -n "${id}" ]]; then
+        export BISCUIT_SHARED_APPLE_TERMINAL_WINDOW_ID="${id}"
+        echo "apple-terminal ${id}" >> "${SHARED_REGISTRY}"
+        echo -e "  {{ dim }}spawned apple-terminal window ${id}{{ reset }}"
+    fi
+
+    cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass -j 1 {{ args }}
 
 # Level 3 tier: OS keyboard/mouse injection tests. Always opt-in via
 # RUN_LEVEL3=1; the recipe sets the variable so the gate trips cleanly.
@@ -283,10 +381,15 @@ _doctest pkg *args="":
     echo
     echo -e "📚 Doctests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
-    meta="$(cargo metadata --no-deps --format-version 1)"
+    # See `_sanity` above for why we use a tempfile + `first(...)` jq
+    # filter instead of `cargo metadata | jq | head` piping, and for
+    # the portable `mktemp` template form.
+    meta_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-doctest-meta.XXXXXX")"
+    trap 'rm -f "${meta_file}"' EXIT
+    cargo metadata --no-deps --format-version 1 > "${meta_file}"
     has_lib="$(jq -r --arg p '{{ pkg }}' \
-        '.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="lib") | .name' \
-        <<< "$meta" | head -n 1)"
+        'first(.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="lib") | .name) // ""' \
+        "${meta_file}")"
     if [[ -z "$has_lib" ]]; then
         echo -e "{{ yellow }}skipping doctests for {{ pkg }}: no lib target{{ reset }}"
         exit 0

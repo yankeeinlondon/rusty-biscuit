@@ -84,10 +84,19 @@ static CLEANUP_ONCE: Once = Once::new();
 /// part of normal window-manager z-order but sits behind whatever the
 /// developer was working in, with no animation and no risk of stray
 /// keystrokes being typed into the test window.
+/// Environment variable read by [`AppleTerminalHarness::shared_or_spawn`]
+/// to attach to a Terminal.app window that was pre-spawned by an outer
+/// process (e.g. the `_test_l2` recipe via `biscuit-harness-broker`).
+pub const SHARED_WINDOW_ENV: &str = "BISCUIT_SHARED_APPLE_TERMINAL_WINDOW_ID";
+
 pub struct AppleTerminalHarness {
     window_id: Option<i64>,
     window_tag: Option<String>,
     preserve_capabilities: bool,
+    /// When `true`, [`Drop`] closes the Terminal.app window. When
+    /// `false` (set by [`AppleTerminalHarness::attach`]) the window
+    /// is left alone.
+    owned: bool,
 }
 
 impl AppleTerminalHarness {
@@ -99,7 +108,63 @@ impl AppleTerminalHarness {
             window_id: None,
             window_tag: None,
             preserve_capabilities: false,
+            owned: true,
         }
+    }
+
+    /// Returns a harness that references an existing Terminal.app
+    /// window by id without taking ownership of its lifecycle.
+    /// [`Drop`] is a no-op.
+    pub fn attach(window_id: i64) -> Self {
+        Self {
+            window_id: Some(window_id),
+            window_tag: None,
+            preserve_capabilities: false,
+            owned: false,
+        }
+    }
+
+    /// If [`SHARED_WINDOW_ENV`] is set, returns an
+    /// [`attach`](Self::attach)-style harness pointing at the
+    /// pre-spawned window. Otherwise spawns a fresh window (owned).
+    ///
+    /// ## Errors
+    ///
+    /// Propagates whatever [`spawn_shell`](TerminalHarness::spawn_shell)
+    /// returns when no shared window id is available.
+    pub fn shared_or_spawn() -> io::Result<Self> {
+        Self::shared_or_else(|| {
+            let mut h = Self::new();
+            h.spawn_shell()?;
+            Ok(h)
+        })
+    }
+
+    /// Like [`shared_or_spawn`](Self::shared_or_spawn), but lets the
+    /// caller supply a customised spawn closure for the fallback case
+    /// — used by Prose-degradation tests that need
+    /// [`preserve_capabilities`](Self::preserve_capabilities)`(true)`.
+    ///
+    /// The shared (attached) path always returns a vanilla
+    /// [`attach`](Self::attach) handle; this is fine because the
+    /// `biscuit-harness-broker` spawn already configures the shared
+    /// window with `preserve_capabilities(true)`.
+    ///
+    /// ## Errors
+    ///
+    /// Returns whatever `spawn` returns when no shared window id is
+    /// available.
+    pub fn shared_or_else<F>(spawn: F) -> io::Result<Self>
+    where
+        F: FnOnce() -> io::Result<Self>,
+    {
+        if let Ok(id) = env::var(SHARED_WINDOW_ENV) {
+            let trimmed = id.trim();
+            if let Ok(parsed) = trimmed.parse::<i64>() {
+                return Ok(Self::attach(parsed));
+            }
+        }
+        spawn()
     }
 
     /// Suppresses the `FORCE_COLOR=1 CLICOLOR_FORCE=1` exports the
@@ -142,6 +207,15 @@ impl AppleTerminalHarness {
             .status()
             .map(|s| s.success())
             .unwrap_or(false)
+    }
+
+    /// Returns the spawned (or attached) window id, or `None` when no
+    /// pane has been associated yet.
+    ///
+    /// Used by `biscuit-harness-broker spawn apple-terminal` to surface
+    /// the freshly spawned window id to the `_test_l2` recipe.
+    pub fn spawned_window_id(&self) -> Option<i64> {
+        self.window_id
     }
 
     /// Borrows the spawned window id, panicking with a clear message
@@ -285,8 +359,25 @@ impl Default for AppleTerminalHarness {
 
 impl Drop for AppleTerminalHarness {
     fn drop(&mut self) {
-        self.close_window();
+        if self.owned {
+            self.close_window();
+        }
     }
+}
+
+/// Closes the Terminal.app window with the given id via AppleScript.
+/// Used by `biscuit-harness-broker kill` to tear down shared windows
+/// whose `AppleTerminalHarness` was leaked in a different process.
+/// Best-effort: any error is swallowed.
+pub fn close_window_by_id(window_id: i64) {
+    let script = format!(
+        "tell application \"Terminal\" to close (every window whose id is {window_id}) saving no",
+    );
+    let mut cmd = Command::new("osascript");
+    cmd.args(["-e", &script])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
 }
 
 impl TerminalHarness for AppleTerminalHarness {

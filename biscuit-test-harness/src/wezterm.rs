@@ -68,10 +68,20 @@ impl PaneSize {
     }
 }
 
+/// Environment variable read by [`WezTermHarness::shared_or_spawn`] to
+/// attach to a pane that was pre-spawned by an outer process (e.g. the
+/// `_test_l2` recipe via `biscuit-harness-broker`) instead of paying the
+/// 2-3 s cost of spawning a fresh pane in every nextest child process.
+pub const SHARED_PANE_ENV: &str = "BISCUIT_SHARED_WEZTERM_PANE_ID";
+
 /// Harness that talks to a running WezTerm GUI via `wezterm cli`.
 pub struct WezTermHarness {
     pane_id: Option<String>,
     spawn_visibility: SpawnVisibility,
+    /// When `true`, [`Drop`] kills the pane via `wezterm cli kill-pane`.
+    /// When `false` (set by [`WezTermHarness::attach`]) the pane is left
+    /// alone because some outer scope owns it.
+    owned: bool,
 }
 
 impl WezTermHarness {
@@ -82,7 +92,43 @@ impl WezTermHarness {
         Self {
             pane_id: None,
             spawn_visibility: SpawnVisibility::default(),
+            owned: true,
         }
+    }
+
+    /// Returns a harness that references an existing pane by id without
+    /// taking ownership: the [`Drop`] impl is a no-op so the pane
+    /// survives this harness going out of scope.
+    ///
+    /// Used by [`shared_or_spawn`](Self::shared_or_spawn) and by
+    /// `biscuit-harness-broker kill` to act on panes whose lifecycle is
+    /// managed by an outer process.
+    pub fn attach(pane_id: impl Into<String>) -> Self {
+        Self {
+            pane_id: Some(pane_id.into()),
+            spawn_visibility: SpawnVisibility::default(),
+            owned: false,
+        }
+    }
+
+    /// If [`SHARED_PANE_ENV`] is set, returns a borrowed
+    /// [`attach`](Self::attach)-style harness pointing at the pre-spawned
+    /// pane. Otherwise spawns a fresh background pane (owned).
+    ///
+    /// ## Errors
+    ///
+    /// Propagates whatever [`spawn_shell`](TerminalHarness::spawn_shell)
+    /// returns when no shared pane id is available.
+    pub fn shared_or_spawn() -> io::Result<Self> {
+        if let Ok(id) = env::var(SHARED_PANE_ENV) {
+            let trimmed = id.trim();
+            if !trimmed.is_empty() {
+                return Ok(Self::attach(trimmed));
+            }
+        }
+        let mut h = Self::new();
+        h.spawn_shell()?;
+        Ok(h)
     }
 
     /// Builder-style override of the default
@@ -91,7 +137,24 @@ impl WezTermHarness {
     /// [`focus_spawned_pane`](Self::focus_spawned_pane) — those need
     /// the window to be on the active workspace before AXRaise can
     /// reach it.
+    ///
+    /// ## Invariant
+    ///
+    /// L2 (shared) tests MUST keep the default
+    /// [`SpawnVisibility::Background`] so test runs do not steal focus
+    /// from the developer's foreground app. Only L3 tests (which own
+    /// their own per-test harness and need OS keyboard injection)
+    /// should override to [`SpawnVisibility::Foreground`]. Attached
+    /// (shared-pane) harnesses panic from this setter in debug builds
+    /// because the broker-spawned pane was already created in
+    /// background mode and cannot be re-spawned with a different
+    /// visibility.
     pub fn with_spawn_visibility(mut self, visibility: SpawnVisibility) -> Self {
+        debug_assert!(
+            self.owned,
+            "with_spawn_visibility on an attached (shared) WezTermHarness has no effect — \
+             the pane was already spawned by biscuit-harness-broker in Background mode",
+        );
         self.spawn_visibility = visibility;
         self
     }
@@ -100,6 +163,12 @@ impl WezTermHarness {
     /// WezTerm GUI socket are available.
     pub fn available() -> bool {
         env::var_os("WEZTERM_UNIX_SOCKET").is_some() && which("wezterm")
+    }
+
+    /// Returns the active pane id (panicking if the harness has not
+    /// spawned or attached yet).
+    pub fn pane_id_str(&self) -> &str {
+        self.pane_id()
     }
 
     /// Borrows the active pane id, panicking with a clear message when
@@ -342,8 +411,23 @@ impl Default for WezTermHarness {
 
 impl Drop for WezTermHarness {
     fn drop(&mut self) {
-        self.kill_pane();
+        if self.owned {
+            self.kill_pane();
+        }
     }
+}
+
+/// Kills the pane with the given id by shelling out to
+/// `wezterm cli kill-pane`. Used by `biscuit-harness-broker kill` so the
+/// `_test_l2` recipe can tear down shared panes whose `WezTermHarness`
+/// instances were leaked in a different process. Best-effort: any error
+/// is swallowed.
+pub fn kill_pane_by_id(pane_id: &str) {
+    let mut cmd = Command::new("wezterm");
+    cmd.args(["cli", "kill-pane", "--pane-id", pane_id])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
 }
 
 impl TerminalHarness for WezTermHarness {

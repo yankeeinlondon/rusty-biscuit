@@ -4,7 +4,7 @@ description: |
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: ccc3b799a5c1d6af-9720a912f567666e
+hash: 3e17ca7fdae4e010
 ---
 
 # Rust Testing — Rusty Biscuit Monorepo
@@ -74,7 +74,7 @@ Every curated package area defines these 12 recipes:
 |--------|---------|
 | `sanity` | Fast confidence (≤15 s). `cargo nextest run --lib --bins -E '!set:slow'`. |
 | `test` | Full L1 suite. |
-| `test-l2` | Real-terminal tests. |
+| `test-l2` | Real-terminal tests. Pre-spawns one shared pane per backend via `biscuit-harness-broker`, exports `BISCUIT_SHARED_*_ID` env vars, runs nextest with `-j 1`, tears panes down in a trap. Tests use `<Backend>Harness::shared_or_spawn()` to attach to the pre-spawned pane and fall back to per-process spawning when the env var is missing. |
 | `test-l3` | OS keyboard/mouse tests. |
 | `test-browser` | Headless browser tests. |
 | `test-real` | External resource tests. |
@@ -158,13 +158,33 @@ Fuzz is **not** part of `sanity`, `test`, or PR gates. It runs nightly in CI.
 | Crate | Purpose |
 |-------|---------|
 | `test_toolkit` | `require_level!`, `EnvGuard`, `trace_phase!` |
-| `biscuit_test_harness` | Terminal harnesses (WezTerm, Kitty, tmux, Apple Terminal) |
+| `biscuit_test_harness` | Terminal harnesses (WezTerm, Kitty, tmux, Apple Terminal); `SharedHarness` + per-backend `shared_or_spawn()`; `biscuit-harness-broker` binary used by `test-l2` |
 | `biscuit_browser_harness` | Headless Chrome harness (`ChromeHarness`, `require_browser`) |
 | `criterion` | Benchmarking |
 | `rstest` | Fixtures and parameterization |
 | `serial_test` | Serialize env/stateful tests |
 | `pretty_assertions` | Better diffs |
 | `insta` | Snapshot testing |
+
+## Topic Pages
+
+Open the topic file when the task matches:
+
+| Topic | File |
+|-------|------|
+| L2 WezTerm capture gotchas (SGR collapsing, semicolon vs colon form) | `wezterm-harness-pitfalls.md` |
+| CLI output (channels, color modes, completions, snapshots) | `cli-output-testing.md` |
+| TUI rendering and event/reducer tests | `tui-testing.md` |
+| Browser tests (computed-style assertions) | `browser-testing.md` |
+| Integration tests | `integration-tests.md` |
+| Unit tests | `unit-tests.md` |
+| Snapshots and redaction | `snapshots.md`, `snapshot-redaction.md` |
+| Doc tests | `doc-tests.md` |
+| Mocking | `mocking.md` |
+| Property testing | `property-testing.md` |
+| Fuzzing | `fuzzing.md` |
+| Benchmarking | `benchmarking.md` |
+| Nextest details | `nextest.md` |
 
 ## Resources
 

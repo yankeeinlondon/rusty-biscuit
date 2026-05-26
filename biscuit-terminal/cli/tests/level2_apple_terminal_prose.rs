@@ -76,10 +76,13 @@ fn level2_apple_terminal_link_fallback_visible() {
     );
 
     let mut guard = SHARED_APPLE.get_or_init(|| {
-        let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
-        h.spawn_shell().expect("spawn_shell failed");
-        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-        h
+        AppleTerminalHarness::shared_or_else(|| {
+            let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
+            h.spawn_shell()?;
+            std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+            Ok(h)
+        })
+        .expect("attach/spawn Apple Terminal")
     });
     let harness = guard.as_mut().expect("shared Apple Terminal harness present");
     // Reset the window so prior tests' rendered output cannot leak into
@@ -164,10 +167,13 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
     );
 
     let mut guard = SHARED_APPLE.get_or_init(|| {
-        let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
-        h.spawn_shell().expect("spawn_shell failed");
-        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-        h
+        AppleTerminalHarness::shared_or_else(|| {
+            let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
+            h.spawn_shell()?;
+            std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+            Ok(h)
+        })
+        .expect("attach/spawn Apple Terminal")
     });
     let harness = guard.as_mut().expect("shared Apple Terminal harness present");
     // Reset the window so prior tests' rendered output cannot leak into
