@@ -20,12 +20,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use loro::{ExportMode, LoroDoc, VersionVector};
 use parking_lot::Mutex;
 use remote_signal_core::{
-    ChunkConfig, ChunkId, ChunkMetadata, Entry, NodeIdentity, SignedEnvelope,
+    ChunkConfig, ChunkId, ChunkMetadata, EnvelopeSealer, Entry, NodeIdentity, PayloadKind,
+    SignedEnvelope,
 };
 use serde_json::Value as JsonValue;
 
 use crate::batcher::{BatcherError, BatcherHandle};
-use crate::projection::ProjectionRow;
+use crate::projection::{Projection, ProjectionError, ProjectionRow};
 use crate::storage::{Storage, StorageError};
 
 /// Loro container name used to hold the per-chunk metadata map.
@@ -53,6 +54,10 @@ pub enum SessionLogError {
     /// Submitting a row to the projection batcher failed.
     #[error(transparent)]
     Batcher(#[from] BatcherError),
+
+    /// The DuckDB projection layer failed.
+    #[error(transparent)]
+    Projection(#[from] ProjectionError),
 
     /// A persisted entry could not be decoded back into the strongly
     /// typed [`Entry`] schema.
@@ -212,9 +217,11 @@ pub struct SessionLogManager {
     inner: Arc<Mutex<ManagerInner>>,
     storage: Storage,
     batcher: BatcherHandle,
+    projection: Projection,
     config: ChunkConfig,
     clock: Arc<dyn Clock + Send + Sync>,
     identity: Arc<NodeIdentity>,
+    sealer: Arc<Mutex<EnvelopeSealer>>,
 }
 
 impl std::fmt::Debug for SessionLogManager {
@@ -251,10 +258,11 @@ impl SessionLogManager {
     pub fn new(
         storage: Storage,
         batcher: BatcherHandle,
+        projection: Projection,
         config: ChunkConfig,
         identity: Arc<NodeIdentity>,
     ) -> Result<Self, SessionLogError> {
-        Self::with_clock(storage, batcher, config, identity, Arc::new(SystemClock))
+        Self::with_clock(storage, batcher, projection, config, identity, Arc::new(SystemClock))
     }
 
     /// Build a manager with an injected clock. Tests use this to feed
@@ -262,10 +270,14 @@ impl SessionLogManager {
     pub fn with_clock(
         storage: Storage,
         batcher: BatcherHandle,
+        projection: Projection,
         config: ChunkConfig,
         identity: Arc<NodeIdentity>,
         clock: Arc<dyn Clock + Send + Sync>,
     ) -> Result<Self, SessionLogError> {
+        let node_id = identity.node_id();
+        let start_counter = storage.load_outbound_counter(&node_id)?;
+        let sealer = Arc::new(Mutex::new(EnvelopeSealer::with_start((*identity).clone(), start_counter)));
         let manager = Self {
             inner: Arc::new(Mutex::new(ManagerInner {
                 chunks: HashMap::new(),
@@ -273,11 +285,14 @@ impl SessionLogManager {
             })),
             storage,
             batcher,
+            projection,
             config,
             clock,
             identity,
+            sealer,
         };
         manager.rehydrate_from_storage()?;
+        manager.rebuild_projection_from_storage()?;
         Ok(manager)
     }
 
@@ -316,13 +331,35 @@ impl SessionLogManager {
             };
             bytes
         };
-        Ok(Some(SignedEnvelope::seal(&self.identity, snapshot_bytes)))
+        let envelope = self.sealer.lock().seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot_bytes,
+        );
+        self.persist_sealer_counter()?;
+        Ok(Some(envelope))
     }
 
     /// Active chunk-rotation configuration.
     #[must_use]
     pub fn config(&self) -> ChunkConfig {
         self.config
+    }
+
+    /// Shared handle on the outbound envelope sealer. The sync service
+    /// uses this instead of creating its own so both code paths issue
+    /// monotonically increasing message IDs from the same counter.
+    #[must_use]
+    pub fn sealer(&self) -> Arc<Mutex<EnvelopeSealer>> {
+        Arc::clone(&self.sealer)
+    }
+
+    /// Persist the sealer's current counter so a restarted daemon can
+    /// resume from it instead of resetting to zero.
+    fn persist_sealer_counter(&self) -> Result<(), SessionLogError> {
+        let counter = self.sealer.lock().next_counter();
+        self.storage.save_outbound_counter(&self.node_id(), counter)?;
+        Ok(())
     }
 
     /// Append a new entry to the session, rotating chunks if required.
@@ -697,12 +734,89 @@ impl SessionLogManager {
         {
             cursor.next_sequence = seq + 1;
         }
+
         Ok(advanced)
     }
 
+    /// After a remote update has been applied to a chunk, submit every
+    /// entry in that chunk to the projection batcher. Callers should
+    /// invoke this only from the live sync path — startup replay relies
+    /// on [`Self::rebuild_projection_from_storage`] instead.
+    pub fn submit_chunk_to_projection(
+        &self,
+        chunk: &ChunkId,
+    ) -> Result<(), SessionLogError> {
+        let key = chunk.as_path();
+        let inner = self.inner.lock();
+        let Some(state) = inner.chunks.get(&key) else {
+            return Ok(());
+        };
+        let list = state.doc.get_list(ENTRIES_CONTAINER);
+        list.for_each(|value| {
+            if let Some(json) = value_to_string(&value)
+                && let Ok(entry) = serde_json::from_str::<Entry>(&json)
+            {
+                let metadata_json = entry
+                    .metadata
+                    .as_ref()
+                    .map(|v| serde_json::to_string(v).unwrap_or_default())
+                    .unwrap_or_default();
+                let _ = self.batcher.submit(ProjectionRow {
+                    chunk: chunk.clone(),
+                    sequence: entry.sequence,
+                    created_at_unix_ms: entry.created_at_unix_ms,
+                    source: entry.source.clone(),
+                    level: entry.level.clone(),
+                    message: entry.message.clone(),
+                    metadata_json,
+                });
+            }
+        });
+        Ok(())
+    }
+
+    /// Rebuild the DuckDB projection from every snapshot persisted in
+    /// redb. Called once during startup so a restarted daemon with an
+    /// empty DuckDB file can serve correct analytical queries.
+    fn rebuild_projection_from_storage(&self) -> Result<(), SessionLogError> {
+        self.projection.truncate()?;
+        let mut to_replay: Vec<(ChunkId, Vec<u8>)> = Vec::new();
+        self.storage.iter_snapshots(|chunk, bytes| {
+            to_replay.push((chunk, bytes));
+            Ok(())
+        })?;
+        for (chunk_id, snapshot) in &to_replay {
+            let doc = LoroDoc::from_snapshot(snapshot)?;
+            let list = doc.get_list(ENTRIES_CONTAINER);
+            list.for_each(|value| {
+                if let Some(json) = value_to_string(&value)
+                    && let Ok(entry) = serde_json::from_str::<Entry>(&json)
+                {
+                    let metadata_json = entry
+                        .metadata
+                        .as_ref()
+                        .map(|v| serde_json::to_string(v).unwrap_or_default())
+                        .unwrap_or_default();
+                    let _ = self.batcher.submit(ProjectionRow {
+                        chunk: chunk_id.clone(),
+                        sequence: entry.sequence,
+                        created_at_unix_ms: entry.created_at_unix_ms,
+                        source: entry.source.clone(),
+                        level: entry.level.clone(),
+                        message: entry.message.clone(),
+                        metadata_json,
+                    });
+                }
+            });
+        }
+        Ok(())
+    }
+
     /// Rehydrate the in-memory state from every snapshot currently
-    /// persisted in redb. Subsequent appends pick up where the previous
-    /// process left off.
+    /// persisted in redb, then replay any accepted envelopes whose
+    /// payloads may not yet be reflected in the snapshot (crash
+    /// recovery). Subsequent appends pick up where the previous process
+    /// left off.
     fn rehydrate_from_storage(&self) -> Result<(), SessionLogError> {
         let mut to_load: Vec<(ChunkId, Vec<u8>)> = Vec::new();
         self.storage.iter_snapshots(|chunk, bytes| {
@@ -756,6 +870,35 @@ impl SessionLogManager {
             }
             inner.chunks.insert(chunk_id.as_path(), state);
         }
+        drop(inner);
+
+        self.replay_accepted_envelopes_on_startup()?;
+
+        Ok(())
+    }
+
+    /// Re-apply all persisted accepted-envelope payloads into the
+    /// in-memory chunks. Loro imports are idempotent (a delta already
+    /// present in the version vector is silently ignored), so this is
+    /// safe for envelopes that were already applied. Envelopes whose
+    /// `save_snapshot` was lost due to a crash will be recovered here.
+    fn replay_accepted_envelopes_on_startup(&self) -> Result<(), SessionLogError> {
+        let mut to_replay: Vec<(ChunkId, Vec<u8>)> = Vec::new();
+        self.storage.iter_accepted_envelopes(|envelope| {
+            if envelope.payload_bytes.is_empty() {
+                return Ok(());
+            }
+            let Ok(chunk_id) = envelope.document_id.parse::<ChunkId>() else {
+                return Ok(());
+            };
+            to_replay.push((chunk_id, envelope.payload_bytes.clone()));
+            Ok(())
+        })?;
+
+        for (chunk_id, payload) in &to_replay {
+            let _ = self.apply_remote_update(chunk_id, payload)?;
+        }
+
         Ok(())
     }
 }
@@ -774,6 +917,7 @@ mod tests {
     use super::*;
     use crate::batcher::{BatcherConfig, BatcherWorker, spawn};
     use crate::projection::Projection;
+    use crate::storage::AcceptedEnvelope;
     use std::sync::atomic::{AtomicI64, Ordering};
     use tempfile::TempDir;
 
@@ -806,13 +950,14 @@ mod tests {
         let tmp = TempDir::new().expect("tempdir");
         let storage = Storage::open(tmp.path().join("session.redb")).expect("open storage");
         let projection = Projection::in_memory().expect("projection");
-        let worker = spawn(projection, BatcherConfig {
+        let worker = spawn(projection.clone(), BatcherConfig {
             flush_interval: std::time::Duration::from_millis(20),
             flush_size: 16,
         });
         let manager = SessionLogManager::with_clock(
             storage.clone(),
             worker.handle(),
+            projection,
             config,
             Arc::new(NodeIdentity::from_seed([7u8; 32])),
             Arc::new(FixedClock::new(1_000)),
@@ -902,6 +1047,7 @@ mod tests {
         let manager = SessionLogManager::with_clock(
             storage.clone(),
             worker.handle(),
+            projection,
             ChunkConfig::default(),
             Arc::new(NodeIdentity::from_seed([3u8; 32])),
             Arc::new(FixedClock::new(1)),
@@ -916,13 +1062,14 @@ mod tests {
         drop(manager);
 
         let projection2 = Projection::in_memory().expect("projection");
-        let worker2 = spawn(projection2, BatcherConfig {
+        let worker2 = spawn(projection2.clone(), BatcherConfig {
             flush_interval: std::time::Duration::from_millis(20),
             flush_size: 16,
         });
         let manager2 = SessionLogManager::with_clock(
             storage,
             worker2.handle(),
+            projection2,
             ChunkConfig::default(),
             Arc::new(NodeIdentity::from_seed([3u8; 32])),
             Arc::new(FixedClock::new(100)),
@@ -971,13 +1118,14 @@ mod tests {
         let tmp = TempDir::new().expect("tempdir");
         let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
         let projection_a = Projection::in_memory().expect("projection_a");
-        let worker_a = spawn(projection_a, BatcherConfig {
+        let worker_a = spawn(projection_a.clone(), BatcherConfig {
             flush_interval: std::time::Duration::from_millis(20),
             flush_size: 16,
         });
         let manager_a = SessionLogManager::with_clock(
             storage.clone(),
             worker_a.handle(),
+            projection_a,
             ChunkConfig::default(),
             Arc::new(NodeIdentity::from_seed([11u8; 32])),
             Arc::new(FixedClock::new(1)),
@@ -988,13 +1136,14 @@ mod tests {
             .expect("append");
 
         let projection_b = Projection::in_memory().expect("projection_b");
-        let worker_b = spawn(projection_b, BatcherConfig {
+        let worker_b = spawn(projection_b.clone(), BatcherConfig {
             flush_interval: std::time::Duration::from_millis(20),
             flush_size: 16,
         });
         let manager_b = SessionLogManager::with_clock(
             storage,
             worker_b.handle(),
+            projection_b,
             ChunkConfig::default(),
             Arc::new(NodeIdentity::from_seed([22u8; 32])),
             Arc::new(FixedClock::new(1)),
@@ -1015,6 +1164,514 @@ mod tests {
 
         worker_a.shutdown();
         worker_b.shutdown();
+        drop(tmp);
+    }
+
+    #[test]
+    fn rebuild_projection_from_storage_populates_duckdb() {
+        let tmp = TempDir::new().expect("tempdir");
+        let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
+        let projection1 = Projection::in_memory().expect("projection1");
+        let worker1 = spawn(projection1.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let manager1 = SessionLogManager::with_clock(
+            storage.clone(),
+            worker1.handle(),
+            projection1,
+            ChunkConfig::default(),
+            Arc::new(NodeIdentity::from_seed([5u8; 32])),
+            Arc::new(FixedClock::new(500)),
+        )
+        .expect("manager1");
+        manager1
+            .append_entry("node-a", "session-1", "src", "info", "alpha", None)
+            .expect("append 1");
+        manager1
+            .append_entry("node-a", "session-1", "src", "info", "beta", None)
+            .expect("append 2");
+        worker1.shutdown();
+        drop(manager1);
+
+        let projection2 = Projection::in_memory().expect("projection2");
+        let worker2 = spawn(projection2.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let _manager2 = SessionLogManager::with_clock(
+            storage,
+            worker2.handle(),
+            projection2.clone(),
+            ChunkConfig::default(),
+            Arc::new(NodeIdentity::from_seed([5u8; 32])),
+            Arc::new(FixedClock::new(900)),
+        )
+        .expect("manager2");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if projection2.row_count().unwrap() >= 2 {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("timed out waiting for projection rebuild");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let rows = projection2
+            .entries_for_session("node-a", "session-1")
+            .expect("query");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].message, "alpha");
+        assert_eq!(rows[1].message, "beta");
+        worker2.shutdown();
+    }
+
+    #[test]
+    fn sealer_counter_persists_across_restart() {
+        let tmp = TempDir::new().expect("tempdir");
+        let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
+        let identity = Arc::new(NodeIdentity::from_seed([77u8; 32]));
+        let node_id = identity.node_id();
+
+        let projection1 = Projection::in_memory().expect("projection1");
+        let worker1 = spawn(projection1.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let manager1 = SessionLogManager::with_clock(
+            storage.clone(),
+            worker1.handle(),
+            projection1,
+            ChunkConfig::default(),
+            Arc::clone(&identity),
+            Arc::new(FixedClock::new(1)),
+        )
+        .expect("manager1");
+
+        let outcome = manager1
+            .append_entry("n", "s", "t", "info", "m", None)
+            .expect("append");
+        let env1 = manager1
+            .sign_chunk_snapshot(&outcome.chunk)
+            .expect("sign")
+            .expect("envelope");
+        let counter1 = u64::from_be_bytes(env1.message_id[24..].try_into().unwrap());
+        worker1.shutdown();
+        drop(manager1);
+
+        assert_eq!(storage.load_outbound_counter(&node_id).expect("load"), counter1 + 1);
+
+        let projection2 = Projection::in_memory().expect("projection2");
+        let worker2 = spawn(projection2.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let manager2 = SessionLogManager::with_clock(
+            storage.clone(),
+            worker2.handle(),
+            projection2,
+            ChunkConfig::default(),
+            Arc::clone(&identity),
+            Arc::new(FixedClock::new(100)),
+        )
+        .expect("manager2");
+
+        let env2 = manager2
+            .sign_chunk_snapshot(&outcome.chunk)
+            .expect("sign")
+            .expect("envelope");
+        let counter2 = u64::from_be_bytes(env2.message_id[24..].try_into().unwrap());
+        assert!(counter2 > counter1, "counter after restart ({counter2}) must exceed pre-restart ({counter1})");
+        worker2.shutdown();
+    }
+
+    #[test]
+    fn accepted_envelope_only_replay_recovers_missing_snapshot() {
+        let tmp = TempDir::new().expect("tempdir");
+        let storage_path = tmp.path().join("session.redb");
+        let storage = Storage::open(&storage_path).expect("storage");
+        let identity = Arc::new(NodeIdentity::from_seed([44u8; 32]));
+
+        let projection1 = Projection::in_memory().expect("projection1");
+        let worker1 = spawn(projection1.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let manager1 = SessionLogManager::with_clock(
+            storage.clone(),
+            worker1.handle(),
+            projection1,
+            ChunkConfig::default(),
+            Arc::clone(&identity),
+            Arc::new(FixedClock::new(1)),
+        )
+        .expect("manager1");
+
+        let sender_identity = NodeIdentity::from_seed([55u8; 32]);
+        let sender_hex = sender_identity.node_id();
+        let sender_chunk = ChunkId::new(&sender_hex, "remote-session", 0);
+
+        let mut sender_sealer =
+            EnvelopeSealer::with_start(sender_identity, 0);
+        let doc = loro::LoroDoc::new();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "from-envelope".into(),
+            metadata: None,
+        };
+        list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
+        doc.commit();
+        let snapshot = doc.export(ExportMode::Snapshot).unwrap();
+        let envelope = sender_sealer.seal(
+            sender_chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot.clone(),
+        );
+        let msg_id_hex = {
+            let mut out = String::with_capacity(envelope.message_id.len() * 2);
+            for byte in &envelope.message_id {
+                use std::fmt::Write;
+                let _ = write!(out, "{byte:02x}");
+            }
+            out
+        };
+        let content_hash_hex = {
+            let mut out = String::with_capacity(envelope.content_hash.len() * 2);
+            for byte in &envelope.content_hash {
+                use std::fmt::Write;
+                let _ = write!(out, "{byte:02x}");
+            }
+            out
+        };
+        let signature_hex = {
+            let mut out = String::with_capacity(envelope.signature.len() * 2);
+            for byte in &envelope.signature {
+                use std::fmt::Write;
+                let _ = write!(out, "{byte:02x}");
+            }
+            out
+        };
+
+        manager1
+            .apply_remote_update(&sender_chunk, &snapshot)
+            .expect("apply");
+
+        let accepted = AcceptedEnvelope {
+            sender_hex: sender_hex.clone(),
+            message_id_hex: msg_id_hex.clone(),
+            document_id: sender_chunk.as_path(),
+            payload_kind: PayloadKind::Snapshot.to_byte(),
+            content_hash_hex,
+            signature_hex,
+            payload_bytes: snapshot.clone(),
+            accepted_at_unix_ms: 5_001,
+        };
+        storage
+            .save_accepted_envelope(&sender_hex, &msg_id_hex, &accepted)
+            .expect("save accepted envelope");
+
+        assert!(
+            storage.load_snapshot(&sender_chunk).expect("load").is_some(),
+            "snapshot must exist before removal",
+        );
+        storage.remove_snapshot(&sender_chunk).expect("remove snapshot");
+        assert!(
+            storage.load_snapshot(&sender_chunk).expect("load").is_none(),
+            "snapshot must be gone after removal",
+        );
+
+        worker1.shutdown();
+        drop(manager1);
+
+        let projection2 = Projection::in_memory().expect("projection2");
+        let worker2 = spawn(projection2.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let manager2 = SessionLogManager::with_clock(
+            storage.clone(),
+            worker2.handle(),
+            projection2.clone(),
+            ChunkConfig::default(),
+            Arc::clone(&identity),
+            Arc::new(FixedClock::new(10_000)),
+        )
+        .expect("manager2");
+
+        let entries = manager2
+            .list_chunk_entries(&sender_chunk)
+            .expect("list after replay");
+        assert_eq!(entries.len(), 1, "replay should recover one entry; got {entries:?}");
+        assert_eq!(entries[0].message, "from-envelope");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if projection2.row_count().unwrap() >= 1 {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("timed out waiting for projection row from envelope replay");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let rows = projection2
+            .entries_for_session(&sender_hex, "remote-session")
+            .expect("query");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].message, "from-envelope");
+
+        worker2.shutdown();
+        drop(tmp);
+    }
+
+    #[test]
+    fn envelope_before_snapshot_crash_window_recovers_on_restart() {
+        let tmp = TempDir::new().expect("tempdir");
+        let storage_path = tmp.path().join("session.redb");
+        let storage = Storage::open(&storage_path).expect("storage");
+        let identity = Arc::new(NodeIdentity::from_seed([88u8; 32]));
+
+        let sender_identity = NodeIdentity::from_seed([99u8; 32]);
+        let sender_hex = sender_identity.node_id();
+        let sender_chunk = ChunkId::new(&sender_hex, "crash-session", 0);
+
+        let mut sender_sealer = EnvelopeSealer::with_start(sender_identity, 0);
+        let doc = loro::LoroDoc::new();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 7_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: "crash-window".into(),
+            metadata: None,
+        };
+        list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
+        doc.commit();
+        let snapshot = doc.export(ExportMode::Snapshot).unwrap();
+        let envelope = sender_sealer.seal(
+            sender_chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot.clone(),
+        );
+        let msg_id_hex = {
+            let mut out = String::with_capacity(envelope.message_id.len() * 2);
+            for byte in &envelope.message_id {
+                use std::fmt::Write;
+                let _ = write!(out, "{byte:02x}");
+            }
+            out
+        };
+        let content_hash_hex = {
+            let mut out = String::with_capacity(envelope.content_hash.len() * 2);
+            for byte in &envelope.content_hash {
+                use std::fmt::Write;
+                let _ = write!(out, "{byte:02x}");
+            }
+            out
+        };
+        let signature_hex = {
+            let mut out = String::with_capacity(envelope.signature.len() * 2);
+            for byte in &envelope.signature {
+                use std::fmt::Write;
+                let _ = write!(out, "{byte:02x}");
+            }
+            out
+        };
+
+        let accepted = AcceptedEnvelope {
+            sender_hex: sender_hex.clone(),
+            message_id_hex: msg_id_hex.clone(),
+            document_id: sender_chunk.as_path(),
+            payload_kind: PayloadKind::Snapshot.to_byte(),
+            content_hash_hex,
+            signature_hex,
+            payload_bytes: snapshot.clone(),
+            accepted_at_unix_ms: 7_001,
+        };
+
+        storage
+            .save_accepted_envelope(&sender_hex, &msg_id_hex, &accepted)
+            .expect("save envelope");
+
+        assert!(
+            storage.load_snapshot(&sender_chunk).expect("load").is_none(),
+            "snapshot must not exist — we simulate the crash window where \
+             the envelope was persisted but the snapshot write was lost",
+        );
+
+        let projection2 = Projection::in_memory().expect("projection2");
+        let worker2 = spawn(projection2.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let manager2 = SessionLogManager::with_clock(
+            storage.clone(),
+            worker2.handle(),
+            projection2.clone(),
+            ChunkConfig::default(),
+            Arc::clone(&identity),
+            Arc::new(FixedClock::new(20_000)),
+        )
+        .expect("manager2");
+
+        let entries = manager2
+            .list_chunk_entries(&sender_chunk)
+            .expect("entries after replay");
+        assert_eq!(
+            entries.len(),
+            1,
+            "replay should recover one entry from the crash window; got {entries:?}",
+        );
+        assert_eq!(entries[0].message, "crash-window");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if projection2.row_count().unwrap() >= 1 {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("timed out waiting for projection row from crash-window replay");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let has_dup = storage.has_accepted_envelope(&sender_hex, &msg_id_hex).expect("has");
+        assert!(has_dup, "accepted envelope must be durable after restart");
+
+        worker2.shutdown();
+        drop(tmp);
+    }
+
+    #[test]
+    fn malformed_loro_payload_rejected_without_envelope_row() {
+        let tmp = TempDir::new().expect("tempdir");
+        let storage_path = tmp.path().join("session.redb");
+        let storage = Storage::open(&storage_path).expect("storage");
+        let identity = Arc::new(NodeIdentity::from_seed([66u8; 32]));
+
+        let projection = Projection::in_memory().expect("projection");
+        let worker = spawn(projection.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let manager = SessionLogManager::with_clock(
+            storage.clone(),
+            worker.handle(),
+            projection,
+            ChunkConfig::default(),
+            Arc::clone(&identity),
+            Arc::new(FixedClock::new(1)),
+        )
+        .expect("manager");
+
+        let garbage_chunk = ChunkId::new("remote-node", "bad-session", 0);
+        let garbage_payload = b"not valid loro data".to_vec();
+        let result = manager.apply_remote_update(&garbage_chunk, &garbage_payload);
+        assert!(result.is_err(), "malformed Loro payload must be rejected");
+
+        assert_eq!(
+            storage.accepted_envelope_count().expect("count"),
+            0,
+            "no accepted envelope should exist for rejected payload",
+        );
+
+        worker.shutdown();
+        drop(manager);
+
+        let projection2 = Projection::in_memory().expect("projection2");
+        let worker2 = spawn(projection2.clone(), BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let manager2 = SessionLogManager::with_clock(
+            storage,
+            worker2.handle(),
+            projection2,
+            ChunkConfig::default(),
+            identity,
+            Arc::new(FixedClock::new(100)),
+        )
+        .expect("restart must succeed when no malformed envelope was persisted");
+
+        let entries = manager2.list_chunk_entries(&garbage_chunk).expect("list");
+        assert!(entries.is_empty(), "no entries from rejected payload");
+
+        worker2.shutdown();
+        drop(tmp);
+    }
+
+    #[test]
+    fn malformed_loro_payload_in_accepted_envelope_breaks_restart() {
+        let tmp = TempDir::new().expect("tempdir");
+        let storage_path = tmp.path().join("session.redb");
+        let storage = Storage::open(&storage_path).expect("storage");
+        let identity = Arc::new(NodeIdentity::from_seed([77u8; 32]));
+
+        let sender_identity = NodeIdentity::from_seed([88u8; 32]);
+        let sender_hex = sender_identity.node_id();
+        let sender_chunk = ChunkId::new(&sender_hex, "poison-session", 0);
+
+        let mut sender_sealer = EnvelopeSealer::with_start(sender_identity, 0);
+        let garbage_payload = b"this is not a valid loro snapshot".to_vec();
+        let envelope = sender_sealer.seal(
+            sender_chunk.as_path(),
+            PayloadKind::Snapshot,
+            garbage_payload.clone(),
+        );
+
+        let accepted = AcceptedEnvelope {
+            sender_hex: sender_hex.clone(),
+            message_id_hex: envelope.message_id_hex(),
+            document_id: sender_chunk.as_path(),
+            payload_kind: PayloadKind::Snapshot.to_byte(),
+            content_hash_hex: {
+                let mut out = String::with_capacity(envelope.content_hash.len() * 2);
+                for byte in &envelope.content_hash {
+                    use std::fmt::Write;
+                    let _ = write!(out, "{byte:02x}");
+                }
+                out
+            },
+            signature_hex: {
+                let mut out = String::with_capacity(envelope.signature.len() * 2);
+                for byte in &envelope.signature {
+                    use std::fmt::Write;
+                    let _ = write!(out, "{byte:02x}");
+                }
+                out
+            },
+            payload_bytes: garbage_payload,
+            accepted_at_unix_ms: 1_000,
+        };
+        storage
+            .save_accepted_envelope(&sender_hex, &envelope.message_id_hex(), &accepted)
+            .expect("save");
+
+        let projection = Projection::in_memory().expect("projection");
+        let worker = spawn(projection, BatcherConfig {
+            flush_interval: std::time::Duration::from_millis(20),
+            flush_size: 16,
+        });
+        let result = SessionLogManager::with_clock(
+            storage,
+            worker.handle(),
+            Projection::in_memory().expect("projection2"),
+            ChunkConfig::default(),
+            identity,
+            Arc::new(FixedClock::new(1)),
+        );
+        assert!(
+            result.is_err(),
+            "restarting with a malformed accepted envelope must fail"
+        );
+        worker.shutdown();
         drop(tmp);
     }
 }

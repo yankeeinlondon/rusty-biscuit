@@ -14,19 +14,20 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use parking_lot::Mutex;
 use prost::Message;
 use quinn::{Connection, RecvStream, SendStream};
 use remote_signal_core::sync::{SyncWireError, encode_frame};
 use remote_signal_core::{
-    ChunkId, ChunkIdParseError, EnvelopeError, EnvelopeInbox, NodeIdentity, SignedEnvelope,
-    SignedEnvelopeWire, SyncAdvertiseEnd, SyncChunkAdvertise, SyncDelta, SyncEnd, SyncFrame,
-    SyncHello, identity::PUBLIC_KEY_LENGTH, sync_frame,
+    ChunkId, ChunkIdParseError, EnvelopeError, EnvelopeInbox, EnvelopeSealer, NodeIdentity,
+    PayloadKind, SignedEnvelopeWire, SyncAdvertiseEnd, SyncChunkAdvertise,
+    SyncDelta, SyncEnd, SyncFrame, SyncHello, identity::PUBLIC_KEY_LENGTH, sync_frame,
 };
 
 use crate::session_log::{SessionLogError, SessionLogManager};
-use crate::storage::Storage;
+use crate::storage::{AcceptedEnvelope, Storage};
 
 /// Wire-level protocol version advertised in [`SyncHello`].
 pub const SYNC_PROTOCOL_VERSION: u32 = 1;
@@ -68,6 +69,12 @@ pub enum SyncError {
     /// connection (e.g. the QUIC peer claimed a different identity).
     #[error("sync hello node_id mismatch: expected {expected}, got {actual}")]
     HelloNodeIdMismatch { expected: String, actual: String },
+
+    /// The envelope's sender is not the owner of the document it
+    /// targets. Remote peers may only write documents in their own
+    /// namespace.
+    #[error("ownership violation: sender {sender} attempted to write document owned by {owner}")]
+    OwnershipViolation { sender: String, owner: String },
 
     /// The remote sent an envelope whose signature could not be
     /// verified.
@@ -114,6 +121,11 @@ pub enum SyncError {
     /// The session ran past [`SYNC_OVERALL_TIMEOUT`].
     #[error("sync session timed out after {0:?}")]
     Timeout(Duration),
+
+    /// The envelope payload could not be imported into the local CRDT
+    /// state (structurally invalid Loro bytes).
+    #[error("malformed CRDT payload for chunk {chunk_id}: {reason}")]
+    MalformedPayload { chunk_id: String, reason: String },
 }
 
 impl SyncError {
@@ -125,26 +137,33 @@ impl SyncError {
 /// Service responsible for driving a sync session against one paired
 /// peer. Holds shared handles on the session log, the pairings store,
 /// and the local identity so both inbound and outbound runs use the
-/// exact same code path.
+/// exact same code path. The sealer is shared from
+/// [`SessionLogManager`](crate::session_log::SessionLogManager) so
+/// all outbound message IDs are monotonic across the daemon lifetime.
 #[derive(Clone)]
 pub struct SyncService {
     session_log: SessionLogManager,
     storage: Storage,
     identity: Arc<NodeIdentity>,
+    sealer: Arc<Mutex<EnvelopeSealer>>,
 }
 
 impl SyncService {
     /// Build a new sync service from the running daemon's handles.
+    /// The sealer is obtained from the session-log manager so both code
+    /// paths share the same monotonic counter.
     #[must_use]
     pub fn new(
         session_log: SessionLogManager,
         storage: Storage,
         identity: Arc<NodeIdentity>,
     ) -> Self {
+        let sealer = session_log.sealer();
         Self {
             session_log,
             storage,
             identity,
+            sealer,
         }
     }
 
@@ -163,8 +182,6 @@ impl SyncService {
         connection: &Connection,
         expected_peer_node_id: &str,
     ) -> Result<SyncOutcome, SyncError> {
-        // Pairing must be in place locally before we open the stream.
-        self.assert_paired(expected_peer_node_id)?;
         let (send, recv) = connection.open_bi().await?;
         self.run_session(send, recv, Some(expected_peer_node_id.to_string())).await
     }
@@ -229,12 +246,36 @@ impl SyncService {
                     actual: peer_node_id_hex,
                 });
             }
-            self.assert_paired(&peer_node_id_hex)?;
+            if expected_peer_node_id.is_some() {
+                // Initiator path: the peer's identity has been confirmed
+                // by the hello matching the expected node_id (from the
+                // invitation). Auto-pair if not already paired so that
+                // invitation-based connections do not require a separate
+                // explicit approval step on the initiator side.
+                if self.storage.get_pairing(&peer_node_id_hex)?.is_none() {
+                    let now_unix_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis();
+                    self.storage.upsert_pairing(
+                        &peer_node_id_hex,
+                        i64::try_from(now_unix_ms).unwrap_or(i64::MAX),
+                        "auto-paired after identity confirmation",
+                    )?;
+                }
+            } else {
+                // Responder path: require pre-existing pairing.
+                self.assert_paired(&peer_node_id_hex)?;
+            }
 
-            // ---- Advertise phase (we send our local state) -------
+            // ---- Advertise phase (we send our own-namespace state) --
+            let local_node_id = self.identity.node_id();
             let local_chunks = self.session_log.list_all_chunks()?;
             let mut chunk_outcomes: HashMap<String, SyncChunkOutcome> = HashMap::new();
             for chunk in &local_chunks {
+                if chunk.owner_node_id != local_node_id {
+                    continue;
+                }
                 let vv = self.session_log.chunk_state_vector(chunk)?.unwrap_or_default();
                 let frame = SyncFrame {
                     kind: Some(sync_frame::Kind::Advertise(SyncChunkAdvertise {
@@ -258,7 +299,7 @@ impl SyncService {
             .await?;
             outcome.sent_bytes += sent;
 
-            // ---- Read remote advertisements ----------------------
+            // ---- Read remote advertisements (only their namespace) --
             let mut remote_state: HashMap<ChunkId, Vec<u8>> = HashMap::new();
             loop {
                 let (frame, received) = read_frame(&mut recv).await?;
@@ -266,7 +307,9 @@ impl SyncService {
                 match frame.kind {
                     Some(sync_frame::Kind::Advertise(ad)) => {
                         let chunk: ChunkId = ad.chunk_id.parse()?;
-                        remote_state.insert(chunk, ad.version_vector);
+                        if chunk.owner_node_id == peer_node_id_hex {
+                            remote_state.insert(chunk, ad.version_vector);
+                        }
                     }
                     Some(sync_frame::Kind::AdvertiseEnd(_)) => break,
                     Some(sync_frame::Kind::Error(err)) => {
@@ -284,28 +327,37 @@ impl SyncService {
             }
 
             // ---- Push deltas the remote is missing ---------------
-            // For every chunk the remote advertised, send updates
-            // since their VV. For chunks they did NOT advertise but
-            // we do have, send the full snapshot.
-            let mut local_paths: HashMap<String, ChunkId> =
-                local_chunks.iter().map(|c| (c.as_path(), c.clone())).collect();
-            // First handle every chunk the remote knows about.
-            for (chunk, vv_bytes) in &remote_state {
-                let remote_vv = if vv_bytes.is_empty() { None } else { Some(vv_bytes.as_slice()) };
+            // Only push deltas for chunks WE own. The remote will push
+            // their own namespace deltas to us in the reading phase.
+            for chunk in local_chunks.iter().filter(|c| c.owner_node_id == local_node_id) {
+                let remote_vv = remote_state.get(chunk).and_then(|v| {
+                    if v.is_empty() { None } else { Some(v.as_slice()) }
+                });
                 let Some(exported) = self.session_log.export_updates_since(chunk, remote_vv)?
                 else {
-                    // Remote knows a chunk we don't — skip; the
-                    // remote will push a snapshot to us.
                     continue;
                 };
-                local_paths.remove(&chunk.as_path());
                 if exported.bytes.is_empty() {
                     continue;
                 }
-                let envelope = SignedEnvelope::seal(&self.identity, exported.bytes);
+                let document_id = chunk.as_path();
+                let payload_kind = if exported.is_snapshot {
+                    PayloadKind::Snapshot
+                } else {
+                    PayloadKind::Delta
+                };
+                let envelope = self.sealer.lock().seal(
+                    document_id.clone(),
+                    payload_kind,
+                    exported.bytes,
+                );
+                self.storage.save_outbound_counter(
+                    &self.identity.node_id(),
+                    self.sealer.lock().next_counter(),
+                )?;
                 let frame = SyncFrame {
                     kind: Some(sync_frame::Kind::Delta(SyncDelta {
-                        chunk_id: chunk.as_path(),
+                        chunk_id: document_id.clone(),
                         envelope: Some(SignedEnvelopeWire::from_envelope(&envelope)),
                         is_snapshot: exported.is_snapshot,
                     })),
@@ -320,29 +372,6 @@ impl SyncService {
                         sent_bytes: sent,
                         ..Default::default()
                     });
-                }
-            }
-            // Then push snapshots for any chunk the remote does not
-            // know about at all.
-            for (path, chunk) in &local_paths {
-                let Some(exported) = self.session_log.export_updates_since(chunk, None)? else {
-                    continue;
-                };
-                if exported.bytes.is_empty() {
-                    continue;
-                }
-                let envelope = SignedEnvelope::seal(&self.identity, exported.bytes);
-                let frame = SyncFrame {
-                    kind: Some(sync_frame::Kind::Delta(SyncDelta {
-                        chunk_id: path.clone(),
-                        envelope: Some(SignedEnvelopeWire::from_envelope(&envelope)),
-                        is_snapshot: true,
-                    })),
-                };
-                let sent = write_frame(&mut send, &frame).await?;
-                outcome.sent_bytes += sent;
-                if let Some(o) = chunk_outcomes.get_mut(path) {
-                    o.sent_bytes += sent;
                 }
             }
             let sent = write_frame(
@@ -372,8 +401,73 @@ impl SyncService {
                                 "delta envelope sender does not match hello node_id",
                             ));
                         }
+                        if envelope.document_id != delta.chunk_id {
+                            return Err(SyncError::protocol(format!(
+                                "envelope document_id {:?} does not match delta chunk_id {:?}",
+                                envelope.document_id, delta.chunk_id,
+                            )));
+                        }
+                        if chunk.owner_node_id != peer_node_id_hex {
+                            return Err(SyncError::OwnershipViolation {
+                                sender: peer_node_id_hex,
+                                owner: chunk.owner_node_id.clone(),
+                            });
+                        }
+                        let expected_kind = if delta.is_snapshot {
+                            PayloadKind::Snapshot
+                        } else {
+                            PayloadKind::Delta
+                        };
+                        if envelope.payload_kind != expected_kind {
+                            return Err(SyncError::protocol(format!(
+                                "envelope payload_kind {:?} does not match delta is_snapshot {:?}",
+                                envelope.payload_kind, delta.is_snapshot,
+                            )));
+                        }
+                        let msg_id_hex = envelope.message_id_hex();
+                        let sender_hex = envelope.sender_node_id();
+                        if self.storage.has_accepted_envelope(&sender_hex, &msg_id_hex)? {
+                            return Err(SyncError::Envelope(
+                                EnvelopeError::DuplicateMessageId(msg_id_hex),
+                            ));
+                        }
                         let payload = inbox.accept(&envelope)?.to_vec();
-                        let advanced = self.session_log.apply_remote_update(&chunk, &payload)?;
+
+                        let advanced = match self.session_log.apply_remote_update(&chunk, &payload) {
+                            Ok(a) => a,
+                            Err(crate::session_log::SessionLogError::Loro(reason)) => {
+                                return Err(SyncError::MalformedPayload {
+                                    chunk_id: chunk.as_path(),
+                                    reason,
+                                });
+                            }
+                            Err(other) => return Err(SyncError::SessionLog(other)),
+                        };
+
+                        let now_unix_ms = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis();
+                        let accepted = AcceptedEnvelope {
+                            sender_hex: sender_hex.clone(),
+                            message_id_hex: msg_id_hex.clone(),
+                            document_id: envelope.document_id.clone(),
+                            payload_kind: envelope.payload_kind.to_byte(),
+                            content_hash_hex: hex_encode(&envelope.content_hash),
+                            signature_hex: hex_encode(&envelope.signature),
+                            payload_bytes: payload.clone(),
+                            accepted_at_unix_ms: i64::try_from(now_unix_ms)
+                                .unwrap_or(i64::MAX),
+                        };
+                        self.storage.save_accepted_envelope(
+                            &sender_hex,
+                            &msg_id_hex,
+                            &accepted,
+                        )?;
+
+                        if advanced {
+                            self.session_log.submit_chunk_to_projection(&chunk)?;
+                        }
                         let entry = chunk_outcomes.entry(chunk.as_path()).or_insert(
                             SyncChunkOutcome {
                                 chunk_id: chunk.as_path(),

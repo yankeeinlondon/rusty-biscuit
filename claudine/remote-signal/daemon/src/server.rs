@@ -318,6 +318,7 @@ pub fn spawn_uds_server(
     let session_log = SessionLogManager::new(
         storage.clone(),
         batcher.handle(),
+        projection.clone(),
         config.chunk_config,
         Arc::clone(&identity),
     )?;
