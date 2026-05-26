@@ -127,6 +127,10 @@ impl From<redb::CommitError> for StorageError {
 pub struct Storage {
     db: std::sync::Arc<Database>,
     path: PathBuf,
+    #[cfg(test)]
+    fail_next_save: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(test)]
+    fail_next_accepted_envelope: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Storage {
@@ -149,6 +153,10 @@ impl Storage {
         let storage = Self {
             db: std::sync::Arc::new(db),
             path,
+            #[cfg(test)]
+            fail_next_save: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(test)]
+            fail_next_accepted_envelope: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         storage.bootstrap_tables()?;
         Ok(storage)
@@ -158,6 +166,20 @@ impl Storage {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Inject a failure into the next `save_snapshot` call. The flag
+    /// auto-resets after firing so that subsequent writes succeed.
+    #[cfg(test)]
+    pub fn inject_save_failure(&self) {
+        self.fail_next_save.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Inject a failure into the next `save_accepted_envelope` call. The
+    /// flag auto-resets after firing.
+    #[cfg(test)]
+    pub fn inject_accepted_envelope_failure(&self) {
+        self.fail_next_accepted_envelope.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Open the tables once with an empty write transaction so subsequent
@@ -181,6 +203,12 @@ impl Storage {
     /// and snapshot write happen inside a single redb transaction so the
     /// on-disk view never disagrees with the in-memory state.
     pub fn save_snapshot(&self, chunk: &ChunkId, snapshot: &[u8]) -> Result<(), StorageError> {
+        #[cfg(test)]
+        if self.fail_next_save.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            return Err(StorageError::Storage(Box::new(redb::StorageError::Io(
+                std::io::Error::new(std::io::ErrorKind::Other, "injected save failure"),
+            ))));
+        }
         let session_key = chunk.session_key();
         let path_key = chunk.as_path();
 
@@ -365,6 +393,12 @@ impl Storage {
         message_id_hex: &str,
         envelope: &AcceptedEnvelope,
     ) -> Result<bool, StorageError> {
+        #[cfg(test)]
+        if self.fail_next_accepted_envelope.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            return Err(StorageError::Storage(Box::new(redb::StorageError::Io(
+                std::io::Error::new(std::io::ErrorKind::Other, "injected accepted-envelope failure"),
+            ))));
+        }
         let composite_key = format!("{sender_hex}:{message_id_hex}");
         let encoded = serde_json::to_vec(envelope).map_err(|source| {
             StorageError::MalformedAcceptedEnvelope {

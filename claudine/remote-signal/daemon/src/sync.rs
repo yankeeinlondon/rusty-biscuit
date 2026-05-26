@@ -433,17 +433,6 @@ impl SyncService {
                         }
                         let payload = inbox.accept(&envelope)?.to_vec();
 
-                        let advanced = match self.session_log.apply_remote_update(&chunk, &payload) {
-                            Ok(a) => a,
-                            Err(crate::session_log::SessionLogError::Loro(reason)) => {
-                                return Err(SyncError::MalformedPayload {
-                                    chunk_id: chunk.as_path(),
-                                    reason,
-                                });
-                            }
-                            Err(other) => return Err(SyncError::SessionLog(other)),
-                        };
-
                         let now_unix_ms = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
@@ -464,6 +453,17 @@ impl SyncService {
                             &msg_id_hex,
                             &accepted,
                         )?;
+
+                        let advanced = match self.session_log.apply_remote_update(&chunk, &payload) {
+                            Ok(a) => a,
+                            Err(crate::session_log::SessionLogError::Loro(reason)) => {
+                                return Err(SyncError::MalformedPayload {
+                                    chunk_id: chunk.as_path(),
+                                    reason,
+                                });
+                            }
+                            Err(other) => return Err(SyncError::SessionLog(other)),
+                        };
 
                         if advanced {
                             self.session_log.submit_chunk_to_projection(&chunk)?;
