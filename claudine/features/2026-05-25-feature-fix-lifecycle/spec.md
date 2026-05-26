@@ -1,7 +1,16 @@
+---
+title: Feature / Fix Lifecycle and Topic-Doc Convention
+date: 2026-05-25
+status: ready for planning and implementation
+reviewed: true
+area: claudine
+scope: repo-wide policy
+---
+
 # Feature / Fix Lifecycle and Topic-Doc Convention
 
 **Date:** 2026-05-25
-**Status:** Draft
+**Status:** Ready for planning and implementation
 **Scope:** Repo-wide policy. Initial implementation lives in
 `just/lifecycle.just`; documentation lives at repo root.
 
@@ -152,6 +161,38 @@ blast_radius:
   even when it is not used by anything the doc talks about, if changing
   it would invalidate the doc's claims.
 
+### Compatibility note for current Sniff behavior
+
+Current Sniff parsing distinguishes only two operational cases:
+documents with a `blast_radius` key and a parsed sequence of paths, and
+documents with no matching path entries. That is enough for today's
+intersection check but not enough for the three-state policy above.
+
+This spec intentionally treats a bare key like:
+
+```yaml
+blast_radius:
+```
+
+as **unanalyzed**, not as no sensitivity. Existing docs that use the
+bare-key form keep working with today's `sniff docs --blast-radius`
+presence filter, but new drift tooling must not interpret that form as
+reviewed. Docs that have been reviewed and intentionally have no source
+blast radius must use:
+
+```yaml
+blast_radius: ""
+```
+
+Reader's note: this is an intended standards change, not a typo. It
+keeps historical bare-key docs visible as classification debt while
+giving authors a compact explicit marker for "reviewed and no source
+sensitivity." The first implementation does not need to rewrite Sniff's
+existing path-intersection behavior, but `docs/feature-lifecycle.md`
+must document the distinction so future drift work can add a typed
+`BlastRadiusClassification` parser instead of inferring from
+`Option<Vec<PathBuf>>`.
+
 ## `spec.md` frontmatter additions
 
 Two new frontmatter properties are populated at closure (not before):
@@ -184,11 +225,22 @@ commits:
 Existing frontmatter on `spec.md` is preserved. These two properties
 are *additive*; they MUST NOT replace or overwrite existing keys.
 
+If a `spec.md` has no frontmatter, the closure workflow creates a
+frontmatter block and preserves the original Markdown body unchanged
+below it. Existing body-level status prose, such as `**Status:** Draft`,
+may be updated when it mirrors the frontmatter status, but the
+frontmatter value is authoritative for tooling.
+
+The writer must preserve unknown frontmatter keys, including
+`sub-spec`, `depends-on`, `reviewed`, and future schema keys. A dependent
+spec's `depends-on` value is informational at closure time; the workflow
+does not re-order or complete dependencies.
+
 ## `episodic.jsonl` shape
 
 Each area's `features/` and `fixes/` directory gains an `episodic.jsonl`
 file. JSONL = newline-delimited JSON, one entry per completed change,
-appended at closure.
+written at closure.
 
 ```
 claudine/features/episodic.jsonl
@@ -247,11 +299,50 @@ future `claudine` daemon) can validate entries deterministically. The
 schema is the authoritative spec; the worked example above is
 illustrative.
 
+### JSONL write semantics
+
+`id` is unique within one `{area}/{features|fixes}/episodic.jsonl` file.
+The closure workflow performs an idempotent upsert:
+
+- If no entry with the same `id` exists, append one newline-delimited
+  JSON object.
+- If an entry with the same `id` already exists, replace that entry
+  in place after validating both the old file and the replacement
+  entry.
+- Preserve the relative order of all other entries.
+- Write through a temporary file in the same directory, then rename, so
+  interruption cannot leave a truncated JSONL file.
+
+Reader's note: this deliberately chooses deterministic upsert over
+append-only logging. The closure command can be interrupted after
+metadata is written and before the directory move; upsert-by-id makes
+reruns repairable without creating duplicate history records.
+
 ## Enhanced `just complete` workflow
 
 The shared recipe at `just/lifecycle.just::complete` is extended. Its
 selection logic (the existing fzf/auto-match flow) is preserved; new
 steps are inserted between *selection* and *move-to-archive*.
+
+### Recipe surface
+
+The implementation exposes two shared recipes:
+
+```bash
+just complete [name]
+just complete-dry-run [name]
+```
+
+- `just complete [name]` keeps the current behavior: auto-match when
+  `name` is unique, otherwise use the existing picker. It writes
+  metadata, updates docs when accepted, then moves the directory.
+- `just complete-dry-run [name]` runs the same selection and analysis
+  but performs no writes and does not move the directory. It prints the
+  proposed frontmatter updates, JSONL entry, and topic-doc changes.
+
+The dry-run recipe is a first-class contract, not a hidden flag, because
+Just positional argument parsing makes `just complete --dry-run` easy to
+misread as a feature name.
 
 ### New flow
 
@@ -276,17 +367,23 @@ steps are inserted between *selection* and *move-to-archive*.
    - Produce the 1–2 sentence summary.
 5. **Write closure metadata:**
    - Update `spec.md` frontmatter (add `design_docs:` and `commits:`).
-   - Append the new entry to `{area}/{features|fixes}/episodic.jsonl`.
+   - Upsert the new entry into `{area}/{features|fixes}/episodic.jsonl`.
 6. **Move** the dir to `_completed/` (existing logic).
 7. **Print** the existing confirmation message.
+
+The implementation must resolve repo-root deliverables (`CLAUDE.md`,
+`docs/feature-lifecycle.md`, and
+`docs/schemas/episodic-entry.schema.json`) from `git rev-parse
+--show-toplevel`, not from the package-area current working directory.
+Area-local feature/fix paths stay relative to the directory where the
+area's `justfile` invokes the shared lifecycle recipe.
 
 ### Failure modes
 
 - **Claudine invocation fails or times out** — the recipe stops before
   the move. The user can re-run `just complete` after addressing the
   failure. Partial state is acceptable because the spec.md frontmatter
-  edits are idempotent and the JSONL append is the last write before
-  the move.
+  edits are idempotent and the JSONL upsert is duplicate-safe.
 - **Agent produces obviously wrong output** — the user reviews the
   diffs/proposed JSONL entry before the move proceeds. The recipe
   surfaces a confirmation prompt for the proposed metadata. (The
@@ -306,6 +403,12 @@ implementation detail) producing a structured list the agent can
 consume. Sniff already has the git infrastructure; this spec just
 formalizes that the closure recipe is sniff's primary consumer for
 this use case.
+
+Sniff's existing `docs --blast-radius` and `blast-radius` commands do
+not become responsible for the new three-state semantics in this spec.
+They can keep their current presence/intersection behavior. The future
+drift-detection spec owns typed parsing of `Unanalyzed`, `No
+sensitivity`, and `Populated` states.
 
 ## Where the policy lives
 
@@ -332,13 +435,15 @@ it is.
 - `just/lifecycle.just::complete` performs the new flow end-to-end on
   a representative feature dir and on a representative fix dir
   (claudine area).
+- `just/lifecycle.just` exposes `complete-dry-run`, and the recipe runs
+  without writing files or moving the selected directory.
 - `docs/feature-lifecycle.md` exists at repo root with the three
   worked examples named above.
 - `docs/schemas/episodic-entry.schema.json` exists and validates the
   example entry in this spec.
 - `CLAUDE.md` contains the new "Feature / Fix Lifecycle" section
   (≤ 25 lines) with the pointer to the detail doc.
-- A dry-run of `just complete` on a no-op test feature produces the
+- A dry-run via `just complete-dry-run` on a no-op test feature produces the
   expected `episodic.jsonl` entry and `spec.md` frontmatter without
   moving the dir.
 - The first real `just complete` invocation after this lands (likely
@@ -346,6 +451,11 @@ it is.
   feature) produces a valid entry and updates the relevant topic
   docs.
 - All existing `_completed/` archives remain untouched (no backfill).
+- Re-running the closure workflow after a partial metadata write
+  updates the existing `episodic.jsonl` entry with the same `id`
+  instead of creating a duplicate.
+- A spec with no existing frontmatter receives a valid frontmatter
+  block, and a spec with existing unknown keys preserves them.
 
 ## Risks
 
@@ -365,13 +475,19 @@ it is.
   *additive* with no key reuse; consumers using `deny_unknown_fields`
   semantics would need a one-line update.
 - **Re-running `just complete` on a partially-closed dir produces
-  duplicate JSONL entries.** Mitigation: the recipe checks for an
-  existing entry with the same `id` and either updates in place or
-  refuses, with the chosen behavior documented in the recipe.
+  duplicate JSONL entries.** Mitigation: the recipe upserts by `id`
+  through a temporary file and rename, so a second run refreshes the
+  existing record instead of appending a second one.
 - **Bigger blast radius than expected.** This is a repo-wide policy
   change that affects 10+ areas. The recipe lives once in
   `just/lifecycle.just` so the rollout is centralized, but every area
   becomes subject to the policy at the same moment.
+
+## Open Questions
+
+No blocking design questions remain for v1. The main unresolved product
+questions — drift detection, episodic synthesis, daemon integration, and
+skill publishing — are explicitly assigned to future specs below.
 
 ## Out of scope (future specs)
 
