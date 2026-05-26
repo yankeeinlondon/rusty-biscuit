@@ -54,10 +54,6 @@ use super::{
     OutputTextCallback, ProcessResult, ProcessTelemetry, ReasoningCallback, SemanticParserBuilder,
 };
 
-// ---------------------------------------------------------------------------
-// Stable identifiers and protocol contract constants
-// ---------------------------------------------------------------------------
-
 /// Wire protocol version Claudine negotiates with Kimi. Phase 0 evidence
 /// confirmed `1.9` is the minimum revision the live `kimi 1.38.0` build
 /// accepts. The parser keys initialize-response handling on this id.
@@ -110,10 +106,6 @@ impl Default for WireClientCapabilities {
         Self::default_for_claudine()
     }
 }
-
-// ---------------------------------------------------------------------------
-// JSON-RPC line builders (pure functions, fully unit-testable)
-// ---------------------------------------------------------------------------
 
 /// Build a JSON-RPC `initialize` request body.
 ///
@@ -287,10 +279,6 @@ impl HookDispatchResult {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Serialized writer
-// ---------------------------------------------------------------------------
-
 /// Single serialized writer over the child's stdin.
 ///
 /// Wraps `ChildStdin` behind a `Mutex` so multiple sender call sites
@@ -341,10 +329,6 @@ impl WireWriter {
         *guard = Box::new(io::sink());
     }
 }
-
-// ---------------------------------------------------------------------------
-// Server request auto-response routing
-// ---------------------------------------------------------------------------
 
 /// Outcome of dispatching a server-initiated request through the wire
 /// auto-response pipeline. The reader thread uses this to decide which
@@ -397,10 +381,6 @@ pub(crate) fn map_kimi_hook_event(event: &str) -> Option<AgenticEvent> {
     };
     Some(canonical)
 }
-
-// ---------------------------------------------------------------------------
-// Hook dispatch wiring
-// ---------------------------------------------------------------------------
 
 /// Dispatch a Kimi `HookRequest` through Claudine's canonical pipeline
 /// and return the negotiated [`HookDispatchResult`].
@@ -511,10 +491,6 @@ fn outcome_to_hook_outcome(outcome: &claudine::dispatch::DispatchOutcome) -> Hoo
     }
 }
 
-// ---------------------------------------------------------------------------
-// Initialize response validation
-// ---------------------------------------------------------------------------
-
 /// Validate that the server's initialize response uses a protocol version
 /// Claudine knows how to drive. Returns `Ok(())` on a recognized version
 /// and an error otherwise so the caller can convert into a terminal
@@ -566,10 +542,6 @@ impl std::fmt::Display for WireInitError {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Session orchestrator
-// ---------------------------------------------------------------------------
 
 /// Configuration for a Kimi wire-mode session.
 pub(crate) struct WireSessionConfig<'a> {
