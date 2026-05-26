@@ -19,11 +19,13 @@ use super::{
 
 /// Nerd Font codepoint used as the in-repo hyperlink label when the terminal
 /// supports Nerd Fonts. Renders as a single glyph standing in for the path.
+///
+/// NOTE: this is a git icon
 const NERD_FONT_REPO_GLYPH: char = '\u{F02A2}';
 
 /// Render the system-prompt header line.
 ///
-/// Format: `<bg-orange-500><white><b> 📔 System Prompt(<i>{action}</i>) </b></white></bg-orange-500>`
+/// Format: `<bg-orange-500><white><b>📔 System Prompt(<i>{action}</i>) </b></white></bg-orange-500>`
 /// where action is `appended` or `replaced`. The entire header line — icon
 /// included — is rendered as white text on an orange-500 background. The
 /// orange-500 swatch matches the bg-painted vertical bar of the system-
@@ -43,7 +45,7 @@ const NERD_FONT_REPO_GLYPH: char = '\u{F02A2}';
 /// ```
 pub fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
     Prose::new(format!(
-        "<bg-orange-500><white><b> 📔 System Prompt(<i>{action}</i>) </b></white></bg-orange-500>"
+        "\n<orange-500><b>■ System Prompt (<i>{action}</i>)</b></orange-500>"
     ))
     .render(term)
 }
@@ -72,7 +74,7 @@ pub(crate) fn resolve_display_label(
 ) -> String {
     let rel = base.and_then(|b| absolute.strip_prefix(b).ok());
     match (rel, term.is_nerd_font) {
-        (Some(rel), Some(true)) => format!("{NERD_FONT_REPO_GLYPH}/{}", rel.display()),
+        (Some(rel), Some(true)) => format!("{NERD_FONT_REPO_GLYPH} /{}", rel.display()),
         (Some(rel), _) => format!("./{}", rel.display()),
         (None, _) => absolute.display().to_string(),
     }

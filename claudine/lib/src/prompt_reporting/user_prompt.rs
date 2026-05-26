@@ -27,7 +27,7 @@ use super::{
 /// assert!(header.contains("Agent Prompt"));
 /// ```
 pub fn render_user_prompt_header(term: &Terminal) -> String {
-    Prose::new("🗣️ <b>Agent Prompt</b>").render(term)
+    Prose::new("\n<green-500>■ <b>Agent Prompt</b></green-500>").render(term)
 }
 
 /// Render the user-prompt body according to the selected format.

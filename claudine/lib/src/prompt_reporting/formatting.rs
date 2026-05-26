@@ -18,7 +18,7 @@ use biscuit_terminal::utils::wrap_policy::WordWrap;
 /// which leave hairline gaps). It sits in column 0 — directly under the
 /// left edge of the 2-cell-wide 🗣️ emoji on the header line above. A
 /// trailing space separates the border from the body content.
-pub(crate) const PROMPT_BORDER: &str = "█ ";
+pub(crate) const PROMPT_BORDER: &str = "┃ ";
 
 /// The system-prompt [`BlockQuote`] border, rendered as a bg-colored
 /// space cell rather than a fg-colored `█` glyph.
@@ -36,7 +36,7 @@ pub(crate) const PROMPT_BORDER: &str = "█ ";
 /// The visible width is **2 cells** (one bg-painted space + one plain
 /// space), matching [`PROMPT_BORDER_WIDTH`]; `visible_width()` strips
 /// the embedded SGR escapes.
-pub(crate) const SYSTEM_PROMPT_BORDER: &str = "\x1b[48;2;255;105;0m \x1b[49m ";
+pub(crate) const SYSTEM_PROMPT_BORDER: &str = "┃ ";
 
 /// The visible cell-width consumed by [`PROMPT_BORDER`] (border glyph plus
 /// the trailing space).
