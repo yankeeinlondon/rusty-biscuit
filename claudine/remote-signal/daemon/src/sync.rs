@@ -374,14 +374,11 @@ impl SyncService {
                 self.assert_paired(&peer_node_id_hex)?;
             }
 
-            // ---- Advertise phase (we send our own-namespace state) --
+            // ---- Advertise phase (we send all chunks we have) ----
             let local_node_id = self.identity.node_id();
             let local_chunks = self.session_log.list_all_chunks()?;
             let mut chunk_outcomes: HashMap<String, SyncChunkOutcome> = HashMap::new();
             for chunk in &local_chunks {
-                if chunk.owner_node_id != local_node_id {
-                    continue;
-                }
                 let vv = self.session_log.chunk_state_vector(chunk)?.unwrap_or_default();
                 let frame = SyncFrame {
                     kind: Some(sync_frame::Kind::Advertise(SyncChunkAdvertise {
@@ -405,7 +402,7 @@ impl SyncService {
             .await?;
             outcome.sent_bytes += sent;
 
-            // ---- Read remote advertisements (only their namespace) --
+            // ---- Read remote advertisements (all namespaces) --------
             let mut remote_state: HashMap<ChunkId, Vec<u8>> = HashMap::new();
             loop {
                 let (frame, received) = read_frame(&mut recv).await?;
@@ -413,9 +410,7 @@ impl SyncService {
                 match frame.kind {
                     Some(sync_frame::Kind::Advertise(ad)) => {
                         let chunk: ChunkId = ad.chunk_id.parse()?;
-                        if chunk.owner_node_id == peer_node_id_hex {
-                            remote_state.insert(chunk, ad.version_vector);
-                        }
+                        remote_state.insert(chunk, ad.version_vector);
                     }
                     Some(sync_frame::Kind::AdvertiseEnd(_)) => break,
                     Some(sync_frame::Kind::Error(err)) => {
@@ -603,6 +598,7 @@ mod tests {
     };
 
     const ENTRIES_CONTAINER: &str = "entries";
+    const METADATA_CONTAINER: &str = "metadata";
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -674,8 +670,26 @@ mod tests {
         }
     }
 
-    fn make_valid_loro_snapshot(message: &str) -> Vec<u8> {
+    fn make_valid_loro_snapshot(
+        message: &str,
+        owner_node_id: &str,
+        session_id: &str,
+        chunk_index: u64,
+    ) -> Vec<u8> {
         let doc = LoroDoc::new();
+        let map = doc.get_map(METADATA_CONTAINER);
+        map.insert("owner_node_id", owner_node_id).unwrap();
+        map.insert("session_id", session_id).unwrap();
+        map.insert("chunk_index", chunk_index as i64).unwrap();
+        map.insert("created_at_unix_ms", 5_000_i64).unwrap();
+        if chunk_index > 0 {
+            let prev_chunk = ChunkId::new(
+                owner_node_id.to_string(),
+                session_id.to_string(),
+                chunk_index - 1,
+            );
+            map.insert("previous_chunk_id", prev_chunk.as_path().as_str()).unwrap();
+        }
         let list = doc.get_list(ENTRIES_CONTAINER);
         let entry = Entry {
             sequence: 0,
@@ -703,7 +717,7 @@ mod tests {
         let mut harness = build_harness();
         let peer_hex = harness.peer_identity.node_id();
         let chunk = ChunkId::new(&peer_hex, "test-session", 0);
-        let snapshot = make_valid_loro_snapshot("hello");
+        let snapshot = make_valid_loro_snapshot("hello", &peer_hex, "test-session", 0);
         let envelope = harness.peer_sealer.seal(
             chunk.as_path(),
             PayloadKind::Snapshot,
@@ -778,7 +792,7 @@ mod tests {
         let mut harness = build_harness();
         let peer_hex = harness.peer_identity.node_id();
         let chunk = ChunkId::new(&peer_hex, "sig-session", 0);
-        let snapshot = make_valid_loro_snapshot("sig-test");
+        let snapshot = make_valid_loro_snapshot("sig-test", &peer_hex, "sig-session", 0);
         let mut envelope = harness.peer_sealer.seal(
             chunk.as_path(),
             PayloadKind::Snapshot,
@@ -816,7 +830,7 @@ mod tests {
         let mut harness = build_harness();
         let peer_hex = harness.peer_identity.node_id();
         let chunk = ChunkId::new(&peer_hex, "hash-session", 0);
-        let snapshot = make_valid_loro_snapshot("hash-test");
+        let snapshot = make_valid_loro_snapshot("hash-test", &peer_hex, "hash-session", 0);
         let mut envelope = harness.peer_sealer.seal(
             chunk.as_path(),
             PayloadKind::Snapshot,
@@ -854,7 +868,7 @@ mod tests {
         let harness = build_harness();
         let peer_hex = harness.peer_identity.node_id();
         let chunk = ChunkId::new(&peer_hex, "sender-session", 0);
-        let snapshot = make_valid_loro_snapshot("sender-test");
+        let snapshot = make_valid_loro_snapshot("sender-test", &peer_hex, "sender-session", 0);
 
         let impostor = NodeIdentity::from_seed([99u8; 32]);
         let mut impostor_sealer = EnvelopeSealer::new(impostor);
@@ -895,7 +909,7 @@ mod tests {
         let peer_hex = harness.peer_identity.node_id();
         let local_hex = harness.service.node_id();
         let foreign_chunk = ChunkId::new(&local_hex, "stolen-session", 0);
-        let snapshot = make_valid_loro_snapshot("namespace-test");
+        let snapshot = make_valid_loro_snapshot("namespace-test", &peer_hex, "stolen-session", 0);
         let envelope = harness.peer_sealer.seal(
             foreign_chunk.as_path(),
             PayloadKind::Snapshot,
@@ -932,7 +946,7 @@ mod tests {
         let mut harness = build_harness();
         let peer_hex = harness.peer_identity.node_id();
         let chunk = ChunkId::new(&peer_hex, "dup-session", 0);
-        let snapshot = make_valid_loro_snapshot("dup-test");
+        let snapshot = make_valid_loro_snapshot("dup-test", &peer_hex, "dup-session", 0);
         let envelope = harness.peer_sealer.seal(
             chunk.as_path(),
             PayloadKind::Snapshot,
@@ -980,7 +994,7 @@ mod tests {
         let mut harness = build_harness();
         let peer_hex = harness.peer_identity.node_id();
         let chunk = ChunkId::new(&peer_hex, "kind-session", 0);
-        let snapshot = make_valid_loro_snapshot("kind-test");
+        let snapshot = make_valid_loro_snapshot("kind-test", &peer_hex, "kind-session", 0);
         let envelope = harness.peer_sealer.seal(
             chunk.as_path(),
             PayloadKind::Delta,
@@ -1018,7 +1032,7 @@ mod tests {
         let peer_hex = harness.peer_identity.node_id();
         let chunk = ChunkId::new(&peer_hex, "docid-session", 0);
         let other_chunk = ChunkId::new(&peer_hex, "other-session", 0);
-        let snapshot = make_valid_loro_snapshot("docid-test");
+        let snapshot = make_valid_loro_snapshot("docid-test", &peer_hex, "docid-session", 0);
         let envelope = harness.peer_sealer.seal(
             other_chunk.as_path(),
             PayloadKind::Snapshot,
@@ -1055,7 +1069,7 @@ mod tests {
         let mut harness = build_harness();
         let peer_hex = harness.peer_identity.node_id();
         let chunk = ChunkId::new(&peer_hex, "envelope-fail-session", 0);
-        let snapshot = make_valid_loro_snapshot("envelope-fail-entry");
+        let snapshot = make_valid_loro_snapshot("envelope-fail-entry", &peer_hex, "envelope-fail-session", 0);
         let envelope = harness.peer_sealer.seal(
             chunk.as_path(),
             PayloadKind::Snapshot,
@@ -1215,6 +1229,310 @@ mod tests {
         let peer_hex = harness.peer_identity.node_id();
         let chunk = ChunkId::new(&peer_hex, "schema-non-monotonic", 0);
         let snapshot = make_schema_invalid_snapshot_non_monotonic();
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    fn make_snapshot_missing_metadata(message: &str) -> Vec<u8> {
+        let doc = LoroDoc::new();
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: message.into(),
+            metadata: None,
+        };
+        list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
+        doc.commit();
+        doc.export(ExportMode::Snapshot).unwrap()
+    }
+
+    fn make_snapshot_wrong_metadata(
+        message: &str,
+        owner: &str,
+        session: &str,
+        chunk_index: i64,
+        created_at: i64,
+        prev_chunk: Option<&str>,
+    ) -> Vec<u8> {
+        let doc = LoroDoc::new();
+        let map = doc.get_map(METADATA_CONTAINER);
+        map.insert("owner_node_id", owner).unwrap();
+        map.insert("session_id", session).unwrap();
+        map.insert("chunk_index", chunk_index).unwrap();
+        map.insert("created_at_unix_ms", created_at).unwrap();
+        if let Some(prev) = prev_chunk {
+            map.insert("previous_chunk_id", prev).unwrap();
+        }
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        let entry = Entry {
+            sequence: 0,
+            created_at_unix_ms: 5_000,
+            source: "remote".into(),
+            level: "info".into(),
+            message: message.into(),
+            metadata: None,
+        };
+        list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
+        doc.commit();
+        doc.export(ExportMode::Snapshot).unwrap()
+    }
+
+    #[test]
+    fn missing_metadata_rejected_without_persistence() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "no-meta-session", 0);
+        let snapshot = make_snapshot_missing_metadata("no-meta");
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err(), "snapshot without metadata must be rejected");
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn wrong_owner_in_metadata_rejected_without_persistence() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "wrong-owner-session", 0);
+        let snapshot = make_snapshot_wrong_metadata(
+            "wrong-owner",
+            "wrong-owner-id",
+            "wrong-owner-session",
+            0,
+            5_000,
+            None,
+        );
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn wrong_session_in_metadata_rejected_without_persistence() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "wrong-session-meta", 0);
+        let snapshot = make_snapshot_wrong_metadata(
+            "wrong-session",
+            &peer_hex,
+            "different-session",
+            0,
+            5_000,
+            None,
+        );
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn wrong_chunk_index_in_metadata_rejected_without_persistence() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "wrong-idx-session", 0);
+        let snapshot = make_snapshot_wrong_metadata(
+            "wrong-idx",
+            &peer_hex,
+            "wrong-idx-session",
+            99,
+            5_000,
+            None,
+        );
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn invalid_created_at_in_metadata_rejected_without_persistence() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "bad-ts-session", 0);
+        let snapshot = make_snapshot_wrong_metadata(
+            "bad-ts",
+            &peer_hex,
+            "bad-ts-session",
+            0,
+            -1,
+            None,
+        );
+        let envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            snapshot,
+        );
+
+        let snapshots_before = baseline_snapshot_count(&harness);
+        let envelopes_before = baseline_envelope_count(&harness);
+        let mut inbox = EnvelopeInbox::new();
+
+        let result = harness.service.receive_delta(
+            &peer_hex,
+            &chunk,
+            &chunk.as_path(),
+            &envelope,
+            true,
+            &mut inbox,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            harness.storage.snapshot_count().expect("count"),
+            snapshots_before,
+        );
+        assert_eq!(
+            harness.storage.accepted_envelope_count().expect("count"),
+            envelopes_before,
+        );
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn wrong_previous_chunk_id_in_metadata_rejected_without_persistence() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "wrong-prev-session", 1);
+        let snapshot = make_snapshot_wrong_metadata(
+            "wrong-prev",
+            &peer_hex,
+            "wrong-prev-session",
+            1,
+            5_000,
+            Some("wrong-previous-chunk-id"),
+        );
         let envelope = harness.peer_sealer.seal(
             chunk.as_path(),
             PayloadKind::Snapshot,

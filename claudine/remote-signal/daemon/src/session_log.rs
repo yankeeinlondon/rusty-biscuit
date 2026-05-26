@@ -646,7 +646,6 @@ impl SessionLogManager {
     ) -> Result<StagedRemoteUpdate, SessionLogError> {
         let key = chunk.as_path();
         let inner = self.inner.lock();
-        let now = self.clock.now_unix_ms();
 
         let (advanced, staged_state) = if let Some(state) = inner.chunks.get(&key) {
             let pre_snapshot = state.snapshot_bytes()?;
@@ -680,6 +679,12 @@ impl SessionLogManager {
             staged_doc.import(update_bytes)?;
 
             validate_remote_entries(&staged_doc, 0)?;
+            let metadata = validate_and_extract_metadata(
+                &staged_doc,
+                &chunk.owner_node_id,
+                &chunk.session_id,
+                chunk.chunk_index,
+            )?;
 
             let list = staged_doc.get_list(ENTRIES_CONTAINER);
             let mut bytes = 0u64;
@@ -692,24 +697,6 @@ impl SessionLogManager {
                     count += 1;
                 }
             });
-            let metadata = ChunkMetadata {
-                owner_node_id: chunk.owner_node_id.clone(),
-                session_id: chunk.session_id.clone(),
-                chunk_index: chunk.chunk_index,
-                created_at_unix_ms: now,
-                previous_chunk_id: if chunk.chunk_index == 0 {
-                    None
-                } else {
-                    Some(
-                        ChunkId::new(
-                            chunk.owner_node_id.clone(),
-                            chunk.session_id.clone(),
-                            chunk.chunk_index - 1,
-                        )
-                        .as_path(),
-                    )
-                },
-            };
             (true, ChunkState {
                 doc: staged_doc,
                 metadata,
@@ -962,6 +949,110 @@ impl SessionLogManager {
     }
 }
 
+fn read_map_string(doc: &LoroDoc, key: &str) -> Result<String, SessionLogError> {
+    use loro::ValueOrContainer;
+    let map = doc.get_map(METADATA_CONTAINER);
+    let Some(voc) = map.get(key) else {
+        return Err(SessionLogError::SchemaValidation {
+            reason: format!("metadata missing required key: {key}"),
+        });
+    };
+    match voc {
+        ValueOrContainer::Value(loro::LoroValue::String(s)) => Ok((*s).to_string()),
+        _ => Err(SessionLogError::SchemaValidation {
+            reason: format!("metadata key {key} is not a string"),
+        }),
+    }
+}
+
+fn read_map_i64(doc: &LoroDoc, key: &str) -> Result<i64, SessionLogError> {
+    use loro::ValueOrContainer;
+    let map = doc.get_map(METADATA_CONTAINER);
+    let Some(voc) = map.get(key) else {
+        return Err(SessionLogError::SchemaValidation {
+            reason: format!("metadata missing required key: {key}"),
+        });
+    };
+    match voc {
+        ValueOrContainer::Value(loro::LoroValue::I64(n)) => Ok(n),
+        ValueOrContainer::Value(loro::LoroValue::Double(n)) if n.fract() == 0.0 => {
+            Ok(n as i64)
+        }
+        _ => Err(SessionLogError::SchemaValidation {
+            reason: format!("metadata key {key} is not an integer"),
+        }),
+    }
+}
+
+fn validate_and_extract_metadata(
+    doc: &LoroDoc,
+    expected_owner: &str,
+    expected_session_id: &str,
+    expected_chunk_index: u64,
+) -> Result<ChunkMetadata, SessionLogError> {
+    let owner = read_map_string(doc, "owner_node_id")?;
+    if owner != expected_owner {
+        return Err(SessionLogError::SchemaValidation {
+            reason: format!(
+                "metadata owner_node_id {owner:?} does not match expected {expected_owner:?}"
+            ),
+        });
+    }
+
+    let session_id = read_map_string(doc, "session_id")?;
+    if session_id != expected_session_id {
+        return Err(SessionLogError::SchemaValidation {
+            reason: format!(
+                "metadata session_id {session_id:?} does not match expected {expected_session_id:?}"
+            ),
+        });
+    }
+
+    let chunk_index = read_map_i64(doc, "chunk_index")?;
+    if chunk_index < 0 || chunk_index as u64 != expected_chunk_index {
+        return Err(SessionLogError::SchemaValidation {
+            reason: format!(
+                "metadata chunk_index {chunk_index} does not match expected {expected_chunk_index}"
+            ),
+        });
+    }
+
+    let created_at = read_map_i64(doc, "created_at_unix_ms")?;
+    if created_at <= 0 {
+        return Err(SessionLogError::SchemaValidation {
+            reason: format!("metadata created_at_unix_ms is invalid: {created_at}"),
+        });
+    }
+
+    let previous_chunk_id = if expected_chunk_index == 0 {
+        None
+    } else {
+        let prev = read_map_string(doc, "previous_chunk_id")?;
+        let expected_prev = ChunkId::new(
+            expected_owner.to_string(),
+            expected_session_id.to_string(),
+            expected_chunk_index - 1,
+        )
+        .as_path();
+        if prev != expected_prev {
+            return Err(SessionLogError::SchemaValidation {
+                reason: format!(
+                    "metadata previous_chunk_id {prev:?} does not match expected {expected_prev:?}"
+                ),
+            });
+        }
+        Some(prev)
+    };
+
+    Ok(ChunkMetadata {
+        owner_node_id: owner,
+        session_id,
+        chunk_index: chunk_index as u64,
+        created_at_unix_ms: created_at,
+        previous_chunk_id,
+    })
+}
+
 fn validate_remote_entries(
     doc: &LoroDoc,
     existing_entry_count: u64,
@@ -1037,6 +1128,34 @@ mod tests {
     use crate::storage::AcceptedEnvelope;
     use std::sync::atomic::{AtomicI64, Ordering};
     use tempfile::TempDir;
+
+    fn make_remote_snapshot(
+        owner_node_id: &str,
+        session_id: &str,
+        chunk_index: u64,
+        entries: &[Entry],
+    ) -> Vec<u8> {
+        let doc = loro::LoroDoc::new();
+        let map = doc.get_map(METADATA_CONTAINER);
+        map.insert("owner_node_id", owner_node_id).unwrap();
+        map.insert("session_id", session_id).unwrap();
+        map.insert("chunk_index", chunk_index as i64).unwrap();
+        map.insert("created_at_unix_ms", 5_000_i64).unwrap();
+        if chunk_index > 0 {
+            let prev = ChunkId::new(
+                owner_node_id.to_string(),
+                session_id.to_string(),
+                chunk_index - 1,
+            );
+            map.insert("previous_chunk_id", prev.as_path().as_str()).unwrap();
+        }
+        let list = doc.get_list(ENTRIES_CONTAINER);
+        for entry in entries {
+            list.push(serde_json::to_string(entry).unwrap().as_str()).unwrap();
+        }
+        doc.commit();
+        doc.export(ExportMode::Snapshot).unwrap()
+    }
 
     struct FixedClock {
         next: AtomicI64,
@@ -1432,8 +1551,6 @@ mod tests {
 
         let mut sender_sealer =
             EnvelopeSealer::with_start(sender_identity, 0);
-        let doc = loro::LoroDoc::new();
-        let list = doc.get_list(ENTRIES_CONTAINER);
         let entry = Entry {
             sequence: 0,
             created_at_unix_ms: 5_000,
@@ -1442,9 +1559,7 @@ mod tests {
             message: "from-envelope".into(),
             metadata: None,
         };
-        list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
-        doc.commit();
-        let snapshot = doc.export(ExportMode::Snapshot).unwrap();
+        let snapshot = make_remote_snapshot(&sender_hex, "remote-session", 0, &[entry]);
         let envelope = sender_sealer.seal(
             sender_chunk.as_path(),
             PayloadKind::Snapshot,
@@ -1559,8 +1674,6 @@ mod tests {
         let sender_chunk = ChunkId::new(&sender_hex, "crash-session", 0);
 
         let mut sender_sealer = EnvelopeSealer::with_start(sender_identity, 0);
-        let doc = loro::LoroDoc::new();
-        let list = doc.get_list(ENTRIES_CONTAINER);
         let entry = Entry {
             sequence: 0,
             created_at_unix_ms: 7_000,
@@ -1569,9 +1682,7 @@ mod tests {
             message: "crash-window".into(),
             metadata: None,
         };
-        list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
-        doc.commit();
-        let snapshot = doc.export(ExportMode::Snapshot).unwrap();
+        let snapshot = make_remote_snapshot(&sender_hex, "crash-session", 0, &[entry]);
         let envelope = sender_sealer.seal(
             sender_chunk.as_path(),
             PayloadKind::Snapshot,
@@ -1856,8 +1967,6 @@ mod tests {
     fn failed_persist_on_remote_update_does_not_leave_data_in_memory() {
         let harness = build_harness(ChunkConfig::default());
 
-        let remote_doc = LoroDoc::new();
-        let remote_list = remote_doc.get_list(ENTRIES_CONTAINER);
         let entry = Entry {
             sequence: 0,
             created_at_unix_ms: 5_000,
@@ -1866,11 +1975,7 @@ mod tests {
             message: "from-remote".into(),
             metadata: None,
         };
-        remote_list
-            .push(serde_json::to_string(&entry).unwrap().as_str())
-            .unwrap();
-        remote_doc.commit();
-        let remote_snapshot = remote_doc.export(ExportMode::Snapshot).unwrap();
+        let remote_snapshot = make_remote_snapshot("remote-node", "remote-session", 0, &[entry]);
 
         let remote_chunk = ChunkId::new("remote-node", "remote-session", 0);
 
@@ -1954,8 +2059,6 @@ mod tests {
         let sender_hex = sender_identity.node_id();
         let sender_chunk = ChunkId::new(&sender_hex, "fail-envelope-session", 0);
 
-        let doc = loro::LoroDoc::new();
-        let list = doc.get_list(ENTRIES_CONTAINER);
         let entry = Entry {
             sequence: 0,
             created_at_unix_ms: 3_000,
@@ -1964,9 +2067,7 @@ mod tests {
             message: "envelope-fail-entry".into(),
             metadata: None,
         };
-        list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
-        doc.commit();
-        let payload = doc.export(ExportMode::Snapshot).unwrap();
+        let payload = make_remote_snapshot(&sender_hex, "fail-envelope-session", 0, &[entry]);
 
         storage.inject_accepted_envelope_failure();
         let accepted = AcceptedEnvelope {
@@ -2030,8 +2131,6 @@ mod tests {
         let sender_chunk = ChunkId::new(&sender_hex, "ordering-session", 0);
 
         let mut sender_sealer = EnvelopeSealer::with_start(sender_identity, 0);
-        let doc = loro::LoroDoc::new();
-        let list = doc.get_list(ENTRIES_CONTAINER);
         let entry = Entry {
             sequence: 0,
             created_at_unix_ms: 9_000,
@@ -2040,9 +2139,7 @@ mod tests {
             message: "ordering-entry".into(),
             metadata: None,
         };
-        list.push(serde_json::to_string(&entry).unwrap().as_str()).unwrap();
-        doc.commit();
-        let snapshot = doc.export(ExportMode::Snapshot).unwrap();
+        let snapshot = make_remote_snapshot(&sender_hex, "ordering-session", 0, &[entry]);
         let envelope = sender_sealer.seal(
             sender_chunk.as_path(),
             PayloadKind::Snapshot,
