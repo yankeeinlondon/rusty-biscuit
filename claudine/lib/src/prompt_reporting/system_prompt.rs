@@ -413,10 +413,10 @@ mod tests {
     // --- Header tests ---
 
     #[test]
-    fn header_contains_book_emoji() {
+    fn header_contains_marker_glyph() {
         let term = test_terminal();
         let header = render_system_prompt_header("appended", &term);
-        assert!(header.contains("📔"));
+        assert!(header.contains("■"));
     }
 
     #[test]
@@ -564,7 +564,7 @@ mod tests {
         // path inside the repo.
         assert_eq!(
             label,
-            format!("{NERD_FONT_REPO_GLYPH}/.claude/system-prompt.md")
+            format!("{NERD_FONT_REPO_GLYPH} /.claude/system-prompt.md")
         );
     }
 
