@@ -1563,4 +1563,203 @@ mod tests {
         );
         harness.worker.shutdown();
     }
+
+    fn make_mutated_metadata_snapshot(
+        original_snapshot: &[u8],
+        field_to_mutate: &str,
+        new_value: &str,
+    ) -> Vec<u8> {
+        let doc = LoroDoc::from_snapshot(original_snapshot).unwrap();
+        let map = doc.get_map(METADATA_CONTAINER);
+        map.insert(field_to_mutate, new_value).unwrap();
+        doc.commit();
+        doc.export(ExportMode::Snapshot).unwrap()
+    }
+
+    fn make_mutated_metadata_i64_snapshot(
+        original_snapshot: &[u8],
+        field_to_mutate: &str,
+        new_value: i64,
+    ) -> Vec<u8> {
+        let doc = LoroDoc::from_snapshot(original_snapshot).unwrap();
+        let map = doc.get_map(METADATA_CONTAINER);
+        map.insert(field_to_mutate, new_value).unwrap();
+        doc.commit();
+        doc.export(ExportMode::Snapshot).unwrap()
+    }
+
+    #[test]
+    fn metadata_owner_mutation_on_existing_chunk_rejected() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "mutate-owner-session", 0);
+        let valid_snapshot = make_valid_loro_snapshot("initial", &peer_hex, "mutate-owner-session", 0);
+
+        let first_envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            valid_snapshot.clone(),
+        );
+        let mut inbox = EnvelopeInbox::new();
+        harness.service.receive_delta(
+            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, true, &mut inbox,
+        ).expect("first accept");
+
+        let snapshots_after = baseline_snapshot_count(&harness);
+        let envelopes_after = baseline_envelope_count(&harness);
+
+        let mutated = make_mutated_metadata_snapshot(&valid_snapshot, "owner_node_id", "impostor-node");
+        let second_envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            mutated,
+        );
+        let result = harness.service.receive_delta(
+            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, true, &mut inbox,
+        );
+        assert!(result.is_err(), "mutated owner_node_id must be rejected on existing chunk");
+        assert_eq!(harness.storage.snapshot_count().expect("count"), snapshots_after);
+        assert_eq!(harness.storage.accepted_envelope_count().expect("count"), envelopes_after);
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn metadata_session_mutation_on_existing_chunk_rejected() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "mutate-session-session", 0);
+        let valid_snapshot = make_valid_loro_snapshot("initial", &peer_hex, "mutate-session-session", 0);
+
+        let first_envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            valid_snapshot.clone(),
+        );
+        let mut inbox = EnvelopeInbox::new();
+        harness.service.receive_delta(
+            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, true, &mut inbox,
+        ).expect("first accept");
+
+        let snapshots_after = baseline_snapshot_count(&harness);
+        let envelopes_after = baseline_envelope_count(&harness);
+
+        let mutated = make_mutated_metadata_snapshot(&valid_snapshot, "session_id", "different-session");
+        let second_envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            mutated,
+        );
+        let result = harness.service.receive_delta(
+            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, true, &mut inbox,
+        );
+        assert!(result.is_err(), "mutated session_id must be rejected on existing chunk");
+        assert_eq!(harness.storage.snapshot_count().expect("count"), snapshots_after);
+        assert_eq!(harness.storage.accepted_envelope_count().expect("count"), envelopes_after);
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn metadata_chunk_index_mutation_on_existing_chunk_rejected() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "mutate-idx-session", 0);
+        let valid_snapshot = make_valid_loro_snapshot("initial", &peer_hex, "mutate-idx-session", 0);
+
+        let first_envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            valid_snapshot.clone(),
+        );
+        let mut inbox = EnvelopeInbox::new();
+        harness.service.receive_delta(
+            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, true, &mut inbox,
+        ).expect("first accept");
+
+        let snapshots_after = baseline_snapshot_count(&harness);
+        let envelopes_after = baseline_envelope_count(&harness);
+
+        let mutated = make_mutated_metadata_i64_snapshot(&valid_snapshot, "chunk_index", 99);
+        let second_envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            mutated,
+        );
+        let result = harness.service.receive_delta(
+            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, true, &mut inbox,
+        );
+        assert!(result.is_err(), "mutated chunk_index must be rejected on existing chunk");
+        assert_eq!(harness.storage.snapshot_count().expect("count"), snapshots_after);
+        assert_eq!(harness.storage.accepted_envelope_count().expect("count"), envelopes_after);
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn metadata_created_at_mutation_on_existing_chunk_rejected() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "mutate-ts-session", 0);
+        let valid_snapshot = make_valid_loro_snapshot("initial", &peer_hex, "mutate-ts-session", 0);
+
+        let first_envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            valid_snapshot.clone(),
+        );
+        let mut inbox = EnvelopeInbox::new();
+        harness.service.receive_delta(
+            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, true, &mut inbox,
+        ).expect("first accept");
+
+        let snapshots_after = baseline_snapshot_count(&harness);
+        let envelopes_after = baseline_envelope_count(&harness);
+
+        let mutated = make_mutated_metadata_i64_snapshot(&valid_snapshot, "created_at_unix_ms", 99_999);
+        let second_envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            mutated,
+        );
+        let result = harness.service.receive_delta(
+            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, true, &mut inbox,
+        );
+        assert!(result.is_err(), "mutated created_at_unix_ms must be rejected on existing chunk");
+        assert_eq!(harness.storage.snapshot_count().expect("count"), snapshots_after);
+        assert_eq!(harness.storage.accepted_envelope_count().expect("count"), envelopes_after);
+        harness.worker.shutdown();
+    }
+
+    #[test]
+    fn metadata_previous_chunk_mutation_on_existing_chunk_rejected() {
+        let mut harness = build_harness();
+        let peer_hex = harness.peer_identity.node_id();
+        let chunk = ChunkId::new(&peer_hex, "mutate-prev-session", 0);
+        let valid_snapshot = make_valid_loro_snapshot("initial", &peer_hex, "mutate-prev-session", 0);
+
+        let first_envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            valid_snapshot.clone(),
+        );
+        let mut inbox = EnvelopeInbox::new();
+        harness.service.receive_delta(
+            &peer_hex, &chunk, &chunk.as_path(), &first_envelope, true, &mut inbox,
+        ).expect("first accept");
+
+        let snapshots_after = baseline_snapshot_count(&harness);
+        let envelopes_after = baseline_envelope_count(&harness);
+
+        let mutated = make_mutated_metadata_snapshot(&valid_snapshot, "previous_chunk_id", "bogus-chunk");
+        let second_envelope = harness.peer_sealer.seal(
+            chunk.as_path(),
+            PayloadKind::Snapshot,
+            mutated,
+        );
+        let result = harness.service.receive_delta(
+            &peer_hex, &chunk, &chunk.as_path(), &second_envelope, true, &mut inbox,
+        );
+        assert!(result.is_err(), "injected previous_chunk_id must be rejected on existing chunk");
+        assert_eq!(harness.storage.snapshot_count().expect("count"), snapshots_after);
+        assert_eq!(harness.storage.accepted_envelope_count().expect("count"), envelopes_after);
+        harness.worker.shutdown();
+    }
 }

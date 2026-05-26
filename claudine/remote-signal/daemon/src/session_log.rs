@@ -655,6 +655,7 @@ impl SessionLogManager {
             let after = staged_doc.oplog_vv();
             let advanced = before != after;
 
+            validate_metadata_unchanged(&staged_doc, &state.metadata)?;
             validate_remote_entries(&staged_doc, state.entry_count)?;
 
             let list = staged_doc.get_list(ENTRIES_CONTAINER);
@@ -1051,6 +1052,81 @@ fn validate_and_extract_metadata(
         created_at_unix_ms: created_at,
         previous_chunk_id,
     })
+}
+
+fn validate_metadata_unchanged(
+    doc: &LoroDoc,
+    expected: &ChunkMetadata,
+) -> Result<(), SessionLogError> {
+    let owner = read_map_string(doc, "owner_node_id")?;
+    if owner != expected.owner_node_id {
+        return Err(SessionLogError::SchemaValidation {
+            reason: format!(
+                "metadata owner_node_id {owner:?} mutated from {:?}",
+                expected.owner_node_id
+            ),
+        });
+    }
+
+    let session_id = read_map_string(doc, "session_id")?;
+    if session_id != expected.session_id {
+        return Err(SessionLogError::SchemaValidation {
+            reason: format!(
+                "metadata session_id {session_id:?} mutated from {:?}",
+                expected.session_id
+            ),
+        });
+    }
+
+    let chunk_index = read_map_i64(doc, "chunk_index")?;
+    if chunk_index < 0 || chunk_index as u64 != expected.chunk_index {
+        return Err(SessionLogError::SchemaValidation {
+            reason: format!(
+                "metadata chunk_index {chunk_index} mutated from {}",
+                expected.chunk_index
+            ),
+        });
+    }
+
+    let created_at = read_map_i64(doc, "created_at_unix_ms")?;
+    if created_at != expected.created_at_unix_ms {
+        return Err(SessionLogError::SchemaValidation {
+            reason: format!(
+                "metadata created_at_unix_ms {created_at} mutated from {}",
+                expected.created_at_unix_ms
+            ),
+        });
+    }
+
+    match &expected.previous_chunk_id {
+        Some(expected_prev) => {
+            let prev = read_map_string(doc, "previous_chunk_id")?;
+            if prev != *expected_prev {
+                return Err(SessionLogError::SchemaValidation {
+                    reason: format!(
+                        "metadata previous_chunk_id {prev:?} mutated from {expected_prev:?}"
+                    ),
+                });
+            }
+        }
+        None => {
+            use loro::ValueOrContainer;
+            let map = doc.get_map(METADATA_CONTAINER);
+            if let Some(voc) = map.get("previous_chunk_id") {
+                if let ValueOrContainer::Value(loro::LoroValue::String(s)) = voc {
+                    if !s.is_empty() {
+                        return Err(SessionLogError::SchemaValidation {
+                            reason: format!(
+                                "metadata previous_chunk_id {s:?} mutated from None"
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_remote_entries(
