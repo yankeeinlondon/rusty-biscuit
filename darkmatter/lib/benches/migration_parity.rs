@@ -124,18 +124,92 @@ fn small_prose() -> String {
         .to_string()
 }
 
-/// A large prose document — several hundred ordinary paragraphs with light
-/// inline emphasis. Stresses the parser and the fold's container
-/// bookkeeping without dominating on any one construct.
+/// A large kitchen-sink prose document — a synthetic README that exercises
+/// most CommonMark + darkmatter constructs (headings, paragraphs, inline
+/// emphasis / strong / code, links, images, ordered + unordered lists,
+/// blockquotes, fenced code blocks, tables, and horizontal rules) without
+/// any single construct dominating the workload. Anchors the
+/// representative-workload end of the corpus, complementing the focused
+/// stress fixtures (`large_code_block`, `large_table`, etc.) that isolate
+/// one construct each.
+///
+/// Per `../../../renderable/features/2026-05-21-isolated-perf/spec.md`, the
+/// existing fixtures answered "which feature regressed?" well but did not
+/// give the parity ledger a typical-document anchor. This fixture closes
+/// that gap.
 fn large_prose() -> String {
-    let mut out = String::from("# Large prose\n\n");
-    for paragraph in 0..400 {
+    const SECTIONS: usize = 10;
+    let mut out = String::from(
+        "# Large prose\n\n\
+         This document is a synthetic README built to exercise most rendering \
+         features in a single fixture. It mixes *emphasis*, **strong**, \
+         `inline code`, [links](https://example.com/intro), and \
+         ![inline images](https://cdn.example.com/img/intro.png) so the \
+         inline dispatcher stays warm across the whole pass.\n\n",
+    );
+    for section in 0..SECTIONS {
+        out.push_str(&format!("## Section {section}\n\n"));
         out.push_str(&format!(
-            "Paragraph {paragraph} carries a sentence of *plain* prose with **bold** \
-             accents and the occasional `inline code` span to keep the inline \
-             dispatcher exercised. A second sentence closes paragraph {paragraph}.\n\n"
+            "Section {section} opens with a paragraph carrying *emphasis*, \
+             **strong** accents, `inline code`, a \
+             [link to section {section}](https://example.com/section/{section} \"Section {section}\"), \
+             and an inline ![image {section}](https://cdn.example.com/img/sec{section}.png).\n\n"
+        ));
+        if section % 2 == 0 {
+            for item in 0..4 {
+                out.push_str(&format!(
+                    "- Unordered item {item} for section {section} with *em* and `code`\n"
+                ));
+            }
+            out.push('\n');
+        } else {
+            for item in 1..=4 {
+                out.push_str(&format!(
+                    "{item}. Ordered item {item} for section {section} with **strong** and `code`\n"
+                ));
+            }
+            out.push('\n');
+        }
+        match section % 4 {
+            0 => {
+                out.push_str(&format!(
+                    "> Blockquote for section {section}. A short cited line with *emphasis* \
+                     and a [reference](https://example.com/quote/{section}).\n\n"
+                ));
+            }
+            1 => {
+                out.push_str("```rust\n");
+                out.push_str(&format!(
+                    "fn section_{section}() -> &'static str {{\n    \"section {section} sample\"\n}}\n"
+                ));
+                out.push_str("```\n\n");
+            }
+            2 => {
+                out.push_str("| Key | Value | Notes |\n");
+                out.push_str("| --- | --- | --- |\n");
+                out.push_str(&format!(
+                    "| section | {section} | introduces the row |\n\
+                     | count | {} | derived |\n\
+                     | active | true | flag |\n\n",
+                    section * 3
+                ));
+            }
+            _ => {
+                out.push_str("---\n\n");
+            }
+        }
+        out.push_str(&format!(
+            "Section {section} closes with a wrap-up paragraph that summarizes \
+             the preceding constructs and keeps paragraph bookkeeping \
+             representative of a real document.\n\n"
         ));
     }
+    out.push_str(
+        "## Conclusion\n\n\
+         The trailing section closes the synthetic README with a final \
+         paragraph so the document ends on prose rather than a block \
+         construct.\n",
+    );
     out
 }
 
