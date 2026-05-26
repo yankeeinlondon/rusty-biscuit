@@ -45,6 +45,27 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
 packages_during_phase_3:
   - claudine
+source_files_during_phase_4:
+  - claudine/lib/src/actions/bash_executor.rs
+  - claudine/lib/src/composition/lifecycle.rs
+  - claudine/lib/src/composition/loop_actions.rs
+  - claudine/lib/src/dispatch/expression.rs
+  - claudine/lib/src/dispatch/mod.rs
+  - claudine/lib/src/harness/model.rs
+  - claudine/lib/src/harness/timeout.rs
+  - claudine/lib/src/mcp/catalog.rs
+  - claudine/lib/src/mcp/state.rs
+  - claudine/lib/src/permissions/engine.rs
+  - claudine/lib/src/permissions/native.rs
+  - claudine/lib/src/permissions/query.rs
+  - claudine/lib/src/provider/path_template.rs
+  - claudine/lib/src/reporting/mod.rs
+  - claudine/lib/src/stream/semantic.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+packages_during_phase_4:
+  - claudine
 ---
 
 # Plan: Comment Quality Rubric and Cleanup
@@ -104,14 +125,23 @@ Perform the first pass of manual cleanup on modules identified as having high co
 
 Complete the cleanup of the library crate.
 
-- [ ] **Task 4.1: Sweep Remaining `claudine/lib/src/`**
-    - Review all other `.rs` files in module order.
-    - Apply rubric anti-patterns and positive criteria.
-- [ ] **Task 4.2: Add `#[allow(missing_docs)]` where necessary**
-    - Apply to impl blocks when redundant accessor docs are removed and clippy requires them.
-- [ ] **Task 4.3: Verify Library Build and Docs**
-    - Run `cargo test -p claudine`.
-    - Run `cargo doc -p claudine` and check for intra-doc link warnings.
+- [x] **Task 4.1: Sweep Remaining `claudine/lib/src/`**
+    - Reviewed every finding from `bash scripts/check-comments.sh claudine/lib/src/`.
+    - Removed 16 redundant accessor docs across `composition/`, `dispatch/`,
+      `harness/`, `mcp/`, `permissions/`, `reporting/`, and `stream/`.
+    - Trimmed 3 long docblocks in `actions/bash_executor.rs`,
+      `harness/timeout.rs`, and `provider/path_template.rs`, keeping the
+      contract / hidden-coupling content and dropping format-narrating
+      examples.
+- [x] **Task 4.2: Add `#[allow(missing_docs)]` where necessary**
+    - Not required — no `missing_docs` lint is enabled on the `claudine`
+      library crate, so removing redundant accessor docs needs no allow.
+- [x] **Task 4.3: Verify Library Build and Docs**
+    - `cargo test -p claudine --lib` → 2302 passed.
+    - `just lint` (claudine) → clean for both `claudine` and `claudine-cli`.
+    - `cargo doc -p claudine --no-deps` warning count unchanged (21 → 21);
+      none of the new warnings were introduced by this phase (verified by
+      stashing and re-running).
 
 ## Phase 5: Claudine CLI Cleanup
 
