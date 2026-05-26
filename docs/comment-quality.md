@@ -17,7 +17,8 @@ them, and which patterns to avoid.
 Prose that restates the implementation step-by-step. The code already
 says this; the prose drifts when the implementation changes.
 
-**Before** (sketch, generalized from `claudine/lib/src/stream/reporting.rs`):
+**Before** (historical state of
+`claudine/lib/src/stream/reporting.rs::summary_to_event_meta`, pre-cleanup):
 
 ```rust
 /// Convert a `StreamExecutionSummary` into an `EventMeta` suitable for
@@ -32,11 +33,11 @@ says this; the prose drifts when the implementation changes.
 pub fn summary_to_event_meta(...) -> EventMeta { ... }
 ```
 
-**After**:
+**After** (current state of the same file — verified clean):
 
 ```rust
 /// Convert a `StreamExecutionSummary` into a synthetic `SessionEnd`
-/// `EventMeta` for JSONL logging.
+/// [`EventMeta`] for JSONL logging.
 pub fn summary_to_event_meta(...) -> EventMeta { ... }
 ```
 
@@ -242,7 +243,10 @@ A docblock example that needs ten or more lines of fixture construction
 to make one assertion becomes its own maintenance burden. If the setup
 is non-trivial, link to a real test instead.
 
-**Before** (sketch):
+No current offender exists in `claudine/` — the cleanup pre-empted any
+heavy-setup doc examples. The shape to avoid (illustrative):
+
+**Before** (illustrative):
 
 ```rust
 /// ## Examples
@@ -250,7 +254,6 @@ is non-trivial, link to a real test instead.
 /// ```
 /// use claudine::config::ClaudineConfig;
 /// use claudine::config::merge::merge_configs;
-/// use std::collections::HashMap;
 ///
 /// let mut base = ClaudineConfig::default();
 /// base.events.insert(/* ...12 lines of setup... */);
@@ -264,15 +267,20 @@ is non-trivial, link to a real test instead.
 pub fn merge_configs(...) -> ClaudineConfig { ... }
 ```
 
-**After**:
+**After** (illustrative):
 
 ```rust
 /// Merge an overlay config into a base config.
 ///
-/// See [`claudine/lib/tests/merge_tests.rs`] for full overlay-precedence
-/// examples.
+/// See the `merge_*` tests in `claudine/lib/src/config/merge.rs` for
+/// overlay-precedence behavior.
 pub fn merge_configs(...) -> ClaudineConfig { ... }
 ```
+
+For a real example of the right shape, see
+`claudine/lib/src/config/merge.rs::merge_repo_override` — overlay
+precedence is exercised by adjacent `#[cfg(test)]` tests, not a docblock
+example.
 
 Reserve doc examples for APIs where the example *teaches the type* in a
 few short lines — those genuinely help. Heavy-setup examples don't.
@@ -469,6 +477,47 @@ produces a maintenance treadmill of broken intra-doc links.
 
 When a topic doc doesn't exist yet, leave the link out. A reviewer's
 judgement is the safety net here, not a heuristic.
+
+## Applying the rubric in a cleanup pass
+
+The first cleanup pass (the `2026-05-25-comment-quality` feature) needed
+five review cycles. Most of the iterations would have been avoided by
+applying this checklist before requesting review:
+
+- **Comment-only commits must be filterable as such.** Run a
+  content-only diff (e.g. `git diff -G '^\s*(///|//!|//)'`) on the
+  commit; anything outside `///`/`//!`/`//` lines is not a comment
+  change and belongs in a separate commit. Rendering tweaks, format
+  strings, glyph swaps, and constant changes are *behavior* — split
+  them out.
+- **Don't bundle behavior changes with comment cleanup.** Even when the
+  same file is being touched, a comment-cleanup commit must not change
+  what the program does. The two-PR sequence is easier to review than
+  one combined diff.
+- **Every file path cited in this doc must be a verified "After" by
+  feature completion.** Citing a file in the rubric is a public
+  commitment that the file passes the rubric. Before declaring the
+  cleanup complete, re-read every cited file against every cited
+  anti-pattern.
+- **The heuristic script (`scripts/check-comments.sh`) must exit clean
+  against its own target scope before requesting review.** A non-empty
+  baseline either means the scope is not actually cleaned, or each
+  remaining finding must be documented in the spec as an accepted
+  exception.
+- **Heuristic tools need fixture tests covering the language constructs
+  they claim to support.** Spot checks against the current tree prove
+  only that the current tree is clean; they don't prove the heuristic
+  catches what it's supposed to catch. Cover multi-line signatures,
+  single-line bodies, and the four flagged categories with fixtures
+  before trusting the script as review tooling.
+- **Whole-codebase acceptance criteria must be phrased as deltas.**
+  Criteria like "`cargo doc` produces no broken intra-doc link
+  warnings" are unsatisfiable against a codebase with pre-existing
+  warnings. Phrase as "no new warnings introduced," quantify against a
+  recorded baseline, or scope to the files the feature touches.
+
+The rubric, not the checklist, is the policy. The checklist is how the
+policy gets applied without the iteration cost the first time around.
 
 ## When in doubt
 
