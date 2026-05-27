@@ -30,7 +30,8 @@ mod types;
 
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
-    CompositionError, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MissingProperty,
+    CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
+    InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MissingProperty,
     SequenceMissingPropertiesStep, SequenceSelectionFailure, TextFormat,
 };
 pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
@@ -54,8 +55,9 @@ pub use prepare::{
 };
 pub use resolve::{resolve_composition_source, validate_file_permissions};
 pub use schema_validation::{
-    InteractiveSchemaOptions, PropertyState, PropertyStatus, SchemaStatusReport,
-    build_schema_status_report, prepare_direct_with_schema, prepare_inline_with_schema,
+    InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
+    SchemaStatusReport, build_schema_status_report, drop_invalid_optionals,
+    pre_validate_schema, prepare_direct_with_schema, prepare_inline_with_schema,
 };
 pub use select::{
     build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,

@@ -558,6 +558,75 @@ impl TextFormat {
     }
 }
 
+/// Pipeline stage where a [`DroppedOptional`] was elided.
+///
+/// Schema validation runs in three places. Each stage surfaces dropped
+/// optionals so the CLI can attribute the warning to its source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DroppedOptionalStage {
+    /// Dropped during pre-flight pre-validation against the raw
+    /// frontmatter + setter overrides.
+    PreValidation,
+    /// Dropped during the prepare-time retry against the post-interpolation
+    /// effective frontmatter (Darkmatter compose stage).
+    Composition,
+    /// Dropped during the post-shell-expansion re-validation against the
+    /// final effective frontmatter.
+    PostShellExpansion,
+}
+
+impl DroppedOptionalStage {
+    /// Short human-readable label used in CLI warnings.
+    pub fn label(self) -> &'static str {
+        match self {
+            DroppedOptionalStage::PreValidation => "pre-validation",
+            DroppedOptionalStage::Composition => "composition",
+            DroppedOptionalStage::PostShellExpansion => "post-shell expansion",
+        }
+    }
+}
+
+/// A schema-optional frontmatter property whose value failed validation
+/// and was elided from the run.
+///
+/// Carries enough metadata for the CLI to render an actionable warning
+/// to stderr so users notice when their supplied value silently dropped
+/// out of the prompt context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DroppedOptional {
+    /// Property name as declared in the schema.
+    pub property: String,
+    /// Source of the invalid value: file frontmatter, setter override,
+    /// or composed effective frontmatter.
+    pub source: DroppedOptionalSource,
+    /// Pipeline stage where the property was dropped.
+    pub stage: DroppedOptionalStage,
+    /// Human-readable reason (the underlying validator message).
+    pub reason: String,
+}
+
+/// Where the invalid value originated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DroppedOptionalSource {
+    /// File-authored frontmatter value.
+    Frontmatter,
+    /// CLI `key=value` setter or `--set` JSON override.
+    Override,
+    /// Composed effective frontmatter (post template / shell expansion).
+    Composed,
+}
+
+impl DroppedOptionalSource {
+    /// Short human-readable label used in CLI warnings.
+    pub fn label(self) -> &'static str {
+        match self {
+            DroppedOptionalSource::Frontmatter => "frontmatter",
+            DroppedOptionalSource::Override => "override",
+            DroppedOptionalSource::Composed => "composed",
+        }
+    }
+}
+
 fn format_missing_names(missing: &[MissingProperty]) -> String {
     missing
         .iter()

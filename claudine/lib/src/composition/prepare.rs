@@ -126,6 +126,7 @@ pub fn prepare_direct(
         closure: CompositionClosurePlan::Direct,
         lifecycle,
         compose_perf: report.perf,
+        dropped_optionals: Vec::new(),
     })
 }
 
@@ -217,6 +218,7 @@ pub fn prepare_inline(
         }),
         lifecycle,
         compose_perf: report.perf,
+        dropped_optionals: Vec::new(),
     })
 }
 
