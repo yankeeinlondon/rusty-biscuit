@@ -3,17 +3,28 @@ $schema:
     - review: string(required)
       spec: string
       iteration: number
+      has_plan: bool
+      has_spec: bool
+      has_review: bool
+    - spec: string(required)
+      has_plan: bool
+      has_spec: bool
+      has_review: bool
     - plan: string(required)
       spec: string
       iteration: number
       has_plan: bool
       has_spec: bool
+      has_review: bool
 name: Implement Review Suggestions
 description: |-
     Implements either:
 
     1. all the recommendations/suggestions produced in a review (pass in `review=...`)
     2. all the phases of a plan (pass in `plan=...`)
+    3. if passed just a specification, it will:
+        - implement if simple
+        - create a plan for the implementation of the plan
 iteration: 1
 area: "{{ ctx.current_package ? ctx.current_package : ctx.current_package_area }}"
 has_spec: "spec ? true : false"
@@ -28,6 +39,15 @@ review_file: "$({{has_review}} ? basename '{{spec}}'  : '' )"
 spec_path: "@{{area}}/{{dir}}/{{spec_file}}"
 plan_file: "@{{area}}/{{dir}}/{{plan_file}}"
 review_path: "@{{area}}/{{dir}}/{{review_file}}"
+
+init: 
+    stack:
+        - when: has_plan
+          action: 
+            proxy: prompts/implement-plan.md
+            phase: phase
+            total_phases: total_phases
+            plan: plan
 ---
 ::block when="review"
 ## Context
@@ -73,7 +93,7 @@ The review was run
 
 ::end-block
 ::block when="!has_review"
-The specification we will be implementing is: {{spec_path}}.
+The functionality we will be implementing is defined by the specification file: {{spec_path}}.
 
 - if the specification has complexity to it that would benefit from a high confidence, multi-phase plan then:
     - create a high confidence plan and save it to "@{{area}}/{{dir}}/plan-${iteration}.md"
