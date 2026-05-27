@@ -150,6 +150,16 @@ pub(crate) fn get_local_branches(
 }
 
 /// Gets tracking status (ahead/behind) for each remote.
+///
+/// `ahead` is push-relevant: it counts commits reachable from the local
+/// branch that are not reachable from **any** `refs/remotes/<remote>/*`
+/// ref. This matches what `git push` would actually transmit, so a
+/// merge-forward from `origin/main` into a feature branch is not
+/// double-counted when `origin/<branch>` happens to be stale.
+///
+/// `behind` is the standard graph count: commits reachable from
+/// `refs/remotes/<remote>/<branch>` that the local branch does not yet
+/// have.
 pub(crate) fn get_tracking_status(
     repo: &Repository,
     current_branch: Option<&str>,
@@ -168,27 +178,74 @@ pub(crate) fn get_tracking_status(
         return tracking;
     };
 
-    // Check each remote for a tracking branch
-    if let Ok(remotes) = repo.remotes() {
-        for remote_name in remotes.iter().flatten() {
-            // Try to find the remote tracking branch (e.g., origin/main)
-            let remote_branch_name = format!("{}/{}", remote_name, branch_name);
-            if let Ok(remote_ref) =
-                repo.find_reference(&format!("refs/remotes/{}", remote_branch_name))
-                && let Ok(remote_commit) = remote_ref.peel_to_commit()
-                && let Ok((ahead, behind)) =
-                    repo.graph_ahead_behind(local_commit.id(), remote_commit.id())
-            {
-                tracking.push(RemoteTrackingStatus {
-                    remote: remote_name.to_string(),
-                    ahead,
-                    behind,
-                });
+    let Ok(remotes) = repo.remotes() else {
+        return tracking;
+    };
+
+    for remote_name in remotes.iter().flatten() {
+        let remote_branch_name = format!("{}/{}", remote_name, branch_name);
+        let Ok(remote_ref) =
+            repo.find_reference(&format!("refs/remotes/{}", remote_branch_name))
+        else {
+            continue;
+        };
+        let Ok(remote_commit) = remote_ref.peel_to_commit() else {
+            continue;
+        };
+
+        let behind = match repo.graph_ahead_behind(local_commit.id(), remote_commit.id()) {
+            Ok((_, b)) => b,
+            Err(e) => {
+                debug!(remote = remote_name, error = %e, "could not compute behind count");
+                continue;
             }
-        }
+        };
+
+        let ahead = match push_relevant_ahead(repo, local_commit.id(), remote_name) {
+            Ok(n) => n,
+            Err(e) => {
+                debug!(remote = remote_name, error = %e, "could not compute push-relevant ahead");
+                continue;
+            }
+        };
+
+        tracking.push(RemoteTrackingStatus {
+            remote: remote_name.to_string(),
+            ahead,
+            behind,
+        });
     }
 
     tracking
+}
+
+/// Count commits reachable from `local` that are not reachable from any
+/// `refs/remotes/<remote>/*` ref.
+///
+/// Mirrors what `git push <remote>` would have to transmit: commits the
+/// remote does not already have on some branch. Avoids inflating the
+/// count when the local branch has merged-forward commits that already
+/// exist on `origin/main` (or other remote branches), even if
+/// `origin/<branch>` itself is stale.
+fn push_relevant_ahead(
+    repo: &Repository,
+    local: git2::Oid,
+    remote_name: &str,
+) -> Result<usize, git2::Error> {
+    let mut walk = repo.revwalk()?;
+    walk.push(local)?;
+
+    let glob = format!("refs/remotes/{}/*", remote_name);
+    let refs = repo.references_glob(&glob)?;
+    for r in refs.flatten() {
+        // `target()` returns None for symbolic refs (e.g. refs/remotes/origin/HEAD);
+        // the underlying concrete ref is iterated separately, so skipping is safe.
+        if let Some(oid) = r.target() {
+            let _ = walk.hide(oid);
+        }
+    }
+
+    Ok(walk.count())
 }
 
 /// Retrieves all configured remotes with their URLs and hosting providers.
