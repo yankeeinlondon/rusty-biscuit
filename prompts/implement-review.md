@@ -5,12 +5,18 @@ $schema:
     - review: string(required)
       iteration: number
 name: Implement Review Suggestions
-description: Implements all the recommendations/suggestions produced in a review. Provide review path and/or iteration number (if not 1) and optionally the spec path if this is a review of a specification.
+description: |-
+    Implements all the recommendations/suggestions produced in a review. Provide either:
+
+    1. a review path and optionally an iteration number (if not 1) 
+    2. a spec path and optionally an iteration number (if not 1)
 iteration: 1
 area: "{{ ctx.current_package ? ctx.current_package : ctx.current_package_area }}"
-dir: "$(dirname '{{review || spec}}')"
-review_path: "{{ctx.repo_root}}/{{area}}/{{review ? review : '{{dir}}/review-{{iteration}}' }}"
-spec_path: "{{ctx.repo_root}}/{{area}}/{{spec}}"
+target: "{{ review || spec }}"
+file: "$(basename '{{target}}')"
+dir: "$(dirname '{{target}}')"
+review_path: "@{{area}}/{{dir}}/review-{{iteration}}.md"
+spec_path: "@{{area}}/{{dir}}/{{file}}"
 ---
 ::block when="spec"
 ## Context
@@ -18,27 +24,26 @@ spec_path: "{{ctx.repo_root}}/{{area}}/{{spec}}"
 - Use the '{{area}}' agent skill when reviewing
 - This review is focused on the '{{area}}' package area which has the following packages:
 
-    ::shell sniff repo packages
+    ::shell sniff repo packages --package-area "{{ctx.current_package_area}}" --md
 
-You will review the implementation's fidelity to the specification file:
+You will review the **implementation**'s fidelity to the specification file:
 
 - {{spec_path}}
 
-Your review suggestions should be written to:
+Your review will be written to:
 
 - {{review_path}}
 
 ::block when="iteration == 1"
-This is the first review of this specification document since the implementation.
+This is the first review of this specification document since the original implementation.
 ::end-block
 ::block when="iteration != 1"
-A prior review of the implementation for this specification did NOT deem the implementation
+A prior review of the _implementation_ of this specification did NOT deem the implementation
 to be "production ready" but we have now implemented all of the suggestions from that review
 and your task will be to again compare the implementation of the specification relative to
 the written intention of the specification.
 
-> Note: you should _also_ validate that all of the "complaints/suggestions" of the prior review have been fully addressed. You are current performing review #{{iteration}} so you should be looking for review in the 
-{{dir}} directory with a name similar to "review-{{decrement(iteration)}}.md"
+> Note: you should _also_ validate that all of the "complaints/suggestions" of the prior review have been fully addressed. You are current performing review #{{iteration}} so you should be looking for review in the @{{area}}/{{dir}} directory with a name similar to "review-{{iteration - 1}}.md"
 ::end-block
 
 ## Task
@@ -71,15 +76,6 @@ banned from this review unless you can pair each user-facing requirement with a 
   the only level that can verify "what bytes does the terminal actually emit when the user presses
   bare Ctrl?" Required for any UX requirement of the form "when the user holds/presses key X, Y
   happens." Currently env-gated behind `RUN_LEVEL3=1` because focus stability is platform-specific.
-
-When reviewing, for each requirement that asserts user-observable behaviour (modifier-press
-visibility, hotkey activation, keybinding behaviour, paste / IME / mouse, scroll on overflow, etc.),
-classify the verification level present and call out any mismatch:
-
-- "Spec requires modifier-press to surface badges" + only Level-1 tests = **gap, not "ready"**.
-- "Spec requires hotkey chord activation" + Level-2 in tmux but no Level-1 chord-byte test = fine.
-- "Spec requires `^X` badges with specific colors" + Level-1 unit tests on style only = needs
-  Level-2 capture verifying real-terminal rendering.
 
 A feature MAY be marked production-ready only when each user-observable requirement has at minimum
 the level of verification appropriate for it. Reviewers MUST list any requirement whose strongest
@@ -114,7 +110,7 @@ The following review has just completed:
 A prior review did NOT deem the implementation to be "production ready" but we have now implemented all of the suggestions from that review and your task will be to again compare the implementation of the specification relative to the written intention of the specification.
 
 > Note: you should also validate that all of the "complaints/suggestions" of the _prior_ review have now been fully addressed. You are current performing review #{{iteration}} so you should be looking for review in the 
-{{dir}} directory with a name similar to "review-{{decrement(iteration)}}.md"
+{{dir}} directory with a name similar to "review-{ {{iteration}} - 1 }.md"
 ::end-block
 
 Your task is to implement all the suggestions in that review.
