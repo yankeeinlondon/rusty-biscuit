@@ -4442,6 +4442,130 @@ Rounded: {{ round(pi) }}"#;
                 Some(&serde_json::json!("fallback"))
             );
         }
+
+        #[test]
+        fn ternary_motivating_workflow_true_branch_through_full_pipeline() {
+            // Review finding 4: exercise the motivating spec_file workflow
+            // through the full compose pipeline so frontmatter interpolation,
+            // pre-interpolation snapshot capture, and frontmatter shell
+            // expansion are all wired together. With `has_spec: true` the
+            // then-branch wins and produces the basename of the spec path.
+            let temp_dir = TempDir::new().unwrap();
+            let content = concat!(
+                "---\n",
+                "has_spec: true\n",
+                "spec: /tmp/example-spec.md\n",
+                "spec_file: \"$({{has_spec}} ? basename {{spec}} : '')\"\n",
+                "---\n",
+                "Spec: {{spec_file}}\n",
+            );
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec_file"),
+                Some(&serde_json::json!("example-spec.md"))
+            );
+            assert!(
+                composed.content().contains("Spec: example-spec.md"),
+                "Expected body to interpolate spec_file, got:\n{}",
+                composed.content()
+            );
+        }
+
+        #[test]
+        fn ternary_motivating_workflow_false_branch_through_full_pipeline() {
+            // Counterpart to the true-branch test: with `has_spec: false`
+            // the else-branch (`''`) wins, short-circuiting to an empty
+            // string without invoking the shell.
+            let temp_dir = TempDir::new().unwrap();
+            let content = concat!(
+                "---\n",
+                "has_spec: false\n",
+                "spec: /tmp/example-spec.md\n",
+                "spec_file: \"$({{has_spec}} ? basename {{spec}} : '')\"\n",
+                "---\n",
+                "Spec: {{spec_file}}\n",
+            );
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec_file"),
+                Some(&serde_json::json!(""))
+            );
+            assert!(
+                composed.content().contains("Spec: "),
+                "Expected body to render with empty spec_file, got:\n{}",
+                composed.content()
+            );
+        }
+
+        #[test]
+        fn ternary_stringified_false_condition_selects_else_branch_in_pipeline() {
+            // Review finding 2 at compose level: when an earlier frontmatter
+            // interpolation rewrites `has_spec` from a boolean into the
+            // string `"false"`, the ternary condition must still resolve
+            // to the else-branch.
+            let temp_dir = TempDir::new().unwrap();
+            let content = concat!(
+                "---\n",
+                "raw_false: false\n",
+                "has_spec: \"{{raw_false}}\"\n",
+                "spec_file: \"$({{has_spec}} ? echo present : '')\"\n",
+                "---\n",
+            );
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, _report) = md.compose_with(options).unwrap();
+            // has_spec is rendered to the string "false"; the ternary must
+            // see it as boolean-false and pick the empty branch.
+            assert_eq!(
+                composed.frontmatter().as_map().get("has_spec"),
+                Some(&serde_json::json!("false"))
+            );
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec_file"),
+                Some(&serde_json::json!(""))
+            );
+        }
     }
 
     mod infix_logic_conditions {
