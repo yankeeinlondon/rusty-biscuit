@@ -802,6 +802,10 @@ impl Commands {
                         on_error: on_error.clone(),
                     }
                 }
+                Some(RepoSubcommand::Area { no_error, on_error }) => RepoAction::Area {
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
                 Some(RepoSubcommand::DirtyPackages {
                     filter: sub_filter,
                     package,
