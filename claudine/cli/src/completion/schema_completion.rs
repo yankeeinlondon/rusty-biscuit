@@ -20,6 +20,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::YamlValue;
+use globset::{Glob, GlobSet, GlobSetBuilder};
+
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::{
@@ -86,35 +89,203 @@ fn resolve_prompt_path(file_arg: &str, ctx: &ScopeContext) -> Option<PathBuf> {
 /// set of property names already passed on the command line — those are
 /// filtered out so the user is never offered to re-set the same key.
 ///
+/// `declared_order` is the property-name sequence as authored in the prompt's
+/// raw frontmatter YAML (or an empty slice when it could not be recovered).
+/// When populated, candidates within each required/optional group are sorted
+/// to match that authored order; names absent from the list keep their
+/// `IndexMap` iteration position appended at the end of the group. This
+/// breaks the underlying [`serde_json::Map`] alphabetisation that
+/// Darkmatter's [`EffectiveSchema`] inherits when it stores nested
+/// frontmatter values.
+///
 /// Each candidate is rendered with a trailing `=` so accepting it leaves the
 /// cursor positioned to start typing the value.
 pub(crate) fn property_names(
     effective: &EffectiveSchema,
     partial: &str,
     supplied: &HashSet<String>,
+    declared_order: &[String],
 ) -> Vec<String> {
     let Some(shape) = single_shape(effective) else {
         return Vec::new();
     };
 
-    let mut required: Vec<String> = Vec::new();
-    let mut optional: Vec<String> = Vec::new();
-    for (name, def) in &shape.properties {
+    let mut required: Vec<(usize, String)> = Vec::new();
+    let mut optional: Vec<(usize, String)> = Vec::new();
+    for (iter_idx, (name, def)) in shape.properties.iter().enumerate() {
         if supplied.contains(name) {
             continue;
         }
         if !name_matches(name, partial) {
             continue;
         }
+        let rank = declaration_rank(declared_order, name, iter_idx);
         if is_required(def) {
-            required.push(format!("{name}="));
+            required.push((rank, format!("{name}=")));
         } else {
-            optional.push(format!("{name}="));
+            optional.push((rank, format!("{name}=")));
         }
     }
 
-    required.extend(optional);
+    required.sort_by_key(|(rank, _)| *rank);
+    optional.sort_by_key(|(rank, _)| *rank);
+
     required
+        .into_iter()
+        .chain(optional)
+        .map(|(_, candidate)| candidate)
+        .collect()
+}
+
+/// Sort key for a property: its index in the authored `declared_order` when
+/// present, otherwise an offset past the end of that list (preserving the
+/// underlying [`IndexMap`] iteration position so the relative order of
+/// unknown names stays deterministic).
+fn declaration_rank(declared_order: &[String], name: &str, iter_idx: usize) -> usize {
+    declared_order
+        .iter()
+        .position(|n| n == name)
+        .unwrap_or(declared_order.len() + iter_idx)
+}
+
+/// Authored property-name order for `file_arg`'s `$schema` declaration.
+///
+/// Re-parses the prompt's raw frontmatter YAML with `serde_yaml_ng` (whose
+/// `Mapping` preserves insertion order) so the original authored sequence of
+/// property names is recoverable. This is necessary because Darkmatter's
+/// [`EffectiveSchema`] stores nested frontmatter values as
+/// `serde_json::Value`, whose `Map` is alphabetised
+/// ([`serde_json::Map`] is a [`BTreeMap`] unless the `preserve_order`
+/// feature is enabled) — the declaration order is lost before
+/// `parse_yaml_schema` ever sees it.
+///
+/// Handles three `$schema` shapes:
+///
+/// - **Inline mapping** → returns the mapping's keys in authored order.
+/// - **String file reference** → loads the referenced file (YAML or JSON) and
+///   returns the property-names from its `$schema` mapping (or its root
+///   `properties` object for raw JSON Schema files).
+/// - **Sequence (root union)** → returns an empty `Vec`; root unions have no
+///   single property set so completion already declines them.
+///
+/// Returns an empty `Vec` on any failure (file missing, frontmatter not
+/// parseable, no `$schema`, unsupported shape). Callers treat the empty
+/// case as "no authored ordering available" and fall back to whatever order
+/// the [`SchemaShape::properties`] map provides.
+///
+/// [`BTreeMap`]: std::collections::BTreeMap
+pub(crate) fn declared_property_order(file_arg: &str, ctx: &ScopeContext) -> Vec<String> {
+    let Some(path) = resolve_prompt_path(file_arg, ctx) else {
+        return Vec::new();
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Some(yaml) = extract_frontmatter_yaml(&text) else {
+        return Vec::new();
+    };
+    let Ok(root) = biscuit_file::serde_yaml_ng::from_str::<YamlValue>(yaml) else {
+        return Vec::new();
+    };
+    let Some(schema_value) = root
+        .as_mapping()
+        .and_then(|m| m.get(YamlValue::String("$schema".into())))
+    else {
+        return Vec::new();
+    };
+    let base_dir = path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    schema_keys_in_order(schema_value, &base_dir)
+}
+
+/// Splits the leading `---`-delimited frontmatter block out of a Markdown
+/// document and returns its YAML body. Returns `None` when no frontmatter
+/// block is present or the block is unterminated.
+fn extract_frontmatter_yaml(text: &str) -> Option<&str> {
+    let body = text.strip_prefix("---\n")?;
+    let end = body.find("\n---\n").or_else(|| {
+        body.strip_suffix("\n---")
+            .map(|trimmed| trimmed.len())
+    })?;
+    Some(&body[..end])
+}
+
+/// Returns the property-name sequence for a `$schema` YAML value, following
+/// file references as needed. Returns an empty `Vec` for shapes that have
+/// no single ordered property set (root unions, unsupported types).
+fn schema_keys_in_order(value: &YamlValue, base_dir: &Path) -> Vec<String> {
+    match value {
+        YamlValue::Mapping(map) => map
+            .keys()
+            .filter_map(|k| k.as_str().map(str::to_string))
+            .collect(),
+        YamlValue::String(reference) => referenced_schema_keys(reference, base_dir),
+        _ => Vec::new(),
+    }
+}
+
+/// Loads a `$schema` file reference (YAML or JSON), returning the authored
+/// property-name order. Mirrors Darkmatter's disambiguation rule: YAML files
+/// whose root holds a `$schema:` mapping are SimplifiedSchema documents
+/// (the order comes from that nested mapping); everything else is a raw JSON
+/// Schema (the order comes from its top-level `properties` object).
+fn referenced_schema_keys(reference: &str, base_dir: &Path) -> Vec<String> {
+    let candidate = base_dir.join(reference);
+    let Ok(text) = std::fs::read_to_string(&candidate) else {
+        return Vec::new();
+    };
+    let lower = candidate
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase);
+    if lower.as_deref() == Some("json") {
+        return json_schema_property_keys(&text);
+    }
+    let Ok(root) = biscuit_file::serde_yaml_ng::from_str::<YamlValue>(&text) else {
+        return Vec::new();
+    };
+    if let YamlValue::Mapping(map) = &root
+        && let Some(inner) = map.get(YamlValue::String("$schema".into()))
+        && let YamlValue::Mapping(inner_map) = inner
+    {
+        return inner_map
+            .keys()
+            .filter_map(|k| k.as_str().map(str::to_string))
+            .collect();
+    }
+    yaml_root_property_keys(&root)
+}
+
+/// Property-name order for a raw JSON Schema file (whose `properties` object
+/// is the source of truth).
+fn json_schema_property_keys(text: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Vec::new();
+    };
+    value
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .map(|obj| obj.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// Property-name order for a YAML JSON-Schema-shaped root (its `properties`
+/// mapping, when present).
+fn yaml_root_property_keys(value: &YamlValue) -> Vec<String> {
+    let YamlValue::Mapping(root) = value else {
+        return Vec::new();
+    };
+    let Some(props) = root.get(YamlValue::String("properties".into())) else {
+        return Vec::new();
+    };
+    let YamlValue::Mapping(map) = props else {
+        return Vec::new();
+    };
+    map.keys()
+        .filter_map(|k| k.as_str().map(str::to_string))
+        .collect()
 }
 
 /// Value candidates for `property=<partial>` when the property is in the
@@ -236,6 +407,9 @@ fn file_candidates(
     if patterns.is_empty() {
         return Vec::new();
     }
+    let Some(matcher) = MatchGlobs::compile(patterns) else {
+        return Vec::new();
+    };
     let base: PathBuf = scopes::effective_repo_root(ctx)
         .map(Path::to_path_buf)
         .unwrap_or_else(|| ctx.cwd.clone());
@@ -260,12 +434,17 @@ fn file_candidates(
         let Some(rel_str) = rel.to_str() else {
             continue;
         };
-        let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        if !matches_any_glob(file_name, patterns) {
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(rel_str);
+        if !matcher.is_match(rel_str, file_name) {
             continue;
         }
+        // The active partial is fuzzy-matched against the basename — users
+        // typically narrow file completion by typing characters from the
+        // file name, not the leading directory path. Path-qualified globs
+        // are already enforced above by the GlobSet check against `rel_str`.
         if !active.is_empty() && !fuzzy::fuzzy_match(file_name, active) {
             continue;
         }
@@ -278,54 +457,87 @@ fn file_candidates(
     out
 }
 
-/// Match `name` against a list of `match(...)` patterns, honouring leading
-/// `!` as negation. A negated pattern matching the name eliminates it from
-/// the result set; an un-negated pattern matching the name accepts it.
+/// Compiled positive + negative globset pair for a Darkmatter
+/// `file(match(...))` constraint.
 ///
-/// Mirrors Darkmatter's `darkmatter-file` keyword semantics.
-fn matches_any_glob(name: &str, patterns: &[String]) -> bool {
-    let mut accepted = false;
-    for pat in patterns {
-        if let Some(neg) = pat.strip_prefix('!') {
-            if glob_match(neg, name) {
-                return false;
+/// Mirrors Darkmatter's `x-darkmatter-match` keyword semantics: a path is
+/// accepted iff (a) at least one positive pattern matches AND (b) no
+/// negative pattern matches. When the constraint contains only negative
+/// patterns, every non-rejected path is accepted (`positive: None`).
+///
+/// Each pattern is added to the globset twice — once with its raw shape
+/// (which may contain path separators like `src/**/*.rs`) and once as a
+/// `**/`-anchored variant so filename-only patterns like `*.png` continue
+/// to match files in subdirectories. This matches Darkmatter's
+/// multi-candidate validator: `*.md` accepts `docs/api.md` because the
+/// resolved filename `api.md` is one of the views the validator tests.
+struct MatchGlobs {
+    positive: Option<GlobSet>,
+    negative: GlobSet,
+}
+
+impl MatchGlobs {
+    fn compile(patterns: &[String]) -> Option<Self> {
+        let mut positive = GlobSetBuilder::new();
+        let mut negative = GlobSetBuilder::new();
+        let mut has_positive = false;
+        let mut has_negative = false;
+        for raw in patterns {
+            let (target, is_negative) = match raw.strip_prefix('!') {
+                Some(stripped) => (stripped, true),
+                None => (raw.as_str(), false),
+            };
+            let primary = Glob::new(target).ok()?;
+            // Anchor filename-only patterns so they match anywhere in the
+            // tree. Skip when the pattern already contains a path separator
+            // or is itself a recursive prefix.
+            let secondary = if target.contains('/') || target.starts_with("**") {
+                None
+            } else {
+                Glob::new(&format!("**/{target}")).ok()
+            };
+            if is_negative {
+                negative.add(primary);
+                if let Some(g) = secondary {
+                    negative.add(g);
+                }
+                has_negative = true;
+            } else {
+                positive.add(primary);
+                if let Some(g) = secondary {
+                    positive.add(g);
+                }
+                has_positive = true;
             }
-        } else if glob_match(pat, name) {
-            accepted = true;
         }
-    }
-    accepted
-}
-
-/// Minimal glob matcher covering `*` and `?` wildcards against a file name.
-/// Patterns are expected to be filename-only (no path separators), matching
-/// Darkmatter's `file(match='*.md')` convention.
-fn glob_match(pattern: &str, name: &str) -> bool {
-    glob_match_inner(pattern.as_bytes(), name.as_bytes())
-}
-
-fn glob_match_inner(pat: &[u8], name: &[u8]) -> bool {
-    let (mut i, mut j, mut star, mut mark) = (0usize, 0usize, None, 0usize);
-    while j < name.len() {
-        if i < pat.len() && (pat[i] == b'?' || pat[i].eq_ignore_ascii_case(&name[j])) {
-            i += 1;
-            j += 1;
-        } else if i < pat.len() && pat[i] == b'*' {
-            star = Some(i);
-            mark = j;
-            i += 1;
-        } else if let Some(s) = star {
-            i = s + 1;
-            mark += 1;
-            j = mark;
+        let positive = if has_positive {
+            Some(positive.build().ok()?)
         } else {
+            None
+        };
+        let negative = if has_negative {
+            negative.build().ok()?
+        } else {
+            GlobSetBuilder::new().build().ok()?
+        };
+        Some(Self { positive, negative })
+    }
+
+    /// Returns true when the relative path is accepted by the constraint.
+    ///
+    /// Both `rel_path` (e.g. `src/lib.rs`) and `file_name` (e.g. `lib.rs`)
+    /// are tested so that patterns can target either view. Negation wins:
+    /// a negative match against any view rejects the path even if a
+    /// positive pattern would accept it.
+    fn is_match(&self, rel_path: &str, file_name: &str) -> bool {
+        if self.negative.is_match(rel_path) || self.negative.is_match(file_name) {
             return false;
         }
+        match &self.positive {
+            Some(set) => set.is_match(rel_path) || set.is_match(file_name),
+            None => true,
+        }
     }
-    while i < pat.len() && pat[i] == b'*' {
-        i += 1;
-    }
-    i == pat.len()
 }
 
 #[cfg(test)]
@@ -364,18 +576,67 @@ mod tests {
             "  count: number\n",
             "---\nbody\n",
         ));
-        let got = property_names(&effective, "", &HashSet::new());
-        // Required properties (status, title) appear before optional
-        // properties (count, description). Within each group the order
-        // reflects the IndexMap iteration produced by Darkmatter's
-        // JSON-Schema-driven storage, which is alphabetical when the
-        // `$schema` was authored as inline YAML.
+        let got = property_names(&effective, "", &HashSet::new(), &[]);
+        // Without an authored-order hint the fall-back is required-first
+        // then optional, in `IndexMap` iteration order. The actual order
+        // within each group can vary because Darkmatter stores nested
+        // frontmatter values as `serde_json::Value` (alphabetised), so
+        // the only contract we can assert here is the group boundary.
         let pos = |needle: &str| got.iter().position(|c| c == needle).unwrap();
         assert!(pos("status=") < pos("description="));
         assert!(pos("status=") < pos("count="));
         assert!(pos("title=") < pos("description="));
         assert!(pos("title=") < pos("count="));
         assert_eq!(got.len(), 4);
+    }
+
+    #[test]
+    fn property_names_respects_declared_order_within_groups() {
+        let effective = effective_from_doc(concat!(
+            "---\n",
+            "$schema:\n",
+            "  title: 'string(required)'\n",
+            "  status: 'enum(draft, published; required)'\n",
+            "  description: string\n",
+            "  count: number\n",
+            "---\nbody\n",
+        ));
+        let declared_order = vec![
+            "title".to_string(),
+            "status".to_string(),
+            "description".to_string(),
+            "count".to_string(),
+        ];
+        let got = property_names(&effective, "", &HashSet::new(), &declared_order);
+        assert_eq!(
+            got,
+            vec![
+                "title=".to_string(),
+                "status=".to_string(),
+                "description=".to_string(),
+                "count=".to_string(),
+            ],
+            "required group must preserve `title` before `status`, optional \
+             group must preserve `description` before `count`",
+        );
+
+        // Reversing the authored order must reverse the within-group output.
+        let reversed = vec![
+            "count".to_string(),
+            "description".to_string(),
+            "status".to_string(),
+            "title".to_string(),
+        ];
+        let got = property_names(&effective, "", &HashSet::new(), &reversed);
+        assert_eq!(
+            got,
+            vec![
+                "status=".to_string(),
+                "title=".to_string(),
+                "count=".to_string(),
+                "description=".to_string(),
+            ],
+        );
     }
 
     #[test]
@@ -389,7 +650,7 @@ mod tests {
         ));
         let mut supplied = HashSet::new();
         supplied.insert("title".to_string());
-        let got = property_names(&effective, "", &supplied);
+        let got = property_names(&effective, "", &supplied, &[]);
         assert_eq!(got, vec!["description="]);
     }
 
@@ -402,8 +663,85 @@ mod tests {
             "  description: string\n",
             "---\nbody\n",
         ));
-        let got = property_names(&effective, "des", &HashSet::new());
+        let got = property_names(&effective, "des", &HashSet::new(), &[]);
         assert_eq!(got, vec!["description="]);
+    }
+
+    #[test]
+    fn declared_property_order_returns_authored_keys_for_inline_schema() {
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(
+            &tmp.path().join("prompt.md"),
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  title: 'string(required)'\n",
+                "  status: 'enum(draft, published; required)'\n",
+                "  description: string\n",
+                "  count: number\n",
+                "---\nbody\n",
+            ),
+        );
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let order = declared_property_order("prompt.md", &ctx);
+        assert_eq!(
+            order,
+            vec![
+                "title".to_string(),
+                "status".to_string(),
+                "description".to_string(),
+                "count".to_string(),
+            ],
+        );
+    }
+
+    #[test]
+    fn declared_property_order_returns_empty_for_root_union_schema() {
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(
+            &tmp.path().join("p.md"),
+            concat!(
+                "---\n",
+                "$schema:\n",
+                "  - title: 'string(required)'\n",
+                "  - name: 'string(required)'\n",
+                "---\nbody\n",
+            ),
+        );
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let order = declared_property_order("p.md", &ctx);
+        assert!(
+            order.is_empty(),
+            "root unions have no single ordered property set: {order:?}",
+        );
+    }
+
+    #[test]
+    fn declared_property_order_follows_yaml_file_reference() {
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(
+            &tmp.path().join("schema.yaml"),
+            "$schema:\n  zeta: 'string(required)'\n  alpha: number\n",
+        );
+        write(
+            &tmp.path().join("p.md"),
+            "---\n$schema: ./schema.yaml\n---\nbody\n",
+        );
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let order = declared_property_order("p.md", &ctx);
+        assert_eq!(order, vec!["zeta".to_string(), "alpha".to_string()]);
+    }
+
+    #[test]
+    fn declared_property_order_returns_empty_when_no_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        seed_repo(tmp.path());
+        write(&tmp.path().join("p.md"), "no frontmatter here\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        assert!(declared_property_order("p.md", &ctx).is_empty());
     }
 
     #[test]
@@ -552,20 +890,46 @@ mod tests {
     }
 
     #[test]
-    fn glob_match_handles_star_and_question() {
-        assert!(glob_match("*.png", "cover.png"));
-        assert!(glob_match("*.png", "PHOTO.PNG"));
-        assert!(!glob_match("*.png", "cover.jpg"));
-        assert!(glob_match("img.?", "img.a"));
-        assert!(!glob_match("img.?", "img.abc"));
-        assert!(glob_match("*", "anything.txt"));
+    fn match_globs_basename_pattern_matches_anywhere_in_tree() {
+        let matcher = MatchGlobs::compile(&["*.png".to_string()]).unwrap();
+        assert!(matcher.is_match("cover.png", "cover.png"));
+        assert!(matcher.is_match("assets/cover.png", "cover.png"));
+        assert!(matcher.is_match("a/b/c/cover.png", "cover.png"));
+        assert!(!matcher.is_match("cover.jpg", "cover.jpg"));
     }
 
     #[test]
-    fn matches_any_glob_honors_negation() {
-        let patterns = vec!["*.md".to_string(), "!_*.md".to_string()];
-        assert!(matches_any_glob("plan.md", &patterns));
-        assert!(!matches_any_glob("_draft.md", &patterns));
-        assert!(!matches_any_glob("notes.txt", &patterns));
+    fn match_globs_honors_negation_against_basename() {
+        let matcher =
+            MatchGlobs::compile(&["*.md".to_string(), "!_*.md".to_string()]).unwrap();
+        assert!(matcher.is_match("plan.md", "plan.md"));
+        assert!(matcher.is_match("docs/plan.md", "plan.md"));
+        assert!(!matcher.is_match("_draft.md", "_draft.md"));
+        assert!(!matcher.is_match("docs/_draft.md", "_draft.md"));
+        assert!(!matcher.is_match("notes.txt", "notes.txt"));
+    }
+
+    #[test]
+    fn match_globs_path_qualified_glob_matches_relative_path() {
+        let matcher = MatchGlobs::compile(&["src/**/*.rs".to_string()]).unwrap();
+        assert!(matcher.is_match("src/lib.rs", "lib.rs"));
+        assert!(matcher.is_match("src/inner/mod.rs", "mod.rs"));
+        // Files outside `src/` must NOT match a path-qualified pattern,
+        // even when the basename would match `*.rs`.
+        assert!(!matcher.is_match("tests/integration.rs", "integration.rs"));
+        assert!(!matcher.is_match("benches/perf.rs", "perf.rs"));
+    }
+
+    #[test]
+    fn match_globs_path_qualified_negation_filters_subset() {
+        let matcher = MatchGlobs::compile(&[
+            "src/**/*.rs".to_string(),
+            "!src/**/test_*.rs".to_string(),
+        ])
+        .unwrap();
+        assert!(matcher.is_match("src/lib.rs", "lib.rs"));
+        assert!(matcher.is_match("src/inner/mod.rs", "mod.rs"));
+        assert!(!matcher.is_match("src/test_helpers.rs", "test_helpers.rs"));
+        assert!(!matcher.is_match("src/inner/test_util.rs", "test_util.rs"));
     }
 }

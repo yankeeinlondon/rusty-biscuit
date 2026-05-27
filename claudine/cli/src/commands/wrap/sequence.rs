@@ -20,7 +20,8 @@ use tracing::{debug, info_span};
 
 use crate::commands::compose::SharedComposeArgs;
 use crate::commands::schema_interactive::{
-    collect_missing_values, render_status_report, resolve_interactive_options,
+    collect_missing_values, emit_dropped_optional_warnings, render_status_report,
+    resolve_interactive_options,
 };
 use crate::log;
 
@@ -692,43 +693,51 @@ fn run_phase_1c_with_schema(
             Phase1cAttempt::Success(contexts, approved) => {
                 return Ok((contexts, approved));
             }
-            Phase1cAttempt::Missing(failures) => {
+            Phase1cAttempt::Missing(contexts) => {
                 if attempt > 0 {
                     // We already collected values once. If we're still
                     // seeing missing values, surface them.
-                    return Err(CompositionError::SequenceMissingProperties {
-                        failure_count: failures.len(),
-                        failures,
-                    }
-                    .into());
+                    return Err(into_sequence_missing(contexts).into());
                 }
+                // Honor `interactive.allowed()` first so non-TTY runs
+                // produce the aggregated per-step report — matching the
+                // direct `compose` path in
+                // `pre_validate_with_interactive_collection`. Promoting
+                // unsupported shapes ahead of this check would force
+                // every non-TTY sequence with e.g. `object(required)` to
+                // surface as `UnsupportedInteractiveSchema` instead of
+                // the actionable aggregated `MissingProperties` report.
                 let interactive = resolve_interactive_options(shared.silent);
                 if !interactive.allowed() {
-                    return Err(CompositionError::SequenceMissingProperties {
-                        failure_count: failures.len(),
-                        failures,
+                    return Err(into_sequence_missing(contexts).into());
+                }
+                // Interactive Mode is allowed: now promote the first
+                // missing property whose schema shape cannot be collected
+                // via `biscuit-tui` (raw JSON Schema, `object`, `any`,
+                // property-level union) so the user sees a targeted
+                // `UnsupportedInteractiveSchema` error rather than a
+                // generic aggregated report we can't satisfy.
+                if let Some((source_path, property, shape)) =
+                    find_first_unsupported(&failures_slice(&contexts))
+                {
+                    return Err(CompositionError::UnsupportedInteractiveSchema {
+                        source_path,
+                        property,
+                        shape,
                     }
                     .into());
                 }
-                let collected = match collect_sequence_missing_values(&failures, silent) {
+                let collected = match collect_sequence_missing_values(&contexts, silent) {
                     Ok(values) => values,
                     Err(_) => {
                         // Ctrl-C / Esc / unsupported shape — surface the
                         // aggregated error so the user sees the actionable
                         // non-TTY report.
-                        return Err(CompositionError::SequenceMissingProperties {
-                            failure_count: failures.len(),
-                            failures,
-                        }
-                        .into());
+                        return Err(into_sequence_missing(contexts).into());
                     }
                 };
                 if collected.is_empty() {
-                    return Err(CompositionError::SequenceMissingProperties {
-                        failure_count: failures.len(),
-                        failures,
-                    }
-                    .into());
+                    return Err(into_sequence_missing(contexts).into());
                 }
                 overrides = Some(merge_overrides(overrides.as_ref(), collected));
             }
@@ -739,10 +748,41 @@ fn run_phase_1c_with_schema(
     unreachable!("phase 1c attempt loop exited without resolving")
 }
 
+/// Per-step missing-properties context.
+///
+/// Pairs the typed `SequenceMissingPropertiesStep` (returned to the user
+/// as part of `CompositionError::SequenceMissingProperties`) with the
+/// post-overlay effective override map for that step. The effective
+/// overrides are needed by [`build_schema_status_report`] so the
+/// pre-prompt diagnostic reflects what the prepare pipeline will
+/// validate against — values supplied by reserved per-step overlay keys
+/// and CLI `--set` / shorthand setters must show as `Valid` (or omitted)
+/// rather than as `Missing`.
+struct StepMissingContext {
+    failure: SequenceMissingPropertiesStep,
+    effective_overrides: Option<serde_json::Value>,
+}
+
 enum Phase1cAttempt {
     Success(Vec<StepContext>, HashSet<String>),
-    Missing(Vec<SequenceMissingPropertiesStep>),
+    Missing(Vec<StepMissingContext>),
     Interrupted,
+}
+
+/// Borrow just the failure records out of a `[StepMissingContext]` slice
+/// for helpers that already operate on `&[SequenceMissingPropertiesStep]`.
+fn failures_slice(contexts: &[StepMissingContext]) -> Vec<SequenceMissingPropertiesStep> {
+    contexts.iter().map(|c| c.failure.clone()).collect()
+}
+
+/// Convert per-step contexts into the typed aggregated error variant.
+fn into_sequence_missing(contexts: Vec<StepMissingContext>) -> CompositionError {
+    let failures: Vec<SequenceMissingPropertiesStep> =
+        contexts.into_iter().map(|c| c.failure).collect();
+    CompositionError::SequenceMissingProperties {
+        failure_count: failures.len(),
+        failures,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -761,7 +801,7 @@ fn run_phase_1c_attempt(
     let total_steps = plan.steps.len();
     let mut cumulative_approved = initial_cumulative_approved;
     let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
-    let mut missing_failures: Vec<SequenceMissingPropertiesStep> = Vec::new();
+    let mut missing_contexts: Vec<StepMissingContext> = Vec::new();
 
     for step_index in 0..total_steps {
         if interrupted.load(Ordering::SeqCst) {
@@ -781,25 +821,64 @@ fn run_phase_1c_attempt(
         let slug = target.provider.as_slug().to_string();
         env_overrides.insert("AGENT".to_string(), slug.clone());
 
+        // Per-step schema pre-validation BEFORE preflight. If a step's
+        // effective frontmatter (source + overlay overrides) is missing
+        // required schema values, capture them for aggregation and
+        // continue — do NOT let Darkmatter's preflight compose pass
+        // surface a raw `SchemaValidationFailed` here, because that
+        // would short-circuit aggregation across remaining steps.
+        let (step_source, step_overrides) =
+            match composition::pre_validate_schema(source, Some(&step_set_overrides)) {
+                Ok(pre) => {
+                    emit_dropped_optional_warnings(&pre.dropped_optionals);
+                    (
+                        pre.source,
+                        pre.set_overrides
+                            .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new())),
+                    )
+                }
+                Err(CompositionError::MissingProperties {
+                    source_path,
+                    missing,
+                    frontmatter_description,
+                    pointer_paths,
+                }) => {
+                    let step = &plan.steps[step_index];
+                    missing_contexts.push(StepMissingContext {
+                        failure: SequenceMissingPropertiesStep {
+                            step: step_index + 1,
+                            step_name: step.name.clone(),
+                            source_path,
+                            missing,
+                            frontmatter_description,
+                            pointer_paths,
+                        },
+                        effective_overrides: Some(step_set_overrides.clone()),
+                    });
+                    continue;
+                }
+                Err(other) => return Err(other.into()),
+            };
+
         let compose_options = {
             let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
             for (key, value) in &env_overrides {
                 ctx.env_mut().insert(key.clone(), value.clone());
             }
             let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
-                .with_source_file(&source.resolved_path);
-            opts = opts.with_set_overrides(step_set_overrides.clone());
+                .with_source_file(&step_source.resolved_path);
+            opts = opts.with_set_overrides(step_overrides.clone());
             opts
         };
 
         let approval_options = super::build_harness_shell_options_with_cache(
-            &source.resolved_path,
+            &step_source.resolved_path,
             source_repo_root,
             Some(Arc::clone(&shared_approval_cache)),
         );
 
         let template_preflight = composition::resolve_shell_approvals(
-            Some(&source.markdown),
+            Some(&step_source.markdown),
             Some(&compose_options),
             None,
             &approval_options,
@@ -807,15 +886,19 @@ fn run_phase_1c_attempt(
         cumulative_approved.extend(template_preflight.approved_commands.iter().cloned());
 
         let prepare_options = PrepareOptions {
-            set_overrides: Some(step_set_overrides.clone()),
+            set_overrides: Some(step_overrides.clone()),
             pre_approved_commands: Some(cumulative_approved.clone()),
             env_overrides: env_overrides.clone(),
             perf_enabled: shared.perf,
             source_repo_root: source_repo_root.map(std::path::Path::to_path_buf),
         };
 
-        let prepared = match composition::prepare_direct_with_schema(source, prepare_options) {
-            Ok(prepared) => prepared,
+        let prepared = match composition::prepare_direct_with_schema(&step_source, prepare_options)
+        {
+            Ok(prepared) => {
+                emit_dropped_optional_warnings(&prepared.dropped_optionals);
+                prepared
+            }
             Err(CompositionError::MissingProperties {
                 source_path,
                 missing,
@@ -823,13 +906,16 @@ fn run_phase_1c_attempt(
                 pointer_paths,
             }) => {
                 let step = &plan.steps[step_index];
-                missing_failures.push(SequenceMissingPropertiesStep {
-                    step: step_index + 1,
-                    step_name: step.name.clone(),
-                    source_path,
-                    missing,
-                    frontmatter_description,
-                    pointer_paths,
+                missing_contexts.push(StepMissingContext {
+                    failure: SequenceMissingPropertiesStep {
+                        step: step_index + 1,
+                        step_name: step.name.clone(),
+                        source_path,
+                        missing,
+                        frontmatter_description,
+                        pointer_paths,
+                    },
+                    effective_overrides: Some(step_overrides.clone()),
                 });
                 // Skip harness preflight for the failed step; continue so
                 // we accumulate every step's missing properties.
@@ -866,8 +952,8 @@ fn run_phase_1c_attempt(
         });
     }
 
-    if !missing_failures.is_empty() {
-        return Ok(Phase1cAttempt::Missing(missing_failures));
+    if !missing_contexts.is_empty() {
+        return Ok(Phase1cAttempt::Missing(missing_contexts));
     }
     Ok(Phase1cAttempt::Success(step_contexts, cumulative_approved))
 }
@@ -878,22 +964,32 @@ fn run_phase_1c_attempt(
 /// Returns a JSON map of `{ property_name: collected_value }` suitable for
 /// merging into the user `--set` overrides. The first failure that
 /// declared the property supplies the metadata used for the prompt.
+///
+/// The per-step status report uses `StepMissingContext::effective_overrides`
+/// so a required property already satisfied by a reserved per-step overlay
+/// value or by a CLI `--set` / shorthand setter is not reported as
+/// `Missing` while the user is being prompted for a different property
+/// (matches the direct `compose` status-drift fix from review-5).
 fn collect_sequence_missing_values(
-    failures: &[SequenceMissingPropertiesStep],
+    contexts: &[StepMissingContext],
     silent: bool,
 ) -> std::io::Result<serde_json::Map<String, serde_json::Value>> {
     if !silent {
         let term = log::terminal();
         // Render one status report per step so the user sees the same
         // diagnostic they get for direct compose.
-        for failure in failures {
+        for ctx in contexts {
+            let failure = &ctx.failure;
             // Build a minimal source view from the recorded path for the
             // status report. The library helper expects a resolved source
             // so we re-resolve here; if that fails we fall through with
             // a header-only note.
             if let Ok(source) =
                 composition::resolve_composition_source(&failure.source_path.display().to_string())
-                && let Ok(Some(report)) = composition::build_schema_status_report(&source, None)
+                && let Ok(Some(report)) = composition::build_schema_status_report(
+                    &source,
+                    ctx.effective_overrides.as_ref(),
+                )
             {
                 let status = Status::from_prose(format!(
                     "<b>Step {}:</b> <cyan>{}</cyan>",
@@ -909,8 +1005,8 @@ fn collect_sequence_missing_values(
     // Build a deduped list, keyed by (name, type_label, description).
     let mut seen_keys: HashSet<(String, Option<String>, Option<String>)> = HashSet::new();
     let mut unique: Vec<MissingProperty> = Vec::new();
-    for failure in failures {
-        for prop in &failure.missing {
+    for ctx in contexts {
+        for prop in &ctx.failure.missing {
             let key = (
                 prop.name.clone(),
                 prop.type_label.clone(),
@@ -925,6 +1021,32 @@ fn collect_sequence_missing_values(
     collect_missing_values(&unique)
 }
 
+/// Locate the first missing property across all sequence step failures
+/// whose schema shape cannot be collected interactively.
+///
+/// Returns `(source_path, property_name, shape_label)` so the caller can
+/// build a typed [`CompositionError::UnsupportedInteractiveSchema`] that
+/// matches the direct `compose` path. The shape label falls back to
+/// `(unknown)` when the property has no recorded type label.
+fn find_first_unsupported(
+    failures: &[SequenceMissingPropertiesStep],
+) -> Option<(std::path::PathBuf, String, String)> {
+    for failure in failures {
+        for prop in &failure.missing {
+            if prop.interactive_shape.is_none() {
+                return Some((
+                    failure.source_path.clone(),
+                    prop.name.clone(),
+                    prop.type_label
+                        .clone()
+                        .unwrap_or_else(|| "(unknown)".to_string()),
+                ));
+            }
+        }
+    }
+    None
+}
+
 fn merge_overrides(
     base: Option<&serde_json::Value>,
     collected: serde_json::Map<String, serde_json::Value>,
@@ -937,5 +1059,88 @@ fn merge_overrides(
         out.insert(k, v);
     }
     serde_json::Value::Object(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claudine::composition::{InteractiveShape, TextFormat};
+    use std::path::PathBuf;
+
+    fn step(
+        n: usize,
+        path: &str,
+        props: Vec<MissingProperty>,
+    ) -> SequenceMissingPropertiesStep {
+        SequenceMissingPropertiesStep {
+            step: n,
+            step_name: format!("step-{n}"),
+            source_path: PathBuf::from(path),
+            missing: props,
+            frontmatter_description: None,
+            pointer_paths: Vec::new(),
+        }
+    }
+
+    fn prop_supported(name: &str) -> MissingProperty {
+        MissingProperty {
+            name: name.to_string(),
+            type_label: Some("string".to_string()),
+            description: None,
+            interactive_shape: Some(InteractiveShape::Text {
+                format: TextFormat::Plain,
+            }),
+        }
+    }
+
+    fn prop_unsupported(name: &str, type_label: Option<&str>) -> MissingProperty {
+        MissingProperty {
+            name: name.to_string(),
+            type_label: type_label.map(str::to_string),
+            description: None,
+            interactive_shape: None,
+        }
+    }
+
+    #[test]
+    fn find_first_unsupported_returns_none_when_all_supported() {
+        let failures = vec![step(
+            1,
+            "/tmp/a.md",
+            vec![prop_supported("topic"), prop_supported("tier")],
+        )];
+        assert!(find_first_unsupported(&failures).is_none());
+    }
+
+    #[test]
+    fn find_first_unsupported_returns_first_unsupported_property() {
+        let failures = vec![
+            step(1, "/tmp/a.md", vec![prop_supported("topic")]),
+            step(
+                2,
+                "/tmp/b.md",
+                vec![
+                    prop_supported("tier"),
+                    prop_unsupported("config", Some("object")),
+                    prop_unsupported("other", None),
+                ],
+            ),
+        ];
+        let (path, name, shape) = find_first_unsupported(&failures).unwrap();
+        assert_eq!(path, PathBuf::from("/tmp/b.md"));
+        assert_eq!(name, "config");
+        assert_eq!(shape, "object");
+    }
+
+    #[test]
+    fn find_first_unsupported_falls_back_to_unknown_label() {
+        let failures = vec![step(
+            1,
+            "/tmp/a.md",
+            vec![prop_unsupported("raw", None)],
+        )];
+        let (_, _, shape) = find_first_unsupported(&failures).unwrap();
+        assert_eq!(shape, "(unknown)");
+    }
 }
 

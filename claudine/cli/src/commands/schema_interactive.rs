@@ -26,10 +26,9 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::{
-    CompositionError, InteractiveSchemaOptions, InteractiveShape, MissingProperty, PrepareOptions,
-    PreparedComposition, PropertyState, PropertyStatus, ResolvedCompositionSource,
-    SchemaStatusReport, TextFormat, build_schema_status_report, prepare_direct_with_schema,
-    prepare_inline_with_schema,
+    CompositionError, DroppedOptional, InteractiveSchemaOptions, InteractiveShape, MissingProperty,
+    PreValidatedSchema, PropertyState, PropertyStatus, ResolvedCompositionSource,
+    SchemaStatusReport, TextFormat, build_schema_status_report, pre_validate_schema,
 };
 use tui_chrome::prelude::*;
 
@@ -162,44 +161,41 @@ pub fn resolve_interactive_options(silent: bool) -> InteractiveSchemaOptions {
     }
 }
 
-/// Composition mode selector for [`prepare_with_interactive_collection`].
+/// Pre-prepare schema validation with interactive collection of missing
+/// required values when allowed.
 ///
-/// Mirrors the two sites in `compose.rs` that call either
-/// [`composition::prepare_direct`] or [`composition::prepare_inline`],
-/// so this helper can be shared between both subcommands.
-#[derive(Clone, Copy)]
-pub enum InteractivePrepareMode {
-    /// Wrap [`prepare_direct_with_schema`].
-    Direct,
-    /// Wrap [`prepare_inline_with_schema`].
-    Inline,
-}
-
-/// Run `prepare_direct_with_schema` / `prepare_inline_with_schema` and, on
-/// [`CompositionError::MissingProperties`], drive the interactive
-/// collection loop (when [`InteractiveSchemaOptions::allowed`] permits)
-/// then retry with the collected values merged into `options.set_overrides`.
+/// Wraps [`pre_validate_schema`]. On `MissingProperties` and when
+/// `interactive.allowed()` is `true`:
 ///
-/// When `interactive` does not allow prompting, the typed
-/// `MissingProperties` error is returned unchanged so the caller can
-/// render the non-TTY status block.
+/// 1. Properties with no [`InteractiveShape`] short-circuit to
+///    [`CompositionError::UnsupportedInteractiveSchema`] — matching the
+///    direct `compose` path.
+/// 2. The schema status report is rendered to `term`.
+/// 3. [`collect_missing_values`] drives a `biscuit-tui` prompt per
+///    missing property.
+/// 4. Collected values are merged into `set_overrides` and validation
+///    is re-run.
+///
+/// Use BEFORE the pre-flight phase so all schema-related errors surface
+/// as typed [`CompositionError`] rather than Darkmatter's raw
+/// `MarkdownError::SchemaValidationFailed`.
 ///
 /// ## Errors
 ///
-/// Returns any [`CompositionError`] that the underlying prepare call
-/// surfaces. User cancellation during interactive collection (`Ctrl-C`
-/// or `Esc`) is mapped to the original `MissingProperties` error so the
-/// CLI exits with a clear "missing required value" report.
-pub fn prepare_with_interactive_collection(
+/// Returns the typed `CompositionError` from [`pre_validate_schema`] when
+/// validation cannot be satisfied (including after interactive
+/// collection). User cancellation of the prompt bubbles back as the
+/// original `MissingProperties` error so the CLI shows the non-TTY
+/// remediation block.
+pub fn pre_validate_with_interactive_collection(
     source: &ResolvedCompositionSource,
-    options: PrepareOptions,
-    mode: InteractivePrepareMode,
+    set_overrides: Option<&serde_json::Value>,
     interactive: InteractiveSchemaOptions,
     term: &Terminal,
-) -> Result<PreparedComposition, CompositionError> {
-    let first_attempt = run_prepare(source, options.clone(), mode);
-    let Err(err) = first_attempt else {
-        return first_attempt;
+) -> Result<PreValidatedSchema, CompositionError> {
+    let first = pre_validate_schema(source, set_overrides);
+    let Err(err) = first else {
+        return first;
     };
 
     let CompositionError::MissingProperties {
@@ -215,9 +211,6 @@ pub fn prepare_with_interactive_collection(
         return Err(err);
     }
 
-    // Any unsupported shape short-circuits: prompt would fail, so we
-    // promote the first such property to `UnsupportedInteractiveSchema`
-    // so the user sees an actionable hint.
     if let Some(prop) = missing.iter().find(|p| p.interactive_shape.is_none()) {
         return Err(CompositionError::UnsupportedInteractiveSchema {
             source_path: source_path.clone(),
@@ -229,42 +222,20 @@ pub fn prepare_with_interactive_collection(
         });
     }
 
-    // Render the status report once before driving prompts.
-    if let Ok(Some(report)) =
-        build_schema_status_report(source, options.set_overrides.as_ref())
-    {
+    if let Ok(Some(report)) = build_schema_status_report(source, set_overrides) {
         render_status_report(&report, term);
     }
 
     let collected = match collect_missing_values(missing) {
         Ok(map) => map,
-        Err(_) => {
-            // Ctrl-C / Esc / unsupported shape — bubble the original
-            // missing-properties error so the user sees the non-TTY
-            // remediation block.
-            return Err(err);
-        }
+        Err(_) => return Err(err),
     };
-
     if collected.is_empty() {
         return Err(err);
     }
 
-    let merged_overrides = merge_overrides(options.set_overrides.as_ref(), collected);
-    let mut retry_options = options;
-    retry_options.set_overrides = Some(serde_json::Value::Object(merged_overrides));
-    run_prepare(source, retry_options, mode)
-}
-
-fn run_prepare(
-    source: &ResolvedCompositionSource,
-    options: PrepareOptions,
-    mode: InteractivePrepareMode,
-) -> Result<PreparedComposition, CompositionError> {
-    match mode {
-        InteractivePrepareMode::Direct => prepare_direct_with_schema(source, options),
-        InteractivePrepareMode::Inline => prepare_inline_with_schema(source, options),
-    }
+    let merged = merge_overrides(set_overrides, collected);
+    pre_validate_schema(source, Some(&serde_json::Value::Object(merged)))
 }
 
 fn merge_overrides(
@@ -279,6 +250,25 @@ fn merge_overrides(
         out.insert(k, v);
     }
     out
+}
+
+/// Emit a user-visible stderr warning per dropped optional property.
+///
+/// Schema validation silently elides optional properties whose value
+/// fails validation so the run can continue; without a CLI-level warning
+/// users never learn that their supplied value was removed. This
+/// surfaces each drop via [`log::warn`] (yellow, always-on) so the
+/// behavior is auditable on every run.
+pub fn emit_dropped_optional_warnings(drops: &[DroppedOptional]) {
+    for drop in drops {
+        log::warn(&format!(
+            "dropped optional schema property `{property}` (from {source}, at {stage}): {reason}",
+            property = drop.property,
+            source = drop.source.label(),
+            stage = drop.stage.label(),
+            reason = drop.reason,
+        ));
+    }
 }
 
 /// Drive `biscuit-tui` prompts for each missing required property and
@@ -567,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_with_interactive_collection_returns_missing_when_not_allowed() {
+    fn pre_validate_with_interactive_returns_missing_when_not_allowed() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("test.md");
@@ -584,14 +574,8 @@ mod tests {
         assert!(!interactive.allowed());
 
         let term = Terminal::default();
-        let err = prepare_with_interactive_collection(
-            &source,
-            PrepareOptions::default(),
-            InteractivePrepareMode::Direct,
-            interactive,
-            &term,
-        )
-        .unwrap_err();
+        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term)
+            .unwrap_err();
         assert!(
             matches!(err, CompositionError::MissingProperties { .. }),
             "expected MissingProperties when interactive not allowed: {err:?}"
@@ -599,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_with_interactive_collection_succeeds_when_overrides_supply_value() {
+    fn pre_validate_with_interactive_succeeds_when_overrides_supply_value() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("test.md");
@@ -611,25 +595,24 @@ mod tests {
         let source = claudine::composition::resolve_composition_source(file.to_str().unwrap())
             .unwrap();
 
-        let options = PrepareOptions {
-            set_overrides: Some(serde_json::json!({ "title": "Plan" })),
-            ..Default::default()
-        };
+        let overrides = serde_json::json!({ "title": "Plan" });
         let term = Terminal::default();
-        let prepared = prepare_with_interactive_collection(
+        let pre = pre_validate_with_interactive_collection(
             &source,
-            options,
-            InteractivePrepareMode::Direct,
+            Some(&overrides),
             InteractiveSchemaOptions::default(),
             &term,
         )
         .unwrap();
-        let fm = prepared.effective_frontmatter.as_object().unwrap();
-        assert_eq!(fm.get("title").and_then(|v| v.as_str()), Some("Plan"));
+        let fm = pre.set_overrides.unwrap();
+        assert_eq!(
+            fm.get("title").and_then(|v| v.as_str()),
+            Some("Plan")
+        );
     }
 
     #[test]
-    fn prepare_with_interactive_collection_returns_unsupported_for_object_shape() {
+    fn pre_validate_with_interactive_returns_unsupported_for_object_shape() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("test.md");
@@ -651,14 +634,8 @@ mod tests {
         assert!(interactive.allowed());
 
         let term = Terminal::default();
-        let err = prepare_with_interactive_collection(
-            &source,
-            PrepareOptions::default(),
-            InteractivePrepareMode::Direct,
-            interactive,
-            &term,
-        )
-        .unwrap_err();
+        let err = pre_validate_with_interactive_collection(&source, None, interactive, &term)
+            .unwrap_err();
         assert!(
             matches!(err, CompositionError::UnsupportedInteractiveSchema { .. }),
             "expected UnsupportedInteractiveSchema: {err:?}"

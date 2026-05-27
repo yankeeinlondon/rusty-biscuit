@@ -238,7 +238,8 @@ fn run_setter_name(
         return Vec::new();
     };
     let supplied = collect_supplied_setter_names(argv, current_index);
-    schema_completion::property_names(&effective, partial, &supplied)
+    let declared_order = schema_completion::declared_property_order(file_arg, ctx);
+    schema_completion::property_names(&effective, partial, &supplied, &declared_order)
 }
 
 /// Walk argv (excluding the cursor token itself) and collect setter names
