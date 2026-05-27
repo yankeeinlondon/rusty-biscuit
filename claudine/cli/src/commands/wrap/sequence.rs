@@ -9,15 +9,19 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
-    self, CompositionError, CompositionExecutionRequest, CompositionMode, PrepareOptions,
-    PreparedComposition, ResolvedCompositionSource, SequenceExecutionOptions, SequencePlan,
-    SequenceRunSummary, SequenceStepDraft, SequenceStepResult,
+    self, CompositionError, CompositionExecutionRequest, CompositionMode, MissingProperty,
+    PrepareOptions, PreparedComposition, ResolvedCompositionSource, SequenceExecutionOptions,
+    SequenceMissingPropertiesStep, SequencePlan, SequenceRunSummary, SequenceStepDraft,
+    SequenceStepResult,
 };
 use claudine::harness::{HarnessResolutionContext, has_harness_properties, parse_harness_plan};
 use color_eyre::eyre::{Result, eyre};
 use tracing::{debug, info_span};
 
 use crate::commands::compose::SharedComposeArgs;
+use crate::commands::schema_interactive::{
+    collect_missing_values, render_status_report, resolve_interactive_options,
+};
 use crate::log;
 
 /// Exit code emitted when Ctrl+C is observed during a sequence run.
@@ -109,7 +113,6 @@ pub(crate) fn execute_sequence(
         }
     };
 
-    let mut cumulative_approved: HashSet<String> = HashSet::new();
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
 
@@ -292,97 +295,37 @@ pub(crate) fn execute_sequence(
     };
 
     // ── Phase 1c: per-step compose with resolved AGENT in env_overrides ─
-    let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
-    for step_index in 0..total_steps {
-        if interrupted.load(Ordering::SeqCst) {
-            if let Some(mut acc) = perf_accumulator {
-                acc.mark_env_setup_complete();
-                acc.set_partial();
-                let total = sequence_start.elapsed();
-                let report = acc.into_report(total);
-                eprint!("{}", crate::perf::render_perf_report(&report));
-            }
-            return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
+    //
+    // Phase 5 schema validation: each step is run through
+    // `prepare_direct_with_schema`, which surfaces `MissingProperties`
+    // when the prompt's `$schema` declares required fields that the
+    // (post-override) frontmatter does not satisfy. Missing-property
+    // failures are aggregated across all steps so the user can fix the
+    // full sequence in one edit. Invalid-required failures
+    // (`SchemaValidation`) abort the sequence before any provider
+    // session is launched.
+    let (step_contexts, _cumulative_approved) = run_phase_1c_with_schema(
+        source,
+        &plan,
+        &resolved_targets,
+        &user_set_overrides,
+        source_repo_root.as_deref(),
+        shared,
+        effective_fail_fast,
+        Arc::clone(&shared_approval_cache),
+        HashSet::new(),
+        &interrupted,
+        silent,
+    )?;
+    if step_contexts.is_empty() && total_steps > 0 {
+        if let Some(mut acc) = perf_accumulator {
+            acc.mark_env_setup_complete();
+            acc.set_partial();
+            let total = sequence_start.elapsed();
+            let report = acc.into_report(total);
+            eprint!("{}", crate::perf::render_perf_report(&report));
         }
-        let overlay = build_step_overlay(&plan, step_index);
-        let step_set_overrides = overlay.as_set_overrides(user_set_overrides.clone());
-
-        let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
-        env_overrides.insert(
-            "CLAUDINE_FAIL_FAST".to_string(),
-            effective_fail_fast.to_string(),
-        );
-        // Inject AGENT for this step using the resolved target so
-        // {{env.AGENT}} in the body composes correctly.
-        let target = resolved_targets
-            .get(step_index)
-            .ok_or_else(|| eyre!("missing resolved target for step {}", step_index + 1))?;
-        let slug = target.provider.as_slug().to_string();
-        env_overrides.insert("AGENT".to_string(), slug.clone());
-
-        let compose_options = {
-            let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
-            for (key, value) in &env_overrides {
-                ctx.env_mut().insert(key.clone(), value.clone());
-            }
-            let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
-                .with_source_file(&source.resolved_path);
-            opts = opts.with_set_overrides(step_set_overrides.clone());
-            opts
-        };
-
-        let approval_options = super::build_harness_shell_options_with_cache(
-            &source.resolved_path,
-            source_repo_root.as_deref(),
-            Some(Arc::clone(&shared_approval_cache)),
-        );
-
-        // Template pre-flight
-        let template_preflight = composition::resolve_shell_approvals(
-            Some(&source.markdown),
-            Some(&compose_options),
-            None,
-            &approval_options,
-        )?;
-        cumulative_approved.extend(template_preflight.approved_commands.iter().cloned());
-
-        // Prepare composition
-        let prepare_options = PrepareOptions {
-            set_overrides: Some(step_set_overrides.clone()),
-            pre_approved_commands: Some(cumulative_approved.clone()),
-            env_overrides: env_overrides.clone(),
-            perf_enabled: shared.perf,
-            source_repo_root: source_repo_root.clone(),
-        };
-        let prepared = composition::prepare_direct(source, prepare_options)?;
-
-        // Harness pre-flight
-        if has_harness_properties(&prepared.effective_frontmatter) {
-            let effective_repo_root = prepared.source_repo_root.as_deref();
-            let resolve_ctx = HarnessResolutionContext {
-                source_path: &prepared.resolved_path,
-                repo_root: effective_repo_root,
-            };
-            let harness_plan = parse_harness_plan(
-                &prepared.effective_frontmatter,
-                &prepared.resolved_path,
-                &resolve_ctx,
-            )
-            .map_err(|e| eyre!("{e}"))?;
-            let harness_preflight = composition::resolve_shell_approvals(
-                None,
-                None,
-                Some(&harness_plan),
-                &approval_options,
-            )
-            .map_err(|e| eyre!("{e}"))?;
-            cumulative_approved.extend(harness_preflight.approved_commands.iter().cloned());
-        }
-
-        step_contexts.push(StepContext {
-            env_overrides,
-            prepared,
-        });
+        return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
     }
 
     if !silent {
@@ -696,3 +639,303 @@ fn apply_user_set_to_hints(
 
     Ok(hints)
 }
+
+/// Run Phase 1c (per-step compose) with schema validation and aggregated
+/// missing-property handling.
+///
+/// On the first pass each step is composed via
+/// [`composition::prepare_direct_with_schema`]. Missing-property errors
+/// are collected per-step; all other failures short-circuit immediately
+/// (including [`CompositionError::SchemaValidation`] for invalid required
+/// values). When at least one step reports missing properties and
+/// Interactive Mode is allowed, the deduplicated missing set is collected
+/// via `biscuit-tui` prompts and the loop re-runs with the merged
+/// overrides. When Interactive Mode is not allowed, an aggregated
+/// [`CompositionError::SequenceMissingProperties`] is returned so the
+/// user can fix the full sequence in one edit.
+#[allow(clippy::too_many_arguments)]
+fn run_phase_1c_with_schema(
+    source: &ResolvedCompositionSource,
+    plan: &SequencePlan,
+    resolved_targets: &[claudine::composition::ResolvedExecutionTarget],
+    user_set_overrides: &Option<serde_json::Value>,
+    source_repo_root: Option<&std::path::Path>,
+    shared: &SharedComposeArgs,
+    effective_fail_fast: bool,
+    shared_approval_cache: composition::SharedApprovalCache,
+    initial_cumulative_approved: HashSet<String>,
+    interrupted: &Arc<AtomicBool>,
+    silent: bool,
+) -> Result<(Vec<StepContext>, HashSet<String>)> {
+    let mut overrides = user_set_overrides.clone();
+    // At most one interactive collection pass — collected values are
+    // shared across all steps that need the same property, and a second
+    // attempt should always succeed (or fail with a different error).
+    for attempt in 0..2 {
+        let attempt_result = run_phase_1c_attempt(
+            source,
+            plan,
+            resolved_targets,
+            &overrides,
+            source_repo_root,
+            shared,
+            effective_fail_fast,
+            Arc::clone(&shared_approval_cache),
+            initial_cumulative_approved.clone(),
+            interrupted,
+        )?;
+
+        match attempt_result {
+            Phase1cAttempt::Interrupted => {
+                return Ok((Vec::new(), initial_cumulative_approved));
+            }
+            Phase1cAttempt::Success(contexts, approved) => {
+                return Ok((contexts, approved));
+            }
+            Phase1cAttempt::Missing(failures) => {
+                if attempt > 0 {
+                    // We already collected values once. If we're still
+                    // seeing missing values, surface them.
+                    return Err(CompositionError::SequenceMissingProperties {
+                        failure_count: failures.len(),
+                        failures,
+                    }
+                    .into());
+                }
+                let interactive = resolve_interactive_options(shared.silent);
+                if !interactive.allowed() {
+                    return Err(CompositionError::SequenceMissingProperties {
+                        failure_count: failures.len(),
+                        failures,
+                    }
+                    .into());
+                }
+                let collected = match collect_sequence_missing_values(&failures, silent) {
+                    Ok(values) => values,
+                    Err(_) => {
+                        // Ctrl-C / Esc / unsupported shape — surface the
+                        // aggregated error so the user sees the actionable
+                        // non-TTY report.
+                        return Err(CompositionError::SequenceMissingProperties {
+                            failure_count: failures.len(),
+                            failures,
+                        }
+                        .into());
+                    }
+                };
+                if collected.is_empty() {
+                    return Err(CompositionError::SequenceMissingProperties {
+                        failure_count: failures.len(),
+                        failures,
+                    }
+                    .into());
+                }
+                overrides = Some(merge_overrides(overrides.as_ref(), collected));
+            }
+        }
+    }
+    // Loop bound enforces two attempts; the inner match returns from
+    // either branch so this point is unreachable.
+    unreachable!("phase 1c attempt loop exited without resolving")
+}
+
+enum Phase1cAttempt {
+    Success(Vec<StepContext>, HashSet<String>),
+    Missing(Vec<SequenceMissingPropertiesStep>),
+    Interrupted,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_phase_1c_attempt(
+    source: &ResolvedCompositionSource,
+    plan: &SequencePlan,
+    resolved_targets: &[claudine::composition::ResolvedExecutionTarget],
+    user_set_overrides: &Option<serde_json::Value>,
+    source_repo_root: Option<&std::path::Path>,
+    shared: &SharedComposeArgs,
+    effective_fail_fast: bool,
+    shared_approval_cache: composition::SharedApprovalCache,
+    initial_cumulative_approved: HashSet<String>,
+    interrupted: &Arc<AtomicBool>,
+) -> Result<Phase1cAttempt> {
+    let total_steps = plan.steps.len();
+    let mut cumulative_approved = initial_cumulative_approved;
+    let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
+    let mut missing_failures: Vec<SequenceMissingPropertiesStep> = Vec::new();
+
+    for step_index in 0..total_steps {
+        if interrupted.load(Ordering::SeqCst) {
+            return Ok(Phase1cAttempt::Interrupted);
+        }
+        let overlay = build_step_overlay(plan, step_index);
+        let step_set_overrides = overlay.as_set_overrides(user_set_overrides.clone());
+
+        let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
+        env_overrides.insert(
+            "CLAUDINE_FAIL_FAST".to_string(),
+            effective_fail_fast.to_string(),
+        );
+        let target = resolved_targets
+            .get(step_index)
+            .ok_or_else(|| eyre!("missing resolved target for step {}", step_index + 1))?;
+        let slug = target.provider.as_slug().to_string();
+        env_overrides.insert("AGENT".to_string(), slug.clone());
+
+        let compose_options = {
+            let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+            for (key, value) in &env_overrides {
+                ctx.env_mut().insert(key.clone(), value.clone());
+            }
+            let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
+                .with_source_file(&source.resolved_path);
+            opts = opts.with_set_overrides(step_set_overrides.clone());
+            opts
+        };
+
+        let approval_options = super::build_harness_shell_options_with_cache(
+            &source.resolved_path,
+            source_repo_root,
+            Some(Arc::clone(&shared_approval_cache)),
+        );
+
+        let template_preflight = composition::resolve_shell_approvals(
+            Some(&source.markdown),
+            Some(&compose_options),
+            None,
+            &approval_options,
+        )?;
+        cumulative_approved.extend(template_preflight.approved_commands.iter().cloned());
+
+        let prepare_options = PrepareOptions {
+            set_overrides: Some(step_set_overrides.clone()),
+            pre_approved_commands: Some(cumulative_approved.clone()),
+            env_overrides: env_overrides.clone(),
+            perf_enabled: shared.perf,
+            source_repo_root: source_repo_root.map(std::path::Path::to_path_buf),
+        };
+
+        let prepared = match composition::prepare_direct_with_schema(source, prepare_options) {
+            Ok(prepared) => prepared,
+            Err(CompositionError::MissingProperties {
+                source_path,
+                missing,
+                frontmatter_description,
+                pointer_paths,
+            }) => {
+                let step = &plan.steps[step_index];
+                missing_failures.push(SequenceMissingPropertiesStep {
+                    step: step_index + 1,
+                    step_name: step.name.clone(),
+                    source_path,
+                    missing,
+                    frontmatter_description,
+                    pointer_paths,
+                });
+                // Skip harness preflight for the failed step; continue so
+                // we accumulate every step's missing properties.
+                continue;
+            }
+            Err(other) => return Err(other.into()),
+        };
+
+        if has_harness_properties(&prepared.effective_frontmatter) {
+            let effective_repo_root = prepared.source_repo_root.as_deref();
+            let resolve_ctx = HarnessResolutionContext {
+                source_path: &prepared.resolved_path,
+                repo_root: effective_repo_root,
+            };
+            let harness_plan = parse_harness_plan(
+                &prepared.effective_frontmatter,
+                &prepared.resolved_path,
+                &resolve_ctx,
+            )
+            .map_err(|e| eyre!("{e}"))?;
+            let harness_preflight = composition::resolve_shell_approvals(
+                None,
+                None,
+                Some(&harness_plan),
+                &approval_options,
+            )
+            .map_err(|e| eyre!("{e}"))?;
+            cumulative_approved.extend(harness_preflight.approved_commands.iter().cloned());
+        }
+
+        step_contexts.push(StepContext {
+            env_overrides,
+            prepared,
+        });
+    }
+
+    if !missing_failures.is_empty() {
+        return Ok(Phase1cAttempt::Missing(missing_failures));
+    }
+    Ok(Phase1cAttempt::Success(step_contexts, cumulative_approved))
+}
+
+/// Dedupe missing properties across all failed steps and prompt for each
+/// unique `(name, type_label, description)` exactly once.
+///
+/// Returns a JSON map of `{ property_name: collected_value }` suitable for
+/// merging into the user `--set` overrides. The first failure that
+/// declared the property supplies the metadata used for the prompt.
+fn collect_sequence_missing_values(
+    failures: &[SequenceMissingPropertiesStep],
+    silent: bool,
+) -> std::io::Result<serde_json::Map<String, serde_json::Value>> {
+    if !silent {
+        let term = log::terminal();
+        // Render one status report per step so the user sees the same
+        // diagnostic they get for direct compose.
+        for failure in failures {
+            // Build a minimal source view from the recorded path for the
+            // status report. The library helper expects a resolved source
+            // so we re-resolve here; if that fails we fall through with
+            // a header-only note.
+            if let Ok(source) =
+                composition::resolve_composition_source(&failure.source_path.display().to_string())
+                && let Ok(Some(report)) = composition::build_schema_status_report(&source, None)
+            {
+                let status = Status::from_prose(format!(
+                    "<b>Step {}:</b> <cyan>{}</cyan>",
+                    failure.step, failure.step_name
+                ))
+                .state(StatusState::Info);
+                log::message(&status.render(&term));
+                render_status_report(&report, &term);
+            }
+        }
+    }
+
+    // Build a deduped list, keyed by (name, type_label, description).
+    let mut seen_keys: HashSet<(String, Option<String>, Option<String>)> = HashSet::new();
+    let mut unique: Vec<MissingProperty> = Vec::new();
+    for failure in failures {
+        for prop in &failure.missing {
+            let key = (
+                prop.name.clone(),
+                prop.type_label.clone(),
+                prop.description.clone(),
+            );
+            if seen_keys.insert(key) {
+                unique.push(prop.clone());
+            }
+        }
+    }
+
+    collect_missing_values(&unique)
+}
+
+fn merge_overrides(
+    base: Option<&serde_json::Value>,
+    collected: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Value {
+    let mut out = match base {
+        Some(serde_json::Value::Object(map)) => map.clone(),
+        _ => serde_json::Map::new(),
+    };
+    for (k, v) in collected {
+        out.insert(k, v);
+    }
+    serde_json::Value::Object(out)
+}
+
