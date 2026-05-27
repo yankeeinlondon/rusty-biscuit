@@ -6,86 +6,95 @@ status: draft
 
 ## Status
 
-**Draft — brainstorming.** This spec captures a candidate architecture for
-darkmatter's inline syntax extensions (`==mark==`, `⌄dim⌄`, and future
-atomic / wrap-style inline features). It is not an implementation contract.
-Open design questions are surfaced explicitly so the team can push on them
-before committing.
+**Draft — architecture approved.** The core shape (source rewrite into a
+GFM-strikethrough envelope, plain fold, fold-side dispatcher) is locked.
+A small number of implementation-level sub-decisions remain — see
+[Open Questions](#open-questions) — but they don't change the
+architecture and can be resolved during the prototype step.
+
+Decision lineage (recording the brainstorm so the choices aren't
+re-litigated):
+
+| Question | Decision | Notes |
+|---|---|---|
+| Profile-gated or architecture-driven? | **Architecture-driven.** | Perf upside is verified post-implementation, not a precondition. |
+| Token marker format | **`<<NAME>>U+FDD0`** | Readable ASCII tag plus a Unicode non-character sentinel for collision-proofing. |
+| Math (`$x^2$`) in scope? | **No.** | If/when math arrives it will likely use a different envelope (inline code) — verbatim payload semantics suit math better. |
+| Tree IR shape | **Hybrid `NodeKind::Extended { token, children, payload }`** | One new variant; renderers dispatch by token name. |
+| Migration strategy | **Big-bang replace.** | Single in-flight branch; finite call sites; coexistence costs more than it saves. |
+| Behavior parity vs fidelity recovery | **Recover `<mark>` element fidelity.** | This is the right moment to fix the legacy-vs-tree `<mark>` → `<span class="mark">` regression. |
 
 The sibling spec
-[`../2026-05-26-block-span/spec.md`](../2026-05-26-block-span/spec.md)
-covers block-level extensions (HR attributes today, future
-admonitions / containers / heading attrs). The two were originally
-muddled together inside one span-aware processor for historical reasons;
-this spec pair separates them.
-
+[`../2026-05-26-block-extension/spec.md`](../2026-05-26-block-extension/spec.md)
+covers the narrow lift of HR attributes out of the inline span-aware
+processor; it deliberately does not design a general block-extension
+architecture (that would be premature from one data point).
 Performance context lives in
 [`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md).
-The 18× span-aware-fold cost recorded against `mark_dim_hr` motivated this
-investigation.
 
 ## Background
 
 Pulldown-cmark recognizes CommonMark plus GFM extensions (tables, task
 lists, strikethrough, autolinks, disallowed raw HTML). Anything outside
 that set — including darkmatter's `==mark==`, `⌄dim⌄`, future emoji
-shortcodes (`:smile:`), variable interpolation (`{{var}}`), inline math
-(`$x^2$`), tooltips — is seen as **literal text** by the parser.
+shortcodes (`:smile:`), variable interpolation (`{{var}}`), tooltips — is
+seen as **literal text** by the parser.
 
 Today's solution is the `SpannedInlineStyleProcessor` in
-`darkmatter/lib/src/markdown/render_tree/span.rs`. It:
+`darkmatter/lib/src/markdown/render_tree/span.rs`. It wraps every
+pulldown-cmark event in a `SpannedInlineEvent`, scans every Text event for
+darkmatter delimiters, maintains an opener stack across text-event
+boundaries, and synthesizes typed events that the fold lowers into tree
+spans. This costs ≈ 164 µs on the `mark_dim_hr` benchmark fixture — about
+18× the plain `fold_markdown_to_document` (≈ 9 µs). The overhead is
+structural, paid once-per-document on the span-aware lane.
 
-1. Wraps every pulldown-cmark event in a `SpannedInlineEvent` that carries
-   a byte range and a kind tag (Standard / Generated).
-2. Scans every Text event for darkmatter delimiters.
-3. Maintains an opener stack across text-event boundaries to support
-   nesting.
-4. Synthesizes typed events (`InlineTag::Mark`, `InlineTag::Dim`) that the
-   fold lowers into tree spans.
-
-This costs ≈ 164 µs on the `mark_dim_hr` benchmark fixture — about 18× the
-plain `fold_markdown_to_document` (≈ 9 µs). The overhead is structural —
-paid once-per-document on the span-aware lane, not once-per-feature — but
-it's the dominant per-document cost when any darkmatter inline syntax is
-used.
-
-This spec proposes an alternative: **rewrite darkmatter inline syntax to a
-GFM-strikethrough envelope at the source-text layer, let pulldown-cmark do
-the structural recognition, and dispatch by token in a small fold-side
-handler.**
+This spec replaces that architecture with: **rewrite darkmatter inline
+syntax to a GFM-strikethrough envelope at the source-text layer, let
+pulldown-cmark do the structural recognition, and dispatch by token in a
+small fold-side handler.**
 
 ## Proposed Architecture
 
 ### Source-layer rewrite
 
 Before parsing, scan the source for darkmatter inline patterns and rewrite
-each occurrence to the canonical form:
+each occurrence to the canonical envelope:
 
 ```
-~~|TOKEN|payload|TOKEN|~~
+~~<<TOKEN>>U+FDD0 payload <<TOKEN>>U+FDD0~~
 ```
+
+The token marker is the literal ASCII tag `<<NAME>>` immediately followed
+by the Unicode non-character codepoint **U+FDD0**. The non-character
+sentinel is what makes the marker collision-proof: even if a user
+legitimately writes `<<mark>>` in prose, they will never adjacent-paste a
+U+FDD0 codepoint by accident.
+
+The same marker form appears at both opener and closer; the fold finds
+the first marker after the opening `~~` and the last marker before the
+closing `~~`. Payload is the content between.
 
 Examples (paired forms):
 
-| Source | Rewritten |
-|--------|-----------|
-| `==highlighted==`   | `~~|mark|highlighted|mark|~~` |
-| `⌄dim text⌄`         | `~~|dim|dim text|dim|~~` |
+| Source | Rewritten (sentinels shown as `␦`) |
+|--------|------------------------------------|
+| `==highlighted==`   | `~~<<mark>>␦highlighted<<mark>>␦~~` |
+| `⌄dim text⌄`         | `~~<<dim>>␦dim text<<dim>>␦~~` |
 
 Examples (atomic forms):
 
 | Source | Rewritten |
 |--------|-----------|
-| `:smile:`           | `~~|emoji|smile|emoji|~~` |
-| `{{username}}`      | `~~|var|username|var|~~` |
-| `$x^2$`             | `~~|math|x^2|math|~~` (see [Math escape](#open-questions)) |
-| `[term]^{def}`      | `~~|tooltip|term||def|tooltip|~~` (multi-field payload) |
+| `:smile:`           | `~~<<emoji>>␦smile<<emoji>>␦~~` |
+| `{{username}}`      | `~~<<var>>␦username<<var>>␦~~` |
+| `[term]^{def}`      | `~~<<tooltip>>␦term‖def<<tooltip>>␦~~` (`‖` = field separator; see [Multi-field payloads](#multi-field-payloads)) |
 
 ### Parsing
 
 Pulldown-cmark runs on the rewritten source with `ENABLE_STRIKETHROUGH`.
 It emits `Tag::Strikethrough` events for the envelopes — paid as part of
-its native parse pass, **free of darkmatter-specific overhead**.
+its native parse pass, free of darkmatter-specific overhead.
 
 ### Fold-side dispatch
 
@@ -93,247 +102,344 @@ The plain fold (no `SpannedInlineEvent` wrapping) folds normally until it
 encounters a `Strikethrough` container. At that point it peeks the first
 child Text event:
 
-- **No leading `|token|`** → emit `NodeKind::Delete` (standard
+- **No leading `<<NAME>>U+FDD0`** → emit `NodeKind::Delete` (standard
   strikethrough).
-- **Leading `|token|`** where `token` is registered → strip the
-  surrounding `|token|...|token|` envelope, parse the payload according to
-  the token's handler, emit the corresponding tree node(s). Drop the
-  outer `Delete` wrapper.
-- **Leading `|token|`** where `token` is unknown → emit `NodeKind::Delete`
-  with a diagnostic (or treat as literal — see
-  [Error recovery](#open-questions)).
+- **Leading `<<NAME>>U+FDD0`** where `NAME` is registered → strip the
+  envelope, parse the payload according to the token's handler, emit an
+  `NodeKind::Extended { token, children, payload }` node. Drop the outer
+  `Delete` wrapper.
+- **Leading `<<NAME>>U+FDD0`** where `NAME` is unknown → emit
+  `NodeKind::Delete` with a diagnostic. (Should be impossible if rewriter
+  and fold share the same token registry; the diagnostic catches a
+  registry drift bug.)
+
+### Tree IR addition
+
+A single new variant in `renderable::tree::NodeKind`:
+
+```rust
+NodeKind::Extended {
+    token: Cow<'static, str>,
+    children: Vec<RenderNode>,
+    payload: Option<String>,
+}
+```
+
+- `token` is the registered extension identifier (`"mark"`, `"dim"`,
+  `"emoji"`, etc.). `Cow<'static, str>` so built-in tokens are
+  zero-allocation literals; dynamic tokens (if any) own their string.
+- `children` carries nested tree content for wrap-style features (mark,
+  dim, tooltip's term). Empty `vec![]` for atomic features.
+- `payload` carries an identifier or scalar value for atomic features
+  (emoji name, var name) and the secondary field for multi-field
+  features (tooltip's definition). `None` for pure wrap features.
+
+Renderers dispatch on `token.as_str()`. Unknown tokens fall back to a
+sensible default (`<span class="extended-{token}">` in browser, plain
+text in terminal and markdown).
+
+### Per-target lowering for built-in tokens
+
+| Token | Browser | Terminal | Markdown roundtrip |
+|---|---|---|---|
+| `mark` | `<mark>` (semantic element, recovering legacy fidelity) | Reverse video (SGR 7) | `==children==` |
+| `dim` | `<span style="opacity:0.6">` | `<dim>` Prose markup → SGR 2 (`\x1b[2m`) | `⌄children⌄` |
+| `emoji` | `<span class="emoji">{payload}</span>` (or a future emoji-lookup hook) | `:{payload}:` literal or a future emoji-lookup | `:{payload}:` |
+| `var` | `<span class="var">{payload}</span>` (or evaluated value if context provides) | `{payload}` literal (or evaluated) | `{{payload}}` |
+| `tooltip` | `<span title="{payload}">{children}</span>` | `{children}` (terminals can't tooltip) | `[children]^{payload}` |
+
+The `mark` lowering specifically **recovers the `<mark>` semantic
+element** that the legacy-vs-tree comparison identified as a fidelity
+regression. The browser renderer matches `Extended { token: "mark", … }`
+and emits `<mark>…</mark>` instead of the current `<span class="mark">`.
 
 ### Token registry
 
-Each inline extension registers four small pieces:
+Each inline extension registers four small pieces in a central registry:
 
 1. **Source pattern** — the user-facing syntax the rewriter recognizes
    (e.g. `==X==`, `:NAME:`).
-2. **Token name** — short kebab-case identifier (e.g. `mark`, `dim`,
-   `emoji`, `var`, `math`).
-3. **Fold handler** — receives the payload string, produces tree
-   node(s). For wrap-style features, the payload is rendered as Markdown
-   inline content (recursive); for atomic features, it's an identifier or
-   typed value.
-4. **Roundtrip rule** — markdown renderer emits the original source form
-   when it encounters a tree node carrying the appropriate provenance hint.
+2. **Token name** — short kebab-case identifier (`mark`, `dim`, `emoji`,
+   `var`, `tooltip`).
+3. **Fold handler** — receives the payload string, decides whether the
+   payload is itself Markdown content (parsed recursively into
+   `children`) or a scalar (stored in `payload`), produces the
+   `NodeKind::Extended` node.
+4. **Roundtrip rule** — markdown renderer's per-token emission when it
+   encounters `NodeKind::Extended { token, … }`.
+
+## Concrete Token Examples
+
+For reference (not normative; the actual signatures will be settled in
+the prototype). These show how each token type fits the registration
+shape.
+
+```rust
+// mark — wrap-style, payload is nested Markdown inline content.
+register_inline_token(InlineTokenSpec {
+    name: "mark",
+    source_pattern: SourcePattern::Paired("=="),
+    fold_handler: |payload, ctx| {
+        let children = ctx.parse_inline_markdown(payload);
+        NodeKind::Extended {
+            token: Cow::Borrowed("mark"),
+            children,
+            payload: None,
+        }
+    },
+    roundtrip: |node, out| {
+        out.push_str("==");
+        out.render_inline_children(&node.children);
+        out.push_str("==");
+    },
+});
+
+// emoji — atomic, payload is a shortcode identifier.
+register_inline_token(InlineTokenSpec {
+    name: "emoji",
+    source_pattern: SourcePattern::Atomic { open: ":", close: ":" },
+    fold_handler: |payload, _ctx| NodeKind::Extended {
+        token: Cow::Borrowed("emoji"),
+        children: vec![],
+        payload: Some(payload.into()),
+    },
+    roundtrip: |node, out| {
+        out.push(':');
+        out.push_str(node.payload.as_deref().unwrap_or(""));
+        out.push(':');
+    },
+});
+
+// tooltip — multi-field, payload is the definition, children are the term.
+register_inline_token(InlineTokenSpec {
+    name: "tooltip",
+    source_pattern: SourcePattern::TooltipForm, // [term]^{def}
+    fold_handler: |raw_payload, ctx| {
+        // The rewriter encoded the two fields with the U+2016 separator.
+        let (term, def) = split_fields(raw_payload);
+        let children = ctx.parse_inline_markdown(term);
+        NodeKind::Extended {
+            token: Cow::Borrowed("tooltip"),
+            children,
+            payload: Some(def.into()),
+        }
+    },
+    roundtrip: |node, out| {
+        out.push('[');
+        out.render_inline_children(&node.children);
+        out.push_str("]^{");
+        out.push_str(node.payload.as_deref().unwrap_or(""));
+        out.push('}');
+    },
+});
+```
 
 ## Goals
 
-- Eliminate the per-event `SpannedInlineEvent` wrapping cost for documents
-  that do not use inline extensions (most documents).
-- For documents that **do** use inline extensions, replace per-text-event
-  scanning with strikethrough-boundary detection (pulldown-cmark's job)
-  plus a small per-strikethrough peek (the fold's job).
+- Eliminate the per-event `SpannedInlineEvent` wrapping for inline
+  extension processing.
 - Provide a single, uniform fold-side dispatcher so adding a new inline
-  feature is "register a token" — not "extend the span-aware processor."
-- Keep multi-target lowering intact: tokens still produce typed tree
-  nodes that each target lowers in its own vocabulary
-  (`<mark>` / SGR 7 / `==` etc.).
+  feature is "register a token" — not "extend a span-aware processor."
+- Recover `<mark>` element fidelity (closes a known regression vs the
+  legacy HTML renderer).
+- Keep multi-target lowering intact: tokens produce typed tree nodes
+  that each target lowers in its own vocabulary.
 - Preserve byte-range provenance for diagnostics.
+- Replace the existing `SpannedInlineStyleProcessor` cleanly — big-bang
+  cutover, no coexistence period.
 
 ## Non-Goals
 
-- Block-level darkmatter extensions (HR attributes, future containers).
-  Owned by the sibling
-  [`../2026-05-26-block-span/spec.md`](../2026-05-26-block-span/spec.md).
-- Per-feature rasterization or graphics policy. Owned by
+- **Math (`$x^2$`).** Out of scope for this architecture. Math's
+  verbatim payload semantics suit a different envelope (likely inline
+  code) and a future spec.
+- **Block-level darkmatter extensions** (HR attributes today; future
+  block extensions if any arrive). Owned by
+  [`../2026-05-26-block-extension/spec.md`](../2026-05-26-block-extension/spec.md).
+- **Graphics / image policy.** Owned by
   [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md).
-- Replacing pulldown-cmark or switching parser crates.
-- Changing the renderable tree IR (`NodeKind`, `RenderNode`).
+- **Replacing pulldown-cmark or switching parser crates.**
+- **Per-target style policy.** Renderers decide their own lowerings; the
+  IR carries intent (`token`), not implementation.
 
-## Performance Hypothesis
+## Migration Plan
 
-The current 18× span-aware cost has three plausible components:
+Single-step replacement, ordered by reverse dependency so each step lands
+on a green tree:
 
-1. **Per-event wrapping** — allocating `SpannedInlineEvent { event, range,
-   kind }` for every event.
-2. **Per-text-event scanning** — looking at every Text event's bytes for
-   delimiters.
-3. **Opener-stack bookkeeping** — cross-text-event state.
+1. **Add `NodeKind::Extended` to `renderable::tree`.** Validation +
+   default no-op handling in every existing renderer (browser, terminal,
+   markdown). At this stage no fold produces the variant; this is
+   IR-only scaffolding.
+2. **Implement per-target lowering for built-in tokens** (`mark`, `dim`)
+   in the three tree renderers. Each renderer's `NodeKind::Extended` arm
+   matches on `token` and emits the appropriate output.
+3. **Build the source rewriter** (`darkmatter::markdown::rewrite` or
+   similar) with the `<<NAME>>U+FDD0` envelope, the registry shape, and
+   the `==`/`⌄` handlers.
+4. **Build the fold-side dispatcher** that consumes
+   `Tag::Strikethrough` events, peeks for the envelope, and emits
+   `NodeKind::Extended` nodes.
+5. **Replace `fold_markdown_spanned_with_frontmatter`'s public surface**
+   with a fold that runs the rewriter then plain-folds. Same function
+   signature; internal mechanism replaced.
+6. **Delete `SpannedInlineStyleProcessor`** and its support types from
+   `darkmatter/lib/src/markdown/render_tree/span.rs`. Confirm no other
+   consumers.
+7. **Run the full test corpus + `migration_parity` benches.** Verify
+   byte-identical output for `mark_dim_hr` (except the deliberate
+   `<mark>` recovery — that fixture's HTML expectations update). Record
+   new perf numbers; this is where the architecture-driven-vs-perf-gated
+   decision gets its receipts.
 
-This proposal eliminates (1) and (2) on the plain document and on
-non-strikethrough events; (3) collapses into the rewriter (balanced
-recognition during source scan) and a small per-strikethrough peek.
+The HR-attribute path stays in the current span-aware processor *until*
+the sibling block-extension spec's Phase-1 refactor lifts it into its own
+block-prefix scanner. The two specs' implementations interleave at step
+6: don't delete `SpannedInlineStyleProcessor` until HR attributes have
+moved.
 
-**Expected savings on documents with darkmatter inline:** substantial but
-unquantified — needs profiling. **Expected savings on documents without
-darkmatter inline:** the rewriter exits immediately (no patterns matched),
-plain fold runs, savings approach the full 155 µs difference between
-span-aware and plain folds.
+## Performance Expectation
 
-**Gating decision:** profile the current `SpannedInlineStyleProcessor`
-before scheduling this work. If component (1) dominates, this is a big
-win. If (3) dominates, this approach barely helps.
+Architecture-driven, so this section is expectation rather than gate.
+
+- **Documents without darkmatter inline:** rewriter scans the source
+  once, finds no patterns, exits. Cost approaches one `memchr` pass
+  (microseconds per MB). Fold runs at plain-fold speed (≈ 9 µs on the
+  small fixtures). **Expected: substantial improvement over the current
+  always-span-aware path.**
+- **Documents with darkmatter inline:** rewriter scans the source once,
+  rewrites in place (one allocation for the rewritten string + a
+  translation table for provenance), fold runs at plain-fold speed plus
+  a small per-strikethrough peek-and-dispatch. **Expected: meaningful
+  improvement over the 164 µs span-aware baseline, but exact magnitude
+  depends on where the 18× cost actually lives — verified by the
+  `migration_parity` numbers in step 7.**
+
+If post-implementation measurement shows no perf improvement, the
+architectural cleanup still stands — the extensibility and `<mark>`
+fidelity wins justify the change on their own. The perf upside is the
+expected outcome, not the justification.
 
 ## Open Questions
 
-### Token format
+The architecture is locked; these are implementation-level sub-decisions
+that surface during the prototype step.
 
-`|tokenname|` is one choice. Alternatives:
+### Pulldown-cmark interaction with `<<NAME>>`
 
-- ASCII brackets with a sigil: `:{tokenname}:` — but `:` is the emoji
-  shortcode opener; would conflict.
-- Non-character Unicode codepoints (e.g. `U+FDD0`) — guaranteed not to
-  appear in user content, but makes the rewritten source hard to
-  inspect in diagnostics / debugger.
-- Pipe-wrapped: `|tokenname|` — readable, safe inside strikethrough
-  (since pipes don't terminate strikethrough), but conflicts with table
-  syntax if a strikethrough ever ends up inside a table cell.
+Confidence is high (~95%) that pulldown-cmark passes `<<NAME>>` through
+as literal text — `<` followed by non-letter content isn't a tokenizer
+trigger. **Smoke-test this in the prototype before locking the
+envelope.** If it falsely matches as an autolink or partial HTML tag,
+the format breaks and we need a different visible bracket pair (e.g.
+`{{|NAME|}}`).
 
-Recommendation TBD.
+### Multi-field payload separator
 
-### Payload escaping
+Tooltips encode `[term]^{def}` as `<<tooltip>>U+FDD0 term ‖ def
+<<tooltip>>U+FDD0`. The separator `‖` (U+2016, double vertical line)
+is a placeholder; the prototype should commit to a specific separator
+character. Two reasonable options:
 
-Some payloads contain characters that conflict with the envelope:
+- A second non-character codepoint (e.g. U+FDD1) — bulletproof but
+  unreadable.
+- A visible punctuation character that's unlikely in payload content
+  (e.g. `‖`, `⁞`, or just `\u{1F}` ASCII unit-separator) — readable but
+  needs an escape rule for user content that legitimately contains it.
 
-- **Math**: `$a~~b$` would rewrite to `~~|math|a~~b|math|~~`, where the
-  inner `~~` closes the outer strikethrough early. Mitigations:
-  - Escape `~` inside math payloads (`a\~\~b`); the math handler
-    un-escapes on the fold side.
-  - Use a different envelope for math (e.g. inline code with a token
-    prefix: `` `|math|x^2|math|` ``).
-  - Decide math is not in scope for this architecture and use a separate
-    mechanism.
-- **Pipes in payloads**: `==text|with|pipes==` rewrites to
-  `~~|mark|text|with|pipes|mark|~~`. The token-pair recognition (leading
-  AND trailing `|mark|`) is unambiguous, but a parser that splits on `|`
-  naively would misread the payload. The fold handler must search for
-  the *trailing* `|mark|` from the end, not split on every `|`.
+Recommendation: U+FDD1 for symmetry with the marker sentinel; defer
+visible-separator decision to the first multi-field feature beyond
+tooltips.
 
-### Multi-field payloads
+### Provenance translation table layout
 
-Tooltips and similar constructs have multiple fields. One scheme:
+Translation table maps `(rewritten_offset → original_offset)`. Two
+shapes work:
 
-```
-~~|tooltip|term||def|tooltip|~~
-```
+- `Vec<(usize, usize)>` sorted by rewritten offset; binary search to
+  resolve. Memory: O(rewrites); lookup: O(log rewrites).
+- Per-rewrite-site list of (start, len_delta) entries; cumulative scan
+  to resolve. Same complexity, slightly different cache profile.
 
-A double-pipe `||` separates fields within the payload. The handler
-splits on `||` after stripping the envelope. Open: what's the escape
-rule for legitimate `||` in user content? Probably `\|\|`, but needs
-spec-level decision.
+Pick during the prototype; either works.
 
-### Provenance translation
+### User-content escape
 
-The rewriter shifts byte positions. Pulldown-cmark's offsets point into
-the rewritten string; diagnostics need original-source positions.
+A user who legitimately wants `==literal==` in prose (e.g. quoting
+Markdown source) needs an escape. Convention: `\==` in source means
+"literal `==`, no rewrite." The rewriter honors the backslash and emits
+plain text. Same rule for `\⌄`, `\:`, `\{{`, etc.
 
-Two approaches:
-
-1. **Translation table** — a sorted list of `(rewritten_offset,
-   original_offset, delta)` entries, one per rewrite site. Binary search
-   to map any offset. Memory cost: O(rewrites); lookup cost: O(log
-   rewrites).
-2. **Inline marker bytes** — wrap rewritten payloads with sentinel bytes
-   that the fold uses to recover original ranges. Avoids a separate
-   table but pollutes the rewritten source.
-
-Recommendation TBD; (1) is the obvious choice unless a profile shows
-table lookup is a bottleneck.
-
-### Conflict with legitimate user `~~|...|...|~~`
-
-A user could legitimately write `~~|literal-pipes|inside strike|literal-
-pipes|~~` as ordinary struck-through text. Today the proposal would
-silently dispatch as if `literal-pipes` were a registered token (probably
-emit a diagnostic — see below).
-
-Mitigations:
-
-- The token registry is closed at compile time; unknown tokens fall
-  through to standard strikethrough. So the conflict only fires when the
-  user's literal text exactly matches a registered token name.
-- Escape mechanism: `\|mark|...` opts out of rewriting. The rewriter
-  honors the backslash and emits plain strikethrough.
-- Documentation: list reserved token names, recommend escaping in any
-  prose that legitimately uses `|tokenname|` syntax.
-
-### Markdown roundtrip
-
-When rendering tree → Markdown, the renderer must emit the original
-source form, not the rewritten envelope. Strategy:
-
-- Tree nodes carry a hint indicating their darkmatter origin
-  (e.g. `attrs.classes = ["mark"]` for `==mark==`).
-- The markdown renderer matches on the hint and emits `==…==` (or the
-  appropriate source form per token).
-- Tree nodes constructed *programmatically* (not from `==` source) with
-  the same hint also emit `==…==` — this is correct behavior; the user
-  can't tell whether the source was `==` or programmatic.
+The current `SpannedInlineStyleProcessor` already handles `\==`
+specifically; the rewriter should mirror that semantics so existing
+documents don't break.
 
 ### Error recovery
 
-What happens on malformed input?
+Mechanical once the format is locked, but pin down explicitly:
 
-- `~~|mark|unclosed` (no closing token, no closing strikethrough) →
-  pulldown-cmark emits literal text; rewriter never wrote that envelope;
-  user's source had a literal `~~|mark|unclosed` which renders as plain
-  strikethrough opener followed by literal text. No darkmatter
-  semantics fire. Probably fine.
-- `==unclosed`: rewriter sees one `==` with no pair; emits literal `==`
-  unchanged into source. No envelope, no token, no diagnostic.
-  Consistent with how today's processor treats unclosed openers.
-- `==text==text==` (three `==` in a row): the rewriter pairs greedily —
-  first two delimit, third becomes orphan literal. Document this.
+- `==unclosed` → no pair found, rewriter emits literal `==`.
+- `==text==text==` (three openers) → pair greedy left-to-right; third
+  becomes orphan literal. Document this in user-facing docs.
+- Rewriter produces a malformed envelope (bug): fold-side dispatcher
+  emits a diagnostic and falls through to standard `Delete`. Defense in
+  depth.
 
-### Block-level interaction
+### Rewriter as architectural surface
 
-This spec is inline-only. HR attributes (`--- { style: ... }`) are
-**block-level** and intentionally out of scope here — the sibling
-block-span spec owns them. The rewriter for this spec should explicitly
-ignore patterns that look like block-level constructs (lines starting
-with `---`, fenced blocks, etc.).
+The rewriter must scan in **one pass** using a shared multi-pattern
+matcher (memchr-based or aho-corasick), not N independent passes per
+token. New tokens add patterns to the shared scan, not new passes. This
+is the equivalent of the architectural rule from the previous
+investigation: "all inline features must share one processor walk."
 
-### Rewriter performance
-
-The rewriter must scan source bytes for all registered delimiter
-patterns. If implemented as N independent passes (one per token), cost
-multiplies with token count — same trap as the current span-aware
-processor. **Architectural rule:** the rewriter must scan in a single
-pass, using a shared DFA or memchr-style multi-pattern scan. New tokens
-add patterns to the shared scan, not new passes.
+Document this as a hard rule in the rewriter's module docs so future
+contributors don't accidentally regress it.
 
 ## Decision Sequencing
 
-1. **Profile the current `SpannedInlineStyleProcessor`** (gating
-   decision). If wrapping + scanning dominate, this proposal has its
-   expected payoff. If opener-stack bookkeeping dominates, it doesn't.
-2. **Decide token format and payload escape rules** (above) based on a
-   small design pass.
-3. **Prototype the rewriter** in isolation with a single token (`mark`).
-   Verify behavior on the existing test corpus.
-4. **Implement the fold-side dispatcher**. Run against the existing
-   `mark_dim_hr` benchmark fixture and `migration_parity` suite. Compare
-   numbers against the current span-aware path.
-5. **Roll forward** if profiling and prototype confirm the win;
-   otherwise file as "considered, deferred" in the perf spec.
-
-## Cross-Bucket Summary
-
-This proposal would graduate to a Bucket-2 framework item in
-[`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md)
-if profiling supports it. Until then it lives here as a design
-investigation.
+1. **Prototype the rewriter** with just `mark`. Verify pulldown-cmark
+   passes `<<NAME>>` through as literal text. Lock the envelope format.
+2. **Add `NodeKind::Extended`** to the renderable tree IR with default
+   no-op handling in all three renderers. Land as a standalone PR — IR
+   scaffolding only.
+3. **Implement `mark` and `dim` lowering** in the three renderers.
+   Including the `<mark>` element recovery in browser.
+4. **Wire the rewriter + fold dispatcher** into
+   `fold_markdown_spanned_with_frontmatter`. Keep the existing
+   `SpannedInlineStyleProcessor` in place; route a feature flag to
+   choose which.
+5. **Run the full test corpus.** Diff outputs. Expected diff: `<mark>`
+   for `==mark==` in HTML; everything else byte-identical.
+6. **Flip the default** and remove the feature flag.
+7. **Delete `SpannedInlineStyleProcessor`** once the block-extension spec's
+   Phase-1 has lifted HR attributes out.
+8. **Run `migration_parity`** and record numbers in
+   `../_completed/2026-05-20-darkmatter-tree/baselines.md` (or this
+   spec's eventual `baselines.md`).
 
 ## Out of Scope
 
-- Block-level darkmatter extensions — owned by
-  [`../2026-05-26-block-span/spec.md`](../2026-05-26-block-span/spec.md).
-- Graphics / image policy — owned by
-  [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md).
+- Math, block-level extensions, graphics policy — explicit non-goals
+  above.
 - Replacing pulldown-cmark.
-- Changes to the renderable tree IR.
+- Changes to the tree IR beyond `NodeKind::Extended`.
+- Per-feature renderer policies (theming, accessibility hooks) — those
+  layer on top of the typed-node lowering, in each renderer.
 
 ## Related Specs
 
-- [`../2026-05-26-block-span/spec.md`](../2026-05-26-block-span/spec.md) —
-  sibling spec for block-level extensions.
+- [`../2026-05-26-block-extension/spec.md`](../2026-05-26-block-extension/spec.md) —
+  sibling spec; lifts HR attributes out of `SpannedInlineStyleProcessor`.
+  Implementations interleave at the `SpannedInlineStyleProcessor`
+  deletion step (block-extension's Phase 1 must land first).
 - [`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md) —
-  the perf spec; owns scheduling.
+  the perf spec. Once measurement lands in step 8, the perf numbers
+  graduate from this spec's expectation section into the perf spec's
+  recorded outcomes.
 - [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md) —
   cross-target graphics policy (unrelated; listed for navigation).
 - [`../_completed/2026-05-20-darkmatter-tree/spec.md`](../_completed/2026-05-20-darkmatter-tree/spec.md) —
   the parent migration spec.
 - [`../_completed/2026-05-20-darkmatter-tree/baselines.md`](../_completed/2026-05-20-darkmatter-tree/baselines.md) —
-  the recorded `mark_dim_hr` ratios that motivated this investigation.
+  recorded `mark_dim_hr` ratios that motivated the investigation.
