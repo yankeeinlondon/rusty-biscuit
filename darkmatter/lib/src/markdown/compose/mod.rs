@@ -1764,13 +1764,16 @@ impl Markdown {
                                     .load_toc_headings(&path_clone)
                                     .map_err(toc_linking::TocLinkingError::Io)?
                             };
+                            // Render with no indentation so the cache entry is
+                            // indent-independent. Indentation is caller-local
+                            // and is applied below after cache lookup.
                             let content = toc_linking::render_resolved_directive(
                                 &display_clone,
                                 &headings,
                                 &options_clone,
                                 line,
-                                &directive.indent,
-                                directive.inferred_indent.as_deref(),
+                                "",
+                                None,
                             )
                             .map_err(crate::markdown::types::MarkdownError::TocLinking)?;
                             Ok(cache::OperationResult { content })
@@ -1783,9 +1786,18 @@ impl Markdown {
                         runtime.record_dependency(dependency);
                     }
 
-                    cached.content.clone()
+                    toc_linking::indent_text(
+                        &cached.content,
+                        &directive.indent,
+                        directive.inferred_indent.as_deref(),
+                    )
                 } else {
-                    directive.options.empty_text.clone().unwrap_or_default()
+                    let empty_text = directive.options.empty_text.clone().unwrap_or_default();
+                    toc_linking::indent_text(
+                        &empty_text,
+                        &directive.indent,
+                        directive.inferred_indent.as_deref(),
+                    )
                 };
 
                 let mut toc_report = ComposeReport::new();

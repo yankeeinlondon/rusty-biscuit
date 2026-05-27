@@ -5,10 +5,36 @@ use super::filter::HeadingFilter;
 use super::types::TocLinkingOptions;
 use crate::markdown::toc::MarkdownTocNode;
 
+/// Applies effective indentation to a block of text.
+///
+/// Each line is prefixed with the effective indent. Returns the text
+/// unchanged when the effective indent is empty or the text is empty.
+pub(crate) fn indent_text(text: &str, indent: &str, inferred_indent: Option<&str>) -> String {
+    let effective_indent = if indent.is_empty() {
+        inferred_indent.unwrap_or("")
+    } else {
+        indent
+    };
+
+    if effective_indent.is_empty() || text.is_empty() {
+        text.to_string()
+    } else if text.contains('\n') {
+        text.lines()
+            .map(|line| format!("{}{}", effective_indent, line))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        format!("{}{}", effective_indent, text)
+    }
+}
+
 /// Renders a list of markdown links from TOC headings.
 ///
 /// Returns the replacement text for the directive. Returns the `empty_text`
 /// (or empty string) when no headings match.
+///
+/// Each generated line is prefixed with `indent`. When `indent` is empty,
+/// `inferred_indent` is used as a fallback.
 pub fn render_toc_links(
     headings: &[&MarkdownTocNode],
     file_path: &str,
@@ -42,16 +68,7 @@ pub fn render_toc_links(
 
     if links.is_empty() {
         match &options.empty_text {
-            Some(text) => {
-                if text.contains('\n') {
-                    text.lines()
-                        .map(|line| format!("{}{}", effective_indent, line))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                } else {
-                    format!("{}{}", effective_indent, text)
-                }
-            }
+            Some(text) => indent_text(text, indent, inferred_indent),
             None => String::new(),
         }
     } else {
@@ -198,6 +215,25 @@ mod tests {
             None,
         );
         assert_eq!(result, "  no results");
+    }
+
+    #[test]
+    fn indented_output_empty_text_multiline() {
+        let headings: Vec<&MarkdownTocNode> = vec![];
+        let options = TocLinkingOptions {
+            empty_text: Some("line one\nline two".to_string()),
+            ..Default::default()
+        };
+
+        let result = render_toc_links(
+            &headings,
+            "./doc.md",
+            &options,
+            &default_filter(),
+            "  ",
+            None,
+        );
+        assert_eq!(result, "  line one\n  line two");
     }
 
     #[test]

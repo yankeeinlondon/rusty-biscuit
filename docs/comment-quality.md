@@ -243,41 +243,60 @@ A docblock example that needs ten or more lines of fixture construction
 to make one assertion becomes its own maintenance burden. If the setup
 is non-trivial, link to a real test instead.
 
-No current offender exists in `claudine/` — the cleanup pre-empted any
-heavy-setup doc examples. The shape to avoid (illustrative):
+`compile_canonical_runtime` in
+`claudine/lib/src/dispatch/loader.rs` is the natural candidate for this
+anti-pattern: it consumes a fully populated `ClaudineConfig`, so any
+docblock example would need to construct the event-action map by hand.
 
-**Before** (illustrative):
+**Before** (the shape a tempting `## Examples` block on
+`compile_canonical_runtime` would take):
 
 ```rust
 /// ## Examples
 ///
 /// ```
 /// use claudine::config::ClaudineConfig;
-/// use claudine::config::merge::merge_configs;
+/// use claudine::dispatch::loader::compile_canonical_runtime;
+/// use claudine::actions::HookAction;
+/// use claudine::events::AgenticEvent;
+/// use std::collections::HashMap;
 ///
-/// let mut base = ClaudineConfig::default();
-/// base.events.insert(/* ...12 lines of setup... */);
+/// let mut config = ClaudineConfig::default();
+/// let mut actions = HashMap::new();
+/// actions.insert(
+///     AgenticEvent::BeforeTool,
+///     vec![HookAction::Bash {
+///         command: "echo".into(),
+///         params: "before".into(),
+///         when: None,
+///     }],
+/// );
+/// config.actions = actions;
 ///
-/// let mut overlay = ClaudineConfig::default();
-/// overlay.events.insert(/* ...10 more lines... */);
-///
-/// let merged = merge_configs(base, overlay);
-/// assert!(merged.events.contains_key(&AgenticEvent::PreToolUse));
+/// let runtime = compile_canonical_runtime(config, None).unwrap();
+/// assert!(runtime.get_binding(&AgenticEvent::BeforeTool).is_some());
 /// ```
-pub fn merge_configs(...) -> ClaudineConfig { ... }
+pub fn compile_canonical_runtime(...) -> Result<CanonicalRuntimeConfig> { ... }
 ```
 
-**After** (illustrative):
+**After** (the rustdoc on `compile_canonical_runtime` today):
 
 ```rust
-/// Merge an overlay config into a base config.
+/// Compile a [`ClaudineConfig`] into a [`CanonicalRuntimeConfig`].
 ///
-/// See the `merge_*` tests in `claudine/lib/src/config/merge.rs` for
-/// overlay-precedence behavior.
-pub fn merge_configs(...) -> ClaudineConfig { ... }
+/// This iterates the flat event→actions map, compiles regex mappers for
+/// `Call` actions, builds the protect service if enabled, and bridges
+/// messenger settings to the existing [`RuntimeMessagingSettings`] type.
+pub fn compile_canonical_runtime(...) -> Result<CanonicalRuntimeConfig> { ... }
 ```
 
-For a real example of the right shape, see
+End-to-end usage is covered by
+`claudine/lib/tests/canonical_dispatch.rs`, which exercises the full
+config-to-runtime pipeline against real dispatch fixtures. The summary
+docblock plus the integration test is more durable than a contrived
+fixture inlined in rustdoc.
+
+For a smaller-scoped real example, see
 `claudine/lib/src/config/merge.rs::merge_repo_override` — overlay
 precedence is exercised by adjacent `#[cfg(test)]` tests, not a docblock
 example.
