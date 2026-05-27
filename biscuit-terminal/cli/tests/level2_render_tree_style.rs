@@ -17,9 +17,26 @@
 //! terminal is absent the test prints `skipping: requires <X>` to stderr and
 //! returns immediately. No `#[ignore]` markers are used.
 
+use biscuit_test_harness::kitty::KittyHarness;
+use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::tmux::TmuxHarness;
+use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use test_toolkit::{Level, require_level};
+
+/// Process-shared WezTerm pane reused across the WezTerm tests in this
+/// file. A `clear` is sent before each test's first interaction so
+/// prior renders cannot leak into the capture window.
+static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
+
+/// Process-shared Kitty window reused across the Kitty tests in this
+/// file.
+static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
+
+/// Process-shared tmux session reused across the tmux tests in this
+/// file.
+static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 
 /// Unique words in the quoted text so the rendered output row can be
 /// isolated from the shell prompt and the command echo.
@@ -101,45 +118,48 @@ fn assert_styled_border<H: TerminalHarness>(harness: &mut H) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_block_quote_style_border_in_wezterm() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    assert_styled_border(&mut harness);
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    assert_styled_border(harness);
 }
 
 #[test]
 #[serial(level2_terminal)]
 fn level2_block_quote_style_border_in_kitty() {
-    use biscuit_test_harness::kitty::KittyHarness;
-
     require_level!(
         Level::L2,
         KittyHarness::available(),
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut harness = KittyHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    assert_styled_border(&mut harness);
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    assert_styled_border(harness);
 }
 
 #[test]
 #[serial(level2_terminal)]
 fn level2_block_quote_style_border_in_tmux() {
-    use biscuit_test_harness::tmux::TmuxHarness;
-
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut harness = TmuxHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    let frame = capture_styled_quote(&mut harness);
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    let frame = capture_styled_quote(harness);
 
     // tmux faithfully relays text glyphs: the declared left border must be
     // visible in the displayed cells even though tmux carries no image or
@@ -233,33 +253,35 @@ fn assert_styled_inline_content<H: TerminalHarness>(harness: &mut H) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_block_quote_styled_inline_content_in_wezterm() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    assert_styled_inline_content(&mut harness);
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    assert_styled_inline_content(harness);
 }
 
 #[test]
 #[serial(level2_terminal)]
 fn level2_block_quote_styled_inline_content_in_kitty() {
-    use biscuit_test_harness::kitty::KittyHarness;
-
     require_level!(
         Level::L2,
         KittyHarness::available(),
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut harness = KittyHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    assert_styled_inline_content(&mut harness);
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    assert_styled_inline_content(harness);
 }
 
 // ---------------------------------------------------------------------------
@@ -613,67 +635,70 @@ fn assert_table_styled<H: TerminalHarness>(harness: &mut H) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_render_tree_style_in_wezterm() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    assert_block_fg(&mut harness);
-    assert_block_bg(&mut harness);
-    assert_block_bold(&mut harness);
-    assert_block_fill_indented(&mut harness);
-    assert_block_fill_full(&mut harness);
-    assert_block_border(&mut harness);
-    assert_block_rounded_border(&mut harness);
-    assert_progress_slot_colors(&mut harness);
-    assert_table_striped(&mut harness);
-    assert_table_styled(&mut harness);
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    assert_block_fg(harness);
+    assert_block_bg(harness);
+    assert_block_bold(harness);
+    assert_block_fill_indented(harness);
+    assert_block_fill_full(harness);
+    assert_block_border(harness);
+    assert_block_rounded_border(harness);
+    assert_progress_slot_colors(harness);
+    assert_table_striped(harness);
+    assert_table_styled(harness);
 }
 
 #[test]
 #[serial(level2_terminal)]
 fn level2_render_tree_style_in_kitty() {
-    use biscuit_test_harness::kitty::KittyHarness;
-
     require_level!(
         Level::L2,
         KittyHarness::available(),
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut harness = KittyHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    assert_block_fg(&mut harness);
-    assert_block_bg(&mut harness);
-    assert_block_bold(&mut harness);
-    assert_block_fill_indented(&mut harness);
-    assert_block_fill_full(&mut harness);
-    assert_block_border(&mut harness);
-    assert_block_rounded_border(&mut harness);
-    assert_progress_slot_colors(&mut harness);
-    assert_table_striped(&mut harness);
-    assert_table_styled(&mut harness);
+    let mut guard = SHARED_KITTY
+        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    assert_block_fg(harness);
+    assert_block_bg(harness);
+    assert_block_bold(harness);
+    assert_block_fill_indented(harness);
+    assert_block_fill_full(harness);
+    assert_block_border(harness);
+    assert_block_rounded_border(harness);
+    assert_progress_slot_colors(harness);
+    assert_table_striped(harness);
+    assert_table_styled(harness);
 }
 
 #[test]
 #[serial(level2_terminal)]
 fn level2_render_tree_style_in_tmux() {
-    use biscuit_test_harness::tmux::TmuxHarness;
-
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut harness = TmuxHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     // tmux carries no styling protocol of its own, but it faithfully relays
     // text glyphs. Assert the border glyphs and visible text survive and that
     // no raw escape garbage leaks into the displayed cells.
-    let frame = capture_bt(&mut harness, "bt block \"bordered notice\" --border all");
+    let frame = capture_bt(harness, "bt block \"bordered notice\" --border all");
     assert!(
         frame.plain.contains('┌') && frame.plain.contains('│') && frame.plain.contains('└'),
         "expected box-drawing border glyphs in the tmux capture.\nplain:\n{}",
@@ -692,7 +717,7 @@ fn level2_render_tree_style_in_tmux() {
 
     // A rounded border must relay its light-arc corner glyphs through tmux.
     let frame = capture_bt(
-        &mut harness,
+        harness,
         "bt block \"rounded notice\" --border all --border-radius 1",
     );
     assert!(
@@ -702,7 +727,7 @@ fn level2_render_tree_style_in_tmux() {
     );
 
     // The progress bar and striped table glyphs must also relay through tmux.
-    let frame = capture_bt(&mut harness, "bt progress 50 --label Loading");
+    let frame = capture_bt(harness,"bt progress 50 --label Loading");
     assert!(
         frame.plain.contains("50%") && frame.plain.contains("Loading"),
         "expected the progress bar text in tmux. plain:\n{}",
@@ -710,7 +735,7 @@ fn level2_render_tree_style_in_tmux() {
     );
 
     let frame = capture_bt(
-        &mut harness,
+        harness,
         "bt table --columns \"Name,Score\" --row \"Annwyl,90\" --row \"Bertrand,75\" --striped",
     );
     assert!(
@@ -727,7 +752,7 @@ fn level2_render_tree_style_in_tmux() {
     // A table with typed header / body slot styling relays its text faithfully
     // through tmux with no escape garbage in the displayed cells.
     let frame = capture_bt(
-        &mut harness,
+        harness,
         "bt table --columns \"Pipeline,Verdict\" --row \"Quokka,Affirmed\" \
          --bold-header --body-color red",
     );

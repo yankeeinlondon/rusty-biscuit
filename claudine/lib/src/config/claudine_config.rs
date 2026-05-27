@@ -280,15 +280,12 @@ impl ClaudineConfig {
     ///
     /// Returns [`ClaudineError::ConfigValidation`] if any check fails.
     pub fn validate(&self) -> Result<()> {
-        // Validate protect config
         self.protect.validate()?;
 
-        // Validate messenger active_config reference
         if let Some(messenger) = &self.messenger {
             messenger.validate()?;
         }
 
-        // Validate default sound effect names
         validate_sound_name("default_sounds.success", &self.default_sounds.success)?;
         validate_sound_name("default_sounds.attention", &self.default_sounds.attention)?;
         validate_sound_name("default_sounds.error", &self.default_sounds.error)?;

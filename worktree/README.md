@@ -62,6 +62,19 @@
 
     > **Note:** the shell completions for `wt` will be updated dynamically and able to resolve the valid worktree names without the user needing to type them out
 
+- `wt remove <name> [-f | -ff] [-b]`
+
+    Removes a worktree by name (or branch name).
+
+    - safety semantics:
+        - clean worktrees prompt for confirmation (no force flag)
+        - dirty worktrees (with uncommitted files) prompt for confirmation
+        - `-f` / `--force` skips confirmation when safe (clean, or fewer than 10 non-source files)
+        - `-ff` removes immediately regardless of state, skipping all confirmation
+    - source-code awareness: uncommitted source files (e.g. `.rs`, `.ts`, `.py`) trigger a stronger warning than non-source files (e.g. `.md`, `.txt`)
+    - `-b` / `--branch` also attempts a soft delete (`git branch -d`) of the worktree's branch after removal; if the branch is not fully merged, a warning is shown with a hint to use `git branch -D` to force-delete it
+    - the main checkout cannot be removed (use plain `git` for that)
+
 - `wt help`
 
     - shows the help system

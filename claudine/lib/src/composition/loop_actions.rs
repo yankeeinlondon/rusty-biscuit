@@ -59,7 +59,6 @@ impl ActionStaging {
         Value::Object(self.frontmatter)
     }
 
-    /// Commit the staged frontmatter copy as a map.
     pub fn commit_map(self) -> Map<String, Value> {
         self.frontmatter
     }

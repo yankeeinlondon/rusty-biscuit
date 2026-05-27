@@ -241,7 +241,6 @@ impl<S: SemanticEventSink> SharedSemanticSink<S> {
         }
     }
 
-    /// Access the shared inner sink through its `Arc<Mutex<_>>`.
     pub fn inner(&self) -> &Arc<Mutex<S>> {
         &self.inner
     }

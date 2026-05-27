@@ -1,0 +1,58 @@
+//! Shared protobuf schema, generated gRPC stubs, and IPC helpers for the
+//! remote-signal daemon and its clients.
+//!
+//! Phase 1 wired the `Ping` / `Status` round-trip over a Unix Domain
+//! Socket. Phase 2 adds the session-log document model
+//! ([`session_log`]) plus the append/read RPC surface that exercises
+//! the daemon's redb-backed Loro persistence and the DuckDB analytical
+//! projection. Later phases will extend the `RemoteSignal` service with
+//! pairing and sync operations.
+
+pub mod envelope;
+pub mod identity;
+pub mod invitation;
+pub mod session_log;
+pub mod socket;
+pub mod sync;
+
+/// Generated protobuf types and gRPC stubs for the `remote_signal` package.
+///
+/// Re-exported from the build-script output so consumers can refer to a
+/// stable module path (`remote_signal_core::proto`) instead of the raw
+/// `tonic::include_proto!` macro call site.
+pub mod proto {
+    tonic::include_proto!("remote_signal");
+}
+
+pub use proto::remote_signal_client::RemoteSignalClient;
+pub use proto::remote_signal_server::{RemoteSignal, RemoteSignalServer};
+pub use proto::{
+    AppendEntryRequest, AppendEntryResponse, ApprovePeerRequest, ApprovePeerResponse,
+    ConnectToPeerRequest, ConnectToPeerResponse, CreateInvitationRequest,
+    CreateInvitationResponse, ListChunkEntriesRequest, ListChunkEntriesResponse,
+    ListPairingsRequest, ListPairingsResponse, ListPeersRequest, ListPeersResponse,
+    ListSessionChunksRequest, ListSessionChunksResponse, PairingInfo, PeerConnectionState,
+    PeerInfo, PeerSource, PingRequest, PingResponse, ProjectionRow, QueryProjectionRequest,
+    QueryProjectionResponse, RevokePeerRequest, RevokePeerResponse, SessionEntry,
+    SignedEnvelopeWire, StatusRequest, StatusResponse, SyncAdvertiseEnd, SyncChunkAdvertise,
+    SyncChunkOutcome, SyncDelta, SyncEnd, SyncError, SyncFrame, SyncHello, SyncWithPeerRequest,
+    SyncWithPeerResponse, sync_frame,
+};
+
+pub use envelope::{
+    ENVELOPE_HASH_LENGTH, EnvelopeError, EnvelopeInbox, EnvelopeSealer, PayloadKind,
+    SignedEnvelope,
+};
+pub use identity::{
+    NodeIdentity, NodeIdentityError, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH, verify_signature,
+};
+pub use invitation::{INVITATION_HRP, INVITATION_VERSION, Invitation, InvitationError};
+
+pub use session_log::{
+    ChunkConfig, ChunkId, ChunkIdParseError, ChunkMetadata, DEFAULT_MAX_BYTES_PER_CHUNK,
+    DEFAULT_MAX_ENTRIES_PER_CHUNK, Entry,
+};
+
+/// Semver string of the `remote-signal-core` crate, surfaced so the daemon
+/// and clients can report a single shared version in protocol responses.
+pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");

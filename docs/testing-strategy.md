@@ -82,7 +82,7 @@ The canonical migration applies to the **curated `areas` list in the root
 
 ```
 biscuit-hash biscuit-location biscuit-speaks biscuit-terminal
-schematic biscuit-file unchained-ai playa
+biscuit-tui schematic biscuit-file unchained-ai playa
 tree-hugger darkmatter sniff model-citizen
 claudine research queue homelab
 ```
@@ -91,7 +91,6 @@ claudine research queue homelab
 
 | Workspace member | Why it is not in `areas` |
 | ---------------- | ------------------------ |
-| `biscuit-tui`    | Mature package area with its own `justfile`, but historically not part of the root orchestrator. Eligible to migrate; tracked separately. |
 | `biscuit-clipboard`, `biscuit-visualized`, `messenger`, `tabby`, `worktree`, `dmls` | Smaller utility crates or experimental areas not yet promoted into the curated list. |
 | `tools/test-toolkit`, `biscuit-test-harness`, `biscuit-browser-harness` | Test-only infrastructure crates. Their tests run as part of the consumers (darkmatter, claudine, biscuit-terminal, etc.). |
 | `schematic/schema` | Generated code; intentionally excluded from the workspace and rebuilt via `just generate` in the `schematic` area. |
@@ -126,6 +125,20 @@ These select tests via stable name prefixes (`level2_`, `level3_`,
 `browser_`). The runtime `require_level!(Level::L2, harness_check)` macro from
 `test-toolkit` decides whether a selected test should skip cleanly or panic
 based on `BISCUIT_TEST_LEVEL_REQUIRED` and `BISCUIT_BROWSER_REQUIRED`.
+
+`test-l2` additionally pre-spawns one shared terminal pane per backend
+(WezTerm, kitty, tmux, Apple Terminal) via `biscuit-harness-broker`
+before invoking nextest, exports the pane ids via `BISCUIT_SHARED_*`
+env vars, and runs nextest with `-j 1`. Tests call
+`<Backend>Harness::shared_or_spawn()` from their `SharedHarness` init
+closures, which attaches to the pre-spawned pane when the env var is
+set and spawns a fresh background pane otherwise. The recipe tears
+the shared panes down in a trap after nextest exits, so a single
+2–3 s spawn cost per backend is paid once per `just test-l2`
+invocation instead of once per test. Backends whose tooling is
+missing on the host (e.g. no `WEZTERM_UNIX_SOCKET`) are silently
+skipped at spawn time and tests fall back to per-process spawning,
+which itself skips cleanly via `require_level!`.
 
 ### `test-real`
 Real-resource tests are typically `#[ignore]`d and gated on per-package env

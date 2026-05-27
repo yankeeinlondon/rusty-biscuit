@@ -59,13 +59,26 @@ sanity:
     @just _sanity claudine
     @just _sanity claudine-cli
 
+# test just the CLI in Claudine
+test-cli *args="":
+    @just _test claudine-cli {{ args }}
+
+# test just the Claudine Library
+test-library *args="":
+    @just _test claudine {{ args }}
+    
+# test just the remote-signal daemon 
+test-remote-signal *args: 
+    @just _test remote-signal {{args}}
+    
 # Test both library and CLI.
 test *args="":
     @just _test claudine {{ args }}
     @just _test claudine-cli {{ args }}
 
-# Level-2 PTY tests. The transcripts are `#[ignore]`d for timing sensitivity;
-# pass `-- --run-ignored=only` to force their execution.
+# Level-2 PTY tests. Gated by `require_level!(Level::L2, pty_available(), ...)`;
+# skip cleanly when /dev/ptmx is unavailable, hard-fail when
+# BISCUIT_TEST_LEVEL_REQUIRED=2 is set.
 test-l2 *args="":
     @just _test_l2 claudine-cli {{ args }}
 

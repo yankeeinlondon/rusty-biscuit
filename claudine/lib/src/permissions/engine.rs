@@ -74,12 +74,10 @@ impl PolicyEngine {
         }
     }
 
-    /// Returns `true` if a backend is registered for the given provider.
     pub fn has_backend(&self, provider: Provider) -> bool {
         self.backends.contains_key(&provider)
     }
 
-    /// Returns the list of providers with registered backends.
     pub fn registered_providers(&self) -> Vec<Provider> {
         self.backends.keys().copied().collect()
     }
@@ -209,7 +207,6 @@ impl ProviderPolicyHandle<'_> {
         backend.plan_change(ctx, &native, change).await
     }
 
-    /// Returns the provider this handle is scoped to.
     pub fn provider(&self) -> Provider {
         self.provider
     }

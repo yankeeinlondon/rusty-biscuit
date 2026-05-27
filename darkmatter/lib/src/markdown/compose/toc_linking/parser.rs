@@ -55,21 +55,75 @@ pub fn parse_toc_linking_directives(
     Ok(directives)
 }
 
-/// Scan backward from `pos` to find the first non-empty line and return its leading whitespace.
+/// Scan backward from `pos` to find the first non-empty line and infer the
+/// indentation a flush-left directive should inherit.
+///
+/// Behaviour:
+/// - If the previous non-empty line is a CommonMark list item (bullet or
+///   ordered), return the item's content column as spaces so the directive
+///   lazy-continues inside that list item.
+/// - Otherwise, return the previous line's leading whitespace.
+/// - Returns `None` when nothing suitable is found.
 fn infer_indent_from_previous_line(content: &str, pos: usize) -> Option<String> {
     let before = &content[..pos];
     for line in before.lines().rev() {
         let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            let leading_ws_len = line.len() - line.trim_start().len();
-            if leading_ws_len > 0 {
-                return Some(line[..leading_ws_len].to_string());
-            } else {
-                return None;
-            }
+        if trimmed.is_empty() {
+            continue;
         }
+
+        if let Some(content_col) = list_item_content_column(line) {
+            return Some(" ".repeat(content_col));
+        }
+
+        let leading_ws_len = line.len() - line.trim_start().len();
+        if leading_ws_len > 0 {
+            return Some(line[..leading_ws_len].to_string());
+        }
+        return None;
     }
     None
+}
+
+/// Detects whether `line` is a CommonMark list item and returns the byte
+/// column where its content begins (i.e., the indentation a lazy
+/// continuation line would inherit).
+fn list_item_content_column(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+        i += 1;
+    }
+    let marker_start = i;
+
+    if i < bytes.len() && matches!(bytes[i], b'-' | b'+' | b'*') {
+        i += 1;
+    } else {
+        let digit_start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == digit_start || i >= bytes.len() || !matches!(bytes[i], b'.' | b')') {
+            return None;
+        }
+        i += 1;
+    }
+
+    if i == marker_start {
+        return None;
+    }
+
+    if i >= bytes.len() {
+        return Some(i);
+    }
+    if bytes[i] != b' ' && bytes[i] != b'\t' {
+        return None;
+    }
+
+    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+        i += 1;
+    }
+    Some(i)
 }
 
 fn parse_directive_line(
@@ -410,5 +464,32 @@ mod tests {
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].indent, "");
         assert_eq!(directives[0].inferred_indent, Some("  ".to_string()));
+    }
+
+    #[test]
+    fn inferred_indent_from_bullet_list_item() {
+        let content = "- Item\n::toc-linking ./doc.md\n";
+        let directives = parse_toc_linking_directives(content).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].indent, "");
+        assert_eq!(directives[0].inferred_indent, Some("  ".to_string()));
+    }
+
+    #[test]
+    fn inferred_indent_from_ordered_list_item() {
+        let content = "1. First\n::toc-linking ./doc.md\n";
+        let directives = parse_toc_linking_directives(content).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].indent, "");
+        assert_eq!(directives[0].inferred_indent, Some("   ".to_string()));
+    }
+
+    #[test]
+    fn inferred_indent_from_nested_bullet_list_item() {
+        let content = "  - Nested item\n::toc-linking ./doc.md\n";
+        let directives = parse_toc_linking_directives(content).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].indent, "");
+        assert_eq!(directives[0].inferred_indent, Some("    ".to_string()));
     }
 }

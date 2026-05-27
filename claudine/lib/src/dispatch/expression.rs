@@ -77,7 +77,6 @@ impl<'a> EventMetaExpressionLookup<'a> {
         Self { meta }
     }
 
-    /// Borrow the underlying [`EventMeta`].
     pub fn meta(&self) -> &'a EventMeta {
         self.meta
     }
@@ -143,7 +142,6 @@ impl<'a> EventMetaConditionLookup<'a> {
         }
     }
 
-    /// Borrow the underlying [`EventMeta`].
     pub fn meta(&self) -> &'a EventMeta {
         self.inner.meta()
     }

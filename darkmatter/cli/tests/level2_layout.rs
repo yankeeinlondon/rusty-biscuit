@@ -18,6 +18,26 @@
 //! WezTerm into a hard failure rather than a silent skip. CI jobs that
 //! provision WezTerm should always set this so Level 2 coverage is
 //! actually enforced, not just nominally present.
+//!
+//! ## WezTerm pane-capture pitfalls
+//!
+//! `harness.capture()` reads the pane via `wezterm cli get-text --escapes`,
+//! which **walks the cell grid and emits SGR for transitions only**:
+//!
+//! - Contiguous same-attribute cells collapse into a single SGR span; the
+//!   leading SGR may appear on a previous row and not re-appear on the next.
+//! - Truecolor SGR is re-emitted in either semicolon (`\x1b[48;2;R;G;Bm`) or
+//!   ITU colon (`\x1b[48:2::R:G:Bm`) form depending on terminfo and version.
+//! - `\x1b[0m` in the source may come back as `\x1b[39m\x1b[49m` (or be elided
+//!   entirely if the following cell has the same attributes).
+//!
+//! Consequence: **per-line byte equality across two captures is unreliable**
+//! even when the underlying `md` output is byte-identical (verifiable by
+//! running the command under `script(1)` and diffing). Prefer semantic
+//! assertions on the full `frame.raw` stream — presence of expected SGR bytes
+//! (in both semicolon and colon form) and absence of disallowed SGR bytes.
+//! See `level2_cli_code_theme_overrides_style_page_code_theme` and commit
+//! `be5d0409e` for the canonical pattern.
 
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
@@ -126,11 +146,8 @@ fn run_md_env(
     let file_path = dir.path().join("layout.md");
     fs::write(&file_path, file_body).unwrap();
 
-    let mut guard = SHARED_HARNESS.get_or_init(|| {
-        let mut harness = WezTermHarness::new();
-        harness.spawn_shell().expect("spawn_shell failed");
-        harness
-    });
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().unwrap();
 
     // Reset the visible region so the previous test's output does not bleed
@@ -2171,43 +2188,69 @@ fn level2_style_page_code_theme_changes_terminal_rendering() {
 }
 
 /// CLI `--code-theme` must beat `style.page.code.theme`. With frontmatter set
-/// to `dracula` and CLI passing `--code-theme nord`, the rendered bytes must
-/// match a plain `--code-theme nord` render of the same body.
+/// to `dracula` and CLI passing `--code-theme nord`, the rendered output must
+/// use the nord theme — its panel background and at least one of its signature
+/// syntax foregrounds — and must not use the dracula panel background.
 #[test]
 #[serial(level2_terminal)]
 fn level2_cli_code_theme_overrides_style_page_code_theme() {
     let doc_with_fm = "---\nstyle:\n  page:\n    code:\n      theme: dracula\n---\n\n\
         ```rust\nfn _cli_override_marker() { let x = 1; }\n```\n";
-    let doc_plain = "```rust\nfn _cli_override_marker() { let x = 1; }\n```\n";
 
     let Some((with_fm, _)) = run_md(doc_with_fm, "--code-theme nord --max-width 60") else {
         return;
     };
-    let Some((baseline, _)) = run_md(doc_plain, "--code-theme nord --max-width 60") else {
-        return;
-    };
 
-    // Both must contain the same SGR-bearing code body — frontmatter must NOT
-    // re-color the block when CLI claims the slot.
     assert!(
         with_fm.plain.contains("_cli_override_marker"),
         "fm-with-cli plain missing body:\n{}",
         with_fm.plain
     );
 
-    // Extract just the code line bytes from each capture for comparison.
-    let line_of = |frame: &CapturedFrame| -> Option<String> {
-        frame
-            .raw
-            .lines()
-            .find(|l| l.contains("_cli_override_marker"))
-            .map(|l| l.to_string())
-    };
-    let with_fm_line = line_of(&with_fm).expect("with_fm code line not found in raw stream");
-    let baseline_line = line_of(&baseline).expect("baseline code line not found in raw stream");
-    assert_eq!(
-        with_fm_line, baseline_line,
-        "CLI --code-theme nord must override style.page.code.theme: dracula"
+    // Nord panel background `#2e3440` = rgb(46,52,64). Dracula panel
+    // background `#282a36` = rgb(40,42,54). WezTerm's `get-text --escapes`
+    // re-emits SGR in either semicolon or ITU colon form and collapses
+    // contiguous same-attribute cells into a single span, so per-line byte
+    // equality is unreliable — assert on the presence of the nord SGR and
+    // the absence of the dracula SGR in the full captured stream instead.
+    let nord_bg_semi = "\x1b[48;2;46;52;64m";
+    let nord_bg_colon = "\x1b[48:2::46:52:64m";
+    let dracula_bg_semi = "\x1b[48;2;40;42;54m";
+    let dracula_bg_colon = "\x1b[48:2::40:42:54m";
+
+    assert!(
+        with_fm.raw.contains(nord_bg_semi) || with_fm.raw.contains(nord_bg_colon),
+        "expected nord panel bg (46,52,64) from CLI override. raw={:?}",
+        with_fm.raw
+    );
+    assert!(
+        !with_fm.raw.contains(dracula_bg_semi) && !with_fm.raw.contains(dracula_bg_colon),
+        "frontmatter dracula panel bg (40,42,54) must not appear when CLI --code-theme \
+         claims the slot. raw={:?}",
+        with_fm.raw
+    );
+
+    // Nord's "frost" Blue `#81a1c1` = rgb(129,161,193) highlights the `fn`
+    // and `let` keywords in our rust snippet; dracula's pink `#ff79c6` =
+    // rgb(255,121,198) would color those instead. Asserting that the nord
+    // keyword color is present and the dracula one is absent is a sharper
+    // signal than panel bg alone (panel bg can match between themes that
+    // share `#2e3440`, but nord/dracula have distinct keyword palettes).
+    let nord_kw_semi = "\x1b[38;2;129;161;193m";
+    let nord_kw_colon = "\x1b[38:2::129:161:193m";
+    let dracula_kw_semi = "\x1b[38;2;255;121;198m";
+    let dracula_kw_colon = "\x1b[38:2::255:121:198m";
+
+    assert!(
+        with_fm.raw.contains(nord_kw_semi) || with_fm.raw.contains(nord_kw_colon),
+        "expected nord keyword fg (129,161,193) from CLI override. raw={:?}",
+        with_fm.raw
+    );
+    assert!(
+        !with_fm.raw.contains(dracula_kw_semi) && !with_fm.raw.contains(dracula_kw_colon),
+        "frontmatter dracula keyword fg (255,121,198) must not appear when CLI --code-theme \
+         claims the slot. raw={:?}",
+        with_fm.raw
     );
 }
 

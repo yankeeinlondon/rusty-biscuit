@@ -183,6 +183,62 @@ pub fn list_worktrees() -> Result<Vec<WorktreeStatus>, WorktreeError> {
     Ok(statuses)
 }
 
+/// A snapshot of the uncommitted files in a worktree, classified by content kind.
+///
+/// `paths` are repository-relative (as emitted by `git status --porcelain`); for
+/// renames the new path is recorded. `has_source` is true if at least one path
+/// classifies as source code under
+/// [`sniff::filesystem::path_kind::is_source_code_path`].
+#[derive(Debug, Clone, Default)]
+pub struct DirtyFiles {
+    pub paths: Vec<PathBuf>,
+    pub has_source: bool,
+}
+
+impl DirtyFiles {
+    /// Classify a worktree's `git status --porcelain` output.
+    pub fn from_porcelain(porcelain: &str) -> Self {
+        let mut paths = Vec::new();
+        let mut has_source = false;
+        for line in porcelain.lines() {
+            let Some(file_path) = porcelain_path(line) else {
+                continue;
+            };
+            let p = PathBuf::from(file_path);
+            if !has_source && sniff::filesystem::path_kind::is_source_code_path(&p) {
+                has_source = true;
+            }
+            paths.push(p);
+        }
+        Self { paths, has_source }
+    }
+
+    /// Folded summary equivalent to [`dirty_status`].
+    pub fn status(&self) -> DirtyStatus {
+        if self.paths.is_empty() {
+            DirtyStatus::Clean
+        } else if self.has_source {
+            DirtyStatus::DirtySource
+        } else {
+            DirtyStatus::DirtyNonSource
+        }
+    }
+}
+
+/// List uncommitted files for the worktree rooted at `path`.
+///
+/// Returns an empty [`DirtyFiles`] (clean) if git fails, mirroring
+/// [`dirty_status`]'s degraded-mode behavior so callers stay robust.
+pub fn list_dirty_files(path: &Path) -> DirtyFiles {
+    let Ok(output) = git_command_in(
+        path,
+        &["-c", "core.untrackedCache=true", "status", "--porcelain"],
+    ) else {
+        return DirtyFiles::default();
+    };
+    DirtyFiles::from_porcelain(&output)
+}
+
 /// Inspect a worktree's working tree and classify its dirtiness.
 ///
 /// Runs `git status --porcelain` in `path` and partitions changed paths into
@@ -371,10 +427,44 @@ pub fn worktree_names() -> Vec<String> {
     names
 }
 
-/// Remove a worktree by path (used in tests).
-pub fn remove_worktree(path: &std::path::Path) -> Result<(), WorktreeError> {
-    git_command(&["worktree", "remove", "--force", &path.display().to_string()])?;
+/// Remove a worktree by absolute path.
+///
+/// When `force` is true, `git worktree remove --force` is used (drops any
+/// uncommitted changes). When false, git's own safety check applies and the
+/// command fails if the worktree has uncommitted changes or is locked.
+pub fn remove_worktree(path: &std::path::Path, force: bool) -> Result<(), WorktreeError> {
+    let path_str = path.display().to_string();
+    let mut args = vec!["worktree", "remove"];
+    if force {
+        args.push("--force");
+    }
+    args.push(&path_str);
+    git_command(&args)?;
     Ok(())
+}
+
+/// Outcome of a soft branch delete attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeleteBranchOutcome {
+    /// `git branch -d <branch>` succeeded.
+    Deleted,
+    /// `git branch -d` refused (e.g. not merged). The branch was preserved.
+    Preserved { reason: String },
+}
+
+/// Attempt a soft delete of `branch` (`git branch -d`).
+///
+/// Soft delete fails if the branch is not fully merged into its upstream or
+/// `HEAD`; in that case we report a [`DeleteBranchOutcome::Preserved`] with
+/// git's stderr as the reason rather than escalating to `-D`.
+pub fn delete_branch(branch: &str) -> DeleteBranchOutcome {
+    match git_command(&["branch", "-d", branch]) {
+        Ok(_) => DeleteBranchOutcome::Deleted,
+        Err(WorktreeError::GitCommand(reason)) => DeleteBranchOutcome::Preserved { reason },
+        Err(e) => DeleteBranchOutcome::Preserved {
+            reason: e.to_string(),
+        },
+    }
 }
 
 #[cfg(test)]
@@ -444,5 +534,51 @@ branch refs/heads/fix/bug-42
         let result = default_branch();
         assert!(result.is_ok());
         assert!(["main", "master"].contains(&result.unwrap().as_str()));
+    }
+
+    #[test]
+    fn classify_dirty_lines_clean() {
+        let dirty = DirtyFiles::from_porcelain("");
+        assert!(dirty.paths.is_empty());
+        assert!(!dirty.has_source);
+        assert_eq!(dirty.status(), DirtyStatus::Clean);
+    }
+
+    #[test]
+    fn classify_dirty_lines_non_source_only() {
+        let porcelain = " M README.md\n?? notes.txt\n";
+        let dirty = DirtyFiles::from_porcelain(porcelain);
+        assert_eq!(dirty.paths.len(), 2);
+        assert!(!dirty.has_source);
+        assert_eq!(dirty.status(), DirtyStatus::DirtyNonSource);
+    }
+
+    #[test]
+    fn classify_dirty_lines_source_present() {
+        let porcelain = " M README.md\n M src/lib.rs\n";
+        let dirty = DirtyFiles::from_porcelain(porcelain);
+        assert_eq!(dirty.paths.len(), 2);
+        assert!(dirty.has_source);
+        assert_eq!(dirty.status(), DirtyStatus::DirtySource);
+    }
+
+    #[test]
+    fn classify_dirty_lines_rename() {
+        let porcelain = "R  old/foo.rs -> new/foo.rs\n";
+        let dirty = DirtyFiles::from_porcelain(porcelain);
+        assert_eq!(dirty.paths.len(), 1);
+        assert_eq!(dirty.paths[0], std::path::PathBuf::from("new/foo.rs"));
+        assert!(dirty.has_source);
+    }
+
+    #[test]
+    fn delete_branch_outcome_variants_construct() {
+        // Smoke-test that the outcome enum is constructable + matchable.
+        let merged = DeleteBranchOutcome::Deleted;
+        let preserved = DeleteBranchOutcome::Preserved {
+            reason: "not fully merged".into(),
+        };
+        assert!(matches!(merged, DeleteBranchOutcome::Deleted));
+        assert!(matches!(preserved, DeleteBranchOutcome::Preserved { .. }));
     }
 }

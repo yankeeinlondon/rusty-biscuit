@@ -2,7 +2,7 @@
 //!
 //! This module is the canonical home for the [`Provider`] enum and all
 //! per-provider static facts. Each [`Provider`] variant has exactly one
-//! [`ProviderInfo`] constant served from [`provider_info`](registry::provider_info)
+//! [`ProviderInfo`] constant served from [`provider_info`]
 //! that exposes identity, documentation links, and four focused behavior
 //! traits ([`ProviderBehavior`], [`McpBehavior`], [`AdapterBehavior`],
 //! [`ConfiguratorBehavior`]).
@@ -89,7 +89,7 @@ fn serialize_resource_support<S: Serializer>(
 /// All static, serializable facts about a provider.
 ///
 /// Populated once per provider variant as a `&'static ProviderInfo` accessed
-/// through [`provider_info`](registry::provider_info). The four behavior
+/// through [`provider_info`]. The four behavior
 /// fields (`behavior`, `mcp`, `adapter`, `configurator`) carry the small set
 /// of genuinely dynamic operations so a single registry lookup returns both
 /// the data and the behavior halves of the catalog.
@@ -213,12 +213,11 @@ pub struct ProviderInfo {
     /// ## Notes
     ///
     /// The first element is treated as the **primary user-level config
-    /// path** by [`crate::config::discover_agents_full`]. The catalog
-    /// invariant test
-    /// [`crate::provider::tests::config_paths_have_primary_user_entry`]
-    /// asserts every provider declares at least one entry; the discovery
-    /// helper relies on `config_paths[0]` to determine config-file
-    /// presence and the path surfaced via [`crate::config::AgentInfo`].
+    /// path** by [`crate::config::discover_agents_full`]. A catalog
+    /// invariant test (`config_paths_have_primary_user_entry`) asserts
+    /// every provider declares at least one entry; the discovery helper
+    /// relies on `config_paths[0]` to determine config-file presence and
+    /// the path surfaced via [`crate::config::AgentInfo`].
     pub config_paths: &'static [PathTemplate],
 
     /// Templates for memory / instruction files contributing to the
@@ -292,7 +291,7 @@ impl ProviderInfo {
 
 // Implementing [`crate::agents::Agent`] on `ProviderInfo` lets the legacy
 // `agents::agent_for(provider)` registry forward straight to
-// [`provider_info`](registry::provider_info) without keeping per-provider
+// [`provider_info`] without keeping per-provider
 // thin facade structs around.
 impl crate::agents::Agent for ProviderInfo {
     fn id(&self) -> Provider {

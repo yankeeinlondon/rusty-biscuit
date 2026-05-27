@@ -1,16 +1,32 @@
 //! Process-shared harness wrapper with at-exit cleanup.
 //!
 //! Real-terminal harnesses (WezTerm, Kitty, tmux, Apple Terminal) cost
-//! 2–3 seconds per spawn. When a test binary holds many `#[serial]`
-//! tests against the same harness, those tests reuse a single harness
-//! stored in a `static`. Rust never runs `Drop` on `static` values, so
-//! without an explicit hook the harness leaks its pane / window / session
-//! at process exit.
+//! 2–3 seconds per spawn. [`SharedHarness`] addresses that cost on two
+//! axes:
 //!
-//! [`SharedHarness`] encapsulates that pattern: a `Mutex<Option<T>>`
-//! protecting the singleton, plus a `libc::atexit` handler registered on
-//! first spawn so the harness's `Drop` impl runs (which in turn shells
-//! out to e.g. `wezterm cli kill-pane`).
+//! ### Same-process reuse
+//!
+//! When a test binary holds many `#[serial]` tests against the same
+//! harness, those tests reuse a single harness stored in a `static`.
+//! Rust never runs `Drop` on `static` values, so without an explicit
+//! hook the harness leaks its pane / window / session at process exit
+//! — [`SharedHarness`] registers a `libc::atexit` handler on first
+//! spawn that runs the harness's `Drop` impl (which in turn shells out
+//! to e.g. `wezterm cli kill-pane`).
+//!
+//! ### Cross-process reuse via `biscuit-harness-broker`
+//!
+//! `cargo nextest run` executes every test in its own child process,
+//! so a process-local `static` cannot itself amortize spawn cost across
+//! tests. The `_test_l2` recipe in `just/devops.just` therefore uses
+//! `biscuit-harness-broker spawn <backend>` to spawn ONE pane per
+//! backend before invoking nextest, exports the resulting id via a
+//! `BISCUIT_SHARED_*_ID` env var, and runs nextest with `-j 1`. The
+//! init closure should call the backend's `shared_or_spawn()` (or
+//! `shared_or_else(...)`) helper, which attaches to the pre-spawned
+//! pane when the env var is set and spawns a fresh one otherwise.
+//! Attach-mode harnesses skip cleanup in `Drop` because the recipe
+//! owns the pane and tears it down after nextest exits.
 //!
 //! ## Usage
 //!
@@ -21,11 +37,10 @@
 //! static SHARED: SharedHarness<WezTermHarness> = SharedHarness::new();
 //!
 //! fn run_in_pane() {
-//!     let mut guard = SHARED.get_or_init(|| {
-//!         let mut h = WezTermHarness::new();
-//!         h.spawn_shell().expect("spawn_shell");
-//!         h
-//!     });
+//!     // `shared_or_spawn()` attaches when the recipe-exported env
+//!     // var is set and spawns a fresh background pane otherwise.
+//!     let mut guard = SHARED
+//!         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn"));
 //!     let harness = guard.as_mut().expect("harness present");
 //!     // ... drive the harness ...
 //! }

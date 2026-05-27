@@ -24,6 +24,7 @@ assert_cmd = "2"
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 expectrl = "0.8"
 predicates = "3"
+serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 
 # Opt-out of benchmarking: thin CLI wrapper around the tui-chrome library.

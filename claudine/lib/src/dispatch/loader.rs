@@ -23,17 +23,14 @@ pub struct RuntimeEventBinding {
 }
 
 impl RuntimeEventBinding {
-    /// Whether the binding is enabled.
     pub fn enabled(&self) -> bool {
         self.enabled
     }
 
-    /// Actions to execute for this binding.
     pub fn actions(&self) -> &[HookAction] {
         &self.actions
     }
 
-    /// Precompiled matcher (regex or expression) for this binding.
     pub fn matcher(&self) -> Option<&RuntimeMatcher> {
         self.matcher.as_ref()
     }
@@ -43,7 +40,6 @@ impl RuntimeEventBinding {
         &self.compiled_mappers
     }
 
-    /// Build a RuntimeEventBinding directly for testing.
     #[cfg(test)]
     pub fn new_for_test(
         enabled: bool,
@@ -76,22 +72,18 @@ pub struct CanonicalRuntimeConfig {
 }
 
 impl CanonicalRuntimeConfig {
-    /// Get the underlying [`ClaudineConfig`].
     pub fn config(&self) -> &ClaudineConfig {
         &self.config
     }
 
-    /// Get runtime messaging settings.
     pub fn messaging(&self) -> &RuntimeMessagingSettings {
         &self.messaging
     }
 
-    /// Get the cached protect service, if available.
     pub fn protect_service(&self) -> Option<&ProtectService> {
         self.protect_service.as_ref()
     }
 
-    /// Get an event binding for a canonical event.
     pub fn get_binding(&self, event: &AgenticEvent) -> Option<&RuntimeEventBinding> {
         self.events.get(event)
     }
@@ -212,7 +204,8 @@ fn compile_canonical_mapper(mapper: &Mapper, event: AgenticEvent) -> Result<Comp
 /// Bridge [`ClaudineConfig`] TTS settings to legacy [`GlobalSettings`].
 ///
 /// Constructs a minimal [`GlobalSettings`] containing only the TTS
-/// configuration, suitable for [`LifecycleRuntimeContext`].
+/// configuration, suitable for
+/// [`LifecycleRuntimeContext`](crate::composition::lifecycle::LifecycleRuntimeContext).
 pub fn bridge_tts_settings(config: &ClaudineConfig) -> GlobalSettings {
     use crate::config::tts::{Gender, TtsValue, VoiceSelection};
     use crate::events::TtsSettings;
@@ -248,7 +241,8 @@ pub fn bridge_tts_settings(config: &ClaudineConfig) -> GlobalSettings {
 
 /// Bridge [`ClaudineConfig`] messenger settings to [`RuntimeMessagingSettings`].
 ///
-/// Reuses [`bridge_messenger_to_runtime`] from [`compile_canonical_runtime`].
+/// Reuses the private `bridge_messenger_to_runtime` helper from
+/// [`compile_canonical_runtime`].
 pub fn bridge_messaging_settings(config: &ClaudineConfig) -> RuntimeMessagingSettings {
     config
         .messenger

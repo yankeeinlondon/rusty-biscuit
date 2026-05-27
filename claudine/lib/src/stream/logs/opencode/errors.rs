@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use regex::Regex;
 
-use crate::stream::logs::opencode::events::{AssetType, LogClassification, OpenCodeLogRecord};
+use crate::stream::logs::opencode::events::{AssetType, LogClassification, OpenCodeLogRecord, ProviderLimitKind};
 use crate::stream::summary::RateLimitInfo;
 
 static RESET_AT_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -290,24 +290,18 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
     }
 
     let status_code = extract_status_code(haystack);
-    let is_fatal = haystack.contains("AI_RetryError") || haystack.contains("maxRetriesExceeded");
+    let is_retry_exhausted =
+        haystack.contains("AI_RetryError") || haystack.contains("maxRetriesExceeded");
+    let has_cap = haystack.contains("\"code\":\"1308\"")
+        || haystack.contains("exceeded_current_quota_error")
+        || haystack.contains("Usage limit reached");
+    let is_overload = contains_any_ci(haystack, &["overload", "engine_overloaded_error"]);
+    let has_error_context = record.tags.contains_key("error");
 
-    // It's a rate limit if it has explicit 429/1308 or known substrings,
-    // OR if it's a fatal retry failure specifically for a 429.
-    let is_rate_limit = status_code == Some(429)
-        || haystack.contains("\"code\":\"1308\"")
-        || haystack.contains("Usage limit reached")
-        || (is_fatal && status_code == Some(429));
-
-    if is_rate_limit {
+    // Resolution order is critical — cap-with-context wins over retries-exhausted.
+    // 1. Cap signal present with error tag → terminal usage cap.
+    if has_cap && has_error_context {
         let status_code = status_code.unwrap_or(429);
-        let error_name = if is_fatal {
-            "AI_RetryError"
-        } else {
-            "AI_APICallError"
-        }
-        .to_string();
-
         let reset_at = extract_reset_at(haystack);
         let provider_id = record.tags.get("providerID").cloned();
         let model_id = record.tags.get("modelID").cloned();
@@ -317,22 +311,104 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
             .cloned()
             .unwrap_or_else(|| haystack.to_string());
 
-        return Some(LogClassification::RateLimit {
+        return Some(LogClassification::ProviderLimit {
             status_code,
-            error_name,
+            kind: ProviderLimitKind::UsageCap,
             reset_at,
             provider_id,
             model_id,
             provider_error,
-            is_fatal,
         });
     }
 
-    if haystack.contains("AI_APICallError") || is_fatal {
+    // 2. Retry exhaustion wrapping a 429 → terminal retries exhausted.
+    if status_code == Some(429) && is_retry_exhausted {
+        let reset_at = extract_reset_at(haystack);
+        let provider_id = record.tags.get("providerID").cloned();
+        let model_id = record.tags.get("modelID").cloned();
+        let provider_error = record
+            .tags
+            .get("error")
+            .cloned()
+            .unwrap_or_else(|| haystack.to_string());
+
+        return Some(LogClassification::ProviderLimit {
+            status_code: 429,
+            kind: ProviderLimitKind::RetriesExhausted,
+            reset_at,
+            provider_id,
+            model_id,
+            provider_error,
+        });
+    }
+
+    // 3. Cap signal without error tag → advisory non-fatal ApiFailure.
+    if has_cap && !has_error_context {
+        let mut message = None;
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&record.message) {
+            message = extract_provider_message(&val);
+        }
+        if message.is_none() && !record.message.is_empty() {
+            message = Some(record.message.clone());
+        }
+        let message = message.unwrap_or_default();
+
+        return Some(LogClassification::ApiFailure {
+            status_code,
+            error_name: "AI_APICallError".to_string(),
+            message,
+            is_fatal: false,
+        });
+    }
+
+    // 4. Plain 429 overload → transient overloaded.
+    if status_code == Some(429) && is_overload {
+        let reset_at = extract_reset_at(haystack);
+        let provider_id = record.tags.get("providerID").cloned();
+        let model_id = record.tags.get("modelID").cloned();
+        let provider_error = record
+            .tags
+            .get("error")
+            .cloned()
+            .unwrap_or_else(|| haystack.to_string());
+
+        return Some(LogClassification::ProviderLimit {
+            status_code: 429,
+            kind: ProviderLimitKind::Overloaded,
+            reset_at,
+            provider_id,
+            model_id,
+            provider_error,
+        });
+    }
+
+    // 5. Plain 429 → transient rate-limited.
+    if status_code == Some(429) {
+        let reset_at = extract_reset_at(haystack);
+        let provider_id = record.tags.get("providerID").cloned();
+        let model_id = record.tags.get("modelID").cloned();
+        let provider_error = record
+            .tags
+            .get("error")
+            .cloned()
+            .unwrap_or_else(|| haystack.to_string());
+
+        return Some(LogClassification::ProviderLimit {
+            status_code: 429,
+            kind: ProviderLimitKind::RateLimited,
+            reset_at,
+            provider_id,
+            model_id,
+            provider_error,
+        });
+    }
+
+    // Anything else that looks like an API or retry failure.
+    if haystack.contains("AI_APICallError") || is_retry_exhausted {
         let mut message = summarize_error_json(record);
         if message.is_empty() {
             // Try to find a tag that contains the error name.
-            let name_to_find = if is_fatal {
+            let name_to_find = if is_retry_exhausted {
                 "AI_RetryError"
             } else {
                 "AI_APICallError"
@@ -354,14 +430,14 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
 
         return Some(LogClassification::ApiFailure {
             status_code,
-            error_name: if is_fatal {
+            error_name: if is_retry_exhausted {
                 "AI_RetryError"
             } else {
                 "AI_APICallError"
             }
             .to_string(),
             message,
-            is_fatal,
+            is_fatal: is_retry_exhausted,
         });
     }
 
@@ -696,27 +772,27 @@ mod tests {
     }
 
     #[test]
-    fn classifies_rate_limit_with_reset_time() {
+    fn classifies_usage_cap_with_reset_time() {
         let line = r#"ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached. Your limit will reset at 2026-04-16 04:18:56\"}}"}]}}"#;
         let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
             panic!("expected Structured");
         };
         match classify(&record) {
-            LogClassification::RateLimit {
+            LogClassification::ProviderLimit {
                 status_code,
-                error_name,
+                kind,
                 reset_at,
                 ..
             } => {
                 assert_eq!(status_code, 429);
-                assert_eq!(error_name, "AI_RetryError");
+                assert_eq!(kind, ProviderLimitKind::UsageCap);
                 let reset = reset_at.expect("reset_at should be parsed");
                 assert_eq!(
                     reset.format("%Y-%m-%d %H:%M:%S").to_string(),
                     "2026-04-16 04:18:56"
                 );
             }
-            other => panic!("expected RateLimit, got {other:?}"),
+            other => panic!("expected ProviderLimit, got {other:?}"),
         }
     }
 
@@ -896,7 +972,7 @@ mod tests {
     }
 
     #[test]
-    fn fixture_rate_limit_classifies() {
+    fn fixture_usage_cap_classifies() {
         let fixture = include_str!("../../../../tests/fixtures/logs/opencode-rate-limit.txt");
         let line = fixture
             .lines()
@@ -906,14 +982,150 @@ mod tests {
             panic!("rate limit fixture failed to parse");
         };
         match classify(&record) {
-            LogClassification::RateLimit { reset_at, .. } => {
+            LogClassification::ProviderLimit { kind, reset_at, .. } => {
+                assert_eq!(kind, ProviderLimitKind::UsageCap);
                 let reset = reset_at.expect("reset_at should be parsed from fixture");
                 assert_eq!(
                     reset.format("%Y-%m-%d %H:%M:%S").to_string(),
                     "2026-04-16 04:18:56",
                 );
             }
-            other => panic!("expected RateLimit, got {other:?}"),
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fixture_429_overload_classifies() {
+        let fixture = include_str!("../../../../tests/fixtures/logs/opencode-429-overload.txt");
+        let line = fixture
+            .lines()
+            .next()
+            .expect("overload fixture has at least one line");
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("overload fixture failed to parse");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit { kind, status_code, .. } => {
+                assert_eq!(status_code, 429);
+                assert_eq!(kind, ProviderLimitKind::Overloaded);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_429_overload_as_overloaded() {
+        let line = r#"ERROR 2026-05-15T19:26:02 +3054ms service=llm providerID=kimi-for-coding modelID=k2p6 error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"The engine is currently overloaded, please try again later\"}}","isRetryable":true}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                status_code,
+                kind,
+                ..
+            } => {
+                assert_eq!(status_code, 429);
+                assert_eq!(kind, ProviderLimitKind::Overloaded);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_429_throttled_as_rate_limited() {
+        let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","statusCode":429,"message":"Too many requests"}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                status_code,
+                kind,
+                ..
+            } => {
+                assert_eq!(status_code, 429);
+                assert_eq!(kind, ProviderLimitKind::RateLimited);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_max_retries_exhausted_as_retries_exhausted() {
+        let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429}]}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                status_code,
+                kind,
+                ..
+            } => {
+                assert_eq!(status_code, 429);
+                assert_eq!(kind, ProviderLimitKind::RetriesExhausted);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classifies_exceeded_quota_as_usage_cap() {
+        let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"type\":\"exceeded_current_quota_error\",\"message\":\"Quota exceeded\"}}"}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                status_code,
+                kind,
+                ..
+            } => {
+                assert_eq!(status_code, 429);
+                assert_eq!(kind, ProviderLimitKind::UsageCap);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cap_phrase_without_error_tag_is_advisory_api_failure() {
+        let line = "ERROR 2026-05-15T19:26:02 +100ms service=llm dummy={} Usage limit reached for k2p6";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure {
+                status_code,
+                message,
+                is_fatal,
+                ..
+            } => {
+                assert_eq!(status_code, None);
+                assert_eq!(message, "Usage limit reached for k2p6");
+                assert!(!is_fatal);
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cap_wins_over_retries_exhausted() {
+        let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached\"}}"}]}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                status_code,
+                kind,
+                ..
+            } => {
+                assert_eq!(status_code, 429);
+                assert_eq!(kind, ProviderLimitKind::UsageCap);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
         }
     }
 
@@ -944,7 +1156,7 @@ mod tests {
         for line in fixture.lines() {
             match parse_line(line) {
                 ParsedOpenCodeStderrLine::Structured(record) => match classify(&record) {
-                    LogClassification::RateLimit { .. } => rate_limit_seen = true,
+                    LogClassification::ProviderLimit { .. } => rate_limit_seen = true,
                     LogClassification::MalformedAsset { .. } => malformed_seen = true,
                     _ => {}
                 },
@@ -1183,8 +1395,8 @@ mod tests {
             panic!("expected Structured");
         };
         match classify(&record) {
-            LogClassification::RateLimit { .. } | LogClassification::ApiFailure { .. } => {}
-            other => panic!("expected ApiFailure/RateLimit, got {other:?}"),
+            LogClassification::ProviderLimit { .. } | LogClassification::ApiFailure { .. } => {}
+            other => panic!("expected ApiFailure/ProviderLimit, got {other:?}"),
         }
     }
 

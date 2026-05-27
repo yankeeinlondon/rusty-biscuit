@@ -9,6 +9,7 @@ import "../just/review.just"
 import "../just/notify.just"
 import "../just/ai.just"
 import "../just/devops.just"
+import "../just/spec.just"
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -51,7 +52,7 @@ build *args="":
 # Test both library and CLI.
 test:
     @just _test worktree
-    @just _test worktree-cli
+    @just _test worktree-cli --no-tests=pass
 
 # Lint both the library and CLI
 

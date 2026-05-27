@@ -283,12 +283,10 @@ impl McpCatalogStore {
         servers
     }
 
-    /// Returns a reference to the underlying catalog.
     pub fn catalog(&self) -> &McpCatalog {
         &self.catalog
     }
 
-    /// Returns a mutable reference to the underlying catalog.
     pub fn catalog_mut(&mut self) -> &mut McpCatalog {
         &mut self.catalog
     }

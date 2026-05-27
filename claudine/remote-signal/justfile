@@ -1,0 +1,78 @@
+set dotenv-load := true
+set positional-arguments := true
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../../just/lifecycle.just"
+import "../../just/plan.just"
+import "../../just/review.just"
+import "../../just/notify.just"
+import "../../just/ai.just"
+import "../../just/devops.just"
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+
+CORE := "remote-signal-core"
+DAEMON := "remote-signal-daemon"
+CLIENT := "remote-signal-client"
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "{{ BOLD }}Remote Signal ({{ RESET }}core / daemon / test-client{{ BOLD }}){{ RESET }}"
+    echo "======================================================================================"
+    echo ""
+    just --list | grep -v 'default'
+    echo
+
+# Build all three remote-signal crates.
+build *args="":
+    @just _build {{ CORE }} "Remote-Signal Core" {{ args }}
+    @just _build {{ DAEMON }} "Remote-Signal Daemon" {{ args }}
+    @just _build {{ CLIENT }} "Remote-Signal Test Client" {{ args }}
+
+# Test all three remote-signal crates.
+test *args="":
+    @just _test {{ CORE }} {{ args }}
+    @just _test {{ DAEMON }} {{ args }}
+    @just _test {{ CLIENT }} {{ args }}
+
+# Lint all three remote-signal crates.
+lint:
+    @just _lint {{ CORE }}
+    @just _lint {{ DAEMON }}
+    @just _lint {{ CLIENT }}
+
+# Lint (and fix) all three remote-signal crates.
+lint-fix:
+    @just _lint {{ CORE }} || just _fix_lint {{ CORE }}
+    @just _lint {{ DAEMON }} || just _fix_lint {{ DAEMON }}
+    @just _lint {{ CLIENT }} || just _fix_lint {{ CLIENT }}
+
+# Validate the source code without doing a full build.
+check:
+    @cargo check -p {{ CORE }} -p {{ DAEMON }} -p {{ CLIENT }}
+
+# Install the daemon and test-client binaries.
+install:
+    @just build --release
+    @just _install "./daemon" "Remote-Signal Daemon"
+    @just _install "./client" "Remote-Signal Test Client"
+
+# Run the Phase-6 POC demo script (multi-node pair + sync flow).
+poc-demo:
+    @just build
+    @bash {{ justfile_directory() }}/scripts/poc-demo.sh
+
+# Reference the colour variables so the linter doesn't complain.
+_colors:
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ DIM }} >/dev/null || true

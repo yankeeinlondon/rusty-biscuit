@@ -15,8 +15,13 @@ clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
 dirs = "6"
 inquire = "0.9"
+sniff = { path = "../../sniff/lib" }
 worktree = { path = "../lib" }
 
 [dev-dependencies]
 assert_cmd = "2"
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 predicates = "3"
+serial_test = "3"
+tempfile = "3"
+test-toolkit = { path = "../../tools/test-toolkit" }

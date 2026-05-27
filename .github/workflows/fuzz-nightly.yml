@@ -43,6 +43,27 @@ jobs:
           workspaces: ". -> target"
           shared-key: fuzz-biscuit-file
 
+      # Replay committed crash fixtures before extending fuzzing. libFuzzer
+      # treats positional paths as additional corpora; `-runs=0` makes it
+      # execute each input exactly once and exit, so any committed crash
+      # that has regressed will fail this step deterministically.
+      - name: Replay committed crash fixtures
+        run: |
+          set -euo pipefail
+          cd biscuit-file/lib/fuzz
+          for target in pdf_extract toml_roundtrip yaml_roundtrip json5_roundtrip; do
+            if [[ -d "crashes/${target}" ]] \
+               && find "crashes/${target}" -mindepth 1 -type f \
+                    -not -name 'README.md' -not -name '.gitkeep' \
+                    | grep -q .; then
+              echo "::group::Replaying crashes/${target}"
+              cargo +nightly fuzz run "${target}" "crashes/${target}" -- -runs=0
+              echo "::endgroup::"
+            else
+              echo "no committed crash fixtures for ${target}; skipping replay"
+            fi
+          done
+
       - name: Run PDF extract fuzz target
         run: |
           cd biscuit-file/lib/fuzz
@@ -172,6 +193,27 @@ jobs:
         with:
           workspaces: ". -> target"
           shared-key: fuzz-darkmatter
+
+      # Replay committed crash fixtures before extending fuzzing. libFuzzer
+      # treats positional paths as additional corpora; `-runs=0` makes it
+      # execute each input exactly once and exit, so any committed crash
+      # that has regressed will fail this step deterministically.
+      - name: Replay committed crash fixtures
+        run: |
+          set -euo pipefail
+          cd darkmatter/lib/fuzz
+          for target in markdown_parser; do
+            if [[ -d "crashes/${target}" ]] \
+               && find "crashes/${target}" -mindepth 1 -type f \
+                    -not -name 'README.md' -not -name '.gitkeep' \
+                    | grep -q .; then
+              echo "::group::Replaying crashes/${target}"
+              cargo +nightly fuzz run "${target}" "crashes/${target}" -- -runs=0
+              echo "::endgroup::"
+            else
+              echo "no committed crash fixtures for ${target}; skipping replay"
+            fi
+          done
 
       - name: Run markdown parser fuzz target
         run: |

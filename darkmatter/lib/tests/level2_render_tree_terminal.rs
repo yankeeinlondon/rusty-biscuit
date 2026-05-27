@@ -190,11 +190,8 @@ fn drive_pane(
     }
 
     let (dir, path) = render(body, name);
-    let mut guard = SHARED_HARNESS.get_or_init(|| {
-        let mut harness = WezTermHarness::new();
-        harness.spawn_shell().expect("spawn_shell failed");
-        harness
-    });
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().unwrap();
 
     // Reset visible region between tests.
@@ -736,11 +733,8 @@ fn run_page_in_pane(
         LevelDecision::Panic(msg) => panic!("{msg}"),
     }
 
-    let mut guard = SHARED_HARNESS.get_or_init(|| {
-        let mut harness = WezTermHarness::new();
-        harness.spawn_shell().expect("spawn_shell failed");
-        harness
-    });
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().unwrap();
     let cols = harness
         .pane_size()
