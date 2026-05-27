@@ -1,4 +1,4 @@
-The `sniff` CLI's `--json` output is governed by a principle documented at [`docs/topics/json-output.md`](../../../docs/topics/json-output.md): **scope-complete JSON**. At any command node, `--json` returns exactly that node's scope — no more, no less. Parent scopes are the keyed aggregate of their children's scopes; leaves return only their own data; default subcommands affect terminal output only. This feature brings the CLI implementation into compliance with that principle and adds a new flag needed for one of the rules.
+The `sniff` CLI's `--json` output is governed by a principle documented at [`sniff/docs/topics/json-output.md`](../../docs/topics/json-output.md): **scope-complete JSON**. At any command node, `--json` returns exactly that node's scope — no more, no less. Parent scopes are the keyed aggregate of their children's scopes; leaves return only their own data; default subcommands affect terminal output only. This feature brings the CLI implementation into compliance with that principle and adds a new flag needed for one of the rules.
 
 ### Background
 
