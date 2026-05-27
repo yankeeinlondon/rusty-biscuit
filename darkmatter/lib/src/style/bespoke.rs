@@ -495,7 +495,7 @@ fn truncate_to_cells(text: &str, max_cells: u16) -> String {
         acc.push(ch);
         used += cw;
     }
-    if reserve_ellipsis && UnicodeWidthStr::width(text) as usize > max {
+    if reserve_ellipsis && UnicodeWidthStr::width(text) > max {
         acc.push('…');
     }
     acc
