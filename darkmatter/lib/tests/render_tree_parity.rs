@@ -869,10 +869,10 @@ fn render_tree_parity_hr_attributes_spanned() {
 // emits no `Paragraph` wrapper, so the HR-rewrite (which only fires for a
 // simple buffered paragraph) never triggers. See the unit test
 // `rule_processor::tests::test_horizontal_rule_inside_list_item_is_not_transformed`.
-// The span-aware fold mirrors this: its `SpannedRuleProcessor` only rewrites
-// when `paragraph_start.is_some()`, so `- --- { style: waves }` stays
-// list-item text on the tree path too. Classified as *equivalent behavior*,
-// not a divergence.
+// The span-aware fold mirrors this: its `BlockExtensionProcessor` only
+// rewrites when a `Start(Paragraph)` opens a buffered region, so
+// `- --- { style: waves }` stays list-item text on the tree path too.
+// Classified as *equivalent behavior*, not a divergence.
 // ---------------------------------------------------------------------------
 
 /// `- --- { style: waves }` must NOT fold to a `ThematicBreak`; it stays a

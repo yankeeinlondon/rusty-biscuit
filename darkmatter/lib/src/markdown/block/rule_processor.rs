@@ -3,6 +3,53 @@ use crate::style::warning::{StyleWarning, StyleWarningKind};
 use pulldown_cmark::{Event, Tag, TagEnd};
 use std::collections::VecDeque;
 
+/// Result of [`parse_hr_attribute_block`] — the parsed attribute values plus
+/// any [`StyleWarning`]s the caller should surface (deprecation, etc.).
+///
+/// `tracing::warn!` side effects (malformed YAML, unknown keys, non-scalar
+/// values) are emitted directly during parsing and are intentionally not
+/// carried in this struct; callers can observe them through a tracing
+/// subscriber.
+#[derive(Debug, Default)]
+pub(crate) struct HrAttributeParseResult {
+    pub(crate) attrs: HorizontalRuleAttrs,
+    pub(crate) warnings: Vec<StyleWarning>,
+}
+
+/// Single source of truth for HR attribute parsing — used by the legacy
+/// [`RuleProcessor`], the span-aware fold's [`try_parse_hr_attrs`] wrapper,
+/// the new render-tree block-extension processor, and the
+/// [`scan_inline_hr_warnings`] preflight.
+///
+/// `attribute_str` is the content between `{` and `}` in an HR-attribute
+/// directive such as `--- { kind: waves }`. The body is parsed as a YAML
+/// flow mapping; on parse failure the legacy comma splitter runs as a
+/// graceful fallback so previously-accepted-but-malformed inputs keep
+/// working.
+///
+/// ## Notes
+///
+/// - Unknown keys are dropped with a `tracing::warn!`.
+/// - Non-scalar values are dropped with a `tracing::warn!`.
+/// - Presence of `style` (the deprecated key) records a deprecation
+///   [`StyleWarning`] in [`HrAttributeParseResult::warnings`] in addition to
+///   surfacing the value on [`HorizontalRuleAttrs::legacy_style`].
+pub(crate) fn parse_hr_attribute_block(attribute_str: &str) -> HrAttributeParseResult {
+    let attrs = parse_attrs(attribute_str);
+
+    let mut warnings = Vec::new();
+    if attrs.legacy_style.is_some() {
+        warnings.push(StyleWarning::new(
+            "hr.inline.style",
+            StyleWarningKind::Deprecated {
+                replacement: "hr.inline.kind".into(),
+            },
+        ));
+    }
+
+    HrAttributeParseResult { attrs, warnings }
+}
+
 /// Parses a darkmatter HR-attribute paragraph body — `---|***|___` followed by
 /// an optional `{ ... }` attribute block — into [`HorizontalRuleAttrs`].
 ///
@@ -15,12 +62,17 @@ pub fn try_parse_hr_attrs(body: &str) -> Option<HorizontalRuleAttrs> {
     // already arrives from pulldown-cmark as `Event::Rule`, so this helper
     // intentionally returns `None` for it.
     let (_, attribute_str) = matches_horizontal_rule_pattern(body)?;
-    Some(parse_attribute_block(&attribute_str))
+    Some(parse_hr_attribute_block(&attribute_str).attrs)
 }
 
 /// Matches `body` against the HR-attribute paragraph pattern, returning
 /// `(marker, attribute-string)` when the body is a single-line directive.
-fn matches_horizontal_rule_pattern(text: &str) -> Option<(String, String)> {
+///
+/// The pattern requires three or more identical characters from `-`, `_`, or
+/// `*`, optional whitespace, then a `{ ... }` attribute block. A bare `---`
+/// is intentionally not recognized here — pulldown-cmark already emits it as
+/// `Event::Rule`.
+pub(crate) fn matches_horizontal_rule_pattern(text: &str) -> Option<(String, String)> {
     let trimmed = text.trim();
     if trimmed.len() < 3 {
         return None;
@@ -51,13 +103,10 @@ fn matches_horizontal_rule_pattern(text: &str) -> Option<(String, String)> {
     Some((marker_str, attributes.to_string()))
 }
 
-/// Parses an HR attribute string (the content between `{` and `}`) into
-/// [`HorizontalRuleAttrs`] using the same YAML-flow-mapping logic as the
-/// in-place [`RuleProcessor::parse_attributes`] method.
-fn parse_attribute_block(attribute_str: &str) -> HorizontalRuleAttrs {
-    // This is a free-function clone of `RuleProcessor::parse_attributes` so
-    // the span-aware fold can call it without instantiating the generic
-    // processor.
+/// Parses the attribute string as a YAML flow mapping, falling back to the
+/// legacy comma splitter on parse failure. The YAML path correctly handles
+/// quoted values with embedded commas or colons (e.g. `color: "rgb(255,0,0)"`).
+fn parse_attrs(attribute_str: &str) -> HorizontalRuleAttrs {
     if attribute_str.trim().is_empty() {
         return HorizontalRuleAttrs::default();
     }
@@ -65,21 +114,48 @@ fn parse_attribute_block(attribute_str: &str) -> HorizontalRuleAttrs {
     let yaml_src = format!("{{ {attribute_str} }}");
     match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&yaml_src) {
         Ok(serde_yaml_ng::Value::Mapping(map)) => attrs_from_mapping(&map),
-        _ => HorizontalRuleAttrs::default(),
+        Ok(other) => {
+            tracing::warn!(
+                kind = ?std::mem::discriminant(&other),
+                "horizontal rule attributes did not parse as a YAML mapping; using legacy splitter"
+            );
+            parse_attributes_legacy(attribute_str)
+        }
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                input = %attribute_str,
+                "malformed horizontal rule attributes; using legacy splitter"
+            );
+            parse_attributes_legacy(attribute_str)
+        }
     }
 }
 
 /// Builds [`HorizontalRuleAttrs`] from a YAML flow mapping, coercing scalars
-/// to strings and dropping unknown keys.
+/// to strings. Unknown keys and non-scalar values are dropped with a
+/// `tracing::warn!`.
 fn attrs_from_mapping(map: &serde_yaml_ng::Mapping) -> HorizontalRuleAttrs {
     let mut attrs = HorizontalRuleAttrs::default();
+
     for (yaml_key, yaml_value) in map {
         let Some(key) = yaml_value_as_string(yaml_key) else {
+            tracing::warn!(
+                key = ?yaml_key,
+                "non-scalar key in horizontal rule attributes; ignoring"
+            );
             continue;
         };
+
         let Some(value) = yaml_value_as_string(yaml_value) else {
+            tracing::warn!(
+                key = %key,
+                value = ?yaml_value,
+                "non-scalar value in horizontal rule attribute; ignoring"
+            );
             continue;
         };
+
         match key.as_str() {
             "kind" => attrs.kind = Some(value),
             "style" => attrs.legacy_style = Some(value),
@@ -87,13 +163,21 @@ fn attrs_from_mapping(map: &serde_yaml_ng::Mapping) -> HorizontalRuleAttrs {
             "weight" => attrs.weight = Some(value),
             "width" => attrs.width = Some(value),
             "color" => attrs.color = Some(value),
-            _ => {}
+            other => {
+                tracing::warn!(
+                    key = %other,
+                    value = %value,
+                    "unknown horizontal rule attribute; ignoring"
+                );
+            }
         }
     }
+
     attrs
 }
 
-/// Coerces a YAML scalar to a string, returning `None` for non-scalar shapes.
+/// Coerces a YAML scalar to a Rust `String`, returning `None` for non-scalar
+/// shapes (sequences, mappings, null, etc.).
 fn yaml_value_as_string(value: &serde_yaml_ng::Value) -> Option<String> {
     match value {
         serde_yaml_ng::Value::String(s) => Some(s.clone()),
@@ -101,6 +185,60 @@ fn yaml_value_as_string(value: &serde_yaml_ng::Value) -> Option<String> {
         serde_yaml_ng::Value::Bool(b) => Some(b.to_string()),
         _ => None,
     }
+}
+
+/// Legacy ad-hoc splitter kept as a graceful fallback when the YAML parser
+/// rejects the input. Mirrors the previous behavior so
+/// malformed-but-previously-accepted attribute strings continue to parse
+/// instead of silently losing all fields.
+fn parse_attributes_legacy(attribute_str: &str) -> HorizontalRuleAttrs {
+    let mut attrs = HorizontalRuleAttrs::default();
+
+    if attribute_str.is_empty() {
+        return attrs;
+    }
+
+    for pair in attribute_str.split(',') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = pair.splitn(2, ':').collect();
+        if parts.len() != 2 {
+            continue;
+        }
+
+        let key = parts[0].trim();
+        let value = parts[1].trim();
+
+        let clean_value = if value.len() >= 2
+            && ((value.starts_with('"') && value.ends_with('"'))
+                || (value.starts_with('\'') && value.ends_with('\'')))
+        {
+            value[1..value.len() - 1].to_string()
+        } else {
+            value.to_string()
+        };
+
+        match key {
+            "kind" => attrs.kind = Some(clean_value),
+            "style" => attrs.legacy_style = Some(clean_value),
+            "alignment" => attrs.alignment = Some(clean_value),
+            "weight" => attrs.weight = Some(clean_value),
+            "width" => attrs.width = Some(clean_value),
+            "color" => attrs.color = Some(clean_value),
+            other => {
+                tracing::warn!(
+                    key = %other,
+                    value = %clean_value,
+                    "unknown horizontal rule attribute; ignoring"
+                );
+            }
+        }
+    }
+
+    attrs
 }
 
 /// Iterator adapter that processes paragraph events for horizontal rule syntax with attributes.
@@ -134,29 +272,6 @@ fn yaml_value_as_string(value: &serde_yaml_ng::Value) -> Option<String> {
 ///
 /// // The paragraph will be converted to a HorizontalRule event
 /// ```
-/// Scan markdown content for inline horizontal-rule deprecation warnings.
-///
-/// Runs the full inline event pipeline (pulldown-cmark → [`InlineStyleProcessor`]
-/// → [`RuleProcessor`]) and returns any deprecation warnings emitted for legacy
-/// inline `style` attributes (`--- { style: waves }`).
-///
-/// This is a preflight helper for `--strict-style`: callers can check the
-/// returned warnings before rendering and promote them to errors when strict
-/// mode is enabled.
-pub fn scan_inline_hr_warnings(content: &str) -> Vec<StyleWarning> {
-    let preprocessed = crate::markdown::inline::preprocess_escaped_markers(content);
-    let parser = pulldown_cmark::Parser::new_ext(
-        &preprocessed,
-        pulldown_cmark::Options::ENABLE_TABLES | pulldown_cmark::Options::ENABLE_STRIKETHROUGH,
-    );
-    let mut processor = RuleProcessor::new(crate::markdown::inline::InlineStyleProcessor::new(
-        parser,
-    ));
-    // Consume all events to populate warnings.
-    for _ in &mut processor {}
-    processor.warnings.into_iter().collect()
-}
-
 pub struct RuleProcessor<'a, I>
 where
     I: Iterator<Item = InlineEvent<'a>>,
@@ -194,216 +309,6 @@ where
         &self.warnings
     }
 
-    /// Checks if the text matches the horizontal rule pattern with attributes.
-    ///
-    /// Pattern: `^([\-\_\*]{3,})\s*\{(.*)\}\s*$`
-    fn matches_horizontal_rule_pattern(text: &str) -> Option<(String, String)> {
-        let trimmed = text.trim();
-        if trimmed.len() < 3 {
-            return None;
-        }
-
-        // Check if it starts with 3 or more of the same character: -, _, or *
-        let first_char = trimmed.chars().next()?;
-        if !['-', '_', '*'].contains(&first_char) {
-            return None;
-        }
-
-        // Find the first non-matching character
-        let mut marker_end = 0;
-        for (i, ch) in trimmed.char_indices() {
-            if ch != first_char {
-                marker_end = i;
-                break;
-            }
-        }
-
-        // If we didn't break, the entire string is markers
-        if marker_end == 0 {
-            marker_end = trimmed.len();
-        }
-
-        // Must have at least 3 markers
-        if marker_end < 3 {
-            return None;
-        }
-
-        // Check if there's a { ... } block after the markers
-        let after_markers = &trimmed[marker_end..].trim_start();
-        if !after_markers.starts_with('{') || !after_markers.ends_with('}') {
-            return None;
-        }
-
-        let attributes = after_markers[1..after_markers.len() - 1].trim();
-        let marker_str = trimmed[..marker_end].to_string();
-
-        Some((marker_str, attributes.to_string()))
-    }
-
-    /// Parses attributes from the attribute string.
-    ///
-    /// The attribute string is the content between the `{` and `}` markers
-    /// in a horizontal-rule directive such as `--- { style: waves }`. This
-    /// content is parsed as a YAML flow mapping (e.g., `{ a: 1, b: "x, y" }`)
-    /// using [`serde_yaml_ng`], which correctly handles quoted values with
-    /// embedded commas or colons — capabilities the previous hand-rolled
-    /// splitter lacked (see review item E2).
-    ///
-    /// ## Errors
-    ///
-    /// YAML parse errors (e.g., `{ style: }`) are non-fatal — the function
-    /// emits a `tracing::warn!` and falls back to the legacy ad-hoc splitter
-    /// so existing malformed-but-previously-accepted inputs keep working.
-    ///
-    /// ## Notes
-    ///
-    /// Unknown enum values (e.g., `style: dashse`) are captured verbatim on
-    /// [`HorizontalRuleAttrs`] — the builder layer
-    /// ([`build_rule`](crate::markdown::block::build_rule)) is responsible
-    /// for emitting a warning and falling back to the default. Unknown
-    /// **keys** are dropped here with a warning.
-    fn parse_attributes(attribute_str: &str) -> HorizontalRuleAttrs {
-        if attribute_str.trim().is_empty() {
-            return HorizontalRuleAttrs::default();
-        }
-
-        // Wrap the captured inner content back into a YAML flow mapping so
-        // `serde_yaml_ng` parses it as a single-level map.
-        let yaml_src = format!("{{ {attribute_str} }}");
-
-        match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&yaml_src) {
-            Ok(serde_yaml_ng::Value::Mapping(map)) => Self::attrs_from_mapping(&map),
-            Ok(other) => {
-                // A bare scalar/sequence can happen when the user wrote
-                // something like `--- { foo }`. Fall back to the legacy
-                // splitter; it will tolerate many such shapes.
-                tracing::warn!(
-                    kind = ?std::mem::discriminant(&other),
-                    "horizontal rule attributes did not parse as a YAML mapping; using legacy splitter"
-                );
-                Self::parse_attributes_legacy(attribute_str)
-            }
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    input = %attribute_str,
-                    "malformed horizontal rule attributes; using legacy splitter"
-                );
-                Self::parse_attributes_legacy(attribute_str)
-            }
-        }
-    }
-
-    /// Converts a parsed YAML mapping into [`HorizontalRuleAttrs`], coercing
-    /// each scalar value to a string and dropping unknown keys with a
-    /// warning.
-    fn attrs_from_mapping(map: &serde_yaml_ng::Mapping) -> HorizontalRuleAttrs {
-        let mut attrs = HorizontalRuleAttrs::default();
-
-        for (yaml_key, yaml_value) in map {
-            // Keys must be scalar strings (or string-coercible scalars).
-            let Some(key) = Self::yaml_value_as_string(yaml_key) else {
-                tracing::warn!(
-                    key = ?yaml_key,
-                    "non-scalar key in horizontal rule attributes; ignoring"
-                );
-                continue;
-            };
-
-            let Some(value) = Self::yaml_value_as_string(yaml_value) else {
-                tracing::warn!(
-                    key = %key,
-                    value = ?yaml_value,
-                    "non-scalar value in horizontal rule attribute; ignoring"
-                );
-                continue;
-            };
-
-            match key.as_str() {
-                "kind" => attrs.kind = Some(value),
-                "style" => attrs.legacy_style = Some(value),
-                "alignment" => attrs.alignment = Some(value),
-                "weight" => attrs.weight = Some(value),
-                "width" => attrs.width = Some(value),
-                "color" => attrs.color = Some(value),
-                other => {
-                    tracing::warn!(
-                        key = %other,
-                        value = %value,
-                        "unknown horizontal rule attribute; ignoring"
-                    );
-                }
-            }
-        }
-
-        attrs
-    }
-
-    /// Coerces a YAML scalar to a Rust `String`, returning `None` for
-    /// non-scalar shapes (sequences, mappings, null, etc.).
-    fn yaml_value_as_string(value: &serde_yaml_ng::Value) -> Option<String> {
-        match value {
-            serde_yaml_ng::Value::String(s) => Some(s.clone()),
-            serde_yaml_ng::Value::Number(n) => Some(n.to_string()),
-            serde_yaml_ng::Value::Bool(b) => Some(b.to_string()),
-            _ => None,
-        }
-    }
-
-    /// Legacy ad-hoc splitter kept as a graceful fallback when the YAML
-    /// parser rejects the input. Mirrors the previous behavior so
-    /// malformed-but-previously-accepted attribute strings continue to
-    /// parse instead of silently losing all fields.
-    fn parse_attributes_legacy(attribute_str: &str) -> HorizontalRuleAttrs {
-        let mut attrs = HorizontalRuleAttrs::default();
-
-        if attribute_str.is_empty() {
-            return attrs;
-        }
-
-        for pair in attribute_str.split(',') {
-            let pair = pair.trim();
-            if pair.is_empty() {
-                continue;
-            }
-
-            let parts: Vec<&str> = pair.splitn(2, ':').collect();
-            if parts.len() != 2 {
-                continue;
-            }
-
-            let key = parts[0].trim();
-            let value = parts[1].trim();
-
-            let clean_value = if value.len() >= 2
-                && ((value.starts_with('"') && value.ends_with('"'))
-                    || (value.starts_with('\'') && value.ends_with('\'')))
-            {
-                value[1..value.len() - 1].to_string()
-            } else {
-                value.to_string()
-            };
-
-            match key {
-                "kind" => attrs.kind = Some(clean_value),
-                "style" => attrs.legacy_style = Some(clean_value),
-                "alignment" => attrs.alignment = Some(clean_value),
-                "weight" => attrs.weight = Some(clean_value),
-                "width" => attrs.width = Some(clean_value),
-                "color" => attrs.color = Some(clean_value),
-                other => {
-                    tracing::warn!(
-                        key = %other,
-                        value = %clean_value,
-                        "unknown horizontal rule attribute; ignoring"
-                    );
-                }
-            }
-        }
-
-        attrs
-    }
-
     /// Processes a completed paragraph buffer.
     ///
     /// If the paragraph contains exactly one text event that matches the
@@ -414,18 +319,12 @@ where
         if self.paragraph_is_simple
             && self.paragraph_buffer.len() == 1
             && let InlineEvent::Standard(Event::Text(text)) = &self.paragraph_buffer[0]
-            && let Some((_, attributes)) = Self::matches_horizontal_rule_pattern(text)
+            && let Some((_, attributes)) = matches_horizontal_rule_pattern(text)
         {
-            let attrs = Self::parse_attributes(&attributes);
-            if attrs.legacy_style.is_some() {
-                self.warnings.push(StyleWarning::new(
-                    "hr.inline.style",
-                    StyleWarningKind::Deprecated {
-                        replacement: "hr.inline.kind".into(),
-                    },
-                ));
-            }
-            self.pending.push_back(InlineEvent::HorizontalRule(attrs));
+            let result = parse_hr_attribute_block(&attributes);
+            self.warnings.extend(result.warnings);
+            self.pending
+                .push_back(InlineEvent::HorizontalRule(result.attrs));
             return;
         }
 
@@ -484,6 +383,63 @@ where
             None => None,
         }
     }
+}
+
+/// Scan markdown content for inline horizontal-rule deprecation warnings.
+///
+/// Runs the inline event pipeline ([`pulldown_cmark::Parser`] →
+/// [`InlineStyleProcessor`]) and checks each simple single-text paragraph for
+/// the HR-attribute pattern, returning any deprecation warnings emitted for
+/// legacy inline `style` attributes (`--- { style: waves }`).
+///
+/// This is a preflight helper for `--strict-style`: callers can check the
+/// returned warnings before rendering and promote them to errors when strict
+/// mode is enabled.
+///
+/// [`InlineStyleProcessor`]: crate::markdown::inline::InlineStyleProcessor
+pub fn scan_inline_hr_warnings(content: &str) -> Vec<StyleWarning> {
+    let preprocessed = crate::markdown::inline::preprocess_escaped_markers(content);
+    let parser = pulldown_cmark::Parser::new_ext(
+        &preprocessed,
+        pulldown_cmark::Options::ENABLE_TABLES | pulldown_cmark::Options::ENABLE_STRIKETHROUGH,
+    );
+    let inline_events = crate::markdown::inline::InlineStyleProcessor::new(parser);
+
+    let mut warnings = Vec::new();
+    let mut paragraph_buffer: Vec<InlineEvent<'_>> = Vec::new();
+    let mut in_paragraph = false;
+    let mut paragraph_is_simple = true;
+
+    for event in inline_events {
+        match event {
+            InlineEvent::Standard(Event::Start(Tag::Paragraph)) => {
+                in_paragraph = true;
+                paragraph_is_simple = true;
+                paragraph_buffer.clear();
+            }
+            InlineEvent::Standard(Event::End(TagEnd::Paragraph)) if in_paragraph => {
+                in_paragraph = false;
+                if paragraph_is_simple
+                    && paragraph_buffer.len() == 1
+                    && let InlineEvent::Standard(Event::Text(text)) = &paragraph_buffer[0]
+                    && let Some((_, attribute_str)) = matches_horizontal_rule_pattern(text)
+                {
+                    warnings.extend(parse_hr_attribute_block(&attribute_str).warnings);
+                }
+                paragraph_buffer.clear();
+            }
+            InlineEvent::Standard(Event::Text(_)) if in_paragraph => {
+                paragraph_buffer.push(event);
+            }
+            other if in_paragraph => {
+                paragraph_is_simple = false;
+                paragraph_buffer.push(other);
+            }
+            _ => {}
+        }
+    }
+
+    warnings
 }
 
 #[cfg(test)]

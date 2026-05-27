@@ -11,3 +11,4 @@ pub(crate) use hr_builder::{
     hr_kind_to_string, hr_weight_to_string,
 };
 pub use rule_processor::{RuleProcessor, scan_inline_hr_warnings, try_parse_hr_attrs};
+pub(crate) use rule_processor::{matches_horizontal_rule_pattern, parse_hr_attribute_block};

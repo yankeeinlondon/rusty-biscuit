@@ -36,12 +36,13 @@
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use renderable::tree::{
     ColumnAlign, Diagnostic, Document, DocumentMetadata, Frontmatter as TreeFrontmatter,
-    FrontmatterFormat, HeadingDepth, NodeKind, Provenance, RenderNode, SourceDescriptor, SourceId,
-    SourceLocation, SourceSpan,
+    FrontmatterFormat, HeadingDepth, HintNamespace, NodeKind, Provenance, RenderNode,
+    SourceDescriptor, SourceId, SourceLocation, SourceSpan,
 };
 use std::ops::Range;
 
 use super::source::single_source_registry;
+use crate::markdown::inline::HorizontalRuleAttrs;
 
 /// Canonical parser-option set the render-tree fold uses.
 ///
@@ -331,12 +332,57 @@ pub fn fold_markdown_with_frontmatter(
     fold_markdown_to_document_with_metadata(source, md.content(), metadata)
 }
 
+/// Builds the synthetic [`NodeKind::ThematicBreak`] node for an HR-attribute
+/// paragraph that the block-extension processor lifted from the event stream.
+///
+/// The returned node has [`Provenance::Generated`] (it was synthesized from a
+/// paragraph) and carries the parsed `darkmatter.hr.*` hints. `body_range`
+/// must point at the original paragraph body bytes — not the wider
+/// `End(Paragraph)` range — so the produced
+/// [`renderable::tree::SourceLocation`] is byte-identical to the legacy
+/// `SpannedRuleProcessor` output.
+fn lower_hr_attrs_to_node(
+    attrs: HorizontalRuleAttrs,
+    body_range: Range<usize>,
+    source: SourceId,
+) -> RenderNode {
+    let mut node = RenderNode::thematic_break();
+    node.span = SourceSpan {
+        provenance: Provenance::Generated,
+        location: Some(SourceLocation {
+            source,
+            bytes: body_range,
+        }),
+    };
+    let hr_ns = HintNamespace("darkmatter.hr");
+    if let Some(kind) = attrs.kind.as_ref().or(attrs.legacy_style.as_ref()) {
+        node.attrs.set_hint(hr_ns, "kind", serde_json::json!(kind));
+    }
+    if let Some(alignment) = attrs.alignment {
+        node.attrs
+            .set_hint(hr_ns, "alignment", serde_json::json!(alignment));
+    }
+    if let Some(weight) = attrs.weight {
+        node.attrs
+            .set_hint(hr_ns, "weight", serde_json::json!(weight));
+    }
+    if let Some(width) = attrs.width {
+        node.attrs
+            .set_hint(hr_ns, "width", serde_json::json!(width));
+    }
+    if let Some(color) = attrs.color {
+        node.attrs
+            .set_hint(hr_ns, "color", serde_json::json!(color));
+    }
+    node
+}
+
 /// Folds Markdown through the span-aware processor chain (DMTR-3), preserving
 /// source byte ranges for `==mark==`, dim, and HR-attribute paragraphs.
 ///
 /// Walks the chain
-/// `Parser::new_ext(...).into_offset_iter() -> SpanningAdapter ->
-/// SpannedInlineStyleProcessor -> SpannedRuleProcessor` and folds:
+/// `Parser::new_ext(...).into_offset_iter() -> BlockExtensionProcessor ->
+/// SpannedInlineStyleProcessor` and folds:
 ///
 /// - `InlineEvent::Standard(_)` events through the existing
 ///   [`Fold::feed_event`] dispatch.
@@ -346,9 +392,10 @@ pub fn fold_markdown_with_frontmatter(
 ///   [`NodeKind::Span`] containers whose `Style.emphasis.dim` is set so the
 ///   browser renderer lowers it to `opacity: 0.6` and the terminal renderer
 ///   emits the dim SGR (`\x1b[2m`) automatically.
-/// - `InlineEvent::HorizontalRule(attrs)` into a [`NodeKind::ThematicBreak`]
-///   with `darkmatter.hr.*` hints (and `Provenance::Generated` because the
-///   event was synthesized from a paragraph).
+/// - [`BlockExtensionEvent::HorizontalRule`](super::block_extension::BlockExtensionEvent::HorizontalRule)
+///   into a [`NodeKind::ThematicBreak`] with `darkmatter.hr.*` hints (and
+///   [`Provenance::Generated`] because the event was synthesized from a
+///   paragraph).
 ///
 /// The body fold sees only Markdown content; darkmatter's already extracted
 /// frontmatter flows into [`DocumentMetadata::frontmatter`].
@@ -361,9 +408,8 @@ pub fn fold_markdown_spanned_with_frontmatter(
     source: SourceDescriptor,
     md: &crate::markdown::Markdown,
 ) -> (Document, Vec<Diagnostic>) {
-    use super::span::{
-        SpannedEventProvenance, SpannedInlineStyleProcessor, SpannedRuleProcessor, SpanningAdapter,
-    };
+    use super::block_extension::{BlockExtensionEvent, BlockExtensionProcessor};
+    use super::span::{SpannedInlineEvent, SpannedInlineStyleProcessor};
     use crate::markdown::inline::{InlineEvent, InlineTag};
 
     let metadata = DocumentMetadata {
@@ -376,10 +422,26 @@ pub fn fold_markdown_spanned_with_frontmatter(
 
     let options = render_tree_parser_options();
     let parser = Parser::new_ext(md.content(), options).into_offset_iter();
-    let chain = SpannedRuleProcessor::new(SpannedInlineStyleProcessor::new(
+    // Block-level extensions (HR-attribute paragraphs) run before the inline
+    // span processor so the inline tier never sees a paragraph that has
+    // already been lifted into a `ThematicBreak`. The map adapter rewraps
+    // each `BlockExtensionEvent` as a `SpannedInlineEvent` so the existing
+    // mark/dim chain can keep its shape.
+    let chain = SpannedInlineStyleProcessor::new(
         md.content(),
-        SpanningAdapter::new(parser),
-    ));
+        BlockExtensionProcessor::new(parser).map(|be| match be {
+            BlockExtensionEvent::Standard(event, range) => {
+                SpannedInlineEvent::parsed(InlineEvent::Standard(event), range)
+            }
+            BlockExtensionEvent::HorizontalRule { attrs, body_range } => {
+                SpannedInlineEvent::generated(
+                    InlineEvent::HorizontalRule(attrs),
+                    body_range.clone(),
+                    body_range,
+                )
+            }
+        }),
+    );
 
     let mut fold = Fold {
         stack: vec![Frame {
@@ -441,41 +503,16 @@ pub fn fold_markdown_spanned_with_frontmatter(
                 fold.push_child(node);
             }
             InlineEvent::HorizontalRule(attrs) => {
-                let location_range = match spanned.provenance {
-                    SpannedEventProvenance::GeneratedFrom { source } => source,
-                    SpannedEventProvenance::Parsed => spanned.range.clone(),
+                // The block-extension processor synthesizes HR events from
+                // paragraph bodies; provenance always points at the body
+                // bytes. The shared lowering helper builds the
+                // `Provenance::Generated` ThematicBreak with the
+                // `darkmatter.hr.*` hints.
+                let body_range = match spanned.provenance {
+                    super::span::SpannedEventProvenance::GeneratedFrom { source } => source,
+                    super::span::SpannedEventProvenance::Parsed => spanned.range.clone(),
                 };
-                let mut node = RenderNode::thematic_break();
-                // Provenance::Generated because the event was synthesized
-                // from a paragraph (span-aware-processor-design.md).
-                node.span = renderable::tree::SourceSpan {
-                    provenance: renderable::tree::Provenance::Generated,
-                    location: Some(renderable::tree::SourceLocation {
-                        source: fold.source,
-                        bytes: location_range,
-                    }),
-                };
-                let hr_ns = renderable::tree::HintNamespace("darkmatter.hr");
-                if let Some(kind) = attrs.kind.as_ref().or(attrs.legacy_style.as_ref()) {
-                    node.attrs
-                        .set_hint(hr_ns, "kind", serde_json::json!(kind));
-                }
-                if let Some(alignment) = attrs.alignment {
-                    node.attrs
-                        .set_hint(hr_ns, "alignment", serde_json::json!(alignment));
-                }
-                if let Some(weight) = attrs.weight {
-                    node.attrs
-                        .set_hint(hr_ns, "weight", serde_json::json!(weight));
-                }
-                if let Some(width) = attrs.width {
-                    node.attrs
-                        .set_hint(hr_ns, "width", serde_json::json!(width));
-                }
-                if let Some(color) = attrs.color {
-                    node.attrs
-                        .set_hint(hr_ns, "color", serde_json::json!(color));
-                }
+                let node = lower_hr_attrs_to_node(attrs, body_range, fold.source);
                 fold.push_child(node);
             }
         }

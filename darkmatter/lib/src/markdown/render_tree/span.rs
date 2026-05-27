@@ -4,14 +4,15 @@
 //! pairs and converts the source byte ranges into
 //! [`renderable::tree::SourceSpan`] so every node points back to source bytes.
 //! Darkmatter's legacy [`InlineStyleProcessor`](crate::markdown::inline::InlineStyleProcessor)
-//! and [`RuleProcessor`](crate::markdown::block::RuleProcessor) iterate over
-//! plain [`Event`]s without ranges; routing the fold through them would erase
-//! every node's [`SourceLocation`](renderable::tree::SourceLocation).
+//! iterates over plain [`Event`]s without ranges; routing the fold through it
+//! would erase every node's [`SourceLocation`](renderable::tree::SourceLocation).
 //!
 //! This module ships a parallel **span-aware** chain (DMTR-3) that produces
-//! [`SpannedInlineEvent`]s while folding `==mark==` / dim inline styles and
-//! horizontal-rule attribute blocks. The legacy non-spanned processors stay
-//! untouched until the tree path becomes the public renderer; see
+//! [`SpannedInlineEvent`]s while folding `==mark==` / dim inline styles.
+//! HR-attribute paragraphs are lifted by the offset-aware
+//! [`crate::markdown::render_tree::block_extension::BlockExtensionProcessor`]
+//! before this chain runs; the [`InlineEvent::HorizontalRule`] variant remains
+//! the fold's transport for those generated events. See
 //! `renderable/features/2026-05-20-darkmatter-tree/span-aware-processor-design.md`
 //! for the design.
 //!
@@ -28,10 +29,6 @@
 //!   case — `\=` is a recognised CommonMark escape), the processor still
 //!   extends the literal range back one byte by consulting the original source
 //!   string, so the emitted span covers `\\==` in the source.
-//! - **Generated HRs**: the synthetic [`InlineEvent::HorizontalRule`] carries
-//!   [`SpannedEventProvenance::GeneratedFrom`] pointing back at the original
-//!   paragraph **body** bytes (the buffered text event range, excluding the
-//!   trailing newline `pulldown-cmark` includes in its `End(Paragraph)` range).
 //!
 //! ## Module Layout
 //!
@@ -40,7 +37,6 @@
 //!   inline events.
 //! - [`SpannedInlineStyleProcessor`] — mark/dim splitter that preserves byte
 //!   ranges.
-//! - [`SpannedRuleProcessor`] — HR-attribute paragraph detector.
 //!
 //! [`Event`]: pulldown_cmark::Event
 
@@ -48,7 +44,7 @@ use pulldown_cmark::{CowStr, Event, Tag, TagEnd};
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use crate::markdown::inline::{HorizontalRuleAttrs, InlineEvent, InlineTag};
+use crate::markdown::inline::{InlineEvent, InlineTag};
 
 /// Provenance of a [`SpannedInlineEvent`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -673,162 +669,6 @@ fn classify_dim(text: &str, byte_pos: usize, len: usize) -> (bool, bool) {
     (can_open, can_close)
 }
 
-/// Span-aware HR-attribute paragraph detector.
-///
-/// Buffers paragraph contents from a stream of [`SpannedInlineEvent`]s and, if
-/// the paragraph body matches `---|***|___ { ...attrs... }` (the darkmatter HR
-/// attribute syntax), replaces the whole paragraph with a single
-/// [`InlineEvent::HorizontalRule`] event whose provenance is
-/// [`SpannedEventProvenance::GeneratedFrom`] over the paragraph bytes.
-///
-/// Anything that does not match passes through unchanged.
-pub struct SpannedRuleProcessor<'a, I>
-where
-    I: Iterator<Item = SpannedInlineEvent<'a>>,
-{
-    inner: I,
-    pending: VecDeque<SpannedInlineEvent<'a>>,
-    buffer: Vec<SpannedInlineEvent<'a>>,
-    /// Byte range of the open `Paragraph` Start event, when one is open.
-    paragraph_start: Option<Range<usize>>,
-    /// Tracks whether the buffered paragraph contains anything other than
-    /// `Standard(Event::Text(_))` events. Mirrors the legacy
-    /// [`RuleProcessor`](crate::markdown::block::RuleProcessor)'s
-    /// `paragraph_is_simple` flag — HR-attribute replacement only applies to
-    /// paragraphs that fold to a single text event.
-    paragraph_is_simple: bool,
-}
-
-impl<'a, I> SpannedRuleProcessor<'a, I>
-where
-    I: Iterator<Item = SpannedInlineEvent<'a>>,
-{
-    /// Wraps `inner`.
-    pub fn new(inner: I) -> Self {
-        Self {
-            inner,
-            pending: VecDeque::new(),
-            buffer: Vec::new(),
-            paragraph_start: None,
-            paragraph_is_simple: true,
-        }
-    }
-
-    /// Closes the buffered paragraph: either fires a synthetic HR event, or
-    /// flushes the buffered events verbatim, then enqueues the matching
-    /// `End(Paragraph)`.
-    ///
-    /// The HR rewrite only fires when the paragraph is **simple** — exactly
-    /// one buffered [`Standard(Event::Text(_))`](Event::Text) and no other
-    /// events. This matches the legacy
-    /// [`RuleProcessor`](crate::markdown::block::RuleProcessor): paragraphs
-    /// carrying nested formatting (`Emphasis`, `Strong`, links, inline HTML,
-    /// span-aware mark/dim, …) pass through unchanged so the fold sees them
-    /// as ordinary paragraphs, not synthetic HRs.
-    fn close_paragraph(&mut self, end_event: SpannedInlineEvent<'a>) {
-        let start_range = self.paragraph_start.take().expect("open paragraph");
-
-        if self.paragraph_is_simple
-            && self.buffer.len() == 1
-            && let InlineEvent::Standard(Event::Text(text)) = &self.buffer[0].event
-            && let Some(attrs) = parse_hr_paragraph(text.as_ref().trim())
-        {
-            // Replace the whole buffered paragraph (start, contents, end) with
-            // a single HR event whose provenance points at the paragraph
-            // **body** — the buffered text event's exact range — not the
-            // `End(Paragraph)` range, which `pulldown-cmark` extends to
-            // include the trailing newline. Pinning the body matches the
-            // design fixture (`span-aware-processor-design.md`, *Generated
-            // Horizontal Rules* / *HR Attributes: Basic*).
-            let body_range = self.buffer[0].range.clone();
-            self.pending.push_back(SpannedInlineEvent::generated(
-                InlineEvent::HorizontalRule(attrs),
-                body_range.clone(),
-                body_range,
-            ));
-            self.buffer.clear();
-            return;
-        }
-
-        // Otherwise flush the buffered paragraph as-is, retaining
-        // pulldown-cmark's `Start(Paragraph)` and `End(Paragraph)` ranges
-        // verbatim.
-        self.pending.push_back(SpannedInlineEvent::parsed(
-            InlineEvent::Standard(Event::Start(Tag::Paragraph)),
-            start_range,
-        ));
-        for event in self.buffer.drain(..) {
-            self.pending.push_back(event);
-        }
-        self.pending.push_back(end_event);
-    }
-}
-
-impl<'a, I> Iterator for SpannedRuleProcessor<'a, I>
-where
-    I: Iterator<Item = SpannedInlineEvent<'a>>,
-{
-    type Item = SpannedInlineEvent<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some(event) = self.pending.pop_front() {
-                return Some(event);
-            }
-            let Some(spanned) = self.inner.next() else {
-                // Drain any half-open paragraph as a literal flush.
-                if let Some(start_range) = self.paragraph_start.take() {
-                    self.pending.push_back(SpannedInlineEvent::parsed(
-                        InlineEvent::Standard(Event::Start(Tag::Paragraph)),
-                        start_range,
-                    ));
-                    let buffered = std::mem::take(&mut self.buffer);
-                    for event in buffered {
-                        self.pending.push_back(event);
-                    }
-                    continue;
-                }
-                return None;
-            };
-
-            match &spanned.event {
-                InlineEvent::Standard(Event::Start(Tag::Paragraph)) => {
-                    self.paragraph_start = Some(spanned.range.clone());
-                    self.buffer.clear();
-                    self.paragraph_is_simple = true;
-                }
-                InlineEvent::Standard(Event::End(TagEnd::Paragraph))
-                    if self.paragraph_start.is_some() =>
-                {
-                    self.close_paragraph(spanned);
-                }
-                _ => {
-                    if self.paragraph_start.is_some() {
-                        // Any non-text event inside the paragraph disqualifies
-                        // the HR rewrite (mirrors the legacy `RuleProcessor`
-                        // `paragraph_is_simple` flag).
-                        if !matches!(spanned.event, InlineEvent::Standard(Event::Text(_))) {
-                            self.paragraph_is_simple = false;
-                        }
-                        self.buffer.push(spanned);
-                    } else {
-                        return Some(spanned);
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Parses an HR-attribute paragraph body (one of `---`, `***`, `___`
-/// optionally followed by `{ ... }`).
-///
-/// Returns `None` when the body is not an HR-attribute paragraph; otherwise
-/// returns the parsed [`HorizontalRuleAttrs`].
-fn parse_hr_paragraph(body: &str) -> Option<HorizontalRuleAttrs> {
-    crate::markdown::block::try_parse_hr_attrs(body)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -906,75 +746,11 @@ mod tests {
         assert_eq!(ends, 1);
     }
 
-    /// Drains the full spanned chain (adapter + style + rule processor) over
-    /// `markdown` into a flat vector. The Lifetime gymnastics mirror `run`.
-    fn run_full(markdown: &str) -> Vec<SpannedInlineEvent<'static>> {
-        let parser = Parser::new_ext(markdown, Options::ENABLE_STRIKETHROUGH).into_offset_iter();
-        let adapter = SpanningAdapter::new(parser);
-        let style = SpannedInlineStyleProcessor::new(markdown, adapter);
-        let rule = SpannedRuleProcessor::new(style);
-        let collected: Vec<_> = rule.collect::<Vec<_>>();
-        let leaked = Box::leak(markdown.to_string().into_boxed_str());
-        let _ = leaked;
-        unsafe {
-            std::mem::transmute::<Vec<SpannedInlineEvent<'_>>, Vec<SpannedInlineEvent<'static>>>(
-                collected,
-            )
-        }
-    }
-
-    #[test]
-    fn rule_processor_rewrites_simple_hr_attribute_paragraph() {
-        let events = run_full("--- { style: waves }\n");
-        let hrs: Vec<_> = events
-            .iter()
-            .filter(|e| matches!(e.event, InlineEvent::HorizontalRule(_)))
-            .collect();
-        assert_eq!(hrs.len(), 1, "simple HR paragraph must be rewritten");
-    }
-
-    /// A paragraph that begins with the HR marker but also carries inline
-    /// formatting must NOT be rewritten as a synthetic HR — this matches the
-    /// legacy [`RuleProcessor`]'s `paragraph_is_simple` policy. See review-2
-    /// finding 4 in `renderable/features/2026-05-20-darkmatter-tree/`.
-    #[test]
-    fn rule_processor_does_not_rewrite_formatted_hr_attribute_paragraph() {
-        // pulldown-cmark emits Start(Em)/Text/End(Em) for the italic word —
-        // so the paragraph buffer is not a single Text event. The legacy
-        // processor would leave this alone; the span-aware processor must
-        // match.
-        let events = run_full("--- *italic* { style: waves }\n");
-        let hrs: Vec<_> = events
-            .iter()
-            .filter(|e| matches!(e.event, InlineEvent::HorizontalRule(_)))
-            .collect();
-        assert!(
-            hrs.is_empty(),
-            "non-simple paragraph must not be rewritten as HR: {events:?}",
-        );
-        // The paragraph itself must still be emitted.
-        let para_starts = events
-            .iter()
-            .filter(|e| matches!(e.event, InlineEvent::Standard(Event::Start(Tag::Paragraph))))
-            .count();
-        assert_eq!(para_starts, 1);
-    }
-
-    /// A paragraph that contains the HR marker text plus an inline-code span
-    /// is also non-simple — multiple events in the buffer, even if every
-    /// non-text event is "harmless" formatting.
-    #[test]
-    fn rule_processor_does_not_rewrite_paragraph_with_inline_code() {
-        let events = run_full("--- `code` { style: dots }\n");
-        let hrs: Vec<_> = events
-            .iter()
-            .filter(|e| matches!(e.event, InlineEvent::HorizontalRule(_)))
-            .collect();
-        assert!(
-            hrs.is_empty(),
-            "paragraph with inline code must not be rewritten as HR: {events:?}",
-        );
-    }
+    // HR-attribute paragraph coverage moved to
+    // `crate::markdown::render_tree::block_extension::tests` and to the
+    // fold-tier tests in `super::fold::tests` (the
+    // `span_aware_fold_*` HR fixtures). The legacy `SpannedRuleProcessor`
+    // chain no longer exists — HR detection runs ahead of this module.
 
     // -----------------------------------------------------------------------
     // Review-6 finding 2: the span-aware processor's *exact byte-range
@@ -1165,46 +941,8 @@ mod tests {
         );
     }
 
-    /// `--- { style: waves }` must rewrite to a synthetic
-    /// [`InlineEvent::HorizontalRule`] whose provenance is
-    /// [`SpannedEventProvenance::GeneratedFrom`] pointing back at the
-    /// paragraph **body** bytes (`0..20`) — exactly the fixture in
-    /// `span-aware-processor-design.md` (*HR Attributes: Basic*).
-    ///
-    /// The 20-byte body is `--- { style: waves }`; `pulldown-cmark`'s
-    /// `End(Paragraph)` range covers the trailing newline as well (`0..21`),
-    /// but the design pins the generated event to the body bytes — the
-    /// processor recovers that exact range from the buffered text event
-    /// instead of the paragraph end.
-    #[test]
-    fn generated_hr_event_source_covers_paragraph_body_bytes() {
-        let body = "--- { style: waves }";
-        let input = format!("{body}\n");
-        assert_eq!(body.len(), 20);
-        assert_eq!(input.len(), 21);
-        let events = run_full(&input);
-
-        let hr = events
-            .iter()
-            .find(|e| matches!(e.event, InlineEvent::HorizontalRule(_)))
-            .expect("HR-attribute paragraph must yield a single HR event");
-
-        // Provenance is GeneratedFrom with the paragraph body source range.
-        let source_range = match &hr.provenance {
-            SpannedEventProvenance::GeneratedFrom { source } => source.clone(),
-            SpannedEventProvenance::Parsed => panic!("HR event must be Generated, not Parsed"),
-        };
-
-        assert_eq!(
-            source_range,
-            0..body.len(),
-            "generated HR source range must exactly cover the paragraph body bytes",
-        );
-        // The event's operational range mirrors `source` (module docs say:
-        // "For GeneratedFrom this is normally the same as `source`").
-        assert_eq!(
-            hr.range, source_range,
-            "generated HR operational range must match its source range",
-        );
-    }
+    // The fold-tier `span_aware_fold_hr_source_location_pins_paragraph_body_bytes`
+    // test in `super::fold::tests` now pins the generated HR's
+    // `SourceLocation.bytes` to the paragraph body — that coverage moved with
+    // the HR pipeline into `block_extension`.
 }

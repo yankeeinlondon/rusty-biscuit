@@ -24,12 +24,14 @@
 //! frontmatter flows through [`renderable::tree::DocumentMetadata::frontmatter`]
 //! without re-parsing through `pulldown-cmark`'s metadata-block options (DMTR-4).
 //!
-//! A span-aware processor chain for `==mark==` / dim inline styles and
-//! horizontal-rule attribute paragraphs lives in [`span`]. It produces
-//! [`span::SpannedInlineEvent`]s with byte ranges so the fold can preserve
-//! every node's [`renderable::tree::SourceLocation`] when those Darkmatter
-//! constructs appear (DMTR-3). The legacy non-spanned `InlineStyleProcessor`
-//! and `RuleProcessor` still back the public renderers and are unchanged.
+//! A span-aware processor chain for `==mark==` / dim inline styles lives in
+//! [`span`]. It produces [`span::SpannedInlineEvent`]s with byte ranges so the
+//! fold can preserve every node's [`renderable::tree::SourceLocation`] when
+//! those Darkmatter constructs appear (DMTR-3). HR-attribute paragraphs are
+//! lifted out of the event stream by [`block_extension`], a dedicated
+//! offset-aware block processor that sits between `pulldown-cmark` and the
+//! inline-span chain. The legacy non-spanned `InlineStyleProcessor` and
+//! `RuleProcessor` still back the public renderers and are unchanged.
 //!
 //! [`Tag`]: pulldown_cmark::Tag
 //!
@@ -50,6 +52,7 @@
 //! [`fold_markdown_to_document`] is the public entry point: it walks a
 //! `pulldown-cmark` event stream and builds a [`renderable::tree::Document`].
 
+pub(crate) mod block_extension;
 pub mod code_renderer;
 // `entrypoints` exposes `pub(crate)` adapter functions that are exercised by
 // integration tests, benches, and the parity harness — none of which live in
