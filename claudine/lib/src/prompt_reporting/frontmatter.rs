@@ -4,33 +4,9 @@ use darkmatter::markdown::Markdown;
 
 use super::types::PromptVerbosity;
 
-/// Parse the `verbosity` property from the frontmatter of a `system-prompt.md`
-/// file.
-///
-/// The raw markdown text is parsed to extract the YAML frontmatter, and the
-/// `verbosity` key is read as a string.  Valid values are `silent`, `quiet`,
-/// and `verbose` (case-insensitive).
-///
-/// ## Returns
-///
-/// Returns `Some(PromptVerbosity)` when the frontmatter contains a valid
-/// `verbosity` value, or `None` when the key is missing or the value is
-/// unrecognized.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::{parse_frontmatter_verbosity, PromptVerbosity};
-///
-/// let text = "---\nverbosity: verbose\n---\n\n# System Prompt\n";
-/// assert_eq!(
-///     parse_frontmatter_verbosity(text),
-///     Some(PromptVerbosity::Verbose)
-/// );
-///
-/// let no_verbosity = "# No frontmatter\n";
-/// assert_eq!(parse_frontmatter_verbosity(no_verbosity), None);
-/// ```
+/// Parse the `verbosity` property from a `system-prompt.md` file's
+/// frontmatter. Valid values are `silent`, `quiet`, and `verbose`
+/// (case-insensitive); anything else returns `None`.
 pub fn parse_frontmatter_verbosity(raw_text: &str) -> Option<PromptVerbosity> {
     let md: Markdown = raw_text.into();
     let value: Option<String> = md.fm_get("verbosity").ok().flatten();

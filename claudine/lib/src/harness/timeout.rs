@@ -91,26 +91,10 @@ pub fn parse_timeout(input: &str, source_path: &Path) -> Result<Duration, Harnes
     Ok(Duration::from_secs_f64(total_secs))
 }
 
-/// Render a [`Duration`] as a compact user-facing string such as `30s`, `5m`,
-/// or `2h`.
-///
-/// Used for error-message rendering in parse-time validation so error text
-/// reads with the same grammar that `parse_timeout` accepts. Prefers the
-/// largest whole unit that divides the duration evenly; falls back to
-/// seconds otherwise.
-///
-/// ## Examples
-///
-/// ```ignore
-/// use std::time::Duration;
-/// // Hours (evenly divisible)
-/// assert_eq!(format_duration(Duration::from_secs(7200)), "2h");
-/// // Minutes (evenly divisible)
-/// assert_eq!(format_duration(Duration::from_secs(300)), "5m");
-/// // Falls back to seconds
-/// assert_eq!(format_duration(Duration::from_secs(30)), "30s");
-/// assert_eq!(format_duration(Duration::from_secs(90)), "90s");
-/// ```
+/// Render a [`Duration`] in the same grammar that [`parse_timeout`] accepts,
+/// picking the largest whole unit that divides evenly (else falling back to
+/// seconds). Used in error messages so the displayed value can be copied back
+/// into config without rewriting.
 pub(crate) fn format_duration(d: Duration) -> String {
     let secs = d.as_secs();
     if secs > 0 && secs.is_multiple_of(3600) {

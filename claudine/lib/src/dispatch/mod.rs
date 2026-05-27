@@ -66,12 +66,10 @@ impl DispatchRuntimeContext {
         }
     }
 
-    /// Return true when a compiled runtime config is available.
     pub fn has_config(&self) -> bool {
         self.canonical_config.is_some()
     }
 
-    /// Get the canonical runtime config, if loaded.
     pub fn canonical_config(&self) -> Option<&loader::CanonicalRuntimeConfig> {
         self.canonical_config.as_deref()
     }
@@ -165,7 +163,8 @@ pub async fn dispatch_event_meta_with_runtime(
 
 /// High-level canonical dispatch entry point.
 ///
-/// Parses raw provider JSON, loads the new [`ClaudineConfig`], compiles the
+/// Parses raw provider JSON, loads the new
+/// [`ClaudineConfig`](crate::config::ClaudineConfig), compiles the
 /// canonical runtime, and delegates to [`dispatch_canonical_with_runtime`].
 pub async fn dispatch_canonical(
     raw: &Value,

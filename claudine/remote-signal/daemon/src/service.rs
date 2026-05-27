@@ -127,10 +127,11 @@ impl RemoteSignal for RemoteSignalService {
         let body = request.into_inner();
         let metadata = parse_optional_json(&body.metadata_json)
             .map_err(|err| Status::invalid_argument(format!("metadata_json: {err}")))?;
+        let owner_node_id = self.identity.node_id();
         let outcome = self
             .session_log
             .append_entry(
-                &body.owner_node_id,
+                &owner_node_id,
                 &body.session_id,
                 body.source,
                 body.level,
@@ -247,7 +248,9 @@ impl RemoteSignal for RemoteSignalService {
             .connect(node_id.clone(), invitation.socket_addr, PeerSource::Manual)
             .await
         {
-            Ok(peer) => Ok(Response::new(ConnectToPeerResponse { peer: Some(peer) })),
+            Ok(peer) => {
+                Ok(Response::new(ConnectToPeerResponse { peer: Some(peer) }))
+            }
             Err(error) => Err(Status::unavailable(format!(
                 "failed to connect to peer {node_id}: {error}"
             ))),
@@ -398,6 +401,7 @@ fn map_sync_error(error: SyncError) -> Status {
     match &error {
         SyncError::NotPaired(_) => Status::failed_precondition(error.to_string()),
         SyncError::Timeout(_) => Status::deadline_exceeded(error.to_string()),
+        SyncError::MalformedPayload { .. } => Status::data_loss(error.to_string()),
         _ => Status::internal(error.to_string()),
     }
 }
@@ -454,6 +458,7 @@ mod tests {
         let session_log = SessionLogManager::new(
             storage.clone(),
             worker.handle(),
+            projection.clone(),
             ChunkConfig::default(),
             Arc::clone(&identity),
         )
@@ -496,9 +501,10 @@ mod tests {
     #[tokio::test]
     async fn append_then_list_chunk_entries() {
         let h = harness();
+        let node_id = h.service.identity.node_id();
         h.service
             .append_entry(Request::new(AppendEntryRequest {
-                owner_node_id: "node-a".into(),
+                owner_node_id: String::new(),
                 session_id: "s-1".into(),
                 source: "test".into(),
                 level: "info".into(),
@@ -507,10 +513,11 @@ mod tests {
             }))
             .await
             .expect("append");
+        let chunk_id = format!("session/{node_id}/s-1/part/0");
         let listed = h
             .service
             .list_chunk_entries(Request::new(ListChunkEntriesRequest {
-                chunk_id: "session/node-a/s-1/part/0".into(),
+                chunk_id: chunk_id.clone(),
             }))
             .await
             .expect("list")

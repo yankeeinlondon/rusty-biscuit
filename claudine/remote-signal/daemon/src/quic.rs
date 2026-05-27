@@ -127,7 +127,6 @@ impl QuicEndpoint {
         })
     }
 
-    /// Socket address the endpoint is bound to.
     #[must_use]
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr

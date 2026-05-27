@@ -9,41 +9,8 @@
 
 use super::types::{PromptReportFormat, PromptVerbosity, SystemPromptReportConfig, TruncationMode};
 
-/// Resolve the reporting configuration for a system prompt.
-///
-/// Applies the precedence chain documented in the module-level description.
-///
-/// ## Arguments
-///
-/// - `cli_silent`: whether `--silent` was passed.
-/// - `cli_quiet`: whether `--quiet` was passed.
-/// - `cli_verbose`: whether `--verbose` was passed (any count > 0).
-/// - `env_verbosity`: value of `CLAUDINE_SYSTEM_PROMPT`, if set and valid.
-/// - `prompt_line_count`: number of lines in the composed prompt.
-/// - `frontmatter_verbosity`: value parsed from the prompt file's frontmatter.
-///
-/// ## Returns
-///
-/// A [`SystemPromptReportConfig`] describing what to render.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::{
-///     resolve_system_prompt_report_config, PromptReportFormat, SystemPromptReportConfig,
-///     TruncationMode,
-/// };
-///
-/// let config = resolve_system_prompt_report_config(
-///     false, // silent
-///     false, // quiet
-///     true,  // verbose
-///     None,
-///     5,
-///     None,
-/// );
-/// assert_eq!(config.format, PromptReportFormat::FullPrompt);
-/// ```
+/// Resolve the reporting configuration for a system prompt, applying the
+/// precedence chain documented in the module-level description.
 pub fn resolve_system_prompt_report_config(
     cli_silent: bool,
     cli_quiet: bool,

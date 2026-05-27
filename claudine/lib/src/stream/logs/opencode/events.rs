@@ -60,17 +60,33 @@ pub enum ParsedOpenCodeStderrLine {
     RawText(String),
 }
 
+/// Classification of an OpenCode 429 / retry-exhaustion signal.
+///
+/// Server overload and rate-limiting are distinct conditions on unrelated
+/// axes (provider capacity vs. account consumption).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderLimitKind {
+    /// The provider's servers are busy. Transient, retryable, not a cap.
+    Overloaded,
+    /// This account sent requests too fast. Transient, retryable.
+    RateLimited,
+    /// The account's usage allowance is exhausted. Terminal.
+    UsageCap,
+    /// A 429 wrapped in `AI_RetryError` / `maxRetriesExceeded` — the call
+    /// failed after exhausting retries. Terminal.
+    RetriesExhausted,
+}
+
 /// Action category derived from a parsed record or raw stderr line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogClassification {
-    RateLimit {
+    ProviderLimit {
         status_code: u16,
-        error_name: String,
+        kind: ProviderLimitKind,
         reset_at: Option<DateTime<Utc>>,
         provider_id: Option<String>,
         model_id: Option<String>,
         provider_error: String,
-        is_fatal: bool,
     },
     MalformedAsset {
         asset_type: AssetType,

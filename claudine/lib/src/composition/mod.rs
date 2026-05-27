@@ -5,6 +5,11 @@
 //! - Prompt preparation (inline frontmatter prompt and chained document)
 //! - Agent/provider selection with precedence rules
 //! - Composition-specific error types
+//!
+//! See [`claudine/docs/topics/composition.md`](../../../docs/topics/composition.md)
+//! for the authoritative design — frontmatter precedence, harness
+//! validations, handlers, and provider selection across `compose`,
+//! `inline-compose`, and `sequence`.
 
 pub mod closure;
 mod error;

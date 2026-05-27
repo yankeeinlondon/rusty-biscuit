@@ -130,7 +130,6 @@ impl McpProviderStateStore {
         }
     }
 
-    /// Returns a reference to the underlying state.
     pub fn state(&self) -> &McpProviderState {
         &self.state
     }
