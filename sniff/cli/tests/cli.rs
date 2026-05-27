@@ -5472,3 +5472,176 @@ fn test_repo_git_status_package_with_area_name_errors() {
         "error must list valid package names (not areas), got:\n{stderr}"
     );
 }
+
+// ============================================================================
+// `repo area` Subcommand
+// ============================================================================
+//
+// `sniff repo area` returns a single "area" name combining the notions of
+// "package" and "package-area": package name when inside a package, else the
+// surrounding area string (or "root").
+
+#[test]
+fn test_repo_area_inside_package_returns_package_name() {
+    let (_dir, path) = create_cli_monorepo();
+    let inside_pkg_a = path.join("pkg-a/lib/src");
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            inside_pkg_a.to_str().unwrap(),
+            "repo",
+            "area",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-a");
+}
+
+#[test]
+fn test_repo_area_at_area_dir_returns_area_name() {
+    let (_dir, path) = create_cli_monorepo();
+    let area_dir = path.join("pkg-a");
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            area_dir.to_str().unwrap(),
+            "repo",
+            "area",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-a");
+}
+
+#[test]
+fn test_repo_area_at_repo_root_returns_root() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "area"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "root");
+}
+
+#[test]
+fn test_repo_area_json_emits_name_outcome() {
+    let (_dir, path) = create_cli_monorepo();
+    let inside_pkg_b = path.join("pkg-b/lib");
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            inside_pkg_b.to_str().unwrap(),
+            "--json",
+            "repo",
+            "area",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["name"], Value::String("pkg-b".to_string()));
+}
+
+#[test]
+fn test_repo_area_non_monorepo_repo_silent_failure() {
+    let (_dir, path) = create_test_repo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "area"])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stdout.is_empty(), "stdout must be empty, got: {stdout:?}");
+    assert!(
+        stderr.is_empty(),
+        "stderr must be empty without --verbose, got: {stderr:?}"
+    );
+}
+
+#[test]
+fn test_repo_area_non_monorepo_verbose_message_on_stderr() {
+    let (_dir, path) = create_test_repo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "--verbose",
+            "--plain",
+            "repo",
+            "area",
+        ])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stdout.is_empty(), "stdout must be empty, got: {stdout:?}");
+    assert!(
+        stderr.contains("you are in a repo but not a monorepo"),
+        "verbose stderr must explain not-a-monorepo, got: {stderr:?}"
+    );
+}
+
+#[test]
+fn test_repo_area_not_in_repo_verbose_message_on_stderr() {
+    let dir = tempfile::tempdir().unwrap();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            dir.path().to_str().unwrap(),
+            "--verbose",
+            "--plain",
+            "repo",
+            "area",
+        ])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stdout.is_empty(), "stdout must be empty, got: {stdout:?}");
+    assert!(
+        stderr.contains("you are not in a repo"),
+        "verbose stderr must explain not-in-repo, got: {stderr:?}"
+    );
+}
+
+#[test]
+fn test_repo_area_no_error_zero_exit_when_no_monorepo() {
+    let (_dir, path) = create_test_repo();
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "area",
+            "--no-error",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_area_on_error_prints_message_to_stdout() {
+    let (_dir, path) = create_test_repo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "--plain",
+            "repo",
+            "area",
+            "--no-error",
+            "--on-error",
+            "n/a",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("n/a"),
+        "--on-error message must reach stdout, got: {stdout:?}"
+    );
+}
