@@ -922,6 +922,115 @@ fn sequence_summary_emits_final_line() {
 }
 
 // ============================================================================
+// Phase 5: schema validation
+// ============================================================================
+
+#[cfg(unix)]
+#[test]
+fn sequence_aggregates_missing_required_properties_across_steps() {
+    // A non-TTY sequence run with `$schema` declaring a required property
+    // that no step supplies must abort BEFORE any provider session is
+    // launched, surfacing every failing step in a single error.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  topic: 'string(required)'
+sequence:
+  - alpha
+  - beta
+---
+Step about {{topic}}.
+"#,
+    )
+    .unwrap();
+
+    // Provider stub records every invocation so we can prove it was
+    // never called.
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.to_lowercase().contains("missing"),
+        "expected a missing-properties report; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("topic"),
+        "expected the `topic` property name; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider session should have been launched; stub recorded a call"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn sequence_set_override_satisfies_required_schema() {
+    // The aggregated path retries cleanly when the user supplies the
+    // missing value via `--set` so no error reaches the provider.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  topic: 'string(required)'
+sequence:
+  - one
+  - two
+---
+Working on {{topic}} ({{state}}).
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\ncat > /dev/null\nexit 0\n",
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args([
+            "sequence",
+            "--goose",
+            md_file.to_str().unwrap(),
+            "topic=async",
+        ])
+        .assert()
+        .success();
+}
+
+// ============================================================================
 // Per-step step_timeout override
 // ============================================================================
 

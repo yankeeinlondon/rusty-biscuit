@@ -1,7 +1,7 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Roo), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-05-23
+last_updated: 2026-05-26
 ---
 
 ## Overview
@@ -103,6 +103,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 - **System prompt** — file-backed only: `--append-system-prompt`/`--asp` and `--replace-system-prompt`/`--rsp`, with `system-prompt.md` discovery from the launch-CWD hierarchy; direct wrappers also support `--edit`. Delivery is spec-driven per provider. See [System Prompt](../../../claudine/docs/topics/system-prompt.md).
 - **Timeouts** — two rules, `timeout` (wall-clock, opt-in) and `step_timeout` (stream-silence, default `30m`). See [Timeouts](../../../claudine/docs/topics/timeouts.md).
 - **Transient overlays** — written to `<repo_root>/.claudine/tmp/` (or `<launch_cwd>/.claudine-tmp/`) and cleaned up on `Drop`.
+- **Schema validation** — when a composition document declares `$schema`, the prepare layer runs Darkmatter's `SimplifiedSchema` validation and emits typed claudine errors (`SchemaLoad`, `SchemaValidation`, `MissingProperties`, `UnsupportedInteractiveSchema`). Required-missing values trigger a `biscuit-tui` prompt loop when stdin+stderr are TTYs, `--silent` is off, and the user-config `prompt_for_missing` is `true` (default). Invalid optional values are dropped with a warning and validation retries once. `sequence` aggregates per-step failures into `SequenceMissingProperties` so all steps can be fixed in one pass. See [Composition — Schema Validation](../../../claudine/docs/topics/composition.md#schema-validation).
 
 **Config TUI — messenger routes:** `claudine config` manages bot-token routes (Discord, Slack, Signal, WhatsApp) and webhook routes (Discord/Slack webhooks). Webhook URLs use masked input and are validated before advancing; env-only routes (blank URL + env var) are allowed. A **Test Connection** workflow (`T` during webhook input) sends a test message without saving. Desktop notifications are intentionally absent — they are zero-config and triggered via lifecycle `notify` frontmatter only.
 
