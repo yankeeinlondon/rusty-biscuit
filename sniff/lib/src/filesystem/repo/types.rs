@@ -202,6 +202,29 @@ impl RepoInfo {
             .max_by_key(|pkg| canonicalize_path(&pkg.path).components().count())
     }
 
+    /// Resolve the area name for `dir`, combining package and package-area into
+    /// a single value useful inside a monorepo.
+    ///
+    /// The rule: if `dir` is inside a package, the area is that package's name;
+    /// otherwise the area is the surrounding package-area string (the literal
+    /// `"root"` for top-level locations). Falls back to `"root"` when neither
+    /// helper resolves a value (e.g. CWD at repo root with no top-level package).
+    ///
+    /// ## Examples
+    ///
+    /// Given a monorepo with a `sniff/lib` package whose `package_area` is
+    /// `"sniff"`:
+    ///
+    /// - CWD inside `sniff/lib/src` → `"sniff-lib"` (the package name)
+    /// - CWD at `sniff/` but outside any package → `"sniff"`
+    /// - CWD at repo root with no top-level package → `"root"`
+    pub fn area_for_dir(&self, dir: &Path) -> &str {
+        if let Some(pkg) = self.package_for_dir(dir) {
+            return &pkg.name;
+        }
+        self.package_area_for_dir(dir).unwrap_or("root")
+    }
+
     /// Find the package area that contains `dir`.
     ///
     /// First checks if `dir` is inside a specific package, then falls back to
@@ -408,5 +431,70 @@ mod tests {
                 .map(|p| p.name.as_str()),
             Some("pkg-a")
         );
+    }
+
+    // ============================================================================
+    // area_for_dir tests
+    // ============================================================================
+
+    fn monorepo_with_areas() -> RepoInfo {
+        RepoInfo {
+            is_monorepo: true,
+            monorepo_tool: None,
+            workspace_tools: Vec::new(),
+            root: PathBuf::from("/repo"),
+            dependencies: None,
+            dev_dependencies: None,
+            peer_dependencies: None,
+            optional_dependencies: None,
+            packages: Some(vec![
+                Package {
+                    path: PathBuf::from("/repo/sniff/lib"),
+                    relative: "sniff/lib".to_string(),
+                    package_area: "sniff".to_string(),
+                    name: "sniff-lib".to_string(),
+                    ..Package::default()
+                },
+                Package {
+                    path: PathBuf::from("/repo/sniff/cli"),
+                    relative: "sniff/cli".to_string(),
+                    package_area: "sniff".to_string(),
+                    name: "sniff-cli".to_string(),
+                    ..Package::default()
+                },
+                Package {
+                    path: PathBuf::from("/repo/top-pkg"),
+                    relative: "top-pkg".to_string(),
+                    package_area: "root".to_string(),
+                    name: "top-pkg".to_string(),
+                    ..Package::default()
+                },
+            ]),
+        }
+    }
+
+    #[test]
+    fn area_for_dir_returns_package_name_when_inside_package() {
+        let repo = monorepo_with_areas();
+        assert_eq!(repo.area_for_dir(Path::new("/repo/sniff/lib/src")), "sniff-lib");
+    }
+
+    #[test]
+    fn area_for_dir_returns_package_name_for_top_level_package() {
+        let repo = monorepo_with_areas();
+        assert_eq!(repo.area_for_dir(Path::new("/repo/top-pkg/src")), "top-pkg");
+    }
+
+    #[test]
+    fn area_for_dir_falls_back_to_package_area_when_outside_any_package() {
+        let repo = monorepo_with_areas();
+        // /repo/sniff exists as an area dir but no package lives at that path
+        assert_eq!(repo.area_for_dir(Path::new("/repo/sniff")), "sniff");
+    }
+
+    #[test]
+    fn area_for_dir_returns_root_at_repo_root() {
+        let repo = monorepo_with_areas();
+        assert_eq!(repo.area_for_dir(Path::new("/repo")), "root");
     }
 }
