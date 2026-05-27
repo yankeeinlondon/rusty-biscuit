@@ -321,6 +321,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn on_provider_limit(
         &mut self,
         record: &OpenCodeLogRecord,
@@ -331,8 +332,16 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         model_id: Option<String>,
         provider_error: String,
     ) -> StderrIngestOutcome {
-        let stdout_seen = self.stdout_event_seen.load(Ordering::SeqCst);
-        let rendered_message = render_rate_limit_message(provider_id, model_id, reset_at);
+        let rendered_message = match kind {
+            ProviderLimitKind::Overloaded => "server overloaded; will retry".to_string(),
+            ProviderLimitKind::RateLimited => "request throttled; will retry".to_string(),
+            ProviderLimitKind::UsageCap => {
+                render_rate_limit_message(provider_id, model_id, reset_at)
+            }
+            ProviderLimitKind::RetriesExhausted => {
+                "provider 429s did not clear after retries".to_string()
+            }
+        };
         let is_terminal = matches!(
             kind,
             ProviderLimitKind::UsageCap | ProviderLimitKind::RetriesExhausted
@@ -344,15 +353,17 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
                 state.diagnostics.rate_limit_events.saturating_add(1);
             state.diagnostics.rate_limit_reset_at =
                 max_reset_at(state.diagnostics.rate_limit_reset_at, reset_at);
-            state.rate_limit = Some(merge_rate_limit(
-                state.rate_limit.take(),
-                RateLimitInfo {
-                    is_throttled: Some(true),
-                    retry_after_ms: None,
-                    message: Some(rendered_message.clone()),
-                    reset_at,
-                },
-            ));
+            if is_terminal {
+                state.rate_limit = Some(merge_rate_limit(
+                    state.rate_limit.take(),
+                    RateLimitInfo {
+                        is_throttled: Some(true),
+                        retry_after_ms: None,
+                        message: Some(rendered_message.clone()),
+                        reset_at,
+                    },
+                ));
+            }
         }
 
         let mut extra_map = base_extra(record, "rate_limit");
@@ -368,23 +379,12 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             extra_map.insert("provider_error".into(), Value::String(provider_error));
         }
 
-        if stdout_seen || !is_terminal {
+        if is_terminal {
             debug!(
                 status_code,
                 kind = ?kind,
                 reset_at = ?reset_at,
-                "opencode provider-limit classified after stdout activity or non-terminal; emitting warning",
-            );
-            self.sink.on_semantic_event(SemanticEvent::Warning {
-                message: rendered_message,
-                extra: Value::Object(extra_map),
-            });
-        } else {
-            debug!(
-                status_code,
-                kind = ?kind,
-                reset_at = ?reset_at,
-                "opencode provider-limit classified before any stdout activity and terminal; requesting early termination",
+                "opencode provider-limit classified as terminal; requesting early termination",
             );
             self.sink.on_semantic_event(SemanticEvent::Error {
                 message: rendered_message.clone(),
@@ -395,6 +395,17 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             self.fire_early_termination(EarlyTermination::RateLimit {
                 message: rendered_message,
                 reset_at,
+            });
+        } else {
+            debug!(
+                status_code,
+                kind = ?kind,
+                reset_at = ?reset_at,
+                "opencode provider-limit classified as non-terminal; emitting warning",
+            );
+            self.sink.on_semantic_event(SemanticEvent::Warning {
+                message: rendered_message,
+                extra: Value::Object(extra_map),
             });
         }
 
@@ -1136,25 +1147,32 @@ mod tests {
     }
 
     #[test]
-    fn rate_limit_after_stdout_emits_warning_no_early_terminate() {
+    fn usage_cap_after_stdout_emits_terminal_error_and_early_terminate() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
         let line = r#"ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached. Your limit will reset at 2026-04-16 04:18:56\"}}"}]}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
         match &bridge.sink.events[0] {
-            SemanticEvent::Warning { message, extra } => {
+            SemanticEvent::Error {
+                terminal,
+                kind,
+                message,
+                extra,
+            } => {
+                assert!(*terminal);
+                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
                 assert!(message.to_lowercase().contains("usage limit"), "{message}");
                 // We no longer assert the exact timestamp because it's converted to local time
                 assert!(message.contains("2026-04-"), "{message}");
                 assert_string(extra, "classification", "rate_limit");
-                assert_string(extra, "error_name", "AI_RetryError");
+                assert_string(extra, "kind", "UsageCap");
             }
-            other => panic!("expected Warning, got {other:?}"),
+            other => panic!("expected Error, got {other:?}"),
         }
         assert!(
-            rx.try_recv().is_err(),
-            "no early-termination signal expected when stdout already seen",
+            rx.try_recv().is_ok(),
+            "early-termination signal expected for UsageCap even when stdout already seen",
         );
         let state = bridge.state.lock().unwrap();
         assert_eq!(state.diagnostics.rate_limit_events, 1);
@@ -1163,7 +1181,7 @@ mod tests {
     }
 
     #[test]
-    fn rate_limit_before_stdout_emits_terminal_error_and_early_terminate() {
+    fn usage_cap_before_stdout_emits_terminal_error_and_early_terminate() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
             OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
@@ -1197,7 +1215,7 @@ mod tests {
     }
 
     #[test]
-    fn rate_limit_fires_early_termination_only_once() {
+    fn provider_limit_fires_early_termination_only_once() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
             OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
@@ -1948,7 +1966,7 @@ mod tests {
     }
 
     #[test]
-    fn rate_limit_without_retry_error_is_warning_even_before_stdout() {
+    fn usage_cap_without_retry_error_still_terminates() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
             OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
@@ -1959,15 +1977,182 @@ mod tests {
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
 
         match &bridge.sink.events[0] {
-            SemanticEvent::Warning { message, .. } => {
+            SemanticEvent::Error {
+                terminal,
+                kind,
+                message,
+                extra,
+            } => {
+                assert!(*terminal);
+                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
                 assert!(message.to_lowercase().contains("usage limit"), "{message}");
+                assert_string(extra, "classification", "rate_limit");
+                assert_string(extra, "kind", "UsageCap");
             }
-            other => panic!("expected Warning, got {other:?}"),
+            other => panic!("expected Error, got {other:?}"),
         }
 
         assert!(
-            rx.try_recv().is_err(),
-            "early-termination signal NOT expected for non-fatal rate limit",
+            rx.try_recv().is_ok(),
+            "early-termination signal expected for UsageCap before stdout",
+        );
+    }
+
+    #[test]
+    fn overload_emits_warning_no_early_terminate() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = r#"ERROR 2026-05-15T19:26:02 +3054ms service=llm providerID=kimi-for-coding modelID=k2p6 error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"The engine is currently overloaded, please try again later\"}}","isRetryable":true}}"#;
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Warning { message, extra } => {
+                assert_eq!(message, "server overloaded; will retry");
+                assert_string(extra, "classification", "rate_limit");
+                assert_string(extra, "kind", "Overloaded");
+            }
+            other => panic!("expected Warning, got {other:?}"),
+        }
+        let state = bridge.state.lock().unwrap();
+        assert_eq!(state.diagnostics.rate_limit_events, 1);
+        assert!(
+            state.rate_limit.is_none(),
+            "overload must not set state.rate_limit"
+        );
+    }
+
+    #[test]
+    fn throttled_emits_warning_no_early_terminate() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","statusCode":429,"message":"Too many requests"}}"#;
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Warning { message, extra } => {
+                assert_eq!(message, "request throttled; will retry");
+                assert_string(extra, "classification", "rate_limit");
+                assert_string(extra, "kind", "RateLimited");
+            }
+            other => panic!("expected Warning, got {other:?}"),
+        }
+        let state = bridge.state.lock().unwrap();
+        assert_eq!(state.diagnostics.rate_limit_events, 1);
+        assert!(
+            state.rate_limit.is_none(),
+            "throttle must not set state.rate_limit"
+        );
+    }
+
+    #[test]
+    fn retries_exhausted_emits_terminal_error_and_early_terminate() {
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge =
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
+        let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429}]}}"#;
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Error {
+                terminal,
+                kind,
+                message,
+                extra,
+            } => {
+                assert!(*terminal);
+                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
+                assert_eq!(message, "provider 429s did not clear after retries");
+                assert_string(extra, "classification", "rate_limit");
+                assert_string(extra, "kind", "RetriesExhausted");
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+        assert!(
+            rx.try_recv().is_ok(),
+            "early-termination signal expected for RetriesExhausted",
+        );
+        let state = bridge.state.lock().unwrap();
+        assert_eq!(state.diagnostics.rate_limit_events, 1);
+        assert!(
+            state.rate_limit.is_some(),
+            "RetriesExhausted must set state.rate_limit"
+        );
+    }
+
+    #[test]
+    fn exceeded_quota_emits_terminal_error_and_early_terminate() {
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge =
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
+        let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"type\":\"exceeded_current_quota_error\",\"message\":\"Quota exceeded\"}}"}}"#;
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Error {
+                terminal,
+                kind,
+                message,
+                extra,
+            } => {
+                assert!(*terminal);
+                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
+                assert!(message.to_lowercase().contains("usage limit"), "{message}");
+                assert_string(extra, "classification", "rate_limit");
+                assert_string(extra, "kind", "UsageCap");
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+        assert!(
+            rx.try_recv().is_ok(),
+            "early-termination signal expected for UsageCap",
+        );
+    }
+
+    #[test]
+    fn cap_phrase_without_error_tag_emits_advisory_warning_no_terminate() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "ERROR 2026-05-15T19:26:02 +100ms service=llm dummy={} Usage limit reached for k2p6";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Warning { message, extra } => {
+                assert_eq!(message, "Usage limit reached for k2p6");
+                assert_string(extra, "classification", "api_failure");
+            }
+            other => panic!("expected Warning, got {other:?}"),
+        }
+        let state = bridge.state.lock().unwrap();
+        assert_eq!(state.diagnostics.api_failures, 1);
+        assert!(
+            state.rate_limit.is_none(),
+            "advisory cap must not set state.rate_limit"
+        );
+    }
+
+    #[test]
+    fn cap_wins_over_retries_exhausted_in_bridge() {
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge =
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
+        let line = r#"ERROR 2026-05-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached\"}}"}]}}"#;
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Error {
+                terminal,
+                kind,
+                message,
+                extra,
+            } => {
+                assert!(*terminal);
+                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
+                assert!(message.to_lowercase().contains("usage limit"), "{message}");
+                assert_string(extra, "classification", "rate_limit");
+                assert_string(extra, "kind", "UsageCap");
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+        assert!(
+            rx.try_recv().is_ok(),
+            "early-termination signal expected for UsageCap",
         );
     }
 }

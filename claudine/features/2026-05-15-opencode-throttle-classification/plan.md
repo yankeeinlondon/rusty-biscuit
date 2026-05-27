@@ -9,6 +9,30 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - claudine/lib/src/stream/logs/opencode/errors.rs
+  - claudine/lib/src/stream/logs/opencode/reasoning.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/lib/src/stream/logs/opencode/reasoning.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+  - .claude/skills/claudine/opencode-event-sources.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/claudine/opencode-event-sources.md
+source_files_during_phase_5:
+  - claudine/lib/src/stream/logs/opencode/errors.rs
+  - claudine/lib/src/stream/logs/opencode/reasoning.rs
+  - claudine/lib/tests/fixtures/logs/opencode-429-overload.txt
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages:
   - claudine
 ---
