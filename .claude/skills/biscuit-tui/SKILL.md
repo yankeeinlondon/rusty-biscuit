@@ -282,6 +282,36 @@ cli/src/
 - Synthetic events via `drive_event_loop` with `Vec<Event>` iterator
 - Prefer `assert_eq!` on `EventOutcome` variants
 
+### Headless guard
+
+`run_standalone_with_chrome` returns an immediate `io::Error` when both
+stdout and stderr are piped (`!is_terminal()`). This is **load-bearing**
+for the test suite: without it, a subprocess that spawns the binary
+from an interactive `just test` shell would call `enable_raw_mode()`
+on `/dev/tty`, mutating the **shared** controlling terminal's termios
+(OPOST off → `\n` loses CR translation) and corrupting any redrawing
+UI in the parent (nextest progress bar, indicatif, etc.). The stderr
+check preserves the shell command-substitution case
+(`FOO=$(question ...)` — stderr stays attached to the terminal).
+
+Do not write integration tests that spawn `question` just to assert
+"reached the event loop and bailed" — that pattern relies on
+`enable_raw_mode()` failing with ENXIO when no controlling tty is
+present, which is environment-dependent. Use the Writer-seam pattern
+below instead.
+
+### Writer-seam unit testing
+
+Each `run` function in `cli/src/commands/*.rs` is factored into a
+`run_with_writer(args, output, height, writer, run_prompt)` shape
+where `run_prompt: FnOnce(State, Option<HeightSpec>) -> io::Result<V>`
+is injectable. Tests substitute a closure that returns a synthetic
+value or `io::Error::new(CANCELLED_KIND|ABORTED_KIND, ...)` without
+ever calling `run_standalone`. This is the canonical place to assert
+flag plumbing, height propagation, hotkey normalization, and exit-code
+mapping. See `run_propagates_*_height_to_prompt` and `run_writes_*` in
+`choose_one.rs` and `choose_many.rs` for working examples.
+
 ## DevOps
 
 ```bash
