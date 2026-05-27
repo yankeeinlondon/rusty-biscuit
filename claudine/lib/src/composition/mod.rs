@@ -23,12 +23,16 @@ pub mod loop_expression;
 pub mod preflight;
 mod prepare;
 mod resolve;
+pub mod schema_validation;
 mod select;
 pub mod sequence;
 mod types;
 
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
-pub use error::{CompositionError, LOOP_RATE_LIMITED_EXIT_CODE, SequenceSelectionFailure};
+pub use error::{
+    CompositionError, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE, MissingProperty,
+    SequenceMissingPropertiesStep, SequenceSelectionFailure, TextFormat,
+};
 pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 #[allow(deprecated)]
 pub use lifecycle::{
@@ -49,6 +53,10 @@ pub use prepare::{
     PrepareOptions, parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
 };
 pub use resolve::{resolve_composition_source, validate_file_permissions};
+pub use schema_validation::{
+    InteractiveSchemaOptions, PropertyState, PropertyStatus, SchemaStatusReport,
+    build_schema_status_report, prepare_direct_with_schema, prepare_inline_with_schema,
+};
 pub use select::{
     build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,
     resolve_model, resolve_model_with_catalog, resolve_model_with_hints, resolve_target_non_tty,
