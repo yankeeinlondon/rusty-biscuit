@@ -479,8 +479,6 @@ fn render_footer(show_values_hint: bool) {
     log::message(&msg2.render(&term));
 }
 
-// --- Expression doc parsing ---
-
 #[derive(Debug, Clone, PartialEq)]
 struct ExprSection {
     heading: String,
@@ -839,8 +837,6 @@ fn render_section_with_subsections(
 
     log::data("");
 }
-
-// --- Expression report rendering ---
 
 fn render_expressions_report() {
     let term = log::terminal();

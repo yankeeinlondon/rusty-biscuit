@@ -277,12 +277,10 @@ impl<'a> LifecycleRunGuard<'a> {
         self.terminal_emitted = true;
     }
 
-    /// Whether `Start` has been emitted.
     pub fn start_emitted(&self) -> bool {
         self.start_emitted
     }
 
-    /// Whether the provider child has actually been spawned.
     pub fn provider_launched(&self) -> bool {
         self.provider_launched
     }

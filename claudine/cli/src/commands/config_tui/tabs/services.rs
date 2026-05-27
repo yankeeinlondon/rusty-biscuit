@@ -8,10 +8,6 @@ use claudine::protect::config::{ProtectRuleToggles, RuleGroupConfig};
 use super::super::app::{App, AppMode, ModalState};
 use super::super::widgets::toggle::Toggle;
 
-// ---------------------------------------------------------------------------
-// Category grouping for the protect rules grid
-// ---------------------------------------------------------------------------
-
 struct ProtectCategory {
     name: &'static str,
     groups: &'static [RuleGroup],
@@ -72,10 +68,6 @@ fn rule_display_name(group: RuleGroup) -> &'static str {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 fn is_group_enabled(rules: &ProtectRuleToggles, group: RuleGroup) -> bool {
     match rules.get(group) {
         None => true,
@@ -99,10 +91,6 @@ fn count_enabled_rules(rules: &ProtectRuleToggles) -> (usize, usize) {
         .count();
     (enabled, total)
 }
-
-// ---------------------------------------------------------------------------
-// Render
-// ---------------------------------------------------------------------------
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let is_detail = app.mode == AppMode::Detail;
@@ -299,10 +287,6 @@ fn render_category_columns(frame: &mut Frame, area: Rect, rules: &ProtectRuleTog
     }
 }
 
-// ---------------------------------------------------------------------------
-// Protect rules modal (unchanged)
-// ---------------------------------------------------------------------------
-
 fn render_protect_rules_modal(
     frame: &mut Frame,
     area: Rect,
@@ -365,10 +349,6 @@ fn render_protect_rules_modal(
         },
     );
 }
-
-// ---------------------------------------------------------------------------
-// Key handling (unchanged)
-// ---------------------------------------------------------------------------
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {

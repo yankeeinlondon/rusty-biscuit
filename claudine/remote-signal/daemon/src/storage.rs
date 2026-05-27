@@ -29,6 +29,20 @@ const SESSION_CHUNKS: TableDefinition<'_, &str, &str> = TableDefinition::new("se
 /// schema can grow without breaking older daemons.
 const PAIRINGS: TableDefinition<'_, &str, &str> = TableDefinition::new("pairings");
 
+/// Accepted-envelopes table: composite key `sender_hex:message_id_hex`
+/// → serialised [`AcceptedEnvelope`]. Used for durable replay
+/// protection across daemon restarts, scoped per sender so that
+/// different senders can independently reuse the same numeric message
+/// ID without falsely rejecting each other.
+const ACCEPTED_ENVELOPES: TableDefinition<'_, &str, &[u8]> =
+    TableDefinition::new("accepted_envelopes");
+
+/// Outbound counter table: hex-encoded `node_id` → last-issued
+/// monotonic message-ID counter (`u64`). Allows the daemon to resume
+/// the outbound counter after restart instead of resetting to zero.
+const OUTBOUND_COUNTER: TableDefinition<'_, &str, u64> =
+    TableDefinition::new("outbound_counter");
+
 /// Errors that the storage layer can return.
 ///
 /// The redb error variants carry sizable structured data, so they are
@@ -72,6 +86,15 @@ pub enum StorageError {
         #[source]
         source: serde_json::Error,
     },
+
+    /// An accepted-envelope row held a JSON value that could not be
+    /// parsed.
+    #[error("malformed accepted envelope for `{message_id}`: {source}")]
+    MalformedAcceptedEnvelope {
+        message_id: String,
+        #[source]
+        source: serde_json::Error,
+    },
 }
 
 impl From<redb::TransactionError> for StorageError {
@@ -104,6 +127,10 @@ impl From<redb::CommitError> for StorageError {
 pub struct Storage {
     db: std::sync::Arc<Database>,
     path: PathBuf,
+    #[cfg(test)]
+    fail_next_save: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(test)]
+    fail_next_accepted_envelope: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Storage {
@@ -126,15 +153,32 @@ impl Storage {
         let storage = Self {
             db: std::sync::Arc::new(db),
             path,
+            #[cfg(test)]
+            fail_next_save: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(test)]
+            fail_next_accepted_envelope: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         storage.bootstrap_tables()?;
         Ok(storage)
     }
 
-    /// Filesystem path of the underlying redb file.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Inject a failure into the next `save_snapshot` call. The flag
+    /// auto-resets after firing so that subsequent writes succeed.
+    #[cfg(test)]
+    pub fn inject_save_failure(&self) {
+        self.fail_next_save.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Inject a failure into the next `save_accepted_envelope` call. The
+    /// flag auto-resets after firing.
+    #[cfg(test)]
+    pub fn inject_accepted_envelope_failure(&self) {
+        self.fail_next_accepted_envelope.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Open the tables once with an empty write transaction so subsequent
@@ -146,6 +190,8 @@ impl Storage {
             let _ = txn.open_table(SNAPSHOTS)?;
             let _ = txn.open_table(SESSION_CHUNKS)?;
             let _ = txn.open_table(PAIRINGS)?;
+            let _ = txn.open_table(ACCEPTED_ENVELOPES)?;
+            let _ = txn.open_table(OUTBOUND_COUNTER)?;
         }
         txn.commit()?;
         Ok(())
@@ -156,6 +202,12 @@ impl Storage {
     /// and snapshot write happen inside a single redb transaction so the
     /// on-disk view never disagrees with the in-memory state.
     pub fn save_snapshot(&self, chunk: &ChunkId, snapshot: &[u8]) -> Result<(), StorageError> {
+        #[cfg(test)]
+        if self.fail_next_save.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            return Err(StorageError::Storage(Box::new(redb::StorageError::Io(
+                std::io::Error::new(std::io::ErrorKind::Other, "injected save failure"),
+            ))));
+        }
         let session_key = chunk.session_key();
         let path_key = chunk.as_path();
 
@@ -232,10 +284,27 @@ impl Storage {
     }
 
     /// Number of snapshots currently stored. Convenient for tests.
+    #[must_use]
     pub fn snapshot_count(&self) -> Result<u64, StorageError> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(SNAPSHOTS)?;
         Ok(table.len()?)
+    }
+
+    /// Remove a single snapshot from the snapshots table. Returns `true`
+    /// when a row was actually deleted. Used in tests to simulate a crash
+    /// that persists an accepted envelope but loses the corresponding
+    /// snapshot.
+    pub fn remove_snapshot(&self, chunk: &ChunkId) -> Result<bool, StorageError> {
+        let path_key = chunk.as_path();
+        let txn = self.db.begin_write()?;
+        let removed;
+        {
+            let mut table = txn.open_table(SNAPSHOTS)?;
+            removed = table.remove(path_key.as_str())?.is_some();
+        }
+        txn.commit()?;
+        Ok(removed)
     }
 
     /// Upsert a pairing entry. The stored value is a JSON blob with the
@@ -310,6 +379,113 @@ impl Storage {
         out.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(out)
     }
+
+    /// Persist an accepted envelope. The composite key
+    /// `sender_hex:message_id_hex` ensures duplicate detection is
+    /// scoped per sender so different senders can independently reuse
+    /// the same numeric message ID. Returns `true` when the envelope
+    /// was newly inserted, `false` when it was already present (i.e.
+    /// a duplicate from a previous session).
+    pub fn save_accepted_envelope(
+        &self,
+        sender_hex: &str,
+        message_id_hex: &str,
+        envelope: &AcceptedEnvelope,
+    ) -> Result<bool, StorageError> {
+        #[cfg(test)]
+        if self.fail_next_accepted_envelope.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            return Err(StorageError::Storage(Box::new(redb::StorageError::Io(
+                std::io::Error::new(std::io::ErrorKind::Other, "injected accepted-envelope failure"),
+            ))));
+        }
+        let composite_key = format!("{sender_hex}:{message_id_hex}");
+        let encoded = serde_json::to_vec(envelope).map_err(|source| {
+            StorageError::MalformedAcceptedEnvelope {
+                message_id: composite_key.clone(),
+                source,
+            }
+        })?;
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(ACCEPTED_ENVELOPES)?;
+            let exists = table.get(composite_key.as_str())?.is_some();
+            if exists {
+                drop(table);
+                txn.commit()?;
+                return Ok(false);
+            }
+            table.insert(composite_key.as_str(), encoded.as_slice())?;
+        }
+        txn.commit()?;
+        Ok(true)
+    }
+
+    /// Check whether an envelope with the given
+    /// `(sender_hex, message_id_hex)` pair was already accepted in a
+    /// previous session.
+    pub fn has_accepted_envelope(
+        &self,
+        sender_hex: &str,
+        message_id_hex: &str,
+    ) -> Result<bool, StorageError> {
+        let composite_key = format!("{sender_hex}:{message_id_hex}");
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(ACCEPTED_ENVELOPES)?;
+        Ok(table.get(composite_key.as_str())?.is_some())
+    }
+
+    /// Iterate all accepted envelopes in no particular order. Used to
+    /// rebuild the DuckDB projection on startup.
+    pub fn iter_accepted_envelopes<F>(&self, mut visit: F) -> Result<(), StorageError>
+    where
+        F: FnMut(AcceptedEnvelope) -> Result<(), StorageError>,
+    {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(ACCEPTED_ENVELOPES)?;
+        for entry in table.iter()? {
+            let (_key, value) = entry?;
+            let parsed: AcceptedEnvelope =
+                serde_json::from_slice(value.value()).map_err(|source| {
+                    StorageError::MalformedAcceptedEnvelope {
+                        message_id: "(unknown)".to_string(),
+                        source,
+                    }
+                })?;
+            visit(parsed)?;
+        }
+        Ok(())
+    }
+
+    /// Number of accepted envelopes currently stored. Convenient for
+    /// tests.
+    pub fn accepted_envelope_count(&self) -> Result<u64, StorageError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(ACCEPTED_ENVELOPES)?;
+        Ok(table.len()?)
+    }
+
+    /// Persist the outbound message-ID counter for the given node.
+    pub fn save_outbound_counter(
+        &self,
+        node_id_hex: &str,
+        counter: u64,
+    ) -> Result<(), StorageError> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(OUTBOUND_COUNTER)?;
+            table.insert(node_id_hex, counter)?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    /// Load the persisted outbound message-ID counter for the given
+    /// node. Returns `0` when no counter has been persisted yet.
+    pub fn load_outbound_counter(&self, node_id_hex: &str) -> Result<u64, StorageError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(OUTBOUND_COUNTER)?;
+        Ok(table.get(node_id_hex)?.map_or(0, |v| v.value()))
+    }
 }
 
 /// Persisted shape of a pairing entry. JSON-encoded so the schema can
@@ -322,6 +498,27 @@ pub struct PairingValue {
     /// Free-form operator note attached to the pairing.
     #[serde(default)]
     pub note: String,
+}
+
+/// Persisted audit record for an accepted network envelope. Stored as
+/// JSON inside redb so the schema can grow without breaking the on-disk
+/// format. Includes the full signed envelope data (signature and
+/// payload bytes) so redb can replay or audit the exact network payload
+/// that was verified.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct AcceptedEnvelope {
+    pub sender_hex: String,
+    pub message_id_hex: String,
+    pub document_id: String,
+    pub payload_kind: u8,
+    pub content_hash_hex: String,
+    /// Hex-encoded Ed25519 signature (128 hex chars).
+    #[serde(default)]
+    pub signature_hex: String,
+    /// Raw payload bytes (Loro delta or snapshot).
+    #[serde(with = "serde_bytes", default)]
+    pub payload_bytes: Vec<u8>,
+    pub accepted_at_unix_ms: i64,
 }
 
 fn parse_indices(session_key: &str, raw: &str) -> Result<Vec<u64>, StorageError> {
@@ -452,5 +649,170 @@ mod tests {
         seen.sort_by_key(|(idx, _)| *idx);
         assert_eq!(seen.len(), 3);
         assert_eq!(seen[1].1, b"snap-1");
+    }
+
+    #[test]
+    fn save_and_check_accepted_envelope_round_trips() {
+        let (storage, _tmp) = fresh_storage();
+        assert!(!storage.has_accepted_envelope("sender-hex", "ab01").expect("has"));
+
+        let envelope = AcceptedEnvelope {
+            sender_hex: "sender-hex".into(),
+            message_id_hex: "ab01".into(),
+            document_id: "session/n/s/0".into(),
+            payload_kind: 0,
+            content_hash_hex: "deadbeef".into(),
+            signature_hex: "ff".repeat(64),
+            payload_bytes: b"hello".to_vec(),
+            accepted_at_unix_ms: 1_234,
+        };
+        let inserted = storage
+            .save_accepted_envelope("sender-hex", "ab01", &envelope)
+            .expect("save");
+        assert!(inserted);
+
+        assert!(storage.has_accepted_envelope("sender-hex", "ab01").expect("has"));
+        assert_eq!(storage.accepted_envelope_count().expect("count"), 1);
+
+        let mut visited = Vec::new();
+        storage
+            .iter_accepted_envelopes(|e| {
+                visited.push(e);
+                Ok(())
+            })
+            .expect("iter");
+        assert_eq!(visited.len(), 1);
+        assert_eq!(visited[0].message_id_hex, "ab01");
+        assert_eq!(visited[0].sender_hex, "sender-hex");
+        assert_eq!(visited[0].document_id, "session/n/s/0");
+        assert_eq!(visited[0].payload_bytes, b"hello");
+        assert_eq!(visited[0].signature_hex, "ff".repeat(64));
+    }
+
+    #[test]
+    fn save_accepted_envelope_returns_false_for_duplicate() {
+        let (storage, _tmp) = fresh_storage();
+        let envelope = AcceptedEnvelope {
+            sender_hex: "s".into(),
+            message_id_hex: "cd02".into(),
+            document_id: "doc".into(),
+            payload_kind: 1,
+            content_hash_hex: "hash".into(),
+            signature_hex: String::new(),
+            payload_bytes: Vec::new(),
+            accepted_at_unix_ms: 999,
+        };
+        let first = storage
+            .save_accepted_envelope("s", "cd02", &envelope)
+            .expect("first");
+        assert!(first);
+        let second = storage
+            .save_accepted_envelope("s", "cd02", &envelope)
+            .expect("second");
+        assert!(!second);
+        assert_eq!(storage.accepted_envelope_count().expect("count"), 1);
+    }
+
+    #[test]
+    fn different_senders_with_same_message_id_are_both_accepted() {
+        let (storage, _tmp) = fresh_storage();
+        let envelope_a = AcceptedEnvelope {
+            sender_hex: "alice".into(),
+            message_id_hex: "0000".into(),
+            document_id: "doc".into(),
+            payload_kind: 0,
+            content_hash_hex: "hash-a".into(),
+            signature_hex: String::new(),
+            payload_bytes: Vec::new(),
+            accepted_at_unix_ms: 100,
+        };
+        let envelope_b = AcceptedEnvelope {
+            sender_hex: "bob".into(),
+            message_id_hex: "0000".into(),
+            document_id: "doc".into(),
+            payload_kind: 0,
+            content_hash_hex: "hash-b".into(),
+            signature_hex: String::new(),
+            payload_bytes: Vec::new(),
+            accepted_at_unix_ms: 200,
+        };
+        assert!(storage.save_accepted_envelope("alice", "0000", &envelope_a).expect("a"));
+        assert!(storage.save_accepted_envelope("bob", "0000", &envelope_b).expect("b"));
+        assert_eq!(storage.accepted_envelope_count().expect("count"), 2);
+    }
+
+    #[test]
+    fn outbound_counter_round_trips() {
+        let (storage, _tmp) = fresh_storage();
+        assert_eq!(storage.load_outbound_counter("node-x").expect("load"), 0);
+        storage.save_outbound_counter("node-x", 42).expect("save");
+        assert_eq!(storage.load_outbound_counter("node-x").expect("load"), 42);
+        storage.save_outbound_counter("node-x", 100).expect("update");
+        assert_eq!(storage.load_outbound_counter("node-x").expect("load"), 100);
+    }
+
+    #[test]
+    fn accepted_envelope_persists_signature_and_payload_bytes() {
+        let (storage, _tmp) = fresh_storage();
+        let signature = vec![0xABu8; 64];
+        let signature_hex: String = signature.iter().map(|b| format!("{b:02x}")).collect();
+        let payload = b"crdt-delta-bytes".to_vec();
+
+        let envelope = AcceptedEnvelope {
+            sender_hex: "sender".into(),
+            message_id_hex: "id1".into(),
+            document_id: "session/n/s/0".into(),
+            payload_kind: 1,
+            content_hash_hex: "hash".into(),
+            signature_hex: signature_hex.clone(),
+            payload_bytes: payload.clone(),
+            accepted_at_unix_ms: 999,
+        };
+        storage
+            .save_accepted_envelope("sender", "id1", &envelope)
+            .expect("save");
+
+        let mut visited = Vec::new();
+        storage
+            .iter_accepted_envelopes(|e| {
+                visited.push(e);
+                Ok(())
+            })
+            .expect("iter");
+        assert_eq!(visited.len(), 1);
+        assert_eq!(visited[0].signature_hex, signature_hex);
+        assert_eq!(visited[0].payload_bytes, payload);
+    }
+
+    #[test]
+    fn per_sender_duplicate_rejection_is_scoped() {
+        let (storage, _tmp) = fresh_storage();
+        let env_a = AcceptedEnvelope {
+            sender_hex: "alice".into(),
+            message_id_hex: "0000".into(),
+            document_id: "doc".into(),
+            payload_kind: 0,
+            content_hash_hex: "h1".into(),
+            signature_hex: String::new(),
+            payload_bytes: Vec::new(),
+            accepted_at_unix_ms: 100,
+        };
+        assert!(storage.save_accepted_envelope("alice", "0000", &env_a).expect("save a"));
+        assert!(storage.has_accepted_envelope("alice", "0000").expect("has a"));
+        assert!(!storage.has_accepted_envelope("bob", "0000").expect("no bob"));
+        let env_b = AcceptedEnvelope {
+            sender_hex: "bob".into(),
+            message_id_hex: "0000".into(),
+            document_id: "doc".into(),
+            payload_kind: 0,
+            content_hash_hex: "h2".into(),
+            signature_hex: String::new(),
+            payload_bytes: Vec::new(),
+            accepted_at_unix_ms: 200,
+        };
+        assert!(storage.save_accepted_envelope("bob", "0000", &env_b).expect("save b"));
+        assert!(storage.has_accepted_envelope("bob", "0000").expect("has b"));
+        assert!(!storage.save_accepted_envelope("alice", "0000", &env_a).expect("dup a"));
+        assert!(!storage.save_accepted_envelope("bob", "0000", &env_b).expect("dup b"));
     }
 }

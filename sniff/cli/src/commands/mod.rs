@@ -911,6 +911,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 | crate::args::RepoAction::PackageAreaRoot
                 | crate::args::RepoAction::Package { .. }
                 | crate::args::RepoAction::PackageArea { .. }
+                | crate::args::RepoAction::Area { .. }
         )
     );
 
@@ -1311,6 +1312,39 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{rendered}");
                 perf.emit_stderr(result.performance.as_ref());
                 return Ok(());
+            }
+            crate::args::RepoAction::Area { no_error, on_error } => {
+                let fs = result.filesystem.as_ref();
+                let repo = fs.and_then(|fs| fs.repo.as_ref());
+                let is_monorepo = repo.is_some_and(|r| r.is_monorepo);
+                if is_monorepo {
+                    let rendered = output::render_repo_area(&result, base_dir.as_deref());
+                    if cli.json {
+                        let outcome = output::repo_json::name_outcome(rendered);
+                        output::print_json_value(outcome.value, result.performance.as_ref());
+                        return Ok(());
+                    }
+                    println!("{rendered}");
+                    perf.emit_stderr(result.performance.as_ref());
+                    return Ok(());
+                }
+                // Not a monorepo. Distinguish "in a git repo" from "not in a
+                // repo at all" using the git detection result.
+                if cli.verbose > 0 {
+                    let in_git_repo = fs.and_then(|fs| fs.git.as_ref()).is_some();
+                    let msg = if in_git_repo {
+                        "'area' is a term that holds meaning only in a monorepo; you are in a repo but not a monorepo!"
+                    } else {
+                        "'area' is a term that holds meaning only in a monorepo; you are not in a repo!"
+                    };
+                    eprintln!("{msg}");
+                }
+                if cli.json {
+                    let outcome = output::repo_json::name_outcome(String::new());
+                    output::print_json_value(outcome.value, result.performance.as_ref());
+                    std::process::exit(if *no_error { 0 } else { 1 });
+                }
+                return handle_no_results(*no_error, on_error, cli.plain, &perf);
             }
             _ => {}
         }

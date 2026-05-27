@@ -336,16 +336,21 @@ message SyncWithPeerResponse {
 // as protobuf so receivers can verify the Ed25519 signature without
 // trusting transport metadata.
 message SignedEnvelopeWire {
-    // 32-byte compressed Ed25519 public key of the sender.
-    bytes sender = 1;
-    // 32-byte BLAKE3 message identifier.
-    bytes message_id = 2;
-    // 32-byte BLAKE3 content hash of the payload.
-    bytes content_hash = 3;
-    // 64-byte Ed25519 signature.
-    bytes signature = 4;
-    // Opaque payload bytes.
-    bytes payload = 5;
+  // 32-byte compressed Ed25519 public key of the sender.
+  bytes sender = 1;
+  // 32-byte monotonic message identifier.
+  bytes message_id = 2;
+  // 32-byte BLAKE3 content hash of the payload.
+  bytes content_hash = 3;
+  // 64-byte Ed25519 signature.
+  bytes signature = 4;
+  // Opaque payload bytes.
+  bytes payload = 5;
+  // Chunk path this envelope is bound to (e.g.
+  // "session/shared/s1/part/0").
+  string document_id = 6;
+  // Payload kind: 0 = snapshot, 1 = delta.
+  int32 payload_kind = 7;
 }
 
 // Initial frame sent by both sides of a sync session. The receiver

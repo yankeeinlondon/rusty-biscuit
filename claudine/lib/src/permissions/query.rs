@@ -225,7 +225,6 @@ impl QueryResult {
         self.effect == Some(PolicyEffect::Ask)
     }
 
-    /// Returns `true` if the effect could not be determined.
     pub fn is_unknown(&self) -> bool {
         self.effect.is_none()
     }

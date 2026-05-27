@@ -67,7 +67,7 @@
     Removes a worktree by name (or branch name).
 
     - safety semantics:
-        - clean worktrees are removed without confirmation
+        - clean worktrees prompt for confirmation (no force flag)
         - dirty worktrees (with uncommitted files) prompt for confirmation
         - `-f` / `--force` skips confirmation when safe (clean, or fewer than 10 non-source files)
         - `-ff` removes immediately regardless of state, skipping all confirmation

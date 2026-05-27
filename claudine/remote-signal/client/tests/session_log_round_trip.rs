@@ -48,13 +48,14 @@ async fn append_persists_to_redb_and_eventually_to_duckdb() {
     let storage_path = config.storage_path.clone();
 
     let handle = spawn_uds_server(socket.clone(), config).expect("spawn");
+    let node_id = handle.node_id();
     wait_until_bound(&socket).await;
     let mut client = connect_uds(socket.clone()).await.expect("connect");
 
     for i in 0..5 {
         client
             .append_entry(AppendEntryRequest {
-                owner_node_id: "node-a".into(),
+                owner_node_id: String::new(),
                 session_id: "session-1".into(),
                 source: "test-client".into(),
                 level: "info".into(),
@@ -66,9 +67,10 @@ async fn append_persists_to_redb_and_eventually_to_duckdb() {
     }
 
     // Loro doc (source of truth) should hold all five entries immediately.
+    let chunk_id = format!("session/{node_id}/session-1/part/0");
     let listed = client
         .list_chunk_entries(ListChunkEntriesRequest {
-            chunk_id: "session/node-a/session-1/part/0".into(),
+            chunk_id: chunk_id.clone(),
         })
         .await
         .expect("list-entries")
@@ -79,20 +81,20 @@ async fn append_persists_to_redb_and_eventually_to_duckdb() {
 
     let chunks = client
         .list_session_chunks(ListSessionChunksRequest {
-            owner_node_id: "node-a".into(),
+            owner_node_id: node_id.clone(),
             session_id: "session-1".into(),
         })
         .await
         .expect("list-chunks")
         .into_inner();
-    assert_eq!(chunks.chunk_ids, vec!["session/node-a/session-1/part/0"]);
+    assert_eq!(chunks.chunk_ids, vec![chunk_id]);
 
     // DuckDB projection: wait for the batcher to flush before reading.
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         let rows = client
             .query_projection(QueryProjectionRequest {
-                owner_node_id: "node-a".into(),
+                owner_node_id: node_id.clone(),
                 session_id: "session-1".into(),
             })
             .await
@@ -139,6 +141,7 @@ async fn chunk_rotation_creates_new_chunk_at_threshold() {
     let config = fast_config(&tmp, ChunkConfig::new(2, 16 * 1024));
 
     let handle = spawn_uds_server(socket.clone(), config).expect("spawn");
+    let node_id = handle.node_id();
     wait_until_bound(&socket).await;
     let mut client = connect_uds(socket.clone()).await.expect("connect");
 
@@ -146,7 +149,7 @@ async fn chunk_rotation_creates_new_chunk_at_threshold() {
     for i in 0..5 {
         let response = client
             .append_entry(AppendEntryRequest {
-                owner_node_id: "node-a".into(),
+                owner_node_id: String::new(),
                 session_id: "session-7".into(),
                 source: "test".into(),
                 level: "info".into(),
@@ -164,7 +167,7 @@ async fn chunk_rotation_creates_new_chunk_at_threshold() {
 
     let chunks = client
         .list_session_chunks(ListSessionChunksRequest {
-            owner_node_id: "node-a".into(),
+            owner_node_id: node_id,
             session_id: "session-7".into(),
         })
         .await

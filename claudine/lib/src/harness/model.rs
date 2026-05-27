@@ -418,7 +418,6 @@ impl ValidationPhaseReport {
             .collect()
     }
 
-    /// Number of checks in this phase.
     pub fn count(&self) -> usize {
         self.outcomes.len()
     }

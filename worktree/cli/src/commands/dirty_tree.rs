@@ -8,11 +8,30 @@
 //! Source-code files (per `sniff::filesystem::path_kind::is_source_code_path`)
 //! are wrapped in `<red>...</red>`; other files in `<yellow>...</yellow>`;
 //! directories in `<dim>...</dim>`.
+//!
+//! ## Why a custom implementation?
+//!
+//! `darkmatter::markdown::reference::file_tree::FileTree` is purpose-built for
+//! Markdown reference graphs: it walks real files on disk, renders
+//! transclusion edges, validation overlays, and toc-linking indicators. The
+//! `wt remove` command needs the opposite: render an arbitrary `Vec<PathBuf>`
+//! (git status output) as a static tree with per-file source-code
+//! color-coding. Rather than fighting FileTree's Markdown-centric model,
+//! this small module produces exactly the markup we need with no unused
+//! features.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::filesystem::tree_chars;
+
+/// Maximum number of files to render in the dirty tree before truncating.
+///
+/// A worktree that has been wiped or partially cleaned up can report hundreds
+/// of dirty paths (e.g. via `D` entries). Dumping the full tree floods the
+/// terminal and pushes the confirmation prompt off-screen, so we cap the
+/// rendered file count and emit a single overflow line summarising the rest.
+pub const MAX_DISPLAYED_FILES: usize = 50;
 
 #[derive(Debug, Default)]
 struct Node {
@@ -32,9 +51,20 @@ impl Node {
 
 /// Build the markup for a tree-rendering of `paths`, all interpreted as
 /// repository-relative entries.
+///
+/// When `paths.len()` exceeds [`MAX_DISPLAYED_FILES`], only the leading slice
+/// is rendered into the tree and a trailing `...and {N} more files` line is
+/// appended so the caller's confirmation prompt stays on-screen.
 pub fn render_markup(paths: &[PathBuf]) -> String {
+    let total = paths.len();
+    let (displayed, overflow) = if total > MAX_DISPLAYED_FILES {
+        (&paths[..MAX_DISPLAYED_FILES], total - MAX_DISPLAYED_FILES)
+    } else {
+        (paths, 0)
+    };
+
     let mut root = Node::default();
-    for path in paths {
+    for path in displayed {
         let parts: Vec<String> = path
             .components()
             .filter_map(|c| match c {
@@ -50,6 +80,9 @@ pub fn render_markup(paths: &[PathBuf]) -> String {
 
     let mut out = String::new();
     render_children(&root, &mut out, "", &PathBuf::new());
+    if overflow > 0 {
+        out.push_str(&format!("<dim>...and {overflow} more file(s)</dim>\n"));
+    }
     out
 }
 
@@ -132,5 +165,55 @@ mod tests {
         let out = render_markup(&paths);
         // Expect a vertical continuation under `a/` for the non-last child line.
         assert!(out.contains("│   "));
+    }
+
+    #[test]
+    fn at_threshold_does_not_truncate() {
+        let paths: Vec<PathBuf> = (0..MAX_DISPLAYED_FILES)
+            .map(|i| PathBuf::from(format!("file-{i:03}.txt")))
+            .collect();
+        let out = render_markup(&paths);
+        assert!(
+            !out.contains("more file"),
+            "should not emit overflow footer at threshold:\n{out}"
+        );
+        assert!(out.contains("file-000.txt"));
+        assert!(out.contains(&format!("file-{:03}.txt", MAX_DISPLAYED_FILES - 1)));
+    }
+
+    #[test]
+    fn over_threshold_truncates_and_summarises() {
+        let extra = 25;
+        let total = MAX_DISPLAYED_FILES + extra;
+        let paths: Vec<PathBuf> = (0..total)
+            .map(|i| PathBuf::from(format!("file-{i:03}.txt")))
+            .collect();
+        let out = render_markup(&paths);
+        assert!(
+            out.contains(&format!("<dim>...and {extra} more file(s)</dim>")),
+            "expected overflow footer for {extra} extras:\n{out}"
+        );
+        // First displayed file appears; first truncated file does not.
+        assert!(out.contains("file-000.txt"));
+        let first_truncated = format!("file-{:03}.txt", MAX_DISPLAYED_FILES);
+        assert!(
+            !out.contains(&first_truncated),
+            "expected file at truncation boundary to be omitted: {first_truncated}\n{out}"
+        );
+    }
+
+    #[test]
+    fn overflow_footer_is_last_line() {
+        let total = MAX_DISPLAYED_FILES + 1;
+        let paths: Vec<PathBuf> = (0..total)
+            .map(|i| PathBuf::from(format!("file-{i:03}.txt")))
+            .collect();
+        let out = render_markup(&paths);
+        let lines: Vec<&str> = out.lines().collect();
+        let last = lines.last().expect("at least one line");
+        assert!(
+            last.starts_with("<dim>...and "),
+            "overflow footer must be the final line, got: {last:?}\nfull:\n{out}"
+        );
     }
 }

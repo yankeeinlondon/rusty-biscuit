@@ -8,7 +8,7 @@
 
 use prost::Message;
 
-use crate::envelope::{ENVELOPE_HASH_LENGTH, EnvelopeError, SignedEnvelope};
+use crate::envelope::{ENVELOPE_HASH_LENGTH, EnvelopeError, PayloadKind, SignedEnvelope};
 use crate::identity::{PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
 use crate::proto::{SignedEnvelopeWire, SyncFrame};
 
@@ -55,6 +55,8 @@ impl SignedEnvelopeWire {
         Self {
             sender: envelope.sender.to_vec(),
             message_id: envelope.message_id.to_vec(),
+            document_id: envelope.document_id.clone(),
+            payload_kind: envelope.payload_kind.to_i32(),
             content_hash: envelope.content_hash.to_vec(),
             signature: envelope.signature.to_vec(),
             payload: envelope.payload.clone(),
@@ -95,6 +97,12 @@ impl SignedEnvelopeWire {
                 SIGNATURE_LENGTH,
             )));
         }
+        let payload_kind = PayloadKind::from_byte(self.payload_kind).ok_or_else(|| {
+            SyncWireError::envelope(format!(
+                "unknown payload_kind discriminant {}",
+                self.payload_kind,
+            ))
+        })?;
         let mut sender = [0u8; PUBLIC_KEY_LENGTH];
         sender.copy_from_slice(&self.sender);
         let mut message_id = [0u8; ENVELOPE_HASH_LENGTH];
@@ -106,6 +114,8 @@ impl SignedEnvelopeWire {
         Ok(SignedEnvelope {
             sender,
             message_id,
+            document_id: self.document_id,
+            payload_kind,
             content_hash,
             signature,
             payload: self.payload,
@@ -155,12 +165,18 @@ pub fn try_decode_frame(bytes: &[u8]) -> Result<Option<(SyncFrame, usize)>, Sync
 mod tests {
     use super::*;
     use crate::NodeIdentity;
+    use crate::envelope::{EnvelopeSealer, PayloadKind};
     use crate::proto::{SyncEnd, sync_frame};
 
     #[test]
     fn signed_envelope_wire_round_trip_preserves_signature() {
         let identity = NodeIdentity::from_seed([13u8; 32]);
-        let envelope = SignedEnvelope::seal(&identity, b"payload".to_vec());
+        let mut sealer = EnvelopeSealer::new(identity);
+        let envelope = sealer.seal(
+            "session/shared/s1/part/0".into(),
+            PayloadKind::Delta,
+            b"payload".to_vec(),
+        );
         let wire = SignedEnvelopeWire::from_envelope(&envelope);
         let restored = wire.into_envelope().expect("decode");
         assert_eq!(restored, envelope);
@@ -172,6 +188,25 @@ mod tests {
         let wire = SignedEnvelopeWire {
             sender: vec![0u8; 10],
             message_id: vec![0u8; ENVELOPE_HASH_LENGTH],
+            document_id: "doc".into(),
+            payload_kind: 0,
+            content_hash: vec![0u8; ENVELOPE_HASH_LENGTH],
+            signature: vec![0u8; SIGNATURE_LENGTH],
+            payload: Vec::new(),
+        };
+        assert!(matches!(
+            wire.into_envelope(),
+            Err(SyncWireError::Envelope(_))
+        ));
+    }
+
+    #[test]
+    fn signed_envelope_wire_rejects_bad_payload_kind() {
+        let wire = SignedEnvelopeWire {
+            sender: vec![0u8; PUBLIC_KEY_LENGTH],
+            message_id: vec![0u8; ENVELOPE_HASH_LENGTH],
+            document_id: "doc".into(),
+            payload_kind: 99,
             content_hash: vec![0u8; ENVELOPE_HASH_LENGTH],
             signature: vec![0u8; SIGNATURE_LENGTH],
             payload: Vec::new(),
