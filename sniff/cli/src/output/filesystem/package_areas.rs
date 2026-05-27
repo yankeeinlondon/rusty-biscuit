@@ -378,6 +378,25 @@ pub fn render_repo_package_area(result: &sniff::SniffResult, base_dir: Option<&P
         .to_string()
 }
 
+/// Render the area name for the given directory.
+///
+/// Returns the package name if `dir` is inside a package, otherwise the
+/// surrounding package-area string (with `"root"` as the final fallback for
+/// top-level locations). Returns an empty string only when the underlying
+/// repository is not a monorepo (callers handle that path separately).
+pub fn render_repo_area(result: &sniff::SniffResult, base_dir: Option<&Path>) -> String {
+    let dir = resolve_dir(base_dir);
+    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+
+    let Some(repo) = repo else {
+        return String::new();
+    };
+    if !repo.is_monorepo {
+        return String::new();
+    }
+    repo.area_for_dir(&dir).to_string()
+}
+
 /// Render the root directory of the package area containing the given directory.
 ///
 /// Returns empty string if not in a package area. Root-level packages (area
