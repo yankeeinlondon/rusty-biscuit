@@ -39,11 +39,6 @@ use crate::argv;
 
 /// Intercept `COMPLETE=<shell> claudine` startup and exit.
 ///
-/// When `COMPLETE` is set in the environment, `clap_complete` emits either
-/// a shell registration snippet or a completion reply and then exits via
-/// [`CompleteEnv::complete`]. When `COMPLETE` is absent, this call is a
-/// no-op and control returns to the regular CLI flow.
-///
 /// ## Notes
 ///
 /// - Must be called before `argv::normalize(...)` so the normalizer's
@@ -51,8 +46,7 @@ use crate::argv;
 /// - Must be called before any stdout output — clap_complete reserves the
 ///   completion stdout channel.
 /// - Only PowerShell and Elvish still rely on this path; bash / zsh / fish
-///   scripts shell out to `claudine __complete`, which is dispatched
-///   through [`engine::run`] instead.
+///   shell out to `claudine __complete` and dispatch through [`engine::run`].
 pub(crate) fn maybe_complete() {
     CompleteEnv::with_factory(completion_command).complete();
 }

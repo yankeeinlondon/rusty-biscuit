@@ -337,7 +337,6 @@ impl CommandPerfCollector {
         self.agent_perf = Some(perf);
     }
 
-    /// Get the current agent execution perf, if any.
     pub fn agent_perf(&self) -> Option<AgentExecutionPerf> {
         self.agent_perf
     }

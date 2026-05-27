@@ -1,3 +1,7 @@
+---
+hash: 39a0c5d58ef53df2-dc0521dad5458b1b
+---
+
 # OpenCode Event Sources
 
 OpenCode is the only provider Claudine wraps where **stdout NDJSON alone is
@@ -70,10 +74,49 @@ to the semantic events emitted by [`OpenCodeLogBridge`](../../../claudine/lib/sr
 | `service=default http.method=... http.url=... http.status=... ... Sent HTTP response` | `HttpResponse { method, url, status, duration_ms }` | `Info { message: "http_response", extra: { method, url, status, duration_ms } }` | `duration_ms` is sourced from the first `logSpan.http.span.*` tag. |
 | `service=bus ...` | *(filtered)* | *(none)* | Refreshes `last_byte_at` only. |
 
-Failure-shaped lines (`RateLimit`, `MalformedAsset`, `ApiFailure`,
+Failure-shaped lines (`ProviderLimit`, `MalformedAsset`, `ApiFailure`,
 `AuthFailure`, `UncaughtError`) continue to route through their existing
 `Warning` / `Error` handlers and are documented in
 [`reasoning.rs`](../../../claudine/lib/src/stream/logs/opencode/reasoning.rs).
+
+## Failure Classifications
+
+The `ProviderLimit` classification replaces the earlier monolithic `RateLimit`
+variant with a four-kind model that distinguishes **provider capacity** from
+**account consumption** on two independent axes.
+
+| `ProviderLimitKind` | Axis | Terminal? | Semantic Event | Notes |
+|---|---|---|---|---|
+| `Overloaded` | Provider capacity | No | `Warning { "server overloaded; will retry" }` | The provider's servers are busy. Transient, retryable, not a cap. Does not set `state.rate_limit` or trigger early termination. |
+| `RateLimited` | Account consumption (speed) | No | `Warning { "request throttled; will retry" }` | This account sent requests too fast. Transient, retryable. Does not set `state.rate_limit` or trigger early termination. |
+| `UsageCap` | Account consumption (allowance) | Yes | `Error { "Usage limit reached..." }` | The account's usage allowance is exhausted. Sets `state.rate_limit` and triggers early termination regardless of whether stdout output was already observed. |
+| `RetriesExhausted` | Provider capacity + account consumption | Yes | `Error { "provider 429s did not clear after retries" }` | A 429 wrapped in `AI_RetryError` / `maxRetriesExceeded` — the call failed after exhausting retries. Sets `state.rate_limit` and triggers early termination. |
+
+### Resolution order
+
+The classifier applies these rules in strict priority order inside
+`classify_llm_failure`:
+
+1. **Cap with context** — `has_cap` ( `"code":"1308"`, `exceeded_current_quota_error`, or `"Usage limit reached"` ) **AND** the record carries an `error` tag → `UsageCap`.
+2. **Retry exhaustion** — `status_code == 429` AND (`AI_RetryError` OR `maxRetriesExceeded`) → `RetriesExhausted`.
+3. **Cap without context** — `has_cap` but NO `error` tag → non-fatal `ApiFailure` (advisory path).
+4. **Plain overload** — `status_code == 429` AND `is_overload` (case-insensitive match for `overload` / `engine_overloaded_error`) → `Overloaded`.
+5. **Plain rate limit** — `status_code == 429` with none of the above → `RateLimited`.
+
+The **error-context gate** (`record.tags.get("error").is_some()`) is the
+primary defense against false-positive termination. Only the presence of an
+`error` tag proves the line came from an OpenCode error envelope rather than
+echoed or quoted text.
+
+### The `kimi-for-coding` gap
+
+The `kimi-for-coding` provider endpoint (used for the `k2p6` model family)
+does **not** emit a confirmed cap type. A real allowance exhaustion on this
+endpoint surfaces as `RetriesExhausted` (a 429 wrapped in `AI_RetryError`
+after retries are exhausted), not `UsageCap`. This is a known limitation:
+without a provider-side `1308` code or `exceeded_current_quota_error` signal,
+the classifier cannot distinguish a coding-endpoint cap from a generic retry
+exhaustion.
 
 ## Deduplication strategy
 

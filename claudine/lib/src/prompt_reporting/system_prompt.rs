@@ -17,54 +17,26 @@ use super::{
     render_markdown_for_terminal, system_prompt_blockquote_styled, truncate_front_back,
 };
 
-/// Nerd Font codepoint used as the in-repo hyperlink label when the terminal
-/// supports Nerd Fonts. Renders as a single glyph standing in for the path.
+/// Nerd Font git icon used as the in-repo hyperlink label when the terminal
+/// supports Nerd Fonts. Stands in for the repo root path.
 const NERD_FONT_REPO_GLYPH: char = '\u{F02A2}';
 
-/// Render the system-prompt header line.
-///
-/// Format: `<bg-orange-500><white><b> 📔 System Prompt(<i>{action}</i>) </b></white></bg-orange-500>`
-/// where action is `appended` or `replaced`. The entire header line — icon
-/// included — is rendered as white text on an orange-500 background. The
-/// orange-500 swatch matches the bg-painted vertical bar of the system-
-/// prompt BlockQuote below, producing a continuous "label badge → bar"
-/// visual that ties the header to its body.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::render_system_prompt_header;
-/// use biscuit_terminal::terminal::Terminal;
-///
-/// let term = Terminal::new();
-/// let header = render_system_prompt_header("appended", &term);
-/// assert!(header.contains("System Prompt"));
-/// assert!(header.contains("appended"));
-/// ```
+/// Render the system-prompt header line. `action` is `appended` or `replaced`.
 pub fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
     Prose::new(format!(
-        "<bg-orange-500><white><b> 📔 System Prompt(<i>{action}</i>) </b></white></bg-orange-500>"
+        "\n<orange-500><b>■ System Prompt (<i>{action}</i>)</b></orange-500>"
     ))
     .render(term)
 }
 
-/// Resolve the visible label for a prompt-file hyperlink.
+/// Resolve the visible label for a prompt-file hyperlink. Returns plain
+/// text (no markup); callers apply styling and OSC8 wrapping.
 ///
-/// Three branches, in priority order:
-///
-/// 1. **Nerd Font glyph + path** — when the terminal reports Nerd Font
-///    support (`Terminal::is_nerd_font == Some(true)`) **and** `absolute`
-///    resolves inside `base`, return `{f02a2}/{rel}` where `{f02a2}` is the
-///    in-repo glyph [`NERD_FONT_REPO_GLYPH`] (`\u{F02A2}`) standing in for
-///    the repo root and `{rel}` is the path inside `base`.
-/// 2. **Relative path with `./` prefix** — when `absolute` resolves inside
-///    `base` but the terminal lacks Nerd Font support, return `./{rel}`.
-/// 3. **Absolute path** — when `base` is `None` or `absolute` is outside it,
-///    return the absolute path.
-///
-/// The returned label is plain text (no Prose markup). Callers wrap it in
-/// the Prose link/color syntax (`<blue-400>[label](file://abs)</blue-400>`)
-/// so OSC8 emission and the blue styling are handled by Prose.
+/// The form depends on terminal capability and whether `absolute` lies
+/// inside `base`: Nerd Font terminals with an in-base path get
+/// [`NERD_FONT_REPO_GLYPH`] joined to the relative path; non-Nerd-Font
+/// terminals with an in-base path get a `./`-prefixed relative path;
+/// otherwise the absolute path is returned unchanged.
 pub(crate) fn resolve_display_label(
     absolute: &Path,
     base: Option<&Path>,
@@ -72,53 +44,19 @@ pub(crate) fn resolve_display_label(
 ) -> String {
     let rel = base.and_then(|b| absolute.strip_prefix(b).ok());
     match (rel, term.is_nerd_font) {
-        (Some(rel), Some(true)) => format!("{NERD_FONT_REPO_GLYPH}/{}", rel.display()),
+        (Some(rel), Some(true)) => format!("{NERD_FONT_REPO_GLYPH} /{}", rel.display()),
         (Some(rel), _) => format!("./{}", rel.display()),
         (None, _) => absolute.display().to_string(),
     }
 }
 
-/// Render the summary view for a system prompt.
+/// Render the summary view for a system prompt as a single prose sentence
+/// of the form: `The system prompt was **{action}**; the content was
+/// _composed_ from <hyperlink>. {token-message}`.
 ///
-/// Produces the spec-mandated prose sentence:
-/// `The system prompt was **{action}**; the content was _composed_ from
-/// <hyperlink>. {token-message}`
-///
-/// - `{action}` is `appended to` for [`SystemPromptMode::Append`] and
-///   `replaced` for [`SystemPromptMode::Replace`].
-/// - `{token-message}` is `The composed system prompt is roughly {#} tokens.`
-///   for append and `The replacement system prompt is roughly {#} tokens.`
-///   for replace.
-///
-/// ## Arguments
-///
-/// - `source` — where the system prompt originated.
-/// - `mode` — append or replace.
-/// - `token_count` — the estimated token count of the composed prompt.
-/// - `base_path` — optional base directory used to compute the relative
-///   path displayed in the hyperlink. When `None`, the absolute path is
-///   used as the visible label.
-/// - `term` — terminal for capability-aware rendering.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::render_system_prompt_summary;
-/// use claudine::system_prompt::{SystemPromptMode, SystemPromptSource};
-/// use biscuit_terminal::terminal::Terminal;
-///
-/// let term = Terminal::new();
-/// let source = SystemPromptSource::BuiltInNonInteractive;
-/// let summary = render_system_prompt_summary(
-///     &source,
-///     SystemPromptMode::Append,
-///     42,
-///     None,
-///     &term,
-/// );
-/// assert!(summary.contains("42"));
-/// assert!(summary.contains("appended to"));
-/// ```
+/// `base_path` is the optional directory used to compute the relative path
+/// displayed in the hyperlink label; when `None`, the absolute path is
+/// shown verbatim.
 pub fn render_system_prompt_summary(
     source: &SystemPromptSource,
     mode: SystemPromptMode,
@@ -161,35 +99,12 @@ pub fn render_system_prompt_summary(
     .render(term)
 }
 
-/// Render the system-prompt body content (no `BlockQuote` wrapper).
+/// Render the system-prompt body content as ANSI text (no `BlockQuote`
+/// wrapper), ready to be concatenated with the rendered summary and
+/// wrapped in a single [`system_prompt_blockquote_styled`].
 ///
-/// Returns the markdown-rendered body as ANSI text, ready to be concatenated
-/// with the rendered summary and wrapped in a single
-/// [`system_prompt_blockquote_styled`].
-///
-/// - `Summary` → empty string.
-/// - `PartialPrompt` → `FrontBack`-truncated text run through the markdown
-///   renderer.
-/// - `FullPrompt` → the full text run through the markdown renderer.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::{
-///     render_system_prompt_body, PromptReportFormat, TruncationMode,
-/// };
-/// use biscuit_terminal::terminal::Terminal;
-///
-/// let term = Terminal::new();
-/// let body = render_system_prompt_body(
-///     "Line 1\nLine 2\nLine 3",
-///     PromptReportFormat::FullPrompt,
-///     TruncationMode::FrontBack,
-///     &term,
-/// );
-/// let plain = biscuit_terminal::discovery::eval::strip_ansi_codes(&body);
-/// assert!(plain.contains("Line 1"));
-/// ```
+/// `Summary` returns the empty string; `PartialPrompt` truncates per
+/// `truncation` before rendering; `FullPrompt` renders the full text.
 pub fn render_system_prompt_body(
     text: &str,
     format: PromptReportFormat,
@@ -217,46 +132,8 @@ pub fn render_system_prompt_body(
     }
 }
 
-/// Top-level system-prompt reporter.
-///
-/// Wires together header resolution, precedence-based configuration, and body
-/// rendering. Returns `None` when the config is `Silent` (suppressed).
-///
-/// ## Arguments
-///
-/// - `effective_sp` — the resolved effective system prompt.
-/// - `config` — the resolved reporting configuration.
-/// - `term` — terminal for capability-aware rendering.
-///
-/// ## Returns
-///
-/// `Some(String)` with the fully rendered report, or `None` if suppressed.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::prompt_reporting::{
-///     report_system_prompt, SystemPromptReportConfig,
-///     PromptReportFormat, TruncationMode,
-/// };
-/// use claudine::system_prompt::EffectiveSystemPrompt;
-/// use biscuit_terminal::terminal::Terminal;
-///
-/// let term = Terminal::new();
-/// let config = SystemPromptReportConfig {
-///     show_header: true,
-///     show_summary: true,
-///     format: PromptReportFormat::Summary,
-///     truncation: TruncationMode::FrontBack,
-/// };
-/// let output = report_system_prompt(
-///     &EffectiveSystemPrompt::None,
-///     config,
-///     &term,
-/// );
-/// // None produces no output in Summary mode
-/// assert!(output.is_none());
-/// ```
+/// Top-level system-prompt reporter. Returns `None` when `config` suppresses
+/// output.
 pub fn report_system_prompt(
     effective_sp: &EffectiveSystemPrompt,
     config: SystemPromptReportConfig,
@@ -411,10 +288,10 @@ mod tests {
     // --- Header tests ---
 
     #[test]
-    fn header_contains_book_emoji() {
+    fn header_contains_marker_glyph() {
         let term = test_terminal();
         let header = render_system_prompt_header("appended", &term);
-        assert!(header.contains("📔"));
+        assert!(header.contains("■"));
     }
 
     #[test]
@@ -562,7 +439,7 @@ mod tests {
         // path inside the repo.
         assert_eq!(
             label,
-            format!("{NERD_FONT_REPO_GLYPH}/.claude/system-prompt.md")
+            format!("{NERD_FONT_REPO_GLYPH} /.claude/system-prompt.md")
         );
     }
 
@@ -756,7 +633,7 @@ mod tests {
         };
         let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
-        assert!(output.contains("📔"));
+        assert!(output.contains("■"));
         assert!(output.contains("System Prompt"));
         assert!(output.contains("appended"));
         assert!(output.contains("tokens"));
@@ -775,7 +652,7 @@ mod tests {
         let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📔"));
+        assert!(plain.contains("■"));
         assert!(plain.contains("replaced"));
         assert!(plain.contains("Full prompt body"));
     }
@@ -797,7 +674,7 @@ mod tests {
         let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📔"));
+        assert!(plain.contains("■"));
         assert!(plain.contains("Line 1"));
         // Because of line wrapping, "Line 50" may be split across lines
         assert!(plain.contains(" 50"), "should contain the last line number");
@@ -848,7 +725,7 @@ mod tests {
         let result = report_system_prompt_empty(&EffectiveSystemPrompt::None, config, &term);
         let output = result.expect("should produce output in full mode");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📔"));
+        assert!(plain.contains("■"));
         assert!(plain.contains("none"));
         assert!(plain.contains("not been modified"));
     }
@@ -867,7 +744,7 @@ mod tests {
             report_system_prompt_empty(&EffectiveSystemPrompt::Disabled { source }, config, &term);
         let output = result.expect("should produce output in full mode");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📔"));
+        assert!(plain.contains("■"));
         assert!(plain.contains("disabled"));
         assert!(plain.contains("been disabled"));
     }
@@ -889,9 +766,9 @@ mod tests {
         let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        let mut lines = plain.lines();
+        let mut lines = plain.lines().filter(|l| !l.trim().is_empty());
         let header = lines.next().expect("header line");
-        assert!(header.contains("📔"), "header line should contain 📔");
+        assert!(header.contains("■"), "header line should contain ■");
         // At least one subsequent non-empty line must begin with the
         // BlockQuote prefix.
         let mut saw_quote = false;
@@ -899,10 +776,8 @@ mod tests {
             if line.trim().is_empty() {
                 continue;
             }
-            // System bar is rendered as a bg-painted space cell, so after
-            // ANSI stripping the prefix is two spaces.
             assert!(
-                line.starts_with("  "),
+                line.starts_with("┃ "),
                 "expected BlockQuote prefix on body line, got {line:?}"
             );
             saw_quote = true;

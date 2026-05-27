@@ -293,17 +293,14 @@ impl TimeoutConfig {
         self
     }
 
-    /// Returns `true` when the wall-clock rule is enabled.
     pub(crate) fn timeout_enabled(&self) -> bool {
         self.timeout.is_some()
     }
 
-    /// Returns `true` when the stream-silence rule is enabled.
     pub(crate) fn step_timeout_enabled(&self) -> bool {
         self.step_timeout.is_some()
     }
 
-    /// Returns `true` when any rule is enabled.
     pub(crate) fn any_enabled(&self) -> bool {
         self.timeout_enabled() || self.step_timeout_enabled()
     }

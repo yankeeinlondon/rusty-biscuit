@@ -209,7 +209,7 @@ impl ModelCatalogService {
     /// ## Cold start
     ///
     /// When no cache exists yet for a dynamic-source provider (true
-    /// first-run), this falls back to [`refresh_provider_blocking`] so
+    /// first-run), this falls back to [`refresh_provider_blocking`](Self::refresh_provider_blocking) so
     /// frontmatter `model:` validation has data to work with rather than
     /// silently flagging a brand-new model as unknown.
     ///
@@ -217,7 +217,7 @@ impl ModelCatalogService {
     ///
     /// Static-source providers (Claude, Codex) and no-source providers
     /// (Gemini, Goose, Kimi, Roo) are essentially free to refresh, so
-    /// this delegates to [`refresh_provider_blocking`] which writes the
+    /// this delegates to [`refresh_provider_blocking`](Self::refresh_provider_blocking) which writes the
     /// static list to cache without spawning any subprocess.
     ///
     /// ## Escape hatch
@@ -285,7 +285,7 @@ impl ModelCatalogService {
 
     /// Refresh the catalog for a single provider with in-process dedup.
     ///
-    /// This is the async counterpart of [`refresh_provider_blocking`]. It
+    /// This is the async counterpart of [`refresh_provider_blocking`](Self::refresh_provider_blocking). It
     /// shares the OpenCode subprocess result between `OpenCode` and
     /// `QwenCode` refreshes so a `--qwen` run never repeats the
     /// `opencode models` call.

@@ -9,8 +9,8 @@
 //! - [`OutputFormatSelector`] — a small metadata enum used by both the provider
 //!   catalog and the CLI wrapper.
 //!
-//! Everything else (behaviour traits, [`ProviderInfo`], registry helpers) stays
-//! in [`crate::provider`].
+//! Everything else (behaviour traits, [`ProviderInfo`](crate::provider::ProviderInfo),
+//! registry helpers) stays in [`crate::provider`].
 
 use serde::{Deserialize, Serialize};
 

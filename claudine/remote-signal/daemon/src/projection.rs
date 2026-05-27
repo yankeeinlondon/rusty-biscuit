@@ -14,6 +14,10 @@ use parking_lot::Mutex;
 use remote_signal_core::ChunkId;
 
 /// SQL applied at startup to ensure the projection table exists.
+/// A UNIQUE constraint on `(chunk_id, sequence)` prevents duplicate
+/// rows when the same chunk is projected more than once (e.g. repeated
+/// incremental syncs). DuckDB `INSERT OR IGNORE` silently skips rows
+/// that would violate the constraint.
 const SCHEMA_SQL: &str = "
     CREATE TABLE IF NOT EXISTS session_entries (
         chunk_id TEXT,
@@ -25,7 +29,8 @@ const SCHEMA_SQL: &str = "
         source TEXT,
         level TEXT,
         message TEXT,
-        metadata_json TEXT
+        metadata_json TEXT,
+        UNIQUE(chunk_id, sequence)
     );
 ";
 
@@ -109,41 +114,44 @@ impl Projection {
         })
     }
 
-    /// Filesystem path of the underlying DuckDB database. Returns
-    /// `":memory:"` for in-memory databases.
+    /// Filesystem path of the underlying DuckDB database, or the sentinel `":memory:"` when constructed via [`Self::in_memory`].
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Insert a batch of rows using DuckDB's `Appender` API. The whole
-    /// batch is wrapped in a single transaction; partial failures abort
-    /// the batch.
+    /// Insert a batch of rows using `INSERT OR IGNORE` so that duplicate
+    /// `(chunk_id, sequence)` pairs are silently skipped instead of
+    /// producing duplicate rows. This makes the projection idempotent
+    /// when the same chunk is submitted multiple times (e.g. repeated
+    /// incremental syncs that re-project already-materialised entries).
     pub fn append_rows(&self, rows: &[ProjectionRow]) -> Result<(), ProjectionError> {
         if rows.is_empty() {
             return Ok(());
         }
         let conn = self.inner.lock();
-        let mut appender = conn.appender("session_entries")?;
         for row in rows {
-            // Cast the unsigned counters to i64 for DuckDB BIGINT. The
-            // values we receive in Phase 2 are always well within i64.
             let chunk_index = i64::try_from(row.chunk.chunk_index).unwrap_or(i64::MAX);
             let sequence = i64::try_from(row.sequence).unwrap_or(i64::MAX);
-            appender.append_row(duckdb::params![
-                row.chunk.as_path(),
-                row.chunk.owner_node_id.as_str(),
-                row.chunk.session_id.as_str(),
-                chunk_index,
-                sequence,
-                row.created_at_unix_ms,
-                row.source.as_str(),
-                row.level.as_str(),
-                row.message.as_str(),
-                row.metadata_json.as_str(),
-            ])?;
+            conn.execute(
+                "INSERT OR IGNORE INTO session_entries \
+                 (chunk_id, owner_node_id, session_id, chunk_index, sequence, \
+                  created_at_unix_ms, source, level, message, metadata_json) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                duckdb::params![
+                    row.chunk.as_path(),
+                    row.chunk.owner_node_id.as_str(),
+                    row.chunk.session_id.as_str(),
+                    chunk_index,
+                    sequence,
+                    row.created_at_unix_ms,
+                    row.source.as_str(),
+                    row.level.as_str(),
+                    row.message.as_str(),
+                    row.metadata_json.as_str(),
+                ],
+            )?;
         }
-        appender.flush()?;
         Ok(())
     }
 
@@ -187,6 +195,15 @@ impl Projection {
             conn.query_row("SELECT COUNT(*) FROM session_entries", [], |row| row.get(0))?;
         Ok(value.max(0) as u64)
     }
+
+    /// Remove all rows from the projection table. Used during startup
+    /// to rebuild the projection from the authoritative redb source of
+    /// truth.
+    pub fn truncate(&self) -> Result<(), ProjectionError> {
+        let conn = self.inner.lock();
+        conn.execute("DELETE FROM session_entries", [])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -225,5 +242,38 @@ mod tests {
         let proj = Projection::in_memory().expect("open");
         proj.append_rows(&[]).expect("append");
         assert_eq!(proj.row_count().expect("count"), 0);
+    }
+
+    #[test]
+    fn truncate_removes_all_rows() {
+        let proj = Projection::in_memory().expect("open");
+        let rows = vec![sample_row(0, 0), sample_row(0, 1)];
+        proj.append_rows(&rows).expect("append");
+        assert_eq!(proj.row_count().expect("count"), 2);
+        proj.truncate().expect("truncate");
+        assert_eq!(proj.row_count().expect("count"), 0);
+    }
+
+    #[test]
+    fn duplicate_rows_are_ignored() {
+        let proj = Projection::in_memory().expect("open");
+        let rows = vec![sample_row(0, 0), sample_row(0, 1)];
+        proj.append_rows(&rows).expect("first append");
+        assert_eq!(proj.row_count().expect("count"), 2);
+
+        proj.append_rows(&rows).expect("duplicate append");
+        assert_eq!(proj.row_count().expect("count"), 2);
+
+        let new_row = sample_row(0, 2);
+        proj.append_rows(&[new_row]).expect("new row");
+        assert_eq!(proj.row_count().expect("count"), 3);
+
+        let fetched = proj
+            .entries_for_session("node-a", "session-1")
+            .expect("query");
+        assert_eq!(fetched.len(), 3);
+        assert_eq!(fetched[0].sequence, 0);
+        assert_eq!(fetched[1].sequence, 1);
+        assert_eq!(fetched[2].sequence, 2);
     }
 }

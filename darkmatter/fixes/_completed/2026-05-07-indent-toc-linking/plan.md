@@ -4,32 +4,26 @@ created: 2026-05-07
 start_phase: 1
 source_files_during_phase_4:
   - darkmatter/lib/src/markdown/compose/toc_linking/mod.rs
+  - darkmatter/lib/src/markdown/compose/toc_linking/render.rs
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
-packages:
-  - darkmatter
 source_files_during_phase_3:
   - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/toc_linking/mod.rs
+  - darkmatter/lib/src/markdown/compose/toc_linking/render.rs
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
-packages:
-  - darkmatter
 source_files_during_phase_2:
-  - darkmatter/lib/src/markdown/compose/toc_linking/parser.rs
-  - darkmatter/lib/src/markdown/compose/toc_linking/render.rs
-docs_updated_during_phase_2: []
-docs_created_during_phase_2: []
-skills_files_updated_during_phase_2: []
-packages:
-  - darkmatter
-source_files_during_phase_1:
   - darkmatter/lib/src/markdown/compose/toc_linking/types.rs
   - darkmatter/lib/src/markdown/compose/toc_linking/parser.rs
   - darkmatter/lib/src/markdown/compose/toc_linking/render.rs
   - darkmatter/lib/src/markdown/compose/toc_linking/mod.rs
-  - darkmatter/lib/src/markdown/compose/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
@@ -119,8 +113,8 @@ The `::toc-linking` directive emits markdown link lists without respecting the i
    - *Depends on:* 2.3
 
 **Validation Checkpoint:**
-- [ ] All unit tests in `toc_linking/` pass: `cargo test -p darkmatter toc_linking`
-- [ ] No compiler warnings in modified files
+- [x] All unit tests in `toc_linking/` pass: `cargo test -p darkmatter toc_linking`
+- [x] No compiler warnings in modified files
 
 ---
 
@@ -150,8 +144,8 @@ The `::toc-linking` directive emits markdown link lists without respecting the i
    - *Parallelizable with:* 3.2
 
 **Validation Checkpoint:**
-- [ ] All `darkmatter` tests pass: `cargo test -p darkmatter`
-- [ ] Manual verification: create a test markdown file with indented `::toc-linking` and inspect output
+- [x] All `darkmatter` tests pass: `cargo test -p darkmatter`
+- [x] Manual verification: create a test markdown file with indented `::toc-linking` and inspect output
 
 ---
 
@@ -162,10 +156,10 @@ The `::toc-linking` directive emits markdown link lists without respecting the i
 **Steps:**
 
 4.1. **Acceptance criteria verification**
-   - [ ] **AC-1:** A test fixture with `::toc-linking` nested two levels deep inside a list (4-space continuation) produces output where every generated bullet has 4 leading spaces
-   - [ ] **AC-2:** A test fixture with `::toc-linking` at column 1 inside a list item continuation produces correctly indented output
-   - [ ] **AC-3:** A test fixture with `::toc-linking` at the document root produces output starting at column 1, unchanged
-   - [ ] **AC-4:** Round-trip the rendered output through a CommonMark parser — inner TOC entries are children of the outer list item, not siblings
+   - [x] **AC-1:** A test fixture with `::toc-linking` nested two levels deep inside a list (4-space continuation) produces output where every generated bullet has 4 leading spaces
+   - [x] **AC-2:** A test fixture with `::toc-linking` at column 1 inside a list item continuation produces correctly indented output
+   - [x] **AC-3:** A test fixture with `::toc-linking` at the document root produces output starting at column 1, unchanged
+   - [x] **AC-4:** Round-trip the rendered output through a CommonMark parser — inner TOC entries are children of the outer list item, not siblings
 
 4.2. **Edge case testing** (manual or scripted)
    - Directive with tab-based indentation
@@ -184,10 +178,10 @@ The `::toc-linking` directive emits markdown link lists without respecting the i
    - Update `CHANGELOG.md` or equivalent if present
 
 **Validation Checkpoint:**
-- [ ] All acceptance criteria pass
-- [ ] `cargo test -p darkmatter` is green
-- [ ] `cargo clippy -p darkmatter` shows no new warnings
-- [ ] Plan marked complete
+- [x] All acceptance criteria pass
+- [x] `cargo test -p darkmatter` is green
+- [x] `cargo clippy -p darkmatter` shows no new warnings
+- [x] Plan marked complete
 
 ## Risk & Contingency
 

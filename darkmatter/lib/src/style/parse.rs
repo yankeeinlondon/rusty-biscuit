@@ -83,15 +83,15 @@ fn scan_deprecated_enum_aliases(value: &Value, warnings: &mut Vec<StyleWarning>)
     let Some(Value::Object(hr)) = root.get("hr") else {
         return;
     };
-    if let Some(Value::String(s)) = hr.get("alignment") {
-        if s == "centered" {
-            warnings.push(StyleWarning::new(
-                "style.hr.alignment",
-                StyleWarningKind::Deprecated {
-                    replacement: "center".into(),
-                },
-            ));
-        }
+    if let Some(Value::String(s)) = hr.get("alignment")
+        && s == "centered"
+    {
+        warnings.push(StyleWarning::new(
+            "style.hr.alignment",
+            StyleWarningKind::Deprecated {
+                replacement: "center".into(),
+            },
+        ));
     }
 }
 

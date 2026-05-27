@@ -14,7 +14,7 @@ use crate::error::{ClaudineError, Result};
 /// allow it to run.
 ///
 /// The authoritative command-gating surface is
-/// [`ProtectService`](crate::protect::protect) (see
+/// [`ProtectService`](crate::protect::ProtectService) (see
 /// `claudine/docs/topics/protect-service.md`), which is regex-backed and
 /// applies to provider tool invocations across every supported CLI.
 pub const BLOCKED_COMMANDS: &[&str] = &[
@@ -43,8 +43,8 @@ pub enum ValidatedCommand {
 ///
 /// A suspicious basename matching [`BLOCKED_COMMANDS`] only emits a
 /// `tracing::warn!`; the real command-gating control is
-/// [`ProtectService`](crate::protect::protect). See the constant's rustdoc
-/// for the reasoning.
+/// [`ProtectService`](crate::protect::ProtectService). See the constant's
+/// rustdoc for the reasoning.
 ///
 /// ## Errors
 ///
@@ -157,23 +157,12 @@ fn validate_js_ts(command: &str, extension: &str) -> Result<ValidatedCommand> {
     )))
 }
 
-/// Wraps a value in single quotes, escaping any embedded single quotes.
+/// Wrap `value` in single quotes, escaping any embedded single quotes.
 ///
-/// **Note:** This function is provided for callers that need explicit
-/// shell escaping (e.g., building `sh -c` strings). The standard dispatch
-/// path does NOT use this function because it passes interpolated values
-/// through `shell_words::split` and then supplies them as discrete `argv`
-/// entries via `Command::args()`, which preserves variable boundaries
-/// without shell interpretation.
-///
-/// ## Examples
-///
-/// ```
-/// use claudine::actions::bash_executor::shell_escape;
-///
-/// assert_eq!(shell_escape("hello"), "'hello'");
-/// assert_eq!(shell_escape("it's"), "'it'\\''s'");
-/// ```
+/// Provided for callers building `sh -c` strings. The standard dispatch path
+/// does not call this — interpolated values flow through `shell_words::split`
+/// and reach the child as discrete `argv` entries via `Command::args()`, which
+/// preserves variable boundaries without shell interpretation.
 pub fn shell_escape(value: &str) -> String {
     let escaped = value.replace('\'', "'\\''");
     format!("'{escaped}'")

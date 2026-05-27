@@ -233,14 +233,11 @@ fn frontmatter_to_value(fm: &darkmatter::markdown::Frontmatter) -> serde_json::V
 /// Parse selection hints (`agent`, `model`) from a raw Markdown frontmatter
 /// without composing the document.
 ///
-/// The CLI uses this for *eager* target resolution: it lets the wrapper
-/// know which provider will run before composition templates are rendered,
-/// so `{{env.AGENT}}` and similar references resolve correctly during
-/// body and inline-prompt rendering.
-///
-/// Untemplated, literal `agent`/`model` values are recognized; values that
-/// require composition to materialize (e.g. `agent: "{{env.SOMETHING}}"`)
-/// are not resolved here and fall through to post-compose resolution.
+/// The CLI calls this for *eager* target resolution — knowing which
+/// provider will run before composition templates render, so `{{env.AGENT}}`
+/// and similar references resolve correctly during body/inline rendering.
+/// Only untemplated literal values are recognized here; templated values
+/// fall through to post-compose resolution.
 ///
 /// ## Errors
 ///

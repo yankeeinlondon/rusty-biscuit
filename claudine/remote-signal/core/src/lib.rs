@@ -39,7 +39,10 @@ pub use proto::{
     SyncWithPeerResponse, sync_frame,
 };
 
-pub use envelope::{ENVELOPE_HASH_LENGTH, EnvelopeError, EnvelopeInbox, SignedEnvelope};
+pub use envelope::{
+    ENVELOPE_HASH_LENGTH, EnvelopeError, EnvelopeInbox, EnvelopeSealer, PayloadKind,
+    SignedEnvelope,
+};
 pub use identity::{
     NodeIdentity, NodeIdentityError, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH, verify_signature,
 };

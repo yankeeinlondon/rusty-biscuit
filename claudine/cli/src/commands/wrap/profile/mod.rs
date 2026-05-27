@@ -28,10 +28,6 @@ pub(crate) use self::opencode::OpencodeWrapper;
 pub(crate) use self::opencode::opencode_default_tui_noise_prefixes;
 pub(crate) use self::qwen::QwenWrapper;
 
-// ---------------------------------------------------------------------------
-// OpenCode model resolution (Phase 1)
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum OpenCodeModelSource {
     CliSwitch(String),
@@ -130,10 +126,6 @@ fn read_opencode_config_model() -> Option<String> {
     Some(model.to_string())
 }
 
-// ---------------------------------------------------------------------------
-// Output format enum (universal --output flag)
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OutputFormat {
     Json,
@@ -188,10 +180,6 @@ impl PromptDelivery {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// PromptSource — typed prompt input to the wrap pipeline
-// ---------------------------------------------------------------------------
 
 /// Outcome of applying YOLO/auto-approve mode to a provider launch.
 ///
@@ -278,19 +266,6 @@ impl PromptSource {
     }
 }
 
-// ---------------------------------------------------------------------------
-// PromptArgConventions — re-exported from claudine::provider
-// ---------------------------------------------------------------------------
-//
-// Phase 6 of the centralized providers refactor moved the type into the
-// lib crate so per-provider data lives alongside the rest of the provider
-// catalog. The CLI re-exports it under the same name for source
-// compatibility with prior callers.
-//
-// `WrapperProfile::prompt_arg_conventions` now defaults to reading from
-// `provider_info(self.provider()).prompt_arg_conventions`, so individual
-// wrapper impls no longer override it.
-
 impl std::fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -324,10 +299,6 @@ impl From<claudine::composition::OutputFormat> for OutputFormat {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// WrapperProfile trait
-// ---------------------------------------------------------------------------
 
 /// Each wrapped provider implements this trait to define its CLI mapping.
 ///
@@ -813,10 +784,6 @@ pub(crate) trait WrapperProfile: Send + Sync {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Provider static instances
-// ---------------------------------------------------------------------------
-
 static CLAUDE: ClaudeWrapper = ClaudeWrapper;
 static CODEX: CodexWrapper = CodexWrapper;
 static GEMINI: GeminiWrapper = GeminiWrapper;
@@ -859,10 +826,6 @@ static WRAPPER_REGISTRY: [Option<&'static dyn WrapperProfile>; PROVIDER_COUNT] =
 pub(crate) fn profile_for_provider(provider: Provider) -> Option<&'static dyn WrapperProfile> {
     WRAPPER_REGISTRY[provider as usize]
 }
-
-// ---------------------------------------------------------------------------
-// Shared helper functions
-// ---------------------------------------------------------------------------
 
 fn non_empty_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.is_empty())
@@ -937,12 +900,6 @@ fn prompt_delivery_append_flags(
         PromptDelivery::AppendArgs(vec![flag.to_string(), prompt.to_string()])
     }
 }
-
-// ---------------------------------------------------------------------------
-// Prompt extraction — consolidates the old extract_user_prompt /
-// find_prompt_location / strip_prompt_from_args per-provider logic into
-// one provider-blind algorithm that dispatches on PromptArgConventions.
-// ---------------------------------------------------------------------------
 
 /// Extract a prompt from raw passthrough args, returning the cleaned
 /// args and the typed `PromptSource`.
@@ -1174,10 +1131,6 @@ pub(crate) fn apply_opencode_model_resolution(
 
     Ok(opencode_model_source)
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

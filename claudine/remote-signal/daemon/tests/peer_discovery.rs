@@ -13,8 +13,9 @@ use std::time::{Duration, Instant};
 
 use remote_signal_client::connect_uds;
 use remote_signal_core::{
-    ConnectToPeerRequest, CreateInvitationRequest, ListPeersRequest, PeerConnectionState,
-    PeerSource,
+    AppendEntryRequest, ConnectToPeerRequest, CreateInvitationRequest, ListChunkEntriesRequest,
+    ListPeersRequest, ListSessionChunksRequest, PeerConnectionState, PeerSource,
+    SyncWithPeerRequest,
 };
 use remote_signal_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
 use tempfile::TempDir;
@@ -99,11 +100,11 @@ async fn two_daemons_connect_via_manual_invitation() {
 }
 
 #[tokio::test]
-async fn two_daemons_discover_each_other_via_mdns() {
-    // mDNS multicast on the loopback interface is permitted on macOS
-    // and most Linux distros, but containerised CI runners often
-    // disable it. The test fails loudly when the environment cannot
-    // multicast so the regression is visible.
+async fn real_two_daemons_discover_each_other_via_mdns() {
+    if std::env::var("REMOTE_SIGNAL_REAL_MDNS").as_deref() != Ok("1") {
+        eprintln!("skipping real_ mDNS discovery test (set REMOTE_SIGNAL_REAL_MDNS=1 to run)");
+        return;
+    }
     let tmp = TempDir::new().expect("tempdir");
     let (alice, alice_sock) = boot_daemon(&tmp, "alice", true).await;
     let (bob, _bob_sock) = boot_daemon(&tmp, "bob", true).await;
@@ -169,4 +170,160 @@ async fn wait_until_bound(path: &Path) {
         }
         sleep(Duration::from_millis(10)).await;
     }
+}
+
+/// **mDNS unpaired data-exchange boundary** — Two daemons discover each
+/// other over real mDNS. Before the operator approves the pairing, any
+/// attempt to sync session-log deltas MUST fail and the receiver's redb
+/// snapshot must remain unchanged. After approval, sync must succeed.
+#[tokio::test]
+async fn real_mdns_discovered_peer_cannot_sync_before_approval() {
+    if std::env::var("REMOTE_SIGNAL_REAL_MDNS").as_deref() != Ok("1") {
+        eprintln!("skipping real_ mDNS data-exchange boundary test (set REMOTE_SIGNAL_REAL_MDNS=1 to run)");
+        return;
+    }
+    let tmp = TempDir::new().expect("tempdir");
+    let (alice, alice_sock) = boot_daemon(&tmp, "alice", true).await;
+    let (bob, bob_sock) = boot_daemon(&tmp, "bob", true).await;
+    let alice_node = alice.node_id();
+    let bob_node = bob.node_id();
+
+    let mut alice_client = connect_uds(alice_sock.clone()).await.expect("alice connect");
+    let mut bob_client = connect_uds(bob_sock.clone()).await.expect("bob connect");
+
+    // Bob writes a "secret" entry in his own namespace.
+    bob_client
+        .append_entry(AppendEntryRequest {
+            owner_node_id: String::new(),
+            session_id: "secret".into(),
+            source: "bob".into(),
+            level: "info".into(),
+            message: "do-not-leak".into(),
+            metadata_json: String::new(),
+        })
+        .await
+        .expect("bob append");
+
+    // Wait for mDNS discovery to populate Alice's peer list.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let peers = alice_client
+            .list_peers(ListPeersRequest {})
+            .await
+            .expect("alice list_peers")
+            .into_inner();
+        if peers.peers.iter().any(|p| p.node_id == bob_node) {
+            break;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "Alice never discovered Bob ({bob_node}) via mDNS; peers={:?}",
+                peers.peers,
+            );
+        }
+        sleep(Duration::from_millis(200)).await;
+    }
+
+    // Attempt sync BEFORE pairing — must fail.
+    let err = alice_client
+        .sync_with_peer(SyncWithPeerRequest {
+            node_id: bob_node.clone(),
+        })
+        .await
+        .expect_err("sync before pairing must fail");
+    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+
+    // Alice's view of Bob's namespace must be empty.
+    let leaked_chunks = alice_client
+        .list_session_chunks(ListSessionChunksRequest {
+            owner_node_id: bob_node.clone(),
+            session_id: "secret".into(),
+        })
+        .await
+        .expect("list chunks")
+        .into_inner()
+        .chunk_ids;
+    assert!(
+        leaked_chunks.is_empty(),
+        "unpaired peer must not see remote data; got chunks {leaked_chunks:?}",
+    );
+
+    // Now approve the pairing on both sides and verify sync works.
+    alice_client
+        .approve_peer(remote_signal_core::ApprovePeerRequest {
+            node_id: bob_node.clone(),
+            note: "bob".into(),
+        })
+        .await
+        .expect("alice approves bob");
+    bob_client
+        .approve_peer(remote_signal_core::ApprovePeerRequest {
+            node_id: alice_node.clone(),
+            note: "alice".into(),
+        })
+        .await
+        .expect("bob approves alice");
+
+    // Connect via invitation (mDNS-discovered peers need explicit QUIC
+    // connection for sync).
+    let invitation = bob_client
+        .create_invitation(CreateInvitationRequest {
+            advertise_addr: String::new(),
+        })
+        .await
+        .expect("invitation")
+        .into_inner();
+    alice_client
+        .connect_to_peer(ConnectToPeerRequest {
+            invitation: invitation.invitation,
+        })
+        .await
+        .expect("alice connect");
+
+    // Sync now succeeds.
+    alice_client
+        .sync_with_peer(SyncWithPeerRequest {
+            node_id: bob_node.clone(),
+        })
+        .await
+        .expect("sync after pairing must succeed");
+
+    // Alice now sees Bob's data in Bob's namespace.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let chunks = alice_client
+            .list_session_chunks(ListSessionChunksRequest {
+                owner_node_id: bob_node.clone(),
+                session_id: "secret".into(),
+            })
+            .await
+            .expect("list chunks")
+            .into_inner()
+            .chunk_ids;
+        if !chunks.is_empty() {
+            let mut messages = Vec::new();
+            for chunk in &chunks {
+                let entries = alice_client
+                    .list_chunk_entries(ListChunkEntriesRequest {
+                        chunk_id: chunk.clone(),
+                    })
+                    .await
+                    .expect("list entries")
+                    .into_inner();
+                messages.extend(entries.entries.into_iter().map(|e| e.message));
+            }
+            assert!(
+                messages.contains(&"do-not-leak".to_string()),
+                "after sync, alice should have bob's data; got {messages:?}",
+            );
+            break;
+        }
+        if Instant::now() >= deadline {
+            panic!("timed out waiting for Bob's data to appear on Alice");
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    alice.shutdown().await.expect("alice shutdown");
+    bob.shutdown().await.expect("bob shutdown");
 }

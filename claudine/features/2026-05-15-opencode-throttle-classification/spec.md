@@ -120,36 +120,50 @@ pub enum ProviderLimitKind {
 ```
 
 Rename `LogClassification::RateLimit` to `LogClassification::ProviderLimit`,
-replacing the `is_fatal: bool` field with `kind: ProviderLimitKind`. All
-other fields (`status_code`, `error_name`, `reset_at`, `provider_id`,
-`model_id`, `provider_error`) are retained.
+replacing the `is_fatal: bool` field with `kind: ProviderLimitKind`. The
+`error_name` field is **dropped** — it is now redundant with `kind` (the
+old values `"AI_APICallError"` / `"AI_RetryError"` were a proxy for the
+fatal/non-fatal distinction that `kind` now encodes directly). The
+remaining fields (`status_code`, `reset_at`, `provider_id`, `model_id`,
+`provider_error`) are retained.
 
 ### 2. `errors.rs` — kind computation
 
 `classify_llm_failure` replaces the `is_rate_limit` / `is_fatal` booleans
 with kind computation from the raw line (`haystack`):
 
-- **Error context** is present when the record carries an `error` tag, an
-  extractable HTTP status, or a known error name (`AI_APICallError` /
-  `AI_RetryError`). A terminal classification is only ever produced from an
-  actual provider rejection.
+- **Error context** is present when **`record.tags.get("error").is_some()`**.
+  An extractable HTTP status or a known error name is *not* sufficient on
+  its own — only the presence of an `error` tag proves the line came from
+  an OpenCode error envelope rather than from echoed tool output or quoted
+  text. A terminal classification is only ever produced from an actual
+  provider rejection.
 - `has_cap` = `haystack.contains("\"code\":\"1308\"")` *(ZAI)*
   **or** `haystack.contains("exceeded_current_quota_error")` *(Kimi std)*
   **or** `haystack.contains("Usage limit reached")` *(legacy phrase)*.
 - `has_429` = `extract_status_code(haystack) == Some(429)`.
 - `exhausted` = `haystack.contains("AI_RetryError")`
   **or** `haystack.contains("maxRetriesExceeded")`.
-- `is_overload` = the provider message/body contains `overload`
-  (case-insensitive) **or** `haystack.contains("engine_overloaded_error")`.
+- `is_overload` = `contains_any_ci(haystack, &["overload", "engine_overloaded_error"])`.
+  (Use the existing `contains_any_ci` helper — `str::contains` is
+  case-sensitive in Rust and would miss `"Overloaded"` / `"OVERLOAD"`.)
 
 Resolution order (first match wins):
 
-1. `has_429` **and** `exhausted` → `ProviderLimit { kind: RetriesExhausted }`.
-   (Retries exhausted = the call failed, whatever the root cause.)
-2. `has_cap` **and** error context → `ProviderLimit { kind: UsageCap }`.
+1. `has_cap` **and** error context → `ProviderLimit { kind: UsageCap }`.
+   **Cap-with-context wins over retries-exhausted on purpose**: a 429 that
+   exhausts retries *and* carries a 1308 / `exceeded_current_quota_error`
+   signal is fundamentally a cap, not a network failure. The precise
+   message (`usage limit reached for <model>`) is the actionable one;
+   demoting it to `provider 429s did not clear after retries` would undo
+   the distinction this feature exists to create.
+2. `has_429` **and** `exhausted` → `ProviderLimit { kind: RetriesExhausted }`.
+   (Retries exhausted = the call failed and no cap signal was present.)
 3. `has_cap` **without** error context → not a `ProviderLimit`; emit a
    non-fatal `ApiFailure` carrying the provider's own message (advisory
-   path, §4). Information preserved, severity not escalated.
+   path, §4). Information preserved, severity not escalated. This is the
+   primary defense against false-positive termination from echoed tool
+   output or quoted error text that happens to mention a usage limit.
 4. `has_429` **and** `is_overload` → `ProviderLimit { kind: Overloaded }`.
 5. `has_429` → `ProviderLimit { kind: RateLimited }`.
 6. otherwise → existing `ApiFailure` / `AuthFailure` paths, unchanged.
@@ -227,7 +241,16 @@ The two transient messages are fixed strings built directly in the handler.
    session is no longer mislabeled as capped.
 2. **Intentional:** a real usage cap seen *after* stdout activity now
    terminates the run (kills the OpenCode child) instead of warning and
-   continuing.
+   continuing. The error-context gate (`record.tags.error.is_some()`,
+   §2) is the safety net — only an actual OpenCode error envelope can
+   trigger termination; quoted/echoed cap text in tool output cannot.
+3. **Semantic regression for `kimi-for-coding`:** because the coding
+   endpoint has no confirmed hard-cap error type (Open Questions), a
+   user who actually exhausts their Kimi coding allowance will see
+   `provider 429s did not clear after retries`, never
+   `usage limit reached for k2p6`. This is strictly less specific than
+   today's (incorrect-but-precise) wording. Acceptable until a real
+   coding-endpoint cap sample is captured and added to `has_cap`.
 
 ## Test Plan
 
@@ -249,14 +272,20 @@ Fixtures live in
     `UsageCap` → terminal `Error` + early termination.
   - cap phrase with no error context → non-fatal `ApiFailure` carrying the
     provider message; no termination.
-- **Updated tests** — the existing `1308` fixture and tests
-  (`classifies_rate_limit_with_reset_time`, `fixture_rate_limit_classifies`,
-  `rate_limit_after_stdout_emits_warning_no_early_terminate`,
-  `rate_limit_without_retry_error_is_warning_even_before_stdout`,
-  `rate_limit_before_stdout_emits_terminal_error_and_early_terminate`,
-  `rate_limit_fires_early_termination_only_once`) now classify `1308` as
-  `UsageCap` and terminate regardless of stdout activity; assertions and
-  the `on_rate_limit` → `on_provider_limit` rename updated accordingly.
+- **Updated tests** — the existing `1308` fixture and tests now classify
+  `1308` as `UsageCap` and terminate regardless of stdout activity.
+  Assertions, the `on_rate_limit` → `on_provider_limit` rename, and the
+  following test renames are applied together (the old names assert the
+  opposite of the new behavior and must not survive):
+
+  | Old name | New name |
+  |---|---|
+  | `classifies_rate_limit_with_reset_time` | `classifies_usage_cap_with_reset_time` |
+  | `fixture_rate_limit_classifies` | `fixture_usage_cap_classifies` |
+  | `rate_limit_after_stdout_emits_warning_no_early_terminate` | `usage_cap_after_stdout_emits_terminal_error_and_early_terminate` |
+  | `rate_limit_without_retry_error_is_warning_even_before_stdout` | `usage_cap_without_retry_error_still_terminates` |
+  | `rate_limit_before_stdout_emits_terminal_error_and_early_terminate` | `usage_cap_before_stdout_emits_terminal_error_and_early_terminate` |
+  | `rate_limit_fires_early_termination_only_once` | `provider_limit_fires_early_termination_only_once` |
 - `cargo test -p claudine` and `cargo clippy -p claudine` pass clean.
 
 ## Affected Files
@@ -269,5 +298,6 @@ Fixtures live in
   `on_rate_limit` → `on_provider_limit`, per-kind branching, removal of the
   `stdout_seen` termination guard for terminal kinds.
 - `claudine/lib/tests/fixtures/logs/opencode-429-overload.txt` — new fixture.
-- `claudine/.claude/skills/claudine/opencode-event-sources.md` — update the
-  rate-limit row to describe the four kinds and the two-axis model.
+- `.claude/skills/claudine/opencode-event-sources.md` — **repo-root**
+  `.claude/`, not under `claudine/`. Update the rate-limit row to
+  describe the four kinds and the two-axis model.
