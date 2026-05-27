@@ -564,7 +564,10 @@ fn run_compose_inner(
     // ── Single execution path (no loop) ──────────────────────────────────
     let prepared = {
         let _span = info_span!("compose_prep.prepare_direct").entered();
-        composition::prepare_direct(
+        let interactive =
+            super::schema_interactive::resolve_interactive_options(shared.silent);
+        let term = crate::log::terminal();
+        super::schema_interactive::prepare_with_interactive_collection(
             &source,
             composition::PrepareOptions {
                 set_overrides,
@@ -573,6 +576,9 @@ fn run_compose_inner(
                 perf_enabled: shared.perf,
                 source_repo_root: prep_context.source_repo_root.clone(),
             },
+            super::schema_interactive::InteractivePrepareMode::Direct,
+            interactive,
+            &term,
         )?
     };
 
@@ -894,7 +900,10 @@ fn run_inline_compose_inner(
     // ── Single execution path (no loop) ──────────────────────────────────
     let prepared = {
         let _span = info_span!("compose_prep.prepare_inline").entered();
-        composition::prepare_inline(
+        let interactive =
+            super::schema_interactive::resolve_interactive_options(shared.silent);
+        let term = crate::log::terminal();
+        super::schema_interactive::prepare_with_interactive_collection(
             &source,
             composition::PrepareOptions {
                 set_overrides,
@@ -903,6 +912,9 @@ fn run_inline_compose_inner(
                 perf_enabled: shared.perf,
                 source_repo_root: prep_context.source_repo_root.clone(),
             },
+            super::schema_interactive::InteractivePrepareMode::Inline,
+            interactive,
+            &term,
         )?
     };
 
