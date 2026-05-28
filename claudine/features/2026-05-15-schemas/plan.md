@@ -1,8 +1,78 @@
 ---
-phases: 5
+phases: 6
 created: 2026-05-15
-updated: 2026-05-25
+updated: 2026-05-26
 start_phase: 1
+packages:
+  - claudine
+  - claudine-cli
+source_files_during_phase_1:
+  - claudine/lib/src/config/claudine_config.rs
+  - claudine/lib/src/composition/error.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/dispatch/runner/mod.rs
+  - claudine/lib/src/dispatch/runner/speak.rs
+  - claudine/cli/src/commands/init/mod.rs
+  - claudine/cli/src/commands/init_wizard.rs
+  - claudine/cli/src/commands/config_tui/mod.rs
+  - claudine/cli/src/commands/config_tui/tabs/preferences.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/schema_validation.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages_during_phase_2:
+  - claudine
+source_files_during_phase_3:
+  - claudine/lib/src/composition/error.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/schema_validation.rs
+  - claudine/cli/src/commands/mod.rs
+  - claudine/cli/src/commands/schema_interactive.rs
+  - claudine/cli/src/commands/compose.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages_during_phase_3:
+  - claudine
+  - claudine-cli
+source_files_during_phase_4:
+  - claudine/cli/src/completion/mod.rs
+  - claudine/cli/src/completion/engine.rs
+  - claudine/cli/src/completion/schema_completion.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+packages_during_phase_4:
+  - claudine-cli
+source_files_during_phase_5:
+  - claudine/lib/src/composition/error.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/closure.rs
+  - claudine/cli/src/commands/wrap/sequence.rs
+  - claudine/cli/tests/sequence_cli.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages_during_phase_5:
+  - claudine
+  - claudine-cli
+source_files_during_phase_6:
+  - claudine/cli/tests/compose_schema_cli.rs
+docs_updated_during_phase_6:
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/execution-flow.md
+  - claudine/docs/topics/shell-completions.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/claudine/SKILL.md
+packages_during_phase_6:
+  - claudine-cli
 ---
 
 # Execution Plan: Schema Support in Claudine

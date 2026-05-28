@@ -922,6 +922,225 @@ fn sequence_summary_emits_final_line() {
 }
 
 // ============================================================================
+// Phase 5: schema validation
+// ============================================================================
+
+#[cfg(unix)]
+#[test]
+fn sequence_aggregates_missing_required_properties_across_steps() {
+    // A non-TTY sequence run with `$schema` declaring a required property
+    // that no step supplies must abort BEFORE any provider session is
+    // launched, surfacing every failing step in a single error.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  topic: 'string(required)'
+sequence:
+  - alpha
+  - beta
+---
+Step about {{topic}}.
+"#,
+    )
+    .unwrap();
+
+    // Provider stub records every invocation so we can prove it was
+    // never called.
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    // Strong assertion: error must be Claudine's typed CompositionError
+    // surface AND per-step aggregated (`sequence missing properties`),
+    // not Darkmatter's raw MarkdownError or a single-doc MissingProperties.
+    // Catches regressions where the per-step preflight short-circuits
+    // aggregation.
+    assert!(
+        plain.contains("CompositionError"),
+        "expected typed CompositionError surface (not raw MarkdownError); stderr:\n{plain}"
+    );
+    assert!(
+        plain.to_lowercase().contains("sequence missing properties"),
+        "expected aggregated `sequence missing properties` (not single-doc); stderr:\n{plain}"
+    );
+    assert!(
+        !plain.contains("MarkdownError"),
+        "raw MarkdownError leaked instead of typed Claudine error; stderr:\n{plain}"
+    );
+    // Both steps must appear in the aggregated report.
+    assert!(
+        plain.contains("Step 1"),
+        "expected per-step `Step 1` header; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("Step 2"),
+        "expected per-step `Step 2` header; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("alpha") && plain.contains("beta"),
+        "expected both step names in the aggregated report; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("topic"),
+        "expected the `topic` property name; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider session should have been launched; stub recorded a call"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn sequence_set_override_satisfies_required_schema() {
+    // The aggregated path retries cleanly when the user supplies the
+    // missing value via `--set` so no error reaches the provider.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  topic: 'string(required)'
+sequence:
+  - one
+  - two
+---
+Working on {{topic}} ({{state}}).
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\ncat > /dev/null\nexit 0\n",
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args([
+            "sequence",
+            "--goose",
+            md_file.to_str().unwrap(),
+            "topic=async",
+        ])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn sequence_unsupported_shape_surfaces_typed_error_under_tty_pref() {
+    // When the run is non-TTY (stdin/stderr are pipes here), the sequence
+    // path MUST emit an aggregated `sequence missing properties` report
+    // rather than promoting the first unsupported shape to
+    // `UnsupportedInteractiveSchema`. This matches the direct `compose`
+    // path's behavior in `pre_validate_with_interactive_collection`,
+    // which only short-circuits to the unsupported error when interactive
+    // collection is actually allowed.
+    //
+    // Regression target (review-5 medium): we previously promoted the
+    // unsupported shape unconditionally, which forced users to see a
+    // shape-specific error even when they could have fixed the sequence
+    // by editing two files in one pass via the aggregated report.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  config: 'object(required)'
+sequence:
+  - alpha
+  - beta
+---
+Step about {{config}}.
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    // Strong assertions: non-TTY must produce the aggregated
+    // sequence-missing surface, NOT the unsupported-shape error.
+    assert!(
+        plain.to_lowercase().contains("sequence missing properties"),
+        "expected aggregated `sequence missing properties` surface; stderr:\n{plain}"
+    );
+    assert!(
+        !plain.to_lowercase().contains("unsupported interactive schema"),
+        "non-TTY must NOT short-circuit to UnsupportedInteractiveSchema; stderr:\n{plain}"
+    );
+    // Both step labels should appear in the aggregated report so a user
+    // can fix the full sequence in one pass.
+    assert!(
+        plain.contains("Step 1") && plain.contains("Step 2"),
+        "expected per-step `Step 1` and `Step 2` headers; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("alpha") && plain.contains("beta"),
+        "expected both step names; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("config"),
+        "expected the `config` property name in error report; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider session should have been launched; stub recorded a call"
+    );
+}
+
+// ============================================================================
 // Per-step step_timeout override
 // ============================================================================
 
@@ -1041,4 +1260,72 @@ exit 0
         plain.contains("1 succeeded") && plain.contains("1 failed"),
         "summary should record step 1 success and step 2 failure; stderr: {plain}"
     );
+}
+
+// ============================================================================
+// Post-shell-expansion schema validation in sequence (review-6 high finding)
+// ============================================================================
+
+#[cfg(unix)]
+fn write_shell_whitelist(home: &std::path::Path, prefixes: &[&str]) {
+    let body: String = prefixes.iter().map(|p| format!("prefix {p}\n")).collect();
+    fs::write(home.join(".darkmatter-shell-whitelist"), body).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn sequence_shell_expanded_value_violating_schema_aborts_step() {
+    // A sequence step whose post-shell effective frontmatter violates the
+    // schema must surface a SchemaValidation error and not launch the
+    // provider for that step.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    write_shell_whitelist(workspace.path(), &["echo"]);
+    let count_path = workspace.path().join("call-count.txt");
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  tier: 'enum(small, medium, large; required)'
+sequence:
+  - alpha
+tier: $(echo huge)
+---
+Step {{state}} with tier {{tier}}.
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.to_lowercase().contains("schema validation"),
+        "expected SchemaValidation surface for shell-expanded sequence step; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider launch should occur on post-shell invalid value"
+    );
+    // Silence unused linter for the predicates import that other tests use.
+    let _ = contains("");
 }

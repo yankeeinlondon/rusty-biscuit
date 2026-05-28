@@ -203,6 +203,92 @@ The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` 
 
 `--exclude <PROVIDER>` removes a provider from automatic selection (repeatable). Explicit flags (`--codex`, etc.) override exclusions.
 
+## Schema Validation
+
+Composition documents can declare a `$schema` in their frontmatter to constrain the property values that drive the prompt. Schema processing is anchored on Darkmatter's `SimplifiedSchema` and runs as a stage inside the existing `Resolve → Pre-Flight → Prepare → Select → Launch → Closure` pipeline — between override application and shell expansion. The wrapper layer translates Darkmatter's structural failures into typed claudine errors so users see actionable reports instead of a generic compose failure.
+
+### Authoring
+
+`$schema` accepts the same forms Darkmatter accepts: inline `SimplifiedSchema` mappings, references to external YAML/JSON schema files (resolved relative to the prompt document's parent directory), and root-level unions. Raw JSON Schema also validates, but it does not expose typed property metadata, so it does not feed the interactive prompts or shell completion described below.
+
+```yaml
+$schema:
+  topic: 'string(required)'
+  tier: 'enum(small, medium, large; required)'
+  draft: boolean
+  cover: "file(match('*.png'))"
+```
+
+Remote `http://` / `https://` schema references remain unsupported.
+
+### Required vs Optional
+
+For each property declared in `$schema`, claudine routes the validation outcome through three categories:
+
+| Outcome                | Required                                                            | Optional                                                                                |
+| ---------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Present and valid      | continue                                                            | continue                                                                                |
+| Missing                | prompt in Interactive Mode when allowed; otherwise `MissingProperties` | continue                                                                                |
+| Present but invalid    | hard `SchemaValidation` abort (no prompt, no recovery)              | the value is dropped from the prompt context, a `tracing::warn!` fires, composition retries once |
+
+The drop-and-retry for invalid optionals is automatic; users see the discarded value via the `dropping optional schema property with invalid value` log line.
+
+### Interactive Mode
+
+When required properties are missing, claudine offers to collect them interactively. Interactive Mode is allowed only when **every** condition is true:
+
+1. `prompt_for_missing` is `true` (the default user-config value),
+2. stdin is attached to a TTY,
+3. stderr is attached to a TTY (stdout may be piped),
+4. `--silent` is not set,
+5. no required value is present-but-invalid (the abort above wins),
+6. at least one required value is actually missing.
+
+When Interactive Mode is denied, claudine emits a `MissingProperties` error with the prompt file (OSC8-linked), the list of missing property names in declaration order with their type labels and descriptions, the frontmatter `description` (when present), and a remediation hint: `Pass key=value, use --set, or set prompt_for_missing to true in an interactive terminal.`
+
+When Interactive Mode is allowed, claudine first prints a per-property status report to stderr (required and optional, with valid/invalid/missing glyphs) and then drives `biscuit-tui` widgets sized to each property's `SimplifiedType`:
+
+| Property type                                  | Widget                                  |
+| ---------------------------------------------- | --------------------------------------- |
+| `enum(...)`                                    | single-choice picker                    |
+| `enum(...)[]`                                  | multi-choice picker                     |
+| `boolean` / `boolish`                          | boolean switch                          |
+| `number` / `numberlike`                        | text input with parse-and-retry         |
+| `string` / `date` / `datetime` / `time` / `url` / `email` / `file` | text input with format hint |
+| `object`, `any`, property-level union, root-level union without projection | `UnsupportedInteractiveSchema` |
+
+Numeric inputs reprompt with an inline error on parse failure instead of aborting. Collected values feed back into the override set; composition re-runs with the new overrides before any provider session starts.
+
+### User Config
+
+The user-scoped Claudine config (`~/.claudine/config.json` or `.json5`) exposes a single switch:
+
+```json
+{ "prompt_for_missing": true }
+```
+
+The default is `true`. The field is scoped to the user config only — the repo-scoped config rejects it. The interactive `claudine config` TUI offers a boolean toggle, and the non-interactive setter accepts `claudine config set prompt-for-missing true|false`.
+
+### Validation Timing
+
+For every flavor (`compose`, `inline-compose`, `sequence`):
+
+1. Parse `--set` and shorthand `key=value` setters (JSON5-first).
+2. For `sequence`, merge per-step overlay values after caller setters; reserved overlay keys win.
+3. Compose through Darkmatter.
+4. Build the effective schema for the composed document.
+5. Validate effective frontmatter.
+6. If required values are missing and Interactive Mode is allowed: collect, apply as overrides, re-compose, re-validate.
+7. Proceed to provider/model resolution only after validation succeeds.
+
+`inline-compose` keeps its existing `prompt` checks: a missing or non-string `prompt` still surfaces as `PromptPropertyMissing` / `PromptPropertyWrongType` before schema validation runs. The original `$schema` declaration is preserved byte-for-byte during the inline rewrite — interactive values collected for one run are never written back to the source file.
+
+`sequence` validates every step during Phase 1a, before any provider session starts. When multiple steps share the same missing property with the same shape and description, the user is prompted once and the answer is reused for later steps (unless the step overlay supplies a different value). Non-interactive failures are aggregated into a single `SequenceMissingProperties` error so the user can fix the entire sequence in one edit pass.
+
+### Schema-Aware Shell Completion
+
+The composition completion engine consults `$schema` when the cursor sits on a setter slot AND a positional prompt-file argument is already committed. See [shell-completions.md — Schema-Aware Setter Completion](shell-completions.md#schema-aware-setter-completion) for the full contract.
+
 ## Harness: Validations and Handlers
 
 Composed documents can declare **pre-checks**, **post-checks**, **timeouts**, and **handlers** in their frontmatter. When present, Claudine activates a harness that gates provider execution behind validation rules and can recover from failures automatically.

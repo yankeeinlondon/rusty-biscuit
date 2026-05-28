@@ -26,7 +26,7 @@ fn map_compose_error(source_path: &std::path::Path, err: MarkdownError) -> Compo
 }
 
 /// Options for composition preparation.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PrepareOptions {
     /// Frontmatter `--set` overrides (JSON object).
     pub set_overrides: Option<serde_json::Value>,
@@ -126,6 +126,7 @@ pub fn prepare_direct(
         closure: CompositionClosurePlan::Direct,
         lifecycle,
         compose_perf: report.perf,
+        dropped_optionals: Vec::new(),
     })
 }
 
@@ -217,6 +218,7 @@ pub fn prepare_inline(
         }),
         lifecycle,
         compose_perf: report.perf,
+        dropped_optionals: Vec::new(),
     })
 }
 

@@ -233,6 +233,21 @@ pub enum CompositionError {
         failure_count: usize,
     },
 
+    /// One or more sequence steps have missing required schema properties
+    /// and Interactive Mode is not allowed.
+    ///
+    /// Aggregated so the user can fix the full sequence in a single edit
+    /// pass instead of discovering each step's gaps one at a time.
+    #[error(
+        "sequence schema validation failed for {failure_count} step(s); missing required properties"
+    )]
+    SequenceMissingProperties {
+        /// Per-step missing-property records in execution order.
+        failures: Vec<SequenceMissingPropertiesStep>,
+        /// Number of steps that reported missing properties.
+        failure_count: usize,
+    },
+
     // -- Loop errors -----------------------------------------------------------
     /// The `loop` frontmatter value is invalid.
     #[error("invalid loop definition: {0}")]
@@ -339,6 +354,87 @@ pub enum CompositionError {
         exit_reason: Option<String>,
     },
 
+    // -- Schema errors --------------------------------------------------------
+    /// A `$schema` reference could not be resolved or compiled.
+    ///
+    /// Covers both file resolution failures (e.g. unsupported `http://` URL,
+    /// missing file) and schema compilation failures (invalid SimplifiedSchema
+    /// or JSON Schema structure).
+    #[error("schema load failed for {}: {message}", source_path.display())]
+    SchemaLoad {
+        /// The prompt file whose `$schema` reference failed to load.
+        source_path: PathBuf,
+        /// Human-readable description of the failure.
+        message: String,
+    },
+
+    /// One or more present frontmatter properties failed schema validation.
+    ///
+    /// This is a hard error: required and optional properties with the wrong
+    /// type are reported together. Optional invalid values get dropped during
+    /// run-time validation (see Phase 2) but raw validation surfaces them
+    /// here so callers can choose their handling.
+    #[error(
+        "schema validation failed for {}: {message}",
+        source_path.display()
+    )]
+    SchemaValidation {
+        /// The prompt file being validated.
+        source_path: PathBuf,
+        /// Human-readable failure summary.
+        message: String,
+        /// JSON pointer paths (or property names) of failures, in
+        /// declaration order. Empty when the underlying validator did not
+        /// expose structured locations.
+        problems: Vec<String>,
+    },
+
+    /// Required schema properties are missing and cannot be collected
+    /// interactively from the current session.
+    ///
+    /// Returned both when Interactive Mode is not allowed (non-TTY, silent
+    /// flag, etc.) and when the user has opted out via `prompt_for_missing`.
+    #[error(
+        "missing required schema {plural} for {}: {names}",
+        source_path.display(),
+        plural = if missing.len() == 1 { "property" } else { "properties" },
+        names = format_missing_names(missing)
+    )]
+    MissingProperties {
+        /// The prompt file whose schema declares the missing properties.
+        source_path: PathBuf,
+        /// Missing properties in declaration order. Empty `missing` is
+        /// permitted only when `pointer_paths` is populated.
+        missing: Vec<MissingProperty>,
+        /// Frontmatter `description` value, if any, for additional context
+        /// when rendering the error.
+        frontmatter_description: Option<String>,
+        /// JSON pointer paths from Darkmatter's validation problems used
+        /// when the document has raw JSON Schema and no typed metadata is
+        /// available.
+        pointer_paths: Vec<String>,
+    },
+
+    /// A missing required property cannot be mapped to a `biscuit-tui`
+    /// widget, so Interactive Mode would fail.
+    ///
+    /// Examples: raw JSON Schema documents, root-level unions without a
+    /// SimplifiedSchema projection, `object`, `any`.
+    #[error(
+        "missing required property `{property}` in {} has an unsupported \
+         schema shape for interactive collection: {shape}",
+        source_path.display()
+    )]
+    UnsupportedInteractiveSchema {
+        /// The prompt file whose schema cannot be collected.
+        source_path: PathBuf,
+        /// The property name (declaration form).
+        property: String,
+        /// Describes the unsupported shape (e.g. `"object"`, `"any"`,
+        /// `"property-level union"`, `"raw JSON Schema"`).
+        shape: String,
+    },
+
     /// A loop iteration completed but reported a provider rate limit, and
     /// either the configured `on_rate_limit` policy was `abort` or no
     /// `reset_at` was available to safely pause.
@@ -365,6 +461,199 @@ pub enum CompositionError {
         /// Provider-supplied human-readable message, when known.
         message: Option<String>,
     },
+}
+
+/// A single required schema property that is missing from frontmatter.
+///
+/// Carries enough metadata to render an actionable error (declaration name,
+/// type label, optional description) without holding a Darkmatter schema
+/// reference. Constructed by the validation layer after consulting the
+/// effective SimplifiedSchema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingProperty {
+    /// Property name as it appears in the schema.
+    pub name: String,
+    /// Schema type label (e.g. `string`, `enum(a|b|c)`, `file`, `number`).
+    /// `None` when the underlying schema is raw JSON Schema and no typed
+    /// metadata is available.
+    pub type_label: Option<String>,
+    /// Optional description from the schema for the property.
+    pub description: Option<String>,
+    /// Interactive widget shape used by the CLI to drive a `biscuit-tui`
+    /// prompt. `None` when the property has a shape that cannot be
+    /// collected interactively (raw JSON Schema, property-level union,
+    /// `object`, `any`, etc.).
+    pub interactive_shape: Option<InteractiveShape>,
+}
+
+/// Widget mapping for interactively collecting a missing property value.
+///
+/// Produced by the validation layer from the property's
+/// [`SimplifiedType`][darkmatter::markdown::schemas::SimplifiedType] plus
+/// any enum members. The CLI layer chooses the concrete `biscuit-tui`
+/// widget from this enum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InteractiveShape {
+    /// Plain text input (string, date, datetime, time, url, email, file).
+    Text {
+        /// Hint about the expected text format. Used for placeholder /
+        /// help text only — Darkmatter handles validation post-submission.
+        format: TextFormat,
+    },
+    /// Numeric input with parse-and-retry validation.
+    Number {
+        /// `true` when the property is constrained to integer values
+        /// (via the SimplifiedSchema `integer` constraint).
+        integer: bool,
+    },
+    /// Boolean on/off toggle (covers both `boolean` and `boolish`).
+    Boolean,
+    /// Single-choice enum from a fixed member list.
+    EnumOne {
+        /// Enum member names in declaration order.
+        members: Vec<String>,
+    },
+    /// Multiple-choice enum from a fixed member list.
+    EnumMany {
+        /// Enum member names in declaration order.
+        members: Vec<String>,
+    },
+}
+
+/// Hint about the expected text format for a [`InteractiveShape::Text`]
+/// prompt.
+///
+/// Used for placeholder text and help hints only — Darkmatter runs the
+/// authoritative validation after the user submits a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextFormat {
+    /// Plain string with no special format.
+    Plain,
+    /// ISO-8601 date (`YYYY-MM-DD`).
+    Date,
+    /// ISO-8601 datetime.
+    DateTime,
+    /// Time-of-day with optional timezone.
+    Time,
+    /// Absolute URL.
+    Url,
+    /// Email address.
+    Email,
+    /// File reference (resolved via `biscuit-file::FileReference`).
+    File,
+}
+
+impl TextFormat {
+    /// One-line human-readable label for the format.
+    pub fn label(self) -> &'static str {
+        match self {
+            TextFormat::Plain => "string",
+            TextFormat::Date => "date (YYYY-MM-DD)",
+            TextFormat::DateTime => "datetime (ISO-8601)",
+            TextFormat::Time => "time",
+            TextFormat::Url => "URL",
+            TextFormat::Email => "email",
+            TextFormat::File => "file path or reference",
+        }
+    }
+}
+
+/// Pipeline stage where a [`DroppedOptional`] was elided.
+///
+/// Schema validation runs in three places. Each stage surfaces dropped
+/// optionals so the CLI can attribute the warning to its source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DroppedOptionalStage {
+    /// Dropped during pre-flight pre-validation against the raw
+    /// frontmatter + setter overrides.
+    PreValidation,
+    /// Dropped during the prepare-time retry against the post-interpolation
+    /// effective frontmatter (Darkmatter compose stage).
+    Composition,
+    /// Dropped during the post-shell-expansion re-validation against the
+    /// final effective frontmatter.
+    PostShellExpansion,
+}
+
+impl DroppedOptionalStage {
+    /// Short human-readable label used in CLI warnings.
+    pub fn label(self) -> &'static str {
+        match self {
+            DroppedOptionalStage::PreValidation => "pre-validation",
+            DroppedOptionalStage::Composition => "composition",
+            DroppedOptionalStage::PostShellExpansion => "post-shell expansion",
+        }
+    }
+}
+
+/// A schema-optional frontmatter property whose value failed validation
+/// and was elided from the run.
+///
+/// Carries enough metadata for the CLI to render an actionable warning
+/// to stderr so users notice when their supplied value silently dropped
+/// out of the prompt context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DroppedOptional {
+    /// Property name as declared in the schema.
+    pub property: String,
+    /// Source of the invalid value: file frontmatter, setter override,
+    /// or composed effective frontmatter.
+    pub source: DroppedOptionalSource,
+    /// Pipeline stage where the property was dropped.
+    pub stage: DroppedOptionalStage,
+    /// Human-readable reason (the underlying validator message).
+    pub reason: String,
+}
+
+/// Where the invalid value originated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DroppedOptionalSource {
+    /// File-authored frontmatter value.
+    Frontmatter,
+    /// CLI `key=value` setter or `--set` JSON override.
+    Override,
+    /// Composed effective frontmatter (post template / shell expansion).
+    Composed,
+}
+
+impl DroppedOptionalSource {
+    /// Short human-readable label used in CLI warnings.
+    pub fn label(self) -> &'static str {
+        match self {
+            DroppedOptionalSource::Frontmatter => "frontmatter",
+            DroppedOptionalSource::Override => "override",
+            DroppedOptionalSource::Composed => "composed",
+        }
+    }
+}
+
+fn format_missing_names(missing: &[MissingProperty]) -> String {
+    missing
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Per-step missing-property record for [`CompositionError::SequenceMissingProperties`].
+///
+/// Carries the same fields as a single-step [`CompositionError::MissingProperties`]
+/// so the CLI can render each step's report without having to re-validate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SequenceMissingPropertiesStep {
+    /// 1-based step number.
+    pub step: usize,
+    /// Display name of the step.
+    pub step_name: String,
+    /// The prompt file whose schema declared the missing properties.
+    pub source_path: PathBuf,
+    /// Missing properties in declaration order.
+    pub missing: Vec<MissingProperty>,
+    /// Frontmatter `description` value, if any.
+    pub frontmatter_description: Option<String>,
+    /// JSON pointer paths from Darkmatter's validation problems used
+    /// when the document has raw JSON Schema and no typed metadata.
+    pub pointer_paths: Vec<String>,
 }
 
 /// Per-step failure information for sequence selection errors.
@@ -451,6 +740,72 @@ impl BlockError for CompositionError {
                     "Re-run after the listed reset time, or use \
                          `--on-rate-limit pause` to wait automatically.",
                 ),
+            CompositionError::SchemaLoad {
+                source_path,
+                message,
+            } => {
+                let file_link = render_file_link(source_path);
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("CompositionError", "schema load failed"))
+                    .body(format!(
+                        "Could not load the `$schema` referenced by {file_link}.\n\n{message}"
+                    ))
+                    .hint(
+                        "Verify the `$schema` path is correct, relative to the prompt's parent \
+                         directory. Remote `http://` / `https://` references are not supported.",
+                    )
+            }
+            CompositionError::SchemaValidation {
+                source_path,
+                message,
+                problems,
+            } => {
+                let file_link = render_file_link(source_path);
+                let mut body = format!("Schema validation failed for {file_link}.\n\n{message}");
+                if !problems.is_empty() {
+                    body.push_str("\n\n<b>Problems:</b>");
+                    for problem in problems {
+                        body.push_str(&format!("\n- <cyan>`{problem}`</cyan>"));
+                    }
+                }
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("CompositionError", "schema validation"))
+                    .body(body)
+            }
+            CompositionError::MissingProperties {
+                source_path,
+                missing,
+                frontmatter_description,
+                pointer_paths,
+            } => render_missing_properties_block(
+                source_path,
+                missing,
+                frontmatter_description.as_deref(),
+                pointer_paths,
+            ),
+            CompositionError::SequenceMissingProperties { failures, .. } => {
+                render_sequence_missing_properties_block(failures)
+            }
+            CompositionError::UnsupportedInteractiveSchema {
+                source_path,
+                property,
+                shape,
+            } => {
+                let file_link = render_file_link(source_path);
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "unsupported interactive schema",
+                    ))
+                    .body(format!(
+                        "Required property <cyan>`{property}`</cyan> in {file_link} has shape \
+                         <i>{shape}</i>, which cannot be collected interactively."
+                    ))
+                    .hint(
+                        "Pass the value with key=value or --set, or provide it in the prompt's \
+                         frontmatter.",
+                    )
+            }
             _ => {
                 let msg = self.to_string();
                 StatusBlock::new(StatusState::Error)
@@ -459,6 +814,124 @@ impl BlockError for CompositionError {
             }
         }
     }
+}
+
+/// Render an absolute OSC8 hyperlink to `path` showing its relative form
+/// where possible (falling back to the full display).
+///
+/// The Prose layer downgrades `<a href>` to plain text when the terminal
+/// does not support OSC8.
+fn render_file_link(path: &std::path::Path) -> String {
+    let abs = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf());
+    let abs_display = abs.display().to_string();
+    let label = path.display().to_string();
+    format!(
+        "<a href=\"{}\">{}</a>",
+        escape_prose_path(&abs_display),
+        escape_prose_path(&label)
+    )
+}
+
+fn render_sequence_missing_properties_block(
+    failures: &[SequenceMissingPropertiesStep],
+) -> StatusBlock {
+    let plural = if failures.len() == 1 { "step" } else { "steps" };
+    let mut body = format!(
+        "Missing required schema properties in {} {plural} of the sequence.",
+        failures.len()
+    );
+
+    for failure in failures {
+        let file_link = render_file_link(&failure.source_path);
+        body.push_str(&format!(
+            "\n\n<b>Step {}: <cyan>{}</cyan></b> ({file_link})",
+            failure.step,
+            escape_prose_path(&failure.step_name),
+        ));
+        if let Some(desc) = failure
+            .frontmatter_description
+            .as_deref()
+            .filter(|d| !d.trim().is_empty())
+        {
+            body.push_str(&format!("\n  <i><dim>{}</dim></i>", escape_prose_path(desc)));
+        }
+        if !failure.missing.is_empty() {
+            for prop in &failure.missing {
+                let type_label = prop
+                    .type_label
+                    .as_deref()
+                    .filter(|t| !t.is_empty())
+                    .unwrap_or("(unknown type)");
+                let mut line = format!("\n  - <cyan>`{}`</cyan>: {}", prop.name, type_label);
+                if let Some(desc) = prop.description.as_deref().filter(|d| !d.trim().is_empty()) {
+                    line.push_str(&format!(" <i><dim>— {}</dim></i>", escape_prose_path(desc)));
+                }
+                body.push_str(&line);
+            }
+        } else if !failure.pointer_paths.is_empty() {
+            for pointer in &failure.pointer_paths {
+                body.push_str(&format!("\n  - <cyan>`{pointer}`</cyan>"));
+            }
+        }
+    }
+
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new(
+            "CompositionError",
+            "sequence missing properties",
+        ))
+        .body(body)
+        .hint(
+            "Fix the missing values in the sequence document (or pass them via --set) and re-run; \
+             every step is validated before the first provider session starts.",
+        )
+}
+
+fn render_missing_properties_block(
+    source_path: &std::path::Path,
+    missing: &[MissingProperty],
+    frontmatter_description: Option<&str>,
+    pointer_paths: &[String],
+) -> StatusBlock {
+    let file_link = render_file_link(source_path);
+
+    let mut body = format!("Required {plural} missing in {file_link}.",
+        plural = if missing.len() == 1 { "property is" } else { "properties are" });
+
+    if let Some(desc) = frontmatter_description.filter(|d| !d.trim().is_empty()) {
+        body.push_str(&format!("\n\n<i><dim>{}</dim></i>", escape_prose_path(desc)));
+    }
+
+    if !missing.is_empty() {
+        body.push_str("\n\n<b>Missing:</b>");
+        for prop in missing {
+            let type_label = prop
+                .type_label
+                .as_deref()
+                .filter(|t| !t.is_empty())
+                .unwrap_or("(unknown type)");
+            let mut line = format!("\n- <cyan>`{}`</cyan>: {}", prop.name, type_label);
+            if let Some(desc) = prop.description.as_deref().filter(|d| !d.trim().is_empty()) {
+                line.push_str(&format!(" <i><dim>— {}</dim></i>", escape_prose_path(desc)));
+            }
+            body.push_str(&line);
+        }
+    } else if !pointer_paths.is_empty() {
+        body.push_str("\n\n<b>Validation problems:</b>");
+        for pointer in pointer_paths {
+            body.push_str(&format!("\n- <cyan>`{pointer}`</cyan>"));
+        }
+    }
+
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("CompositionError", "missing properties"))
+        .body(body)
+        .hint(
+            "Pass key=value, use --set, or set prompt_for_missing to true in an interactive \
+             terminal.",
+        )
 }
 
 fn escape_prose_path(input: &str) -> String {
@@ -571,6 +1044,204 @@ mod tests {
         assert!(
             rendered.starts_with("invalid loop definition:"),
             "got: {rendered}"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Schema errors
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn schema_load_display_includes_path_and_message() {
+        let err = CompositionError::SchemaLoad {
+            source_path: PathBuf::from("prompts/plan.md"),
+            message: "unsupported `http://` schema reference".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("prompts/plan.md"),
+            "expected path in display: {rendered}"
+        );
+        assert!(
+            rendered.contains("unsupported `http://`"),
+            "expected message in display: {rendered}"
+        );
+    }
+
+    #[test]
+    fn schema_validation_display_includes_message() {
+        let err = CompositionError::SchemaValidation {
+            source_path: PathBuf::from("prompts/plan.md"),
+            message: "expected number, got string".to_string(),
+            problems: vec!["/properties/count".to_string()],
+        };
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("expected number, got string"),
+            "got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn missing_properties_display_lists_names_in_order() {
+        let err = CompositionError::MissingProperties {
+            source_path: PathBuf::from("prompts/plan.md"),
+            missing: vec![
+                MissingProperty {
+                    name: "target".to_string(),
+                    type_label: Some("string".to_string()),
+                    description: None,
+                    interactive_shape: None,
+                },
+                MissingProperty {
+                    name: "count".to_string(),
+                    type_label: Some("number".to_string()),
+                    description: None,
+                    interactive_shape: None,
+                },
+            ],
+            frontmatter_description: None,
+            pointer_paths: Vec::new(),
+        };
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("target, count"),
+            "expected declaration-order names: {rendered}"
+        );
+        assert!(
+            rendered.contains("properties"),
+            "expected plural form for >1 missing: {rendered}"
+        );
+    }
+
+    #[test]
+    fn missing_properties_display_uses_singular_for_one() {
+        let err = CompositionError::MissingProperties {
+            source_path: PathBuf::from("prompts/plan.md"),
+            missing: vec![MissingProperty {
+                name: "target".to_string(),
+                type_label: Some("string".to_string()),
+                description: None,
+                interactive_shape: None,
+            }],
+            frontmatter_description: None,
+            pointer_paths: Vec::new(),
+        };
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("property") && !rendered.contains("properties"),
+            "expected singular form: {rendered}"
+        );
+    }
+
+    #[test]
+    fn unsupported_interactive_schema_display_mentions_shape() {
+        let err = CompositionError::UnsupportedInteractiveSchema {
+            source_path: PathBuf::from("prompts/plan.md"),
+            property: "config".to_string(),
+            shape: "object".to_string(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("`config`"), "got: {rendered}");
+        assert!(rendered.contains("object"), "got: {rendered}");
+    }
+
+    #[test]
+    fn missing_properties_status_block_includes_remediation_hint() {
+        use biscuit_terminal::prelude::TerminalRenderable;
+        use biscuit_terminal::terminal::Terminal;
+        let err = CompositionError::MissingProperties {
+            source_path: PathBuf::from("prompts/plan.md"),
+            missing: vec![MissingProperty {
+                name: "target".to_string(),
+                type_label: Some("string".to_string()),
+                description: Some("the target to act on".to_string()),
+                interactive_shape: None,
+            }],
+            frontmatter_description: Some("Plan a feature".to_string()),
+            pointer_paths: Vec::new(),
+        };
+        let block = err.status_block(&Terminal::default());
+        let rendered = block.render(&Terminal::default());
+        assert!(
+            rendered.contains("Pass key=value")
+                || rendered.contains("prompt_for_missing"),
+            "expected remediation hint in rendered output: {rendered}"
+        );
+    }
+
+    #[test]
+    fn sequence_missing_properties_status_block_lists_each_step() {
+        use biscuit_terminal::prelude::TerminalRenderable;
+        use biscuit_terminal::terminal::Terminal;
+        let err = CompositionError::SequenceMissingProperties {
+            failure_count: 2,
+            failures: vec![
+                SequenceMissingPropertiesStep {
+                    step: 1,
+                    step_name: "research".to_string(),
+                    source_path: PathBuf::from("prompts/seq.md"),
+                    missing: vec![MissingProperty {
+                        name: "topic".to_string(),
+                        type_label: Some("string".to_string()),
+                        description: None,
+                        interactive_shape: None,
+                    }],
+                    frontmatter_description: None,
+                    pointer_paths: Vec::new(),
+                },
+                SequenceMissingPropertiesStep {
+                    step: 2,
+                    step_name: "summarize".to_string(),
+                    source_path: PathBuf::from("prompts/seq.md"),
+                    missing: vec![MissingProperty {
+                        name: "tone".to_string(),
+                        type_label: Some("enum(formal|casual)".to_string()),
+                        description: Some("the desired tone".to_string()),
+                        interactive_shape: None,
+                    }],
+                    frontmatter_description: None,
+                    pointer_paths: Vec::new(),
+                },
+            ],
+        };
+        let block = err.status_block(&Terminal::default());
+        let rendered = block.render(&Terminal::default());
+        assert!(rendered.contains("Step 1"), "got: {rendered}");
+        assert!(rendered.contains("Step 2"), "got: {rendered}");
+        assert!(rendered.contains("topic"), "got: {rendered}");
+        assert!(rendered.contains("tone"), "got: {rendered}");
+        assert!(
+            rendered.contains("research") && rendered.contains("summarize"),
+            "got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn sequence_missing_properties_display_includes_failure_count() {
+        let err = CompositionError::SequenceMissingProperties {
+            failure_count: 3,
+            failures: Vec::new(),
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("3 step(s)"), "got: {rendered}");
+    }
+
+    #[test]
+    fn missing_properties_status_block_lists_pointer_paths_when_no_typed_metadata() {
+        use biscuit_terminal::prelude::TerminalRenderable;
+        use biscuit_terminal::terminal::Terminal;
+        let err = CompositionError::MissingProperties {
+            source_path: PathBuf::from("prompts/plan.md"),
+            missing: Vec::new(),
+            frontmatter_description: None,
+            pointer_paths: vec!["/properties/target".to_string()],
+        };
+        let block = err.status_block(&Terminal::default());
+        let rendered = block.render(&Terminal::default());
+        assert!(
+            rendered.contains("/properties/target"),
+            "expected JSON pointer in rendered output: {rendered}"
         );
     }
 }
