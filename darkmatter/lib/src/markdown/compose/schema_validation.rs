@@ -1,8 +1,16 @@
 //! Schema validation stage for the compose pipeline.
 //!
 //! This module implements the always-on Schema Validation stage that runs
-//! after `--set` / `--state` overrides are applied to frontmatter, but before
-//! any interpolation or shell expansion.
+//! after `--set` / `--state` overrides are applied to frontmatter AND after
+//! frontmatter interpolation has resolved `{{ }}` expressions, but BEFORE
+//! frontmatter shell expansion runs. Validating after interpolation lets
+//! schema-constrained fields derive from templates
+//! (e.g. `runtime_agent: '{{ env.AGENT }}'`); validating before shell
+//! expansion preserves fail-fast behavior so an invalid schema does not
+//! trigger expensive or side-effectful shell commands. Values that depend
+//! on shell-expanded inputs are re-validated downstream by the caller
+//! (e.g. claudine's `prepare_*_with_schema`) against the post-shell
+//! effective frontmatter.
 //!
 //! When the effective frontmatter violates the resolved schema, compose aborts
 //! with a styled [`BlockError`] that names the offending property.
@@ -65,16 +73,60 @@ pub(crate) fn run(markdown: &Markdown, options: &ComposeOptions) -> MarkdownResu
         }
     })?;
 
-    if !report.valid {
+    // Defer problems whose value will be re-resolved by frontmatter shell
+    // expansion. The compose-time validator runs BEFORE shell expansion so
+    // values that depend on `$(...)` expressions still hold their literal
+    // form here. The downstream consumer (e.g. claudine's
+    // `prepare_*_with_schema`) re-validates the post-shell effective
+    // frontmatter and reports any residual problems. See the rationale at
+    // `compose::run::compose` where this stage is invoked.
+    let fm_map = markdown.frontmatter().as_map();
+    let composition_independent: Vec<_> = report
+        .problems
+        .iter()
+        .filter(|p| {
+            let Some(name) = top_level_pointer_segment(&p.path) else {
+                return true;
+            };
+            !value_needs_shell_expansion(fm_map.get(&name))
+        })
+        .cloned()
+        .collect();
+
+    if !report.valid && !composition_independent.is_empty() {
         return Err(MarkdownError::SchemaValidationFailed {
             path,
-            problems: report.problems,
+            problems: composition_independent,
             summary: "frontmatter did not satisfy the schema".to_string(),
             description,
         });
     }
 
     Ok(())
+}
+
+/// Returns `true` when `value` contains a frontmatter shell expression
+/// (`$(...)`) somewhere in any string descendant. Compose-time schema
+/// validation must not fail values that will be transformed by frontmatter
+/// shell expansion — the consumer re-validates the post-shell effective
+/// frontmatter.
+fn value_needs_shell_expansion(value: Option<&serde_json::Value>) -> bool {
+    let Some(value) = value else { return false };
+    match value {
+        serde_json::Value::String(s) => s.contains("$("),
+        serde_json::Value::Array(items) => items.iter().any(|v| value_needs_shell_expansion(Some(v))),
+        serde_json::Value::Object(map) => map.values().any(|v| value_needs_shell_expansion(Some(v))),
+        _ => false,
+    }
+}
+
+fn top_level_pointer_segment(pointer: &str) -> Option<String> {
+    let stripped = pointer.strip_prefix('/')?;
+    let first = stripped.split('/').next()?;
+    if first.is_empty() {
+        return None;
+    }
+    Some(first.replace("~1", "/").replace("~0", "~"))
 }
 
 /// Determines the source path to report in validation errors.

@@ -14,6 +14,7 @@ pub mod link_display;
 pub mod logs;
 pub mod mcp;
 pub mod providers;
+pub mod schema_interactive;
 pub mod sequence;
 pub mod skills;
 pub mod slash_commands;

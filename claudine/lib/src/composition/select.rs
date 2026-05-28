@@ -526,6 +526,7 @@ mod tests {
             closure: CompositionClosurePlan::Direct,
             lifecycle: LifecycleConfig::default(),
             compose_perf: None,
+            dropped_optionals: Vec::new(),
         }
     }
 

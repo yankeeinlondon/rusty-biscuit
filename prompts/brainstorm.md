@@ -1,5 +1,8 @@
 ---
-context: 
+$prompt:
+    # describes what we're brainstorming about
+    context: string(required)
+    
 interactive: true
 ---
 
@@ -130,5 +133,3 @@ Drive the conversation forward through structured human-in-the-loop clarificatio
 
     - If you believe there is still more work to be done in finalizing the functional specification, return to step 1 and go through another round of questions
     - If you believe that the specification is now complete then summarize this to the user and you are done
-
-

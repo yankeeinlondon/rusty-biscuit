@@ -153,25 +153,192 @@ Use `#[serial_test::serial]` when a test mutates process-global state, shares a 
 cargo clippy -p <pkg> -- -D warnings
 ```
 
-Package areas that own multiple crates call `_lint` once per crate. The root `just lint` iterates the curated area list and invokes each area's public `lint` recipe.
-
-Linting is deliberately separate from `sanity`. `sanity` answers "do the fast tests pass?" while `lint` answers "does the code meet compiler and Clippy hygiene expectations?" `just all` runs both, with `sanity` first so cheap behavioral failures surface before lint output.
-
-Do not use lint recipes as a place for broad formatting churn. Keep lint fixes scoped to the warning or error at hand, and update docs only when public behavior or workflow changes.
+- Package areas that own multiple crates call `_lint` once per crate. The root `just lint` iterates the curated area list and invokes each area's public `lint` recipe.
+- Linting is deliberately separate from `sanity`. 
+    - `sanity` answers "do the fast tests pass?" 
+    - while `lint` answers "does the code meet compiler and Clippy hygiene expectations?" 
+    - `just all` runs both, with `sanity` first so cheap behavioral failures surface before lint output.
+- Do not use lint recipes as a place for broad formatting churn. 
+- Keep lint fixes scoped to the warning or error at hand, and update docs only when public behavior or workflow changes.
 
 ## Performance Testing
 
-Performance testing uses Criterion benchmarks exposed through `just bench`. The shared `_bench <pkg>` recipe runs:
+> **Rollout status.** The shared templates (`_bench`, `_bench_save`, `_bench_compare`, `_bench_id`, `_bench_preflight`) exist in `just/devops.just`. Public area-level wrappers (`bench-save`, `bench-compare`) and root-level orchestration for those are not yet wired into every area's `justfile`. This guide describes the end-state workflow; if `just bench-save` errors with "unknown recipe" in an area, the area still needs its public wrappers added.
+
+Performance testing in Rusty Biscuit answers a different question from unit tests. Unit tests ask "does this code do the right thing?" Benchmarks ask "is this change making it faster or slower?" The first is a pass/fail signal. The second is always **comparative** — a single number from a single run does not demonstrate anything by itself. The workflow below exists to make the comparison rigorous: same machine, same measurement tool, before and after a change.
+
+### What Criterion is, in one paragraph
+
+Rusty Biscuit uses [Criterion](https://github.com/bheisler/criterion.rs), the de-facto standard benchmark framework for Rust. Criterion takes a small piece of code, runs it many thousands of times, collects timing samples, computes statistics (mean, median, confidence intervals, outlier counts), and writes the result to disk. The next time you run the same bench, Criterion compares against the saved data and reports `improved`, `regressed`, or `no change` with a confidence interval and a p-value. Benchmark source code lives in each crate's `benches/` directory; you don't need to know how to author a Criterion bench to *run* one.
+
+Two Criterion concepts you'll see referenced below:
+
+- A **baseline** is a saved set of measurements stored under a chosen name. You produce one with `cargo bench ... -- --save-baseline NAME` and compare against one with `--baseline NAME`. The recipes below pick the name for you.
+- Criterion stores everything under `<workspace>/target/criterion/`. That directory is local to your machine, never synced, and `cargo clean` deletes it.
+
+### The workflow
+
+Suppose you're about to change the Markdown parser in `darkmatter` and you want to know whether your change makes it faster or slower. The canonical loop is four steps:
 
 ```bash
-cargo bench -p <pkg>
+# 1. From the merge base (or main), save the current performance as your baseline.
+cd darkmatter
+just bench-save
+
+# 2. Apply your change.
+git switch -c my-perf-change
+# ... edit code ...
+
+# 3. Run the comparison. Criterion prints "improved", "regressed", or
+#    "no change" for each bench, with the percentage and confidence interval.
+just bench-compare
+
+# 4. Paste the comparison output into your PR description (see "Reporting" below).
 ```
 
-Some areas add narrower benchmark recipes when the package has distinct performance surfaces. For example, `darkmatter` has separate schema, compose, and render benchmark recipes, plus baseline comparison helpers.
+That's the entire intended loop. You do not need to remember a baseline name — `bench-save` and `bench-compare` both derive one automatically from facts about your machine (see "Why baselines are per-host" below). You do not need to pass any flags to get the comparison report — Criterion produces it whenever a baseline with the matching name exists.
 
-Benchmarks are not part of `sanity`, `test`, or `all` because they need a quiet machine and their output is comparative. Use them when a change touches parsing, rendering, filesystem walks, terminal layout, API dispatch, or any other path where latency or throughput is part of the user-visible contract.
+Two additional recipes exist for specific situations:
 
-When reporting benchmark results, prefer before/after comparisons from the same host and similar power state. A single absolute number from a laptop under load is not a regression proof.
+- `just bench` — runs benches once without saving and without comparing. Useful as a smoke test that benches still compile, or for "I just want to see absolute numbers right now."
+- `just bench-id` — prints the auto-derived baseline name for the current host. You'll occasionally want this when writing a PR description so reviewers can see which host produced the comparison.
+
+Root-level orchestration (`just bench darkmatter` from the repo root, instead of `cd darkmatter && just bench`) follows the same pattern used by `just test` and `just sanity`. At the time of writing, `bench` is wired at the root but `bench-save` and `bench-compare` are not yet — run those from inside the area directory until the root recipes land.
+
+### Why baselines are per-host (and what multi-machine developers need to know)
+
+Criterion baselines are stored under a directory name. Rusty Biscuit auto-derives that name from stable facts about the machine running the bench. The shape is:
+
+```text
+{host8}--{arch}--{os}--{cores}c--{mem}g
+```
+
+Example from a 16-core 128 GB Apple Silicon laptop:
+
+```text
+4ef2e814--arm64--macos--16c--128g
+```
+
+The `host8` prefix is an 8-character xxHash of a stable machine identifier (`IOPlatformUUID` on macOS, `/etc/machine-id` on Linux, hostname as a fallback). The remaining fields come from `sniff cpu --json`, `sniff os --json`, and `sniff memory --json`. Run `just bench-id` to see the value for your current host.
+
+The practical effect is **per-host segregation by construction**:
+
+- Saving a baseline on your macOS dev laptop creates `target/criterion/<bench>/4ef2e814--arm64--macos--16c--128g/`.
+- Saving on your Linux VM creates a different directory under a different name on that VM.
+- `bench-compare` on the macOS laptop only ever looks for the macOS-named baseline. It cannot accidentally compare your macOS run against the Linux VM's numbers.
+
+This is why the doc no longer carries a "remember to compare on the same host" guideline — the name shape enforces it.
+
+If you bench across multiple machines, **each machine maintains its own independent baseline timeline**. Treat them as three separate stories: did this change regress on macOS? did it regress on Linux? did it regress on Windows? The framework does **not** currently cross-compare or aggregate across hosts; that would require syncing Criterion artifacts off-machine to a shared location, which we do not do today. If you need an "is this change a regression on all three platforms?" report, run the comparison on each machine and paste the three results together in the PR.
+
+Hardware changes invalidate baselines naturally. Add RAM and the `mem` segment changes; the old baseline becomes unreachable by name. That is the correct behavior — the old numbers were taken on a materially different machine and shouldn't be compared against new ones.
+
+### Host-state preflight
+
+Before either `bench-save` or `bench-compare` runs Criterion, it inspects the host and warns when conditions would skew the measurements. The three checks are:
+
+- **On battery power.** Thermal throttling kicks in aggressively on laptops, especially Apple Silicon. Plug in before benching.
+- **Less than 30% memory available.** Memory pressure causes page faults and allocator stalls that drown out the signal.
+- **1-minute load average above `cores / 2`.** Another process is competing for CPU; on a 16-core machine, the threshold is a load of 8.
+
+Behavior when one or more checks fire:
+
+| Context | Behavior |
+| --- | --- |
+| Interactive terminal | Prints warnings, prompts `ENTER to run anyway, Q to quit`. |
+| `CI=true` or `BENCH_NONINTERACTIVE=1` | Refuses with a non-zero exit. |
+| `BENCH_YES=1` (any context) | Skips the prompt or refusal, logs that the override was used. |
+
+If you legitimately need to bench on a constrained host (e.g. demo conditions are the point), set `BENCH_YES=1` and **note that explicitly in the PR comment**. The reader needs to know the numbers came from a constrained machine.
+
+### Reading Criterion output
+
+A typical Criterion comparison line looks like this:
+
+```text
+parse/markdown/large
+                        time:   [11.234 ms 11.456 ms 11.689 ms]
+                        change: [-8.21% -6.74% -5.31%] (p = 0.00 < 0.05)
+                        Performance has improved.
+```
+
+How to read it:
+
+- **`time:`** is the *current* measurement with a 95% confidence interval — `[lower estimate upper]`. The middle number is the point estimate; the outer numbers bound it.
+- **`change:`** is the delta against the saved baseline, also as a `[lower estimate upper]` confidence interval. Negative means faster.
+- **`p = 0.00 < 0.05`** is Criterion's significance test. If `p > 0.05`, Criterion will say `No change in performance detected` rather than claiming a regression or improvement, no matter how dramatic the percentage looks. Trust the verdict, not the raw percentage.
+- The final line is Criterion's plain-English summary: `Performance has improved`, `Performance has regressed`, or `No change in performance detected`.
+
+Criterion also writes an HTML report to `target/criterion/<bench>/report/index.html` with plots; useful for spotting bimodal distributions or outliers, but not for pasting into a PR.
+
+### Reporting benchmark results in a PR
+
+A good PR comment for a perf-relevant change has four parts:
+
+1. **What you changed and why it should affect perf.** One sentence.
+2. **The host name(s).** From `just bench-id` on each machine you benched. Lets reviewers see whether the numbers came from your laptop, your Linux VM, or CI.
+3. **The Criterion comparison summary**, pasted verbatim — the `time:` / `change:` / verdict block for each affected bench. Don't paraphrase; the structured form is the signal.
+4. **Any preflight warnings** that fired, with the reason you proceeded.
+
+Do not paste:
+
+- A single absolute number from one run with no baseline.
+- A screenshot of Criterion's HTML report. Reviewers can't grep an image.
+- Numbers from your laptop alongside numbers from the Linux VM as if they're directly comparable — they aren't, label them separately.
+
+### When to bench (and when not to)
+
+Run benches when the change *plausibly* affects a measurable runtime path:
+
+- Parsers, serializers, formatters
+- Render pipelines (terminal, HTML, Markdown)
+- Filesystem walks, repo scans, ignore-pattern matching
+- Allocation-heavy code paths (collection types, string handling, buffer reuse)
+- Async dispatch, channel throughput, lock contention
+
+Skip benches for changes that cannot affect runtime cost:
+
+- Renaming a symbol
+- Editing documentation, comments, or doctests
+- Adjusting derive macros that produce identical output
+- Trivial bug fixes that don't change the algorithm
+
+A full bench run for a non-trivial area like `darkmatter` can take several minutes. The cost is real; respect it.
+
+### Resetting and cleanup
+
+Baselines live in `target/criterion/`. A few practical consequences:
+
+- **`cargo clean` deletes them.** If you're about to clean and care about a baseline, save the criterion directory first or accept that you'll need to recapture.
+- **`target/` is per-checkout.** Two clones of the repo on the same machine have independent baseline stores.
+- **No rotation.** Saving a new baseline under the same auto-derived name overwrites the previous one. If you need to keep a historical baseline (e.g. for a release tag), pass an explicit name through `cargo bench` directly: `cargo bench -p darkmatter -- --save-baseline v1.2`.
+
+To reset baselines for one bench on the current host:
+
+```bash
+rm -rf target/criterion/<bench-name>/$(just bench-id)
+```
+
+To reset everything:
+
+```bash
+rm -rf target/criterion
+```
+
+### Recipe reference
+
+For quick lookup once the workflow is familiar:
+
+| Recipe | Purpose |
+| --- | --- |
+| `just bench [area...]` | Run benches once. No baseline, no comparison. |
+| `just bench-save [area...]` | Run benches and save as this host's baseline. |
+| `just bench-compare [area...]` | Run benches and compare against this host's baseline. |
+| `just bench-id` | Print the auto-derived baseline name for this host. |
+
+All four orchestrate through the shared `_bench`, `_bench_save`, `_bench_compare`, `_bench_id`, and `_bench_preflight` templates in `just/devops.just`. Area-level justfiles call those templates once per crate they own, the same pattern used by `_test` and `_lint` (see "Leveraging Shared Just Recipes" above).
+
+Required tools: `cargo`, `sniff`, `bh` (biscuit-hash CLI), `jq`. The first three are repo tooling installed by `just install`; `jq` is a system package (`brew install jq` or `apt install jq`).
 
 ## Test Coverage
 

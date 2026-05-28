@@ -410,6 +410,11 @@ pub struct PreparedComposition {
     pub lifecycle: LifecycleConfig,
     /// Darkmatter composition performance report, when enabled.
     pub compose_perf: Option<ComposePerfReport>,
+    /// Optional schema properties whose effective value failed validation
+    /// and were elided during prepare (pre-validation, drop-and-retry, or
+    /// post-shell re-validation). The CLI renders one user-visible warning
+    /// per entry so silently dropped values are surfaced before launch.
+    pub dropped_optionals: Vec<super::error::DroppedOptional>,
 }
 
 /// How the composition result should be applied after provider execution.

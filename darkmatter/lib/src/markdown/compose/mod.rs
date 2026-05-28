@@ -496,14 +496,6 @@ impl Markdown {
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion),
             );
 
-            // Schema Validation: check frontmatter against $schema or baseline
-            // after overrides are applied but before interpolation/shell expansion.
-            let sv_start = perf.is_enabled().then(std::time::Instant::now);
-            schema_validation::run(self, &options)?;
-            if let Some(start) = sv_start {
-                perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
-            }
-
             let shell_expansion_enabled =
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
 
@@ -531,6 +523,24 @@ impl Markdown {
                         start.elapsed(),
                     );
                 }
+            }
+
+            // Schema Validation: check frontmatter against $schema or baseline
+            // AFTER frontmatter interpolation so template values like
+            // `runtime_agent: '{{ env.AGENT }}'` are evaluated to their
+            // resolved form before being checked. Runs BEFORE shell
+            // expansion so the validator can fail-fast without triggering
+            // (potentially expensive or side-effectful) shell commands when
+            // the resolved frontmatter is invalid.
+            //
+            // For frontmatter values that depend on shell-expanded inputs,
+            // the second interpolation pass below will re-resolve them and
+            // the prepare-time consumer (e.g. claudine's `prepare_*_with_schema`)
+            // can re-validate the post-shell effective frontmatter.
+            let sv_start = perf.is_enabled().then(std::time::Instant::now);
+            schema_validation::run(self, &options)?;
+            if let Some(start) = sv_start {
+                perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
             }
 
             // Frontmatter Shell Expansion: execute $(cmd) in frontmatter values
