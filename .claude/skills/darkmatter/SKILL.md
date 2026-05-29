@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 0a9e0f6258164379-bc4ff04c901962f0
+hash: 38ce971c4dbb3efe-c7fdc5b66e6654df
 ---
 
 # darkmatter
@@ -93,7 +93,7 @@ The compose pipeline runs in three phases:
 **Inline Pre** (serial):
 
 1. **Frontmatter Interpolation** - Resolve `{{ variable }}` in frontmatter values.
-2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. Problems on fields still holding `$(...)` are deferred to downstream re-validation.
+2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast.
 3. **Frontmatter Shell Expansion** - Execute top-level `$(cmd)` frontmatter values.
 4. **Text Replacement** - Replace literal strings from `replace:` map.
 5. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions.

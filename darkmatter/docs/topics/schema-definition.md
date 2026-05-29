@@ -1,3 +1,10 @@
+---
+related_specs:
+    - "@darkmatter/features/_completed/2026-05-11-schemas/spec.md"
+    - "@darkmatter/features/_completed/2026-05-23-compose-schema/spec.md"
+    - "@darkmatter/features/_completed/2026-05-28-schema-coercion/spec.md"
+---
+
 # Schema Definition
 
 Darkmatter can **define**, **detect**, and **evaluate** schemas for Markdown frontmatter. Authors declare the shape of their frontmatter with **SimplifiedSchema** — a single-line YAML grammar that compiles deterministically to a Draft 2020-12 JSON Schema. Every validation runs through the `jsonschema` crate; SimplifiedSchema is a surface, not a parallel validator.
@@ -619,7 +626,7 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 - When a baseline schema is set via `ComposeOptions::with_baseline_schema(...)` and the document lacks `$schema`, the baseline alone is validated.
 - When neither `$schema` nor a baseline is present, the stage is a **no-op** — compose proceeds unchanged.
 - `--set` and `--state` overrides are applied **before** validation, so they can fulfill required properties. A document with `spec: ""` plus `--set spec=design.md` validates successfully.
-- Problems whose top-level field value still contains a frontmatter shell expression (`$(...)`) are **deferred** — that value has not been expanded at validation time, so the downstream consumer (e.g. claudine) re-validates the post-shell effective frontmatter. If every problem is deferred, compose proceeds; any composition-independent problem fails fast.
+- Problems whose top-level field value still contains a frontmatter shell expression (`$(...)`) are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been expanded at validation time, so the downstream consumer (e.g. claudine) re-validates the post-shell effective frontmatter. If every problem is deferred, compose proceeds; any composition-independent problem fails fast. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
 - Recursive compose runs validate every child document after its parent `set=` overlay is applied. A child schema failure aborts the parent compose under `fail_fast` (or when the error is structural); otherwise it surfaces as a transclusion warning.
 - The baseline schema participates in transclusion cache keys and persistent cache option hashing, so cached results are not reused across different baselines.
 
