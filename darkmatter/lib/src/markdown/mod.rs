@@ -53,6 +53,10 @@ pub use delta::{
     FrontmatterChange, MarkdownDelta, MovedSection, SectionId, SectionPath,
 };
 pub use frontmatter::{Frontmatter, MergeStrategy};
+pub use hash::{
+    ComputedHash, DetailedValue, FmHashPair, MdHashKind, MdHashOptions, ParseMdHashKindError,
+    SectionTuple,
+};
 pub use normalize::{
     HeadingAdjustment, HeadingLevel, NormalizationError, NormalizationReport, StructureIssue,
     StructureIssueKind, StructureValidation, ViolationCorrection,

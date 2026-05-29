@@ -135,6 +135,19 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
         .hint("Review the transform pipeline inputs and any configured rules.")
 }
 
+/// Build the [`StatusBlock`] for [`MarkdownError::MalformedStoredHash`].
+pub(crate) fn malformed_stored_hash_block(property: &str, reason: &str) -> StatusBlock {
+    let body = format!(
+        "<dim>Property:</dim> <inverse>{}</inverse>\n{}",
+        Prose::escape_text(property),
+        Prose::escape_text(reason),
+    );
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "malformed stored hash"))
+        .body(body)
+        .hint("Fix or remove the `hash` frontmatter property, or rerun `md hash --save` to rewrite it.")
+}
+
 /// Build the [`StatusBlock`] for [`MarkdownError::SchemaValidationFailed`].
 ///
 /// When `problems` is empty the failure represents a schema *preparation*
@@ -365,6 +378,21 @@ mod tests {
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
         assert!(out.contains("transform failed"), "missing summary: {out}");
         assert!(out.contains("pipeline stalled"), "missing message: {out}");
+    }
+
+    #[test]
+    fn malformed_stored_hash_block_renders_property_and_reason() {
+        let out = render_block(&malformed_stored_hash_block(
+            "hash",
+            "expected one of: fm, body, simple, structured, detailed",
+        ));
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(out.contains("malformed stored hash"), "missing summary: {out}");
+        assert!(out.contains("hash"), "missing property: {out}");
+        assert!(
+            out.contains("expected one of"),
+            "missing reason: {out}"
+        );
     }
 
     /// Preparation failures (malformed `$schema`, unresolved baseline) arrive
