@@ -598,15 +598,15 @@ Every variant implements `biscuit_terminal::errors::BlockError`, so failures ren
 
 ## Compose Pipeline Integration
 
-Darkmatter runs an **always-on Schema Validation stage** inside `md compose`. It validates the document's effective frontmatter against the resolved `$schema` (and optional baseline) after `--set` / `--state` overrides are applied, but **before** frontmatter interpolation or shell expansion. This means schema violations fail fast with a clear error naming the offending property, rather than producing cryptic downstream failures (e.g. `dirname ''` from an empty interpolation).
+Darkmatter runs an **always-on Schema Validation stage** inside `md compose`. It validates the document's effective frontmatter against the resolved `$schema` (and optional baseline) after `--set` / `--state` overrides are applied and after frontmatter interpolation resolves `{{ }}` expressions, but **before** frontmatter shell expansion. This means schema violations fail fast with a clear error naming the offending property, rather than producing cryptic downstream failures (e.g. `dirname ''` from an empty interpolation). Validating after interpolation lets schema-constrained fields derive from templates (e.g. `runtime_agent: '{{ env.AGENT }}'`); validating before shell expansion avoids triggering side-effectful `$(...)` commands when the frontmatter is already invalid.
 
 ### Pipeline Placement
 
 ```
 Load markdown
   └─ Apply --set / --state overrides
-      └─ Schema Validation  ──► fails fast on violation
-          └─ Frontmatter Interpolation   ({{ var }})
+      └─ Frontmatter Interpolation   ({{ var }})
+          └─ Schema Validation  ──► fails fast on violation
               └─ Frontmatter Shell Expansion ($(cmd))
                   └─ …remaining stages…
 ```
@@ -619,7 +619,8 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 - When a baseline schema is set via `ComposeOptions::with_baseline_schema(...)` and the document lacks `$schema`, the baseline alone is validated.
 - When neither `$schema` nor a baseline is present, the stage is a **no-op** — compose proceeds unchanged.
 - `--set` and `--state` overrides are applied **before** validation, so they can fulfill required properties. A document with `spec: ""` plus `--set spec=design.md` validates successfully.
-- Recursive compose runs validate every child document after its parent `set=` overlay is applied.
+- Problems whose top-level field value still contains a frontmatter shell expression (`$(...)`) are **deferred** — that value has not been expanded at validation time, so the downstream consumer (e.g. claudine) re-validates the post-shell effective frontmatter. If every problem is deferred, compose proceeds; any composition-independent problem fails fast.
+- Recursive compose runs validate every child document after its parent `set=` overlay is applied. A child schema failure aborts the parent compose under `fail_fast` (or when the error is structural); otherwise it surfaces as a transclusion warning.
 - The baseline schema participates in transclusion cache keys and persistent cache option hashing, so cached results are not reused across different baselines.
 
 ### Library API
