@@ -20,7 +20,8 @@ pub use formatting::{
 };
 pub use frontmatter::parse_frontmatter_verbosity;
 pub use precedence::{
-    resolve_system_prompt_report_config, resolve_system_prompt_report_config_with_change,
+    resolve_agent_prompt_report_mode, resolve_system_prompt_report_config,
+    resolve_system_prompt_report_config_with_change, resolve_system_prompt_report_mode,
     resolve_user_prompt_report_config,
 };
 pub use system_prompt::{
@@ -30,7 +31,7 @@ pub use system_prompt::{
 pub use tokens::{estimate_system_prompt_tokens, estimate_tokens, estimate_tokens_dense};
 pub use truncation::{strip_leading_whitespace, truncate_front_back};
 pub use types::{
-    PromptReportFormat, PromptVerbosity, SystemPromptReportConfig, TruncationMode,
+    PromptReportFormat, PromptVerbosity, ReportMode, SystemPromptReportConfig, TruncationMode,
     UserPromptReportConfig,
 };
 pub use user_prompt::{render_user_prompt_body, render_user_prompt_header, report_user_prompt};

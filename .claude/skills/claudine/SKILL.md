@@ -41,7 +41,7 @@ Nineteen modules plus the shared error type and the flat `provider_id` leaf. Ful
 | `prompt_reporting` | System/user prompt reporting types and rendering |
 | `reporting` | JSONL-to-SQLite metrics index |
 | `stream` | Structured stream parsing for 6 providers (typed models in `stream::protocol`) |
-| `system_prompt` | Launch-CWD detection (`LaunchContext`), `system-prompt.md` discovery, `EffectiveSystemPrompt` resolution |
+| `system_prompt` | Launch-CWD detection (`LaunchContext`), `system-prompt.md` discovery, `ResolvedSystemPrompt` resolution |
 | `provider_id` *(leaf)* | `Provider` enum, `provider_info()`, `PROVIDERS_DISPLAY_ORDER`, `OutputFormatSelector` (split from `provider/mod.rs` to break the `provider` ⇄ `stream` import cycle) |
 
 ## CLI Commands
