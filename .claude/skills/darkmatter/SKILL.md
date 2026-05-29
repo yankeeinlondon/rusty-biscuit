@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: d57f54767f869d83-2fb62553a55befa8
+hash: 0a9e0f6258164379-bc4ff04c901962f0
 ---
 
 # darkmatter
@@ -92,8 +92,8 @@ The compose pipeline runs in three phases:
 
 **Inline Pre** (serial):
 
-1. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides but before interpolation or shell expansion.
-2. **Frontmatter Interpolation** - Resolve `{{ variable }}` in frontmatter values.
+1. **Frontmatter Interpolation** - Resolve `{{ variable }}` in frontmatter values.
+2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. Problems on fields still holding `$(...)` are deferred to downstream re-validation.
 3. **Frontmatter Shell Expansion** - Execute top-level `$(cmd)` frontmatter values.
 4. **Text Replacement** - Replace literal strings from `replace:` map.
 5. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions.
@@ -122,7 +122,7 @@ Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via 
 - `$schema` frontmatter property (inline, file reference, or root-level union).
 - `md schema validate` and `md schema detect` CLI subcommands.
 - `DarkmatterSchemas` library API with baseline merging and LRU validator cache.
-- Always-on compose pipeline stage (after `--set`/`--state`, before interpolation).
+- Always-on compose pipeline stage (after `--set`/`--state` and interpolation, before shell expansion).
 - `ComposeOptions::with_baseline_schema(...)` for programmatic baseline injection.
 
 See `darkmatter/docs/topics/schema-definition.md` for the full topic documentation.
