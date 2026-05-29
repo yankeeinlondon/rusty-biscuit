@@ -12,14 +12,14 @@ block-beta
         preTitle["<b>1. Inline Pre</b> (<i>serial</i>)"]
         preFlightChecks("<a href='./inline/preflight-checks.md'>0. Pre-flight checks 🏁</a>")
         fmInterpolate("<a href='./inline/fm-interpolation.md'>1. Frontmatter Interpolation 🏁</a>")
-        schemaValidation("<a href='./topics/schema-validation.md'>2. Frontmatter Shell Expansion 🏁</a>")
-        shellExp("<a href='./inline/fm-shell-expansion.md'>2. Frontmatter Shell Expansion 🏁</a>")
-        textReplacement("<a href='./inline/text-replacement.md'>3. Text Replacement 🏁</a>")
-        pageBlocks("<a href='./inline/page-blocks.md'>4. Page Blocks 🏁</a>")
-        interpolation("<a href='./inline/interpolation.md'>5. Interpolation 🏁</a>")
-        shellExpansion("<a href='./inline/shell-expansion.md'>6. Shell Expansion 🏁</a>")
-        shellBlocks("<a href='./inline/shell-blocks.md'>7. Shell Blocks 🏁</a>")
-        linkResolve("<a href='./operations/link-resolve.md'>8. Link Resolve (abs) 🏁</a>")
+        schemaValidation("<a href='./inline/schema-validation.md'>2. Schema Validation 🏁</a>")
+        shellExp("<a href='./inline/fm-shell-expansion.md'>3. Frontmatter Shell Expansion 🏁</a>")
+        textReplacement("<a href='./inline/text-replacement.md'>4. Text Replacement 🏁</a>")
+        pageBlocks("<a href='./inline/page-blocks.md'>5. Page Blocks 🏁</a>")
+        interpolation("<a href='./inline/interpolation.md'>6. Interpolation 🏁</a>")
+        shellExpansion("<a href='./inline/shell-expansion.md'>7. Shell Expansion 🏁</a>")
+        shellBlocks("<a href='./inline/shell-blocks.md'>8. Shell Blocks 🏁</a>")
+        linkResolve("<a href='./operations/link-resolve.md'>9. Link Resolve (abs) 🏁</a>")
     end
 
     block:transclusion
