@@ -16,10 +16,13 @@
 //! See `darkmatter/features/2026-05-28-schema-coercion/design.md` for the
 //! recognizer table and union algorithm this implements.
 
+use std::collections::HashSet;
+
+use jsonschema::Validator;
 use serde_json::{Map, Value};
 
 use super::simplified::convert::{BOOLISH_VALUES, NUMBERLIKE_PATTERN};
-use super::validate::{self, build_validator};
+use super::validate::{self, build_validator, error_top_level_key};
 
 /// The conversion a recognized property schema asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,17 +117,24 @@ fn target_from_any_of(arms: &[Value]) -> Option<CoercionTarget> {
     }
 }
 
-/// True when a non-empty `anyOf` `enum` arm's members are *all* boolish
-/// spellings ([`BOOLISH_VALUES`]). [`super::simplified::convert::boolish_fragment`]
-/// emits the full six-spelling set, but any subset (e.g. `["true","false"]`)
-/// still represents only boolish values and so coerces safely. An enum carrying
-/// any non-boolish member (e.g. `["auto"]`) — including a non-string member —
-/// fails the match and is left untouched.
+/// True when an `anyOf` `enum` arm's members are *exactly* the full boolish
+/// spelling set ([`BOOLISH_VALUES`]), order-independent and with no missing or
+/// extra members. This is precisely the shape
+/// [`super::simplified::convert::boolish_fragment`] emits, so the recognizer
+/// matches only Darkmatter's own boolish fragment. Any subset (e.g. `["true"]`
+/// or `["true","false"]`), any superset, or any non-boolish member fails the
+/// match and is left untouched for the strict validator.
+///
+/// Subsets must be rejected: a raw JSON Schema such as
+/// `{"anyOf":[{"type":"boolean"},{"enum":["true"]}]}` is *not* Darkmatter's
+/// shape, and with instance `"false"` strict validation must fail (string, and
+/// `"false"` is not in `["true"]`). Recognizing the subset would coerce
+/// `"false"` → `false` and falsely validate it against the boolean arm.
 fn is_boolish_enum(members: &[Value]) -> bool {
-    !members.is_empty()
-        && members
+    members.len() == BOOLISH_VALUES.len()
+        && BOOLISH_VALUES
             .iter()
-            .all(|m| m.as_str().is_some_and(|s| BOOLISH_VALUES.contains(&s)))
+            .all(|expected| members.iter().any(|m| m.as_str() == Some(*expected)))
 }
 
 /// Builds a coerced copy of `instance` against `json_schema` and reports
@@ -135,14 +145,39 @@ fn is_boolish_enum(members: &[Value]) -> bool {
 /// candidate validates is committed. If no arm validates, the instance is
 /// returned unchanged so the existing union error reporting runs.
 pub fn coerce_frontmatter(json_schema: &Value, instance: &Value) -> CoercionOutcome {
+    coerce_frontmatter_with_pending(json_schema, instance, &HashSet::new())
+}
+
+/// Like [`coerce_frontmatter`], but for the compose pre-shell stage where some
+/// top-level keys still hold `$(...)` shell expressions and so cannot yet be
+/// coerced or validated to their declared types.
+///
+/// For a root `anyOf` union, an arm is committed when its coerced candidate
+/// either fully validates *or* the only remaining validation problems are
+/// attributable to keys in `shell_pending` — whose real type is resolved at
+/// post-shell re-validation. This lets non-shell fields in the winning arm
+/// (e.g. a boolish `flag: "false"`) still coerce and be written back even when a
+/// sibling shell-pending typed field (e.g. `n: "$(echo 1)"`) keeps the raw
+/// candidate from validating. Non-shell coercions are unaffected: a non-union
+/// schema ignores `shell_pending` (its per-property pass already skips
+/// uncoercible values), and an empty set reduces this to [`coerce_frontmatter`].
+pub fn coerce_frontmatter_with_pending(
+    json_schema: &Value,
+    instance: &Value,
+    shell_pending: &HashSet<String>,
+) -> CoercionOutcome {
     if let Some(arms) = json_schema.get("anyOf").and_then(Value::as_array) {
-        return coerce_root_union(arms, instance);
+        return coerce_root_union(arms, instance, shell_pending);
     }
     coerce_object(json_schema, instance)
 }
 
-/// Root-union pass: commit the first arm whose coerced candidate validates.
-fn coerce_root_union(arms: &[Value], instance: &Value) -> CoercionOutcome {
+/// Root-union pass: commit the first arm whose coerced candidate is accepted.
+fn coerce_root_union(
+    arms: &[Value],
+    instance: &Value,
+    shell_pending: &HashSet<String>,
+) -> CoercionOutcome {
     for arm in arms {
         let candidate = coerce_object(arm, instance).value;
         let wrapped = validate::wrap_arm_as_root_schema(arm);
@@ -151,7 +186,7 @@ fn coerce_root_union(arms: &[Value], instance: &Value) -> CoercionOutcome {
         let Ok(validator) = build_validator(&wrapped) else {
             continue;
         };
-        if validator.is_valid(&candidate) {
+        if arm_accepts(&validator, &candidate, shell_pending) {
             let changed = &candidate != instance;
             return CoercionOutcome {
                 value: candidate,
@@ -163,6 +198,32 @@ fn coerce_root_union(arms: &[Value], instance: &Value) -> CoercionOutcome {
         value: instance.clone(),
         changed: false,
     }
+}
+
+/// Whether a root-union arm's coerced candidate is good enough to commit.
+///
+/// A fully valid candidate is always accepted. Otherwise — only when
+/// `shell_pending` is non-empty — the arm is still accepted if every residual
+/// validation problem points at a pending `$(...)` top-level key. Those keys
+/// are re-validated and coerced after shell expansion, so deferring them here
+/// is sound; a problem on any non-pending key (including a missing required
+/// discriminator) rejects the arm so a genuinely wrong arm is never committed.
+fn arm_accepts(validator: &Validator, candidate: &Value, shell_pending: &HashSet<String>) -> bool {
+    if validator.is_valid(candidate) {
+        return true;
+    }
+    if shell_pending.is_empty() {
+        return false;
+    }
+    let mut saw_problem = false;
+    for err in validator.iter_errors(candidate) {
+        saw_problem = true;
+        match error_top_level_key(&err) {
+            Some(key) if shell_pending.contains(&key) => {}
+            _ => return false,
+        }
+    }
+    saw_problem
 }
 
 /// Non-union object pass: coerce each instance property that the schema
@@ -414,6 +475,19 @@ mod tests {
     }
 
     #[test]
+    fn boolish_subset_enum_union_is_none() {
+        // A boolish *subset* enum is NOT the full six-spelling shape
+        // `boolish_fragment` emits. Recognizing it would coerce a value like
+        // `"false"` against `{"anyOf":[{"type":"boolean"},{"enum":["true"]}]}`
+        // into `false` and falsely validate it against the boolean arm, even
+        // though strict validation should reject the string `"false"`.
+        let single = json!({"anyOf": [{"type": "boolean"}, {"enum": ["true"]}]});
+        assert_eq!(coercion_target(&single), None);
+        let pair = json!({"anyOf": [{"type": "boolean"}, {"enum": ["true", "false"]}]});
+        assert_eq!(coercion_target(&pair), None);
+    }
+
+    #[test]
     fn unrelated_number_string_pattern_union_is_none() {
         // A number/string union whose string arm carries a *different* pattern
         // is not the numberlike shape; coercing `"42"` here would defeat the
@@ -608,7 +682,10 @@ mod tests {
         let schema = json!({
             "type": "object",
             "properties": {
-                "flag": {"anyOf": [{"type": "boolean"}, {"enum": ["true", "false"]}]},
+                "flag": {"anyOf": [
+                    {"type": "boolean"},
+                    {"enum": ["true", "false", "True", "False", "TRUE", "FALSE"]}
+                ]},
                 "n": {"anyOf": [{"type": "number"}, {"type": "string", "pattern": r"^-?\d+(\.\d+)?$"}]}
             }
         });
@@ -666,6 +743,90 @@ mod tests {
         assert_eq!(outcome.value["has_spec"], json!(true));
         assert_eq!(outcome.value["has_plan"], json!(false));
         assert_eq!(outcome.value["has_review"], json!(false));
+    }
+
+    #[test]
+    fn root_union_commits_arm_when_only_pending_keys_block_it() {
+        // An arm declaring both a shell-pending number (`n`) and a non-shell
+        // boolean (`flag`). With `n` deferred via `shell_pending`, the arm is
+        // committed and `flag` coerces; `n` keeps its literal `$(...)` form.
+        let schema = json!({
+            "anyOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "kind": {"type": "string"},
+                        "n": {"type": "number"},
+                        "flag": {"type": "boolean"}
+                    },
+                    "required": ["kind"]
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": { "other": {"type": "string"} },
+                    "required": ["other"]
+                }
+            ]
+        });
+        let instance = json!({ "kind": "implement", "n": "$(echo 1)", "flag": "false" });
+        let pending: HashSet<String> = ["n".to_string()].into_iter().collect();
+        let outcome = coerce_frontmatter_with_pending(&schema, &instance, &pending);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["flag"], json!(false));
+        assert_eq!(outcome.value["n"], json!("$(echo 1)"));
+    }
+
+    #[test]
+    fn root_union_without_pending_set_still_requires_full_validation() {
+        // Same shape, but no key is marked pending: `n: "$(echo 1)"` is a string
+        // against a `number` arm, so no arm fully validates and the instance is
+        // returned unchanged (the existing union error reporting then runs).
+        let schema = json!({
+            "anyOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "kind": {"type": "string"},
+                        "n": {"type": "number"},
+                        "flag": {"type": "boolean"}
+                    },
+                    "required": ["kind"]
+                }
+            ]
+        });
+        let instance = json!({ "kind": "implement", "n": "$(echo 1)", "flag": "false" });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(!outcome.changed);
+        assert_eq!(outcome.value, instance);
+    }
+
+    #[test]
+    fn root_union_pending_does_not_mask_non_pending_failure() {
+        // `flag` is non-pending and holds an uncoercible array, so even though
+        // `n` is pending the arm has a residual non-pending problem on `/flag`
+        // and must not be committed.
+        let schema = json!({
+            "anyOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "kind": {"type": "string"},
+                        "n": {"type": "number"},
+                        "flag": {"type": "boolean"}
+                    },
+                    "required": ["kind"]
+                }
+            ]
+        });
+        let instance = json!({ "kind": "implement", "n": "$(echo 1)", "flag": [1, 2] });
+        let pending: HashSet<String> = ["n".to_string()].into_iter().collect();
+        let outcome = coerce_frontmatter_with_pending(&schema, &instance, &pending);
+        assert!(!outcome.changed);
+        assert_eq!(outcome.value, instance);
     }
 
     #[test]

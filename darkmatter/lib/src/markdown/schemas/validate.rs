@@ -275,6 +275,16 @@ fn classify_kind(kind: &ValidationErrorKind) -> ValidationProblemKind {
     }
 }
 
+/// Top-level frontmatter key a validation error is attributable to, if any.
+///
+/// Mirrors the attribution [`collect_problems`] uses (the missing-property name
+/// for `Required`, otherwise the first JSON-pointer segment), so callers that
+/// reason about which key caused a failure stay consistent with reported
+/// problems without re-deriving the rule.
+pub(super) fn error_top_level_key(err: &jsonschema::ValidationError<'_>) -> Option<String> {
+    identify_key(err.instance_path().as_str(), err.kind())
+}
+
 /// Picks the top-level frontmatter key to attribute a problem to.
 ///
 /// - For `Required` failures the key comes from the error kind (the path

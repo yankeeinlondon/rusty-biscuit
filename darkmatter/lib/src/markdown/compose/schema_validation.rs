@@ -21,7 +21,7 @@
 //! This stage also MUTATES the stored frontmatter: before reporting, it coerces
 //! schema-recognized scalar values to their declared types (e.g. the string
 //! `"true"` against a `boolean` field becomes a real JSON bool) via
-//! [`coerce_frontmatter`] and writes the coerced top-level properties back into
+//! [`coerce_frontmatter_with_pending`] and writes the coerced top-level properties back into
 //! `markdown.frontmatter_mut()`, so the real types flow to every later stage and
 //! into the composed output. Values still holding a `$(...)` shell expression are
 //! left untouched here — their real type is resolved at post-shell re-validation.
@@ -32,7 +32,7 @@ use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::types::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::DarkmatterSchemas;
-use crate::markdown::schemas::coerce::coerce_frontmatter;
+use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
 
 /// Runs schema validation against the document's effective frontmatter,
@@ -44,9 +44,11 @@ use crate::markdown::types::{MarkdownError, MarkdownResult};
 /// 2. Builds `DarkmatterSchemas::new()` plus `.with_baseline(...)` when
 ///    `ComposeOptions::baseline_schema` is set.
 /// 3. Resolves the effective schema, coerces the frontmatter against it via
-///    [`coerce_frontmatter`], and writes coerced top-level properties back into
+///    [`coerce_frontmatter_with_pending`], and writes coerced top-level properties back into
 ///    `markdown.frontmatter_mut()` (skipping any value still holding a `$(...)`
-///    shell expression).
+///    shell expression). The pending-key set is passed through so a root-union
+///    arm can be committed when its only residual problems are shell-pending
+///    keys, letting non-shell siblings still coerce and write back.
 /// 4. Calls `.validate(&markdown)` on the now-coerced frontmatter.
 /// 5. Converts schema-preparation `SchemaError` into
 ///    `MarkdownError::SchemaValidationFailed`, preserving the original error
@@ -120,7 +122,7 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
             (serde_json::Value::Object(object), shell_pending)
         };
 
-        let outcome = coerce_frontmatter(&effective.json_schema, &instance);
+        let outcome = coerce_frontmatter_with_pending(&effective.json_schema, &instance, &shell_pending);
         if outcome.changed
             && let serde_json::Value::Object(coerced) = outcome.value
         {
@@ -436,6 +438,31 @@ mod tests {
             md.frontmatter().as_map().get("n"),
             Some(&serde_json::json!("$(echo 1)"))
         );
+    }
+
+    #[test]
+    fn write_back_root_union_defers_pending_and_coerces_sibling() {
+        // A root-union arm declares both a shell-pending typed field (`n:
+        // number`) and a non-shell boolean (`flag`). The pending `n` must be
+        // deferred (left as its literal `$(...)` form, run returns Ok) while the
+        // non-shell `flag` still coerces and is written back as a real bool —
+        // even though `n` keeps the raw arm candidate from validating.
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 - kind: string(required)\n\
+             \x20   n: number\n\
+             \x20   flag: boolean\n\
+             \x20 - other: string(required)\n\
+             kind: implement\n\
+             n: \"$(echo 1)\"\n\
+             flag: \"false\"\n",
+        );
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        let fm = md.frontmatter();
+        let map = fm.as_map();
+        assert_eq!(map.get("flag"), Some(&serde_json::json!(false)));
+        assert_eq!(map.get("n"), Some(&serde_json::json!("$(echo 1)")));
     }
 
     // ── Baseline merging ──────────────────────────────────────────────
