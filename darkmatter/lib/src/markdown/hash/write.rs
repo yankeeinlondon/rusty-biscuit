@@ -163,13 +163,15 @@ mod tests {
     fn updating_existing_hash_preserves_key_order() {
         // `hash` sits in the middle: its position must be preserved on update.
         let opts = MdHashOptions::default();
-        let stored =
-            crate::markdown::hash::StoredHash::parse(&serde_json::json!("stale-value"), "hash")
-                .unwrap();
+        let stored = crate::markdown::hash::StoredHash::parse(
+            &serde_json::json!("aaaa111111111111-bbbb222222222222"),
+            "hash",
+        )
+        .unwrap();
 
         // Force a body change so a rewrite is required.
         let edited = md(
-            "---\ntitle: T\nhash: stale-value\nauthor: A\n---\n# H\n\nChanged body.",
+            "---\ntitle: T\nhash: aaaa111111111111-bbbb222222222222\nauthor: A\n---\n# H\n\nChanged body.",
         );
         let decision = edited.plan_hash_save(Some(&stored), &opts).unwrap();
         let written = edited.apply_hash_save(&decision, &opts, "2026-05-28").unwrap();

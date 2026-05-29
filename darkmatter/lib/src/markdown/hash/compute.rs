@@ -185,23 +185,61 @@ fn filtered_frontmatter(md: &Markdown, ignore: &BTreeSet<String>) -> Frontmatter
         .collect()
 }
 
-/// Hashes the document's heading structure: each heading in document order
-/// rendered as `<#...> <title>`, joined with newlines. Captures heading text,
-/// level, and order without section content. Empty when there are no headings.
+/// The literal heading text for the heading whose source line starts at
+/// `start_byte`: the heading source with only ATX/setext markers and surrounding
+/// whitespace removed. Inline Markdown syntax is preserved, so `# Install *Now*`
+/// yields `Install *Now*` rather than the parsed `Install Now`.
 ///
-/// This is a verbatim structural fingerprint — it applies no whitespace
-/// normalization, so `strict` does not affect it. Whitespace-only differences in
-/// the heading *source* surface through the `body` value component (which is
-/// verbatim under strict), not through this skeleton.
+/// For ATX headings, the leading `#` run and an optional whitespace-preceded
+/// closing `#` run are stripped. Setext heading text lines carry no markers and
+/// are only trimmed.
+fn literal_heading(content: &str, start_byte: usize) -> String {
+    let line = content[start_byte..].split('\n').next().unwrap_or("");
+    let trimmed = line.trim();
+    if !trimmed.starts_with('#') {
+        // Setext heading: the underline lives on the following line, so the
+        // captured text line carries no markers.
+        return trimmed.to_string();
+    }
+    let body = trimmed.trim_start_matches('#').trim_start().trim_end();
+    if body.ends_with('#') {
+        // A trailing `#` run is a closing sequence only when whitespace
+        // precedes it (CommonMark); otherwise the `#`s are heading content.
+        let stripped = body.trim_end_matches('#');
+        if stripped.is_empty() || stripped.ends_with(char::is_whitespace) {
+            return stripped.trim_end().to_string();
+        }
+    }
+    body.to_string()
+}
+
+/// Hashes the document's heading structure: each heading in document order
+/// rendered as `<#...> <literal-heading>`, joined with newlines. Captures
+/// heading text, level, and order without section content. Empty when there are
+/// no headings.
+///
+/// The heading text is the literal source ([`literal_heading`]), so an inline
+/// markup change such as `# A *B*` vs `# A B` is a structural difference. This is
+/// a verbatim structural fingerprint — it applies no whitespace normalization, so
+/// `strict` does not affect it. Whitespace-only differences in the heading
+/// *source* surface through the `body` value component (which is verbatim under
+/// strict), not through this skeleton.
 fn hash_body_structure(md: &Markdown) -> u64 {
     let toc = md.toc();
     let headings = toc.all_headings();
     if headings.is_empty() {
         return xx_hash("");
     }
+    let content = md.content();
     let joined = headings
         .iter()
-        .map(|node| format!("{} {}", "#".repeat(node.level.hash_count()), node.title))
+        .map(|node| {
+            format!(
+                "{} {}",
+                "#".repeat(node.level.hash_count()),
+                literal_heading(content, node.source_span.0)
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     xx_hash(&joined)
@@ -237,7 +275,7 @@ fn compute_detailed(md: &Markdown, filtered: &FrontmatterMap, strict: bool) -> D
         .enumerate()
         .map(|(index, node)| SectionTuple {
             level: node.level.as_u8(),
-            heading: node.title.clone(),
+            heading: literal_heading(content, node.source_span.0),
             content_hash: hex(hash_content_with_policy(
                 section_content(content, &headings, index),
                 strict,
@@ -400,6 +438,40 @@ mod tests {
             original.compute_hash(MdHashKind::Detailed, &opts),
             respaced.compute_hash(MdHashKind::Detailed, &opts),
         );
+    }
+
+    #[test]
+    fn structured_body_structure_distinguishes_inline_heading_markup() {
+        // The structural fingerprint hashes the literal heading source, so an
+        // inline-markup-only change is a structural difference even though the
+        // parsed title (`Install Now`) is identical.
+        let styled = md("# Install *Now*\n\nBody.");
+        let plain = md("# Install Now\n\nBody.");
+        let opts = MdHashOptions::default();
+
+        let body_structure = |computed: ComputedHash| match computed {
+            ComputedHash::Structured { body_structure, .. } => body_structure,
+            other => panic!("expected Structured, got {other:?}"),
+        };
+
+        assert_ne!(
+            body_structure(styled.compute_hash(MdHashKind::Structured, &opts)),
+            body_structure(plain.compute_hash(MdHashKind::Structured, &opts)),
+            "inline markup in the heading source is a structural difference",
+        );
+    }
+
+    #[test]
+    fn detailed_section_heading_is_literal_source_text() {
+        // The persisted heading keeps inline Markdown and strips only the ATX
+        // markers (leading `#` run and the whitespace-preceded closing `##`).
+        let doc = md("# Install *Now* ##\n\nBody.");
+        let ComputedHash::Detailed(value) =
+            doc.compute_hash(MdHashKind::Detailed, &MdHashOptions::default())
+        else {
+            panic!("expected Detailed");
+        };
+        assert_eq!(value.sections[0].heading, "Install *Now*");
     }
 
     #[test]

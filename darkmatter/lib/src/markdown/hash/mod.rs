@@ -101,14 +101,18 @@ pub(super) fn hash_frontmatter_map(map: &FrontmatterMap, strict: bool) -> u64 {
 
 /// Hashes a frontmatter map's keys only, ignoring values.
 ///
-/// Mirrors the non-strict key ordering of [`hash_frontmatter_map`] so the
-/// keys-only structure hash stays consistent with the keys+values hash.
-pub(super) fn hash_frontmatter_keys(map: &FrontmatterMap) -> u64 {
+/// Mirrors [`hash_frontmatter_map`]'s key-ordering policy so the keys-only
+/// structure hash stays consistent with the keys+values hash: non-strict sorts
+/// the keys, while strict preserves the document's insertion order so that
+/// `--strict` performs no key reordering.
+pub(super) fn hash_frontmatter_keys(map: &FrontmatterMap, strict: bool) -> u64 {
     if map.is_empty() {
         return xx_hash("");
     }
     let mut keys: Vec<&String> = map.keys().collect();
-    keys.sort();
+    if !strict {
+        keys.sort();
+    }
     let canonical = keys
         .iter()
         .map(|k| k.as_str())

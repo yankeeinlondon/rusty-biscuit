@@ -253,7 +253,9 @@ fn validate_flat(flat: &str, kind: MdHashKind, property: &str) -> MarkdownResult
     Ok(())
 }
 
-/// Validates every hash field of a `detailed` stored value.
+/// Validates every hash field of a `detailed` stored value, plus each section's
+/// heading level (`1..=6`) so a corrupted baseline cannot yield impossible
+/// levels such as `H0` or `H9`.
 fn validate_detailed(detailed: &DetailedValue, property: &str) -> MarkdownResult<()> {
     let check = |label: &str, value: &str| -> MarkdownResult<()> {
         if is_hash_component(value) {
@@ -272,6 +274,15 @@ fn validate_detailed(detailed: &DetailedValue, property: &str) -> MarkdownResult
         check("preamble", preamble)?;
     }
     for (index, section) in detailed.sections.iter().enumerate() {
+        if !(1..=6).contains(&section.level) {
+            return Err(malformed(
+                property,
+                format!(
+                    "sections[{index}].level {} is not a heading level 1-6",
+                    section.level
+                ),
+            ));
+        }
         check(&format!("sections[{index}].content_hash"), &section.content_hash)?;
     }
     Ok(())
@@ -606,6 +617,36 @@ mod tests {
         .to_frontmatter_value();
         let err = StoredHash::parse(&value, "hash").unwrap_err();
         assert!(err.to_string().contains("sections[1].content_hash"));
+    }
+
+    #[test]
+    fn rejects_detailed_with_section_level_below_one() {
+        let mut detailed = detailed_fixture();
+        detailed.sections[0].level = 0;
+        let value = StoredHash {
+            kind: MdHashKind::Detailed,
+            value: StoredHashValue::Detailed(detailed),
+            ignored: Vec::new(),
+        }
+        .to_frontmatter_value();
+        let err = StoredHash::parse(&value, "hash").unwrap_err();
+        assert!(matches!(err, MarkdownError::MalformedStoredHash { .. }));
+        assert!(err.to_string().contains("sections[0].level"));
+    }
+
+    #[test]
+    fn rejects_detailed_with_section_level_above_six() {
+        let mut detailed = detailed_fixture();
+        detailed.sections[1].level = 7;
+        let value = StoredHash {
+            kind: MdHashKind::Detailed,
+            value: StoredHashValue::Detailed(detailed),
+            ignored: Vec::new(),
+        }
+        .to_frontmatter_value();
+        let err = StoredHash::parse(&value, "hash").unwrap_err();
+        assert!(matches!(err, MarkdownError::MalformedStoredHash { .. }));
+        assert!(err.to_string().contains("sections[1].level"));
     }
 
     #[test]
