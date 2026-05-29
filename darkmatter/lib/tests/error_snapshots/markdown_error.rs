@@ -141,6 +141,7 @@ fn schema_validation_missing_required_renders_block() {
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: Some("Planner prompt".to_string()),
+        source: None,
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -161,6 +162,7 @@ fn schema_validation_wrong_type_renders_block() {
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: None,
+        source: None,
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -181,6 +183,7 @@ fn schema_validation_format_failure_renders_block() {
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: Some("Design document".to_string()),
+        source: None,
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -199,6 +202,7 @@ fn schema_validation_preparation_failure_renders_summary() {
         summary: "schema could not be prepared: $schema must be a mapping or array of mappings"
             .to_string(),
         description: None,
+        source: None,
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -211,6 +215,7 @@ fn schema_validation_preparation_failure_with_description_renders_summary() {
         problems: vec![],
         summary: "schema could not be prepared: could not resolve ./missing.yaml".to_string(),
         description: Some("Planner prompt".to_string()),
+        source: None,
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -235,6 +240,7 @@ fn schema_validation_root_union_arm_index_renders_block() {
         }],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: None,
+        source: None,
     };
     let out = render(&err);
     insta::assert_snapshot!(out);
@@ -266,6 +272,7 @@ fn schema_validation_multiple_problems_renders_block() {
         ],
         summary: "frontmatter did not satisfy the schema".to_string(),
         description: None,
+        source: None,
     };
     let out = render(&err);
     insta::assert_snapshot!(out);

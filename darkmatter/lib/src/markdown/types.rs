@@ -102,6 +102,17 @@ pub enum MarkdownError {
         summary: String,
         /// Document description from frontmatter, when present.
         description: Option<String>,
+        /// Underlying schema-preparation error, when the failure originated
+        /// in schema parsing, resolution, conversion, baseline merge, or
+        /// validator construction. `None` when the schema was prepared
+        /// successfully but the frontmatter did not satisfy it (in which case
+        /// the failure detail lives in `problems`). Preserved so programmatic
+        /// callers can recover the original [`SchemaError`] via
+        /// [`std::error::Error::source`].
+        ///
+        /// [`SchemaError`]: crate::markdown::schemas::SchemaError
+        #[source]
+        source: Option<Box<crate::markdown::schemas::SchemaError>>,
     },
 }
 
@@ -167,6 +178,10 @@ impl BlockError for MarkdownError {
                 problems,
                 summary,
                 description,
+                // The preparation source is preserved for `Error::source()`
+                // programmatic recovery; the styled block renders `summary`
+                // and `problems` only.
+                source: _,
             } => blocks::schema_validation_failed_block(path, problems, summary, description),
         }
     }

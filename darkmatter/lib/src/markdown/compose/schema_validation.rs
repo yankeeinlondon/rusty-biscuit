@@ -34,7 +34,8 @@ use crate::markdown::types::{MarkdownError, MarkdownResult};
 ///    `ComposeOptions::baseline_schema` is set.
 /// 3. Calls `.validate(&markdown)`.
 /// 4. Converts schema-preparation `SchemaError` into
-///    `MarkdownError::SchemaValidationFailed`.
+///    `MarkdownError::SchemaValidationFailed`, preserving the original error
+///    on the variant's `source` field for `Error::source()` recovery.
 /// 5. Converts `ValidationReport { valid: false, problems }` into the same
 ///    error variant. On success, returns `Ok(())`.
 pub(crate) fn run(markdown: &Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
@@ -61,6 +62,7 @@ pub(crate) fn run(markdown: &Markdown, options: &ComposeOptions) -> MarkdownResu
                     problems: Vec::new(),
                     summary: format!("schema could not be prepared: {err}"),
                     description: description.clone(),
+                    source: Some(Box::new(err)),
                 }
             })?;
         }
@@ -73,6 +75,7 @@ pub(crate) fn run(markdown: &Markdown, options: &ComposeOptions) -> MarkdownResu
             problems: Vec::new(),
             summary: format!("schema could not be prepared: {err}"),
             description: description.clone(),
+            source: Some(Box::new(err)),
         }
     })?;
 
@@ -113,6 +116,9 @@ pub(crate) fn run(markdown: &Markdown, options: &ComposeOptions) -> MarkdownResu
             problems: composition_independent,
             summary: "frontmatter did not satisfy the schema".to_string(),
             description,
+            // Schema was prepared successfully; the failure detail lives in
+            // `problems`, so there is no upstream `SchemaError` cause.
+            source: None,
         });
     }
 
