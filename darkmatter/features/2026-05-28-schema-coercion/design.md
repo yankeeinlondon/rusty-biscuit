@@ -89,8 +89,11 @@ leave the original element/value untouched):
   → `true`; the `*FALSE*` family → `false`). Anything else (incl. `"yes"`,
   `"1"`, non-string) → untouched.
 - **`ToNumber`:** `Value::String(s)` where `s` matches `^-?\d+(\.\d+)?$` →
-  parsed JSON number (integer form when integral via `i64`, else `f64` through
-  `serde_json::Number::from_f64`). Non-matching string / non-string → untouched.
+  parsed JSON number via `serde_json::from_str::<serde_json::Number>` so the
+  result matches serde_json's own number model (integral strings → `i64`/`u64`,
+  preserving values above `i64::MAX`; decimals → `f64`). The only literals left
+  untouched are those too large even for `f64`, which then fail validation as
+  strings. Non-matching string / non-string → untouched.
 - **`ToString`:** `Value::Number(n)` → `Value::String(n.to_string())`
   (`42`→`"42"`, `3.14`→`"3.14"`); `Value::Bool(b)` → `"true"`/`"false"`.
   `Value::String` (already a string), `Null`, `Array`, `Object` → untouched.
