@@ -260,14 +260,19 @@ impl EffectiveSchema {
     /// [`validate::build_position_map`]). For root unions, problems are
     /// attributed to the closest-matching arm and carry the corresponding
     /// `arm_index`.
+    ///
+    /// The instance is type-coerced against the schema (see
+    /// [`coerce::coerce_frontmatter`]) on a working copy before validation, so
+    /// the report reflects post-coercion validity. No input is mutated.
     pub fn validate_with_positions(
         &self,
         frontmatter: &Value,
         positions: &PositionMap,
     ) -> ValidationReport {
+        let coerced = coerce::coerce_frontmatter(&self.json_schema, frontmatter);
         let problems = match &self.arm_validators {
-            Some(arms) => validate::collect_root_union_problems(arms, frontmatter, positions),
-            None => validate::collect_problems(&self.validator, frontmatter, positions),
+            Some(arms) => validate::collect_root_union_problems(arms, &coerced.value, positions),
+            None => validate::collect_problems(&self.validator, &coerced.value, positions),
         };
         ValidationReport {
             valid: problems.is_empty(),
@@ -545,5 +550,86 @@ mod tests {
         api.validate(&md1).unwrap();
         api.validate(&md2).unwrap();
         assert_eq!(api.cache().len(), 1);
+    }
+
+    #[test]
+    fn coerces_boolish_string_against_inline_schema() {
+        let md = md_with_schema("$schema:\n  flag: boolean\nflag: \"true\"\n");
+        let api = DarkmatterSchemas::new();
+        let report = api.validate(&md).unwrap();
+        assert!(report.valid, "expected valid: {:?}", report.problems);
+    }
+
+    #[test]
+    fn coerces_numeric_string_against_inline_schema() {
+        let md = md_with_schema("$schema:\n  n: number\nn: \"42\"\n");
+        let api = DarkmatterSchemas::new();
+        let report = api.validate(&md).unwrap();
+        assert!(report.valid, "expected valid: {:?}", report.problems);
+    }
+
+    #[test]
+    fn ambiguous_string_still_reports_type_problem() {
+        let md = md_with_schema("$schema:\n  flag: boolean\nflag: \"yes\"\n");
+        let api = DarkmatterSchemas::new();
+        let report = api.validate(&md).unwrap();
+        assert!(!report.valid);
+        assert!(
+            report
+                .problems
+                .iter()
+                .any(|p| p.kind == ValidationProblemKind::Type && p.path == "/flag"),
+            "expected Type problem on /flag: {:?}",
+            report.problems
+        );
+    }
+
+    #[test]
+    fn coerces_baseline_merged_field_without_document_schema() {
+        // Document has no `$schema`; the boolean field comes solely from the
+        // baseline. Coercion reads the post-merge json_schema, so it fires even
+        // though the document's `simplified` AST never declares `enabled`.
+        let md = md_with_schema("enabled: \"false\"\n");
+        let baseline = SimplifiedSchema::Single(SchemaShape {
+            properties: {
+                let mut m = indexmap::IndexMap::new();
+                m.insert(
+                    "enabled".into(),
+                    PropertyDef::Single(PropertyAtom {
+                        ty: SimplifiedType::Boolean,
+                        is_array: false,
+                        constraints: vec![],
+                        array_constraints: vec![],
+                        description: None,
+                    }),
+                );
+                m
+            },
+        });
+        let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
+        let report = api.validate(&md).unwrap();
+        assert!(report.valid, "expected valid: {:?}", report.problems);
+    }
+
+    #[test]
+    fn coerces_raw_json_schema_baseline_with_no_simplified_ast() {
+        // Raw JSON Schema baseline → `simplified` is None on the effective
+        // schema. Coercion never consults the AST, so the boolish string still
+        // coerces to a real boolean and validates.
+        let md = md_with_schema("flag: \"true\"\n");
+        let raw = serde_json::json!({
+            "type": "object",
+            "properties": { "flag": {"type": "boolean"} }
+        });
+        let api = DarkmatterSchemas::new()
+            .with_baseline_json_schema(raw)
+            .unwrap();
+        let effective = api.effective_for(&md).unwrap().unwrap();
+        assert!(
+            effective.simplified.is_none(),
+            "raw JSON Schema baseline should have no simplified AST"
+        );
+        let report = api.validate(&md).unwrap();
+        assert!(report.valid, "expected valid: {:?}", report.problems);
     }
 }

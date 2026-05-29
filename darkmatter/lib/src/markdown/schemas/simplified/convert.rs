@@ -35,12 +35,11 @@ pub const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
 
 /// String spellings a `boolish` field accepts (and that coercion maps to a
 /// real boolean). Single source of truth shared with [`super::super::coerce`].
-pub(super) const BOOLISH_VALUES: [&str; 6] =
+pub(in crate::markdown::schemas) const BOOLISH_VALUES: [&str; 6] =
     ["true", "false", "True", "False", "TRUE", "FALSE"];
 
-/// Pattern the `numberlike` string arm carries (and that coercion mirrors via a
-/// hand-rolled matcher). Single source of truth shared with
-/// [`super::super::coerce`].
+/// Pattern the `numberlike` string arm carries — the source for the schema the
+/// validator compiles.
 pub(super) const NUMBERLIKE_PATTERN: &str = r"^-?\d+(\.\d+)?$";
 
 /// Converts a [`SimplifiedSchema`] into a Draft 2020-12 JSON Schema value.

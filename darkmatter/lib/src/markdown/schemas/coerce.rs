@@ -212,13 +212,13 @@ fn coerce_to_number(value: &Value) -> Option<Value> {
     if !is_numberlike(s) {
         return None;
     }
-    // Integral strings (no `.`) parse as i64 to keep the JSON integer form;
-    // otherwise fall back to f64. `is_numberlike` guarantees the grammar, so a
-    // parse failure here means the value overflows the target — leave untouched.
+    // Integral strings (no `.`) parse as i64 to keep the JSON integer form. An
+    // integral string that overflows i64 is left untouched (`None`) rather than
+    // silently truncated through f64 — the validator then reports the type
+    // mismatch and the original string survives. The f64 path is reached only
+    // for decimal strings.
     if !s.contains('.') {
-        if let Ok(i) = s.parse::<i64>() {
-            return Some(Value::Number(i.into()));
-        }
+        return s.parse::<i64>().ok().map(|i| Value::Number(i.into()));
     }
     let f = s.parse::<f64>().ok()?;
     serde_json::Number::from_f64(f).map(Value::Number)
@@ -440,6 +440,19 @@ mod tests {
         assert_eq!(coerce_to_number(&json!([1])), None);
     }
 
+    #[test]
+    fn integral_string_overflowing_i64_is_left_untouched() {
+        // Larger than i64::MAX and integral (no `.`): coercing through f64 would
+        // silently lose precision, so it stays a string for the validator to
+        // reject. In-range integers and decimals still coerce.
+        assert_eq!(coerce_to_number(&json!("99999999999999999999")), None);
+        assert_eq!(
+            coerce_to_number(&json!("9223372036854775807")), // i64::MAX
+            Some(json!(9_223_372_036_854_775_807_i64))
+        );
+        assert_eq!(coerce_to_number(&json!("3.14")), Some(json!(3.14)));
+    }
+
     // ── scalar coercion: string ─────────────────────────────────────────
 
     #[test]
@@ -514,7 +527,7 @@ mod tests {
             "flag": "true",
             "count": "42",
             "label": 7,
-            "opaque": {"k": "v"},      // recognized-but-untouchable (object value)
+            "opaque": {"k": "v"},      // skipped at the coercion_target guard: object is not a recognized target
             "undeclared": "left-alone" // not in schema
         });
         let outcome = coerce_frontmatter(&schema, &instance);

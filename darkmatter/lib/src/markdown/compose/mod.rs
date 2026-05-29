@@ -532,7 +532,10 @@ impl Markdown {
             // resolved form before being checked. Runs BEFORE shell
             // expansion so the validator can fail-fast without triggering
             // (potentially expensive or side-effectful) shell commands when
-            // the resolved frontmatter is invalid.
+            // the resolved frontmatter is invalid. This stage also coerces
+            // schema-recognized scalars (e.g. the string "true" against a
+            // boolean field) and writes the real types back into frontmatter,
+            // so later stages and the composed output see coerced values.
             //
             // For frontmatter values that depend on shell-expanded inputs,
             // the second interpolation pass below will re-resolve them and
@@ -4803,6 +4806,95 @@ Rounded: {{ round(pi) }}"#;
                 MarkdownError::SchemaValidationFailed { .. } => {}
                 other => panic!("Expected SchemaValidationFailed, got {other:?}"),
             }
+        }
+
+        #[test]
+        fn coercion_write_back_flows_to_composed_frontmatter() {
+            // `has_spec` derives from a ternary, resolves to the string "true"
+            // during frontmatter interpolation, and is coerced to a real JSON
+            // bool by schema validation. The composed frontmatter must hold the
+            // bool, not the string.
+            let content = "---\n$schema:\n  spec: string(required)\n  has_spec: boolean\nspec: design.md\nhas_spec: \"{{spec ? true : false}}\"\n---\nBody\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::Interpolation,
+            ]);
+
+            let (composed, _report) = md.compose_with(options).unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("has_spec"),
+                Some(&serde_json::json!(true))
+            );
+        }
+
+        #[test]
+        fn implement_md_three_arm_union_ternaries_coerce_and_defer_shell() {
+            // Faithful reproduction of the original failing `claudine compose
+            // prompts/implement.md spec=… --claude` invocation: a 3-arm root
+            // union where every arm types the `has_*` trio as strict `boolean`,
+            // computed `has_*` ternaries that render into quoted scalars
+            // ("true"/"false"), and a `$(...)`-bearing `dir`. A `spec=` value is
+            // supplied via --set, so arm 2 (`spec: string(required)`) validates
+            // post-coercion. Before this feature the strict `boolean` arms
+            // rejected the "false"/"true" strings; now they coerce.
+            //
+            // Frontmatter shell expansion is left disabled to keep the test
+            // hermetic (no real `dirname` invocation). `dir` is typed `string`,
+            // so its literal `$(...)` value is already a valid string: coercion
+            // skips it and validation raises no type problem, so it survives
+            // untouched into the composed output as a deferred shell expression.
+            let content = "---\n\
+                $schema:\n\
+                \x20 - review: string(required)\n\
+                \x20   spec: string\n\
+                \x20   iteration: number\n\
+                \x20   has_plan: boolean\n\
+                \x20   has_spec: boolean\n\
+                \x20   has_review: boolean\n\
+                \x20 - spec: string(required)\n\
+                \x20   has_plan: boolean\n\
+                \x20   has_spec: boolean\n\
+                \x20   has_review: boolean\n\
+                \x20 - plan: string(required)\n\
+                \x20   spec: string\n\
+                \x20   iteration: number\n\
+                \x20   has_plan: boolean\n\
+                \x20   has_spec: boolean\n\
+                \x20   has_review: boolean\n\
+                has_spec: \"{{spec ? true : false}}\"\n\
+                has_plan: \"{{plan ? true : false}}\"\n\
+                has_review: \"{{review ? true : false}}\"\n\
+                dir: \"$(dirname '{{spec || plan}}')\"\n\
+                ---\nBody\n";
+            let md: Markdown = content.into();
+
+            // `spec=` provided via --set; no `plan`/`review` → second arm wins.
+            let options = ComposeOptions::new()
+                .with_set_overrides(serde_json::json!({ "spec": "features/plan.md" }))
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::Interpolation,
+                ]);
+
+            let (composed, _report) = md
+                .compose_with(options)
+                .expect("compose should succeed once the has_* strings coerce");
+
+            let fm = composed.frontmatter();
+            let map = fm.as_map();
+            // The motivating fix: the ternary-derived strings become real bools.
+            assert_eq!(map.get("has_spec"), Some(&serde_json::json!(true)));
+            assert_eq!(map.get("has_plan"), Some(&serde_json::json!(false)));
+            assert_eq!(map.get("has_review"), Some(&serde_json::json!(false)));
+            // The `$(...)` `dir` value is deferred: coercion skips it pre-shell,
+            // and the unresolved interpolation/shell template never errored.
+            let dir = map.get("dir").and_then(serde_json::Value::as_str).unwrap();
+            assert!(
+                dir.contains("$(") && dir.contains("dirname"),
+                "dir should remain a deferred shell expression, got: {dir}"
+            );
         }
 
         #[test]
