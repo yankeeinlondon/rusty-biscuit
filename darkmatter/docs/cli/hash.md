@@ -192,13 +192,21 @@ and `detailed` kinds are rejected with a usage error. Directory output forms:
 **Non-strict mode**
 
 - Frontmatter: canonicalized by sorted keys and JSON-serialized values.
+- Frontmatter keys (`structured`/`detailed` `fm_keys`): sorted before hashing.
 - Body: leading/trailing whitespace and blank-line variants are ignored, so
   whitespace-only edits do not change the semantic hash.
 
 **Strict mode**
 
 - Frontmatter: hashes YAML serialization without canonical key sorting.
+- Frontmatter keys (`structured`/`detailed` `fm_keys`): preserved in document
+  order — strict performs no key reordering.
 - Body: hashes raw body bytes.
+- Body structure (`structured` `body_structure`): a verbatim fingerprint of the
+  heading skeleton (level + parsed title, in document order). It applies no
+  whitespace normalization in either mode, so strict does not change it;
+  whitespace-only differences in heading *source* surface through the verbatim
+  `body` component instead.
 
 ## Lessons Learned
 
