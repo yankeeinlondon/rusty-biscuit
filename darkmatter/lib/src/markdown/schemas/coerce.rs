@@ -98,7 +98,7 @@ fn target_from_any_of(arms: &[Value]) -> Option<CoercionTarget> {
     let has_boolish_enum_arm = arms.iter().any(|a| {
         a.get("enum")
             .and_then(Value::as_array)
-            .is_some_and(is_boolish_enum)
+            .is_some_and(|members| is_boolish_enum(members))
     });
     let has_numberlike_string_arm = arms.iter().any(|a| {
         a.get("type").and_then(Value::as_str) == Some("string")
@@ -114,16 +114,17 @@ fn target_from_any_of(arms: &[Value]) -> Option<CoercionTarget> {
     }
 }
 
-/// True when an `anyOf` `enum` arm's members are exactly the boolish spellings
-/// ([`BOOLISH_VALUES`]) — the set [`super::simplified::convert::boolish_fragment`]
-/// emits. Order-independent; any extra or missing member fails the match.
+/// True when a non-empty `anyOf` `enum` arm's members are *all* boolish
+/// spellings ([`BOOLISH_VALUES`]). [`super::simplified::convert::boolish_fragment`]
+/// emits the full six-spelling set, but any subset (e.g. `["true","false"]`)
+/// still represents only boolish values and so coerces safely. An enum carrying
+/// any non-boolish member (e.g. `["auto"]`) — including a non-string member —
+/// fails the match and is left untouched.
 fn is_boolish_enum(members: &[Value]) -> bool {
-    use std::collections::BTreeSet;
-    let actual: BTreeSet<&str> = members.iter().filter_map(Value::as_str).collect();
-    // Reject if any member was a non-string (filtered out above), which would
-    // shrink `actual` below the member count and never equal the expected set.
-    actual.len() == members.len()
-        && actual == BOOLISH_VALUES.iter().copied().collect::<BTreeSet<&str>>()
+    !members.is_empty()
+        && members
+            .iter()
+            .all(|m| m.as_str().is_some_and(|s| BOOLISH_VALUES.contains(&s)))
 }
 
 /// Builds a coerced copy of `instance` against `json_schema` and reports
