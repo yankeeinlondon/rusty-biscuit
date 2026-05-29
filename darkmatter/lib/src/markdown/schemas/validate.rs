@@ -161,7 +161,7 @@ impl ValidatorCache {
 
 /// Builds a `Validator` configured with darkmatter's custom format and
 /// keywords.
-fn build_validator(schema: &Value) -> Result<Validator, SchemaError> {
+pub(super) fn build_validator(schema: &Value) -> Result<Validator, SchemaError> {
     let opts = jsonschema::options()
         .with_draft(Draft::Draft202012)
         .with_pattern_options(PatternOptions::regex());

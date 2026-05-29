@@ -17,6 +17,14 @@
 //!
 //! When the effective frontmatter violates the resolved schema, compose aborts
 //! with a styled [`BlockError`] that names the offending property.
+//!
+//! This stage also MUTATES the stored frontmatter: before reporting, it coerces
+//! schema-recognized scalar values to their declared types (e.g. the string
+//! `"true"` against a `boolean` field becomes a real JSON bool) via
+//! [`coerce_frontmatter`] and writes the coerced top-level properties back into
+//! `markdown.frontmatter_mut()`, so the real types flow to every later stage and
+//! into the composed output. Values still holding a `$(...)` shell expression are
+//! left untouched here — their real type is resolved at post-shell re-validation.
 
 use std::path::PathBuf;
 
@@ -24,20 +32,28 @@ use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::types::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::DarkmatterSchemas;
+use crate::markdown::schemas::coerce::coerce_frontmatter;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
 
-/// Runs schema validation against the document's effective frontmatter.
+/// Runs schema validation against the document's effective frontmatter,
+/// coercing schema-recognized scalar values to their declared types and
+/// writing the coerced values back into the document's frontmatter.
 ///
 /// 1. Checks whether either document `$schema` or `ComposeOptions::baseline_schema`
 ///    is present; if neither exists, returns `Ok(())` without constructing a validator.
 /// 2. Builds `DarkmatterSchemas::new()` plus `.with_baseline(...)` when
 ///    `ComposeOptions::baseline_schema` is set.
-/// 3. Calls `.validate(&markdown)`.
-/// 4. Converts schema-preparation `SchemaError` into
-///    `MarkdownError::SchemaValidationFailed`.
-/// 5. Converts `ValidationReport { valid: false, problems }` into the same
+/// 3. Resolves the effective schema, coerces the frontmatter against it via
+///    [`coerce_frontmatter`], and writes coerced top-level properties back into
+///    `markdown.frontmatter_mut()` (skipping any value still holding a `$(...)`
+///    shell expression).
+/// 4. Calls `.validate(&markdown)` on the now-coerced frontmatter.
+/// 5. Converts schema-preparation `SchemaError` into
+///    `MarkdownError::SchemaValidationFailed`, preserving the original error
+///    on the variant's `source` field for `Error::source()` recovery.
+/// 6. Converts `ValidationReport { valid: false, problems }` into the same
 ///    error variant. On success, returns `Ok(())`.
-pub(crate) fn run(markdown: &Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
+pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
     let has_document_schema = markdown.frontmatter().as_map().contains_key("$schema");
     let has_baseline = options.baseline_schema.is_some();
 
@@ -61,11 +77,65 @@ pub(crate) fn run(markdown: &Markdown, options: &ComposeOptions) -> MarkdownResu
                     problems: Vec::new(),
                     summary: format!("schema could not be prepared: {err}"),
                     description: description.clone(),
+                    source: Some(Box::new(err)),
                 }
             })?;
         }
         builder
     };
+
+    // Coerce schema-recognized scalars to their declared types and write the
+    // coerced top-level properties back, so real types flow to every later
+    // stage and into the composed output. `effective_for` returns an owned
+    // schema, so no borrow of `markdown` persists into the mutation below.
+    if let Some(effective) = schemas.effective_for(markdown).map_err(|err| {
+        MarkdownError::SchemaValidationFailed {
+            path: path.clone(),
+            problems: Vec::new(),
+            summary: format!("schema could not be prepared: {err}"),
+            description: description.clone(),
+            source: Some(Box::new(err)),
+        }
+    })? {
+        // Build the validation instance and the shell-pending key set while
+        // holding only an immutable borrow; both are dropped before the write.
+        let (instance, shell_pending) = {
+            let fm_map = markdown.frontmatter().as_map();
+            let mut object = serde_json::Map::with_capacity(fm_map.len());
+            let mut shell_pending = std::collections::HashSet::new();
+            for (key, value) in fm_map {
+                // `$schema` is a Darkmatter control key, not document data. This
+                // exclusion must match `schemas::frontmatter_as_json`, which
+                // builds the instance the library validate path coerces against;
+                // if the two diverge, compose and validate would coerce against
+                // different instances.
+                if key == "$schema" {
+                    continue;
+                }
+                if value_needs_shell_expansion(Some(value)) {
+                    shell_pending.insert(key.clone());
+                }
+                object.insert(key.clone(), value.clone());
+            }
+            (serde_json::Value::Object(object), shell_pending)
+        };
+
+        let outcome = coerce_frontmatter(&effective.json_schema, &instance);
+        if outcome.changed
+            && let serde_json::Value::Object(coerced) = outcome.value
+        {
+            let fm_map = markdown.frontmatter_mut().as_map_mut();
+            for (key, value) in coerced {
+                // A value still holding `$(...)` is resolved (and coerced)
+                // later at post-shell re-validation; writing back here would
+                // clobber the literal form shell expansion must consume.
+                if shell_pending.contains(&key) {
+                    continue;
+                }
+                fm_map.insert(key, value);
+            }
+        }
+    }
 
     let report = schemas.validate(markdown).map_err(|err| {
         MarkdownError::SchemaValidationFailed {
@@ -73,6 +143,7 @@ pub(crate) fn run(markdown: &Markdown, options: &ComposeOptions) -> MarkdownResu
             problems: Vec::new(),
             summary: format!("schema could not be prepared: {err}"),
             description: description.clone(),
+            source: Some(Box::new(err)),
         }
     })?;
 
@@ -113,6 +184,9 @@ pub(crate) fn run(markdown: &Markdown, options: &ComposeOptions) -> MarkdownResu
             problems: composition_independent,
             summary: "frontmatter did not satisfy the schema".to_string(),
             description,
+            // Schema was prepared successfully; the failure detail lives in
+            // `problems`, so there is no upstream `SchemaError` cause.
+            source: None,
         });
     }
 
@@ -213,16 +287,16 @@ mod tests {
 
     #[test]
     fn no_schema_no_baseline_is_no_op() {
-        let md = md_with_schema("name: alice\n");
+        let mut md = md_with_schema("name: alice\n");
         let options = ComposeOptions::new();
-        assert!(run(&md, &options).is_ok());
+        assert!(run(&mut md, &options).is_ok());
     }
 
     #[test]
     fn no_schema_no_baseline_downstream_stages_untouched() {
-        let md = md_with_schema("title: Hello\n");
+        let mut md = md_with_schema("title: Hello\n");
         let options = ComposeOptions::new();
-        let result = run(&md, &options);
+        let result = run(&mut md, &options);
         assert!(result.is_ok());
         // Frontmatter should remain intact
         assert_eq!(
@@ -235,16 +309,16 @@ mod tests {
 
     #[test]
     fn document_schema_valid() {
-        let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: Hello\n");
+        let mut md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: Hello\n");
         let options = ComposeOptions::new();
-        assert!(run(&md, &options).is_ok());
+        assert!(run(&mut md, &options).is_ok());
     }
 
     #[test]
     fn document_schema_missing_required_fails() {
-        let md = md_with_schema("$schema:\n  title: 'string(required)'\nother: stuff\n");
+        let mut md = md_with_schema("$schema:\n  title: 'string(required)'\nother: stuff\n");
         let options = ComposeOptions::new();
-        let err = run(&md, &options).unwrap_err();
+        let err = run(&mut md, &options).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed { problems, summary, .. } => {
                 assert!(!problems.is_empty());
@@ -256,10 +330,25 @@ mod tests {
     }
 
     #[test]
-    fn document_schema_wrong_type_fails() {
-        let md = md_with_schema("$schema:\n  spec: 'string(required)'\nspec: 42\n");
+    fn document_schema_number_coerces_to_string_and_writes_back() {
+        // `42` against a `string` field is coercible (`42` -> `"42"`), so under
+        // coercion this now validates AND the stored value is the string "42".
+        let mut md = md_with_schema("$schema:\n  spec: 'string(required)'\nspec: 42\n");
         let options = ComposeOptions::new();
-        let err = run(&md, &options).unwrap_err();
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("42"))
+        );
+    }
+
+    #[test]
+    fn document_schema_uncoercible_type_still_fails() {
+        // An array against a `string` field is outside the coercion matrix, so
+        // coercion never masks it — the type problem must still be reported.
+        let mut md = md_with_schema("$schema:\n  spec: 'string(required)'\nspec:\n  - a\n  - b\n");
+        let options = ComposeOptions::new();
+        let err = run(&mut md, &options).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed { problems, .. } => {
                 assert!(!problems.is_empty());
@@ -270,15 +359,92 @@ mod tests {
             }
             other => panic!("expected SchemaValidationFailed, got {other:?}"),
         }
+        // Write-back must not have partially mutated the uncoercible value.
+        assert_eq!(
+            md.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!(["a", "b"]))
+        );
+    }
+
+    // ── Coercion write-back ───────────────────────────────────────────
+
+    #[test]
+    fn write_back_produces_real_boolean() {
+        // Post-interpolation literal form: the resolved string "true" against a
+        // `boolean` field is coerced and written back as a real JSON bool.
+        let mut md = md_with_schema("$schema:\n  has_spec: boolean\nhas_spec: \"true\"\n");
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("has_spec"),
+            Some(&serde_json::json!(true))
+        );
+    }
+
+    #[test]
+    fn write_back_produces_real_number() {
+        let mut md = md_with_schema("$schema:\n  n: number\nn: \"42\"\n");
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("n"),
+            Some(&serde_json::json!(42))
+        );
+    }
+
+    #[test]
+    fn write_back_handles_root_union() {
+        // Mirrors prompts/implement.md: a 3-arm root union where every arm types
+        // `has_*` as boolean. Frontmatter holds them as strings; after run they
+        // must be stored as real booleans.
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 - review: string(required)\n\
+             \x20   has_spec: boolean\n\
+             \x20   has_plan: boolean\n\
+             \x20   has_review: boolean\n\
+             \x20 - spec: string(required)\n\
+             \x20   has_spec: boolean\n\
+             \x20   has_plan: boolean\n\
+             \x20   has_review: boolean\n\
+             \x20 - plan: string(required)\n\
+             \x20   has_spec: boolean\n\
+             \x20   has_plan: boolean\n\
+             \x20   has_review: boolean\n\
+             spec: design.md\n\
+             has_spec: \"true\"\n\
+             has_plan: \"false\"\n\
+             has_review: \"false\"\n",
+        );
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        let fm = md.frontmatter();
+        let map = fm.as_map();
+        assert_eq!(map.get("has_spec"), Some(&serde_json::json!(true)));
+        assert_eq!(map.get("has_plan"), Some(&serde_json::json!(false)));
+        assert_eq!(map.get("has_review"), Some(&serde_json::json!(false)));
+    }
+
+    #[test]
+    fn write_back_skips_shell_pending_value() {
+        // A `$(...)`-bearing typed value is deferred (run returns Ok) AND left
+        // untouched so its literal form survives into shell expansion.
+        let mut md = md_with_schema("$schema:\n  n: number\nn: \"$(echo 1)\"\n");
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        assert_eq!(
+            md.frontmatter().as_map().get("n"),
+            Some(&serde_json::json!("$(echo 1)"))
+        );
     }
 
     // ── Baseline merging ──────────────────────────────────────────────
 
     #[test]
     fn baseline_applies_when_document_has_no_schema() {
-        let md = md_with_schema("title: hi\n");
+        let mut md = md_with_schema("title: hi\n");
         let options = ComposeOptions::new().with_baseline_schema(baseline_required_string("owner"));
-        let err = run(&md, &options).unwrap_err();
+        let err = run(&mut md, &options).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed { problems, .. } => {
                 assert!(problems.iter().any(|p| p.property.as_deref() == Some("owner")));
@@ -289,16 +455,16 @@ mod tests {
 
     #[test]
     fn baseline_applies_when_document_has_no_schema_and_valid() {
-        let md = md_with_schema("owner: alice\n");
+        let mut md = md_with_schema("owner: alice\n");
         let options = ComposeOptions::new().with_baseline_schema(baseline_required_string("owner"));
-        assert!(run(&md, &options).is_ok());
+        assert!(run(&mut md, &options).is_ok());
     }
 
     #[test]
     fn baseline_merges_with_document_schema() {
-        let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
+        let mut md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
         let options = ComposeOptions::new().with_baseline_schema(baseline_required_string("owner"));
-        let err = run(&md, &options).unwrap_err();
+        let err = run(&mut md, &options).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed { problems, .. } => {
                 assert!(problems.iter().any(|p| p.property.as_deref() == Some("owner")));
@@ -328,9 +494,9 @@ mod tests {
             properties: baseline_props,
         });
 
-        let md = md_with_schema("$schema:\n  spec: 'number(required)'\nspec: 42\n");
+        let mut md = md_with_schema("$schema:\n  spec: 'number(required)'\nspec: 42\n");
         let options = ComposeOptions::new().with_baseline_schema(baseline);
-        assert!(run(&md, &options).is_ok());
+        assert!(run(&mut md, &options).is_ok());
     }
 
     // ── Override interaction ──────────────────────────────────────────
@@ -345,7 +511,7 @@ mod tests {
             .as_map_mut()
             .insert("spec".into(), serde_json::json!("design.md"));
         let options = ComposeOptions::new();
-        assert!(run(&md, &options).is_ok());
+        assert!(run(&mut md, &options).is_ok());
     }
 
     #[test]
@@ -358,7 +524,7 @@ mod tests {
             .as_map_mut()
             .insert("spec".into(), serde_json::json!(""));
         let options = ComposeOptions::new();
-        let err = run(&md, &options).unwrap_err();
+        let err = run(&mut md, &options).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed { problems, .. } => {
                 assert!(problems.iter().any(|p| p.path == "/spec"));
@@ -373,12 +539,12 @@ mod tests {
     fn error_includes_document_path() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.md");
-        let md = md_with_schema_and_source(
+        let mut md = md_with_schema_and_source(
             "$schema:\n  title: 'string(required)'\nother: stuff\n",
             &path,
         );
         let options = ComposeOptions::new().with_source_file(&path);
-        let err = run(&md, &options).unwrap_err();
+        let err = run(&mut md, &options).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed { path: err_path, .. } => {
                 assert_eq!(err_path, path);
@@ -389,11 +555,11 @@ mod tests {
 
     #[test]
     fn error_includes_description_when_present() {
-        let md = md_with_schema(
+        let mut md = md_with_schema(
             "$schema:\n  title: 'string(required)'\ndescription: My doc\nother: stuff\n",
         );
         let options = ComposeOptions::new();
-        let err = run(&md, &options).unwrap_err();
+        let err = run(&mut md, &options).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed {
                 description: Some(desc),
@@ -412,9 +578,9 @@ mod tests {
         // `spec` holds a `$(...)` value and shell expansion is enabled (the
         // default), so the type violation is deferred to post-shell
         // re-validation and run returns Ok.
-        let md = md_with_schema("$schema:\n  spec: 'number(required)'\nspec: \"$(echo 1)\"\n");
+        let mut md = md_with_schema("$schema:\n  spec: 'number(required)'\nspec: \"$(echo 1)\"\n");
         let options = ComposeOptions::new();
-        assert!(run(&md, &options).is_ok());
+        assert!(run(&mut md, &options).is_ok());
     }
 
     #[test]
@@ -422,9 +588,9 @@ mod tests {
         // Same document, but FrontmatterShellExpansion is disabled. Nothing
         // downstream will expand or re-validate `spec`, so the schema
         // violation must be reported rather than silently deferred.
-        let md = md_with_schema("$schema:\n  spec: 'number(required)'\nspec: \"$(echo 1)\"\n");
+        let mut md = md_with_schema("$schema:\n  spec: 'number(required)'\nspec: \"$(echo 1)\"\n");
         let options = ComposeOptions::new().disable(ComposeOperation::FrontmatterShellExpansion);
-        let err = run(&md, &options).unwrap_err();
+        let err = run(&mut md, &options).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed { problems, .. } => {
                 assert!(
@@ -443,9 +609,9 @@ mod tests {
         // so we construct an invalid one indirectly by passing something
         // that will fail at validation time. A simpler approach: use a
         // malformed inline schema in the document.
-        let md = md_with_schema("$schema: 42\n");
+        let mut md = md_with_schema("$schema: 42\n");
         let options = ComposeOptions::new();
-        let err = run(&md, &options).unwrap_err();
+        let err = run(&mut md, &options).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed { problems, summary, .. } => {
                 assert!(problems.is_empty());
@@ -456,5 +622,48 @@ mod tests {
             }
             other => panic!("expected SchemaValidationFailed, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn schema_preparation_error_preserves_source_chain() {
+        use std::error::Error;
+
+        // A malformed inline `$schema` (an integer, not a mapping/sequence/
+        // string) fails during schema preparation. The compose error must
+        // expose the underlying `SchemaError` via `Error::source()` so
+        // programmatic callers can recover and inspect the original cause
+        // rather than only reading the formatted summary.
+        let mut md = md_with_schema("$schema: 42\n");
+        let options = ComposeOptions::new();
+        let err = run(&mut md, &options).unwrap_err();
+
+        let source = err
+            .source()
+            .expect("preparation failure should expose a source error");
+        let schema_err = source
+            .downcast_ref::<crate::markdown::schemas::SchemaError>()
+            .expect("source should downcast to SchemaError");
+        assert!(
+            matches!(
+                schema_err,
+                crate::markdown::schemas::SchemaError::FrontmatterShape { .. }
+            ),
+            "expected FrontmatterShape, got {schema_err:?}"
+        );
+    }
+
+    #[test]
+    fn validation_failure_has_no_source_chain() {
+        use std::error::Error;
+
+        // A successfully prepared schema that the frontmatter simply does not
+        // satisfy carries its detail in `problems`, not an upstream
+        // `SchemaError`. `Error::source()` must be `None` so callers can
+        // distinguish "schema could not be prepared" from "frontmatter did
+        // not satisfy the prepared schema".
+        let mut md = md_with_schema("$schema:\n  title: 'string(required)'\nother: stuff\n");
+        let options = ComposeOptions::new();
+        let err = run(&mut md, &options).unwrap_err();
+        assert!(err.source().is_none(), "validation failure should have no source");
     }
 }
