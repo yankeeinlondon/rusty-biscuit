@@ -2,6 +2,65 @@
 phases: 8
 created: 2026-05-28
 start_phase: 1
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+  - darkmatter/features/2026-05-28-darkmatter-hashing/design.md
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/hash/mod.rs
+  - darkmatter/lib/src/markdown/hash/kind.rs
+  - darkmatter/lib/src/markdown/hash/options.rs
+  - darkmatter/lib/src/markdown/hash/compute.rs
+  - darkmatter/lib/src/markdown/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/hash/stored.rs
+  - darkmatter/lib/src/markdown/hash/mod.rs
+  - darkmatter/lib/src/markdown/types.rs
+  - darkmatter/lib/src/markdown/errors/blocks.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/hash/kind.rs
+  - darkmatter/lib/src/markdown/hash/compare.rs
+  - darkmatter/lib/src/markdown/hash/save.rs
+  - darkmatter/lib/src/markdown/hash/stored.rs
+  - darkmatter/lib/src/markdown/hash/mod.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - darkmatter/lib/src/markdown/hash/write.rs
+  - darkmatter/lib/src/markdown/hash/mod.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - darkmatter/lib/src/markdown/hash/explain.rs
+  - darkmatter/lib/src/markdown/hash/mod.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+  - darkmatter/cli/Cargo.toml
+  - darkmatter/cli/src/args.rs
+  - darkmatter/cli/src/commands.rs
+  - darkmatter/cli/tests/cli.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+source_files_during_phase_8: []
+docs_updated_during_phase_8:
+  - darkmatter/docs/cli/hash.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/darkmatter/SKILL.md
+packages:
+  - darkmatter
 ---
 
 # Darkmatter Hashing Execution Plan
