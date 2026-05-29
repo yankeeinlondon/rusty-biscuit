@@ -236,6 +236,24 @@ fn test_double_verbose_flag() {
 }
 
 #[test]
+fn with_network_flag_parses() {
+    // The flag should be accepted globally; pair with a fast subcommand
+    // so the test doesn't pay full-detection cost.
+    cargo_bin_cmd!("sniff")
+        .args(["--with-network", "repo", "name"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn with_network_flag_parses_before_json() {
+    cargo_bin_cmd!("sniff")
+        .args(["--with-network", "repo", "name", "--json"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn test_base_flag_before_subcommand() {
     cargo_bin_cmd!("sniff")
         .args(["-b", ".", "filesystem"])
