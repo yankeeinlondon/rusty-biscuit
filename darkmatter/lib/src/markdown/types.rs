@@ -106,13 +106,16 @@ pub enum MarkdownError {
         /// in schema parsing, resolution, conversion, baseline merge, or
         /// validator construction. `None` when the schema was prepared
         /// successfully but the frontmatter did not satisfy it (in which case
-        /// the failure detail lives in `problems`). Preserved so programmatic
-        /// callers can recover the original [`SchemaError`] via
-        /// [`std::error::Error::source`].
+        /// the failure detail lives in `problems`).
         ///
-        /// [`SchemaError`]: crate::markdown::schemas::SchemaError
+        /// Boxed as `dyn Error` rather than `Box<SchemaError>` so that
+        /// [`std::error::Error::source`] yields the inner
+        /// [`SchemaError`](crate::markdown::schemas::SchemaError) directly:
+        /// `err.source().and_then(|e| e.downcast_ref::<SchemaError>())`
+        /// recovers the original. A `Box<SchemaError>` field would surface the
+        /// `Box` itself as the trait object, so that downcast would miss.
         #[source]
-        source: Option<Box<crate::markdown::schemas::SchemaError>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
     },
 }
 
