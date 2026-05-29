@@ -59,11 +59,14 @@ impl StoredHash {
     /// is echoed back in the error so CLI users know which key to fix.
     pub fn parse(value: &Value, property: &str) -> MarkdownResult<Self> {
         match value {
-            Value::String(flat) => Ok(Self {
-                kind: MdHashKind::Simple,
-                value: StoredHashValue::Flat(flat.clone()),
-                ignored: Vec::new(),
-            }),
+            Value::String(flat) => {
+                validate_flat(flat, MdHashKind::Simple, property)?;
+                Ok(Self {
+                    kind: MdHashKind::Simple,
+                    value: StoredHashValue::Flat(flat.clone()),
+                    ignored: Vec::new(),
+                })
+            }
             Value::Object(map) => Self::parse_object(map, property),
             other => Err(malformed(
                 property,
@@ -99,10 +102,14 @@ impl StoredHash {
                     serde_json::from_value(raw_value.clone()).map_err(|err| {
                         malformed(property, format!("invalid 'detailed' value: {err}"))
                     })?;
+                validate_detailed(&detailed, property)?;
                 StoredHashValue::Detailed(detailed)
             }
             _ => match raw_value {
-                Value::String(flat) => StoredHashValue::Flat(flat.clone()),
+                Value::String(flat) => {
+                    validate_flat(flat, kind, property)?;
+                    StoredHashValue::Flat(flat.clone())
+                }
                 other => {
                     return Err(malformed(
                         property,
@@ -201,6 +208,73 @@ impl ComputedHash {
             },
         }
     }
+}
+
+/// Whether `s` is a canonical hash component: exactly 16 lowercase hex digits.
+fn is_hash_component(s: &str) -> bool {
+    s.len() == 16
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// The number of `-`-joined components a flat (non-`detailed`) kind carries.
+fn flat_component_count(kind: MdHashKind) -> usize {
+    match kind {
+        MdHashKind::Fm | MdHashKind::Body => 1,
+        MdHashKind::Simple => 2,
+        MdHashKind::Structured => 4,
+        // `detailed` never stores a flat value; it is validated separately.
+        MdHashKind::Detailed => unreachable!("detailed has no flat component count"),
+    }
+}
+
+/// Validates a flat stored value: the right number of `-`-joined components for
+/// `kind`, each a canonical 16-digit lowercase hex hash.
+fn validate_flat(flat: &str, kind: MdHashKind, property: &str) -> MarkdownResult<()> {
+    let expected = flat_component_count(kind);
+    let parts: Vec<&str> = flat.split('-').collect();
+    if parts.len() != expected {
+        return Err(malformed(
+            property,
+            format!(
+                "expected {expected} '-'-joined hash components for kind '{kind}', found {}",
+                parts.len()
+            ),
+        ));
+    }
+    for part in parts {
+        if !is_hash_component(part) {
+            return Err(malformed(
+                property,
+                format!("'{part}' is not a 16-digit lowercase hex hash"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validates every hash field of a `detailed` stored value.
+fn validate_detailed(detailed: &DetailedValue, property: &str) -> MarkdownResult<()> {
+    let check = |label: &str, value: &str| -> MarkdownResult<()> {
+        if is_hash_component(value) {
+            Ok(())
+        } else {
+            Err(malformed(
+                property,
+                format!("{label} '{value}' is not a 16-digit lowercase hex hash"),
+            ))
+        }
+    };
+
+    check("frontmatter.fm", &detailed.frontmatter.fm)?;
+    check("frontmatter.keys", &detailed.frontmatter.keys)?;
+    if let Some(preamble) = &detailed.preamble {
+        check("preamble", preamble)?;
+    }
+    for (index, section) in detailed.sections.iter().enumerate() {
+        check(&format!("sections[{index}].content_hash"), &section.content_hash)?;
+    }
+    Ok(())
 }
 
 /// Constructs a [`MarkdownError::MalformedStoredHash`] for `property`.
@@ -465,6 +539,73 @@ mod tests {
         });
         let stored = StoredHash::parse(&value, "hash").unwrap();
         assert_eq!(stored.ignored, vec!["draft".to_string(), "reviewed".to_string()]);
+    }
+
+    #[test]
+    fn rejects_shorthand_with_non_hex_components() {
+        // Two 16-char components, but outside the lowercase hex alphabet.
+        let value = Value::String("zzzzzzzzzzzzzzzz-yyyyyyyyyyyyyyyy".to_string());
+        let err = StoredHash::parse(&value, "hash").unwrap_err();
+        assert!(matches!(err, MarkdownError::MalformedStoredHash { .. }));
+        assert!(err.to_string().contains("not a 16-digit lowercase hex hash"));
+    }
+
+    #[test]
+    fn rejects_shorthand_with_extra_components() {
+        // The review's literal `not-a-real-hash-but-two-parts` splits into many
+        // components, so the component-count guard fires before the hex check.
+        let value = Value::String("not-a-real-hash-but-two-parts".to_string());
+        let err = StoredHash::parse(&value, "hash").unwrap_err();
+        assert!(err.to_string().contains("expected 2"));
+    }
+
+    #[test]
+    fn rejects_shorthand_with_uppercase_hex() {
+        let value = Value::String("AAAA000000000000-bbbb000000000000".to_string());
+        let err = StoredHash::parse(&value, "hash").unwrap_err();
+        assert!(err.to_string().contains("not a 16-digit lowercase hex hash"));
+    }
+
+    #[test]
+    fn rejects_shorthand_with_wrong_component_length() {
+        // Correct hex alphabet, but each component is the wrong length.
+        let value = Value::String("aaaa-bbbb".to_string());
+        let err = StoredHash::parse(&value, "hash").unwrap_err();
+        assert!(err.to_string().contains("not a 16-digit lowercase hex hash"));
+    }
+
+    #[test]
+    fn rejects_structured_with_wrong_component_count() {
+        let value = serde_json::json!({
+            "kind": "structured",
+            "value": "aaaa000000000000-bbbb000000000000",
+        });
+        let err = StoredHash::parse(&value, "hash").unwrap_err();
+        assert!(err.to_string().contains("expected 4"));
+    }
+
+    #[test]
+    fn rejects_structured_with_non_hex_component() {
+        let value = serde_json::json!({
+            "kind": "structured",
+            "value": "aaaa000000000000-bbbb000000000000-cccc000000000000-zzzzzzzzzzzzzzzz",
+        });
+        let err = StoredHash::parse(&value, "hash").unwrap_err();
+        assert!(err.to_string().contains("not a 16-digit lowercase hex hash"));
+    }
+
+    #[test]
+    fn rejects_detailed_with_non_hex_section_hash() {
+        let mut detailed = detailed_fixture();
+        detailed.sections[1].content_hash = "zzzz000000000000".to_string();
+        let value = StoredHash {
+            kind: MdHashKind::Detailed,
+            value: StoredHashValue::Detailed(detailed),
+            ignored: Vec::new(),
+        }
+        .to_frontmatter_value();
+        let err = StoredHash::parse(&value, "hash").unwrap_err();
+        assert!(err.to_string().contains("sections[1].content_hash"));
     }
 
     #[test]

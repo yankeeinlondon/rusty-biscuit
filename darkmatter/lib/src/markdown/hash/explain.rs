@@ -883,11 +883,13 @@ mod tests {
         let stored = stored_at(&original, MdHashKind::Detailed, &opts);
 
         // "Usage" promoted H2 → H1 with edited content; "Appendix" demoted
-        // H2 → H3 with unchanged content.
+        // H2 → H3 with unchanged content. Promoting "Usage" out of "Top" shrinks
+        // "Top"'s subtree, so its section content changes too (Fix: detailed
+        // section content covers the full subtree, not just the prelude).
         let edited = md("# Top\n\nT.\n\n# Usage\n\nU rewritten.\n\n### Appendix\n\nApp.");
         assert_eq!(
             explain(&edited, &stored),
-            "- Frontmatter has not changed\n- There were changes to the document body:\n  - \"Usage\" section: promoted from H2 to H1\n  - \"Appendix\" section: demoted from H2 to H3, content unchanged",
+            "- Frontmatter has not changed\n- There were changes to the document body:\n  - \"Top\" section: content has changed\n  - \"Usage\" section: promoted from H2 to H1\n  - \"Appendix\" section: demoted from H2 to H3, content unchanged",
         );
     }
 
@@ -897,11 +899,14 @@ mod tests {
         let opts = MdHashOptions::default();
         let stored = stored_at(&original, MdHashKind::Detailed, &opts);
 
-        // "Changelog" removed; "Troubleshooting" added at the end.
+        // "Changelog" removed; "Troubleshooting" added as a child of "Examples".
+        // Nesting "Troubleshooting" under "Examples" grows "Examples"'s subtree,
+        // so its section content changes too (Fix: detailed section content
+        // covers the full subtree, not just the prelude).
         let edited = md("# Usage\n\nU.\n\n# Examples\n\nE.\n\n## Troubleshooting\n\nT.");
         assert_eq!(
             explain(&edited, &stored),
-            "- Frontmatter has not changed\n- There were changes to the document body:\n  - \"Troubleshooting\" section: added (H2)\n  - \"Changelog\" section was removed (previously between \"Usage\" and \"Examples\")",
+            "- Frontmatter has not changed\n- There were changes to the document body:\n  - \"Examples\" section: content has changed\n  - \"Troubleshooting\" section: added (H2)\n  - \"Changelog\" section was removed (previously between \"Usage\" and \"Examples\")",
         );
     }
 
@@ -926,10 +931,12 @@ mod tests {
         let stored = stored_at(&original, MdHashKind::Detailed, &opts);
 
         // A new frontmatter key (keys changed) and "Usage" promoted to H1.
+        // Promoting "Usage" out of "Top" shrinks "Top"'s subtree, so its section
+        // content changes too (detailed section content covers the full subtree).
         let edited = md("---\nauthor: A\nstatus: draft\n---\n# Top\n\nT.\n\n# Usage\n\nU.");
         assert_eq!(
             explain(&edited, &stored),
-            "- Frontmatter keys and values have changed\n- There were changes to the document body:\n  - \"Usage\" section: promoted from H2 to H1, content unchanged",
+            "- Frontmatter keys and values have changed\n- There were changes to the document body:\n  - \"Top\" section: content has changed\n  - \"Usage\" section: promoted from H2 to H1, content unchanged",
         );
     }
 

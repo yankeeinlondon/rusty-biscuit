@@ -12,6 +12,7 @@ use super::options::MdHashOptions;
 use super::{hash_content_with_policy, hash_frontmatter_keys, hash_frontmatter_map, hex};
 use crate::markdown::FrontmatterMap;
 use crate::markdown::Markdown;
+use crate::markdown::MarkdownTocNode;
 
 /// The frontmatter component of a `structured` or `detailed` hash.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,7 +163,7 @@ impl Markdown {
             },
             MdHashKind::Structured => ComputedHash::Structured {
                 fm: hex(hash_frontmatter_map(&filtered, strict)),
-                fm_keys: hex(hash_frontmatter_keys(&filtered)),
+                fm_keys: hex(hash_frontmatter_keys(&filtered, strict)),
                 body: hex(hash_content_with_policy(self.content(), strict)),
                 body_structure: hex(hash_body_structure(self)),
             },
@@ -187,6 +188,11 @@ fn filtered_frontmatter(md: &Markdown, ignore: &BTreeSet<String>) -> Frontmatter
 /// Hashes the document's heading structure: each heading in document order
 /// rendered as `<#...> <title>`, joined with newlines. Captures heading text,
 /// level, and order without section content. Empty when there are no headings.
+///
+/// This is a verbatim structural fingerprint — it applies no whitespace
+/// normalization, so `strict` does not affect it. Whitespace-only differences in
+/// the heading *source* surface through the `body` value component (which is
+/// verbatim under strict), not through this skeleton.
 fn hash_body_structure(md: &Markdown) -> u64 {
     let toc = md.toc();
     let headings = toc.all_headings();
@@ -204,13 +210,16 @@ fn hash_body_structure(md: &Markdown) -> u64 {
 /// Builds the nested `detailed` value: the frontmatter pair, a nullable
 /// preamble hash, and one section tuple per heading in document order.
 ///
-/// Section content is the heading's own prelude (content before its first
-/// child heading), hashed under the body whitespace policy so a whitespace-only
-/// edit does not change the non-strict content hash.
+/// A section's content is all content after the heading line up to the next
+/// heading at the same or a parent (lower-or-equal) level — its full subtree,
+/// including any nested child sections. It is hashed under the body whitespace
+/// policy so a whitespace-only edit does not change the non-strict content hash.
+/// Because a parent's slice contains its children, editing a child section
+/// changes both the child tuple and every ancestor tuple.
 fn compute_detailed(md: &Markdown, filtered: &FrontmatterMap, strict: bool) -> DetailedValue {
     let frontmatter = FmHashPair {
         fm: hex(hash_frontmatter_map(filtered, strict)),
-        keys: hex(hash_frontmatter_keys(filtered)),
+        keys: hex(hash_frontmatter_keys(filtered, strict)),
     };
 
     let toc = md.toc();
@@ -221,14 +230,16 @@ fn compute_detailed(md: &Markdown, filtered: &FrontmatterMap, strict: bool) -> D
         Some(hex(hash_content_with_policy(&toc.preamble, strict)))
     };
 
-    let sections = toc
-        .all_headings()
+    let content = md.content();
+    let headings = toc.all_headings();
+    let sections = headings
         .iter()
-        .map(|node| SectionTuple {
+        .enumerate()
+        .map(|(index, node)| SectionTuple {
             level: node.level.as_u8(),
             heading: node.title.clone(),
             content_hash: hex(hash_content_with_policy(
-                node.prelude_content().unwrap_or(""),
+                section_content(content, &headings, index),
                 strict,
             )),
         })
@@ -238,6 +249,30 @@ fn compute_detailed(md: &Markdown, filtered: &FrontmatterMap, strict: bool) -> D
         frontmatter,
         preamble,
         sections,
+    }
+}
+
+/// The content slice owned by the heading at `index`: everything after the
+/// heading line up to the next heading at the same or a parent (lower-or-equal)
+/// level, or end of document. This is the spec's detailed-section boundary and
+/// includes any nested child sections.
+///
+/// Returns `""` when the heading has no trailing content (e.g. a trailing
+/// heading with no body). Byte offsets come from `MarkdownTocNode::source_span`,
+/// which indexes into the same `content` string the TOC was built from.
+fn section_content<'a>(content: &'a str, headings: &[&MarkdownTocNode], index: usize) -> &'a str {
+    let node = headings[index];
+    let level = node.level.as_u8();
+    let start = node.source_span.0;
+    let end = headings[index + 1..]
+        .iter()
+        .find(|next| next.level.as_u8() <= level)
+        .map_or(content.len(), |next| next.source_span.0);
+
+    let section = &content[start..end];
+    match section.find('\n') {
+        Some(newline) => &section[newline + 1..],
+        None => "",
     }
 }
 
@@ -395,6 +430,93 @@ mod tests {
         assert_eq!(absent_fm, empty_fm);
         // Empty frontmatter hashes the empty string.
         assert_eq!(absent_fm, hex(xx_hash("")));
+    }
+
+    #[test]
+    fn detailed_child_edit_changes_child_and_parent_tuples() {
+        // A section's content is its full subtree, so editing a nested child
+        // changes the child tuple AND every ancestor tuple.
+        let original = md("# Intro\n\nA.\n\n## Setup\n\nB.");
+        let edited = md("# Intro\n\nA.\n\n## Setup\n\nB changed.");
+        let opts = MdHashOptions::default();
+
+        let ComputedHash::Detailed(orig) = original.compute_hash(MdHashKind::Detailed, &opts)
+        else {
+            panic!("expected Detailed");
+        };
+        let ComputedHash::Detailed(new) = edited.compute_hash(MdHashKind::Detailed, &opts) else {
+            panic!("expected Detailed");
+        };
+
+        assert_eq!(orig.sections[0].heading, "Intro");
+        assert_eq!(orig.sections[1].heading, "Setup");
+
+        assert_ne!(
+            orig.sections[1].content_hash, new.sections[1].content_hash,
+            "child Setup tuple must change",
+        );
+        assert_ne!(
+            orig.sections[0].content_hash, new.sections[0].content_hash,
+            "parent Intro tuple must change because it subsumes the child subtree",
+        );
+    }
+
+    #[test]
+    fn detailed_sibling_edit_leaves_other_sibling_tuple_stable() {
+        // The boundary for a section is the next same-or-parent heading, so an
+        // edit under one H1 sibling must not perturb the other sibling's tuple.
+        let original = md("# One\n\nX.\n\n# Two\n\nY.");
+        let edited = md("# One\n\nX.\n\n# Two\n\nY changed.");
+        let opts = MdHashOptions::default();
+
+        let ComputedHash::Detailed(orig) = original.compute_hash(MdHashKind::Detailed, &opts)
+        else {
+            panic!("expected Detailed");
+        };
+        let ComputedHash::Detailed(new) = edited.compute_hash(MdHashKind::Detailed, &opts) else {
+            panic!("expected Detailed");
+        };
+
+        assert_eq!(orig.sections[0].heading, "One");
+        assert_eq!(orig.sections[1].heading, "Two");
+        assert_eq!(
+            orig.sections[0].content_hash, new.sections[0].content_hash,
+            "sibling One must be unchanged",
+        );
+        assert_ne!(
+            orig.sections[1].content_hash, new.sections[1].content_hash,
+            "sibling Two must change",
+        );
+    }
+
+    #[test]
+    fn structured_strict_preserves_frontmatter_key_order() {
+        // Same keys and values, different insertion order. Non-strict sorts keys
+        // (so `fm_keys` matches); strict preserves order (so `fm_keys` differs).
+        let a = md("---\nbeta: 1\nalpha: 2\n---\n# H\n\nBody.");
+        let b = md("---\nalpha: 2\nbeta: 1\n---\n# H\n\nBody.");
+
+        let strict = MdHashOptions {
+            strict: true,
+            ..MdHashOptions::default()
+        };
+        let non_strict = MdHashOptions::default();
+
+        let fm_keys = |computed: ComputedHash| match computed {
+            ComputedHash::Structured { fm_keys, .. } => fm_keys,
+            other => panic!("expected Structured, got {other:?}"),
+        };
+
+        assert_ne!(
+            fm_keys(a.compute_hash(MdHashKind::Structured, &strict)),
+            fm_keys(b.compute_hash(MdHashKind::Structured, &strict)),
+            "strict must not reorder frontmatter keys",
+        );
+        assert_eq!(
+            fm_keys(a.compute_hash(MdHashKind::Structured, &non_strict)),
+            fm_keys(b.compute_hash(MdHashKind::Structured, &non_strict)),
+            "non-strict sorts keys, so insertion order is irrelevant",
+        );
     }
 
     #[test]
