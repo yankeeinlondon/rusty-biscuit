@@ -463,4 +463,47 @@ mod tests {
             other => panic!("expected SchemaValidationFailed, got {other:?}"),
         }
     }
+
+    #[test]
+    fn schema_preparation_error_preserves_source_chain() {
+        use std::error::Error;
+
+        // A malformed inline `$schema` (an integer, not a mapping/sequence/
+        // string) fails during schema preparation. The compose error must
+        // expose the underlying `SchemaError` via `Error::source()` so
+        // programmatic callers can recover and inspect the original cause
+        // rather than only reading the formatted summary.
+        let md = md_with_schema("$schema: 42\n");
+        let options = ComposeOptions::new();
+        let err = run(&md, &options).unwrap_err();
+
+        let source = err
+            .source()
+            .expect("preparation failure should expose a source error");
+        let schema_err = source
+            .downcast_ref::<crate::markdown::schemas::SchemaError>()
+            .expect("source should downcast to SchemaError");
+        assert!(
+            matches!(
+                schema_err,
+                crate::markdown::schemas::SchemaError::FrontmatterShape { .. }
+            ),
+            "expected FrontmatterShape, got {schema_err:?}"
+        );
+    }
+
+    #[test]
+    fn validation_failure_has_no_source_chain() {
+        use std::error::Error;
+
+        // A successfully prepared schema that the frontmatter simply does not
+        // satisfy carries its detail in `problems`, not an upstream
+        // `SchemaError`. `Error::source()` must be `None` so callers can
+        // distinguish "schema could not be prepared" from "frontmatter did
+        // not satisfy the prepared schema".
+        let md = md_with_schema("$schema:\n  title: 'string(required)'\nother: stuff\n");
+        let options = ComposeOptions::new();
+        let err = run(&md, &options).unwrap_err();
+        assert!(err.source().is_none(), "validation failure should have no source");
+    }
 }

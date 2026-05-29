@@ -4,13 +4,14 @@
 //! for running operations in three phases:
 //!
 //! **Inline Pre** (serial):
-//! 0. **Schema Validation** - Validate frontmatter against `$schema` or
-//!    `ComposeOptions::baseline_schema`. Runs after `--set` / `--state`
-//!    overrides are applied but before interpolation or shell expansion.
-//! 1. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
+//! 0. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
 //!    When shell expansion is enabled, templated keys that reference
 //!    shell-pending values (top-level `$(...)`) are deferred for a second
 //!    interpolation pass after step 2 completes.
+//! 1. **Schema Validation** - Validate frontmatter against `$schema` or
+//!    `ComposeOptions::baseline_schema`. Runs after `--set` / `--state`
+//!    overrides and frontmatter interpolation are applied, but before
+//!    frontmatter shell expansion.
 //! 2. **Frontmatter Shell Expansion** - Execute shell commands in frontmatter
 //!    values, then re-run interpolation to resolve any keys deferred above.
 //! 3. **Text Replacement** - Replace literal strings from frontmatter `replace` map
