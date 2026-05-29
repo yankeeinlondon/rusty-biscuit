@@ -5,6 +5,7 @@
 //! handler are all covered end-to-end.
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use darkmatter::markdown::Markdown;
 use predicates::prelude::*;
 use std::fs;
 use std::io::Write;
@@ -212,4 +213,144 @@ fn compose_block_includes_source_path() {
         stderr.contains("needs-title.md"),
         "expected file name in styled block stderr, got:\n{stderr}",
     );
+}
+
+// ── review-1 Medium #3: `md compose --frontmatter` write-back serialization ──
+//
+// The library unit tests in `compose::schema_validation` prove that
+// `schema_validation::run` mutates the in-memory frontmatter. These CLI tests
+// close the gap the review flagged: that the coerced values actually serialize
+// into the composed document after the *full* pipeline — the user-visible
+// output. Each composes with `--frontmatter`, re-parses the emitted document,
+// and asserts the serialized frontmatter holds real JSON types. Re-parsing (vs
+// matching raw YAML text) is robust against the serializer's quote-style
+// choices while still proving the on-disk bytes round-trip to the right type.
+
+/// Composes `doc` with `--frontmatter` and re-parses the emitted document so
+/// callers can inspect the *serialized* frontmatter's real JSON types.
+fn composed_frontmatter(doc: &Path) -> serde_json::Map<String, serde_json::Value> {
+    let assert = md_cmd()
+        .args(["compose", "--frontmatter"])
+        .arg(doc)
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    let reparsed: Markdown = stdout.as_str().into();
+    reparsed
+        .frontmatter()
+        .as_map()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
+#[test]
+fn compose_frontmatter_serializes_real_boolean() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "boolean.md",
+        "---\n$schema:\n  has_spec: boolean\nhas_spec: \"true\"\n---\nBody\n",
+    );
+    let fm = composed_frontmatter(&doc);
+    assert_eq!(fm.get("has_spec"), Some(&serde_json::json!(true)));
+}
+
+#[test]
+fn compose_frontmatter_serializes_real_number() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "number.md",
+        "---\n$schema:\n  n: number\nn: \"42\"\n---\nBody\n",
+    );
+    let fm = composed_frontmatter(&doc);
+    assert_eq!(fm.get("n"), Some(&serde_json::json!(42)));
+}
+
+#[test]
+fn compose_frontmatter_serializes_string_reverse_coercion() {
+    let tmp = TempDir::new().unwrap();
+    // A real number `42` against a `string` field is reverse-coerced to "42";
+    // the composed output must store (and serialize) it as a real string.
+    let doc = write_file(
+        &tmp,
+        "string.md",
+        "---\n$schema:\n  spec: 'string(required)'\nspec: 42\n---\nBody\n",
+    );
+    let fm = composed_frontmatter(&doc);
+    assert_eq!(fm.get("spec"), Some(&serde_json::json!("42")));
+}
+
+#[test]
+fn compose_frontmatter_serializes_boolish_normalization() {
+    let tmp = TempDir::new().unwrap();
+    // `boolish` accepts the `True` spelling and normalizes it to a real bool.
+    let doc = write_file(
+        &tmp,
+        "boolish.md",
+        "---\n$schema:\n  flag: boolish\nflag: \"True\"\n---\nBody\n",
+    );
+    let fm = composed_frontmatter(&doc);
+    assert_eq!(fm.get("flag"), Some(&serde_json::json!(true)));
+}
+
+#[test]
+fn compose_frontmatter_serializes_numberlike_normalization() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "numberlike.md",
+        "---\n$schema:\n  n: numberlike\nn: \"42\"\n---\nBody\n",
+    );
+    let fm = composed_frontmatter(&doc);
+    assert_eq!(fm.get("n"), Some(&serde_json::json!(42)));
+}
+
+#[test]
+fn compose_frontmatter_serializes_typed_array() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "array.md",
+        "---\n$schema:\n  flags: 'boolean[]'\nflags:\n  - \"true\"\n  - \"false\"\n---\nBody\n",
+    );
+    let fm = composed_frontmatter(&doc);
+    assert_eq!(fm.get("flags"), Some(&serde_json::json!([true, false])));
+}
+
+#[test]
+fn compose_frontmatter_serializes_root_union_write_back() {
+    let tmp = TempDir::new().unwrap();
+    // A 3-arm root union (mirrors prompts/implement.md) where every arm types
+    // the `has_*` trio as boolean. The frontmatter holds them as strings; the
+    // composed output must serialize them as real booleans via the
+    // first-validating-arm coercion path.
+    let doc = write_file(
+        &tmp,
+        "union.md",
+        "---\n\
+         $schema:\n\
+        \x20 - review: string(required)\n\
+        \x20   has_spec: boolean\n\
+        \x20   has_plan: boolean\n\
+        \x20   has_review: boolean\n\
+        \x20 - spec: string(required)\n\
+        \x20   has_spec: boolean\n\
+        \x20   has_plan: boolean\n\
+        \x20   has_review: boolean\n\
+        \x20 - plan: string(required)\n\
+        \x20   has_spec: boolean\n\
+        \x20   has_plan: boolean\n\
+        \x20   has_review: boolean\n\
+         spec: design.md\n\
+         has_spec: \"true\"\n\
+         has_plan: \"false\"\n\
+         has_review: \"false\"\n\
+         ---\nBody\n",
+    );
+    let fm = composed_frontmatter(&doc);
+    assert_eq!(fm.get("has_spec"), Some(&serde_json::json!(true)));
+    assert_eq!(fm.get("has_plan"), Some(&serde_json::json!(false)));
+    assert_eq!(fm.get("has_review"), Some(&serde_json::json!(false)));
 }
