@@ -1403,6 +1403,197 @@ fn test_hash_directory_ignores_non_markdown() {
 }
 
 // =============================================================================
+//                     HASH KIND / SAVE / DIFF TESTS
+// =============================================================================
+
+#[test]
+fn test_hash_kind_structured_outputs_four_parts() {
+    md_cmd()
+        .args(["hash", "--kind", "structured", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}\n$")
+                .unwrap(),
+        );
+}
+
+#[test]
+fn test_hash_kind_detailed_outputs_nested_yaml() {
+    md_cmd()
+        .args(["hash", "--kind", "detailed", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("frontmatter:"))
+        .stdout(predicate::str::contains("sections:"));
+}
+
+#[test]
+fn test_hash_kind_fm_matches_frontmatter_flag() {
+    let input = "---\ntitle: Hello\n---\n# Content";
+    let by_kind = md_cmd()
+        .args(["hash", "--kind", "fm", "-"])
+        .write_stdin(input)
+        .output()
+        .unwrap();
+    let by_flag = md_cmd()
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin(input)
+        .output()
+        .unwrap();
+    assert_eq!(by_kind.stdout, by_flag.stdout);
+}
+
+#[test]
+fn test_hash_kind_conflicts_with_body() {
+    md_cmd()
+        .args(["hash", "--kind", "fm", "--body", "-"])
+        .write_stdin("# H")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_hash_save_and_diff_conflict() {
+    md_cmd()
+        .args(["hash", "--save", "--diff", "-"])
+        .write_stdin("# H")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_hash_env_property_override() {
+    // HASH_PROPERTY changes which frontmatter key the hash is written to.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
+
+    md_cmd()
+        .env("HASH_PROPERTY", "fingerprint")
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success();
+
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(written.contains("fingerprint:"), "got:\n{written}");
+    assert!(!written.contains("\nhash:"), "got:\n{written}");
+}
+
+#[test]
+fn test_hash_ignore_properties_excludes_key() {
+    // A document differing only in an ignored property hashes identically.
+    let with_draft = md_cmd()
+        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin("---\ntitle: T\ndraft: true\n---\n# H")
+        .output()
+        .unwrap();
+    let without_draft = md_cmd()
+        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .args(["hash", "--frontmatter", "-"])
+        .write_stdin("---\ntitle: T\n---\n# H")
+        .output()
+        .unwrap();
+    assert_eq!(with_draft.stdout, without_draft.stdout);
+}
+
+#[test]
+fn test_hash_save_writes_baseline_and_exits_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
+
+    md_cmd()
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("baseline"));
+
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(written.contains("hash:"), "got:\n{written}");
+}
+
+#[test]
+fn test_hash_save_requires_file_not_stdin() {
+    md_cmd()
+        .args(["hash", "--save", "-"])
+        .write_stdin("# H")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_hash_diff_no_stored_hash_exits_two() {
+    md_cmd()
+        .args(["hash", "--diff", "-"])
+        .write_stdin("---\ntitle: T\n---\n# H\n\nBody.")
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("No stored hash to compare against"));
+}
+
+#[test]
+fn test_hash_diff_unchanged_exits_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
+
+    // Establish a baseline, then diff against it without any edit.
+    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+
+    md_cmd()
+        .arg("hash")
+        .arg("--diff")
+        .arg(&file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No semantic changes detected"));
+}
+
+#[test]
+fn test_hash_diff_changed_exits_two() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
+
+    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+
+    // Edit the body, leaving the stored hash in place.
+    let stored = std::fs::read_to_string(&file).unwrap();
+    let edited = stored.replace("Body.", "Different body.");
+    std::fs::write(&file, edited).unwrap();
+
+    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(2);
+}
+
+#[test]
+fn test_hash_directory_rejects_save() {
+    let dir = create_hash_dir();
+    md_cmd()
+        .args(["hash", "--save"])
+        .arg(dir.path())
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_hash_directory_rejects_structured_kind() {
+    let dir = create_hash_dir();
+    md_cmd()
+        .args(["hash", "--kind", "structured"])
+        .arg(dir.path())
+        .assert()
+        .failure();
+}
+
+// =============================================================================
 //                          GET SUBCOMMAND TESTS
 // =============================================================================
 
