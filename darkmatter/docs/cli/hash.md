@@ -203,10 +203,13 @@ and `detailed` kinds are rejected with a usage error. Directory output forms:
   order — strict performs no key reordering.
 - Body: hashes raw body bytes.
 - Body structure (`structured` `body_structure`): a verbatim fingerprint of the
-  heading skeleton (level + parsed title, in document order). It applies no
-  whitespace normalization in either mode, so strict does not change it;
-  whitespace-only differences in heading *source* surface through the verbatim
-  `body` component instead.
+  heading skeleton (level + literal heading text, in document order). The heading
+  text is the literal source with only ATX/setext markers and surrounding
+  whitespace removed, so inline Markdown is preserved — `# Install *Now*` and
+  `# Install Now` are distinct structural headings. It applies no whitespace
+  normalization in either mode, so strict does not change it; whitespace-only
+  differences in heading *source* surface through the verbatim `body` component
+  instead.
 
 ## Lessons Learned
 

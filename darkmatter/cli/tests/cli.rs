@@ -1546,6 +1546,35 @@ fn test_hash_diff_malformed_stored_hash_exits_one() {
 }
 
 #[test]
+fn test_hash_diff_detailed_bad_section_level_exits_one() {
+    // A stored detailed hash whose section level is outside 1-6 is a malformed
+    // baseline (operational error, exit 1), never a content difference (exit 2).
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(
+        &file,
+        concat!(
+            "---\n",
+            "title: T\n",
+            "hash:\n",
+            "  kind: detailed\n",
+            "  value:\n",
+            "    frontmatter:\n",
+            "      fm: \"0000000000000001\"\n",
+            "      keys: \"0000000000000002\"\n",
+            "    preamble: null\n",
+            "    sections:\n",
+            "      - [9, \"Bad\", \"0000000000000004\"]\n",
+            "---\n",
+            "# H\n\nBody.\n",
+        ),
+    )
+    .unwrap();
+
+    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(1);
+}
+
+#[test]
 fn test_hash_kind_detailed_outputs_nested_yaml() {
     md_cmd()
         .args(["hash", "--kind", "detailed", "-"])
