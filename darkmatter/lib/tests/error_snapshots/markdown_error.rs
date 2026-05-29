@@ -216,6 +216,30 @@ fn schema_validation_preparation_failure_with_description_renders_summary() {
     insta::assert_snapshot!(out);
 }
 
+/// Root-union (`$schema` array-of-mappings) failures carry the matched arm in
+/// `arm_index`; the renderer appends a `(schema arm N)` suffix to the bullet.
+/// This is the only test that exercises a non-`None` `arm_index`, so it guards
+/// the suffix branch in `schema_validation_failed_block`.
+#[test]
+fn schema_validation_root_union_arm_index_renders_block() {
+    let err = MarkdownError::SchemaValidationFailed {
+        path: PathBuf::from("/tmp/test/union.md"),
+        problems: vec![ValidationProblem {
+            path: "/kind".to_string(),
+            property: Some("kind".to_string()),
+            message: "\"draft\" is not one of the allowed values".to_string(),
+            kind: ValidationProblemKind::Invalid,
+            line: Some(3),
+            column: Some(7),
+            arm_index: Some(2),
+        }],
+        summary: "frontmatter did not satisfy the schema".to_string(),
+        description: None,
+    };
+    let out = render(&err);
+    insta::assert_snapshot!(out);
+}
+
 #[test]
 fn schema_validation_multiple_problems_renders_block() {
     let err = MarkdownError::SchemaValidationFailed {
