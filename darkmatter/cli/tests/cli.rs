@@ -1402,6 +1402,77 @@ fn test_hash_directory_ignores_non_markdown() {
         .stdout(predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}\n$").unwrap());
 }
 
+#[test]
+fn test_hash_directory_ignores_managed_keys() {
+    // Adding the managed `hash` / `last_updated` baseline fields must not move
+    // the directory aggregate — the hash never hashes itself.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("a.md"),
+        "---\ntitle: Alpha\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("b.md"),
+        "---\ntitle: Beta\n---\n# Beta\n\nSecond file.",
+    )
+    .unwrap();
+
+    let before = md_cmd().arg("hash").arg(dir.path()).output().unwrap();
+    assert!(before.status.success());
+
+    std::fs::write(
+        dir.path().join("a.md"),
+        "---\ntitle: Alpha\nhash: 1111111111111111-2222222222222222\nlast_updated: 2020-01-01\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("b.md"),
+        "---\ntitle: Beta\nhash: 3333333333333333-4444444444444444\nlast_updated: 2020-01-01\n---\n# Beta\n\nSecond file.",
+    )
+    .unwrap();
+
+    let after = md_cmd().arg("hash").arg(dir.path()).output().unwrap();
+    assert_eq!(
+        before.stdout, after.stdout,
+        "managed keys must not change the directory aggregate",
+    );
+}
+
+#[test]
+fn test_hash_directory_honors_ignore_properties() {
+    // A file differing only in an ignored property must aggregate identically.
+    let with_draft = tempfile::tempdir().unwrap();
+    std::fs::write(
+        with_draft.path().join("a.md"),
+        "---\ntitle: Alpha\ndraft: true\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+    let without_draft = tempfile::tempdir().unwrap();
+    std::fs::write(
+        without_draft.path().join("a.md"),
+        "---\ntitle: Alpha\n---\n# Alpha\n\nFirst file.",
+    )
+    .unwrap();
+
+    let a = md_cmd()
+        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .arg("hash")
+        .arg(with_draft.path())
+        .output()
+        .unwrap();
+    let b = md_cmd()
+        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .arg("hash")
+        .arg(without_draft.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        a.stdout, b.stdout,
+        "HASH_IGNORE_PROPERTIES must apply in directory mode",
+    );
+}
+
 // =============================================================================
 //                     HASH KIND / SAVE / DIFF TESTS
 // =============================================================================
@@ -1417,6 +1488,61 @@ fn test_hash_kind_structured_outputs_four_parts() {
             predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}\n$")
                 .unwrap(),
         );
+}
+
+#[test]
+fn test_hash_kind_structured_strict_outputs_four_parts() {
+    md_cmd()
+        .args(["hash", "--kind", "structured", "--strict", "-"])
+        .write_stdin("---\nbeta: 1\nalpha: 2\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::is_match(r"^[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}-[0-9a-f]{16}\n$")
+                .unwrap(),
+        );
+}
+
+#[test]
+fn test_hash_kind_structured_strict_respects_key_order() {
+    let reordered = |args: &[&str]| {
+        let beta_first = md_cmd()
+            .args(args)
+            .write_stdin("---\nbeta: 1\nalpha: 2\n---\n# H\n\nBody.")
+            .output()
+            .unwrap()
+            .stdout;
+        let alpha_first = md_cmd()
+            .args(args)
+            .write_stdin("---\nalpha: 2\nbeta: 1\n---\n# H\n\nBody.")
+            .output()
+            .unwrap()
+            .stdout;
+        (beta_first, alpha_first)
+    };
+
+    // Strict preserves key order, so reordering keys changes the hash.
+    let (strict_beta, strict_alpha) = reordered(&["hash", "--kind", "structured", "--strict", "-"]);
+    assert_ne!(strict_beta, strict_alpha, "strict must not reorder keys");
+
+    // Non-strict sorts keys, so reordering is a no-op.
+    let (ns_beta, ns_alpha) = reordered(&["hash", "--kind", "structured", "-"]);
+    assert_eq!(ns_beta, ns_alpha, "non-strict sorts keys");
+}
+
+#[test]
+fn test_hash_diff_malformed_stored_hash_exits_one() {
+    // A corrupt stored hash is an operational error (exit 1), never a content
+    // difference (exit 2).
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(
+        &file,
+        "---\ntitle: T\nhash: not-a-real-hash-but-two-parts\n---\n# H\n\nBody.\n",
+    )
+    .unwrap();
+
+    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(1);
 }
 
 #[test]

@@ -1406,7 +1406,19 @@ fn run_hash_directory(
 
     let body_only = options.forced_kind == Some(MdHashKind::Body);
     let frontmatter_only = options.forced_kind == Some(MdHashKind::Fm);
-    let strict = options.strict;
+
+    // Directory mode is bare-hash only, so the kind is always one with a flat
+    // string form. Computing through `compute_hash` (rather than the legacy
+    // `Markdown::hash`) applies the managed-key and `HASH_IGNORE_PROPERTIES`
+    // ignore policy, so an aggregate is stable when a file only gains `hash` /
+    // `last_updated` and honors extra ignored properties.
+    let kind = if body_only {
+        MdHashKind::Body
+    } else if frontmatter_only {
+        MdHashKind::Fm
+    } else {
+        MdHashKind::Simple
+    };
 
     let mut paths = collect_markdown_files(path)?;
     paths.sort();
@@ -1416,7 +1428,9 @@ fn run_hash_directory(
         .map(|p| {
             let md =
                 Markdown::try_from(p.as_path()).unwrap_or_else(|_| Markdown::from(String::new()));
-            md.hash(body_only, frontmatter_only, strict)
+            md.compute_hash(kind, options)
+                .flat_string()
+                .expect("simple/fm/body always have a flat string form")
         })
         .collect();
 
