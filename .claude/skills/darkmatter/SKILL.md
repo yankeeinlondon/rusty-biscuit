@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 38ce971c4dbb3efe-c7fdc5b66e6654df
+hash: 204b9185fb997905-137d6998905769ba
 ---
 
 # darkmatter
@@ -93,7 +93,7 @@ The compose pipeline runs in three phases:
 **Inline Pre** (serial):
 
 1. **Frontmatter Interpolation** - Resolve `{{ variable }}` in frontmatter values.
-2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast.
+2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast.
 3. **Frontmatter Shell Expansion** - Execute top-level `$(cmd)` frontmatter values.
 4. **Text Replacement** - Replace literal strings from `replace:` map.
 5. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions.
@@ -122,7 +122,7 @@ Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via 
 - `$schema` frontmatter property (inline, file reference, or root-level union).
 - `md schema validate` and `md schema detect` CLI subcommands.
 - `DarkmatterSchemas` library API with baseline merging and LRU validator cache.
-- Always-on compose pipeline stage (after `--set`/`--state` and interpolation, before shell expansion).
+- Always-on compose pipeline stage (after `--set`/`--state` and interpolation, before shell expansion) that also **coerces** schema-recognized scalars to their declared types and writes them back (default-on; `$(...)`-pending values are skipped and coerced at post-shell re-validation).
 - `ComposeOptions::with_baseline_schema(...)` for programmatic baseline injection.
 
 See `darkmatter/docs/topics/schema-definition.md` for the full topic documentation.
