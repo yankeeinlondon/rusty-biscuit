@@ -43,6 +43,7 @@
 //! [`Constraint`]: crate::markdown::schemas::simplified::Constraint
 //! [`SchemaError`]: crate::markdown::schemas::errors::SchemaError
 
+pub mod coerce;
 pub mod completion;
 pub mod detect;
 pub mod errors;
