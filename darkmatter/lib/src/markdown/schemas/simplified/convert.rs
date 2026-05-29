@@ -39,8 +39,10 @@ pub(in crate::markdown::schemas) const BOOLISH_VALUES: [&str; 6] =
     ["true", "false", "True", "False", "TRUE", "FALSE"];
 
 /// Pattern the `numberlike` string arm carries — the source for the schema the
-/// validator compiles.
-pub(super) const NUMBERLIKE_PATTERN: &str = r"^-?\d+(\.\d+)?$";
+/// validator compiles. Single source of truth shared with
+/// [`super::super::coerce`], which matches it exactly when recognizing a
+/// numberlike `anyOf` arm.
+pub(in crate::markdown::schemas) const NUMBERLIKE_PATTERN: &str = r"^-?\d+(\.\d+)?$";
 
 /// Converts a [`SimplifiedSchema`] into a Draft 2020-12 JSON Schema value.
 ///

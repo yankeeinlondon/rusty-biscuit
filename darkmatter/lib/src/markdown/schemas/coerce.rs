@@ -18,7 +18,7 @@
 
 use serde_json::{Map, Value};
 
-use super::simplified::convert::BOOLISH_VALUES;
+use super::simplified::convert::{BOOLISH_VALUES, NUMBERLIKE_PATTERN};
 use super::validate::{self, build_validator};
 
 /// The conversion a recognized property schema asks for.
@@ -76,33 +76,54 @@ pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
     }
 }
 
-/// Recognizes the two `anyOf` shapes Darkmatter emits.
+/// Recognizes the two `anyOf` shapes Darkmatter emits, matching them *exactly*
+/// so unrelated property unions are never coerced.
 ///
-/// - **boolish**: one arm is `{"type":"boolean"}` and one arm carries an
-///   `"enum"` key → [`CoercionTarget::ToBoolean`].
+/// - **boolish**: one arm is `{"type":"boolean"}` and one arm is an `"enum"`
+///   whose members are exactly [`BOOLISH_VALUES`] → [`CoercionTarget::ToBoolean`].
 /// - **numberlike**: one arm is `{"type":"number"}` and one arm is
-///   `{"type":"string"}` carrying a `"pattern"` → [`CoercionTarget::ToNumber`].
+///   `{"type":"string"}` whose `"pattern"` equals [`NUMBERLIKE_PATTERN`] →
+///   [`CoercionTarget::ToNumber`].
 ///
-/// The `pattern` requirement on the numberlike string arm is what distinguishes
-/// it from a generic `string|number` property union (which has no pattern and
-/// therefore yields `None`, leaving such unions untouched).
+/// The exact `enum`/`pattern` match is the correctness boundary: a raw JSON
+/// Schema union such as `{"anyOf":[{"type":"boolean"},{"enum":["auto"]}]}` or
+/// `{"anyOf":[{"type":"number"},{"type":"string","pattern":"^[A-Z]+$"}]}` is
+/// *not* something Darkmatter emits, so it yields `None` and is left for the
+/// strict validator to accept or reject untouched.
 fn target_from_any_of(arms: &[Value]) -> Option<CoercionTarget> {
     let has_type = |t: &str| {
         arms.iter()
             .any(|a| a.get("type").and_then(Value::as_str) == Some(t))
     };
-    let has_enum_arm = arms.iter().any(|a| a.get("enum").is_some());
-    let has_pattern_string_arm = arms.iter().any(|a| {
-        a.get("type").and_then(Value::as_str) == Some("string") && a.get("pattern").is_some()
+    let has_boolish_enum_arm = arms.iter().any(|a| {
+        a.get("enum")
+            .and_then(Value::as_array)
+            .is_some_and(is_boolish_enum)
+    });
+    let has_numberlike_string_arm = arms.iter().any(|a| {
+        a.get("type").and_then(Value::as_str) == Some("string")
+            && a.get("pattern").and_then(Value::as_str) == Some(NUMBERLIKE_PATTERN)
     });
 
-    if has_type("boolean") && has_enum_arm {
+    if has_type("boolean") && has_boolish_enum_arm {
         Some(CoercionTarget::ToBoolean)
-    } else if has_type("number") && has_pattern_string_arm {
+    } else if has_type("number") && has_numberlike_string_arm {
         Some(CoercionTarget::ToNumber)
     } else {
         None
     }
+}
+
+/// True when an `anyOf` `enum` arm's members are exactly the boolish spellings
+/// ([`BOOLISH_VALUES`]) — the set [`super::simplified::convert::boolish_fragment`]
+/// emits. Order-independent; any extra or missing member fails the match.
+fn is_boolish_enum(members: &[Value]) -> bool {
+    use std::collections::BTreeSet;
+    let actual: BTreeSet<&str> = members.iter().filter_map(Value::as_str).collect();
+    // Reject if any member was a non-string (filtered out above), which would
+    // shrink `actual` below the member count and never equal the expected set.
+    actual.len() == members.len()
+        && actual == BOOLISH_VALUES.iter().copied().collect::<BTreeSet<&str>>()
 }
 
 /// Builds a coerced copy of `instance` against `json_schema` and reports
@@ -212,16 +233,15 @@ fn coerce_to_number(value: &Value) -> Option<Value> {
     if !is_numberlike(s) {
         return None;
     }
-    // Integral strings (no `.`) parse as i64 to keep the JSON integer form. An
-    // integral string that overflows i64 is left untouched (`None`) rather than
-    // silently truncated through f64 — the validator then reports the type
-    // mismatch and the original string survives. The f64 path is reached only
-    // for decimal strings.
-    if !s.contains('.') {
-        return s.parse::<i64>().ok().map(|i| Value::Number(i.into()));
-    }
-    let f = s.parse::<f64>().ok()?;
-    serde_json::Number::from_f64(f).map(Value::Number)
+    // Parse through serde_json's own number model so the coerced value is
+    // exactly what the validator would have seen had the literal been written
+    // bare: integral strings become `i64`/`u64` (preserving values above
+    // `i64::MAX`), decimals become `f64`. `is_numberlike` already guaranteed the
+    // `^-?\d+(\.\d+)?$` shape, so this only returns `None` for literals too
+    // large even for `f64`, which then stay strings for the validator to reject.
+    serde_json::from_str::<serde_json::Number>(s)
+        .ok()
+        .map(Value::Number)
 }
 
 fn coerce_to_string(value: &Value) -> Option<Value> {
@@ -375,6 +395,34 @@ mod tests {
         assert_eq!(coercion_target(&frag), None);
     }
 
+    #[test]
+    fn unrelated_boolean_enum_union_is_none() {
+        // A raw JSON Schema union of `boolean` with an arbitrary enum is NOT the
+        // boolish shape Darkmatter emits — the enum members are not the boolish
+        // spellings — so it must yield `None` and never coerce `"true"` → true.
+        let frag = json!({"anyOf": [{"type": "boolean"}, {"enum": ["auto"]}]});
+        assert_eq!(coercion_target(&frag), None);
+        // A superset enum (boolish spellings plus extras) is also not exact.
+        let superset = json!({
+            "anyOf": [
+                {"type": "boolean"},
+                {"enum": ["true", "false", "True", "False", "TRUE", "FALSE", "maybe"]}
+            ]
+        });
+        assert_eq!(coercion_target(&superset), None);
+    }
+
+    #[test]
+    fn unrelated_number_string_pattern_union_is_none() {
+        // A number/string union whose string arm carries a *different* pattern
+        // is not the numberlike shape; coercing `"42"` here would defeat the
+        // string arm's intentional `^[A-Z]+$` rejection of digits.
+        let frag = json!({
+            "anyOf": [{"type": "number"}, {"type": "string", "pattern": "^[A-Z]+$"}]
+        });
+        assert_eq!(coercion_target(&frag), None);
+    }
+
     // ── scalar coercion: boolean ────────────────────────────────────────
 
     #[test]
@@ -441,14 +489,17 @@ mod tests {
     }
 
     #[test]
-    fn integral_string_overflowing_i64_is_left_untouched() {
-        // Larger than i64::MAX and integral (no `.`): coercing through f64 would
-        // silently lose precision, so it stays a string for the validator to
-        // reject. In-range integers and decimals still coerce.
-        assert_eq!(coerce_to_number(&json!("99999999999999999999")), None);
+    fn large_integral_strings_match_serde_json_number_model() {
+        // Coercion mirrors serde_json's number parsing: `i64::MAX` stays i64,
+        // `i64::MAX + 1` becomes u64 (rather than being rejected), and the
+        // coerced value equals what the bare literal would deserialize to.
         assert_eq!(
             coerce_to_number(&json!("9223372036854775807")), // i64::MAX
             Some(json!(9_223_372_036_854_775_807_i64))
+        );
+        assert_eq!(
+            coerce_to_number(&json!("9223372036854775808")), // i64::MAX + 1
+            Some(json!(9_223_372_036_854_775_808_u64))
         );
         assert_eq!(coerce_to_number(&json!("3.14")), Some(json!(3.14)));
     }
