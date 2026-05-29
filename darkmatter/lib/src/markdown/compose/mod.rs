@@ -4758,6 +4758,32 @@ Rounded: {{ round(pi) }}"#;
         }
 
         #[test]
+        fn schema_violation_on_shell_value_reported_when_shell_expansion_disabled() {
+            // A `$(...)` frontmatter value violates the schema, but
+            // FrontmatterShellExpansion is NOT in the enabled set. Because no
+            // later stage will expand or re-validate `spec`, the violation must
+            // surface here rather than being deferred and silently accepted.
+            let content =
+                "---\n$schema:\n  spec: 'number(required)'\nspec: \"$(echo 1)\"\n---\nBody\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+
+            let err = md.compose_with(options).unwrap_err();
+            match err {
+                MarkdownError::SchemaValidationFailed { problems, .. } => {
+                    assert!(
+                        problems
+                            .iter()
+                            .any(|p| p.property.as_deref() == Some("spec") || p.path == "/spec"),
+                        "Error should mention the spec property, got: {problems:?}"
+                    );
+                }
+                other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+            }
+        }
+
+        #[test]
         fn schema_validation_reports_zero_shell_replacements() {
             let content = "---\n$schema:\n  spec: 'file(required)'\nspec: \"\"\ndir: \"$(dirname '{{ spec }}')\"\n---\nBody\n";
             let md: Markdown = content.into();

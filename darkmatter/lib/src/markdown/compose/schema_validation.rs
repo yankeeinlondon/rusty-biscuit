@@ -7,10 +7,13 @@
 //! schema-constrained fields derive from templates
 //! (e.g. `runtime_agent: '{{ env.AGENT }}'`); validating before shell
 //! expansion preserves fail-fast behavior so an invalid schema does not
-//! trigger expensive or side-effectful shell commands. Values that depend
-//! on shell-expanded inputs are re-validated downstream by the caller
-//! (e.g. claudine's `prepare_*_with_schema`) against the post-shell
-//! effective frontmatter.
+//! trigger expensive or side-effectful shell commands. When frontmatter
+//! shell expansion is enabled, values that depend on shell-expanded inputs
+//! are re-validated downstream by the caller (e.g. claudine's
+//! `prepare_*_with_schema`) against the post-shell effective frontmatter,
+//! so their problems are deferred here. When shell expansion is disabled,
+//! no later stage re-resolves those values, so every problem is reported
+//! here rather than deferred.
 //!
 //! When the effective frontmatter violates the resolved schema, compose aborts
 //! with a styled [`BlockError`] that names the offending property.
@@ -19,7 +22,7 @@ use std::path::PathBuf;
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOptions;
-use crate::markdown::compose::types::ComposeSource;
+use crate::markdown::compose::types::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::DarkmatterSchemas;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
 
@@ -80,11 +83,22 @@ pub(crate) fn run(markdown: &Markdown, options: &ComposeOptions) -> MarkdownResu
     // `prepare_*_with_schema`) re-validates the post-shell effective
     // frontmatter and reports any residual problems. See the rationale at
     // `compose::run::compose` where this stage is invoked.
+    //
+    // Deferral is only sound when shell expansion will actually run. When
+    // `FrontmatterShellExpansion` is disabled, no later stage expands or
+    // re-validates `$(...)` values, so deferring would silently accept a
+    // schema violation. In that case every problem is final and must be
+    // reported here.
+    let shell_expansion_enabled =
+        options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
     let fm_map = markdown.frontmatter().as_map();
     let composition_independent: Vec<_> = report
         .problems
         .iter()
         .filter(|p| {
+            if !shell_expansion_enabled {
+                return true;
+            }
             let Some(name) = top_level_pointer_segment(&p.path) else {
                 return true;
             };
@@ -388,6 +402,37 @@ mod tests {
                 assert_eq!(desc, "My doc");
             }
             other => panic!("expected SchemaValidationFailed with description, got {other:?}"),
+        }
+    }
+
+    // ── Shell-dependent deferral gating ───────────────────────────────
+
+    #[test]
+    fn shell_dependent_problem_deferred_when_shell_expansion_enabled() {
+        // `spec` holds a `$(...)` value and shell expansion is enabled (the
+        // default), so the type violation is deferred to post-shell
+        // re-validation and run returns Ok.
+        let md = md_with_schema("$schema:\n  spec: 'number(required)'\nspec: \"$(echo 1)\"\n");
+        let options = ComposeOptions::new();
+        assert!(run(&md, &options).is_ok());
+    }
+
+    #[test]
+    fn shell_dependent_problem_not_deferred_when_shell_expansion_disabled() {
+        // Same document, but FrontmatterShellExpansion is disabled. Nothing
+        // downstream will expand or re-validate `spec`, so the schema
+        // violation must be reported rather than silently deferred.
+        let md = md_with_schema("$schema:\n  spec: 'number(required)'\nspec: \"$(echo 1)\"\n");
+        let options = ComposeOptions::new().disable(ComposeOperation::FrontmatterShellExpansion);
+        let err = run(&md, &options).unwrap_err();
+        match err {
+            MarkdownError::SchemaValidationFailed { problems, .. } => {
+                assert!(
+                    problems.iter().any(|p| p.path == "/spec"),
+                    "expected problem on /spec, got {problems:?}"
+                );
+            }
+            other => panic!("expected SchemaValidationFailed, got {other:?}"),
         }
     }
 
