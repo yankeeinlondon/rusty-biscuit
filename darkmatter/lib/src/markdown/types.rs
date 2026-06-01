@@ -91,6 +91,15 @@ pub enum MarkdownError {
     #[error("Context error: {0}")]
     CtxMerge(#[from] crate::markdown::compose::context::merge::CtxMergeError),
 
+    /// A document's stored `hash` property could not be parsed.
+    #[error("Malformed stored hash in '{property}': {reason}")]
+    MalformedStoredHash {
+        /// The frontmatter property the malformed hash was read from.
+        property: String,
+        /// Why parsing failed, phrased for a CLI user to act on.
+        reason: String,
+    },
+
     /// Schema validation failed during compose.
     #[error("Schema validation failed for {path:?}: {summary}")]
     SchemaValidationFailed {
@@ -176,6 +185,9 @@ impl BlockError for MarkdownError {
             MarkdownError::InvalidLineRange(message) => blocks::invalid_line_range_block(message),
             MarkdownError::Serialization(source) => blocks::serialization_block(source),
             MarkdownError::Transform(message) => blocks::transform_block(message),
+            MarkdownError::MalformedStoredHash { property, reason } => {
+                blocks::malformed_stored_hash_block(property, reason)
+            }
             MarkdownError::SchemaValidationFailed {
                 path,
                 problems,

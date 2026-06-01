@@ -8,14 +8,17 @@ Detect system and repository information
 
 Usage: sniff [OPTIONS] [COMMAND]
 
-  -b, --base <BASE>  Base directory for filesystem analysis
-      --json         Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
-      --perf         Include structured performance timings and counters in the output
-  -v, --verbose...   Increase output verbosity (styled user output only; never raw tracing)
-      --debug...     Emit raw developer tracing to stderr; repeat for higher verbosity
-      --plain        Strip terminal escape codes from text output
-  -h, --help         Print help
-  -V, --version      Print version
+  -b, --base <BASE>   Base directory for filesystem analysis
+      --json          Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
+      --perf          Include structured performance timings and counters in the output
+  -v, --verbose...    Increase output verbosity (styled user output only; never raw tracing)
+      --debug...      Emit raw developer tracing to stderr; repeat for higher verbosity
+      --plain         Strip terminal escape codes from text output
+      --with-network  Include network-dependent supplemental data (requires connectivity). Affects
+                      both terminal and JSON output. No effect on subcommands that do not currently
+                      consume network data — included as the well-known surface for future opt-in
+  -h, --help          Print help
+  -V, --version       Print version
 
 
 Commands:

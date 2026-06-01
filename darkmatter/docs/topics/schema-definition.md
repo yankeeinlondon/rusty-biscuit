@@ -311,7 +311,7 @@ Any other construct — `$ref`, `allOf`, `anyOf`, `if`/`then`/`else`, `patternPr
 
 - Object-level deep merge keyed by property name.
 - Where both sides declare a property, the **document side wins entirely** — its type and constraints replace the baseline's. There is no per-constraint interleaving.
-- `required` is a property-level concern, so replacing a property removes its inherited `required`. Re-state `required` in the document to preserve requiredness while changing the type.
+- `required` is a property-level concern, so replacing a property removes its inherited `required`. Re-state `required` in the document to preserve required constraint while changing the type.
 - Properties present only in the baseline remain in the effective schema.
 - Properties present only in the document are added.
 - For root unions, the baseline is merged into each arm independently.
