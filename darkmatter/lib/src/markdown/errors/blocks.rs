@@ -63,7 +63,16 @@ pub(crate) fn frontmatter_parse_block(ctx: SourceContext, source: &YamlParseErro
     let location = source.location();
     let location_line = location.map(|loc| loc.line());
 
-    let mut body = vec![Prose::new(format!("<dim>YAML:</dim> {source}"))];
+    let mut body = Vec::new();
+
+    // Name the offending file when the context carries a real path (loads from
+    // disk do; in-memory/stdin parses leave it as "unknown"). Directory hashing
+    // hashes many files, so identifying which one failed is the actionable bit.
+    if ctx.display != std::path::Path::new("unknown") {
+        body.push(ctx.linked_path_prose());
+    }
+
+    body.push(Prose::new(format!("<dim>YAML:</dim> {source}")));
 
     if let Some(line) = location_line {
         body.push(Prose::new("Frontmatter parsing failed here:"));

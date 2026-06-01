@@ -1423,16 +1423,22 @@ fn run_hash_directory(
     let mut paths = collect_markdown_files(path)?;
     paths.sort();
 
+    // Propagate per-file load/parse failures with path context rather than
+    // hashing an empty document in their place. A single unreadable or
+    // malformed file must fail the whole aggregate so `md hash <dir>` honors
+    // the operational-error exit-code contract instead of producing a false
+    // baseline.
     let per_file_hashes: Vec<String> = paths
         .par_iter()
         .map(|p| {
-            let md =
-                Markdown::try_from(p.as_path()).unwrap_or_else(|_| Markdown::from(String::new()));
-            md.compute_hash(kind, options)
+            let md = Markdown::try_from(p.as_path())
+                .wrap_err_with(|| format!("Failed to read file: {}", p.display()))?;
+            Ok(md
+                .compute_hash(kind, options)
                 .flat_string()
-                .expect("simple/fm/body always have a flat string form")
+                .expect("simple/fm/body always have a flat string form"))
         })
-        .collect();
+        .collect::<Result<Vec<String>>>()?;
 
     let combined = per_file_hashes.join("\n");
     let aggregate = xx_hash(&combined);

@@ -1748,6 +1748,33 @@ fn test_hash_directory_rejects_structured_kind() {
         .failure();
 }
 
+/// A single malformed Markdown file must fail the whole directory aggregate
+/// rather than being silently hashed as an empty document. Otherwise a CI /
+/// release check using `md hash <dir>` could pass on a broken file and record
+/// a false baseline.
+#[test]
+fn test_hash_directory_malformed_frontmatter_exits_one() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("good.md"),
+        "---\ntitle: Alpha\n---\n# Alpha\n",
+    )
+    .unwrap();
+    // Quoted scalar followed by trailing unquoted text: a frontmatter parse error.
+    std::fs::write(
+        dir.path().join("bad.md"),
+        "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("hash")
+        .arg(dir.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("bad.md"));
+}
+
 // =============================================================================
 //                          GET SUBCOMMAND TESTS
 // =============================================================================

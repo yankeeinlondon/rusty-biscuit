@@ -856,7 +856,18 @@ impl TryFrom<&Path> for Markdown {
 
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
         let content = std::fs::read_to_string(path)?;
-        let md = Markdown::try_from_content(content)?;
+        // Parse with a path-aware context so a frontmatter error names the
+        // offending file. `try_from_content` would build an "unknown" context,
+        // and `with_source` only runs on success — so without this the path is
+        // lost on exactly the error that needs it.
+        let absolute = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            absolute,
+            path.to_path_buf(),
+            content.as_str(),
+        );
+        let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content, ctx)?;
+        let md = Self::with_frontmatter(frontmatter, remaining);
         Ok(md.with_source(ComposeSource::infer_from_path(path)))
     }
 }
