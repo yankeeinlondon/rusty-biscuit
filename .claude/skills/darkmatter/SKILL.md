@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: c5f71c58058347b2-137d6998905769ba
+hash: 751ea2392b8b3231-7d4b443fb0147706
 ---
 
 # darkmatter
@@ -139,6 +139,7 @@ Open only the topic file needed for the task:
 | Frontmatter model | `frontmatter.md` |
 | Error/status block conventions | `errors.md` |
 | Document comparison | `comparison.md` |
+| Markdown hashing (`md hash`: kinds, `--save`, `--diff`, env vars) | `darkmatter/docs/cli/hash.md` |
 | Module layout | `structure.md` |
 | Parser details | `pulldown-cmark.md` |
 

@@ -73,6 +73,7 @@ the written intention of the specification.
 
 > Note: you should _also_ validate that all of the "complaints/suggestions" of the prior review have been fully addressed. You are current performing review #{{iteration}} so you should be looking for review in the @{{area}}/{{dir}} directory with a name similar to "review-{{iteration - 1}}.md"
 ::end-block
+
 ::block when="!has_spec"
 Prior attempts at implementing the review findings were deemed incomplete. This is the #{{iteration}} attempt to complete this review's findings.
 ::end-block

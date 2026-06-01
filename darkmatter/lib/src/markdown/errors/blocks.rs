@@ -63,7 +63,16 @@ pub(crate) fn frontmatter_parse_block(ctx: SourceContext, source: &YamlParseErro
     let location = source.location();
     let location_line = location.map(|loc| loc.line());
 
-    let mut body = vec![Prose::new(format!("<dim>YAML:</dim> {source}"))];
+    let mut body = Vec::new();
+
+    // Name the offending file when the context carries a real path (loads from
+    // disk do; in-memory/stdin parses leave it as "unknown"). Directory hashing
+    // hashes many files, so identifying which one failed is the actionable bit.
+    if ctx.display != std::path::Path::new("unknown") {
+        body.push(ctx.linked_path_prose());
+    }
+
+    body.push(Prose::new(format!("<dim>YAML:</dim> {source}")));
 
     if let Some(line) = location_line {
         body.push(Prose::new("Frontmatter parsing failed here:"));
@@ -133,6 +142,19 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
         .error_header(ErrorHeader::new("MarkdownError", "transform failed"))
         .body(message.to_string())
         .hint("Review the transform pipeline inputs and any configured rules.")
+}
+
+/// Build the [`StatusBlock`] for [`MarkdownError::MalformedStoredHash`].
+pub(crate) fn malformed_stored_hash_block(property: &str, reason: &str) -> StatusBlock {
+    let body = format!(
+        "<dim>Property:</dim> <inverse>{}</inverse>\n{}",
+        Prose::escape_text(property),
+        Prose::escape_text(reason),
+    );
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "malformed stored hash"))
+        .body(body)
+        .hint("Fix or remove the `hash` frontmatter property, or rerun `md hash --save` to rewrite it.")
 }
 
 /// Build the [`StatusBlock`] for [`MarkdownError::SchemaValidationFailed`].
@@ -365,6 +387,21 @@ mod tests {
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
         assert!(out.contains("transform failed"), "missing summary: {out}");
         assert!(out.contains("pipeline stalled"), "missing message: {out}");
+    }
+
+    #[test]
+    fn malformed_stored_hash_block_renders_property_and_reason() {
+        let out = render_block(&malformed_stored_hash_block(
+            "hash",
+            "expected one of: fm, body, simple, structured, detailed",
+        ));
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(out.contains("malformed stored hash"), "missing summary: {out}");
+        assert!(out.contains("hash"), "missing property: {out}");
+        assert!(
+            out.contains("expected one of"),
+            "missing reason: {out}"
+        );
     }
 
     /// Preparation failures (malformed `$schema`, unresolved baseline) arrive
