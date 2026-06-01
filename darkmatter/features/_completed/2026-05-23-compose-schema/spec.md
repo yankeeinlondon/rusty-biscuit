@@ -8,7 +8,7 @@ status: ready for planning and implementation
 
 Darkmatter's `compose` pipeline currently runs frontmatter interpolation and frontmatter shell expansion without ever consulting the schemas subsystem. As a result, a document that declares a required property via `$schema` can still produce cryptic downstream failures when that property is missing or invalid — e.g. `dirname ''` exits 1 because `{{ spec }}` interpolated to an empty string.
 
-This feature adds an always-on **Schema Validation** stage to the compose pipeline. It runs after `--set` / `--state` overrides are applied to the frontmatter, but **before** any interpolation or shell expansion. When the effective frontmatter violates the resolved schema, compose aborts with a styled `BlockError` that names the offending property — instead of a downstream tool's exit code.
+This feature adds an always-on **Schema Validation** stage to the compose pipeline. It runs after `--set` / `--state` overrides are applied to the frontmatter and after frontmatter interpolation resolves `{{ }}` expressions, but **before** frontmatter shell expansion. When the effective frontmatter violates the resolved schema, compose aborts with a styled `BlockError` that names the offending property — instead of a downstream tool's exit code.
 
 ## Goals & Non-Goals
 
@@ -29,12 +29,12 @@ This feature adds an always-on **Schema Validation** stage to the compose pipeli
 
 ## Foundational Decisions
 
-- **Decision #1** — Schema Validation runs as a new always-on pre-effective-state stage, positioned **after** `prepare_frontmatter_for_compose(...)` applies external-state defaults and `--set` overrides, but **before** Frontmatter Interpolation.
-- **Decision #2** — The stage validates the **effective** (post-override) frontmatter. `--set` and `--state` can fulfill required properties; a document with `spec: ""` plus `--set spec=design.md` validates successfully.
+- **Decision #1** — Schema Validation runs as a new always-on pre-effective-state stage, positioned **after** `prepare_frontmatter_for_compose(...)` applies external-state defaults and `--set` overrides and **after** Frontmatter Interpolation resolves `{{ }}` expressions, but **before** Frontmatter Shell Expansion. Validating after interpolation lets schema-constrained fields derive from templates (e.g. `runtime_agent: '{{ env.AGENT }}'`); validating before shell expansion preserves fail-fast so an invalid schema does not trigger side-effectful `$(...)` commands.
+- **Decision #2** — The stage validates the **effective** (post-override, post-interpolation) frontmatter. `--set` and `--state` can fulfill required properties; a document with `spec: ""` plus `--set spec=design.md` validates successfully.
 - **Decision #3** — The stage reuses `DarkmatterSchemas::validate` directly and treats `ValidationReport { valid: false, problems }` as the compose failure path. No parallel validator and no duplicate problem shape.
 - **Decision #4** — When a document declares no `$schema` and no baseline is configured, the stage is a no-op. Compose proceeds unchanged.
-- **Decision #5** — Schema violations are hard errors. The stage returns before any interpolation or shell expansion runs.
-- **Decision #6** — Recursive compose runs validate every Markdown document they compose. Parent `::file set=` overlays are applied to a child before the child's schema stage, but those overlays still do not propagate to grandchildren.
+- **Decision #5** — Schema violations are hard errors that abort compose before Frontmatter Shell Expansion runs. The one exception: problems whose top-level field value still contains a frontmatter shell expression (`$(...)`) are **deferred**, because that value has not yet been expanded at validation time — the downstream consumer (e.g. claudine's `prepare_*_with_schema`) re-validates the post-shell effective frontmatter and reports any residual problems. If every problem is deferred, compose proceeds; any composition-independent problem fails fast.
+- **Decision #6** — Recursive compose runs validate every Markdown document they compose. Parent `::file set=` overlays are applied to a child before the child's schema stage, but those overlays still do not propagate to grandchildren. A child schema failure follows the standard transclusion error policy: it aborts the parent compose when `fail_fast` is set (or the error is structural), and is otherwise surfaced as a transclusion warning.
 - **Decision #7** — A configured baseline schema is part of the compose options that affect output/failure behavior, so it must participate in transclusion cache keys and persistent cache option hashing.
 
 ## Pipeline Placement
@@ -42,8 +42,8 @@ This feature adds an always-on **Schema Validation** stage to the compose pipeli
 ```
 Load markdown
   └─ Apply --set / --state overrides
-      └─ [NEW] Schema Validation  ──► fails fast on SchemaError
-          └─ Frontmatter Interpolation   ({{ var }})
+      └─ Frontmatter Interpolation   ({{ var }})
+          └─ [NEW] Schema Validation  ──► fails fast on SchemaError
               └─ Frontmatter Shell Expansion ($(cmd))
                   └─ Text Replacement
                       └─ Page Blocks
@@ -135,17 +135,17 @@ The CLI top-level handler already converts `Result` errors into a styled print +
 4. Converts schema-preparation `SchemaError` into the chosen compose error path while preserving it as the source.
 5. Converts `ValidationReport { valid: false, problems }` into the new validation-failed error variant. On success, returns `Ok(())`.
 
-**`compose::mod.rs`** — invoke the new stage immediately after `prepare_frontmatter_for_compose(...)` and before `frontmatter_interpolation::interpolate_frontmatter(...)`. Update the long doc comment that enumerates Inline Pre stages to list "0. Schema Validation" as the first stage. Because `run_compose_pipeline_internal(...)` is used for child documents too, this placement validates transcluded Markdown children after their scoped `set=` overlay is applied.
+**`compose::mod.rs`** — invoke the new stage immediately after `frontmatter_interpolation::interpolate_frontmatter(...)` and before `frontmatter_shell_expansion::execute_frontmatter_shell_expansion(...)`. Update the long doc comment that enumerates Inline Pre stages to list Schema Validation between Frontmatter Interpolation and Frontmatter Shell Expansion. Because `run_compose_pipeline_internal(...)` is used for child documents too, this placement validates transcluded Markdown children after their scoped `set=` overlay is applied.
 
 **`compose::types.rs`** — add the `baseline_schema` field to `ComposeOptions`, plus the `with_baseline_schema(...)` builder method. Add `ComposeStage::SchemaValidation` so perf output can report this stage in execution order, and update the fixed-size perf array and stage display text accordingly. Add the new error variant on the relevant compose error enum (preferred: `MarkdownError`).
 
-**`compose::perf.rs`** — add `PerfMetricKind::SchemaValidation` before `FrontmatterInterpolation`; keep the public/private stage ordering and fixed array size in sync.
+**`compose::perf.rs`** — add `PerfMetricKind::SchemaValidation` after `FrontmatterInterpolation`; keep the public/private stage ordering and fixed array size in sync.
 
 **`compose::cache::hashing`** — include `baseline_schema` in `options_hash(...)` using canonical JSON from `schemas::to_json_schema(...)`. This prevents cached child compose results from being reused across different baseline schemas. Add a unit test proving two otherwise-identical `ComposeOptions` values with different baselines produce different option hashes.
 
 **CLI (`darkmatter/cli/src/commands.rs`)** — no changes for this feature. The new error propagates through the existing top-level error handler. Document-level `$schema` validation becomes active for `md compose`; baseline injection remains library-only.
 
-**Skill file (`.claude/skills/darkmatter/SKILL.md`)** — update the "Compose Pipeline" → "Inline Pre" list to include Schema Validation as the first stage. Regenerate the `hash:` frontmatter via `md hash` after edits.
+**Skill file (`.claude/skills/darkmatter/SKILL.md`)** — update the "Compose Pipeline" → "Inline Pre" list to include Schema Validation immediately after Frontmatter Interpolation. Regenerate the `hash:` frontmatter via `md hash` after edits.
 
 ## Testing Strategy
 
@@ -165,7 +165,7 @@ The CLI top-level handler already converts `Result` errors into a styled print +
   - Document has `spec: "design.md"` + `--set spec=""` → fails.
 - **Recursive compose interaction**:
   - Child document has `$schema` requiring `child_input`; parent transcludes it with `set.child_input=ok` → child validates.
-  - Same child without the parent `set=` overlay → child validation fails before child frontmatter interpolation or shell expansion.
+  - Same child without the parent `set=` overlay → child validation fails before child frontmatter shell expansion. Under `fail_fast` the failure aborts the parent compose; otherwise it surfaces as a transclusion warning.
 - **Cache safety**:
   - Distinct `baseline_schema` values produce distinct `cache::hashing::options_hash(...)` values.
 

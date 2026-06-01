@@ -1191,9 +1191,9 @@ pub(crate) fn execute_composition_request_inner(
     let mut sp_artifacts: Vec<super::system_prompt::SystemPromptArtifact> = Vec::new();
 
     match &effective_sp {
-        claudine::system_prompt::EffectiveSystemPrompt::None
-        | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
-        claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
+        claudine::system_prompt::ResolvedSystemPrompt::None
+        | claudine::system_prompt::ResolvedSystemPrompt::Disabled { .. } => {}
+        claudine::system_prompt::ResolvedSystemPrompt::Ready(prepared) => {
             let application = profile.apply_system_prompt(
                 prepared,
                 !effective_non_interactive,
@@ -1564,7 +1564,7 @@ pub(crate) fn execute_composition_request_inner(
 
         if matches!(
             effective_sp,
-            claudine::system_prompt::EffectiveSystemPrompt::Ready(_)
+            claudine::system_prompt::ResolvedSystemPrompt::Ready(_)
         ) && effective_non_interactive
         {
             crate::log::message("");

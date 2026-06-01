@@ -107,6 +107,10 @@ pub enum RepoAction {
         no_error: bool,
         on_error: Option<String>,
     },
+    Area {
+        no_error: bool,
+        on_error: Option<String>,
+    },
     DirtyPackages {
         filter: Vec<String>,
         package: Option<String>,
@@ -408,6 +412,17 @@ pub enum RepoSubcommand {
     },
     /// Output the package area for the current directory
     PackageArea {
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
+        on_error: Option<String>,
+    },
+    /// Output the area for the current directory (package name when inside a
+    /// package, else the surrounding package-area, else "root")
+    Area {
         /// Exit 0 with no output when no results found (default is exit 1)
         #[arg(long)]
         no_error: bool,

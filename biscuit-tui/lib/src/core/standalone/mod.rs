@@ -198,6 +198,19 @@ where
 {
     let hint = state.help_hint().to_string();
     let fullscreen = height.is_none();
+    // Bail before touching `/dev/tty` when both stdio streams are
+    // captured (the test-harness / pipeline shape). `enable_raw_mode`
+    // disables `OPOST` on the shared controlling terminal, so a
+    // subprocess that enters raw mode and exits leaves the *parent's*
+    // tty with `\n` mapped to bare LF — corrupting any concurrent
+    // redrawing UI in the parent (e.g. nextest's progress bar). The
+    // shell command-substitution case (`FOO=$(question ...)`) still
+    // works because stderr stays attached to the terminal there.
+    if !io::stdout().is_terminal() && !io::stderr().is_terminal() {
+        return Err(io::Error::other(
+            "no interactive terminal available (stdout and stderr are both not a tty)",
+        ));
+    }
     // Redirect stdout to /dev/tty when the caller captured stdout
     // (e.g. `FOO=$(question ...)`). Restored on Drop, before the
     // CLI prints the result, so the caller's pipe receives only the

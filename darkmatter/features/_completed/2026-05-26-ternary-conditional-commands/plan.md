@@ -87,18 +87,65 @@ Ensure the security invariant: "Every command that the directive could execute m
 
 Comprehensive testing to ensure correctness, security, and backwards compatibility.
 
-- [ ] **Task 5.1: Unit Tests for Ternary Parsing**
+- [x] **Task 5.1: Unit Tests for Ternary Parsing**
     - Test successful parsing of valid ternaries.
     - Test failure cases (missing `:`, multiple `?`, invalid branch content).
     - Test quote/parentheses escaping for `?` and `:`.
-- [ ] **Task 5.2: Unit Tests for Execution**
+- [x] **Task 5.2: Unit Tests for Execution**
     - Test `true` condition selecting `then`.
     - Test `false` condition selecting `else`.
     - Test empty string literals producing no shell invocation.
-- [ ] **Task 5.3: Security & Allowlist Tests**
+- [x] **Task 5.3: Security & Allowlist Tests**
     - Verify rejection of interpolated executables in either branch.
     - Verify rejection of off-allowlist commands in either branch.
-- [ ] **Task 5.4: Integration Test**
+- [x] **Task 5.4: Integration Test**
     - Implement the worked example from the spec: `spec_file: "$({{has_spec}} ? basename '{{spec}}' : '')"`.
-- [ ] **Task 5.5: Final Plan Verification**
+- [x] **Task 5.5: Final Plan Verification**
     - Run existing tests to ensure no regressions in standard shell expansion.
+
+## Review 3 Follow-up
+
+Findings from `review-3.md` addressed in
+`darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs`,
+`darkmatter/lib/src/markdown/compose/shell_expansion/discovery.rs`, and
+`darkmatter/features/2026-05-26-ternary-conditional-commands/spec.md`:
+
+- **Finding 1 (high)**: ternary condition evaluation now routes through
+  `expression::parse_condition` instead of `parse`, so the spec's full
+  condition grammar (`&&`, `||`, `!`, comparisons, expression-level
+  ternaries) is accepted. Level 1 execution tests added for each form.
+- **Finding 2 (high)**: shell-command discovery now flattens ternary
+  branches. The new `directive_reachable_pipelines` helper exposes every
+  pipeline a directive could execute (one for `Pipeline` AST, one per
+  non-`Empty` branch for `Ternary` AST) after running per-branch
+  interpolation. `scan_one_frontmatter` iterates that set and emits one
+  entry per reachable action. Level 1 discovery tests added covering
+  both-branches-emit, empty-branch-emits-nothing, branch-chain-per-action,
+  interpolated-arg-resolution, and executable-interpolation rejection.
+- **Finding 3 (medium)**: the spec's Decision #3 now documents the
+  whitespace-padded separator contract explicitly; a parser test locks in
+  that `$(flag? echo yes : '')` is treated as a plain pipeline (not a
+  ternary) so the contract is enforced.
+- **Side fix**: `find_unquoted_closing_paren` now tracks paren depth, so
+  parenthesized condition sub-expressions like `$((a ? b : c) ? then : else)`
+  no longer have their outer `$(...)` closed by an inner `)`. This aligns
+  the inner-extraction with the splitter's existing top-level view.
+
+## Review 1 Follow-up
+
+Findings from `review-1.md` addressed in `darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs`:
+
+- **Finding 1 (high)**: branch boundaries now anchor to the original
+  (pre-interpolation) snapshot. `Branch::Pipeline` carries `original_text`
+  and is interpolated per-branch at execute time, so condition interpolation
+  cannot shift the then/else split.
+- **Finding 2 (high)**: ternary condition evaluation now interpolates the
+  condition source against the seed state first, then parses the result
+  as a template expression. A frontmatter value rendered as the string
+  `"false"` is recognized as a boolean and selects the else-branch.
+- **Finding 3 (medium)**: a top-level `?` or `:` in either branch is
+  rejected at parse time with a "nested ternaries are not supported"
+  error.
+- **Finding 4 (medium)**: added compose-level integration tests covering
+  the motivating workflow (true and false branches) and the stringified
+  `"false"` interpolation path through the full compose pipeline.

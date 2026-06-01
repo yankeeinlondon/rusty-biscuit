@@ -26,7 +26,7 @@ fn map_compose_error(source_path: &std::path::Path, err: MarkdownError) -> Compo
 }
 
 /// Options for composition preparation.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PrepareOptions {
     /// Frontmatter `--set` overrides (JSON object).
     pub set_overrides: Option<serde_json::Value>,
@@ -77,6 +77,7 @@ pub fn prepare_direct(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
+    let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     let mut ctx = ComposeContext::capture();
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
@@ -94,6 +95,15 @@ pub fn prepare_direct(
         .markdown
         .compose_with(compose_opts)
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
+
+    let prompt = composed.content().to_string();
+    if prompt.trim().is_empty() {
+        return Err(CompositionError::ComposedBodyEmpty {
+            source_path: source.resolved_path.clone(),
+            mode: CompositionMode::ChainedDocument,
+            provided_overrides: override_keys,
+        });
+    }
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let agent_hint = composed
@@ -120,12 +130,13 @@ pub fn prepare_direct(
         mode: CompositionMode::ChainedDocument,
         resolved_path: source.resolved_path.clone(),
         source_repo_root,
-        prompt: composed.content().to_string(),
+        prompt,
         effective_frontmatter,
         selection_hints,
         closure: CompositionClosurePlan::Direct,
         lifecycle,
         compose_perf: report.perf,
+        dropped_optionals: Vec::new(),
     })
 }
 
@@ -138,6 +149,7 @@ pub fn prepare_inline(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
+    let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     let fm = source.markdown.frontmatter();
 
     let prompt_value = fm
@@ -191,6 +203,13 @@ pub fn prepare_inline(
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
 
     let mut prompt = composed.content().to_string();
+    if prompt.trim().is_empty() {
+        return Err(CompositionError::ComposedBodyEmpty {
+            source_path: source.resolved_path.clone(),
+            mode: CompositionMode::InlineFrontmatterPrompt,
+            provided_overrides: override_keys,
+        });
+    }
 
     let source_repo_root = options
         .source_repo_root
@@ -217,6 +236,7 @@ pub fn prepare_inline(
         }),
         lifecycle,
         compose_perf: report.perf,
+        dropped_optionals: Vec::new(),
     })
 }
 
@@ -335,6 +355,19 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
         serde_json::Value::String(_) => "string",
         serde_json::Value::Array(_) => "array",
         serde_json::Value::Object(_) => "object",
+    }
+}
+
+/// Extract the top-level keys from a `set_overrides` JSON object, in the
+/// underlying `serde_json::Map` iteration order (alphabetical without the
+/// `preserve_order` feature). Returns an empty `Vec` when overrides are
+/// absent or the value is not an object. Used to surface "what the user
+/// provided" in the `ComposedBodyEmpty` error so the diagnostic can name
+/// the variables that were visible to `::block when=…` conditions.
+fn top_level_override_keys(overrides: Option<&serde_json::Value>) -> Vec<String> {
+    match overrides {
+        Some(serde_json::Value::Object(map)) => map.keys().cloned().collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -671,5 +704,78 @@ mod tests {
         let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
         assert_eq!(prepared.selection_hints.agent, None);
         assert_eq!(prepared.selection_hints.model, None);
+    }
+
+    #[test]
+    fn direct_composition_empty_body_returns_composed_body_empty() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("title", json!("Test"))], "   \n\n  \t\n");
+
+        let options = PrepareOptions {
+            set_overrides: Some(json!({"spec": "plan.md", "phase": 1})),
+            ..Default::default()
+        };
+
+        let err = prepare_direct(&source, options).unwrap_err();
+        match err {
+            CompositionError::ComposedBodyEmpty {
+                source_path,
+                mode,
+                provided_overrides,
+            } => {
+                assert_eq!(source_path, source.resolved_path);
+                assert_eq!(mode, CompositionMode::ChainedDocument);
+                let keys: std::collections::HashSet<String> =
+                    provided_overrides.into_iter().collect();
+                assert_eq!(
+                    keys,
+                    ["spec", "phase"].iter().map(|s| s.to_string()).collect()
+                );
+            }
+            other => panic!("expected ComposedBodyEmpty, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn direct_composition_block_strips_everything_returns_composed_body_empty() {
+        let dir = TempDir::new().unwrap();
+        // Body consists entirely of a `::block when="review"` whose guard is
+        // not satisfied (no `review` override provided). After composition
+        // the body should be empty and detection must fire — this mirrors
+        // the real-world prompt that triggered the user-facing bug report.
+        let body = "::block when=\"review\"\n## Context\n\nThis is review-only content.\n::end-block\n";
+        let source = make_source(&dir, &[("title", json!("Test"))], body);
+
+        let options = PrepareOptions {
+            set_overrides: Some(json!({"spec": "plan.md"})),
+            ..Default::default()
+        };
+
+        let err = prepare_direct(&source, options).unwrap_err();
+        let CompositionError::ComposedBodyEmpty {
+            mode,
+            provided_overrides,
+            ..
+        } = err
+        else {
+            panic!("expected ComposedBodyEmpty, got a different error");
+        };
+        assert_eq!(mode, CompositionMode::ChainedDocument);
+        assert_eq!(provided_overrides, vec!["spec".to_string()]);
+    }
+
+    #[test]
+    fn direct_composition_empty_body_without_overrides() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("title", json!("Test"))], "");
+
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+        let CompositionError::ComposedBodyEmpty {
+            provided_overrides, ..
+        } = err
+        else {
+            panic!("expected ComposedBodyEmpty");
+        };
+        assert!(provided_overrides.is_empty());
     }
 }

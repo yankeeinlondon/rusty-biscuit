@@ -6,8 +6,8 @@ The darkmatter compose pipeline provides document preparation through three phas
 
 **Inline Pre** (serial):
 
-1. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides are applied but before interpolation or shell expansion
-2. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
+1. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
+2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast
 3. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter
 4. **Text Replacement** - `replace:` frontmatter replaces literal strings
 5. **Page Blocks** - `::block`/`::end-block` conditional regions

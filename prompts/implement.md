@@ -3,22 +3,22 @@ $schema:
     - review: string(required)
       spec: string
       iteration: number
-      has_plan: bool
-      has_spec: bool
-      has_review: bool
+      has_plan: boolean
+      has_spec: boolean
+      has_review: boolean
     - spec: string(required)
-      has_plan: bool
-      has_spec: bool
-      has_review: bool
+      has_plan: boolean
+      has_spec: boolean
+      has_review: boolean
     - plan: string(required)
       spec: string
       iteration: number
-      has_plan: bool
-      has_spec: bool
-      has_review: bool
+      has_plan: boolean
+      has_spec: boolean
+      has_review: boolean
 name: Implement Review Suggestions
 description: |-
-    Implements either:
+    This prompt will behave differently based on what you pass in as a parameter:
 
     1. all the recommendations/suggestions produced in a review (pass in `review=...`)
     2. all the phases of a plan (pass in `plan=...`)
@@ -27,13 +27,13 @@ description: |-
         - create a plan for the implementation of the plan
 iteration: 1
 area: "{{ ctx.current_package ? ctx.current_package : ctx.current_package_area }}"
-has_spec: "spec ? true : false"
-has_plan: "plan ? true : false"
-has_review: "review ? true : false"
+has_spec: "{{spec ? true : false}}"
+has_plan: "{{plan ? true : false}}"
+has_review: "{{review ? true : false}}"
 dir: "$(dirname '{{spec || plan}}')"
 
-plan_file: "$({{has_plan}} ? $(basename '{{plan}}' : '' }} )"
-spec_file: "$({{has_spec}} ? $(basename '{{spec}}'  : '' }} )"
+plan_file: "$({{has_plan}} ? basename '{{plan}}' : ''  )"
+spec_file: "$({{has_spec}} ? basename '{{spec}}'  : '' )"
 review_file: "$({{has_review}} ? basename '{{spec}}'  : '' )"
 
 spec_path: "@{{area}}/{{dir}}/{{spec_file}}"

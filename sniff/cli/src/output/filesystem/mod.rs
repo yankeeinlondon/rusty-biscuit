@@ -89,8 +89,8 @@ pub use files::{PathListFormat, render_files_section, render_path_list};
 pub(crate) use language::primary_language_name;
 pub use language::{render_language_section, render_repo_language};
 pub use package_areas::{
-    collect_repo_package_area_names, render_dirty_package_areas, render_repo_package_area,
-    render_repo_package_area_root, render_repo_package_areas_formatted,
+    collect_repo_package_area_names, render_dirty_package_areas, render_repo_area,
+    render_repo_package_area, render_repo_package_area_root, render_repo_package_areas_formatted,
     render_staged_package_areas, render_unstaged_package_areas,
 };
 pub(crate) use package_areas::{

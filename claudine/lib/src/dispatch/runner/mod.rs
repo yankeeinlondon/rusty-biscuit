@@ -491,6 +491,7 @@ mod tests {
             canonical_provider: None,
             models: HashMap::new(),
             default_sounds: Default::default(),
+            prompt_for_missing: true,
         }
     }
 

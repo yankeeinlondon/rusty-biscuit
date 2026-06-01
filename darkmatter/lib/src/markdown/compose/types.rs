@@ -1482,8 +1482,8 @@ pub struct ComposePerfReport {
 /// a deterministic, intuitive ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComposeStage {
-    SchemaValidation,
     FrontmatterInterpolation,
+    SchemaValidation,
     FrontmatterShellExpansion,
     EffectiveStateBuild,
     TextReplacement,
@@ -1504,8 +1504,8 @@ pub enum ComposeStage {
 impl std::fmt::Display for ComposeStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::SchemaValidation => "schema validation",
             Self::FrontmatterInterpolation => "frontmatter interpolation",
+            Self::SchemaValidation => "schema validation",
             Self::FrontmatterShellExpansion => "frontmatter shell expansion",
             Self::EffectiveStateBuild => "effective state build",
             Self::TextReplacement => "text replacement",

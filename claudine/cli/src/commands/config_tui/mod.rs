@@ -56,6 +56,15 @@ pub enum ConfigSetTarget {
         /// The provider name (or `none`/`clear`/`-` to clear).
         value: String,
     },
+    /// Set whether composition prompts for missing required schema
+    /// properties when stdin and stderr are TTYs.
+    ///
+    /// Pass `true` or `false`.
+    #[command(name = "prompt-for-missing")]
+    PromptForMissing {
+        /// The boolean value (`true` or `false`).
+        value: String,
+    },
 }
 
 pub async fn run(args: ConfigArgs) -> color_eyre::Result<()> {
@@ -69,6 +78,9 @@ async fn run_setter(command: ConfigCommand) -> color_eyre::Result<()> {
     match command {
         ConfigCommand::Set { target } => match target {
             ConfigSetTarget::FavoriteAgent { value } => run_set_favorite_agent(&value).await,
+            ConfigSetTarget::PromptForMissing { value } => {
+                run_set_prompt_for_missing(&value).await
+            }
         },
     }
 }
@@ -104,6 +116,34 @@ async fn run_set_favorite_agent(value: &str) -> color_eyre::Result<()> {
         Some(provider) => format!("Set favorite agent to {provider}."),
         None => "Cleared favorite agent.".to_string(),
     });
+    log::message(&format!("Updated {}.", config_path.display()));
+    Ok(())
+}
+
+async fn run_set_prompt_for_missing(value: &str) -> color_eyre::Result<()> {
+    let new_value = match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => true,
+        "false" | "0" | "no" | "off" => false,
+        _ => {
+            return Err(color_eyre::eyre::eyre!(
+                "invalid boolean '{value}' — expected `true` or `false`"
+            ));
+        }
+    };
+
+    let config_path = claudine::dispatch::loader::user_config_path();
+    let mut config = claudine::dispatch::loader::load_claudine_config(Some(&config_path), None)?;
+
+    if config.prompt_for_missing == new_value {
+        log::message(&format!(
+            "prompt_for_missing is already {new_value}; no change."
+        ));
+        return Ok(());
+    }
+
+    config.prompt_for_missing = new_value;
+    claudine::dispatch::loader::save_claudine_config(&config, &config_path)?;
+    log::message(&format!("Set prompt_for_missing to {new_value}."));
     log::message(&format!("Updated {}.", config_path.display()));
     Ok(())
 }
@@ -362,6 +402,7 @@ fn build_hotkey_pairs(app: &App) -> Vec<(&'static str, &'static str)> {
                 ("S", "Success"),
                 ("N", "Attention"),
                 ("E", "Error"),
+                ("M", "Prompt For Missing"),
             ]);
         }
         app::Tab::Services => {

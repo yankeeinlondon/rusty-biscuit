@@ -189,6 +189,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         canonical_provider: canonical_provider.and_then(|_| preference.first().copied()),
         models: HashMap::new(),
         default_sounds: DefaultSounds::default(),
+        prompt_for_missing: true,
     };
 
     // Phase 5: Write and Register
@@ -502,6 +503,7 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
         canonical_provider,
         models: HashMap::new(),
         default_sounds: DefaultSounds::default(),
+        prompt_for_missing: true,
     })
 }
 
@@ -610,6 +612,7 @@ mod tests {
             canonical_provider: None,
             models: HashMap::new(),
             default_sounds: DefaultSounds::default(),
+            prompt_for_missing: true,
         }
     }
 
