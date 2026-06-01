@@ -207,8 +207,7 @@ where
     // shell command-substitution case (`FOO=$(question ...)`) still
     // works because stderr stays attached to the terminal there.
     if !io::stdout().is_terminal() && !io::stderr().is_terminal() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             "no interactive terminal available (stdout and stderr are both not a tty)",
         ));
     }

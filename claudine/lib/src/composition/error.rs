@@ -461,6 +461,35 @@ pub enum CompositionError {
         /// Provider-supplied human-readable message, when known.
         message: Option<String>,
     },
+
+    /// Composition succeeded but produced an empty body.
+    ///
+    /// The Markdown composed cleanly (no transclusion or shell-expansion
+    /// failures), but every block in the body evaluated to falsy or the
+    /// document had no body to begin with. Sending the result to a provider
+    /// CLI would surface as `"Input must be provided ..."` from the provider
+    /// rather than naming the real cause, so the composition layer short-
+    /// circuits here with an actionable error.
+    #[error(
+        "composed prompt body is empty for {}{}",
+        source_path.display(),
+        if provided_overrides.is_empty() {
+            String::new()
+        } else {
+            format!(" (provided: {})", provided_overrides.join(", "))
+        }
+    )]
+    ComposedBodyEmpty {
+        /// The prompt file that produced the empty body.
+        source_path: PathBuf,
+        /// Composition mode in effect when the body was produced.
+        mode: super::types::CompositionMode,
+        /// Top-level keys of `key=value` / `--set` overrides applied during
+        /// composition, in declaration order. Useful for telling the user
+        /// which variables were actually visible to `::block when=…`
+        /// conditions when the body collapsed to nothing.
+        provided_overrides: Vec<String>,
+    },
 }
 
 /// A single required schema property that is missing from frontmatter.
@@ -804,6 +833,48 @@ impl BlockError for CompositionError {
                     .hint(
                         "Pass the value with key=value or --set, or provide it in the prompt's \
                          frontmatter.",
+                    )
+            }
+            CompositionError::ComposedBodyEmpty {
+                source_path,
+                mode,
+                provided_overrides,
+            } => {
+                let file_link = render_file_link(source_path);
+                let mode_label = match mode {
+                    super::types::CompositionMode::ChainedDocument => "chained (compose)",
+                    super::types::CompositionMode::InlineFrontmatterPrompt => {
+                        "inline (inline-compose)"
+                    }
+                };
+                let mut body = format!(
+                    "Composition produced an <b>empty prompt body</b> for {file_link}.\n\n\
+                     Mode: <i>{mode_label}</i>"
+                );
+                if provided_overrides.is_empty() {
+                    body.push_str("\n\nNo `key=value` overrides were provided.");
+                } else {
+                    body.push_str("\n\n<b>Provided overrides:</b>");
+                    for key in provided_overrides {
+                        body.push_str(&format!("\n- <cyan>`{key}`</cyan>"));
+                    }
+                }
+                body.push_str(
+                    "\n\nThe document composed without error, but every block in the body \
+                     was stripped by its `when` condition (or the body was empty to begin with). \
+                     The provider CLI would otherwise reject this as \"Input must be provided …\" \
+                     without naming the real cause.",
+                );
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "composed prompt is empty",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Check that the variables you passed match the `::block when=…` \
+                         conditions in the prompt, or verify there is body content outside any \
+                         conditional block.",
                     )
             }
             _ => {

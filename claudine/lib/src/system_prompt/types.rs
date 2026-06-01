@@ -81,7 +81,7 @@ pub struct PreparedSystemPrompt {
 
 /// The outcome of the full resolve -> compose pipeline.
 #[derive(Debug, Clone)]
-pub enum EffectiveSystemPrompt {
+pub enum ResolvedSystemPrompt {
     /// No system prompt file was found or specified.
     None,
     /// A file was found but its composed body is empty — explicit disable.
@@ -90,7 +90,7 @@ pub enum EffectiveSystemPrompt {
     Ready(PreparedSystemPrompt),
 }
 
-impl EffectiveSystemPrompt {
+impl ResolvedSystemPrompt {
     pub fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }

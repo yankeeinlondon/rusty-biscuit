@@ -133,13 +133,13 @@ fn prepare_system_prompt_with_ctx(
     source: SystemPromptSource,
     raw_text: &str,
     shared_ctx: Option<&ComposeContext>,
-) -> Result<EffectiveSystemPrompt, crate::error::ClaudineError> {
+) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
     let mode = mode_for_source(&source);
     let composed_markdown = compose_prompt_markdown(&source, raw_text, shared_ctx)?;
     if composed_markdown.trim().is_empty() {
-        return Ok(EffectiveSystemPrompt::Disabled { source });
+        return Ok(ResolvedSystemPrompt::Disabled { source });
     }
-    Ok(EffectiveSystemPrompt::Ready(PreparedSystemPrompt {
+    Ok(ResolvedSystemPrompt::Ready(PreparedSystemPrompt {
         mode,
         source,
         raw_text: raw_text.to_string(),
@@ -173,20 +173,20 @@ fn prepare_non_interactive_appendix_from(
 /// return the effective result.
 ///
 /// If the composed body is empty after trimming, returns
-/// `EffectiveSystemPrompt::Disabled`. Otherwise returns `Ready`.
+/// `ResolvedSystemPrompt::Disabled`. Otherwise returns `Ready`.
 pub fn prepare_system_prompt(
     source: SystemPromptSource,
     raw_text: &str,
-) -> Result<EffectiveSystemPrompt, crate::error::ClaudineError> {
+) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
     let mode = mode_for_source(&source);
     let composed_markdown = compose_prompt_markdown(&source, raw_text, None)?;
 
     // Empty-body check
     if composed_markdown.trim().is_empty() {
-        return Ok(EffectiveSystemPrompt::Disabled { source });
+        return Ok(ResolvedSystemPrompt::Disabled { source });
     }
 
-    Ok(EffectiveSystemPrompt::Ready(PreparedSystemPrompt {
+    Ok(ResolvedSystemPrompt::Ready(PreparedSystemPrompt {
         mode,
         source,
         raw_text: raw_text.to_string(),
@@ -199,7 +199,7 @@ pub fn prepare_system_prompt(
 pub fn resolve_and_prepare(
     args: &SystemPromptArgs,
     context: &crate::system_prompt::context::LaunchContext,
-) -> Result<EffectiveSystemPrompt, crate::error::ClaudineError> {
+) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
     resolve_and_prepare_for_session(args, context, false)
 }
 
@@ -209,7 +209,7 @@ pub fn resolve_and_prepare_for_session(
     args: &SystemPromptArgs,
     context: &crate::system_prompt::context::LaunchContext,
     non_interactive: bool,
-) -> Result<EffectiveSystemPrompt, crate::error::ClaudineError> {
+) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
     let _span = info_span!(
         "system_prompt_prepare",
         non_interactive,
@@ -242,7 +242,7 @@ pub fn resolve_and_prepare_for_session(
         Some((source, raw_text)) => {
             prepare_system_prompt_with_ctx(source, &raw_text, Some(&shared_ctx))?
         }
-        None => EffectiveSystemPrompt::None,
+        None => ResolvedSystemPrompt::None,
     };
 
     if !non_interactive {
@@ -255,16 +255,16 @@ pub fn resolve_and_prepare_for_session(
     )?;
 
     Ok(match effective {
-        EffectiveSystemPrompt::Ready(mut prepared) => {
+        ResolvedSystemPrompt::Ready(mut prepared) => {
             prepared.raw_text = merge_prompt_sections(&prepared.raw_text, &appendix.raw_text);
             prepared.composed_markdown =
                 merge_prompt_sections(&prepared.composed_markdown, &appendix.composed_markdown);
             prepared.non_interactive_appendix = Some(appendix);
-            EffectiveSystemPrompt::Ready(prepared)
+            ResolvedSystemPrompt::Ready(prepared)
         }
-        EffectiveSystemPrompt::Disabled { source } => {
+        ResolvedSystemPrompt::Disabled { source } => {
             let mode = mode_for_source(&source);
-            EffectiveSystemPrompt::Ready(PreparedSystemPrompt {
+            ResolvedSystemPrompt::Ready(PreparedSystemPrompt {
                 mode,
                 source: appendix.source.clone(),
                 raw_text: appendix.raw_text.clone(),
@@ -272,7 +272,7 @@ pub fn resolve_and_prepare_for_session(
                 non_interactive_appendix: None,
             })
         }
-        EffectiveSystemPrompt::None => EffectiveSystemPrompt::Ready(PreparedSystemPrompt {
+        ResolvedSystemPrompt::None => ResolvedSystemPrompt::Ready(PreparedSystemPrompt {
             mode: SystemPromptMode::Append,
             source: appendix.source.clone(),
             raw_text: appendix.raw_text.clone(),
@@ -314,7 +314,7 @@ mod tests {
         let result = prepare_system_prompt(source, "# Hello World\n\nSome content.").unwrap();
 
         match result {
-            EffectiveSystemPrompt::Ready(prepared) => {
+            ResolvedSystemPrompt::Ready(prepared) => {
                 assert!(prepared.composed_markdown.contains("Hello World"));
                 assert!(prepared.composed_markdown.contains("Some content."));
                 assert_eq!(prepared.mode, SystemPromptMode::Append);
@@ -344,7 +344,7 @@ mod tests {
             prepare_system_prompt(source, "Before.\n\n::file ./included.md\n\nAfter.").unwrap();
 
         match result {
-            EffectiveSystemPrompt::Ready(prepared) => {
+            ResolvedSystemPrompt::Ready(prepared) => {
                 assert!(
                     prepared
                         .composed_markdown
@@ -382,7 +382,7 @@ mod tests {
         let result = prepare_system_prompt(source, "Pre.\n\n::shell echo hello\n\nPost.").unwrap();
 
         match result {
-            EffectiveSystemPrompt::Ready(prepared) => {
+            ResolvedSystemPrompt::Ready(prepared) => {
                 assert!(
                     prepared.composed_markdown.contains("hello"),
                     "Expected shell output. Got: {}",
@@ -406,7 +406,7 @@ mod tests {
         let result = prepare_system_prompt(source, "Today is {{today}}.").unwrap();
 
         match result {
-            EffectiveSystemPrompt::Ready(prepared) => {
+            ResolvedSystemPrompt::Ready(prepared) => {
                 // {{today}} should be replaced with an actual date, not the literal
                 assert!(
                     !prepared.composed_markdown.contains("{{today}}"),
@@ -468,7 +468,7 @@ mod tests {
         let result = prepare_system_prompt(source, raw).unwrap();
 
         match result {
-            EffectiveSystemPrompt::Ready(prepared) => {
+            ResolvedSystemPrompt::Ready(prepared) => {
                 assert!(
                     !prepared.composed_markdown.contains("---"),
                     "Frontmatter delimiters should not appear in composed output. Got: {}",
@@ -498,7 +498,7 @@ mod tests {
         let result = prepare_system_prompt(source, "Content.").unwrap();
 
         match result {
-            EffectiveSystemPrompt::Ready(prepared) => {
+            ResolvedSystemPrompt::Ready(prepared) => {
                 assert_eq!(prepared.mode, SystemPromptMode::Append);
             }
             other => panic!("Expected Ready, got {other:?}"),
@@ -518,7 +518,7 @@ mod tests {
         let result = prepare_system_prompt(source, "Replacement content.").unwrap();
 
         match result {
-            EffectiveSystemPrompt::Ready(prepared) => {
+            ResolvedSystemPrompt::Ready(prepared) => {
                 assert_eq!(prepared.mode, SystemPromptMode::Replace);
             }
             other => panic!("Expected Ready, got {other:?}"),
@@ -554,7 +554,7 @@ mod tests {
         }
 
         match result {
-            EffectiveSystemPrompt::Ready(prepared) => {
+            ResolvedSystemPrompt::Ready(prepared) => {
                 assert_eq!(prepared.mode, SystemPromptMode::Append);
                 assert_eq!(
                     prepared.composed_markdown,
@@ -605,7 +605,7 @@ mod tests {
         }
 
         match result {
-            EffectiveSystemPrompt::Ready(prepared) => {
+            ResolvedSystemPrompt::Ready(prepared) => {
                 assert_eq!(prepared.mode, SystemPromptMode::Append);
                 assert_eq!(prepared.composed_markdown, "Base prompt.\n\nRepo appendix.");
                 let appendix = prepared
@@ -663,7 +663,7 @@ mod tests {
         }
 
         match result {
-            EffectiveSystemPrompt::Ready(prepared) => {
+            ResolvedSystemPrompt::Ready(prepared) => {
                 assert_eq!(prepared.mode, SystemPromptMode::Replace);
                 assert_eq!(
                     prepared.composed_markdown,
@@ -709,7 +709,7 @@ mod tests {
         }
 
         match result {
-            EffectiveSystemPrompt::Ready(prepared) => {
+            ResolvedSystemPrompt::Ready(prepared) => {
                 assert_eq!(prepared.mode, SystemPromptMode::Append);
                 assert_eq!(prepared.composed_markdown, "Repo appendix.");
                 assert!(matches!(
@@ -743,11 +743,11 @@ mod tests {
 
         // Should be None unless ~/.claudine/system-prompt.md exists on the host
         match result {
-            EffectiveSystemPrompt::None => {} // expected in clean test environments
-            EffectiveSystemPrompt::Ready(_) => {
+            ResolvedSystemPrompt::None => {} // expected in clean test environments
+            ResolvedSystemPrompt::Ready(_) => {
                 // Acceptable if user has ~/.claudine/system-prompt.md
             }
-            EffectiveSystemPrompt::Disabled { .. } => {
+            ResolvedSystemPrompt::Disabled { .. } => {
                 // Acceptable if user has an empty ~/.claudine/system-prompt.md
             }
         }
