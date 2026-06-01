@@ -66,7 +66,7 @@ This spec re-states the parser's job in terms of that invariant.
 
 - **Decision #1** — The shell-directive parser gains an AST. The current shape becomes one of two variants: `Pipeline(ShellPipeline)` or `Ternary { condition: String, then: Branch, else: Branch }` where `Branch ∈ { Empty, Pipeline(ShellPipeline) }`.
 - **Decision #2** — The condition string is the **original** (pre-interpolation) text of the condition expression, captured before the frontmatter-interpolation pass runs. The shell-expansion stage evaluates it through `darkmatter::compose::expression::evaluate` using the same lookup the interpolation pass uses, then applies `is_truthy()`.
-- **Decision #3** — The ternary is detected by scanning the inner text of `$(...)` for an unquoted, top-level `?` followed somewhere later by an unquoted, top-level `:`. "Top-level" means: not inside single quotes, double quotes, or a parenthesized sub-expression; not preceded by a backslash. If no such pair is found, the directive parses as a plain pipeline (today's path).
+- **Decision #3** — The ternary is detected by scanning the inner text of `$(...)` for an unquoted, top-level, **whitespace-padded** `?` followed somewhere later by an unquoted, top-level, **whitespace-padded** `:`. "Top-level" means: not inside single quotes, double quotes, or a parenthesized sub-expression; not preceded by a backslash. "Whitespace-padded" means the byte immediately before and after the character is either a space, a tab, or the slice boundary. The padding rule keeps URL-style arguments like `http://example.com`, `cmd:arg` key/value pairs, and glob fragments such as `file?.txt` from being misclassified as ternary punctuation — a separator must be authored with whitespace on both sides. If no such pair is found, the directive parses as a plain pipeline (today's path).
 - **Decision #4** — Each branch is parsed independently. The empty-string literal (`''` or `""`, with optional surrounding whitespace) is the only non-pipeline branch form and produces `Branch::Empty`. Anything else is fed to `parse_pipeline` as today.
 - **Decision #5** — The executable-interpolation check (`validate_no_executable_interpolation`) is moved from "string-level over the full inner text" to "AST-level over each branch's pipeline." The condition position is exempt from the check; all other rules are unchanged.
 - **Decision #6** — Allowlist resolution runs per branch. The set of reachable command executables = `then.commands() ∪ else.commands()` (with `Branch::Empty` contributing none). Every member of that set must satisfy the existing allowlist policy. If any does not, the directive fails before any command runs.
@@ -126,7 +126,7 @@ impl Branch {
 
 ### Parser
 
-`parse_shell_value` gains a small helper `split_top_level_ternary(inner: &str) -> Option<(&str, &str, &str)>` that returns `(condition, then, else)` slices, respecting quotes and parentheses, or `None` if no top-level `?`/`:` pair exists.
+`parse_shell_value` gains a small helper `split_top_level_ternary(inner: &str) -> Option<(&str, &str, &str)>` that returns `(condition, then, else)` slices, respecting quotes, parentheses, and the whitespace-padding rule from Decision #3, or `None` if no top-level, whitespace-padded `?`/`:` pair exists.
 
 `validate_no_executable_interpolation` continues to enforce its rule but is called per branch's slice rather than once over the whole inner text. The condition slice is **not** checked.
 

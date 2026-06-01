@@ -6,6 +6,7 @@ use color_eyre::eyre::{Result, eyre};
 use tracing::info_span;
 
 use super::compose::SharedComposeArgs;
+use super::schema_interactive::emit_dropped_optional_warnings;
 
 /// Run a Markdown document as a serial sequence of composition steps.
 ///
@@ -100,6 +101,19 @@ fn run_sequence_inner(
 
     let set_overrides =
         super::compose::merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
+
+    // Schema-aware doc-level scrub: drop invalid optional values only.
+    // Required-value validation is deferred to per-step pre-validation
+    // (`wrap::sequence::run_phase_1c_attempt`) so a missing required
+    // property is aggregated across ALL failing steps and surfaced as
+    // `SequenceMissingProperties` — not short-circuited here with a
+    // single-document `MissingProperties` error. Interactive collection
+    // for missing required values is driven by
+    // `wrap::sequence::run_phase_1c_with_schema` against the
+    // deduplicated cross-step set.
+    let (source, set_overrides, dropped_optionals) =
+        composition::drop_invalid_optionals(source, set_overrides);
+    emit_dropped_optional_warnings(&dropped_optionals);
 
     let execution_options = SequenceExecutionOptions {
         fail_fast_override: fail_fast,

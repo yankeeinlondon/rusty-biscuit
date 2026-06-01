@@ -1,3 +1,10 @@
+---
+related_specs:
+    - "@darkmatter/features/_completed/2026-05-11-schemas/spec.md"
+    - "@darkmatter/features/_completed/2026-05-23-compose-schema/spec.md"
+    - "@darkmatter/features/_completed/2026-05-28-schema-coercion/spec.md"
+---
+
 # Schema Definition
 
 Darkmatter can **define**, **detect**, and **evaluate** schemas for Markdown frontmatter. Authors declare the shape of their frontmatter with **SimplifiedSchema** — a single-line YAML grammar that compiles deterministically to a Draft 2020-12 JSON Schema. Every validation runs through the `jsonschema` crate; SimplifiedSchema is a surface, not a parallel validator.
@@ -79,9 +86,9 @@ $schema:
 | `datetime`   | Any ISO-8601 datetime.                                                                                 | JSON Schema `format: date-time`.                                                                                   |
 | `time`       | `hh:mm`, `hh:mm:ss`, `hh:mm:ss.ms` with optional TZ (`Z` or `±HH:MM`).                                 | JSON Schema `format: time`.                                                                                        |
 | `number`     | Any JSON number.                                                                                       | Constraints: `min`, `max`, `integer`, `default`, `required`.                                                       |
-| `numberlike` | A JSON number **or** a numeric string (`"4"`, `"-13"`, `"3.14"`).                                      | Compiles to `anyOf: [number, regex-pattern string]`.                                                               |
+| `numberlike` | A JSON number **or** a numeric string (`"4"`, `"-13"`, `"3.14"`).                                      | Compiles to `anyOf: [number, regex-pattern string]`. A numeric-string value is **normalized** to a real number (see [Type Coercion](#type-coercion)). |
 | `boolean`    | Any JSON boolean.                                                                                      | Constraints: `default`, `required`.                                                                                |
-| `boolish`    | A JSON boolean **or** the strings `"true"` / `"false"` (any case).                                     | Compiles to `anyOf: [boolean, enum]`.                                                                              |
+| `boolish`    | A JSON boolean **or** the strings `"true"` / `"false"` (any case).                                     | Compiles to `anyOf: [boolean, enum]`. A `"true"` / `"false"` value is **normalized** to a real boolean (see [Type Coercion](#type-coercion)). |
 | `object`     | Any YAML/JSON object.                                                                                  | No nested-schema authoring in v1 — `object` accepts any shape. Reference an external file for deeper typing.       |
 | `file`       | A file reference resolved via `biscuit-file::FileReference`. Single or array form.                     | Constraints: `match(glob, ...)`, `required`. Resolved **from the CWD** at validation time. See [Files](#files).    |
 | `enum`       | A value from an explicit set.                                                                          | Constraints required — the members are the constraint. See [Enumerations](#enumerations).                          |
@@ -304,12 +311,47 @@ Any other construct — `$ref`, `allOf`, `anyOf`, `if`/`then`/`else`, `patternPr
 
 - Object-level deep merge keyed by property name.
 - Where both sides declare a property, the **document side wins entirely** — its type and constraints replace the baseline's. There is no per-constraint interleaving.
-- `required` is a property-level concern, so replacing a property removes its inherited `required`. Re-state `required` in the document to preserve requiredness while changing the type.
+- `required` is a property-level concern, so replacing a property removes its inherited `required`. Re-state `required` in the document to preserve required constraint while changing the type.
 - Properties present only in the baseline remain in the effective schema.
 - Properties present only in the document are added.
 - For root unions, the baseline is merged into each arm independently.
 
 This semantics is chosen because per-constraint merging produces surprising results (e.g. a baseline `min(5)` silently shadowing a document `min(3)`).
+
+## Type Coercion
+
+When a frontmatter value is *trivially* the wrong JSON type but **unambiguously** convertible to the type its property declares, Darkmatter coerces the stored value to the declared type and accepts it, rather than failing validation. This is driven by the merged compiled JSON Schema, so it covers inline `$schema`, baseline-merged fields, raw JSON Schema, and root unions through one path.
+
+Coercion is **default-on**: there is no opt-in flag and no opt-out / strict-types flag. It is unambiguous by construction — it only *adds* acceptances for values with exactly one possible target, never changes the outcome of an already-valid value, and never masks a genuinely-wrong value. A value outside the matrix below is left untouched and fails with the same `Type` error it does today.
+
+### Coercion Matrix
+
+| Declared type | Incoming value | Coerced result |
+|---|---|---|
+| `boolean` | a string in the set `{true, false, True, False, TRUE, FALSE}` | real boolean (`"true"` → `true`) |
+| `boolish` | same boolish set | real boolean (**normalized** — previously left as a string) |
+| `number` / `integer` | a string matching `^-?\d+(\.\d+)?$` | real number (`"42"` → `42`, `"3.14"` → `3.14`) |
+| `numberlike` | a numeric string (same regex) | real number (**normalized** — previously left as a string) |
+| `string` (incl. `date` / `datetime` / `time` / `url` / `email` / `file`) | a `number` or `boolean` scalar | its canonical string (`42` → `"42"`, `true` → `"true"`) |
+| `array` of a coercible item type | an array | each element coerced by the item rule (recursively) |
+
+The string direction is reverse-direction and always unambiguous (every scalar has exactly one canonical string form). It targets `string` only — a number landing in a `date` field coerces to its string form and then fails the `date` format check normally, so coercion never produces a false accept.
+
+### Never Coerced (Ambiguous)
+
+These remain uncoerced and continue to fail strict validation on a type mismatch:
+
+- `"yes"` / `"no"` / `"on"` / `"off"` → boolean (not in the boolish set).
+- `"1"` / `"0"` → boolean (equally valid as numbers).
+- any string that does not match the numeric regex → number.
+- arrays, objects, or `null` → any scalar type.
+- a string → object, or an object → string.
+
+Nested object properties are not deeply coerced — coercion applies to top-level properties and to the elements of top-level typed arrays. Coercing an already-correctly-typed value is a no-op (idempotent).
+
+### Root Unions
+
+For a root-level union, coercion must make the instance satisfy *at least one* arm, and arms may type the same property differently. Each arm is tried **in index order**: a per-arm coerced candidate is built and strict-validated, and the **first arm that validates post-coercion wins**; its coerced candidate is committed. If no arm validates post-coercion, the instance is returned unchanged and the existing closest-matching-arm error reporting runs.
 
 ## CLI: `md schema validate`
 
@@ -598,15 +640,15 @@ Every variant implements `biscuit_terminal::errors::BlockError`, so failures ren
 
 ## Compose Pipeline Integration
 
-Darkmatter runs an **always-on Schema Validation stage** inside `md compose`. It validates the document's effective frontmatter against the resolved `$schema` (and optional baseline) after `--set` / `--state` overrides are applied, but **before** frontmatter interpolation or shell expansion. This means schema violations fail fast with a clear error naming the offending property, rather than producing cryptic downstream failures (e.g. `dirname ''` from an empty interpolation).
+Darkmatter runs an **always-on Schema Validation stage** inside `md compose`. It validates the document's effective frontmatter against the resolved `$schema` (and optional baseline) after `--set` / `--state` overrides are applied and after frontmatter interpolation resolves `{{ }}` expressions, but **before** frontmatter shell expansion. This means schema violations fail fast with a clear error naming the offending property, rather than producing cryptic downstream failures (e.g. `dirname ''` from an empty interpolation). Validating after interpolation lets schema-constrained fields derive from templates (e.g. `runtime_agent: '{{ env.AGENT }}'`); validating before shell expansion avoids triggering side-effectful `$(...)` commands when the frontmatter is already invalid.
 
 ### Pipeline Placement
 
 ```
 Load markdown
   └─ Apply --set / --state overrides
-      └─ Schema Validation  ──► fails fast on violation
-          └─ Frontmatter Interpolation   ({{ var }})
+      └─ Frontmatter Interpolation   ({{ var }})
+          └─ Schema Validation  ──► fails fast on violation
               └─ Frontmatter Shell Expansion ($(cmd))
                   └─ …remaining stages…
 ```
@@ -619,7 +661,10 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 - When a baseline schema is set via `ComposeOptions::with_baseline_schema(...)` and the document lacks `$schema`, the baseline alone is validated.
 - When neither `$schema` nor a baseline is present, the stage is a **no-op** — compose proceeds unchanged.
 - `--set` and `--state` overrides are applied **before** validation, so they can fulfill required properties. A document with `spec: ""` plus `--set spec=design.md` validates successfully.
-- Recursive compose runs validate every child document after its parent `set=` overlay is applied.
+- The stage **mutates** the document: it coerces schema-recognized top-level scalars to their declared types (see [Type Coercion](#type-coercion)) and **writes the coerced values back** into the frontmatter, so the real types flow to every later stage (shell expansion, page blocks, body interpolation, init-stack conditions) and into the composed output. For example, a `has_spec: "{{spec ? true : false}}"` ternary resolves to the string `"true"` during interpolation and is stored as a real JSON boolean `true` after this stage.
+- A top-level value still holding a `$(...)` shell expression is **skipped** by the write-back — its literal form must survive into shell expansion. Its real type is resolved later at the post-shell re-validation point, which coerces via the same helper, so compose and the downstream consumer agree.
+- Problems whose top-level field value still contains a frontmatter shell expression (`$(...)`) are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been expanded at validation time, so the downstream consumer (e.g. claudine) re-validates the post-shell effective frontmatter. If every problem is deferred, compose proceeds; any composition-independent problem fails fast. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
+- Recursive compose runs validate every child document after its parent `set=` overlay is applied. A child schema failure aborts the parent compose under `fail_fast` (or when the error is structural); otherwise it surfaces as a transclusion warning.
 - The baseline schema participates in transclusion cache keys and persistent cache option hashing, so cached results are not reused across different baselines.
 
 ### Library API
@@ -664,7 +709,9 @@ Schema-preparation errors (unparseable `$schema`, missing referenced file, etc.)
 - **No remote `$schema`.** Download referenced schemas locally for now.
 - **No nested object schemas.** `object` accepts any shape; use a referenced schema file for stronger typing.
 - **No arrays of unions.** The `[]` suffix binds to a single type expression, and a YAML sequence at a property value is itself the union form. Workaround: reference a JSON Schema file.
-- **No value coercion.** `numberlike` and `boolish` accept either shape but do not rewrite the document.
+- **No coercion opt-out.** [Type coercion](#type-coercion) is default-on with no `--no-coerce` / strict-types flag.
+- **No coercions beyond the matrix.** In particular no `"yes"` / `"no"` / `"1"` / `"0"` → boolean, no string-parsing into `date` / `url` / `email`, and no object/array coercions.
+- **No `md schema validate --write`.** The library check path reports post-coercion validity but does not rewrite files; only the compose pipeline mutates the (in-memory) document it composes.
 - **No constraint inference in detection.** Patterns, `min` / `max`, and enum members are never synthesised from values.
 - **No `additionalProperties: false` opt-in.** Generated schemas always allow extra keys; a `strict` mode may land later.
 - **No cross-document constraints.** Uniqueness across a corpus is out of scope for v1.

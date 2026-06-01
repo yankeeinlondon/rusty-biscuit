@@ -161,7 +161,7 @@ impl ValidatorCache {
 
 /// Builds a `Validator` configured with darkmatter's custom format and
 /// keywords.
-fn build_validator(schema: &Value) -> Result<Validator, SchemaError> {
+pub(super) fn build_validator(schema: &Value) -> Result<Validator, SchemaError> {
     let opts = jsonschema::options()
         .with_draft(Draft::Draft202012)
         .with_pattern_options(PatternOptions::regex());
@@ -273,6 +273,16 @@ fn classify_kind(kind: &ValidationErrorKind) -> ValidationProblemKind {
         ValidationErrorKind::Type { .. } => ValidationProblemKind::Type,
         _ => ValidationProblemKind::Invalid,
     }
+}
+
+/// Top-level frontmatter key a validation error is attributable to, if any.
+///
+/// Mirrors the attribution [`collect_problems`] uses (the missing-property name
+/// for `Required`, otherwise the first JSON-pointer segment), so callers that
+/// reason about which key caused a failure stay consistent with reported
+/// problems without re-deriving the rule.
+pub(super) fn error_top_level_key(err: &jsonschema::ValidationError<'_>) -> Option<String> {
+    identify_key(err.instance_path().as_str(), err.kind())
 }
 
 /// Picks the top-level frontmatter key to attribute a problem to.

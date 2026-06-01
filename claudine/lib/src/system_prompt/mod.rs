@@ -1,5 +1,5 @@
 //! Launch-CWD detection, `system-prompt.md` discovery, and
-//! `EffectiveSystemPrompt` resolution shared by all provider wrappers.
+//! `ResolvedSystemPrompt` resolution shared by all provider wrappers.
 //!
 //! See [`claudine/docs/topics/system-prompt.md`](../../../docs/topics/system-prompt.md)
 //! for the launch-context discovery hierarchy, `--append`/`--replace`

@@ -665,9 +665,9 @@ fn run_provider_wrapper_inner(
     );
 
     match &effective_sp {
-        claudine::system_prompt::EffectiveSystemPrompt::None
-        | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
-        claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
+        claudine::system_prompt::ResolvedSystemPrompt::None
+        | claudine::system_prompt::ResolvedSystemPrompt::Disabled { .. } => {}
+        claudine::system_prompt::ResolvedSystemPrompt::Ready(prepared) => {
             let application = profile.apply_system_prompt(
                 prepared,
                 !non_interactive_requested,
@@ -982,7 +982,7 @@ fn run_provider_wrapper_inner(
         if !quiet_requested
             || matches!(
                 effective_sp,
-                claudine::system_prompt::EffectiveSystemPrompt::Ready(_)
+                claudine::system_prompt::ResolvedSystemPrompt::Ready(_)
             )
         {
             log::message("");

@@ -18,7 +18,8 @@ use std::collections::BTreeSet;
 
 use clap::Args;
 use claudine::composition::{
-    self, CompositionExecutionRequest, CompositionMode, OutputFormat as CompositionOutputFormat,
+    self, CompositionError, CompositionExecutionRequest, CompositionMode,
+    OutputFormat as CompositionOutputFormat,
 };
 use claudine::provider::Provider;
 use claudine::system_prompt::SystemPromptArgs;
@@ -366,6 +367,29 @@ fn run_compose_inner(
 
     let source = composition::resolve_composition_source(&file)?;
 
+    // Schema-aware pre-prepare validation. Runs BEFORE the preflight
+    // compose pass so the user-visible error surface is Claudine's
+    // typed `CompositionError` rather than Darkmatter's raw
+    // `MarkdownError::SchemaValidationFailed`. Drives interactive
+    // collection of missing required values when allowed and merges the
+    // collected values into `set_overrides`. Invalid optional values are
+    // dropped in place. Schema-load failures, invalid required values,
+    // and missing required values (non-interactive) surface as typed
+    // errors here, never as Darkmatter raw errors.
+    let (source, set_overrides) = {
+        let interactive_opts =
+            super::schema_interactive::resolve_interactive_options(shared.silent);
+        let term = crate::log::terminal();
+        let pre = super::schema_interactive::pre_validate_with_interactive_collection(
+            &source,
+            set_overrides.as_ref(),
+            interactive_opts,
+            &term,
+        )?;
+        super::schema_interactive::emit_dropped_optional_warnings(&pre.dropped_optionals);
+        (pre.source, pre.set_overrides)
+    };
+
     let _compose_span = info_span!(
         "compose",
         file = %source.resolved_path.display(),
@@ -408,8 +432,20 @@ fn run_compose_inner(
     );
 
     // ── Pre-flight shell approval ────────────────────────────────────
+    //
+    // `ComposeContext::capture()` + `env_mut().insert(...)` installs the
+    // resolved `AGENT` (and any other composition env overrides) into
+    // the same Darkmatter compose pipeline that the preflight pass
+    // walks. Without this, frontmatter values that derive from env
+    // (e.g. `runtime_agent: '{{ env.AGENT }}'`) fail Darkmatter's
+    // built-in schema validation during preflight, before reaching
+    // `prepare_direct_with_schema`.
     let compose_options = {
-        let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
+        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+        for (key, value) in &env_overrides {
+            ctx.env_mut().insert(key.clone(), value.clone());
+        }
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
             .with_source_file(&source.resolved_path);
         if let Some(ref overrides) = set_overrides {
             opts = opts.with_set_overrides(overrides.clone());
@@ -462,7 +498,13 @@ fn run_compose_inner(
         run_loop_with_overrides(&source, set_overrides.as_ref(), loop_options, |ctx| {
             let prepared = {
                 let _span = info_span!("compose_prep.prepare_direct").entered();
-                composition::prepare_direct(
+                // Schema-aware variant: typed `SchemaLoad` /
+                // `SchemaValidation` / `MissingProperties` errors and
+                // drop-and-retry for invalid optionals apply per
+                // iteration. Interactive collection is NOT driven inside
+                // loops; missing required values surface as
+                // `MissingProperties` on the first iteration.
+                composition::prepare_direct_with_schema(
                     &source,
                     composition::PrepareOptions {
                         set_overrides: Some(ctx.as_set_overrides()),
@@ -562,9 +604,13 @@ fn run_compose_inner(
     }
 
     // ── Single execution path (no loop) ──────────────────────────────────
+    // Pre-validation (with interactive collection) has already run, so
+    // schema requirements are satisfied. Call the schema-aware prepare
+    // directly — typed errors still surface for any residual issues
+    // (e.g. drop-and-retry on a latent optional).
     let prepared = {
         let _span = info_span!("compose_prep.prepare_direct").entered();
-        composition::prepare_direct(
+        composition::prepare_direct_with_schema(
             &source,
             composition::PrepareOptions {
                 set_overrides,
@@ -575,6 +621,7 @@ fn run_compose_inner(
             },
         )?
     };
+    super::schema_interactive::emit_dropped_optional_warnings(&prepared.dropped_optionals);
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::ChainedDocument,
@@ -691,7 +738,12 @@ fn run_inline_compose_inner(
     };
 
     // -- Pre-validation: prompt frontmatter property ------------------------
-
+    //
+    // This MUST run before the schema-aware pre-validation. Otherwise a
+    // schema like `$schema: { prompt: string }` with `prompt: 123` would
+    // be dropped by the invalid-optional scrub, and inline-compose would
+    // then incorrectly report `PromptPropertyMissing` instead of
+    // `PromptPropertyWrongType` — masking the real problem.
     let prompt_value = source
         .markdown
         .frontmatter()
@@ -707,6 +759,39 @@ fn run_inline_compose_inner(
     if let Some(ref t) = term {
         claudine::harness::report::report_prompt_property(has_prompt, is_non_empty, t);
     }
+
+    // Drive the inline-specific contract eagerly so a wrong-type or
+    // missing `prompt` produces the right typed error before any schema
+    // scrubbing kicks in.
+    if !has_prompt {
+        return Err(CompositionError::PromptPropertyMissing.into());
+    }
+    if let Some(value) = prompt_value.as_ref()
+        && !matches!(value, serde_json::Value::String(_))
+    {
+        return Err(CompositionError::PromptPropertyWrongType(
+            json_type_name(value).to_string(),
+        )
+        .into());
+    }
+
+    // Schema-aware pre-prepare validation. Runs AFTER the prompt-property
+    // check so the inline-compose contract takes precedence over the
+    // generic schema check. See the same call in `run_compose_inner` for
+    // the full rationale.
+    let (source, set_overrides) = {
+        let interactive_opts =
+            super::schema_interactive::resolve_interactive_options(shared.silent);
+        let term_for_schema = crate::log::terminal();
+        let pre = super::schema_interactive::pre_validate_with_interactive_collection(
+            &source,
+            set_overrides.as_ref(),
+            interactive_opts,
+            &term_for_schema,
+        )?;
+        super::schema_interactive::emit_dropped_optional_warnings(&pre.dropped_optionals);
+        (pre.source, pre.set_overrides)
+    };
 
     // Phase 2 (2026-05-09-slow-prep): single source-root discovery for the
     // whole inline-compose invocation; downstream prep phases reuse this
@@ -738,8 +823,16 @@ fn run_inline_compose_inner(
     );
 
     // ── Pre-flight shell approval ────────────────────────────────────
+    //
+    // See the matching block in `run_compose_inner` for why we install
+    // `env_overrides` into the compose context: it lets template values
+    // like `{{ env.AGENT }}` resolve during preflight's schema check.
     let compose_options = {
-        let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
+        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+        for (key, value) in &env_overrides {
+            ctx.env_mut().insert(key.clone(), value.clone());
+        }
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
             .with_source_file(&source.resolved_path);
         if let Some(ref overrides) = set_overrides {
             opts = opts.with_set_overrides(overrides.clone());
@@ -792,7 +885,13 @@ fn run_inline_compose_inner(
         run_loop_with_overrides(&source, set_overrides.as_ref(), loop_options, |ctx| {
             let prepared = {
                 let _span = info_span!("compose_prep.prepare_inline").entered();
-                composition::prepare_inline(
+                // Schema-aware variant: typed `SchemaLoad` /
+                // `SchemaValidation` / `MissingProperties` errors and
+                // drop-and-retry for invalid optionals apply per
+                // iteration. Interactive collection is NOT driven inside
+                // loops; missing required values surface as
+                // `MissingProperties` on the first iteration.
+                composition::prepare_inline_with_schema(
                     &source,
                     composition::PrepareOptions {
                         set_overrides: Some(ctx.as_set_overrides()),
@@ -892,9 +991,12 @@ fn run_inline_compose_inner(
     }
 
     // ── Single execution path (no loop) ──────────────────────────────────
+    // Pre-validation (with interactive collection) has already run, so
+    // schema requirements are satisfied. Call the schema-aware prepare
+    // directly for typed-error fidelity on residual issues.
     let prepared = {
         let _span = info_span!("compose_prep.prepare_inline").entered();
-        composition::prepare_inline(
+        composition::prepare_inline_with_schema(
             &source,
             composition::PrepareOptions {
                 set_overrides,
@@ -905,6 +1007,7 @@ fn run_inline_compose_inner(
             },
         )?
     };
+    super::schema_interactive::emit_dropped_optional_warnings(&prepared.dropped_optionals);
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,
@@ -1059,6 +1162,18 @@ where
 
     let prompt_path = source.resolved_path.clone();
 
+    // Capture the launch CWD (and PWD) before any iteration runs so we can
+    // restore them between iterations. The wrap layer's
+    // `switch_process_cwd` mutates the process-global CWD to the detected
+    // repo/git root inside each iteration; without restoration, iteration
+    // 2's `prepare_direct_with_schema` resolves any CLI-supplied
+    // `file(required)` setter against the post-switch root rather than
+    // the user's original launch directory. A path that validated on
+    // iteration 1 then fails iteration 2 as `not a "darkmatter-file"`,
+    // even though nothing about the value changed.
+    let launch_cwd = std::env::current_dir().ok();
+    let launch_pwd = std::env::var_os("PWD");
+
     // The Ctrl+C SIGINT handler is installed at the top of the compose
     // subcommand (see `install_user_interrupt_guard`) so it covers the
     // entire prep window, not just the loop. The wrapped executor below
@@ -1074,6 +1189,20 @@ where
                     prompt_path: prompt_path_for_executor.clone(),
                 },
             ));
+        }
+        // Restore launch CWD/PWD before each iteration so per-iteration
+        // schema validation (which uses ambient CWD via
+        // `validate_file_reference`) sees the same root that the pre-loop
+        // validation saw. SAFETY: single-threaded loop driver — no other
+        // thread reads or writes `PWD` concurrently.
+        if let Some(ref cwd) = launch_cwd {
+            let _ = std::env::set_current_dir(cwd);
+            unsafe {
+                match launch_pwd {
+                    Some(ref value) => std::env::set_var("PWD", value),
+                    None => std::env::remove_var("PWD"),
+                }
+            }
         }
         let output = executor(ctx)?;
         if crate::output::user_interrupt_observed() {
@@ -1315,6 +1444,22 @@ pub(crate) fn parse_composition_positionals(
         file_ref,
         shorthand_setters,
     })
+}
+
+/// Return a stable type name for a `serde_json::Value`.
+///
+/// Used by `inline-compose` to construct
+/// [`CompositionError::PromptPropertyWrongType`] when the frontmatter
+/// `prompt` value is present but not a string.
+fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
 }
 
 /// Merge `--set` JSON with shorthand setters. Shorthand wins on overlapping keys.

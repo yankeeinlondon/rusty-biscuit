@@ -872,3 +872,106 @@ exit 0
         String::from_utf8_lossy(&assert.get_output().stderr)
     );
 }
+
+// ============================================================================
+// CWD preservation across loop iterations
+// ============================================================================
+
+/// Regression: a `file(required)` setter that resolves against the user's
+/// launch CWD must keep validating across every iteration, not just the
+/// first. The wrap layer's `switch_process_cwd` mutates the process-global
+/// CWD to the detected repo/git root inside each iteration; without
+/// restoring the launch CWD before the next iteration's
+/// `prepare_direct_with_schema`, a relative `plan=...` setter that
+/// validated on iteration 1 fails iteration 2 as `not a "darkmatter-file"`
+/// even though the in-memory state is identical.
+#[cfg(unix)]
+#[test]
+fn compose_loop_file_required_setter_revalidates_against_launch_cwd_each_iteration() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // Create a git repo at the workspace so the wrap layer's
+    // `detect_repo_root` resolves to a directory ABOVE the launch CWD.
+    // Then run from a subdirectory of the repo where the relative
+    // `plan=...` path resolves. Without the CWD-restore fix, iteration 2
+    // would resolve `plan` against the repo root instead of the subdir
+    // and validation would fail.
+    std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(workspace.path())
+        .status()
+        .unwrap();
+
+    let subdir = workspace.path().join("package");
+    fs::create_dir_all(&subdir).unwrap();
+    let plan_dir = subdir.join("features");
+    fs::create_dir_all(&plan_dir).unwrap();
+    let plan_file = plan_dir.join("plan.md");
+    fs::write(&plan_file, "# plan\n").unwrap();
+
+    // Prompt is at the repo root (not the subdir) so we point at it via
+    // `../` from the subdir, matching the real-world layout where the
+    // user runs from a package area against a repo-root prompts file.
+    let md_file = workspace.path().join("loop.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  phase: 'number(required)'
+  total_phases: 'number(required)'
+  plan: 'file(required)'
+phase: 1
+total_phases: 0
+loop:
+  until: "phase > total_phases"
+  action: "increment(phase)"
+---
+Phase {{phase}} of {{total_phases}}.
+"#,
+    )
+    .unwrap();
+
+    let count_path = workspace.path().join("call-count.txt");
+
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+count=0
+if [ -f "$CLAUDINE_COUNT_FILE" ]; then
+  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
+cat > /dev/null
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_COUNT_FILE", &count_path)
+        .current_dir(&subdir)
+        .args([
+            "compose",
+            "--goose",
+            "../loop.md",
+            "plan=features/plan.md",
+            "total_phases=3",
+        ])
+        .assert()
+        .success();
+
+    let calls = fs::read_to_string(&count_path).unwrap_or_default();
+    assert_eq!(
+        calls.trim(),
+        "3",
+        "all three iterations must run; loop bailing on iteration 2 \
+         with a schema validation error indicates the launch CWD was \
+         not restored between iterations. stderr:\n{}",
+        strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr))
+    );
+}

@@ -90,7 +90,7 @@ Integrate the validation stage into the existing compose pipeline and ensure cac
 
 - [x] **Task 3.1: Inject Stage into Pipeline**
   - Modify `run_compose_pipeline_internal` in `darkmatter/lib/src/markdown/compose/mod.rs`.
-  - Call `schema_validation::run` immediately after `prepare_frontmatter_for_compose` and before frontmatter interpolation.
+  - Call `schema_validation::run` immediately after frontmatter interpolation and before frontmatter shell expansion.
   - Update the module's doc comments enumerating pipeline stages.
 
 - [x] **Task 3.2: Update Cache Hashing**
