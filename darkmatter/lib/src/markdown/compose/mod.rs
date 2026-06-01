@@ -541,10 +541,16 @@ impl Markdown {
             // the second interpolation pass below will re-resolve them and
             // the prepare-time consumer (e.g. claudine's `prepare_*_with_schema`)
             // can re-validate the post-shell effective frontmatter.
-            let sv_start = perf.is_enabled().then(std::time::Instant::now);
-            schema_validation::run(self, &options)?;
-            if let Some(start) = sv_start {
-                perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
+            // Skipped by internal non-terminal passes (shell-command
+            // discovery) that strip FrontmatterShellExpansion: validating a
+            // still-literal `$(...)` value there would wrongly report it as a
+            // final violation. See `ComposeOptions::skip_schema_validation`.
+            if !options.skip_schema_validation {
+                let sv_start = perf.is_enabled().then(std::time::Instant::now);
+                schema_validation::run(self, &options)?;
+                if let Some(start) = sv_start {
+                    perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
+                }
             }
 
             // Frontmatter Shell Expansion: execute $(cmd) in frontmatter values

@@ -174,7 +174,12 @@ pub fn collect_shell_commands(
     .filter(|op| options.is_enabled(*op))
     .collect();
 
-    let discovery_options = options.clone().only(&discovery_ops);
+    // Discovery is a non-terminal pass: it strips FrontmatterShellExpansion
+    // to avoid executing commands, so schema validation here would judge
+    // still-literal `$(...)` values as final violations. Skip it — the
+    // terminal compose pass validates the resolved frontmatter.
+    let mut discovery_options = options.clone().only(&discovery_ops);
+    discovery_options.skip_schema_validation = true;
 
     let (composed, report) = markdown.compose_with(discovery_options)?;
 
@@ -318,7 +323,11 @@ fn collect_frontmatter_commands_recursive(
     .filter(|op| options.is_enabled(*op))
     .collect();
 
-    let (prepared, _) = markdown.compose_with(options.clone().only(&inline_ops))?;
+    // Non-terminal pass (see Phase 2 below): skip schema validation so a
+    // still-literal `$(...)` value is not judged as a final violation.
+    let mut inline_options = options.clone().only(&inline_ops);
+    inline_options.skip_schema_validation = true;
+    let (prepared, _) = markdown.compose_with(inline_options)?;
     let transclusion_opts = options.transclusion_options();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(
@@ -736,6 +745,26 @@ replace:
             "Missing echo: {:?}",
             executables
         );
+    }
+
+    #[test]
+    fn discovers_frontmatter_command_when_schema_constrains_the_value() {
+        // Regression: a `$schema`-constrained frontmatter value that holds a
+        // `$(...)` expression must not abort discovery. Discovery composes
+        // with FrontmatterShellExpansion stripped (so the command is not yet
+        // executed), but schema validation is irrelevant to command
+        // collection and must not treat the still-literal `$(...)` value as a
+        // final schema violation — the real compose pass (with shell
+        // expansion) validates the resolved value downstream.
+        let content = "---\n$schema:\n  tier: 'enum(small, medium, large; required)'\ntier: $(echo small)\n---\n# Doc\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1, "entries: {:?}", entries);
+        assert_eq!(entries[0].executable, "echo");
+        assert_eq!(entries[0].raw_command, "echo small");
     }
 
     #[test]
