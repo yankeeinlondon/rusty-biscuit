@@ -236,6 +236,63 @@ fn test_double_verbose_flag() {
 }
 
 #[test]
+fn with_network_flag_parses() {
+    // The flag should be accepted globally; pair with a fast subcommand
+    // so the test doesn't pay full-detection cost.
+    cargo_bin_cmd!("sniff")
+        .args(["--with-network", "repo", "name"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn with_network_flag_parses_before_json() {
+    cargo_bin_cmd!("sniff")
+        .args(["--with-network", "repo", "name", "--json"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn repo_name_json_is_leaf_only() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "name", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json_str = std::str::from_utf8(&output).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
+
+    let obj = json.as_object().expect("json should be an object");
+
+    // The only key allowed is `name`. No version, language, is_monorepo,
+    // or package_count may appear at the leaf level.
+    assert_eq!(
+        obj.len(),
+        1,
+        "repo name --json must contain exactly one key; got: {json}"
+    );
+    assert!(
+        obj.contains_key("name"),
+        "repo name --json must contain `name`: {json}"
+    );
+    assert!(
+        obj.get("name").and_then(|v| v.as_str()).is_some(),
+        "`name` must be a string: {json}"
+    );
+
+    for forbidden in ["version", "language", "is_monorepo", "package_count"] {
+        assert!(
+            !obj.contains_key(forbidden),
+            "repo name --json must NOT contain `{forbidden}`: {json}"
+        );
+    }
+}
+
+#[test]
 fn test_base_flag_before_subcommand() {
     cargo_bin_cmd!("sniff")
         .args(["-b", ".", "filesystem"])

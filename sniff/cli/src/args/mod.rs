@@ -106,6 +106,13 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub plain: bool,
 
+    /// Include network-dependent supplemental data (requires connectivity).
+    /// Affects both terminal and JSON output. No effect on subcommands that
+    /// do not currently consume network data — included as the well-known
+    /// surface for future opt-in.
+    #[arg(long, global = true)]
+    pub with_network: bool,
+
     /// Generate shell completions for the specified shell
     #[arg(long, value_name = "SHELL", hide = true)]
     pub completions: Option<Shell>,

@@ -706,8 +706,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap_or_else(|| std::path::Path::new("."));
                 let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
                 if cli.json {
-                    let json = serde_json::to_value(&identity)?;
-                    output::print_json_value(json, perf.build_report().as_ref());
+                    let outcome = output::repo_json::name_outcome(identity.name.clone());
+                    output::print_json_value(outcome.value, perf.build_report().as_ref());
+                    if let Some(code) = outcome.exit_code {
+                        std::process::exit(code);
+                    }
                     return Ok(());
                 }
                 let rendered = output::render_repo_name(&identity, cli.verbose);
