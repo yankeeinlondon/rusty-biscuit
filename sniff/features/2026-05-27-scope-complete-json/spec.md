@@ -80,6 +80,22 @@ Target: add `--with-network` to the global `Cli` struct in `args/mod.rs` alongsi
 
 The flag has no positional or value form — it is a pure bool toggle. Behavior when no children currently honor it: the flag is accepted, has no observable effect, and is documented as future-proofing in `--help`.
 
+### Terminal output as JSON-scope subset
+
+A companion principle documented at [`sniff/docs/topics/terminal-output.md`](../../docs/topics/terminal-output.md) establishes the reciprocal contract: the JSON output at each command level defines the scope of available metadata, and the terminal output at that same level may only show data drawn from that scope — typically a strict subset.
+
+Because this spec narrows several JSON scopes, we must verify each affected command's terminal form does not leak data outside its new JSON scope. For each command this spec touches:
+
+- **`sniff repo name` (default and `-v`)** — JSON scope narrows to `{ name }`. The terminal form must show only the name. If today's `-v` form surfaces `version`, `language`, `is_monorepo`, or `package_count`, those must be dropped. Users who want that information drill into the new sibling leaves (`sniff repo version`, `sniff repo is-monorepo`, etc.) or invoke `sniff repo -v` for the aggregate.
+
+- **`sniff repo` (no subcommand, no `--json`)** — continues to dispatch to the default subcommand `name` for human output. The terminal form is `{ name }`, which is a subset of the parent `repo` aggregate JSON scope. Compliant unchanged. Designing a richer verbose-aggregate terminal form (e.g. `sniff repo -v` showing a multi-line summary built from the aggregate scope) is **out of scope for this spec** — left as a follow-up once the aggregate JSON exists.
+
+- **`sniff repo is-monorepo`, `sniff repo package-count`, `sniff repo version` (new leaves)** — terminal forms show only their respective values (`yes`/`no`, the count as plain text, the version string or blank). The `-v` form, if differentiated at all, may add only contextual styling (e.g. labels, units) — not data from other scopes.
+
+- **`sniff repo recent-commits`, `sniff repo source-code-changes`, `sniff repo documentation-changes`** — JSON narrows from whole-`RepoInfo` to commit-data-only. Terminal forms today are already commit-focused, so the expected delta is zero. Implementation must verify no terminal output paths still pull from the now-out-of-scope full `RepoInfo`.
+
+Explicit non-goal: this spec does NOT audit terminal-output subset compliance for commands it does not touch. The broader CLI-wide audit is a separate follow-up activity.
+
 ### Out of scope
 
 - Changing the human/terminal output of any compliant command. Only `repo` (default-subcommand dispatch) and the three commit families' JSON branches change. Their text outputs are not part of this work.
