@@ -184,12 +184,17 @@ enum SectionReport {
         content_changed: bool,
     },
     /// Reordered among its siblings; now appears before `before`.
-    Reordered { heading: String, before: String },
+    Reordered {
+        heading: String,
+        before: String,
+        content_changed: bool,
+    },
     /// Moved to a different parent.
     Moved {
         heading: String,
         new_parent: Option<String>,
         old_parent: Option<String>,
+        content_changed: bool,
     },
     /// Present only in the new document.
     Added { heading: String, level: u8 },
@@ -231,14 +236,24 @@ impl SectionReport {
                 "\"{heading}\" section: demoted from H{from} to H{to}{}",
                 content_suffix(*content_changed)
             ),
-            SectionReport::Reordered { heading, before } => {
-                format!("\"{heading}\" section: reordered, now appears before \"{before}\"")
-            }
+            SectionReport::Reordered {
+                heading,
+                before,
+                content_changed,
+            } => format!(
+                "\"{heading}\" section: reordered, now appears before \"{before}\"{}",
+                placement_content_suffix(*content_changed)
+            ),
             SectionReport::Moved {
                 heading,
                 new_parent,
                 old_parent,
-            } => format!("\"{heading}\" section: {}", moved_phrase(new_parent, old_parent)),
+                content_changed,
+            } => format!(
+                "\"{heading}\" section: {}{}",
+                moved_phrase(new_parent, old_parent),
+                placement_content_suffix(*content_changed)
+            ),
             SectionReport::Added { heading, level } => {
                 format!("\"{heading}\" section: added (H{level})")
             }
@@ -258,6 +273,17 @@ fn content_suffix(content_changed: bool) -> &'static str {
         ""
     } else {
         ", content unchanged"
+    }
+}
+
+/// A placement change (move/reorder) does not imply a content edit the way a
+/// promotion/demotion does, so the noteworthy case here is the inverse: a
+/// content change is stated explicitly, while an unchanged body needs no note.
+fn placement_content_suffix(content_changed: bool) -> &'static str {
+    if content_changed {
+        ", content has changed"
+    } else {
+        ""
     }
 }
 
@@ -558,13 +584,27 @@ fn align_sections(
     }
 
     // Pass 3 — pair remaining sections by corresponding position at the same
-    // level (rename-plus-edit: both heading and content changed).
+    // level (rename-plus-edit: both heading and content changed). A candidate is
+    // valid only inside the old-document gap delimited by the new section's
+    // already-anchored siblings: the nearest preceding and following sections
+    // matched in passes 1–2 fix the gap's old-index bounds. Restricting to that
+    // gap stops a removal before an anchor from being paired with an addition
+    // after it merely because both share a heading level (spec.md:263-268, the
+    // "same relative position at the same level" tie-break in spec.md:280-286).
+    let anchored = new_to_old.clone();
     for i in 0..new.len() {
         if new_to_old[i].is_some() {
             continue;
         }
         let level = new[i].level;
-        if let Some(j) = (0..old.len()).find(|&j| !old_used[j] && old[j].level == level) {
+        let lo = (0..i)
+            .rev()
+            .find_map(|p| anchored[p])
+            .map_or(0, |old_idx| old_idx + 1);
+        let hi = ((i + 1)..new.len())
+            .find_map(|p| anchored[p])
+            .unwrap_or(old.len());
+        if let Some(j) = (lo..hi).find(|&j| !old_used[j] && old[j].level == level) {
             new_to_old[i] = Some(j);
             old_used[j] = true;
         }
@@ -651,6 +691,7 @@ fn classify_pair(
             heading: ns.heading.clone(),
             new_parent,
             old_parent,
+            content_changed,
         });
     }
 
@@ -658,6 +699,7 @@ fn classify_pair(
         return Some(SectionReport::Reordered {
             heading: ns.heading.clone(),
             before,
+            content_changed,
         });
     }
 
@@ -911,6 +953,25 @@ mod tests {
     }
 
     #[test]
+    fn detailed_reports_anchored_sibling_remove_plus_add_not_rename() {
+        // Regression (review-4): a removed section before an anchor plus an added
+        // section after it must NOT be paired as a rename-plus-edit just because
+        // both are the same level. Pass 3 may only pair sections at the same
+        // *relative position* among already-anchored siblings.
+        let original = md("# A\n\na\n\n# B\n\nb");
+        let opts = MdHashOptions::default();
+        let stored = stored_at(&original, MdHashKind::Detailed, &opts);
+
+        // "B" is anchored (unchanged). Old "A" sits before the anchor; new "C"
+        // sits after it — different gaps, so "A" is removed and "C" is added.
+        let edited = md("# B\n\nb\n\n# C\n\nc");
+        assert_eq!(
+            explain(&edited, &stored),
+            "- Frontmatter has not changed\n- There were changes to the document body:\n  - \"C\" section: added (H1)\n  - \"A\" section was removed (previously before \"B\")",
+        );
+    }
+
+    #[test]
     fn detailed_reports_reorder() {
         let original = md("# Usage\n\nU.\n\n# Examples\n\nE.");
         let opts = MdHashOptions::default();
@@ -920,6 +981,39 @@ mod tests {
         assert_eq!(
             explain(&edited, &stored),
             "- Frontmatter has not changed\n- There were changes to the document body:\n  - \"Examples\" section: reordered, now appears before \"Usage\"",
+        );
+    }
+
+    #[test]
+    fn detailed_reorder_reports_simultaneous_content_change() {
+        // A same-heading sibling reordered AND edited must surface both: the
+        // placement note plus an explicit content-changed clause, since a move
+        // does not imply a content edit.
+        let original = md("# Usage\n\nU.\n\n# Examples\n\nOld examples.");
+        let opts = MdHashOptions::default();
+        let stored = stored_at(&original, MdHashKind::Detailed, &opts);
+
+        let edited = md("# Examples\n\nNew examples.\n\n# Usage\n\nU.");
+        assert_eq!(
+            explain(&edited, &stored),
+            "- Frontmatter has not changed\n- There were changes to the document body:\n  - \"Examples\" section: reordered, now appears before \"Usage\", content has changed",
+        );
+    }
+
+    #[test]
+    fn detailed_move_reports_simultaneous_content_change() {
+        // A same-heading section moved to a different parent AND edited must
+        // surface both the move and the content change. Relocating "Caveats"
+        // also shrinks "Usage"'s subtree and grows "Advanced"'s, so those
+        // parents register content changes too.
+        let original = md("# Usage\n\nU.\n\n## Caveats\n\nOld caveat.\n\n# Advanced\n\nA.");
+        let opts = MdHashOptions::default();
+        let stored = stored_at(&original, MdHashKind::Detailed, &opts);
+
+        let edited = md("# Usage\n\nU.\n\n# Advanced\n\nA.\n\n## Caveats\n\nNew caveat.");
+        assert_eq!(
+            explain(&edited, &stored),
+            "- Frontmatter has not changed\n- There were changes to the document body:\n  - \"Usage\" section: content has changed\n  - \"Advanced\" section: content has changed\n  - \"Caveats\" section: moved beneath \"Advanced\" (previously beneath \"Usage\"), content has changed",
         );
     }
 
