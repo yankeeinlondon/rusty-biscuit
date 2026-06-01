@@ -21,7 +21,6 @@ failure:
 loop:
     until: "phase > total_phases"
     action: "increment(phase)"
-
 ---
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}
