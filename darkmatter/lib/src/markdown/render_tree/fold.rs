@@ -392,10 +392,10 @@ fn lower_hr_attrs_to_node(
 ///   [`NodeKind::Span`] containers whose `Style.emphasis.dim` is set so the
 ///   browser renderer lowers it to `opacity: 0.6` and the terminal renderer
 ///   emits the dim SGR (`\x1b[2m`) automatically.
-/// - [`BlockExtensionEvent::HorizontalRule`](super::block_extension::BlockExtensionEvent::HorizontalRule)
-///   into a [`NodeKind::ThematicBreak`] with `darkmatter.hr.*` hints (and
-///   [`Provenance::Generated`] because the event was synthesized from a
-///   paragraph).
+/// - `BlockExtensionEvent::HorizontalRule` (from the crate-private
+///   `block_extension` module) into a [`NodeKind::ThematicBreak`] with
+///   `darkmatter.hr.*` hints (and [`Provenance::Generated`] because the event
+///   was synthesized from a paragraph).
 ///
 /// The body fold sees only Markdown content; darkmatter's already extracted
 /// frontmatter flows into [`DocumentMetadata::frontmatter`].

@@ -10,7 +10,7 @@
 //! This module ships a parallel **span-aware** chain (DMTR-3) that produces
 //! [`SpannedInlineEvent`]s while folding `==mark==` / dim inline styles.
 //! HR-attribute paragraphs are lifted by the offset-aware
-//! [`crate::markdown::render_tree::block_extension::BlockExtensionProcessor`]
+//! `BlockExtensionProcessor` (in `crate::markdown::render_tree::block_extension`)
 //! before this chain runs; the [`InlineEvent::HorizontalRule`] variant remains
 //! the fold's transport for those generated events. See
 //! `renderable/features/2026-05-20-darkmatter-tree/span-aware-processor-design.md`

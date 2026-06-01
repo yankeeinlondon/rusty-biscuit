@@ -28,7 +28,7 @@
 //! [`span`]. It produces [`span::SpannedInlineEvent`]s with byte ranges so the
 //! fold can preserve every node's [`renderable::tree::SourceLocation`] when
 //! those Darkmatter constructs appear (DMTR-3). HR-attribute paragraphs are
-//! lifted out of the event stream by [`block_extension`], a dedicated
+//! lifted out of the event stream by the `block_extension` module, a dedicated
 //! offset-aware block processor that sits between `pulldown-cmark` and the
 //! inline-span chain. The legacy non-spanned `InlineStyleProcessor` and
 //! `RuleProcessor` still back the public renderers and are unchanged.
