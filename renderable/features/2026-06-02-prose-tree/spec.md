@@ -96,8 +96,15 @@ already lower `Style`, so those targets are covered once `inverse` is added.)
 ### End state
 
 - `Prose`'s parser builds `RenderNode` directly. `ProseDocument`, `ProseNode`,
-  `ProseStyle`, and the three bespoke emitters (`terminal.rs`, `browser.rs`,
-  `to_markdown.rs`) are deleted.
+  and the three bespoke emitters (`terminal.rs`, `browser.rs`, `to_markdown.rs`)
+  are deleted. `ProseStyle` is **retained**, moved into `prose/styles.rs` as a
+  lightweight parser-local *tag-intent* helper: the parser produces one per
+  bracketed tag and immediately lowers it into a `RenderNode` via
+  `prose/tree.rs::project_span`. It is explicitly **not** a rendering IR —
+  nothing renders from it, and `Prose` renders only through the shared tree
+  renderers. (This is a deliberate refinement of the original "delete
+  `ProseStyle`" plan: a one-tag resolution intent is clearer than threading
+  raw `Style`/`RenderNode` construction through the bracket-tag scanner.)
 - `Prose` renders to every target **only** through the shared tree renderers
   (`render_terminal_node`, `render_browser_*`, `render_markdown_document`).
 - `Prose` keeps its bracket-tag parser (`prose/tokens.rs`) — that is its input
@@ -222,10 +229,11 @@ Ordered so each step lands on a green tree:
 5. **Diff against the step-3 snapshots.** The only permitted diffs are the
    removed `<hidden>` and browser `inverse` CSS whitespace normalization.
    Everything else must be byte-stable.
-6. **Delete** `ir.rs` (`ProseDocument` / `ProseNode` / `ProseStyle`),
-   `terminal.rs`, `browser.rs`, and `to_markdown.rs`. Confirm no remaining
-   references; `to_render_nodes()` and `prose/tree.rs` fold into the parser
-   output path.
+6. **Delete** `ir.rs` (`ProseDocument` / `ProseNode`), `terminal.rs`,
+   `browser.rs`, and `to_markdown.rs`. Move `ProseStyle` into `prose/styles.rs`
+   as a parser-local tag-intent helper (not a rendering IR). Confirm no
+   remaining references; `to_render_nodes()` and `prose/tree.rs` fold into the
+   parser output path.
 7. **Bench Prose** before/after (see [Performance](#performance)).
 
 ## Performance

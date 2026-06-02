@@ -170,8 +170,9 @@ for the full RT-* ledger.
 Inherently visual components (`TerminalImage`, `GraphExpression`) and
 simple non-block helpers (`PadLeft`, `PadRight`, `InlineContent`,
 `HorizontalRule`, `Status`) remain bespoke by design — they are out of
-scope for the tree. `Prose` is in a category of its own: it owns a
-component-local `ProseDocument` IR and does not project to a `RenderNode`.
+scope for the tree. `Prose` parses its bracket-tag grammar directly into
+`RenderNode`, implements `TreeRenderable`, and renders every target through
+the shared tree renderers; it has no component-local IR.
 
 ## 4. Testing coverage — and the gaps
 

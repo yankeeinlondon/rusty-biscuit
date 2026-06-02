@@ -327,7 +327,9 @@ Phase 3 oracle.*
 ### Tasks
 
 - [ ] Delete `biscuit-terminal/lib/src/components/prose/ir.rs` and all
-  remaining `ProseDocument`, `ProseNode`, and `ProseStyle` references.
+  remaining `ProseDocument` and `ProseNode` references. Retain `ProseStyle`,
+  moved to `prose/styles.rs` as a parser-local tag-intent helper (not a
+  rendering IR).
 
 - [ ] Delete `biscuit-terminal/lib/src/components/prose/terminal.rs`,
   `browser.rs`, and `to_markdown.rs` after their behavior is covered by shared

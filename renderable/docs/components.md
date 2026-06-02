@@ -10,11 +10,11 @@ Target support reflects trait implementations:
   produces a canonical [`RenderNode`](../src/tree/node.rs) tree, which the
   Markdown, Browser, and Terminal **tree renderers** can each fold into
   output. A `TreeRenderable` component therefore reaches every tree-backed
-  target without implementing a per-target trait. Thirteen components
+  target without implementing a per-target trait. Fourteen components
   currently project to the render tree: `BlockQuote`, `Compose`,
-  `FileSystem`, `OrderedList`, `UnorderedList`, `Progress`, `Section`,
-  `StatusBlock`, `Table`, `TextBlock`, `Todo`, and `TwoColumn` from
-  `biscuit-terminal`, plus darkmatter's `YamlBlock`. See
+  `FileSystem`, `OrderedList`, `UnorderedList`, `Progress`, `Prose`,
+  `Section`, `StatusBlock`, `Table`, `TextBlock`, `Todo`, and `TwoColumn`
+  from `biscuit-terminal`, plus darkmatter's `YamlBlock`. See
   [`renderable/features/2026-05-19-pushing-toward-ir/lessons-learned.md`](../features/2026-05-19-pushing-toward-ir/lessons-learned.md)
   for the per-component migration notes and
   [`stage3-spec.md`](../features/2026-05-19-pushing-toward-ir/stage3-spec.md)
@@ -37,12 +37,6 @@ IR state values:
   > tree path's terminal output is not yet at parity. Stage 3 deferred the
   > terminal flip to Stage 4 pending connector-list `Style` lowering and
   > icon-name spacing parity. See `stage3-spec.md` §S3-1c.
-- `component IR (ProseDocument)` means the component has fully migrated to its
-  own component-local intermediate representation rather than the shared
-  render tree. `Prose` is the only such component: it parses to a
-  `ProseDocument` ([`prose/ir.rs`](../../biscuit-terminal/lib/src/components/prose/ir.rs))
-  and the Terminal, Browser, and Markdown emitters all render from that single
-  model. `Prose` implements no `TreeRenderable` and produces no `RenderNode`.
 
 ## Two distinct tree cutovers
 
@@ -54,8 +48,9 @@ only the first; do not read it as a statement about the second.
    `BlockQuote::render()`, `Table::render()`, etc. — routes through the tree
    renderer. Most `biscuit-terminal` components have cut over (`both avail,
    tree renders`); a few still default to bespoke (`YamlBlock`, `FileSystem`'s
-   terminal path, the `Prose` `ProseDocument` IR, and the `no changes`
-   components).
+   terminal path, and the `no changes` components). `Prose` has fully cut over
+   to `tree render only`: it parses its bracket-tag grammar directly into
+   `RenderNode` and renders through the shared tree renderers only.
 
 2. **The darkmatter Markdown *document* pipeline** *(NOT tracked here).* The
    whole-document Markdown serializers — `Markdown::as_html`,
@@ -135,7 +130,7 @@ fail with documented `StyleApplyError` variants.
 | PadLeft         | Block  | ✅       | ❌      | ❌       | ❌   | no changes                   | bespoke       | `biscuit-terminal/lib/src/components/pad.rs`                 | Pads content on the left with spaces to guarantee a minimum width.                  |
 | PadRight        | Block  | ✅       | ❌      | ❌       | ❌   | no changes                   | bespoke       | `biscuit-terminal/lib/src/components/pad.rs`                 | Pads content on the right with spaces to guarantee a minimum width.                 |
 | Progress        | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/progress.rs`            | A horizontal progress bar for terminal display.                                     |
-| Prose           | Inline | ✅       | ✅      | ✅       | ❌   | component IR (ProseDocument) | ProseDocument | `biscuit-terminal/lib/src/components/prose/render.rs`        | Styled text with bracketed tags (`<red>…</red>`) and a Markdown subset.             |
+| Prose           | Inline | ✅       | ✅      | ✅       | ✅   | tree render only             | tree          | `biscuit-terminal/lib/src/components/prose/mod.rs`           | Styled text with bracketed tags (`<red>…</red>`) and a Markdown subset.             |
 | Section         | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/section.rs`             | A Markdown-style heading (h1-h6) followed by arbitrary content.                     |
 | Status          | Block  | ✅       | ❌      | ❌       | ❌   | no changes                   | —             | `biscuit-terminal/lib/src/components/status.rs`              | A status indicator with themed icons for validation/action-item state.              |
 | StatusBlock     | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/status_block.rs`        | A severity-colored block with optional header, body, and hint content.              |
@@ -165,7 +160,7 @@ fail with documented `StyleApplyError` variants.
 >   *exists*; it does not imply the component renders through it by default
 >   (see **IR State**).
 > - **IR State** — which rendering path the component's own default render
->   method (`TerminalRenderable::render()`) uses. One of the five values
+>   method (`TerminalRenderable::render()`) uses. One of the four values
 >   defined in "IR state values" above. This describes the *component*, not
 >   any particular caller.
 > - **bt CLI** — which renderer the corresponding [`bt`](../../biscuit-terminal/docs/cli.md)
@@ -176,8 +171,6 @@ fail with documented `StyleApplyError` variants.
 >     bespoke `render()`.
 >   - `bespoke` — the `bt` command calls the component's bespoke `render()` /
 >     `fallback_render()` path.
->   - `ProseDocument` — the `bt prose` command renders via Prose's own
->     `ProseDocument` IR (Prose has no render tree).
 >   - `—` — no `bt` command renders this component.
 > - **Location** — path to the component's primary source file, relative to
 >   the repository root.
