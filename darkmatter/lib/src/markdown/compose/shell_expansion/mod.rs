@@ -108,6 +108,7 @@ impl DirectiveExecutionResult {
 ///     executable: "echo".to_string(),
 ///     args: vec!["hello".to_string()],
 ///     span: 0..10,
+///     indent: String::new(),
 ///     origin: ShellCommandOrigin::Body { line: 1 },
 ///     error_handling: ErrorHandling::default(),
 ///     timeout_override: None,
@@ -521,6 +522,7 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
                 executable: exe,
                 args,
                 span: directive.span.clone(),
+                indent: directive.indent.clone(),
                 origin: directive.origin.clone(),
                 error_handling: directive.error_handling.clone(),
                 timeout_override: directive.timeout_override,
@@ -559,6 +561,7 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
             executable: resolved.executable,
             args: merged_args,
             span: directive.span.clone(),
+            indent: directive.indent.clone(),
             origin: directive.origin.clone(),
             error_handling: directive.error_handling.clone(),
             timeout_override: directive.timeout_override,
@@ -718,6 +721,88 @@ mod integration_tests {
         assert!(!composed.content().contains("::shell"));
         assert_eq!(report.shell_expansions_applied, 1);
         assert_eq!(report.shell_approvals_used, 1);
+    }
+
+    /// Composes `content` through the shell-expansion stage with an allow-once
+    /// approval handler, returning the composed body.
+    fn compose_shell_only(content: &str) -> String {
+        let temp_dir = TempDir::new().unwrap();
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+        let (composed, _report) = md.compose_with(options).unwrap();
+        composed.content().to_string()
+    }
+
+    #[test]
+    fn indented_shell_output_under_list_item_is_reindented() {
+        let content = "- intro\n\n    ::shell printf 'one\\ntwo\\n'\n\n- next\n";
+        let body = compose_shell_only(content);
+        // Every output line keeps the directive's 4-space indent so the lines
+        // remain nested under the list item instead of becoming siblings.
+        assert!(body.contains("    one\n    two\n"), "got: {body:?}");
+        assert!(!body.contains("\none\n"), "got: {body:?}");
+    }
+
+    #[test]
+    fn tab_indented_shell_output_is_reindented() {
+        let content = "- intro\n\n\t::shell printf 'one\\ntwo\\n'\n\n- next\n";
+        let body = compose_shell_only(content);
+        assert!(body.contains("\tone\n\ttwo\n"), "got: {body:?}");
+    }
+
+    #[test]
+    fn indented_shell_blank_output_lines_receive_indent() {
+        let content = "- intro\n\n    ::shell printf 'one\\n\\ntwo\\n'\n\n- next\n";
+        let body = compose_shell_only(content);
+        // The blank separator line is indented too, otherwise it would break
+        // out of the surrounding list.
+        assert!(body.contains("    one\n    \n    two\n"), "got: {body:?}");
+    }
+
+    #[test]
+    fn root_level_shell_output_has_no_indent() {
+        let content = "intro\n\n::shell printf 'one\\ntwo\\n'\n\nnext\n";
+        let body = compose_shell_only(content);
+        assert!(body.contains("one\ntwo\n"), "got: {body:?}");
+        assert!(!body.contains("    one"), "got: {body:?}");
+    }
+
+    /// Composes `content` through the shell stage, then renders the result to
+    /// HTML so the splice can be validated against the CommonMark block
+    /// structure rather than raw substrings.
+    fn compose_shell_to_html(content: &str) -> String {
+        let body = compose_shell_only(content);
+        let md: Markdown = body.as_str().into();
+        md.as_html(crate::markdown::output::HtmlOptions::default())
+            .unwrap()
+    }
+
+    #[test]
+    fn indented_shell_output_is_nested_under_list_item_in_commonmark() {
+        // Re-indented output is a continuation paragraph of the first list item,
+        // so the whole document is a single list with two items — proving the
+        // generated lines are children of the parent <li>, not siblings.
+        let content = "- intro\n\n    ::shell printf 'one\\ntwo\\n'\n\n- next\n";
+        let html = compose_shell_to_html(content);
+        assert_eq!(html.matches("<ul>").count(), 1, "got: {html}");
+        assert_eq!(html.matches("<li>").count(), 2, "got: {html}");
+    }
+
+    #[test]
+    fn root_level_shell_output_is_a_sibling_block_in_commonmark() {
+        // The column-1 baseline is intentionally a top-level sibling: the spliced
+        // paragraph splits the surrounding list into two separate <ul> blocks.
+        let content = "- intro\n\n::shell printf 'one\\ntwo\\n'\n\n- next\n";
+        let html = compose_shell_to_html(content);
+        assert_eq!(html.matches("<ul>").count(), 2, "got: {html}");
     }
 
     #[test]

@@ -489,6 +489,7 @@ fn scan_one_frontmatter(
                 executable,
                 args,
                 span: 0..0,
+                indent: String::new(),
                 origin: ShellCommandOrigin::Frontmatter {
                     key: candidate.key.clone(),
                 },

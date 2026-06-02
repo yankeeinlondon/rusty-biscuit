@@ -64,6 +64,10 @@ pub struct ShellDirective {
     pub executable: String,
     pub args: Vec<String>,
     pub span: std::ops::Range<usize>,
+    /// Leading whitespace of the directive's source line, captured verbatim so
+    /// multi-line output can be re-indented to stay nested under its container.
+    /// Empty for frontmatter, synthetic, or column-1 directives.
+    pub indent: String,
     pub origin: ShellCommandOrigin,
     pub error_handling: ErrorHandling,
     /// Per-command timeout override. When Some, takes precedence over the global timeout.

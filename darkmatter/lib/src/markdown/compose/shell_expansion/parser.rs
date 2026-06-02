@@ -49,6 +49,10 @@ pub fn parse_directives(
         if !is_in_code_region(line_start, &code_regions) {
             let trimmed = line.trim();
             if let Some(command_text) = trimmed.strip_prefix("::shell ") {
+                // Exact leading whitespace prefix; preserved verbatim so the
+                // directive's output can be re-indented under its container.
+                let indent = line[..line.len() - line.trim_start().len()].to_string();
+
                 // Parse the command
                 let tokens = tokenize(command_text, &ctx).map_err(|e| {
                     ShellExpansionError::ParseDirective {
@@ -102,6 +106,7 @@ pub fn parse_directives(
                     executable,
                     args,
                     span: line_start..line_with_newline_end,
+                    indent,
                     origin: ShellCommandOrigin::Body { line: line_num },
                     error_handling,
                     timeout_override,
@@ -341,6 +346,27 @@ And `::shell echo inline` should also be ignored.
         let directives = parse_directives(content, dummy_ctx(content)).unwrap();
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].executable, "echo");
+    }
+
+    #[test]
+    fn parse_directive_captures_space_indent() {
+        let content = "    ::shell echo hello\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives[0].indent, "    ");
+    }
+
+    #[test]
+    fn parse_directive_captures_tab_indent() {
+        let content = "\t::shell echo hello\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives[0].indent, "\t");
+    }
+
+    #[test]
+    fn parse_directive_at_column_one_has_empty_indent() {
+        let content = "::shell echo hello\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives[0].indent, "");
     }
 
     #[test]
