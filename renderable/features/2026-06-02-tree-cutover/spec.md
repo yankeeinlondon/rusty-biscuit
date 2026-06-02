@@ -117,9 +117,12 @@ renderers"):
 1. **Darkmatter pipeline on the tree.** `Markdown::as_html`,
    `Markdown::for_terminal`, and `DarkmatterPage::render` route through the
    render-tree document renderers.
-2. **Every renderable component on the tree.** Each component is
-   `tree render only`, *or* is explicitly exempted with documented
-   justification (see [the Prose / non-structural decision](#decisions-to-be-made)).
+2. **Every component the document pipeline renders is on the tree.** Each such
+   component is `tree render only`. Components the darkmatter document pipeline
+   does not render — terminal-only presentation primitives, standalone
+   graphics/viz widgets, node-kind builder/helpers, and the page frame — are
+   exempt, enumerated with justification in the Exemption Register of
+   [`../2026-06-02-non-structural/spec.md`](../2026-06-02-non-structural/spec.md).
 3. **No functional or fidelity regressions** versus bespoke on any target.
    Output parity, or a deliberate documented improvement (e.g. `<mark>`).
 4. **Net performance trend toward faster.** The corpus-wide trend must
@@ -248,10 +251,14 @@ These need brainstorming/sign-off; they do not change the overall direction.
    deleted; the two shared-tree prerequisites (`inverse` on `TextEmphasis`,
    MarkdownPlus inline-`Style` lowering) move to Phase 0c. See
    [`../2026-06-02-prose-tree/spec.md`](../2026-06-02-prose-tree/spec.md).
-5. **Non-structural components.** `PadLeft`/`PadRight`, `InlineContent`,
-   `TerminalImage`, `Status`, `DarkmatterPage`, `FileTree` may have no
-   document-structure tree equivalent. Define the exemption criteria so
-   "every component on the tree" is an achievable bar, not an impossible one.
+5. **Non-structural components.** ✅ **Resolved — see
+   [`../2026-06-02-non-structural/spec.md`](../2026-06-02-non-structural/spec.md).**
+   Criterion: a component is `tree render only` iff the document pipeline renders
+   it; the rest are exempt via the Exemption Register (`PadLeft`/`PadRight`,
+   `InlineContent`, `Status`, `GraphExpression`, `FileTree`, `HorizontalRule`,
+   `TerminalImage`, `MermaidDiagram`, `DarkmatterPage`). One verification
+   condition: the `Image`/`ThematicBreak`/`Code{mermaid}` node renderers must own
+   the document lowering (helper calls to the exempt components are fine).
 6. **Mermaid on the tree.** ✅ **Resolved — designed in graphics-policy** as a
    promoted `Code` node (static `<svg>` browser, raster terminal; interactive
    mermaid.js an orthogonal opt-in). Built in Phase 0a, before cutover.
@@ -279,6 +286,9 @@ These need brainstorming/sign-off; they do not change the overall direction.
 - [`../2026-06-02-perf-gate/spec.md`](../2026-06-02-perf-gate/spec.md) —
   resolves Decision #3, subsumes Decision #9, supplies Acceptance Criteria #4's
   metric; the gate runs at Phase 4/5.
+- [`../2026-06-02-non-structural/spec.md`](../2026-06-02-non-structural/spec.md) —
+  resolves Decision #5; narrows Acceptance Criteria #2 and supplies the
+  Exemption Register.
 - [`../2026-05-26-inline-span/spec.md`](../2026-05-26-inline-span/spec.md)
 - [`../2026-05-26-block-extension/spec.md`](../2026-05-26-block-extension/spec.md)
 - [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md)
