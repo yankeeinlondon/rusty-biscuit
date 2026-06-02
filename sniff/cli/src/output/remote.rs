@@ -59,12 +59,10 @@ pub fn render_remote_text(report: &RemoteReport, readme_content: Option<&str>) -
             format_number(issues as usize)
         ));
     }
-    if !report.pull_requests.is_empty() {
-        stats_parts.push(format!(
-            "<dim>⇄</dim> {} PRs",
-            format_number(report.pull_requests.len())
-        ));
-    }
+    stats_parts.push(format!(
+        "<dim>⇄</dim> {} PRs",
+        format_number(report.pull_requests.len())
+    ));
     if !stats_parts.is_empty() {
         write!(out, "{}", Prose::new(stats_parts.join("  ")).display(&term)).unwrap();
     }
@@ -202,12 +200,15 @@ fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
 
     let mut out = String::new();
     writeln!(out).unwrap();
-    write!(out, "{}", Prose::new("<b><u>CI/CD</u></b>").display(term)).unwrap();
 
     // Check if we have "run-shaped" entries with actual workflow run data
     let run_shaped: Vec<&CiCdInfo> = cicd.iter().filter(|ci| ci.started_at.is_some()).collect();
 
     if !run_shaped.is_empty() {
+        let shown = run_shaped.len().min(10);
+        let heading = format!("<b><u>CI/CD</u></b> <dim>(last {shown} runs)</dim>");
+        write!(out, "{}", Prose::new(&heading).display(term)).unwrap();
+
         let columns = vec![
             TableColumn::new("").with_fixed_width(2),
             TableColumn::new("Workflow"),
@@ -239,6 +240,7 @@ fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
         write!(out, "{}", table.display(term)).unwrap();
     } else {
         // Presence-only fallback: render as unordered list
+        write!(out, "{}", Prose::new("<b><u>CI/CD</u></b>").display(term)).unwrap();
         let items: Vec<String> = cicd
             .iter()
             .map(|ci| {
@@ -435,9 +437,10 @@ fn render_key_urls(report: &RemoteReport, term: &Terminal) -> String {
     }
 }
 
-/// Convert an ISO 8601 timestamp to a human-readable relative time string.
+/// Convert an ISO 8601 timestamp to a compact relative time string.
 ///
-/// Examples: "just now", "5 minutes ago", "2 hours ago", "3 days ago".
+/// Examples: "just now", "8m ago", "2h ago", "3d ago", "2w ago", "5mo ago",
+/// "2y ago".
 pub fn relative_time(iso: &str, now: DateTime<Utc>) -> String {
     let parsed = match DateTime::parse_from_rfc3339(iso) {
         Ok(dt) => dt.with_timezone(&Utc),
@@ -453,31 +456,31 @@ pub fn relative_time(iso: &str, now: DateTime<Utc>) -> String {
 
     let minutes = duration.num_minutes();
     if minutes < 60 {
-        return format!("{} minute{} ago", minutes, if minutes == 1 { "" } else { "s" });
+        return format!("{minutes}m ago");
     }
 
     let hours = duration.num_hours();
     if hours < 24 {
-        return format!("{} hour{} ago", hours, if hours == 1 { "" } else { "s" });
+        return format!("{hours}h ago");
     }
 
     let days = duration.num_days();
     if days < 7 {
-        return format!("{} day{} ago", days, if days == 1 { "" } else { "s" });
+        return format!("{days}d ago");
     }
 
     let weeks = days / 7;
     if weeks < 4 {
-        return format!("{} week{} ago", weeks, if weeks == 1 { "" } else { "s" });
+        return format!("{weeks}w ago");
     }
 
     let months = days / 30;
     if months < 12 {
-        return format!("{} month{} ago", months, if months == 1 { "" } else { "s" });
+        return format!("{months}mo ago");
     }
 
     let years = days / 365;
-    format!("{} year{} ago", years, if years == 1 { "" } else { "s" })
+    format!("{years}y ago")
 }
 
 /// Format PR state with semantic meaning.
@@ -895,84 +898,84 @@ mod tests {
     fn test_relative_time_minutes_ago() {
         let now = Utc::now();
         let then = now - chrono::Duration::minutes(5);
-        assert_eq!(relative_time(&then.to_rfc3339(), now), "5 minutes ago");
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "5m ago");
     }
 
     #[test]
     fn test_relative_time_one_minute_ago() {
         let now = Utc::now();
         let then = now - chrono::Duration::minutes(1);
-        assert_eq!(relative_time(&then.to_rfc3339(), now), "1 minute ago");
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "1m ago");
     }
 
     #[test]
     fn test_relative_time_hours_ago() {
         let now = Utc::now();
         let then = now - chrono::Duration::hours(3);
-        assert_eq!(relative_time(&then.to_rfc3339(), now), "3 hours ago");
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "3h ago");
     }
 
     #[test]
     fn test_relative_time_one_hour_ago() {
         let now = Utc::now();
         let then = now - chrono::Duration::hours(1);
-        assert_eq!(relative_time(&then.to_rfc3339(), now), "1 hour ago");
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "1h ago");
     }
 
     #[test]
     fn test_relative_time_days_ago() {
         let now = Utc::now();
         let then = now - chrono::Duration::days(2);
-        assert_eq!(relative_time(&then.to_rfc3339(), now), "2 days ago");
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "2d ago");
     }
 
     #[test]
     fn test_relative_time_one_day_ago() {
         let now = Utc::now();
         let then = now - chrono::Duration::days(1);
-        assert_eq!(relative_time(&then.to_rfc3339(), now), "1 day ago");
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "1d ago");
     }
 
     #[test]
     fn test_relative_time_weeks_ago() {
         let now = Utc::now();
         let then = now - chrono::Duration::days(14);
-        assert_eq!(relative_time(&then.to_rfc3339(), now), "2 weeks ago");
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "2w ago");
     }
 
     #[test]
     fn test_relative_time_one_week_ago() {
         let now = Utc::now();
         let then = now - chrono::Duration::days(7);
-        assert_eq!(relative_time(&then.to_rfc3339(), now), "1 week ago");
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "1w ago");
     }
 
     #[test]
     fn test_relative_time_months_ago() {
         let now = Utc::now();
         let then = now - chrono::Duration::days(60);
-        assert_eq!(relative_time(&then.to_rfc3339(), now), "2 months ago");
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "2mo ago");
     }
 
     #[test]
     fn test_relative_time_one_month_ago() {
         let now = Utc::now();
         let then = now - chrono::Duration::days(30);
-        assert_eq!(relative_time(&then.to_rfc3339(), now), "1 month ago");
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "1mo ago");
     }
 
     #[test]
     fn test_relative_time_years_ago() {
         let now = Utc::now();
         let then = now - chrono::Duration::days(730);
-        assert_eq!(relative_time(&then.to_rfc3339(), now), "2 years ago");
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "2y ago");
     }
 
     #[test]
     fn test_relative_time_one_year_ago() {
         let now = Utc::now();
         let then = now - chrono::Duration::days(365);
-        assert_eq!(relative_time(&then.to_rfc3339(), now), "1 year ago");
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "1y ago");
     }
 
     #[test]
@@ -1001,10 +1004,10 @@ mod tests {
     }
 
     #[test]
-    fn test_render_remote_text_no_pr_count_when_empty() {
+    fn test_render_remote_text_shows_zero_pr_count_when_empty() {
         let report = make_test_report();
         let rendered = render_remote_text(&report, None);
-        assert!(!rendered.contains("⇄"));
+        assert!(rendered.contains("⇄") && rendered.contains("0 PRs"));
     }
 
     fn make_test_cicd(
@@ -1148,10 +1151,11 @@ mod tests {
         )];
         let rendered = render_cicd(&cicd, &term);
         assert!(rendered.contains("CI/CD"));
+        assert!(rendered.contains("last 1 runs"));
         assert!(rendered.contains("Test Workflow"));
         assert!(rendered.contains("main"));
         assert!(rendered.contains("push"));
-        assert!(rendered.contains("5 minutes ago"));
+        assert!(rendered.contains("5m ago"));
         // Table rendering uses box-drawing characters
         assert!(rendered.contains('│') || rendered.contains('┌'));
     }
@@ -1181,6 +1185,7 @@ mod tests {
             ),
         ];
         let rendered = render_cicd(&cicd, &term);
+        assert!(rendered.contains("last 2 runs"));
         assert!(rendered.contains("Build"));
         assert!(rendered.contains("Lint"));
         assert!(rendered.contains("feature"));
@@ -1235,7 +1240,7 @@ mod tests {
         )];
         let rendered = render_remote_text(&report, None);
         assert!(rendered.contains("CI/CD"));
-        assert!(rendered.contains("CI"));
+        assert!(rendered.contains("last 1 runs"));
         assert!(rendered.contains("main"));
     }
 }
