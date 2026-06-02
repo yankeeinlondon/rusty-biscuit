@@ -2,10 +2,28 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use tree_sitter::Query;
+use tree_sitter::{Language, Query};
 
 use crate::error::TreeHuggerError;
 use crate::shared::ProgrammingLanguage;
+
+/// Identifies the concrete tree-sitter grammar a query must be compiled
+/// against.
+///
+/// A single [`ProgrammingLanguage`] can map to more than one grammar (notably
+/// TypeScript, whose `.tsx` files use a distinct TSX grammar). Queries are
+/// compiled against the grammar that actually parsed the tree, since node-kind
+/// IDs differ between grammars; `id` keys the compiled-query cache so each
+/// grammar variant is compiled and cached independently.
+#[derive(Debug, Clone, Copy)]
+pub struct GrammarRef<'a> {
+    /// The language whose query files supply the query text.
+    pub language: ProgrammingLanguage,
+    /// The grammar the query is compiled against (and that parsed the tree).
+    pub grammar: &'a Language,
+    /// A stable identifier for the grammar variant, unique across languages.
+    pub id: &'static str,
+}
 
 /// Represents the type of tree-sitter query being executed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -38,43 +56,47 @@ impl fmt::Display for QueryKind {
     }
 }
 
-/// Cache type for compiled tree-sitter queries.
-type QueryCache = Mutex<HashMap<(ProgrammingLanguage, QueryKind), Arc<Query>>>;
+/// Cache type for compiled tree-sitter queries, keyed by grammar variant.
+type QueryCache = Mutex<HashMap<(&'static str, QueryKind), Arc<Query>>>;
 
 static QUERY_CACHE: OnceLock<QueryCache> = OnceLock::new();
 
-/// Loads and caches a query for the requested language and kind.
-pub fn query_for(
-    language: ProgrammingLanguage,
-    kind: QueryKind,
-) -> Result<Arc<Query>, TreeHuggerError> {
+/// Loads and caches a query for the requested grammar and kind.
+///
+/// The query text is resolved from the grammar's [`language`] query files but
+/// compiled against [`grammar`], so a TSX-parsed tree is matched with a query
+/// compiled for the TSX grammar rather than the plain TypeScript grammar.
+///
+/// [`language`]: GrammarRef::language
+/// [`grammar`]: GrammarRef::grammar
+pub fn query_for(grammar: GrammarRef<'_>, kind: QueryKind) -> Result<Arc<Query>, TreeHuggerError> {
     let cache = QUERY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
+    let cache_key = (grammar.id, kind);
     {
         let guard = cache
             .lock()
             .map_err(|_| TreeHuggerError::QueryCachePoisoned)?;
-        if let Some(query) = guard.get(&(language, kind)) {
+        if let Some(query) = guard.get(&cache_key) {
             return Ok(Arc::clone(query));
         }
     }
 
-    let source = resolve_query_text(language, kind)?;
+    let source = resolve_query_text(grammar.language, kind)?;
 
-    let query = Arc::new(
-        Query::new(&language.tree_sitter_language(), &source).map_err(|source| {
-            TreeHuggerError::QueryError {
-                language,
+    let query =
+        Arc::new(
+            Query::new(grammar.grammar, &source).map_err(|source| TreeHuggerError::QueryError {
+                language: grammar.language,
                 kind,
                 source,
-            }
-        })?,
-    );
+            })?,
+        );
 
     let mut guard = cache
         .lock()
         .map_err(|_| TreeHuggerError::QueryCachePoisoned)?;
-    guard.insert((language, kind), Arc::clone(&query));
+    guard.insert(cache_key, Arc::clone(&query));
 
     Ok(query)
 }
@@ -444,24 +466,52 @@ mod tests {
         assert!(body.contains("@local.definition.class"));
     }
 
+    fn default_grammar_ref(language: ProgrammingLanguage) -> (Language, &'static str) {
+        (language.tree_sitter_language(), language.query_name())
+    }
+
     #[test]
     fn compiles_typescript_locals_query_with_overlay() {
-        let query = query_for(ProgrammingLanguage::TypeScript, QueryKind::Locals)
-            .expect("typescript locals query should compile");
+        let (grammar, id) = default_grammar_ref(ProgrammingLanguage::TypeScript);
+        let query = query_for(
+            GrammarRef {
+                language: ProgrammingLanguage::TypeScript,
+                grammar: &grammar,
+                id,
+            },
+            QueryKind::Locals,
+        )
+        .expect("typescript locals query should compile");
         assert!(query.pattern_count() > 0);
     }
 
     #[test]
     fn compiles_javascript_locals_query_with_overlay() {
-        let query = query_for(ProgrammingLanguage::JavaScript, QueryKind::Locals)
-            .expect("javascript locals query should compile");
+        let (grammar, id) = default_grammar_ref(ProgrammingLanguage::JavaScript);
+        let query = query_for(
+            GrammarRef {
+                language: ProgrammingLanguage::JavaScript,
+                grammar: &grammar,
+                id,
+            },
+            QueryKind::Locals,
+        )
+        .expect("javascript locals query should compile");
         assert!(query.pattern_count() > 0);
     }
 
     #[test]
     fn compiles_typescript_references_query() {
-        let query = query_for(ProgrammingLanguage::TypeScript, QueryKind::References)
-            .expect("typescript references query should compile");
+        let (grammar, id) = default_grammar_ref(ProgrammingLanguage::TypeScript);
+        let query = query_for(
+            GrammarRef {
+                language: ProgrammingLanguage::TypeScript,
+                grammar: &grammar,
+                id,
+            },
+            QueryKind::References,
+        )
+        .expect("typescript references query should compile");
         assert!(query.pattern_count() > 0);
     }
 }

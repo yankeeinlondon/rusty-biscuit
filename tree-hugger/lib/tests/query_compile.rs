@@ -1,7 +1,57 @@
 //! Tests to verify lint queries compile correctly for all languages.
 
 use tree_hugger::ProgrammingLanguage;
+use tree_hugger::queries::{GrammarRef, QueryKind, query_for};
 use tree_sitter::Query;
+
+/// Every supported language must have queries that compile for every query
+/// kind. A broken `references.scm` previously slipped through because only
+/// `lint.scm` and `comments.scm` were covered, which let semantic analysis
+/// silently fail for PHP, Perl, and Zsh.
+#[test]
+fn test_all_queries_compile_for_all_languages() {
+    const LANGUAGES: &[ProgrammingLanguage] = &[
+        ProgrammingLanguage::Rust,
+        ProgrammingLanguage::JavaScript,
+        ProgrammingLanguage::TypeScript,
+        ProgrammingLanguage::Go,
+        ProgrammingLanguage::Python,
+        ProgrammingLanguage::Java,
+        ProgrammingLanguage::Php,
+        ProgrammingLanguage::Perl,
+        ProgrammingLanguage::Bash,
+        ProgrammingLanguage::Zsh,
+        ProgrammingLanguage::C,
+        ProgrammingLanguage::Cpp,
+        ProgrammingLanguage::CSharp,
+        ProgrammingLanguage::Swift,
+        ProgrammingLanguage::Scala,
+        ProgrammingLanguage::Lua,
+    ];
+    const KINDS: &[QueryKind] = &[
+        QueryKind::Locals,
+        QueryKind::Imports,
+        QueryKind::Exports,
+        QueryKind::References,
+        QueryKind::Lint,
+        QueryKind::Comments,
+    ];
+
+    for &language in LANGUAGES {
+        let grammar = language.tree_sitter_language();
+        let grammar_ref = GrammarRef {
+            language,
+            grammar: &grammar,
+            id: language.query_name(),
+        };
+        for &kind in KINDS {
+            assert!(
+                query_for(grammar_ref, kind).is_ok(),
+                "{language} {kind} query should compile"
+            );
+        }
+    }
+}
 
 fn test_query_compiles(language: ProgrammingLanguage, query_text: &str) {
     let ts_language = language.tree_sitter_language();

@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use tree_sitter::{Query, QueryCursor, StreamingIterator, Tree};
 
-use crate::queries::{QueryKind, query_for};
+use crate::queries::{GrammarRef, QueryKind, query_for};
 use crate::shared::ProgrammingLanguage;
 
 /// Directive prefix for line-level ignores.
@@ -59,8 +59,27 @@ impl IgnoreDirectives {
     /// Returns `IgnoreDirectives` with all parsed suppression rules.
     /// Falls back to line-based parsing if no comments query is available.
     pub fn parse_with_tree(source: &str, tree: &Tree, language: ProgrammingLanguage) -> Self {
-        // Try to get the comments query for this language
-        let query = match query_for(language, QueryKind::Comments) {
+        let grammar = language.tree_sitter_language();
+        Self::parse_with_grammar(
+            source,
+            tree,
+            GrammarRef {
+                language,
+                grammar: &grammar,
+                id: language.query_name(),
+            },
+        )
+    }
+
+    /// Parses ignore directives, compiling the comments query against the exact
+    /// grammar that produced `tree`.
+    ///
+    /// ## Returns
+    /// Returns `IgnoreDirectives` with all parsed suppression rules. Falls back
+    /// to line-based parsing if no comments query is available.
+    pub fn parse_with_grammar(source: &str, tree: &Tree, grammar: GrammarRef<'_>) -> Self {
+        // Try to get the comments query for this grammar
+        let query = match query_for(grammar, QueryKind::Comments) {
             Ok(q) if q.pattern_count() > 0 => q,
             // Fall back to line-based parsing if no comments query
             _ => return Self::parse(source),
