@@ -1,10 +1,11 @@
 # Side Effects
 
-> **Status: planned (not yet implemented).** This page summarizes the agreed
-> design. The authoritative, full specification lives in
+> **Status: local catalog implemented; network deferred.** The frontmatter and
+> file/directory verbs ship today as `darkmatter::effects::EffectEngine`. The
+> network verb (`http_post`) and URL-accepting variants remain deferred until
+> the `url-referencing` feature lands. The authoritative, full specification
+> lives in
 > [`more-context-variables`](../../features/_unscheduled/more-context-variables/spec.md#side-effects).
-> Until the feature lands, treat the linked spec as the source of truth and do
-> not rely on any API described here existing yet.
 
 Side Effects are the counterpart to the read-only [Expression Engine](./darkmatter-expressions.md).
 Where expression functions only *report* on state, side effects **mutate**
@@ -48,11 +49,13 @@ Both enforced inside Darkmatter, both configured by the host:
 
 ## v1 Catalog (summary)
 
-- **Frontmatter:** `set_frontmatter`, `merge_frontmatter`, `delete_frontmatter`,
-  `increment_frontmatter` / `decrement_frontmatter`,
+- **Frontmatter (shipped):** `set_frontmatter`, `merge_frontmatter`,
+  `delete_frontmatter`, `increment_frontmatter` / `decrement_frontmatter`,
   `append_frontmatter` / `prepend_frontmatter`
-- **File & directory:** `ensure_file`, `ensure_dir`, `append_line`, `append_jsonl`
-- **Network:** `http_post` (host-allowlist gated)
+- **File & directory (shipped):** `ensure_file` (with an
+  `ensure_file_with_content` two-arg form), `ensure_dir`, `append_line`,
+  `append_jsonl`
+- **Network (deferred):** `http_post` (host-allowlist gated)
 
 Markdown frontmatter writers re-hash a `hash:` property automatically by
 default. Full-file overwrite and deletion are expressly out of scope for v1.

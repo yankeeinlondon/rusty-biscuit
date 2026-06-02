@@ -288,6 +288,26 @@ Relative validators (accept date *and* datetime strings):
 
 All return `false` for non-string inputs and unparseable strings.
 
+### Date Formatting
+
+`date(iso, format)` reformats an ISO date or datetime string into a named
+human format. The date portion is extracted from datetime inputs.
+
+Supported format tokens (canonical name plus aliases):
+
+| Format | Alias | Example output |
+|--------|-------|----------------|
+| `MMMM Do` | `short` | `July 12th` |
+| `MMMM Do [YYYY]` | `short-optional` | `July 12th` (current year) / `July 12th 1999` |
+| `MMMM Do YYYY` | | `July 12th 2026` |
+| `D MMMM [YYYY]` | | `12 July` (current year) / `12 July 1999` |
+| `D MMMM YYYY` | | `12 July 2021` |
+| `ddd, MMMM Do, YYYY` | `long` | `Mon, July 12th, 2021` |
+
+The `[YYYY]` token includes the year only when it differs from the current
+year. Invalid ISO input or an unknown format token returns an error; a `null`
+argument propagates as `null`.
+
 ### Function Contracts
 
 All functions added in the expression-syntax expansion follow a consistent
@@ -302,6 +322,7 @@ This applies to:
 - collections: `first`, `last`
 - string predicates: `starts_with`, `ends_with`
 - string mutations: `lower`, `upper`, `capitalize`, `kebab_case`, `camel_case`, `pascal_case`, `snake_case`, `title_case`
+- date formatting: `date`
 
 `is_string`/`is_number`/`is_array`/`is_null`/`is_object`/`is_empty` are inspecting
 predicates and never error or null-propagate; they always return a boolean.

@@ -1,3 +1,55 @@
+---
+source_files_during_phase_1:
+  - darkmatter/lib/src/markdown/compose/context/capture.rs
+docs_updated_during_phase_1:
+  - darkmatter/docs/topics/context-variables.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/compose/context/capture.rs
+docs_updated_during_phase_2:
+  - darkmatter/docs/topics/context-variables.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+docs_updated_during_phase_3:
+  - darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - darkmatter/lib/src/effects/mod.rs
+  - darkmatter/lib/src/effects/error.rs
+  - darkmatter/lib/src/effects/fs_write.rs
+  - darkmatter/lib/src/effects/verbs.rs
+  - darkmatter/lib/src/lib.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+  - darkmatter/lib/src/effects/verbs.rs
+  - darkmatter/lib/src/effects/fs_write.rs
+  - darkmatter/lib/tests/effects_integration.rs
+docs_updated_during_phase_7:
+  - darkmatter/docs/topics/side-effects.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+packages:
+  - darkmatter
+---
+
 # More Context Variables — Local Parts Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
