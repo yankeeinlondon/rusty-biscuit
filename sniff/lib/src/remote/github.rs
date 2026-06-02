@@ -230,6 +230,21 @@ fn is_documentation_file(filename: &str) -> bool {
         || lower == "code_of_conduct"
 }
 
+/// Map a GitHub [`WorkflowRun`] to normalized [`CiCdInfo`].
+fn map_workflow_run(run: WorkflowRun) -> CiCdInfo {
+    CiCdInfo {
+        provider: "GitHub Actions".to_string(),
+        config_path: None,
+        name: run.name.unwrap_or_else(|| "Unknown".to_string()),
+        status: run.status.unwrap_or_else(|| "unknown".to_string()),
+        conclusion: run.conclusion,
+        html_url: run.html_url,
+        started_at: run.created_at,
+        head_branch: run.head_branch,
+        event: run.event,
+    }
+}
+
 #[async_trait]
 impl RemoteRepoProvider for GitHubRemote {
     fn provider(&self) -> GitProvider {
@@ -511,10 +526,44 @@ impl RemoteRepoProvider for GitHubRemote {
                 conclusion: None,
                 html_url: Some(format!("https://github.com/{}/{}/actions", owner, repo)),
                 started_at: None,
+                head_branch: None,
+                event: None,
             }))
         } else {
             Ok(None)
         }
+    }
+
+    async fn list_workflow_runs(
+        &self,
+        owner: &str,
+        repo: &str,
+        limit: usize,
+    ) -> Result<Vec<CiCdInfo>, SniffError> {
+        let request = ListWorkflowRunsRequest::new(owner, repo)
+            .with_per_page(limit as i64);
+
+        // Attempt the request with the configured client first. If it fails
+        // because no credentials are available, or with a 401/403 response,
+        // retry once with an explicitly unauthenticated client.
+        let response: WorkflowRunsResponse = match self.client.request(request.clone()).await {
+            Ok(runs) => runs,
+            Err(SchematicError::MissingCredential { .. })
+            | Err(SchematicError::AuthenticationRequired { .. })
+            | Err(SchematicError::ApiError { status: 401, .. })
+            | Err(SchematicError::ApiError { status: 403, .. }) => self
+                .unauthenticated_client()
+                .request(request)
+                .await
+                .map_err(map_schematic_error)?,
+            Err(err) => return Err(map_schematic_error(err)),
+        };
+
+        Ok(response
+            .workflow_runs
+            .into_iter()
+            .map(map_workflow_run)
+            .collect())
     }
 
     async fn list_org_repos(&self, _org: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
@@ -671,5 +720,75 @@ mod tests {
             }
             _ => panic!("Expected RemoteApi error"),
         }
+    }
+
+    #[test]
+    fn test_map_workflow_run_full() {
+        let run = WorkflowRun {
+            id: 12345,
+            name: Some("CI".to_string()),
+            run_number: Some(42),
+            run_attempt: Some(1),
+            status: Some("completed".to_string()),
+            conclusion: Some("success".to_string()),
+            workflow_id: Some(101),
+            event: Some("push".to_string()),
+            head_branch: Some("main".to_string()),
+            head_sha: Some("abc123".to_string()),
+            html_url: Some("https://github.com/owner/repo/actions/runs/12345".to_string()),
+            url: None,
+            created_at: Some("2024-01-15T10:30:00Z".to_string()),
+            updated_at: None,
+            actor: None,
+            triggering_actor: None,
+        };
+
+        let info = map_workflow_run(run);
+
+        assert_eq!(info.provider, "GitHub Actions");
+        assert_eq!(info.name, "CI");
+        assert_eq!(info.status, "completed");
+        assert_eq!(info.conclusion, Some("success".to_string()));
+        assert_eq!(
+            info.html_url,
+            Some("https://github.com/owner/repo/actions/runs/12345".to_string())
+        );
+        assert_eq!(info.started_at, Some("2024-01-15T10:30:00Z".to_string()));
+        assert_eq!(info.head_branch, Some("main".to_string()));
+        assert_eq!(info.event, Some("push".to_string()));
+        assert_eq!(info.config_path, None);
+    }
+
+    #[test]
+    fn test_map_workflow_run_minimal() {
+        let run = WorkflowRun {
+            id: 0,
+            name: None,
+            run_number: None,
+            run_attempt: None,
+            status: None,
+            conclusion: None,
+            workflow_id: None,
+            event: None,
+            head_branch: None,
+            head_sha: None,
+            html_url: None,
+            url: None,
+            created_at: None,
+            updated_at: None,
+            actor: None,
+            triggering_actor: None,
+        };
+
+        let info = map_workflow_run(run);
+
+        assert_eq!(info.provider, "GitHub Actions");
+        assert_eq!(info.name, "Unknown");
+        assert_eq!(info.status, "unknown");
+        assert_eq!(info.conclusion, None);
+        assert_eq!(info.html_url, None);
+        assert_eq!(info.started_at, None);
+        assert_eq!(info.head_branch, None);
+        assert_eq!(info.event, None);
     }
 }

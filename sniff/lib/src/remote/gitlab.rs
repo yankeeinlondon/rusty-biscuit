@@ -559,6 +559,8 @@ impl RemoteRepoProvider for GitLabRemote {
                 conclusion: None,
                 html_url: Some(format!("{}/{}/{}/-/pipelines", self.base_url, owner, repo)),
                 started_at: None,
+                head_branch: None,
+                event: None,
             }))
         } else {
             Ok(None)

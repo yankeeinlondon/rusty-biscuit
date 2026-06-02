@@ -738,6 +738,8 @@ impl RemoteRepoProvider for BitbucketRemote {
                     workspace, repo_slug
                 )),
                 started_at: None,
+                head_branch: None,
+                event: None,
             }))
         } else {
             Ok(None)

@@ -110,6 +110,22 @@ pub trait RemoteRepoProvider: Send + Sync {
     /// Returns `None` if no CI/CD configuration is detected.
     async fn detect_cicd(&self, owner: &str, repo: &str) -> Result<Option<CiCdInfo>, SniffError>;
 
+    /// List recent workflow runs.
+    ///
+    /// Fetches actual CI/CD execution runs from the provider's API.
+    /// Returns up to `limit` recent runs. Providers that don't support
+    /// workflow runs return an empty vector.
+    ///
+    /// The default implementation returns an empty vector.
+    async fn list_workflow_runs(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _limit: usize,
+    ) -> Result<Vec<CiCdInfo>, SniffError> {
+        Ok(Vec::new())
+    }
+
     /// List other repositories in the same org/group.
     ///
     /// Useful for discovering related projects in the same organization.
@@ -154,7 +170,11 @@ pub trait RemoteRepoProvider: Send + Sync {
             .get_tags_and_releases(owner, repo)
             .await
             .unwrap_or_default();
-        let cicd = self.detect_cicd(owner, repo).await.unwrap_or(None);
+        // Try to fetch actual workflow runs first; fall back to presence detection
+        let cicd = match self.list_workflow_runs(owner, repo, 5).await {
+            Ok(runs) if !runs.is_empty() => runs,
+            _ => self.detect_cicd(owner, repo).await.unwrap_or(None).into_iter().collect(),
+        };
         let org_repos = self.list_org_repos(owner).await.unwrap_or_default();
         let key_urls = self.build_key_urls(owner, repo);
 
@@ -166,7 +186,7 @@ pub trait RemoteRepoProvider: Send + Sync {
             pull_requests,
             issues,
             tags_and_releases,
-            ci_cd: cicd.into_iter().collect(),
+            ci_cd: cicd,
             org_repos,
             key_urls,
         })
