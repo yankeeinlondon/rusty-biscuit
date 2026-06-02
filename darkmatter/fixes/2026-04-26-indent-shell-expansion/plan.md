@@ -112,3 +112,28 @@ packages:
 - [x] Avoid changing shell execution output semantics in `executor.rs`; the fix should only affect how captured output is spliced into Markdown body content. (`executor.rs` only gained `indent: String::new()` in test helpers; no execution-output behavior changed.)
 - [x] Avoid applying indentation to frontmatter shell expansion, command discovery keys, command approval prompts, or error diagnostics. (Frontmatter and discovery construction sites use `String::new()`; only body splice/render sites re-indent.)
 - [x] Preserve column-1 behavior with explicit tests so existing documents rendered at root do not gain leading whitespace. (`root_level_shell_output_has_no_indent`, `root_level_block_output_has_no_indent`, and the new `root_level_*_is_a_sibling_block_in_commonmark` structural tests all assert no leading whitespace at column 1.)
+
+## Post-Review Follow-up (`review-1.md`)
+
+The original implementation deferred the two block-quote acceptance criteria as
+"unreachable" and left the spec's trailing-blank note unverified. `review-1.md`
+flagged both. Resolution:
+
+- **Block-quote directives are now implemented** (supersedes the "unreachable"
+  notes in Phases 3-5). A shared `parse_utils::directive_prefix_len` /
+  `strip_blockquote_prefix` pair captures the leading run of indentation
+  whitespace and `>` markers. `::shell` (`shell_expansion/parser.rs`),
+  the block scanner (`block_pairs.rs`), the shell-block region parser
+  (`shell_blocks/parser.rs`), and the body splitter (`shell_blocks/body.rs`) all
+  use it, so `> > ::shell ...` and `> ::shell-block ...` are recognized, executed
+  with markers stripped, and re-quoted on every output line. Covered by parser
+  unit tests at each layer plus compose + CommonMark `<blockquote>`-nesting tests
+  for both directive forms. The negative `blockquote_marked_shell_block_is_not_a_directive`
+  test was replaced by positive equivalents.
+- **Trailing-blank requirement was corrected in the spec, not the code.** A
+  trailing-newline output keeps its bare final newline rather than materializing
+  a whitespace-only `"    "` line: the two are CommonMark-equivalent at the end
+  of a container and the shared `indent_text` helper is deliberately
+  byte-preserving. `spec.md` requirement #3 and the trailing-newline note were
+  rewritten to match; `indented_shell_trailing_newline_does_not_become_indent_only_line`
+  and its `::shell-block` mirror lock the behavior.
