@@ -33,7 +33,11 @@ md compose doc.md --allow-host example.com
 ```
 
 The CLI currently accepts exact host names. Library callers configure
-`ComposeOptions::with_remote_read_config(...)`.
+`ComposeOptions::with_remote_read_config(...)`. Supplying an allowed host there
+enables read-side expression URL reads (`frontmatter(url)`, `markdown_title(url)`,
+`file_exists(url)`, …) on its own. Remote `::file` / `::code` block transclusion
+additionally requires the explicit `with_allow_remote_transclusion(true)` opt-in,
+since it injects fetched bodies into the document.
 
 ## Cache And Freshness
 
