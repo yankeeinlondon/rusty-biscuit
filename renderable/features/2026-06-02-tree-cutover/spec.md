@@ -259,10 +259,15 @@ sibling specs.
    `TerminalImage`, `MermaidDiagram`, `DarkmatterPage`). One verification
    condition: the `Image`/`ThematicBreak`/`Code{mermaid}` node renderers must own
    the document lowering (helper calls to the exempt components are fine).
-   **Verification completed 2026-06-02** — see
+   **Verification condition confirmed 2026-06-02** — the tree node renderers and
+   `pub(crate)` entry points own the document lowering for those three node
+   kinds, with every exempt-helper call below the node renderer. This does
+   **not** sign off the public document-pipeline cutover: `Markdown::as_html` /
+   `as_terminal` / `as_terminal_with_layout` and `DarkmatterPage::render` still
+   route through the legacy serializers, which condition #1 above retires. See
    [`../2026-06-02-non-structural/phase-5-notes.md`](../2026-06-02-non-structural/phase-5-notes.md)
-   for mechanical-search evidence, test results, and the Phase 4/5 checklist
-   sign-off.
+   for mechanical-search evidence, test results, the Phase 4/5 checklist, and
+   the explicit scope boundary.
 6. **Mermaid on the tree.** ✅ **Resolved — designed in graphics-policy** as a
    promoted `Code` node (static `<svg>` browser, raster terminal; interactive
    mermaid.js an orthogonal opt-in). Built in Phase 0a, before cutover.
