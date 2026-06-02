@@ -558,6 +558,50 @@ fn test_compose_remote_expression_function_denied_host_reads_false() {
 }
 
 #[test]
+fn test_compose_remote_prologue_allowed_host_fetches_url() {
+    // A remote `prologue` URL on an allowed host must be registered, fetched,
+    // and prepended to the body.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "Prologue body\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/intro.md");
+
+    md_cmd()
+        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .write_stdin(format!("---\nprologue: {url}\n---\n# Local\n\nBody.\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Prologue body"))
+        .stdout(predicate::str::contains("Local"));
+
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn test_compose_remote_epilogue_deny_all_fails_without_request() {
+    // A remote `epilogue` on a non-allowed host must fail by policy and never
+    // issue a request — not fail with an internal "not registered" error.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "should not be fetched\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/outro.md");
+
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin(format!("---\nepilogue: {url}\n---\n# Local\n\nBody.\n"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("remote read denied"))
+        .stderr(predicate::str::contains("127.0.0.1"));
+
+    assert_eq!(server.request_count(), 0);
+}
+
+#[test]
 fn test_compose_remote_refresh_revalidates_cached_url() {
     let cache_dir = tempfile::TempDir::new().unwrap();
     let server = mock_http_server(vec![
