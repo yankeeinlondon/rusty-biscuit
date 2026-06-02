@@ -173,6 +173,30 @@ pub enum Command {
         /// Emit a compose performance report to stderr after completion
         #[arg(long)]
         perf: bool,
+
+        /// Allow remote reads from the specified host (repeatable)
+        #[arg(long, value_name = "HOST")]
+        allow_host: Vec<String>,
+
+        /// Maximum concurrent remote fetches (default: 4)
+        #[arg(long, value_name = "N", default_value_t = 4)]
+        remote_concurrency: usize,
+
+        /// Remote artifact TTL in seconds (default: use server cache headers)
+        #[arg(long, value_name = "SECONDS")]
+        remote_ttl: Option<u64>,
+
+        /// Force revalidation of cached remote artifacts
+        #[arg(long)]
+        remote_refresh: bool,
+
+        /// Remote freshness mode: optimistic, strict (default), or fallback
+        #[arg(long, value_name = "MODE", default_value = "strict")]
+        remote_freshness: String,
+
+        /// Persistent compose cache root (enables remote URL artifact caching)
+        #[arg(long, value_name = "DIR")]
+        cache_root: Option<PathBuf>,
     },
 
     /// Show markdown table of contents.

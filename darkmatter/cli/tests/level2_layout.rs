@@ -1743,10 +1743,65 @@ style:\n  page:\n    color: red-500\n---\n\
     );
 }
 
+fn foreground_at_text(raw: &str, needle: &str) -> Option<Option<(u8, u8, u8)>> {
+    let target = raw.find(needle)?;
+    let mut fg = None;
+    let mut i = 0;
+    while i < target {
+        let rest = &raw[i..];
+        if let Some(after_csi) = rest.strip_prefix("\x1b[")
+            && let Some(end) = after_csi.find('m')
+        {
+            apply_sgr_foreground(&after_csi[..end], &mut fg);
+            i += 2 + end + 1;
+            continue;
+        }
+        i += rest.chars().next()?.len_utf8();
+    }
+    Some(fg)
+}
+
+fn apply_sgr_foreground(params: &str, fg: &mut Option<(u8, u8, u8)>) {
+    if params.is_empty() {
+        *fg = None;
+        return;
+    }
+
+    for param in params.split(';') {
+        match param {
+            "0" | "39" => *fg = None,
+            colon if colon.starts_with("38:2:") => {
+                let values: Vec<u8> = colon
+                    .split(':')
+                    .filter_map(|part| part.parse::<u8>().ok())
+                    .collect();
+                if values.len() >= 5 {
+                    *fg = Some((values[2], values[3], values[4]));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut semicolon = params.split(';');
+    while let Some(param) = semicolon.next() {
+        if param == "38" && semicolon.next() == Some("2") {
+            let Some(r) = semicolon.next().and_then(|value| value.parse::<u8>().ok()) else {
+                continue;
+            };
+            let Some(g) = semicolon.next().and_then(|value| value.parse::<u8>().ok()) else {
+                continue;
+            };
+            let Some(b) = semicolon.next().and_then(|value| value.parse::<u8>().ok()) else {
+                continue;
+            };
+            *fg = Some((r, g, b));
+        }
+    }
+}
+
 /// Visible terminal capture for the fixed list inheritance: `style.ul.color`
 /// must surface on list item bodies even when `style.li.color` is unset.
-/// We anchor on the SGR byte sequence in the raw stream because the
-/// `plain` view strips ANSI codes.
 #[test]
 #[serial(level2_terminal)]
 fn level2_ul_color_inherits_into_li_body() {
@@ -1758,34 +1813,17 @@ style:\n  ul:\n    color: red-500\n---\n\
         return;
     };
 
-    // Tailwind Red-500 lowers to truecolor (251, 44, 54). WezTerm's
-    // `get-text --escapes` re-emits cell attributes and collapses
-    // contiguous same-attribute cells into a single SGR span, so counting
-    // opens is unreliable. Instead, verify both items live inside the same
-    // red span: a red SGR (semicolon or ITU colon form) precedes the first
-    // item, and no foreground reset (`\x1b[39m` or `\x1b[0m`) appears
-    // between the two item bodies.
-    let red_semi = "\x1b[38;2;251;44;54m";
-    let red_colon = "\x1b[38:2::251:44:54m";
-    let red_open_at = frame
-        .raw
-        .find(red_semi)
-        .or_else(|| frame.raw.find(red_colon));
-    let alpha_at = frame.raw.find("listbodyalpha");
-    let beta_at = frame.raw.find("listbodybeta");
-    let (Some(red_at), Some(alpha_at), Some(beta_at)) = (red_open_at, alpha_at, beta_at) else {
-        panic!("missing red SGR and/or item bodies. raw={:?}", frame.raw);
-    };
-    assert!(
-        red_at < alpha_at && alpha_at < beta_at,
-        "red SGR must open before the first item body. raw={:?}",
+    let red_500 = Some((251, 44, 54));
+    assert_eq!(
+        foreground_at_text(&frame.raw, "listbodyalpha").flatten(),
+        red_500,
+        "first list body must inherit ul.color. raw={:?}",
         frame.raw
     );
-    let between = &frame.raw[alpha_at..beta_at];
-    assert!(
-        !between.contains("\x1b[39m") && !between.contains("\x1b[0m"),
-        "no foreground reset may appear between item bodies — both must \
-         inherit ul.color. between={between:?}, raw={:?}",
+    assert_eq!(
+        foreground_at_text(&frame.raw, "listbodybeta").flatten(),
+        red_500,
+        "second list body must inherit ul.color. raw={:?}",
         frame.raw
     );
     // Layout must also still show the bodies in the plain view.

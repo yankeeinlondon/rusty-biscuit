@@ -218,6 +218,12 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             allow_shell_timeout,
             shell,
             perf,
+            allow_host,
+            remote_concurrency,
+            remote_ttl,
+            remote_refresh,
+            remote_freshness,
+            cache_root,
         } => {
             let parsed = parse_compose_positionals(&args)?;
             let mode = resolve_list_spacing(compact, loose);
@@ -226,6 +232,13 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 image_refs: allow_missing_image_refs || allow_any_missing_reference,
                 transclusions: allow_missing_transclusions || allow_any_missing_reference,
             };
+            let remote_config = build_remote_read_config(
+                &allow_host,
+                remote_concurrency,
+                remote_ttl,
+                remote_refresh,
+                &remote_freshness,
+            );
             run_compose(
                 parsed.input.as_ref(),
                 state.as_deref(),
@@ -244,6 +257,8 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 allow_shell_timeout,
                 shell,
                 perf,
+                remote_config,
+                cache_root.as_ref(),
                 cli,
             )?;
         }
@@ -358,6 +373,30 @@ fn resolve_list_spacing(compact: bool, loose: bool) -> ListSpacingMode {
         (true, _) => ListSpacingMode::Compact,
         (_, true) => ListSpacingMode::Loose,
         _ => ListSpacingMode::Normal,
+    }
+}
+
+fn build_remote_read_config(
+    allowed_hosts: &[String],
+    concurrency: usize,
+    ttl_secs: Option<u64>,
+    refresh: bool,
+    freshness: &str,
+) -> darkmatter::markdown::compose::RemoteReadConfig {
+    use darkmatter::markdown::compose::RemoteFreshnessMode;
+
+    let freshness_mode = match freshness.to_ascii_lowercase().as_str() {
+        "optimistic" => RemoteFreshnessMode::Optimistic,
+        "fallback" => RemoteFreshnessMode::Fallback,
+        _ => RemoteFreshnessMode::Strict,
+    };
+
+    darkmatter::markdown::compose::RemoteReadConfig {
+        allowed_hosts: allowed_hosts.to_vec(),
+        remote_concurrency: concurrency.max(1),
+        remote_ttl: ttl_secs.map(std::time::Duration::from_secs),
+        refresh,
+        freshness_mode,
     }
 }
 
@@ -477,6 +516,8 @@ pub fn run_compose(
     allow_shell_timeout: bool,
     shell_report: bool,
     perf: bool,
+    remote_config: darkmatter::markdown::compose::RemoteReadConfig,
+    cache_root: Option<&PathBuf>,
     cli: &Cli,
 ) -> Result<()> {
     info!("starting compose pipeline");
@@ -650,6 +691,11 @@ pub fn run_compose(
     options =
         options.with_allow_reassigned_frontmatter_property(allow_reassigned_frontmatter_property);
     options = options.with_perf(perf);
+    options = options.with_remote_read_config(remote_config);
+    options = options.with_allow_remote_transclusion(true);
+    if let Some(cache_root) = cache_root {
+        options = options.with_cache_root(cache_root);
+    }
     if let Some(size) = indent {
         options = options.with_indent_size(size);
     }
