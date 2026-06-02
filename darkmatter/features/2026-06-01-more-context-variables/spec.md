@@ -203,7 +203,9 @@ EffectEngine::builder()
 > into a **Darkmatter-wide network policy** that gates both compose-time URL
 > reads and side-effect network writes (still Darkmatter-enforced,
 > host-configured). No change to the `allowed_hosts` shape is required for this
-> evolution.
+> evolution. This policy is specified concretely as the shared `FetchPolicy` in
+> [`url-referencing`](../url-referencing/spec.md), enforced inside the
+> `biscuit-file` fetch primitive that both compose reads and `http_post` use.
 
 ### Filepath Normalization
 
