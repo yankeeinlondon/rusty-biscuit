@@ -4959,6 +4959,30 @@ fn test_repo_worktrees_default_output() {
 }
 
 #[test]
+fn test_repo_worktrees_md_output() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--md",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    for line in stdout.trim().lines() {
+        assert!(
+            line.starts_with("- "),
+            "md output should start with '- ': {line}"
+        );
+    }
+}
+
+#[test]
 fn test_repo_worktrees_list_output() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
@@ -4974,12 +4998,17 @@ fn test_repo_worktrees_list_output() {
         .success();
 
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-    for line in stdout.trim().lines() {
+    let lines: Vec<&str> = stdout.trim().lines().collect();
+    for line in &lines {
         assert!(
-            line.starts_with("- "),
-            "list output should start with '- ': {line}"
+            !line.starts_with("- "),
+            "list output should not use markdown bullets: {line}"
         );
     }
+    assert!(
+        lines.iter().any(|l| l.contains("my-worktree")),
+        "list should contain worktree name: {stdout}"
+    );
 }
 
 #[test]

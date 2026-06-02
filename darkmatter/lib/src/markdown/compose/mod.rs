@@ -58,6 +58,7 @@ pub mod conditions;
 pub mod context;
 mod frontmatter_interpolation;
 pub(crate) mod frontmatter_shell_expansion;
+pub(crate) mod indent;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
 mod schema_validation;
@@ -1246,7 +1247,10 @@ impl Markdown {
         for directive in directives {
             let execution =
                 execute_directive_detailed(&directive, options, &policy_paths, &mut runtime.shell)?;
-            replacements.push((directive.span.clone(), execution.combined_output()));
+            // Re-indent multi-line output to the directive's column so generated
+            // lines stay nested under the surrounding list or block quote.
+            let output = indent::indent_text(&execution.combined_output(), &directive.indent, None);
+            replacements.push((directive.span.clone(), output));
             report.warnings.extend(execution.warnings);
             report.shell_expansions_applied += 1;
         }

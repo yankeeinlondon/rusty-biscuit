@@ -55,7 +55,7 @@ use filter::HeadingFilter;
 use parser::parse_toc_linking_directives;
 use render::render_toc_links;
 
-pub(crate) use render::indent_text;
+pub(crate) use crate::markdown::compose::indent::indent_text;
 use tracing::trace;
 
 #[cfg(test)]

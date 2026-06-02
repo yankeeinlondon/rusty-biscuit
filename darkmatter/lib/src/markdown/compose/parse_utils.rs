@@ -340,6 +340,51 @@ pub(crate) fn is_identifier_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'
 }
 
+/// Byte length of the leading run of block-quote markers and indentation
+/// whitespace on `line`.
+///
+/// This is the prefix a `::shell` / `::shell-block` directive line carries
+/// before its directive token — every space, tab, and `>` block-quote marker
+/// up to the first other byte. The splice machinery reproduces this exact
+/// prefix on each emitted output line so the result stays nested under the same
+/// list item or block quote the directive appeared in.
+///
+/// ## Examples
+///
+/// ```ignore
+/// assert_eq!(directive_prefix_len("::shell x"), 0);
+/// assert_eq!(directive_prefix_len("    ::shell x"), 4);
+/// assert_eq!(directive_prefix_len("> > ::shell x"), 4);
+/// ```
+pub(crate) fn directive_prefix_len(line: &str) -> usize {
+    line.len() - line.trim_start_matches(['>', ' ', '\t']).len()
+}
+
+/// Strips a leading block-quote marker prefix from `line`, returning the bare
+/// content after the markers.
+///
+/// Only strips when the leading run actually contains a `>` marker, so plain
+/// whitespace-indented lines (which carry no block-quote markers) are returned
+/// untouched — their leading whitespace is semantically significant to callers
+/// that join continuation lines. A `>`-led line has its full marker-and-space
+/// prefix removed so the bare command remains.
+///
+/// ## Examples
+///
+/// ```ignore
+/// assert_eq!(strip_blockquote_prefix("> echo hi"), "echo hi");
+/// assert_eq!(strip_blockquote_prefix("> > echo hi"), "echo hi");
+/// assert_eq!(strip_blockquote_prefix("  echo hi"), "  echo hi");
+/// ```
+pub(crate) fn strip_blockquote_prefix(line: &str) -> &str {
+    let prefix_len = directive_prefix_len(line);
+    if line[..prefix_len].contains('>') {
+        &line[prefix_len..]
+    } else {
+        line
+    }
+}
+
 /// Finds byte ranges of inline code and fenced code blocks.
 pub(crate) fn find_code_regions(content: &str) -> Vec<(usize, usize)> {
     let mut regions = Vec::new();
@@ -371,4 +416,61 @@ pub(crate) fn is_in_code_region(position: usize, regions: &[(usize, usize)]) -> 
     regions
         .iter()
         .any(|(start, end)| position >= *start && position < *end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directive_prefix_len_column_one_is_zero() {
+        assert_eq!(directive_prefix_len("::shell echo hi"), 0);
+    }
+
+    #[test]
+    fn directive_prefix_len_captures_space_indent() {
+        assert_eq!(directive_prefix_len("    ::shell echo hi"), 4);
+    }
+
+    #[test]
+    fn directive_prefix_len_captures_tab_indent() {
+        assert_eq!(directive_prefix_len("\t::shell echo hi"), 1);
+    }
+
+    #[test]
+    fn directive_prefix_len_captures_blockquote_markers() {
+        assert_eq!(directive_prefix_len("> > ::shell echo hi"), 4);
+        assert_eq!(directive_prefix_len("> ::shell echo hi"), 2);
+        assert_eq!(directive_prefix_len(">::shell echo hi"), 1);
+    }
+
+    #[test]
+    fn directive_prefix_len_stops_at_first_content_byte() {
+        // The internal `>` of a redirection is past the first content byte and
+        // must not be folded into the prefix.
+        assert_eq!(directive_prefix_len("> echo a > b"), 2);
+    }
+
+    #[test]
+    fn strip_blockquote_prefix_removes_single_marker() {
+        assert_eq!(strip_blockquote_prefix("> echo hi"), "echo hi");
+    }
+
+    #[test]
+    fn strip_blockquote_prefix_removes_nested_markers() {
+        assert_eq!(strip_blockquote_prefix("> > echo hi"), "echo hi");
+    }
+
+    #[test]
+    fn strip_blockquote_prefix_removes_marker_without_space() {
+        assert_eq!(strip_blockquote_prefix(">echo hi"), "echo hi");
+    }
+
+    #[test]
+    fn strip_blockquote_prefix_leaves_plain_whitespace_untouched() {
+        // No `>` marker: leading whitespace is significant to continuation
+        // joining and must be preserved verbatim.
+        assert_eq!(strip_blockquote_prefix("  echo hi"), "  echo hi");
+        assert_eq!(strip_blockquote_prefix("echo hi"), "echo hi");
+    }
 }
