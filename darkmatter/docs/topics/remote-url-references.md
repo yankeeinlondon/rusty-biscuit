@@ -52,9 +52,9 @@ Freshness is resolved in this order:
 
 Freshness modes:
 
+- `fallback` (the default) revalidates stale artifacts but serves the stale
+  cached body on network or HTTP failure, keeping CI/offline builds resilient.
 - `strict` revalidates stale remote artifacts and fails when revalidation fails.
-- `fallback` revalidates stale artifacts but serves the stale cached body on
-  network or HTTP failure.
 - `optimistic` serves an existing cached body without revalidation.
 
 `--remote-refresh` forces revalidation even when a cached remote artifact is

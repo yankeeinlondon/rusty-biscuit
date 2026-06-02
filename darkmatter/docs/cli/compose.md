@@ -89,7 +89,7 @@ md compose doc.md iteration=1 draft=false name=Alice
 - `--remote-concurrency <N>`: maximum concurrent remote fetches. Defaults to `4`.
 - `--remote-ttl <SECONDS>`: override remote artifact freshness TTL. Without this, server cache headers are used when present.
 - `--remote-refresh`: force revalidation of cached remote artifacts.
-- `--remote-freshness <strict|fallback|optimistic>`: choose stale-cache behavior for remote artifacts. Defaults to `strict`.
+- `--remote-freshness <strict|fallback|optimistic>`: choose stale-cache behavior for remote artifacts. Defaults to `fallback`, which serves the stale cached body when revalidation fails on the network.
 - `--cache-root <DIR>`: enable persistent compose caching at the given root. Remote URL cache behavior across CLI runs requires this option.
 
 ### Compose Warnings

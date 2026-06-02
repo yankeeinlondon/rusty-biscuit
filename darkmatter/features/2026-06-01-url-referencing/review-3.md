@@ -1,5 +1,5 @@
 ---
-ready: false
+ready: true
 agent: codex
 model: ""
 ---
@@ -41,3 +41,27 @@ No Level 3 coverage is required for this feature because the spec does not asser
 ## Recommendation
 
 Do not ship this as production-ready until the redirect policy bypass is closed and the default freshness behavior is reconciled with the spec. After that, the remaining expression-discovery issue can be resolved either by supporting evaluated URL arguments at point of use or by narrowing the public contract and tests to literal URL arguments only.
+
+## Resolution
+
+All three findings have been addressed.
+
+### Critical: redirect bypass closed in the shared fetch primitive
+
+`biscuit-file` now exposes `policy_client()`, which builds the `reqwest::Client` with `redirect::Policy::none()`, and `fetch`/`post` reject any 3xx (other than `304 Not Modified`) with a new `FetchError::RedirectBlocked { status, location }`. With redirect-following disabled, a `302 Location: http://blocked-host/…` from an allowed host can no longer be silently followed to an unallowed host — the primitive surfaces the redirect as an error at the only place requests are issued. Both darkmatter consumers — `RemoteFetchRuntime`'s shared client and the side-effect engine's `http_post` — now build their client via `policy_client()` instead of `reqwest::Client::new()`.
+
+New Level 1 wiremock coverage in `biscuit-file/lib/tests/fetch_integration.rs`: `policy_client_blocks_redirect_to_unallowed_host` (allowed host returns `302` pointing at a blocked host → `RedirectBlocked`) and `policy_client_blocks_redirect_to_unsupported_scheme` (`301` to an `ftp://` target is blocked at the redirect, before any scheme handling).
+
+### High: default freshness is now stale-on-failure (`Fallback`)
+
+`RemoteFreshnessMode`'s `#[default]` moved from `Strict` to `Fallback`, `RemoteReadConfig::default()` now uses `Fallback`, and the CLI `--remote-freshness` default value is `fallback`. This matches the spec's "TTL → conditional → stale-on-failure" default and keeps CI/offline builds resilient when a remote dependency is briefly unreachable. `md compose` docs and the remote-URL topic doc were updated to mark `fallback` as the default.
+
+New Level 1 coverage: `default_mode_serves_stale_on_failure` pins the contract through `RemoteFreshnessMode::default()` (asserting it equals `Fallback`) and proves a failed revalidation serves the stale cached body under the shipped default. Existing default-config assertions in `remote.rs` and `types.rs` were updated accordingly.
+
+### Medium: evaluated (non-literal) URL arguments fetch on demand
+
+`ResolutionContext::fetch_remote_text` no longer errors when an evaluated URL has no pre-registered slot. When the discovery scanner never saw the URL (e.g. `{{ markdown_title(remote_doc) }}` where `remote_doc` is a frontmatter/state string), it now calls `register_nested` at point of use and blocks on the result. Host policy is still enforced — a disallowed host fills the slot with a denial error.
+
+New Level 1 coverage in `resolve_ctx.rs`: `fetch_remote_text_registers_unseen_url_on_demand` (a never-registered URL is fetched and its body returned) and `fetch_remote_text_on_demand_enforces_policy` (a deny-all policy rejects the on-demand registration).
+
+All `biscuit-file` (`--features fetch`), `darkmatter`, and `darkmatter-cli` remote/effects tests pass with clean clippy.
