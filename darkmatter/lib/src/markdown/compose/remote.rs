@@ -46,9 +46,11 @@ pub enum RemoteFreshnessMode {
     /// Serve cache without revalidation when within TTL.
     Optimistic,
     /// Always revalidate with conditional GET.
-    #[default]
     Strict,
-    /// Serve stale on network failure.
+    /// Serve stale on network failure. The default: the spec's
+    /// "TTL → conditional → stale-on-failure" behavior keeps CI/offline builds
+    /// resilient when a remote dependency is briefly unreachable.
+    #[default]
     Fallback,
 }
 
@@ -86,7 +88,7 @@ impl Default for RemoteReadConfig {
             remote_concurrency: 4,
             remote_ttl: None,
             refresh: false,
-            freshness_mode: RemoteFreshnessMode::Strict,
+            freshness_mode: RemoteFreshnessMode::Fallback,
         }
     }
 }
@@ -579,7 +581,7 @@ mod tests {
         assert_eq!(config.remote_concurrency, 4);
         assert!(config.remote_ttl.is_none());
         assert!(!config.refresh);
-        assert_eq!(config.freshness_mode, RemoteFreshnessMode::Strict);
+        assert_eq!(config.freshness_mode, RemoteFreshnessMode::Fallback);
     }
 
     #[test]

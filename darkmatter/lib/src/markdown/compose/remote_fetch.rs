@@ -19,7 +19,7 @@ use super::cache::remote_cache::{RemoteCacheConfig, RemoteOutcomeEvent, fetch_wi
 use super::remote::{RemoteReadConfig, RemoteReadError};
 
 /// Default cache config for test constructors: no TTL override, no forced
-/// refresh, and the default (`Strict`) freshness mode.
+/// refresh, and the default (`Fallback`) freshness mode.
 #[cfg(test)]
 fn test_cache_config() -> RemoteCacheConfig {
     RemoteCacheConfig {
@@ -224,7 +224,7 @@ impl RemoteFetchRuntime {
                 slots: DashMap::new(),
                 policy,
                 stats: Mutex::new(RemoteFetchStats::default()),
-                client: reqwest::Client::new(),
+                client: biscuit_file::file_reference::fetch::policy_client(),
                 // A zero cap would deadlock every fetch; clamp to at least one.
                 semaphore: Arc::new(tokio::sync::Semaphore::new(concurrency.max(1))),
                 runtime: OnceLock::new(),
@@ -994,6 +994,43 @@ mod persistent_cache_tests {
         assert_eq!(rt1.get_content(&url).unwrap().as_deref(), Some("stale-but-usable"));
 
         // Revalidation returns 500; Fallback serves the stale cached body.
+        let rt2 = runtime(Arc::clone(&store), cfg);
+        rt2.register_and_fetch(url.clone());
+        tokio::time::sleep(SETTLE).await;
+        assert_eq!(rt2.get_content(&url).unwrap().as_deref(), Some("stale-but-usable"));
+        assert_eq!(rt2.stats().stale_served, 1);
+    }
+
+    #[tokio::test]
+    async fn default_mode_serves_stale_on_failure() {
+        // The shipped default freshness mode is stale-on-failure, per spec.
+        // This test pins that contract through `RemoteFreshnessMode::default()`
+        // rather than a hard-coded `Fallback`, so a future default flip fails
+        // here loudly instead of silently regressing offline/CI resilience.
+        assert_eq!(RemoteFreshnessMode::default(), RemoteFreshnessMode::Fallback);
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/doc.md"))
+            .respond_with(FailOnRevalidate {
+                etag: "e1".to_string(),
+                body: "stale-but-usable".to_string(),
+            })
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = temp_store(&dir);
+        let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+        // TTL zero forces revalidation; mode comes from the shipped default.
+        let cfg = config(Some(Duration::ZERO), false, RemoteFreshnessMode::default());
+
+        let rt1 = runtime(Arc::clone(&store), cfg);
+        rt1.register_and_fetch(url.clone());
+        tokio::time::sleep(SETTLE).await;
+        assert_eq!(rt1.get_content(&url).unwrap().as_deref(), Some("stale-but-usable"));
+
+        // Revalidation returns 500; the default mode serves the stale body.
         let rt2 = runtime(Arc::clone(&store), cfg);
         rt2.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;

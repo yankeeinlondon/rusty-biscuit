@@ -2594,7 +2594,7 @@ mod tests {
         let config = options.remote_read_config();
         assert!(config.allowed_hosts.is_empty());
         assert_eq!(config.remote_concurrency, 4);
-        assert_eq!(config.freshness_mode, RemoteFreshnessMode::Strict);
+        assert_eq!(config.freshness_mode, RemoteFreshnessMode::Fallback);
     }
 
     #[test]

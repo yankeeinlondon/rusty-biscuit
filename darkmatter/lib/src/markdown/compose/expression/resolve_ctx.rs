@@ -38,19 +38,32 @@ impl ResolutionContext {
 
     /// Fetches the text body for an HTTP(S) URL argument.
     ///
+    /// The pre-compose discovery scanner only registers URLs written as literal
+    /// arguments. When a function receives a URL produced at evaluation time
+    /// (e.g. from a frontmatter or state variable), no slot exists yet, so this
+    /// registers and fetches it on demand before blocking on the result. Host
+    /// policy is still enforced — registration of a disallowed host fills the
+    /// slot with a denial error.
+    ///
     /// ## Returns
     ///
     /// - `Ok(Some(body))` when the URL was fetched.
     /// - `Ok(None)` when no remote-fetch runtime is attached.
-    /// - `Err` when the URL is malformed, unregistered, or the fetch failed.
+    /// - `Err` when the URL is malformed, denied by policy, or the fetch failed.
     pub(crate) fn fetch_remote_text(&self, raw: &str) -> Result<Option<String>, String> {
         let Some(rf) = self.remote_fetch.as_ref() else {
             return Ok(None);
         };
         let url = url::Url::parse(raw).map_err(|e| format!("invalid URL {raw:?}: {e}"))?;
+        if let Ok(Some(body)) = rf.get_content(&url) {
+            return Ok(Some(body));
+        }
+        // Not pre-registered (or a prior probe found no slot): register the
+        // evaluated URL now and block on its fetch.
+        rf.register_nested(url.clone());
         match rf.get_content(&url) {
             Ok(Some(body)) => Ok(Some(body)),
-            Ok(None) => Err(format!("remote URL {raw:?} was not registered for fetching")),
+            Ok(None) => Err(format!("remote URL {raw:?} could not be fetched")),
             Err(e) => Err(e),
         }
     }
@@ -101,5 +114,65 @@ mod tests {
         let ctx = ResolutionContext::new(PathBuf::from("/tmp/docdir"));
         assert_eq!(ctx.base_dir, PathBuf::from("/tmp/docdir"));
         assert!(ctx.magic_paths.is_empty());
+    }
+
+    /// An evaluated (non-literal) URL the discovery scanner never saw must still
+    /// fetch: `fetch_remote_text` registers it on demand at point of use. This
+    /// covers `{{ markdown_title(remote_doc) }}` where `remote_doc` is a
+    /// frontmatter/state string rather than a literal URL argument.
+    #[tokio::test]
+    async fn fetch_remote_text_registers_unseen_url_on_demand() {
+        use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
+        use biscuit_file::file_reference::fetch::FetchPolicy;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/dynamic.md"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("# Dynamic\n\nbody"))
+            .mount(&server)
+            .await;
+
+        let policy = FetchPolicy::deny_all().allow_host("127.0.0.1");
+        let rt = RemoteFetchRuntime::with_policy(policy);
+        let url = format!("{}/dynamic.md", server.uri());
+
+        let ctx = ResolutionContext {
+            base_dir: PathBuf::from("/tmp"),
+            magic_paths: Vec::new(),
+            remote_fetch: Some(rt),
+        };
+
+        // The URL was never registered by discovery; the read-side function
+        // must register-and-fetch it now and return the body.
+        let body = tokio::task::spawn_blocking(move || ctx.fetch_remote_text(&url))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(body.as_deref(), Some("# Dynamic\n\nbody"));
+    }
+
+    /// On-demand registration still honors the host allowlist: a disallowed
+    /// evaluated URL fails with a policy denial rather than fetching.
+    #[tokio::test]
+    async fn fetch_remote_text_on_demand_enforces_policy() {
+        use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
+        use biscuit_file::file_reference::fetch::FetchPolicy;
+
+        // Deny-all policy: even a well-formed URL must be denied at registration.
+        let rt = RemoteFetchRuntime::with_policy(FetchPolicy::deny_all());
+        let ctx = ResolutionContext {
+            base_dir: PathBuf::from("/tmp"),
+            magic_paths: Vec::new(),
+            remote_fetch: Some(rt),
+        };
+
+        let result = tokio::task::spawn_blocking(move || {
+            ctx.fetch_remote_text("https://blocked.example/doc.md")
+        })
+        .await
+        .unwrap();
+        assert!(result.is_err());
     }
 }

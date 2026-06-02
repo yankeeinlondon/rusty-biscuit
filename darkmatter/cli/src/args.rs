@@ -190,8 +190,8 @@ pub enum Command {
         #[arg(long)]
         remote_refresh: bool,
 
-        /// Remote freshness mode: optimistic, strict (default), or fallback
-        #[arg(long, value_name = "MODE", default_value = "strict")]
+        /// Remote freshness mode: optimistic, strict, or fallback (default)
+        #[arg(long, value_name = "MODE", default_value = "fallback")]
         remote_freshness: String,
 
         /// Persistent compose cache root (enables remote URL artifact caching)

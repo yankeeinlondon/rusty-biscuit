@@ -269,7 +269,7 @@ impl EffectEngine {
             policy = policy.allow(HostPattern::Exact(host.clone()));
         }
 
-        let client = reqwest::Client::new();
+        let client = biscuit_file::file_reference::fetch::policy_client();
         let response = biscuit_file::file_reference::fetch::post_blocking(
             &client,
             &url,
