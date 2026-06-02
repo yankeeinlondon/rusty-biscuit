@@ -1,18 +1,20 @@
 ---
-status: draft
+status: ready for planning and implementation
+reviewed: true
 ---
 
 # Prose → Tree: Full Collapse onto the Shared Render Tree
 
 ## Status
 
-**Draft — architecture approved.** The core decision is locked: `Prose` stops
+**Ready for planning and implementation.** The core decision is locked: `Prose` stops
 carrying its own component-local `ProseDocument` IR and instead parses
 **directly into the shared render tree** (`renderable::tree::RenderNode`),
 rendering only through the shared Terminal / Browser / Markdown tree renderers.
-The bespoke `ProseDocument` emitters are deleted. One small render-side
-sub-decision remains — how the browser target lowers `inverse` — recorded under
-[Open Questions](#open-questions).
+The bespoke `ProseDocument` emitters are deleted. This reviewed draft also
+locks the previously open browser lowering for `inverse`: the shared browser
+renderer lowers it to `filter: invert(1)`, matching the current Prose browser
+emitter's behavior instead of inventing a color-swap rule.
 
 This spec resolves Decision #4 of
 [`../2026-06-02-tree-cutover/spec.md`](../2026-06-02-tree-cutover/spec.md)
@@ -26,6 +28,7 @@ Decision lineage (so the choices are not re-litigated):
 |---|---|---|
 | Migration degree | **Full collapse.** | Parser emits `RenderNode` directly; `ProseDocument` and the three bespoke emitters are deleted. Cleaner than the projection model and removes a lowering pass. |
 | `inverse` (SGR 7) home | **Add to `TextEmphasis`.** | A core SGR attribute, peer to the existing `dim` / `blink`. Not a darkmatter-domain `Extended` token. |
+| Browser `inverse` lowering | **Use `filter: invert(1)`.** | This preserves the current Prose browser output shape and avoids renderer-time color inheritance/swap complexity. |
 | `hidden` (SGR 8) | **Drop.** | Zero caller uses across the workspace; only the Prose module references it. |
 | MarkdownPlus color parity | **Extend the shared markdown renderer.** | Lower an inline `Style` to MarkdownPlus inline-HTML `<span style="…">`, matching today's `to_markdown.rs`. |
 
@@ -99,38 +102,85 @@ already lower `Style`, so those targets are covered once `inverse` is added.)
   (`render_terminal_node`, `render_browser_*`, `render_markdown_document`).
 - `Prose` keeps its bracket-tag parser (`prose/tokens.rs`) — that is its input
   grammar, analogous to darkmatter's Markdown parser, not a rendering path.
-- `Prose::to_render_nodes()` becomes the core projection (parse → inline
-  `RenderNode`s); containers that already call it are unaffected.
+- `Prose::to_render_nodes()` remains the embedding API for containers that
+  need the parsed inline/mixed node sequence; containers that already call it
+  are unaffected.
+- Prose's own `TreeRenderable::render_tree()` returns a valid document-shaped
+  `RenderNode::root`: contiguous inline nodes are wrapped in `Paragraph`
+  blocks, and top-level `Code` nodes remain block children. This keeps
+  `TreeRenderable`'s single-node contract and render-tree validation intact
+  without changing the existing container-embedding helper.
 
 ### Shared-tree prerequisites (cutover Phase 0)
 
 These land first, in the `renderable` crate, and benefit every tree consumer:
 
 1. **`inverse` on `TextEmphasis`.** Add `inverse: bool` to
-   `renderable::style::TextEmphasis`. Lowering:
+   `renderable::style::TextEmphasis`. This is a serialized render-tree type,
+   so the new field must default to `false` during deserialization of older
+   tree JSON. Add `EmphasisLayer::Inverse` with SGR reset `27`, include it in
+   `TextEmphasis::is_empty`, `inherited_from`, and `sgr_ops`, and update the
+   terminal style-layer bridge in `biscuit-terminal` so nested inverse spans
+   restore parent inverse state instead of relying on a full reset. Lowering:
    - Terminal → SGR 7 (reverse video), nested with the other emphasis codes.
-   - Browser → see [Open Questions](#open-questions).
+   - Browser → `filter: invert(1)` on the styled element.
    - Markdown / MarkdownPlus → no sigil; degrade to inner text.
 2. **Inline `Style` → MarkdownPlus HTML.** Extend the shared markdown
    renderer's `render_span` so that, under `MarkdownDialect::MarkdownPlus`, a
    node carrying an inline `Style` (foreground / background color, underline
    variant) emits `<span style="…">` with concrete CSS — matching
-   `to_markdown.rs`. Under plain `Markdown` it degrades to inner text (current
-   behavior preserved). Class-based spans keep their existing behavior.
+   `to_markdown.rs`. Escape literal `<`, `>`, and `&` in the span body as HTML
+   entities while still escaping Markdown sigils, matching the bespoke
+   MarkdownPlus safety behavior. Under plain `Markdown`, styled spans follow
+   the existing classed-span strictness model: reject under `Strict`, record a
+   lossy diagnostic and emit inner text under `Warn`, and emit inner text under
+   `Lossy`. Class-based spans keep their existing behavior; if both classes
+   and style are present in MarkdownPlus, emit one `<span>` carrying both
+   `class` and `style` attributes rather than nesting two spans.
+
+### Prose parity contracts that must move to the tree path
+
+The full collapse deletes the files that currently own several target
+policies. These are not optional cleanup details; they must be re-homed before
+the bespoke emitters are removed:
+
+- **Link resolution.** Preserve `prose/styles.rs::resolve_href` behavior for
+  Prose links: absolute paths become `file://` URLs, `./` paths resolve from
+  the current working directory, other relative paths resolve through the
+  package/repo-root fallback, and `http`, `https`, `file`, and `mailto` pass
+  through unchanged. Do not replace this with the generic render-tree link
+  target formatter unless that formatter first learns these Prose semantics.
+- **Markdown link escaping.** Preserve the bespoke Markdown destination rules:
+  parentheses and backslashes are escaped in bare destinations, whitespace
+  destinations use angle brackets, and line endings degrade to spaces. Link
+  descriptions must not be double-escaped.
+- **Browser escaping.** User text and code-block bodies are HTML-escaped, and
+  href attributes are attribute-escaped, before the shared browser fragment is
+  emitted. Unknown Prose tags remain visible inert text.
+- **OSC8 degradation.** Terminal links still render as OSC8 only when the
+  terminal supports it; otherwise they render as `[description](href)`.
+- **Underline degradation.** The shared terminal tree path must keep the
+  current capability-aware underline degradation for `UnderlineStyle::Double`
+  and the other variants: use the requested variant when supported, fall back
+  to straight underline when available, and emit no underline SGR when the
+  terminal has no underline support.
+- **Layout.** `Prose::with_layout`, margin helpers, and word-wrap behavior
+  continue to apply through `TreeRenderable::tree_layout()` / render options.
+  The migration must not silently drop Prose's existing layout configuration.
 
 ### Dropped behavior
 
-- The `<hidden>` / `<reveal>`-style hidden tag is removed from `Prose`. Zero
-  callers use it; document the removal in the Prose docs and CHANGELOG-level
-  notes. (If a hidden need ever returns, it can be reconsidered as a shared
-  attribute then — YAGNI now.)
+- The `<hidden>` tag is removed from `Prose`. Zero callers use it; document
+  the removal in the Prose docs and CHANGELOG-level notes. If a hidden need
+  ever returns, reconsider it as a shared attribute then.
 
 ## Goals
 
 - Remove the last component-local rendering IR so all rendering flows through
   the shared tree (advances cutover Acceptance Criteria #2).
-- Preserve Prose fidelity on every target except the two intended diffs
-  (dropped `hidden`, browser `inverse` representation).
+- Preserve Prose fidelity on every target except the intended diffs:
+  `<hidden>` is removed, and browser `inverse` may normalize CSS declaration
+  whitespace while preserving the existing `filter: invert(1)` semantics.
 - Add `inverse` and MarkdownPlus inline-`Style` lowering as first-class shared
   capabilities that darkmatter and other components also gain.
 - Keep — or improve — Prose render performance on its hot path.
@@ -148,22 +198,30 @@ These land first, in the `renderable` crate, and benefit every tree consumer:
 Ordered so each step lands on a green tree:
 
 1. **Add `inverse` to `TextEmphasis`** and its terminal SGR 7 lowering; browser
-   and markdown lowering per the decisions above. Unit-test the SGR output and
-   the browser/markdown degradation. (Phase 0)
+   and markdown lowering per the decisions above. Unit-test the SGR output,
+   SGR 27 reset behavior, inherited inverse behavior, serde backward
+   compatibility, browser CSS, and markdown degradation. (Phase 0)
 2. **Extend the shared markdown renderer** to lower an inline `Style` to
    MarkdownPlus inline-HTML `<span style>`; plain Markdown unchanged.
-   Unit-test against the cases `to_markdown.rs` covers (color, bg, underline).
+   Unit-test against the cases `to_markdown.rs` covers: foreground color,
+   background color, underline variants, HTML escaping inside inline HTML, link
+   destination escaping, and class+style coalescing.
    (Phase 0)
 3. **Pin Prose output** with snapshots of the *current* bespoke terminal /
    browser / markdown / markdown-plus output across a representative tag
-   corpus, before any deletion. This is the parity oracle for step 5.
+   corpus, before any deletion. Include nested style restoration, OSC8 and
+   non-OSC8 links, path-like links, markdown destination escaping, unknown
+   tags, escaped literal markup, code fences, underline degradation, layout,
+   and `<inverse>` / `<hidden>`. This is the parity oracle for step 5.
 4. **Rewrite the Prose parser to emit `RenderNode`** directly, reusing the
-   `node_to_render_node` mapping shapes. `Prose`'s `TerminalRenderable`,
-   `BrowserRenderable`, and `MarkdownRenderable` impls delegate to the shared
-   renderers over the parsed tree.
+   `node_to_render_node` mapping shapes. Keep `to_render_nodes()` as the
+   container embedding helper, add a normalized root/paragraph wrapper for
+   `TreeRenderable::render_tree()`, and make `Prose`'s
+   `TerminalRenderable`, `BrowserRenderable`, and `MarkdownRenderable` impls
+   delegate to the shared renderers over the parsed tree.
 5. **Diff against the step-3 snapshots.** The only permitted diffs are the
-   removed `<hidden>` and the browser `inverse` representation. Everything else
-   must be byte-stable.
+   removed `<hidden>` and browser `inverse` CSS whitespace normalization.
+   Everything else must be byte-stable.
 6. **Delete** `ir.rs` (`ProseDocument` / `ProseNode` / `ProseStyle`),
    `terminal.rs`, `browser.rs`, and `to_markdown.rs`. Confirm no remaining
    references; `to_render_nodes()` and `prose/tree.rs` fold into the parser
@@ -185,24 +243,14 @@ tag-dense corpus and require no material regression versus the bespoke
 emitters. If a regression appears, it must clear the cutover's
 mild-regression-with-net-faster-trend bar or be fixed before Prose flips.
 
-## Open Questions
+## Reader Note
 
-Architecture is locked; this is render-side only.
-
-### Browser lowering of `inverse`
-
-SGR 7 swaps foreground and background. The browser has two reasonable
-expressions:
-
-- **Swap the resolved fg/bg colors** on the emitted element (semantic, but
-  requires both colors to be known at lowering time; defaults may be implicit).
-- **`filter: invert(1)`** (or `mix-blend-mode`) — simple and always available,
-  but inverts perceptually rather than swapping the two named colors, so it can
-  differ from the terminal result.
-
-Recommendation: swap fg/bg when both are resolvable, else fall back to a
-documented `filter`-based class. Pin the choice with a browser snapshot. This
-is the one intended browser diff versus the bespoke emitter.
+The earlier draft left browser lowering of `inverse` open. This review chooses
+`filter: invert(1)` unconditionally. Swapping resolved foreground/background
+colors would be more terminal-like when both colors are explicit, but it is
+hard to make correct once inherited/default colors enter the renderer. The
+filter rule is simple, matches the current Prose browser emitter, and keeps the
+tree migration focused on parity rather than new browser color semantics.
 
 ## Out of Scope
 
