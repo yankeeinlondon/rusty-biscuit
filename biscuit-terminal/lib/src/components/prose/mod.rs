@@ -18,8 +18,9 @@ mod styles;
 mod tokens;
 mod tree;
 
-/// Parity-snapshot oracle pinning the current bespoke Prose emitters before
-/// the shared-render-tree cutover (feature `2026-06-02-prose-tree`, Phase 3).
+/// Byte-stable behavior lock for Prose's tree-only rendered output across a
+/// representative tag corpus (feature `2026-06-02-prose-tree`). Began as the
+/// Phase 3 parity oracle; now characterizes the post-migration baseline.
 #[cfg(test)]
 mod parity;
 
@@ -657,14 +658,17 @@ mod tests {
 
     #[test]
     fn code_block_inside_span_restores_enclosing_style() {
-        // KNOWN LIMITATION: the render tree validator rejects block-level
-        // `Code` nodes inside phrasing-only containers such as `Span`. A
-        // fenced code block nested inside a styled span therefore produces
-        // empty output through the tree path. This is an accepted divergence
-        // until the parser learns to split styled spans around block children.
+        // A fenced code block nested in a styled span is split around the
+        // block child: the inline text before and after the fence each keep
+        // the enclosing red style (`\x1b[31m`), while the code block renders
+        // as its own dim block (`\x1b[2m`). Earlier the block-in-phrasing
+        // shape tripped tree validation and the whole span rendered empty.
         let prose = Prose::new("<red>before\n```\ncode\n```\nafter</red>");
         let result = prose.render_optimistic(None);
-        assert_eq!(result, "", "block-level code inside styled span is currently unsupported on the tree path; got: {result:?}");
+        assert_eq!(
+            result,
+            "\x1b[31mbefore\n\x1b[0m\n\n\x1b[2m    code\x1b[0m\n\n\x1b[31m\nafter\x1b[0m"
+        );
     }
 
     #[test]

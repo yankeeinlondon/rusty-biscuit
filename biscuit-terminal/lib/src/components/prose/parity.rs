@@ -1,22 +1,24 @@
-//! Parity snapshot oracle for the Prose → shared-render-tree migration.
+//! Byte-stable behavior lock for Prose's shared-render-tree output.
 //!
-//! These tests pin the **current bespoke** Prose output — the
-//! [`terminal`](super::terminal), [`browser`](super::browser), and
-//! [`to_markdown`](super::to_markdown) emitters — across a representative tag
-//! corpus, **before** Prose's parser and emitters are rewritten onto the
-//! shared tree renderers (feature `2026-06-02-prose-tree`, Phase 3).
+//! These tests pin Prose's rendered output across a representative tag corpus
+//! through its stable public trait entry points — [`TerminalRenderable`],
+//! [`BrowserRenderable`], and [`MarkdownRenderable`]. They began life as the
+//! Phase 3 parity oracle for the `2026-06-02-prose-tree` migration, capturing
+//! the pre-cutover bespoke `terminal` / `browser` / `to_markdown` emitter
+//! output. That migration has since deleted those emitters, so every assertion
+//! now runs through the tree-only render path and locks the **post-migration**
+//! baseline.
 //!
-//! They are the byte-stable oracle that Phase 5 diffs the tree-rendered output
-//! against. Every assertion here is reached through Prose's *stable* public
-//! trait entry points — [`TerminalRenderable`], [`BrowserRenderable`], and
-//! [`MarkdownRenderable`] — so the same tests survive the cutover and the only
-//! permitted post-flip diffs are:
-//!
-//! 1. the removed `<hidden>` tag (see [`hidden_tag`]), and
-//! 2. browser `inverse` CSS declaration-whitespace normalization.
+//! Honesty note: the original bespoke snapshots were **not** preserved as a
+//! separate fixture — the pre-cutover oracle lives only in this file's git
+//! history. The values below were reconciled against that history at the flip,
+//! and the only two intended post-flip diffs were the removed `<hidden>` tag
+//! (see [`hidden_tag`]) and browser `inverse` CSS declaration-whitespace
+//! normalization. Treat this suite as the characterization baseline going
+//! forward: any future diff is a behavior change to review, not noise.
 //!
 //! Do not relax these into `contains` checks: exact-string assertions are what
-//! make the parity comparison meaningful.
+//! make the comparison meaningful.
 
 use renderable::browser::BrowserRenderable;
 use renderable::markdown::MarkdownRenderable;
@@ -219,14 +221,15 @@ fn terminal_reverse_alias() {
     assert_eq!(term("<reverse>x</reverse>"), "\x1b[7mx\x1b[0m");
 }
 
-// ── Terminal: `<hidden>` — REMOVED after the cutover ─────────────────────
+// ── Terminal: `<hidden>` — REMOVED in the cutover ────────────────────────
 
-/// Captures today's `<hidden>` (SGR 8) terminal output.
+/// Locks `<hidden>` as the removed tag — it renders as inert literal text.
 ///
-/// This is the one snapshot deliberately destined to **change** at the Phase 5
-/// flip: `<hidden>` has zero callers and is dropped, after which `<hidden>x`
-/// renders as the inert literal tag text. Reviewers must treat that diff as an
-/// **approved behavior drop**, not a regression.
+/// `<hidden>` had zero callers and was dropped in the tree migration: the
+/// parser no longer recognizes it, so `<hidden>x</hidden>` passes through as
+/// literal tag text on every target (the browser HTML-escapes the angle
+/// brackets). This was the one **approved behavior drop** from the old bespoke
+/// SGR 8 output.
 #[test]
 fn hidden_tag() {
     // Terminal: <hidden> has no semantic peer in the render tree; it passes
@@ -326,6 +329,19 @@ fn terminal_code_fence_preserves_literal_markup() {
     assert_eq!(
         term("```\n**not bold**\n```"),
         "\x1b[2m    **not bold**\x1b[0m"
+    );
+}
+
+#[test]
+fn terminal_styled_fenced_code_splits_around_block() {
+    // A fenced code block nested inside a styled span splits the span around
+    // the block child: the surrounding text keeps the enclosing red (`31`)
+    // foreground and the code renders as its own dim (`2`) block. (Before the
+    // split the block-in-phrasing shape tripped tree validation and the whole
+    // span rendered empty.)
+    assert_eq!(
+        term("<red>before\n```\ncode\n```\nafter</red>"),
+        "\x1b[31mbefore\n\x1b[0m\n\n\x1b[2m    code\x1b[0m\n\n\x1b[31m\nafter\x1b[0m"
     );
 }
 

@@ -146,6 +146,88 @@ fn level2_apple_terminal_link_fallback_visible() {
     );
 }
 
+/// A link whose description carries inline styling **and** a Markdown
+/// bracket must degrade to a visible `[desc](url)` fallback with the
+/// bracket escaped — proving the shared terminal tree path keeps the
+/// bespoke Markdown destination/description escaping when OSC8 is
+/// unavailable.
+///
+/// Input `<a href="…"><b>x</b>[1]</a>` renders (bold stripped by
+/// Terminal.app's capture) to the fallback `[x[1\]](https://example.com)`:
+/// the inner `]` is escaped, the styled child text stays visible, and no
+/// OSC8 introducer leaks on screen.
+#[test]
+#[serial(level2_terminal)]
+fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
+    require_level!(
+        Level::L2,
+        AppleTerminalHarness::available(),
+        "Terminal.app",
+    );
+
+    let mut guard = SHARED_APPLE.get_or_init(|| {
+        AppleTerminalHarness::shared_or_else(|| {
+            let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
+            h.spawn_shell()?;
+            std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+            Ok(h)
+        })
+        .expect("attach/spawn Apple Terminal")
+    });
+    let harness = guard.as_mut().expect("shared Apple Terminal harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+
+    harness
+        .send_text(
+            b"printf '__BT_START__\\n'; bt prose '<a href=\"https://example.com\"><b>x</b>[1]</a>'; printf '\\n__BT_END__\\n'\n",
+        )
+        .expect("send_text failed");
+    harness.settle();
+    std::thread::sleep(Duration::from_millis(400));
+
+    let frame = harness.capture().expect("capture failed");
+    let bounded = frame
+        .plain
+        .split("__BT_START__\n")
+        .nth(1)
+        .and_then(|s| s.split("\n__BT_END__").next())
+        .unwrap_or("");
+
+    assert!(
+        !bounded.is_empty(),
+        "sentinel-bounded output is empty — bt prose likely crashed or emitted nothing.\n\
+         full capture:\n{}",
+        frame.plain,
+    );
+    // Styled child text remains visible (bold SGR is stripped by the
+    // Terminal.app capture, the text is not).
+    assert!(
+        bounded.contains("x[1"),
+        "expected visible styled link description `x[1`.\nbounded:\n{}",
+        bounded,
+    );
+    // The Markdown destination fallback is visible.
+    assert!(
+        bounded.contains("(https://example.com)"),
+        "expected markdown-style URL fallback `(https://example.com)`.\nbounded:\n{}",
+        bounded,
+    );
+    // The `]` in the description is escaped in the fallback.
+    assert!(
+        bounded.contains(r"x[1\]"),
+        "expected the description bracket to be escaped as `x[1\\]` in the \
+         fallback.\nbounded:\n{}",
+        bounded,
+    );
+    // No OSC8 introducer may leak onto the screen.
+    assert!(
+        !bounded.contains("\x1b]8;;") && !bounded.contains("8;;https://example.com"),
+        "OSC8 sequence leaked into the visible fallback capture.\nbounded:\n{}",
+        bounded,
+    );
+}
+
 // ------------------------------------------------------------------
 // AC-2 — `<double-underline>` degrades to plain visible text
 // ------------------------------------------------------------------

@@ -130,32 +130,14 @@ fn style_from_prose(prose_style: &ProseStyle) -> Option<Style> {
     if any { Some(style) } else { None }
 }
 
-/// Returns `true` when `style` has no semantic inline peer in the tree.
-///
-/// `inverse` and `hidden` were Prose-only knobs and have no representation
-/// in the canonical `Style`; we surface them as plain text rather than
-/// dropping them inside a styled wrapper.
-fn is_prose_only(style: &ProseStyle) -> bool {
-    style.emphasis.is_empty()
-        && style.fg.is_none()
-        && style.bg.is_none()
-        && style.hidden
-}
-
 /// Project a styled Prose span into a render-tree inline node.
 ///
 /// Pure emphasis styles map onto semantic wrappers (Strong / Emphasis /
 /// Delete) for the cleanest cross-target output. Anything richer — colors,
-/// dim, blink, underline variants — rides on a `NodeKind::Span` with a
-/// `Style` attached, which the terminal renderer lowers through
+/// dim, blink, underline variants, inverse — rides on a `NodeKind::Span` with
+/// a `Style` attached, which the terminal renderer lowers through
 /// `text_appearance_sgr`.
 pub(super) fn project_span(style: &ProseStyle, children: Vec<RenderNode>) -> RenderNode {
-    // Prose-only knobs with no inline peer in `Style` (`inverse`, `hidden`):
-    // drop the wrapper and emit children as a bare `Span` carrying nothing.
-    if is_prose_only(style) {
-        return RenderNode::span(Vec::new(), children);
-    }
-
     // If the style is purely semantic emphasis (bold / italic /
     // strikethrough — no color, no underline/dim/blink), emit the
     // canonical Strong / Emphasis / Delete wrappers so Markdown and
@@ -174,6 +156,40 @@ pub(super) fn project_span(style: &ProseStyle, children: Vec<RenderNode>) -> Ren
             node
         }
         None => RenderNode::span(Vec::new(), children),
+    }
+}
+
+/// Project a styled Prose span whose children may include a block-level node,
+/// pushing the result(s) onto `out`.
+///
+/// The render tree forbids a block-level `Code` node inside a phrasing-only
+/// `Span`, so a fenced code block nested in a styled span — e.g.
+/// `<red>before ```code``` after</red>` — cannot ride inside one span wrapper
+/// (the validator would reject it and the terminal renderer would emit empty
+/// output). The span is split around each block child: every contiguous inline
+/// run is wrapped by [`project_span`], restoring the enclosing style on both
+/// sides of the block, and the block child is emitted as a sibling.
+///
+/// `Code` is the only block-level node the Prose parser produces; all other
+/// children (text, links, nested spans) accumulate into the surrounding run.
+pub(super) fn project_styled_span(
+    style: &ProseStyle,
+    children: Vec<RenderNode>,
+    out: &mut Vec<RenderNode>,
+) {
+    let mut run: Vec<RenderNode> = Vec::new();
+    for child in children {
+        if matches!(child.kind, NodeKind::Code { .. }) {
+            if !run.is_empty() {
+                out.push(project_span(style, std::mem::take(&mut run)));
+            }
+            out.push(child);
+        } else {
+            run.push(child);
+        }
+    }
+    if !run.is_empty() {
+        out.push(project_span(style, run));
     }
 }
 

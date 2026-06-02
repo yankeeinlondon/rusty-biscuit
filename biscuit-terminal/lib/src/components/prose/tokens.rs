@@ -139,7 +139,6 @@ fn resolve_tag(tag_name: &str, attrs: &[(String, String)]) -> TagResolution {
         "dashed-underline" => Styled(ProseStyle::underline(UnderlineStyle::Dashed)),
         "blink" => Styled(ProseStyle::blink()),
         "inverse" | "reverse" => Styled(ProseStyle::inverse()),
-        "hidden" => Styled(ProseStyle::hidden()),
         "strikethrough" | "~" => Styled(ProseStyle::strikethrough()),
 
         "a" => {
@@ -353,12 +352,12 @@ fn flush_render_text(text: &mut String, nodes: &mut Vec<RenderNode>) {
 /// `Strong`/`Emphasis`/`Delete` wrappers or a styled `Span`; links, code
 /// blocks, and literal text map to `Link`, `Code`, and `Text`.
 ///
-/// Two render-tree-only policies diverge from the old bespoke IR path:
+/// Two Prose-only tag policies:
 ///
 /// - `<inverse>` / `<reverse>` carry `TextEmphasis::inverse` through the
 ///   styled `Span`, lowered per target by the shared renderers.
-/// - `<hidden>` is dropped — it has no semantic peer and degrades to inert
-///   literal text exactly like an unknown tag.
+/// - `<hidden>` is not recognized — it renders as inert literal text like any
+///   unknown tag.
 pub(super) fn parse_render_nodes(content: &str, code_blocks: &[FencedCode]) -> Vec<RenderNode> {
     let mut nodes: Vec<RenderNode> = Vec::new();
     let mut text = String::new();
@@ -401,19 +400,16 @@ pub(super) fn parse_render_nodes(content: &str, code_blocks: &[FencedCode]) -> V
                 && let Some((tag_name, attrs)) = parse_opening_tag(&tag_content)
             {
                 let resolution = resolve_tag(&tag_name, &attrs);
-                // `<hidden>` is recognized by `resolve_tag` (the bespoke path
-                // still emits SGR 8 for it), but the render-tree path drops it:
-                // it falls through to the literal-text branch below alongside
-                // unknown tags.
-                let recognized = !matches!(resolution, TagResolution::Unknown)
-                    && !matches!(&resolution, TagResolution::Styled(style) if style.hidden);
-                if recognized {
+                if !matches!(resolution, TagResolution::Unknown) {
                     let inner = scan_inner(&mut chars, &tag_name);
                     match resolution {
                         TagResolution::Styled(style) => {
                             flush_render_text(&mut text, &mut nodes);
                             let children = parse_render_nodes(&inner, code_blocks);
-                            nodes.push(super::tree::project_span(&style, children));
+                            // A styled span may wrap a fenced code block; split
+                            // it around the block child so the block-in-phrasing
+                            // shape never reaches (and trips) tree validation.
+                            super::tree::project_styled_span(&style, children, &mut nodes);
                         }
                         TagResolution::Link(href) => {
                             flush_render_text(&mut text, &mut nodes);
