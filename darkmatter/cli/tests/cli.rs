@@ -658,6 +658,20 @@ fn test_compose_remote_fallback_serves_stale_cache_on_failure() {
 }
 
 #[test]
+fn test_compose_invalid_remote_freshness_fails_fast() {
+    // A typo must fail with a non-zero exit and list the accepted values,
+    // rather than silently degrading to a single freshness mode.
+    md_cmd()
+        .args(["compose", "-", "--remote-freshness", "fallbak"])
+        .write_stdin("# Local\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("optimistic"))
+        .stderr(predicate::str::contains("strict"))
+        .stderr(predicate::str::contains("fallback"));
+}
+
+#[test]
 fn test_compose_preserves_rendered_remote_links() {
     md_cmd()
         .args(["compose", "-"])
