@@ -670,4 +670,31 @@ mod tests {
         assert!(html.contains("hello"), "got: {html}");
         assert!(html.contains("world"), "got: {html}");
     }
+
+    #[test]
+    fn nested_blockquote_marked_shell_block_output_is_re_quoted() {
+        // A `> > `-led shell block replays the nested block-quote markers on
+        // every emitted line — including the blank separator — so the output
+        // stays inside the nested quote rather than escaping it.
+        let content = "> > ::shell-block\n> > echo hello\n> > echo world\n> > ::end-block\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert!(
+            result.contains("> > hello\n> > \n> > world\n"),
+            "got: {result:?}"
+        );
+        assert!(!result.contains("\nhello\n"), "got: {result:?}");
+    }
+
+    #[test]
+    fn nested_blockquote_shell_block_output_stays_nested_in_commonmark() {
+        // The re-quoted output keeps the whole region inside the two-level
+        // block quote: CommonMark renders nested <blockquote> wrappers rather
+        // than the output breaking out into a sibling block.
+        let content = "> > ::shell-block\n> > echo hello\n> > echo world\n> > ::end-block\n";
+        let html = run_block_stage_to_html(content);
+        assert_eq!(html.matches("<blockquote>").count(), 2, "got: {html}");
+        assert!(html.contains("hello"), "got: {html}");
+        assert!(html.contains("world"), "got: {html}");
+    }
 }

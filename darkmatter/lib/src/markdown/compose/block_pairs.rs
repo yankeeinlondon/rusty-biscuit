@@ -69,8 +69,10 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
     let code_regions = find_code_regions(content);
     let bytes = content.as_bytes();
 
-    // Stack entries: (block_start_byte, body_start_byte, start_line, kind, opening_text)
-    let mut stack: Vec<(usize, usize, usize, BlockOpenKind, String)> = Vec::new();
+    // Stack entries: (block_start_byte, body_start_byte, start_line, kind, opening_text, quoted)
+    // `quoted` records whether the opener carried a block-quote marker, so a
+    // quoted `::end-block` only closes a quoted opener.
+    let mut stack: Vec<(usize, usize, usize, BlockOpenKind, String, bool)> = Vec::new();
     let mut pairs: Vec<BlockPair> = Vec::new();
 
     let mut line_start = 0usize;
@@ -95,12 +97,16 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
         if !trimmed.is_empty() {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
             if !is_in_code_region(first_non_ws, &code_regions) {
-                // Recognize directives that sit inside a block quote by skipping
-                // any leading `>` markers; the marker prefix is captured later
-                // (in `parse_shell_block_region`) so the rendered output can be
-                // re-quoted at the splice boundary.
+                // Block-quote support is scoped to `::shell-block`. Page blocks
+                // (`::block`) match against the unstripped line, so a quoted
+                // `> ::block ... > ::end-block` region stays literal Markdown
+                // (e.g. a documentation example) rather than becoming an active
+                // page block. The marker prefix on a quoted shell block is
+                // captured later (in `parse_shell_block_region`) so the rendered
+                // output can be re-quoted at the splice boundary.
                 let directive = strip_blockquote_prefix(trimmed);
-                if let Some(after) = directive.strip_prefix("::block") {
+                let is_quoted = directive.len() < trimmed.len();
+                if let Some(after) = trimmed.strip_prefix("::block") {
                     // Make sure it's not ::blockquote or similar
                     if after.is_empty() || after.starts_with(char::is_whitespace) {
                         let body_start = span_end;
@@ -111,6 +117,7 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
                             line_number,
                             BlockOpenKind::Page,
                             opening_text,
+                            false,
                         ));
                     }
                 } else if let Some(after) = directive.strip_prefix("::shell-block") {
@@ -124,31 +131,40 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
                             line_number,
                             BlockOpenKind::Shell,
                             opening_text,
+                            is_quoted,
                         ));
                     }
                 } else if let Some(after) = directive.strip_prefix("::end-block") {
-                    let trailing = after.trim();
-                    if !trailing.is_empty() {
-                        return Err(BlockPairError::TrailingContent {
-                            line: line_number,
-                            content: trailing.to_string(),
+                    // A quoted `> ::end-block` only closes a quoted opener; when
+                    // the top of the stack is unquoted (or the stack is empty)
+                    // the line is literal quoted Markdown, not a closer.
+                    let is_active_closer = !is_quoted
+                        || matches!(stack.last(), Some((.., quoted)) if *quoted);
+
+                    if is_active_closer {
+                        let trailing = after.trim();
+                        if !trailing.is_empty() {
+                            return Err(BlockPairError::TrailingContent {
+                                line: line_number,
+                                content: trailing.to_string(),
+                            });
+                        }
+
+                        let Some((block_start, body_start, start_line, kind, opening_text, _)) =
+                            stack.pop()
+                        else {
+                            return Err(BlockPairError::UnmatchedEnd { line: line_number });
+                        };
+
+                        pairs.push(BlockPair {
+                            kind,
+                            span: block_start..span_end,
+                            body_span: body_start..line_start,
+                            start_line,
+                            end_line: line_number,
+                            opening_text,
                         });
                     }
-
-                    let Some((block_start, body_start, start_line, kind, opening_text)) =
-                        stack.pop()
-                    else {
-                        return Err(BlockPairError::UnmatchedEnd { line: line_number });
-                    };
-
-                    pairs.push(BlockPair {
-                        kind,
-                        span: block_start..span_end,
-                        body_span: body_start..line_start,
-                        start_line,
-                        end_line: line_number,
-                        opening_text,
-                    });
                 }
             }
         }
@@ -158,7 +174,7 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
     }
 
     // Check for unterminated blocks (report the deepest open one)
-    if let Some((block_start, _, start_line, _, _)) = stack.last() {
+    if let Some((block_start, _, start_line, _, _, _)) = stack.last() {
         let opening_end = content[*block_start..]
             .find('\n')
             .map(|pos| block_start + pos)
@@ -226,6 +242,28 @@ mod tests {
         assert_eq!(pairs.len(), 1);
         assert_eq!(pairs[0].kind, BlockOpenKind::Shell);
         assert_eq!(&content[pairs[0].body_span.clone()], "> echo hi\n");
+    }
+
+    #[test]
+    fn nested_blockquote_marked_shell_block_is_paired() {
+        // A `> > `-led opener/closer pairs once its nested block-quote markers
+        // are skipped, mirroring the single-marker case.
+        let content = "> > ::shell-block\n> > echo hi\n> > ::end-block\n";
+        let pairs = scan_block_pairs(content).unwrap();
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].kind, BlockOpenKind::Shell);
+        assert_eq!(&content[pairs[0].body_span.clone()], "> > echo hi\n");
+    }
+
+    #[test]
+    fn blockquote_marked_page_block_is_not_paired() {
+        // Block-quote support is scoped to shell blocks: a quoted `> ::block`
+        // region stays literal Markdown (e.g. a documentation example). The
+        // opener is not recognized, and the quoted `> ::end-block` is skipped
+        // rather than treated as a closer — so no pair and no error.
+        let content = "> ::block when=\"x\"\n> body\n> ::end-block\n";
+        let pairs = scan_block_pairs(content).unwrap();
+        assert!(pairs.is_empty());
     }
 
     #[test]
