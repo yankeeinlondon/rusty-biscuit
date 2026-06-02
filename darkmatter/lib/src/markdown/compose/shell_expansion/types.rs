@@ -1021,6 +1021,11 @@ impl PipelineRuntime {
         if let Some(root) = cache_root {
             cache = cache.with_persistent(root);
         }
+        let remote_fetch = crate::markdown::compose::remote_fetch::RemoteFetchRuntime::with_store(
+            &crate::markdown::compose::remote::RemoteReadConfig::default(),
+            None,
+        );
+        cache = cache.with_remote_fetch(remote_fetch.clone());
         Self {
             transclusion: crate::markdown::compose::transclusion::TransclusionRuntime::new(
                 max_depth,
@@ -1028,10 +1033,7 @@ impl PipelineRuntime {
             shell: ShellExpansionRuntime::new(),
             cache,
             dependencies: Vec::new(),
-            remote_fetch: crate::markdown::compose::remote_fetch::RemoteFetchRuntime::with_store(
-                &crate::markdown::compose::remote::RemoteReadConfig::default(),
-                None,
-            ),
+            remote_fetch,
         }
     }
 
@@ -1046,6 +1048,10 @@ impl PipelineRuntime {
         if let Some(root) = cache_root {
             cache = cache.with_persistent(root);
         }
+        // Share the run's fetch runtime with the cache so compose-manifest
+        // validation can revalidate RemoteUrl dependencies under the active
+        // RemoteReadConfig (e.g. --remote-refresh, expired TTL).
+        cache = cache.with_remote_fetch(remote_fetch.clone());
         Self {
             transclusion: crate::markdown::compose::transclusion::TransclusionRuntime::new(
                 max_depth,

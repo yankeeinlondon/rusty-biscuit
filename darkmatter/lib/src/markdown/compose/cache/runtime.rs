@@ -108,6 +108,10 @@ pub(crate) struct RunLocalCache {
     access_mode: CacheAccessMode,
     /// Optional persistent file-backed cache store.
     persistent: Option<Arc<FileStore>>,
+    /// The run's shared remote-fetch runtime, used to revalidate `RemoteUrl`
+    /// dependencies under the active `RemoteReadConfig` during compose-manifest
+    /// validation. Absent in caches built without remote reads.
+    remote_fetch: Option<crate::markdown::compose::remote_fetch::RemoteFetchRuntime>,
 }
 
 impl std::fmt::Debug for RunLocalCache {
@@ -137,7 +141,22 @@ impl RunLocalCache {
             stats: Arc::new(Mutex::new(CacheStats::default())),
             access_mode,
             persistent: None,
+            remote_fetch: None,
         }
+    }
+
+    /// Attaches the run's shared remote-fetch runtime.
+    ///
+    /// Lets compose-manifest validation revalidate `RemoteUrl` dependencies
+    /// under the active `RemoteReadConfig` instead of trusting the persisted
+    /// remote artifact hash, so a cached local child cannot serve stale output
+    /// when its nested remote URL changes (or `--remote-refresh` is set).
+    pub fn with_remote_fetch(
+        mut self,
+        remote_fetch: crate::markdown::compose::remote_fetch::RemoteFetchRuntime,
+    ) -> Self {
+        self.remote_fetch = Some(remote_fetch);
+        self
     }
 
     /// Creates a new cache with persistent file-backed storage.
@@ -1025,6 +1044,24 @@ impl RunLocalCache {
                     .read_manifest(ArtifactClass::RemoteUrl, dependency.entry_key)
                     .ok()
                     .flatten()?;
+
+                // Reading only the persisted hash would accept a body that the
+                // active RemoteReadConfig (--remote-refresh, expired TTL) should
+                // have revalidated — the bug where a cached local child bypasses
+                // remote freshness. Drive the revalidation through the run's
+                // fetch runtime first, then read its (possibly updated) hash.
+                // Single-flight makes this a no-op if the URL is already in
+                // flight this run, and it blocks until the fetch settles.
+                if let Some(remote_fetch) = self.remote_fetch.as_ref()
+                    && let Ok(url) = url::Url::parse(&manifest.url)
+                {
+                    remote_fetch.register_and_fetch(url.clone());
+                    // `None` means the fetch failed with no stale fallback (e.g.
+                    // a Strict revalidation error); treat the dependency as
+                    // invalid so the parent recomputes and surfaces the failure.
+                    return remote_fetch.content_hash(&url);
+                }
+
                 Some(manifest.content_hash)
             }
             ArtifactClass::DocumentSnapshot => None,
@@ -1288,6 +1325,7 @@ mod tests {
             operation_results: Arc::clone(&cache.operation_results),
             stats: Arc::clone(&cache.stats),
             persistent: cache.persistent.clone(),
+            remote_fetch: cache.remote_fetch.clone(),
         };
 
         let result = refresh_cache
