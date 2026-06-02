@@ -101,7 +101,7 @@ packages:
 
 ## Phase 5: Cutover Readiness Validation
 
-- [x] Run mechanical searches confirming no remaining document-pipeline route calls the legacy `RuleProcessor`, `output/html.rs`, `output/terminal.rs`, or exempt helper components directly for `Image`, `ThematicBreak`, or Mermaid code nodes.
+- [x] Run mechanical searches confirming the tree entry points and node renderers do not call the legacy `RuleProcessor`, `output/html.rs`, `output/terminal.rs`, or exempt helper components directly for `Image`, `ThematicBreak`, or Mermaid code nodes; every exempt-helper call sits below the node renderer. (The public `Markdown::as_html` / `as_terminal` / `as_terminal_with_layout` pipeline still routes through the legacy serializers — that public cutover is tree-cutover condition #1 and remains pending. See `phase-5-notes.md` § Scope.)
 - [x] Run the narrow package tests covering `renderable`, `biscuit-terminal`, and `darkmatter` renderer behavior touched or verified by this work.
 - [x] Run any existing component-catalog or documentation validation commands that cover `renderable/docs/components.md` and the feature specs.
 - [x] Update the tree-cutover Phase 4/5 checklist, if present, with the final exemption-register and node-kind verification status.

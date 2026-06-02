@@ -5,9 +5,27 @@ completed: 2026-06-02
 
 # Phase 5 Implementation Notes: Cutover Readiness Validation
 
+## Scope of This Verification
+
+This validates the **node-kind builder/helper exemption** condition from the
+spec: that the tree node renderers and `pub(crate)` tree entry points own the
+document lowering for `Image`, `ThematicBreak`, and `Code{mermaid}`, and that
+every exempt-helper call sits below the node renderer (helper calls are fine).
+
+It does **not** verify the public document-pipeline cutover. The public APIs
+`Markdown::as_html`, `Markdown::as_terminal`, and `as_terminal_with_layout`
+still delegate to the legacy serializers (`output::as_html`,
+`output::for_terminal`, `output::terminal::for_terminal_with_layout`), and
+`DarkmatterPage::render` still calls `as_terminal_with_layout`. Routing those
+public APIs through the tree entry points is **tree-cutover condition #1** and
+remains **pending**. The mechanical-search "no remaining document-pipeline
+route calls the legacy serializers" state is only reached *after* that cutover
+deletes the serializers — see the spec's Verification Condition, which is
+explicitly framed "before bespoke deletion (cutover Phase 5)."
+
 ## Success Criteria
 
-- [x] Mechanical searches confirm no remaining document-pipeline route calls the legacy `RuleProcessor`, `output/html.rs`, `output/terminal.rs`, or exempt helper components directly for `Image`, `ThematicBreak`, or Mermaid code nodes.
+- [x] Mechanical searches confirm the tree entry points and node renderers do not call the legacy `RuleProcessor`, `output/html.rs`, `output/terminal.rs`, or exempt helper components directly for `Image`, `ThematicBreak`, or Mermaid code nodes; every exempt-helper call sits below the node renderer or in a legacy path scheduled for deletion. (The public `Markdown::as_html` / `as_terminal` / `as_terminal_with_layout` pipeline still routes through the legacy serializers — that public cutover is tree-cutover condition #1 and remains pending. See [Scope](#scope-of-this-verification).)
 - [x] Narrow package tests covering `renderable`, `biscuit-terminal`, and `darkmatter` renderer behavior pass.
 - [x] Component-catalog and feature-spec documentation is up to date.
 - [x] Tree-cutover Phase 4/5 checklist updated with exemption-register and node-kind verification status.
@@ -29,7 +47,11 @@ Searched `darkmatter`, `biscuit-terminal`, and `renderable` for `RuleProcessor`.
 - The render-tree fold uses `BlockExtensionProcessor` (span-aware) for HR attributes, not `RuleProcessor`.
 - References in `renderable` and `biscuit-terminal` are limited to documentation, specs, and the `biscuit-terminal` skill file — no source usage.
 
-**Conclusion:** `RuleProcessor` is a legacy-only path. No document-pipeline route bypasses the tree renderer to call it.
+**Conclusion:** `RuleProcessor` is reached only from the legacy serializers. No
+*tree* route constructs it; the tree fold uses `BlockExtensionProcessor`
+instead. The legacy serializers that do call it are still the active public
+document-pipeline routes (`Markdown::as_html` / `as_terminal`) and are
+scheduled for deletion at tree-cutover Phase 5 once condition #1 lands.
 
 ### Legacy Output Serializers
 
@@ -37,11 +59,11 @@ Searched for `output/html.rs` and `output/terminal.rs` usage.
 
 **Findings:**
 - Both files exist under `darkmatter/lib/src/markdown/output/`.
-- They are referenced in documentation, specs, reviews, and the legacy render API (`Markdown::as_html`, `Markdown::for_terminal`).
+- They are still the active public document-pipeline routes: `Markdown::as_html` delegates to `output::as_html` (`darkmatter/lib/src/markdown/mod.rs:595`), `Markdown::as_terminal` to `output::for_terminal` (`:620`), and `as_terminal_with_layout` to `output::terminal::for_terminal_with_layout` (`:626`); `DarkmatterPage::render` calls `as_terminal_with_layout` (`darkmatter/lib/src/layout/page.rs:867`).
 - They are **not** referenced by any tree-renderer code path.
-- The tree entry points (`render_tree_html`, `render_tree_terminal`, `render_tree_markdown`) live in `darkmatter/lib/src/markdown/render_tree/entrypoints.rs` and do not call the legacy serializers.
+- The tree entry points (`render_tree_html`, `render_tree_terminal`, `render_tree_markdown`) live in `darkmatter/lib/src/markdown/render_tree/entrypoints.rs`, are `pub(crate)` and reached only from tests/benchmarks, and do not call the legacy serializers.
 
-**Conclusion:** The legacy serializers are scheduled for deletion in the tree-cutover Phase 5. They are not active document-pipeline routes.
+**Conclusion:** The legacy serializers remain the active public document-pipeline routes and are scheduled for deletion at tree-cutover Phase 5, once condition #1 routes the public APIs through the tree entry points. The tree entry points themselves are verified clean of legacy-serializer calls; the public cutover that retires the serializers is pending (owned by the tree-cutover spec).
 
 ### Exempt Helper Components
 
@@ -130,7 +152,8 @@ Result: **All passed**
 | `NodeKind::ThematicBreak` renders terminal/browser/markdown from `render_*_node` / `render_*_document`; `HorizontalRule` is a helper below the node renderer | ✅ | `biscuit-terminal/lib/src/render_tree/render.rs:418-421`, `renderable/src/tree/render/browser.rs:273`, `renderable/src/tree/render/markdown.rs:259` |
 | `NodeKind::Image` renders through the tree renderer's graphics-policy path; `TerminalImage` is not dispatched as a standalone component | ✅ | `biscuit-terminal/lib/src/render_tree/render.rs:747-756`, `renderable/src/tree/render/browser.rs:292-294`, `renderable/src/tree/render/markdown.rs:308-317` |
 | `NodeKind::Code { lang: "mermaid" }` stays a code node until promotion; `MermaidDiagram` is below the boundary | ✅ | `darkmatter/lib/src/markdown/render_tree/code_renderer.rs:78`, `renderable/src/tree/render/browser.rs:270`, `renderable/src/tree/render/markdown.rs:247` |
-| No document-pipeline route calls legacy `RuleProcessor`, `output/html.rs`, `output/terminal.rs`, or helpers directly | ✅ | Mechanical searches (see above) |
+| No *tree* route calls legacy `RuleProcessor`, `output/html.rs`, `output/terminal.rs`, or helpers directly; every exempt-helper call sits below the node renderer | ✅ | Mechanical searches (see above) |
+| Public `Markdown::as_html` / `as_terminal` / `as_terminal_with_layout` route through the tree (retiring the legacy serializers) | ⏳ Pending | Owned by tree-cutover condition #1; public APIs still delegate to `output::*` (`darkmatter/lib/src/markdown/mod.rs:595,620,626`) |
 | No darkmatter document path emits bare `Status` | ✅ | `StatusBlock` is the document type; mechanical search finds no bare `Status` emission |
 
 ## Remaining Cutover Blockers
@@ -149,3 +172,6 @@ Separate cutover blockers (owned by sibling specs):
 ✅ The cutover can consume the non-structural spec without treating the registered exempt components as blockers.
 ✅ All document-pipeline components remain either tree-render-only or explicitly tracked for cutover.
 ✅ Every exempt helper call is either below the node renderer or in a legacy path scheduled for deletion.
+✅ The tree node renderers and `pub(crate)` entry points own the document lowering for `Image`, `ThematicBreak`, and `Code{mermaid}` (helper calls below the node renderer).
+
+⏳ **Not verified here (out of scope):** the public document-pipeline cutover. `Markdown::as_html` / `as_terminal` / `as_terminal_with_layout` and `DarkmatterPage::render` still route through the legacy serializers. Retiring those public routes is tree-cutover condition #1 and remains pending; only after it lands does the "no remaining document-pipeline route calls the legacy serializers" state hold for the public surface.
