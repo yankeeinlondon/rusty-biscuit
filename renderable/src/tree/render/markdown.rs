@@ -815,6 +815,25 @@ mod tests {
     }
 
     #[test]
+    fn inverse_style_degrades_to_inner_text_in_both_dialects() {
+        use crate::style::{Style, TextEmphasis};
+        // A `Span` carrying inverse emphasis and no classes has no Markdown
+        // sigil: both dialects degrade it to its inner text.
+        let mut span = RenderNode::span(vec![], vec![RenderNode::text("loud")]);
+        span.attrs.set_style(&Style {
+            emphasis: TextEmphasis {
+                inverse: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        for dialect in [MarkdownDialect::Markdown, MarkdownDialect::MarkdownPlus] {
+            let out = render_with(&span, &opts(dialect, RenderStrictness::Lossy)).output;
+            assert_eq!(out, "loud", "dialect {dialect:?}");
+        }
+    }
+
+    #[test]
     fn inline_code_and_code_block() {
         assert_eq!(render(&RenderNode::inline_code("x")).output, "`x`");
         let code = RenderNode::code(Some("rust".into()), None, "let a = 1;");

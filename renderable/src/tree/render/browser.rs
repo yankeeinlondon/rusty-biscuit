@@ -218,7 +218,7 @@ impl Writer<'_> {
     /// (`<strong>`, `<em>`, `<s>`); a **block** node lowers the same emphasis
     /// to inline CSS via [`node_attributes`], because wrapping a block element
     /// inside `<strong>`/`<em>`/`<s>` is invalid HTML. The color, background,
-    /// underline, dim, and blink layers always lower to CSS.
+    /// underline, dim, blink, and inverse layers always lower to CSS.
     fn render(&mut self, node: &RenderNode) -> Result<BrowserFragment<Ready>, RenderError> {
         let fragment = self.render_kind(node)?;
         if is_inline_node_kind(&node.kind) {
@@ -1132,7 +1132,7 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
 /// inline CSS declaration string.
 ///
 /// Always covers `color`, `background` (as `background-color`), and the
-/// underline / dim / blink emphasis layers. When `emit_emphasis` is `true`
+/// underline / dim / blink / inverse emphasis layers. When `emit_emphasis` is `true`
 /// (a block node) the bold / italic / strikethrough layers are *also* lowered
 /// here, to `font-weight` / `font-style` / `text-decoration-line` — wrapping a
 /// block element in `<strong>`/`<em>`/`<s>` would be invalid HTML. When it is
@@ -1178,6 +1178,9 @@ fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> S
     if style.emphasis.blink {
         decls.push("text-decoration:blink".into());
     }
+    if style.emphasis.inverse {
+        decls.push("filter:invert(1)".into());
+    }
     // Block emphasis: lower bold / italic / strikethrough to CSS rather than
     // to the semantic element wrappers used for inline nodes.
     if emit_emphasis {
@@ -1200,8 +1203,8 @@ fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> S
 /// This applies only the bold / italic / strikethrough layers and is invoked
 /// only for **inline** nodes — wrapping a block element in these tags is
 /// invalid HTML, so a block node lowers the same layers to CSS through
-/// [`style_css_declarations`]. The underline / dim / blink layers are always
-/// applied as CSS by [`style_css_declarations`].
+/// [`style_css_declarations`]. The underline / dim / blink / inverse layers
+/// are always applied as CSS by [`style_css_declarations`].
 fn wrap_style_emphasis(
     attrs: &NodeAttrs,
     fragment: BrowserFragment<Ready>,
@@ -2241,6 +2244,19 @@ mod tests {
             ..Default::default()
         });
         assert!(html(&node).contains("text-decoration:blink"));
+    }
+
+    #[test]
+    fn style_inverse_lowers_to_invert_filter() {
+        use crate::style::{Style, TextEmphasis};
+        let node = styled_para(Style {
+            emphasis: TextEmphasis {
+                inverse: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        assert!(html(&node).contains("filter:invert(1)"));
     }
 
     #[test]
