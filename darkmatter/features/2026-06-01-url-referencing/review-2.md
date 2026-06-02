@@ -1,5 +1,5 @@
 ---
-ready: false
+ready: true
 agent: codex
 model: ""
 ---
@@ -35,3 +35,21 @@ model: ""
 ## Production Readiness
 
 Not ready for production. The core static remote-read paths are much improved, but remote transclusions introduced by earlier compose phases can still fail at point-of-use, and the fetch runtime does not provide the resource bounds promised by the design.
+
+## Resolution
+
+Both findings have been addressed.
+
+### High: remote directives created during compose are now registered at prepare time
+
+`prepare_block_transclusions` now receives the run's `RemoteFetchRuntime` and calls `register_nested(url.clone())` the moment it resolves an allowed remote `::file` / `::code` target (`mod.rs` block-transclusion preparation). A directive whose URL is produced by an earlier compose phase (interpolation, replacement) is therefore registered before point-of-use, so `get_content` lands on an in-flight slot instead of failing with "URL was not registered for fetching". The eager pre-scan is retained for latency.
+
+New Level 1 compose coverage: `interpolated_directive_creates_fetchable_remote_file` and `interpolated_directive_creates_fetchable_remote_code` build a `::file` / `::code` directive via `{{ remote_ref }}` interpolation, compose with `--allow-host`, and assert the remote body is included with `fetched == 1`. Both tests were confirmed to fail with the exact "URL was not registered for fetching" error before the fix.
+
+### Medium: the concurrency cap now bounds spawned work
+
+`RemoteFetchRuntime` no longer spawns one OS thread plus a fresh current-thread runtime per URL. It owns a single multi-thread Tokio runtime, built lazily on first registration with its worker-thread count bounded by `remote_concurrency`, and spawns each fetch as a task onto it. The semaphore is still acquired inside each task, so registering many URLs never creates more than the cap's worth of threads or in-flight requests. The runtime is shut down via `shutdown_background` in `Drop` to stay safe when the struct is dropped inside an async context.
+
+New Level 1 coverage: `concurrency_cap_bounds_in_flight_fetches` registers six delayed fetches under a cap of two and asserts a `peak_in_flight` high-water mark of exactly two, proving the cap controls spawned work rather than just request entry.
+
+All `darkmatter` and `darkmatter-cli` tests pass (3674 lib tests) with clean clippy.
