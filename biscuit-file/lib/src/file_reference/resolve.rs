@@ -12,6 +12,9 @@ use crate::file_reference::{
     ReferenceKind, TemplateSegment, make_partial_completion,
 };
 
+#[cfg(feature = "url")]
+use crate::file_reference::Resolved;
+
 /// Resolve a parsed reference against runtime context.
 pub(crate) fn resolve(
     parsed: &ParsedReference,
@@ -19,6 +22,12 @@ pub(crate) fn resolve(
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
+    #[cfg(feature = "url")]
+    if matches!(parsed.kind, ReferenceKind::Url(_)) {
+        let raw = interpolated_url_string(&parsed.kind)?;
+        return Err(FileReferenceError::RemoteNotLocal(raw));
+    }
+
     let interpolated = interpolate(parsed.kind.template(), ctx)?;
 
     if parsed.recursive {
@@ -26,6 +35,47 @@ pub(crate) fn resolve(
     } else {
         resolve_direct(parsed, &interpolated, magic_paths, vault_roots, ctx)
     }
+}
+
+#[cfg(feature = "url")]
+fn interpolated_url_string(kind: &ReferenceKind) -> Result<String, FileReferenceError> {
+    let template = kind.template();
+    let mut raw = String::new();
+    for seg in &template.segments {
+        match seg {
+            TemplateSegment::Literal(l) => raw.push_str(l),
+            TemplateSegment::EnvVar(name) => {
+                let val = std::env::var(name).unwrap_or_else(|_| format!("{{{{{name}}}}}"));
+                raw.push_str(&val);
+            }
+        }
+    }
+    Ok(raw)
+}
+
+/// Resolve a parsed reference to a typed [`Resolved`] target.
+#[cfg(feature = "url")]
+pub(crate) fn resolve_target(
+    parsed: &ParsedReference,
+    magic_paths: &MagicPathList,
+    vault_roots: &[PathBuf],
+) -> Result<Option<Resolved>, FileReferenceError> {
+    if let ReferenceKind::Url(_) = &parsed.kind {
+        let raw = interpolated_url_string(&parsed.kind)?;
+        let url = ::url::Url::parse(&raw)
+            .map_err(|e| FileReferenceError::InvalidUrl(e.to_string()))?;
+        let scheme = url.scheme();
+        if scheme != "http" && scheme != "https" {
+            return Err(FileReferenceError::InvalidUrl(format!(
+                "unsupported scheme: {scheme}"
+            )));
+        }
+        return Ok(Some(Resolved::Remote(url)));
+    }
+
+    let ctx = ResolutionContext::from_ambient()?;
+    let local = resolve(parsed, magic_paths, vault_roots, &ctx)?;
+    Ok(local.map(Resolved::Local))
 }
 
 /// Resolve without recursion -- check exact file paths.
@@ -177,6 +227,8 @@ fn collect_roots(
             }
             Ok(roots)
         }
+        #[cfg(feature = "url")]
+        ReferenceKind::Url(_) => Ok(vec![]),
     }
 }
 
@@ -196,6 +248,11 @@ fn build_candidates(
             )));
         }
         return Ok(vec![path]);
+    }
+
+    #[cfg(feature = "url")]
+    if matches!(parsed.kind, ReferenceKind::Url(_)) {
+        return Ok(vec![]);
     }
 
     let roots = collect_roots(&parsed.kind, magic_paths, vault_roots, ctx)?;

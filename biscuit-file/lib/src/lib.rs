@@ -9,6 +9,8 @@
 //! - **PDF**: Extract text, convert to Markdown, extract table of contents
 //! - **FileReference**: Parse compact file descriptors (`@`, `!`, `vault:`, `%`,
 //!   `{{ENV}}`) and resolve them lazily against runtime context
+//! - **Fetch**: Feature-gated HTTP fetch primitive with policy-enforcing host
+//!   allowlists, conditional request headers, and structured responses
 //!
 //! ## Feature Flags
 //!
@@ -21,6 +23,8 @@
 //! | `lopdf` | Yes | PDF TOC extraction via lopdf |
 //! | `pdfium` | No | High-fidelity PDF extraction via pdfium-render |
 //! | `file-reference` | Yes | File reference parsing and resolution |
+//! | `url` | Yes (via `file-reference`) | URL classification for remote references |
+//! | `fetch` | No | HTTP fetch primitive with host policy enforcement |
 //! | `schema` | No | JSON Schema validation for TOML/YAML |
 //! | `full` | No | All features enabled |
 //!
@@ -134,6 +138,21 @@ pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
 pub use self::file_reference::{
     CompletionEntryForm, FileReference, FileReferenceError, PartialCompletion, PathPosition,
 };
+
+#[cfg(feature = "url")]
+pub use self::file_reference::Resolved;
+
+#[cfg(feature = "fetch")]
+pub use self::file_reference::{
+    fetch::{
+        Conditional, FetchPolicy, FetchResponse, HostPattern, fetch, fetch_blocking, post,
+        post_blocking,
+    },
+    error::FetchError,
+};
+
+#[cfg(feature = "url")]
+pub use url;
 
 // Re-export underlying crate types for convenience
 // This allows consumers to use `use biscuit_file::serde_yaml::Value`

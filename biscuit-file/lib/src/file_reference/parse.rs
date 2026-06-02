@@ -33,6 +33,7 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
             DetectedKind::Magic => ReferenceKind::Magic(template),
             DetectedKind::Package => ReferenceKind::Package(template),
             DetectedKind::Vault => ReferenceKind::Vault(template),
+            DetectedKind::Url => ReferenceKind::Url(template),
         },
     };
 
@@ -56,10 +57,14 @@ enum DetectedKind {
     Magic,
     Package,
     Vault,
+    Url,
 }
 
 /// Detect the reference kind from its prefix and return the remaining path string.
 fn detect_kind(s: &str) -> (DetectedKind, &str) {
+    if s.starts_with("http://") || s.starts_with("https://") {
+        return (DetectedKind::Url, s);
+    }
     // vault:: (double colon) before vault: (single colon)
     if let Some(rest) = s.strip_prefix("vault::") {
         return (DetectedKind::Vault, rest);
@@ -322,5 +327,34 @@ mod tests {
     fn explicit_dotdot_slash_is_relative() {
         let parsed = parse("../foo.md").unwrap();
         assert!(matches!(parsed.kind, ReferenceKind::Relative(_)));
+    }
+
+    #[test]
+    fn http_url_detected_as_url_kind() {
+        let parsed = parse("http://example.com/doc.md").unwrap();
+        assert!(!parsed.recursive);
+        assert!(matches!(parsed.kind, ReferenceKind::Url(_)));
+        let template = parsed.kind.template();
+        assert_eq!(
+            template.segments[0],
+            TemplateSegment::Literal("http://example.com/doc.md".to_string())
+        );
+    }
+
+    #[test]
+    fn https_url_detected_as_url_kind() {
+        let parsed = parse("https://example.com/doc.md").unwrap();
+        assert!(matches!(parsed.kind, ReferenceKind::Url(_)));
+    }
+
+    #[test]
+    fn url_with_path_segments() {
+        let parsed = parse("https://cdn.example.com/assets/v2/spec.md").unwrap();
+        assert!(matches!(parsed.kind, ReferenceKind::Url(_)));
+        let template = parsed.kind.template();
+        assert_eq!(
+            template.segments[0],
+            TemplateSegment::Literal("https://cdn.example.com/assets/v2/spec.md".to_string())
+        );
     }
 }
