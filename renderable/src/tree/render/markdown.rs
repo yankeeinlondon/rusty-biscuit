@@ -101,6 +101,7 @@ pub fn render_markdown_node(
         opts,
         diagnostics: Vec::new(),
         table_cell_depth: 0,
+        html_depth: 0,
     };
 
     // Warning-severity validation findings escalate to an error under Strict
@@ -172,6 +173,11 @@ struct Writer<'a> {
     /// Inside a table cell, text is escaped so literal pipes and newlines
     /// cannot corrupt the GFM pipe-delimited table structure.
     table_cell_depth: u32,
+    /// Non-zero while rendering the body of a MarkdownPlus inline-HTML span
+    /// (a classed or styled [`NodeKind::Span`]). Inside that body, text nodes
+    /// HTML-escape `<`, `>`, and `&` so literal markup stays inert, while
+    /// generated Markdown sigils and nested span tags pass through unescaped.
+    html_depth: u32,
 }
 
 impl Writer<'_> {
@@ -279,11 +285,7 @@ impl Writer<'_> {
                 let body = self.render_blocks(children)?;
                 Ok(format!("[^{identifier}]: {body}"))
             }
-            NodeKind::Text { value } => Ok(if self.table_cell_depth > 0 {
-                escape_table_cell_text(value)
-            } else {
-                value.clone()
-            }),
+            NodeKind::Text { value } => Ok(self.render_text(value)),
             NodeKind::Emphasis { children } => Ok(format!("_{}_", self.render_inline(children)?)),
             NodeKind::Strong { children } => Ok(format!("**{}**", self.render_inline(children)?)),
             NodeKind::Delete { children } => Ok(format!("~~{}~~", self.render_inline(children)?)),
@@ -541,27 +543,61 @@ impl Writer<'_> {
         Ok(format!("| {} |", cells.join(" | ")))
     }
 
-    /// Renders an inline span, degrading classed spans in plain Markdown.
+    /// Renders an inline span.
+    ///
+    /// Under [`MarkdownDialect::MarkdownPlus`] a span carrying CSS-bearing
+    /// classes or a concrete inline [`Style`](crate::style::Style) (foreground
+    /// color, background color, or an underline variant) lowers to a single
+    /// inline `<span>` carrying a `class` and/or `style` attribute, with both
+    /// attributes coalesced onto one element when present. Its body is rendered
+    /// with `<`, `>`, and `&` HTML-escaped so literal markup stays inert.
+    /// Emphasis layers without a MarkdownPlus CSS form here (`dim`, `blink`,
+    /// `inverse`) carry no inline style and degrade to inner text.
+    ///
+    /// Under plain [`MarkdownDialect::Markdown`] a classed or styled span has
+    /// no portable equivalent and degrades per the strictness model: rejected
+    /// under [`RenderStrictness::Strict`], a lossy diagnostic plus inner text
+    /// under [`RenderStrictness::Warn`], and silent inner text under
+    /// [`RenderStrictness::Lossy`].
     fn render_span(
         &mut self,
         node: &RenderNode,
         children: &[RenderNode],
     ) -> Result<String, RenderError> {
-        let inner = self.render_inline(children)?;
         let classes = &node.attrs.classes;
-        if classes.is_empty() {
-            return Ok(inner);
-        }
+        let style_css = node
+            .attrs
+            .style()
+            .filter(|style| !style.is_empty())
+            .and_then(|style| markdown_plus_style_css(&style));
+
         match self.opts.dialect {
-            MarkdownDialect::MarkdownPlus => Ok(format!(
-                "<span class=\"{}\">{inner}</span>",
-                classes.join(" ")
-            )),
+            MarkdownDialect::MarkdownPlus => {
+                if classes.is_empty() && style_css.is_none() {
+                    return self.render_inline(children);
+                }
+                // The children become the body of an inline HTML element, so
+                // descendant text HTML-escapes its markup characters.
+                self.html_depth += 1;
+                let inner = self.render_inline(children);
+                self.html_depth -= 1;
+                let inner = inner?;
+
+                let mut attrs = String::new();
+                if !classes.is_empty() {
+                    attrs.push_str(&format!(" class=\"{}\"", classes.join(" ")));
+                }
+                if let Some(css) = &style_css {
+                    attrs.push_str(&format!(" style=\"{css}\""));
+                }
+                Ok(format!("<span{attrs}>{inner}</span>"))
+            }
             MarkdownDialect::Markdown => {
-                let message = format!(
-                    "span classes [{}] have no plain Markdown equivalent",
-                    classes.join(", ")
-                );
+                let inner = self.render_inline(children)?;
+                if classes.is_empty() && style_css.is_none() {
+                    return Ok(inner);
+                }
+                let message = span_lossy_message(classes, style_css.is_some());
                 match self.opts.strictness {
                     RenderStrictness::Strict => Err(RenderError::LossyRejected { message }),
                     RenderStrictness::Warn => {
@@ -573,6 +609,20 @@ impl Writer<'_> {
                 }
             }
         }
+    }
+
+    /// Renders a text node, applying HTML-body escaping inside a MarkdownPlus
+    /// inline-HTML span and GFM table-cell escaping inside a table cell.
+    fn render_text(&self, value: &str) -> String {
+        let mut text = if self.html_depth > 0 {
+            escape_inline_html_body(value)
+        } else {
+            value.to_string()
+        };
+        if self.table_cell_depth > 0 {
+            text = escape_table_cell_text(&text);
+        }
+        text
     }
 
     /// Renders raw HTML, degrading it under plain Markdown.
@@ -606,18 +656,25 @@ impl Writer<'_> {
     ///
     /// Inside a table cell the URL and title are escaped the same way a
     /// `Text` node is — a literal `|` or newline in either value would
-    /// otherwise split the GFM pipe-delimited row.
+    /// otherwise split the GFM pipe-delimited row. Outside a table cell the
+    /// destination is escaped per CommonMark by
+    /// [`escape_markdown_destination`] so parentheses, backslashes, and
+    /// whitespace cannot truncate or break the destination.
     fn link_target(&self, url: &str, title: &Option<String>) -> String {
-        let escape = |text: &str| {
-            if self.table_cell_depth > 0 {
-                escape_table_cell_text(text)
-            } else {
-                text.to_string()
-            }
-        };
+        if self.table_cell_depth > 0 {
+            return match title {
+                Some(title) => format!(
+                    "{} \"{}\"",
+                    escape_table_cell_text(url),
+                    escape_table_cell_text(title)
+                ),
+                None => escape_table_cell_text(url),
+            };
+        }
+        let dest = escape_markdown_destination(url);
         match title {
-            Some(title) => format!("{} \"{}\"", escape(url), escape(title)),
-            None => escape(url),
+            Some(title) => format!("{dest} \"{title}\""),
+            None => dest,
         }
     }
 
@@ -690,6 +747,120 @@ fn escape_table_cell_text(text: &str) -> String {
     text.replace('|', "\\|")
         .replace("\r\n", "<br>")
         .replace('\n', "<br>")
+}
+
+/// HTML-escapes `<`, `>`, and `&` for text placed inside the body of a
+/// MarkdownPlus inline-HTML element, so literal markup stays inert.
+///
+/// Markdown sigils are intentionally left untouched — CommonMark still parses
+/// Markdown inside inline HTML, so a nested `Strong`/`Emphasis` node's `**` /
+/// `_` must survive. `"` is not escaped because the body is element content,
+/// not an attribute value.
+fn escape_inline_html_body(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// Lowers the MarkdownPlus-supported layers of a [`Style`](crate::style::Style)
+/// to one inline CSS declaration string: foreground color, background color,
+/// and the underline variant. Returns `None` when none of those layers is set.
+///
+/// Colors lower to the `rgb(r, g, b)` form (or `inherit` when the color has no
+/// fixed RGB value). `dim`, `blink`, and `inverse` have no MarkdownPlus CSS
+/// form here and are omitted, so a span carrying only those degrades to inner
+/// text.
+fn markdown_plus_style_css(style: &crate::style::Style) -> Option<String> {
+    use crate::color::ColorMode;
+    use crate::target::RenderTarget;
+
+    let resolve = |tv: &crate::layout::TargetValue<
+        crate::style::PerMode<crate::color::Color>,
+    >|
+     -> Option<crate::color::Color> {
+        tv.resolve(RenderTarget::MarkdownPlus)
+            .map(|per_mode| *per_mode.resolve(ColorMode::Dark))
+    };
+
+    let mut decls: Vec<String> = Vec::new();
+    if let Some(color) = style.color.as_ref().and_then(&resolve) {
+        decls.push(format!("color: {}", rgb_css(color)));
+    }
+    if let Some(bg) = style.background.as_ref().and_then(&resolve) {
+        decls.push(format!("background-color: {}", rgb_css(bg)));
+    }
+    if let Some(underline) = style.emphasis.underline {
+        decls.push(underline.css_declaration().to_string());
+    }
+    if decls.is_empty() {
+        None
+    } else {
+        Some(decls.join("; "))
+    }
+}
+
+/// A CSS color string for a [`Color`](crate::color::Color): `rgb(r, g, b)`, or
+/// `inherit` when the color has no fixed RGB value.
+fn rgb_css(color: crate::color::Color) -> String {
+    match color.to_rgb() {
+        Some((r, g, b)) => format!("rgb({r}, {g}, {b})"),
+        None => "inherit".to_string(),
+    }
+}
+
+/// Builds the lossy-degradation message for a classed and/or styled span that
+/// has no portable plain-Markdown equivalent.
+fn span_lossy_message(classes: &[String], has_style: bool) -> String {
+    match (classes.is_empty(), has_style) {
+        (false, true) => format!(
+            "span classes [{}] and inline style have no plain Markdown equivalent",
+            classes.join(", ")
+        ),
+        (false, false) => format!(
+            "span classes [{}] have no plain Markdown equivalent",
+            classes.join(", ")
+        ),
+        (true, _) => "inline span style has no plain Markdown equivalent".to_string(),
+    }
+}
+
+/// Escapes a link/image destination so it survives intact as a CommonMark
+/// link destination.
+///
+/// A *bare* destination may not contain ASCII whitespace, and any parentheses
+/// or backslashes are backslash-escaped so the first unescaped `)` cannot
+/// truncate the destination. A destination containing whitespace is emitted in
+/// *angle-bracket* form (`<…>`), which permits spaces but forbids unescaped
+/// `<` and `>`; line endings, invalid in either form, degrade to spaces.
+fn escape_markdown_destination(url: &str) -> String {
+    if url.chars().any(|c| c.is_ascii_whitespace()) {
+        let mut out = String::with_capacity(url.len() + 2);
+        out.push('<');
+        for c in url.chars() {
+            match c {
+                '\\' | '<' | '>' => {
+                    out.push('\\');
+                    out.push(c);
+                }
+                '\n' | '\r' | '\t' => out.push(' '),
+                _ => out.push(c),
+            }
+        }
+        out.push('>');
+        out
+    } else {
+        let mut out = String::with_capacity(url.len());
+        for c in url.chars() {
+            match c {
+                '\\' | '(' | ')' => {
+                    out.push('\\');
+                    out.push(c);
+                }
+                _ => out.push(c),
+            }
+        }
+        out
+    }
 }
 
 /// Builds the semantic progress-widget HTML emitted by MarkdownPlus.
@@ -1887,5 +2058,254 @@ mod tests {
             render(&tree).output,
             "# Parent\n\nIntro\n\n## Child\n\nBody"
         );
+    }
+
+    // ── RT-PROSE-002: MarkdownPlus inline-style lowering ───────────────────
+
+    fn styled_span(style: crate::style::Style, children: Vec<RenderNode>) -> RenderNode {
+        let mut span = RenderNode::span(vec![], children);
+        span.attrs.set_style(&style);
+        span
+    }
+
+    fn color_style(color: crate::color::Color) -> crate::style::Style {
+        use crate::layout::TargetValue;
+        use crate::style::{PerMode, Style};
+        Style {
+            color: Some(TargetValue::universal(PerMode::universal(color))),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn markdown_plus_lowers_foreground_color_to_inline_html() {
+        use crate::color::{BasicColor, Color};
+        let span = styled_span(
+            color_style(Color::BasicColor(BasicColor::Red)),
+            vec![RenderNode::text("x")],
+        );
+        let out = render_with(
+            &span,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert_eq!(out, "<span style=\"color: rgb(128, 0, 0)\">x</span>");
+    }
+
+    #[test]
+    fn markdown_plus_lowers_background_color_to_inline_html() {
+        use crate::color::{BasicColor, Color};
+        use crate::layout::TargetValue;
+        use crate::style::{PerMode, Style};
+        let span = styled_span(
+            Style {
+                background: Some(TargetValue::universal(PerMode::universal(Color::BasicColor(
+                    BasicColor::Red,
+                )))),
+                ..Default::default()
+            },
+            vec![RenderNode::text("y")],
+        );
+        let out = render_with(
+            &span,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert_eq!(out, "<span style=\"background-color: rgb(128, 0, 0)\">y</span>");
+    }
+
+    #[test]
+    fn markdown_plus_lowers_underline_variants_to_inline_html() {
+        use crate::style::{Style, TextEmphasis, UnderlineStyle};
+        let straight = styled_span(
+            Style {
+                emphasis: TextEmphasis {
+                    underline: Some(UnderlineStyle::Straight),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            vec![RenderNode::text("x")],
+        );
+        assert_eq!(
+            render_with(
+                &straight,
+                &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn)
+            )
+            .output,
+            "<span style=\"text-decoration: underline\">x</span>"
+        );
+
+        let curly = styled_span(
+            Style {
+                emphasis: TextEmphasis {
+                    underline: Some(UnderlineStyle::Curly),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            vec![RenderNode::text("x")],
+        );
+        assert_eq!(
+            render_with(
+                &curly,
+                &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn)
+            )
+            .output,
+            "<span style=\"text-decoration: underline; text-decoration-style: wavy\">x</span>"
+        );
+    }
+
+    #[test]
+    fn markdown_plus_html_escapes_styled_span_body() {
+        use crate::color::{BasicColor, Color};
+        let span = styled_span(
+            color_style(Color::BasicColor(BasicColor::Red)),
+            vec![RenderNode::text("<script>alert(1)</script>")],
+        );
+        let out = render_with(
+            &span,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert_eq!(
+            out,
+            "<span style=\"color: rgb(128, 0, 0)\">\
+             &lt;script&gt;alert(1)&lt;/script&gt;</span>"
+        );
+    }
+
+    #[test]
+    fn markdown_plus_html_escapes_ampersand_in_styled_span_body() {
+        use crate::color::{BasicColor, Color};
+        let span = styled_span(
+            color_style(Color::BasicColor(BasicColor::Red)),
+            vec![RenderNode::text("a & b")],
+        );
+        let out = render_with(
+            &span,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert_eq!(out, "<span style=\"color: rgb(128, 0, 0)\">a &amp; b</span>");
+    }
+
+    #[test]
+    fn markdown_plus_preserves_markdown_sigils_inside_styled_span() {
+        use crate::color::{BasicColor, Color};
+        // A nested `Strong` node's `**` sigils are structural output, not body
+        // text, so HTML-body escaping leaves them intact.
+        let span = styled_span(
+            color_style(Color::BasicColor(BasicColor::Red)),
+            vec![RenderNode::strong(vec![RenderNode::text("<x>")])],
+        );
+        let out = render_with(
+            &span,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert_eq!(
+            out,
+            "<span style=\"color: rgb(128, 0, 0)\">**&lt;x&gt;**</span>"
+        );
+    }
+
+    #[test]
+    fn markdown_plus_coalesces_class_and_style_into_one_span() {
+        use crate::color::{BasicColor, Color};
+        let mut span = RenderNode::span(vec!["hl".into()], vec![RenderNode::text("x")]);
+        span.attrs
+            .set_style(&color_style(Color::BasicColor(BasicColor::Red)));
+        let out = render_with(
+            &span,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert_eq!(
+            out,
+            "<span class=\"hl\" style=\"color: rgb(128, 0, 0)\">x</span>"
+        );
+    }
+
+    #[test]
+    fn styled_span_degrades_in_plain_markdown_with_diagnostic() {
+        use crate::color::{BasicColor, Color};
+        let span = styled_span(
+            color_style(Color::BasicColor(BasicColor::Red)),
+            vec![RenderNode::text("important")],
+        );
+        let rendered = render_with(
+            &span,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Warn),
+        );
+        assert_eq!(rendered.output, "important");
+        assert_eq!(rendered.diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn styled_span_emits_inner_text_in_lossy_plain_markdown() {
+        use crate::color::{BasicColor, Color};
+        let span = styled_span(
+            color_style(Color::BasicColor(BasicColor::Red)),
+            vec![RenderNode::text("important")],
+        );
+        let rendered = render_with(
+            &span,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Lossy),
+        );
+        assert_eq!(rendered.output, "important");
+        assert!(rendered.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn styled_span_rejected_in_strict_plain_markdown() {
+        use crate::color::{BasicColor, Color};
+        let span = styled_span(
+            color_style(Color::BasicColor(BasicColor::Red)),
+            vec![RenderNode::text("important")],
+        );
+        let result = render_markdown_node(
+            &span,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Strict),
+        );
+        assert!(matches!(result, Err(RenderError::LossyRejected { .. })));
+    }
+
+    // ── RT-PROSE-003: link destination escaping ────────────────────────────
+
+    #[test]
+    fn link_destination_escapes_parentheses() {
+        let link = RenderNode::link(
+            "https://example.com/a(b)c",
+            None,
+            vec![RenderNode::text("go")],
+        );
+        assert_eq!(render(&link).output, r"[go](https://example.com/a\(b\)c)");
+    }
+
+    #[test]
+    fn link_destination_escapes_backslash() {
+        let link = RenderNode::link(r"https://example.com/a\b", None, vec![RenderNode::text("go")]);
+        assert_eq!(render(&link).output, r"[go](https://example.com/a\\b)");
+    }
+
+    #[test]
+    fn link_destination_with_whitespace_uses_angle_brackets() {
+        let link = RenderNode::link(
+            "https://example.com/a b",
+            None,
+            vec![RenderNode::text("go")],
+        );
+        assert_eq!(render(&link).output, "[go](<https://example.com/a b>)");
+    }
+
+    #[test]
+    fn link_destination_line_ending_degrades_to_space() {
+        let link = RenderNode::link(
+            "https://example.com/a\nb",
+            None,
+            vec![RenderNode::text("go")],
+        );
+        assert_eq!(render(&link).output, "[go](<https://example.com/a b>)");
     }
 }
