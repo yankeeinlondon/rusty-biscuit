@@ -105,6 +105,60 @@ fn wait_for_marker(session: &mut OsSession, marker: &str, deadline: Duration) ->
     );
 }
 
+/// Alternate-screen enter sequence crossterm emits via `EnterAlternateScreen`.
+const ALT_SCREEN_ENTER: &str = "\x1b[?1049h";
+
+/// Block until the interactive widget has switched the PTY into raw mode,
+/// then return the accumulated raw transcript.
+///
+/// The prompt's property name renders in the pre-prompt status report —
+/// which `run_standalone` prints to stderr *before* it calls
+/// `enable_raw_mode()`. Sending a keystroke as soon as that name appears
+/// races the line discipline: until raw mode disables `ICRNL`, a carriage
+/// return (`\r`, the byte that means Enter) is rewritten to a line feed
+/// (`\n`), which crossterm parses as `Ctrl+J` — not `Enter` — so the
+/// prompt never submits and the test hangs to its deadline.
+///
+/// `prepare_terminal` enables raw mode and *then* emits
+/// [`ALT_SCREEN_ENTER`], so observing that sequence in the transcript
+/// proves raw mode is already active and any `\r` we write next survives
+/// as a carriage return. Gate every keystroke on this marker.
+///
+/// `seed` is the transcript already drained by the preceding
+/// [`wait_for_marker`] call — the sequence may have arrived in the same
+/// read as the status report.
+fn wait_for_raw_mode(session: &mut OsSession, seed: String, deadline: Duration) -> String {
+    if seed.contains(ALT_SCREEN_ENTER) {
+        return seed;
+    }
+    let stop = Instant::now() + deadline;
+    let mut transcript = seed;
+    let mut scratch = [0u8; 4096];
+    session.set_expect_timeout(Some(Duration::from_millis(100)));
+    while Instant::now() < stop {
+        match session.try_read(&mut scratch) {
+            Ok(0) => break,
+            Ok(n) => {
+                transcript.push_str(&String::from_utf8_lossy(&scratch[..n]));
+                if transcript.contains(ALT_SCREEN_ENTER) {
+                    return transcript;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
+                || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(_) => break,
+        }
+    }
+    panic!(
+        "raw-mode marker {ALT_SCREEN_ENTER:?} did not appear within {deadline:?}; \
+         transcript:\n{transcript}"
+    );
+}
+
 /// Pre-stage a minimal claudine config at `$HOME/.claudine/config.json`.
 ///
 /// Under a PTY, claudine detects an interactive stdin and runs the
@@ -181,9 +235,11 @@ fn level2_pty_schema_prompt_collects_string_and_launches_provider() {
     let cmd = compose_command(workspace.path(), &bin_dir, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
-    // The prompt label is built from the property name plus type hint. Wait
-    // for the label to render before sending input.
+    // The property name appears in the pre-prompt status report. Wait for
+    // it, then block until raw mode is on before sending input (see
+    // `wait_for_raw_mode`).
     let pre = wait_for_marker(&mut session, "topic", Duration::from_secs(10));
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
 
     // Type a value and submit. `\r` is the carriage-return byte that
     // crossterm's raw-mode reader translates into `KeyCode::Enter`.
@@ -232,7 +288,8 @@ fn level2_pty_schema_prompt_collects_enum_selection() {
     let cmd = compose_command(workspace.path(), &bin_dir, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
-    wait_for_marker(&mut session, "tier", Duration::from_secs(10));
+    let pre = wait_for_marker(&mut session, "tier", Duration::from_secs(10));
+    wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
 
     // ChooseOne defaults to the first option highlighted. Pressing Enter
     // submits the current selection (`small`).
@@ -276,7 +333,8 @@ fn level2_pty_schema_prompt_collects_boolean() {
     let cmd = compose_command(workspace.path(), &bin_dir, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
-    wait_for_marker(&mut session, "ready", Duration::from_secs(10));
+    let pre = wait_for_marker(&mut session, "ready", Duration::from_secs(10));
+    wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
 
     // BooleanSwitch defaults to false; Enter submits the current state.
     session.write_all(b"\r").expect("submit boolean default");
@@ -319,11 +377,14 @@ fn level2_pty_schema_prompt_number_retries_on_invalid_input() {
     let cmd = compose_command(workspace.path(), &bin_dir, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
-    wait_for_marker(&mut session, "count", Duration::from_secs(10));
+    let pre = wait_for_marker(&mut session, "count", Duration::from_secs(10));
+    wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
 
     // First, submit a non-numeric value. The parse-and-retry loop in
     // `collect_number` must re-prompt with an inline validation error
-    // and keep the previous buffer.
+    // and keep the previous buffer. (The retry's submission waits on the
+    // widget-rendered validation error below, which already implies raw
+    // mode for the second prompt iteration.)
     session.write_all(b"not-a-number\r").expect("write bad value");
     session.flush().ok();
 
@@ -462,6 +523,7 @@ fn level2_pty_schema_status_does_not_report_templated_enum_as_invalid() {
     // never user-supplied — the test asserts it is NOT flagged invalid
     // in the report transcript.
     let pre = wait_for_marker(&mut session, "topic", Duration::from_secs(10));
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
     session.write_all(b"async\r").expect("write topic value");
     session.flush().ok();
 
@@ -598,8 +660,10 @@ fn level2_pty_sequence_prompt_dedupes_and_launches_all_steps() {
         common::strip_ansi(&pre)
     );
 
-    // Submit the answer once. The deduper should apply this value to
-    // every step that declared the same missing property.
+    // Submit the answer once, after raw mode is confirmed. The deduper
+    // should apply this value to every step that declared the same
+    // missing property.
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
     session.write_all(b"async\r").expect("write topic value");
     session.flush().ok();
 
@@ -733,6 +797,7 @@ exit 0
 
     // Drive the prompt to completion. The deduper should fire `topic`
     // exactly once and reuse the answer for both steps.
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
     session.write_all(b"collected\r").expect("write topic value");
     session.flush().ok();
 
@@ -846,6 +911,7 @@ fn level2_pty_sequence_status_report_honors_setter_supplied_required() {
     );
 
     // Drive the prompt to completion so the test exits cleanly.
+    wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
     session.write_all(b"async\r").expect("write topic value");
     session.flush().ok();
     let stop = Instant::now() + Duration::from_secs(15);
