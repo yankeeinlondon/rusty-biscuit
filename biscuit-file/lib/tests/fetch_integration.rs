@@ -175,23 +175,21 @@ async fn fetch_conditional_if_modified_since() {
 }
 
 #[tokio::test]
-async fn fetch_wildcard_host_policy() {
+async fn fetch_wildcard_does_not_match_bare_parent_host() {
+    // The mock server is reached at the bare host `127.0.0.1`. A wildcard over
+    // that host delegates subdomains only, so the request must be policy-denied
+    // before any network access — exact-host coverage lives in the other tests
+    // via `setup_server`.
     let server = MockServer::start().await;
     let client = Client::new();
     let policy = FetchPolicy::deny_all().allow(HostPattern::Wildcard("127.0.0.1".to_string()));
 
-    Mock::given(method("GET"))
-        .and(path("/ok"))
-        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
-        .mount(&server)
-        .await;
-
     let url = url::Url::parse(&format!("{}/ok", server.uri())).unwrap();
-    let resp = fetch(&client, &url, &policy, &Conditional::default())
+    let err = fetch(&client, &url, &policy, &Conditional::default())
         .await
-        .unwrap();
+        .unwrap_err();
 
-    assert_eq!(resp.status, 200);
+    assert!(matches!(err, FetchError::PolicyDenied { .. }));
 }
 
 #[test]

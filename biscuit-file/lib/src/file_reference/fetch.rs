@@ -26,10 +26,13 @@ impl HostPattern {
         match self {
             HostPattern::Exact(e) => e.eq_ignore_ascii_case(host),
             HostPattern::Wildcard(suffix) => {
+                // Subdomains only: `*.example.com` matches `a.example.com` but
+                // not the bare parent `example.com`. As the shared SSRF
+                // boundary, the wildcard must not silently widen to the parent
+                // host a delegated-subdomain policy did not intend to allow.
                 let host_lower = host.to_ascii_lowercase();
                 let suffix_lower = suffix.to_ascii_lowercase();
                 host_lower.ends_with(&format!(".{suffix_lower}"))
-                    || host_lower.eq_ignore_ascii_case(&suffix_lower)
             }
         }
     }
@@ -304,7 +307,8 @@ mod tests {
         let pat = HostPattern::Wildcard("example.com".to_string());
         assert!(pat.matches("a.example.com"));
         assert!(pat.matches("b.c.example.com"));
-        assert!(pat.matches("example.com"));
+        // The bare parent host is NOT a subdomain and must not match.
+        assert!(!pat.matches("example.com"));
         assert!(!pat.matches("notexample.com"));
     }
 
@@ -333,7 +337,8 @@ mod tests {
         let policy =
             FetchPolicy::deny_all().allow(HostPattern::Wildcard("example.com".to_string()));
         assert!(policy.is_allowed("api.example.com"));
-        assert!(policy.is_allowed("example.com"));
+        // Wildcard delegates subdomains only; the bare parent stays denied.
+        assert!(!policy.is_allowed("example.com"));
         assert!(!policy.is_allowed("other.com"));
     }
 
