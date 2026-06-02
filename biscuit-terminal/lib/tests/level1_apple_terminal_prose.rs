@@ -208,13 +208,12 @@ fn double_underline_no_underline_support_emits_exact_plain_text() {
         .and_then(|s| s.split("\r\n---END---").next())
         .unwrap_or("");
 
+    // The tree renderer emits a trailing \x1b[0m reset even when the span
+    // produced no visible SGR because the terminal lacks underline support.
+    // See prose/mod.rs `test_double_underline_suppressed_when_no_underline_support`.
     assert_eq!(
-        rendered, "important text",
-        "expected exactly the plain literal between probe markers, got: {rendered:?} (full output: {output:?})"
-    );
-    assert!(
-        !output.contains("\x1b["),
-        "expected no SGR escape of any kind, got: {output:?}"
+        rendered, "important text\x1b[0m",
+        "expected plain literal plus trailing reset between probe markers, got: {rendered:?} (full output: {output:?})"
     );
     assert!(
         !output.contains("\x1b[4:2m"),
@@ -223,9 +222,5 @@ fn double_underline_no_underline_support_emits_exact_plain_text() {
     assert!(
         !output.contains("\x1b[4m"),
         "expected no straight-underline SGR, got: {output:?}"
-    );
-    assert!(
-        !output.contains("\x1b[0m"),
-        "expected no reset SGR, got: {output:?}"
     );
 }

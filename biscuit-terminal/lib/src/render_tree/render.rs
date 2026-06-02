@@ -1628,8 +1628,10 @@ fn apply_classes(inner: &str, classes: &[String], effective: &Style, term: &crat
     if emphasis.is_empty() {
         return inner.to_string();
     }
-    let mut style = Style::default();
-    style.emphasis = emphasis;
+    let style = Style {
+        emphasis,
+        ..Default::default()
+    };
     let child_effective = style.inherited_from(effective);
     let open = style::text_appearance_sgr(&child_effective, term);
     let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
