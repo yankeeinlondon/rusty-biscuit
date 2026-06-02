@@ -42,7 +42,7 @@ Options:
       --exclude-symbols <GLOB>  Glob patterns for symbol names to exclude from output
   -h, --help                    Print help
   -V, --version                 Print version
-  ```
+```
 
 ## Code Review Dimensions
 
