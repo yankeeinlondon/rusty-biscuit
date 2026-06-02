@@ -1,11 +1,9 @@
 # Side Effects
 
-> **Status: local catalog implemented; network deferred.** The frontmatter and
-> file/directory verbs ship today as `darkmatter::effects::EffectEngine`. The
-> network verb (`http_post`) and URL-accepting variants remain deferred until
-> the `url-referencing` feature lands. The authoritative, full specification
-> lives in
-> [`more-context-variables`](../../features/_unscheduled/more-context-variables/spec.md#side-effects).
+> **Status: v1 catalog implemented.** The frontmatter, file/directory, and
+> host-policy-gated network verbs ship as `darkmatter::effects::EffectEngine`.
+> The authoritative, full specification lives in
+> [`more-context-variables`](../../features/2026-06-01-more-context-variables/spec.md#side-effects).
 
 Side Effects are the counterpart to the read-only [Expression Engine](./darkmatter-expressions.md).
 Where expression functions only *report* on state, side effects **mutate**
@@ -55,13 +53,17 @@ Both enforced inside Darkmatter, both configured by the host:
 - **File & directory (shipped):** `ensure_file` (with an
   `ensure_file_with_content` two-arg form), `ensure_dir`, `append_line`,
   `append_jsonl`
-- **Network (deferred):** `http_post` (host-allowlist gated)
+- **Network:** `http_post(url, body)` posts a body and returns an object with
+  `status` and `body`. It is host-allowlist gated and deny-all by default.
 
 Markdown frontmatter writers re-hash a `hash:` property automatically by
 default. Full-file overwrite and deletion are expressly out of scope for v1.
 
-See the [spec](../../features/_unscheduled/more-context-variables/spec.md#side-effects)
+See the [spec](../../features/2026-06-01-more-context-variables/spec.md#side-effects)
 for full signatures, return values, and the host integration surface.
+
+`http_post` uses the same `biscuit-file` fetch policy as compose remote reads,
+so denied hosts are rejected before any network request is attempted.
 
 ## See Also
 

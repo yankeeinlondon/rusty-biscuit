@@ -2,6 +2,102 @@
 phases: 6
 created: 2026-06-02
 start_phase: 1
+source_files_during_phase_1:
+  - biscuit-file/lib/Cargo.toml
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/file_reference/parse.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/src/file_reference/error.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - biscuit-file/lib/Cargo.toml
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/file_reference/parse.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/src/file_reference/error.rs
+  - biscuit-file/lib/src/file_reference/fetch.rs
+  - biscuit-file/lib/tests/fetch_integration.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/compose/remote.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/types.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/link_normalization.rs
+  - darkmatter/cli/src/args.rs
+  - darkmatter/cli/src/commands.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/Cargo.toml
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/remote_fetch.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+packages_during_phase_4:
+  - darkmatter
+source_files_during_phase_5:
+  - darkmatter/lib/src/markdown/compose/cache/types.rs
+  - darkmatter/lib/src/markdown/compose/cache/store.rs
+  - darkmatter/lib/src/markdown/compose/cache/manifest.rs
+  - darkmatter/lib/src/markdown/compose/cache/mod.rs
+  - darkmatter/lib/src/markdown/compose/cache/remote_cache.rs
+  - darkmatter/lib/src/markdown/compose/cache/runtime.rs
+  - darkmatter/lib/src/markdown/compose/remote_fetch.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/types.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages_during_phase_5:
+  - darkmatter
+source_files_during_phase_6:
+  - biscuit-file/lib/src/file_reference/fetch.rs
+  - biscuit-file/lib/src/lib.rs
+  - darkmatter/cli/src/args.rs
+  - darkmatter/cli/src/commands.rs
+  - darkmatter/cli/tests/cli.rs
+  - darkmatter/cli/tests/level2_layout.rs
+  - darkmatter/lib/src/effects/error.rs
+  - darkmatter/lib/src/effects/verbs.rs
+  - darkmatter/lib/src/markdown/compose/remote_fetch.rs
+  - darkmatter/lib/tests/effects_integration.rs
+  - darkmatter/lib/tests/layout_snapshots.rs
+  - darkmatter/lib/tests/render_tree_parity.rs
+docs_updated_during_phase_6:
+  - docs/dependencies.md
+  - darkmatter/docs/cli/compose.md
+  - darkmatter/docs/topics/side-effects.md
+  - darkmatter/docs/topics/transclusion.md
+  - darkmatter/features/2026-06-01-url-referencing/plan.md
+docs_created_during_phase_6:
+  - biscuit-file/docs/dependencies.md
+  - darkmatter/docs/dependencies.md
+  - darkmatter/docs/topics/remote-url-references.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/darkmatter/SKILL.md
+packages_during_phase_6:
+  - biscuit-file
+  - darkmatter
+  - darkmatter-cli
+packages:
+  - biscuit-file
+  - darkmatter
+  - darkmatter-cli
 ---
 
 # Execution Plan: URL Referencing
@@ -62,52 +158,52 @@ start_phase: 1
 
 **Goal:** Start remote fetches eagerly, reuse a single client, and block consumers on one single-flight slot per URL.
 
-- [ ] Enable `biscuit-file/fetch` for Darkmatter through the appropriate Cargo feature wiring.
-- [ ] Add a shared `reqwest::Client` to the compose runtime used for all remote fetches in a compose run.
-- [ ] Register each discovered URL as an eager in-flight remote slot in the run-local cache before local composition work begins.
-- [ ] Spawn remote fetch tasks on Darkmatter's Tokio runtime with the configured global concurrency cap.
-- [ ] Implement point-of-use waiting so transclusion and expression functions block on the URL's existing single-flight slot.
-- [ ] Disable duplicate-compute timeout fallback for remote slots; timeout handling must wait or fail according to remote freshness policy rather than issuing another request.
-- [ ] Register and spawn newly discovered nested remote URLs immediately after fetched Markdown content is parsed.
-- [ ] Wire `::file` URL transclusion to insert fetched body text.
-- [ ] Wire `::code` URL transclusion to insert fetched body text with the same language, fence, and rendering behavior as local code transclusion.
-- [ ] Wire URL-aware read-side expression functions to consume fetched content consistently with local file inputs.
-- [ ] Add cache/report stats for remote fetches, waits, policy denials, network failures, and stale/cache use where the existing report model supports them.
-- [ ] Add tests proving duplicate URL consumers perform one fetch per run, eager fetch overlaps with local work, nested remote references are discovered, and policy-denied URLs never attempt a request.
-- [ ] **Validation Checkpoint:** Mock-server compose tests pass for `::file`, `::code`, and read-side expression functions with multiple consumers of the same URL.
+- [x] Enable `biscuit-file/fetch` for Darkmatter through the appropriate Cargo feature wiring.
+- [x] Add a shared `reqwest::Client` to the compose runtime used for all remote fetches in a compose run.
+- [x] Register each discovered URL as an eager in-flight remote slot in the run-local cache before local composition work begins.
+- [x] Spawn remote fetch tasks on Darkmatter's Tokio runtime with the configured global concurrency cap.
+- [x] Implement point-of-use waiting so transclusion and expression functions block on the URL's existing single-flight slot.
+- [x] Disable duplicate-compute timeout fallback for remote slots; timeout handling must wait or fail according to remote freshness policy rather than issuing another request.
+- [x] Register and spawn newly discovered nested remote URLs immediately after fetched Markdown content is parsed.
+- [x] Wire `::file` URL transclusion to insert fetched body text.
+- [x] Wire `::code` URL transclusion to insert fetched body text with the same language, fence, and rendering behavior as local code transclusion.
+- [x] Wire URL-aware read-side expression functions to consume fetched content consistently with local file inputs.
+- [x] Add cache/report stats for remote fetches, waits, policy denials, network failures, and stale/cache use where the existing report model supports them.
+- [x] Add tests proving duplicate URL consumers perform one fetch per run, eager fetch overlaps with local work, nested remote references are discovered, and policy-denied URLs never attempt a request.
+- [x] **Validation Checkpoint:** Mock-server compose tests pass for `::file`, `::code`, and read-side expression functions with multiple consumers of the same URL.
 
 ## Phase 5: Persistent Remote Cache and Freshness
 *Dependency: Phase 4*
 
 **Goal:** Extend the existing persistent cache to store remote URL artifacts and apply TTL, conditional revalidation, and stale-on-failure behavior.
 
-- [ ] Audit the existing `.darkmatter/cache/v1/` artifact layout, manifest schema, `SourceKind`, and closure-hash integration.
-- [ ] Add `remote_url` artifact support with a response-body blob and manifest fields for URL, status, `etag`, `last_modified`, `cache_control`, `fetched_at`, `expires_at`, and content hash.
-- [ ] Reuse the existing content hashing strategy for remote bodies so remote dependency changes flow into parent `closure_hash` values.
-- [ ] Implement TTL calculation from `Cache-Control: max-age`, explicit remote TTL override, and existing manifest `expires_at`.
-- [ ] Implement within-TTL behavior that serves the cached blob without network access.
-- [ ] Implement past-TTL conditional GET behavior using `If-None-Match` and `If-Modified-Since` when available.
-- [ ] Implement `304` handling that preserves the cached body and updates freshness metadata.
-- [ ] Implement `200` refresh handling that replaces the cached body and manifest atomically.
-- [ ] Implement stale-on-failure behavior for `Fallback` freshness mode.
-- [ ] Map existing freshness modes so `Optimistic` serves cache without revalidation, `Strict` revalidates, and `Fallback` serves stale on network failure.
-- [ ] Implement `--refresh` behavior so remote artifacts are revalidated even when cached content is otherwise fresh.
-- [ ] Add tests for cache hits within TTL, conditional `304`, conditional `200`, network failure with stale fallback, strict failure without fallback, optimistic no-network behavior, and closure-hash invalidation.
-- [ ] **Validation Checkpoint:** Persistent cache tests pass using a temporary cache directory and local mock server, including a no-network cached run.
+- [x] Audit the existing `.darkmatter/cache/v1/` artifact layout, manifest schema, `SourceKind`, and closure-hash integration.
+- [x] Add `remote_url` artifact support with a response-body blob and manifest fields for URL, status, `etag`, `last_modified`, `cache_control`, `fetched_at`, `expires_at`, and content hash.
+- [x] Reuse the existing content hashing strategy for remote bodies so remote dependency changes flow into parent `closure_hash` values.
+- [x] Implement TTL calculation from `Cache-Control: max-age`, explicit remote TTL override, and existing manifest `expires_at`.
+- [x] Implement within-TTL behavior that serves the cached blob without network access.
+- [x] Implement past-TTL conditional GET behavior using `If-None-Match` and `If-Modified-Since` when available.
+- [x] Implement `304` handling that preserves the cached body and updates freshness metadata.
+- [x] Implement `200` refresh handling that replaces the cached body and manifest atomically.
+- [x] Implement stale-on-failure behavior for `Fallback` freshness mode.
+- [x] Map existing freshness modes so `Optimistic` serves cache without revalidation, `Strict` revalidates, and `Fallback` serves stale on network failure.
+- [x] Implement `--refresh` behavior so remote artifacts are revalidated even when cached content is otherwise fresh.
+- [x] Add tests for cache hits within TTL, conditional `304`, conditional `200`, network failure with stale fallback, strict failure without fallback, optimistic no-network behavior, and closure-hash invalidation.
+- [x] **Validation Checkpoint:** Persistent cache tests pass using a temporary cache directory and local mock server, including a no-network cached run.
 
 ## Phase 6: Integration, Documentation, and Release Checks
 *Dependency: Phase 5*
 
 **Goal:** Finish the feature as a coherent public capability with tests, docs, and release-facing maintenance updates.
 
-- [ ] Wire the side-effect engine's `http_post` path to use the same `biscuit-file` fetch primitive and `FetchPolicy` enforcement.
-- [ ] Verify remote writes still honor the side-effect engine's mutation rules in addition to the shared network policy.
-- [ ] Add or update Darkmatter topic docs for remote URL references, allowed hosts, freshness modes, cache behavior, and unsupported v1 schemes.
-- [ ] Update Darkmatter CLI docs for new remote flags and environment variables.
-- [ ] Update `docs/dependencies.md` and per-area dependency docs for newly added `url`, `reqwest`, `bytes`, or related dependencies.
-- [ ] Update `.claude/skills/darkmatter/SKILL.md` if compose pipeline architecture, cache behavior, or URL referencing workflow guidance changed.
-- [ ] Add end-to-end CLI tests for allowed-host remote compose, deny-all failure, refresh, stale fallback, and rendered link preservation.
-- [ ] Run targeted package checks for `biscuit-file`, `darkmatter`, and `darkmatter-cli`.
-- [ ] Run the repo's canonical Darkmatter test recipe from the local `justfile` or the narrowest accepted equivalent if a full run is too costly.
-- [ ] Review all touched rustdoc and inline comments for drift, deleting or updating comments that no longer match behavior.
-- [ ] **Validation Checkpoint:** Build, lint, targeted tests, docs updates, and feature behavior are complete with no unguarded network fetch path.
+- [x] Wire the side-effect engine's `http_post` path to use the same `biscuit-file` fetch primitive and `FetchPolicy` enforcement.
+- [x] Verify remote writes still honor the side-effect engine's mutation rules in addition to the shared network policy.
+- [x] Add or update Darkmatter topic docs for remote URL references, allowed hosts, freshness modes, cache behavior, and unsupported v1 schemes.
+- [x] Update Darkmatter CLI docs for new remote flags and environment variables.
+- [x] Update `docs/dependencies.md` and per-area dependency docs for newly added `url`, `reqwest`, `bytes`, or related dependencies.
+- [x] Update `.claude/skills/darkmatter/SKILL.md` if compose pipeline architecture, cache behavior, or URL referencing workflow guidance changed.
+- [x] Add end-to-end CLI tests for allowed-host remote compose, deny-all failure, refresh, stale fallback, and rendered link preservation.
+- [x] Run targeted package checks for `biscuit-file`, `darkmatter`, and `darkmatter-cli`.
+- [x] Run the repo's canonical Darkmatter test recipe from the local `justfile` or the narrowest accepted equivalent if a full run is too costly.
+- [x] Review all touched rustdoc and inline comments for drift, deleting or updating comments that no longer match behavior.
+- [x] **Validation Checkpoint:** Build, lint, targeted tests, docs updates, and feature behavior are complete with no unguarded network fetch path.
