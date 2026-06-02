@@ -683,6 +683,20 @@ mod tests {
     }
 
     #[test]
+    fn inverse_lowers_to_sgr_7() {
+        let style = Style {
+            emphasis: TextEmphasis {
+                inverse: true,
+                ..Default::default()
+            },
+            ..Style::default()
+        };
+        let out = apply_style("x", &style, &truecolor_term(), 5);
+        assert!(out.contains("\x1b[7m"), "got {out:?}");
+        assert!(out.ends_with(SGR_RESET));
+    }
+
+    #[test]
     fn underline_double_degrades_when_unsupported() {
         let mut term = truecolor_term();
         term.underline_support.double = false;

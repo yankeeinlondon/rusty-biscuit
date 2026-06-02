@@ -177,6 +177,8 @@ impl TextBlock {
             italic: self.italic,
             strikethrough: self.strikethrough,
             blink: self.blink,
+            // `TextBlock` has no inverse-video control.
+            inverse: false,
             underline: underline_style_from_request(&self.underline),
         };
         let color = self

@@ -698,6 +698,7 @@ impl StyleLayer {
             EmphasisLayer::Underline => Self::Underline,
             EmphasisLayer::Strikethrough => Self::Strikethrough,
             EmphasisLayer::Blink => Self::Blink,
+            EmphasisLayer::Inverse => Self::Inverse,
         }
     }
 

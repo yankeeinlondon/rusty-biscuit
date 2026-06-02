@@ -2942,6 +2942,47 @@ mod render_tree_tests {
         );
     }
 
+    #[test]
+    fn render_tree_inline_span_restores_parent_inverse() {
+        use renderable::style::{Style, TextEmphasis};
+
+        // A child span resets at its close, then the parent's inverse is
+        // re-applied — the tail after the child stays inverse rather than
+        // losing all emphasis state.
+        let inverse_style = Style {
+            emphasis: TextEmphasis {
+                inverse: true,
+                ..TextEmphasis::default()
+            },
+            ..Style::default()
+        };
+        let mut child = RenderNode::span(vec![], vec![RenderNode::text("child")]);
+        // The child declares its own color so its close fires a reset.
+        child
+            .attrs
+            .set_style(&fg_style(renderable::color::BasicColor::Green));
+        let mut parent = RenderNode::span(
+            vec![],
+            vec![
+                RenderNode::text("head "),
+                child,
+                RenderNode::text(" tail"),
+            ],
+        );
+        parent.attrs.set_style(&inverse_style);
+        let para = RenderNode::paragraph(vec![parent]);
+
+        let out = render(&para).output;
+        // The child's close restores the parent inverse (SGR 7), not a bare
+        // reset that would drop it.
+        let after_child = out.split("child").nth(1).expect("child run");
+        assert!(
+            after_child.contains("\x1b[7m"),
+            "parent inverse not restored after child span: {out:?}"
+        );
+        assert!(strip_escape_codes(&out).contains("head child tail"));
+    }
+
     // ── Table slot styling (Spec B D5) ─────────────────────────────────
 
     /// Builds a one-column, one-row table render tree from a `Table`.
