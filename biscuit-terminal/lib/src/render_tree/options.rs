@@ -7,7 +7,7 @@
 use std::rc::Rc;
 
 use renderable::layout::Layout as RenderableLayout;
-use renderable::tree::{CodeRenderer, RenderStrictness};
+use renderable::tree::{CodeRenderer, GraphicsMode, RenderStrictness};
 
 use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
 use crate::terminal::Terminal;
@@ -76,6 +76,11 @@ pub struct TerminalRenderContext {
     ///
     /// [`with_layout`]: TerminalRenderContext::with_layout
     pub active_layout: Option<RenderableLayout>,
+    /// The graphics fidelity tier for this render.
+    pub graphics_mode: GraphicsMode,
+    /// Whether to force graphics rendering even when the terminal
+    /// capability detection suggests the feature is unavailable.
+    pub force_graphics: bool,
 }
 
 impl TerminalRenderContext {
@@ -100,6 +105,8 @@ impl TerminalRenderContext {
             available_width: width,
             current_indent: 0,
             active_layout: None,
+            graphics_mode: GraphicsMode::default(),
+            force_graphics: false,
         }
     }
 
@@ -288,6 +295,22 @@ mod tests {
     }
 
     #[test]
+    fn from_terminal_initializes_graphics_mode_to_rich() {
+        let term = Terminal::new_optimistic(80);
+        let ctx = TerminalRenderContext::from_terminal(&term);
+
+        assert_eq!(ctx.graphics_mode, GraphicsMode::Rich);
+    }
+
+    #[test]
+    fn from_terminal_initializes_force_graphics_to_false() {
+        let term = Terminal::new_optimistic(80);
+        let ctx = TerminalRenderContext::from_terminal(&term);
+
+        assert!(!ctx.force_graphics);
+    }
+
+    #[test]
     fn fallback_initializes_new_fields_correctly() {
         let ctx = TerminalRenderContext::fallback();
 
@@ -295,6 +318,8 @@ mod tests {
         assert_eq!(ctx.available_width, 80);
         assert_eq!(ctx.current_indent, 0);
         assert!(ctx.active_layout.is_none());
+        assert_eq!(ctx.graphics_mode, GraphicsMode::Rich);
+        assert!(!ctx.force_graphics);
     }
 
     #[test]

@@ -157,7 +157,33 @@ impl TerminalRenderable for HorizontalRule {
             return image;
         }
 
-        // Determine the width based on alignment, custom width, and terminal width
+        self.render_text_tier(term)
+    }
+
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
+    }
+
+    fn is_block_level(&self) -> bool {
+        true
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl HorizontalRule {
+    /// Renders the text tier (Unicode or ASCII glyphs) without attempting
+    /// the image tier.
+    ///
+    /// Used by the render-tree renderer when [`GraphicsMode::Off`] suppresses
+    /// graphics, or when the image tier is unavailable or fails.
+    pub(crate) fn render_text_tier(&self, term: &Terminal) -> String {
         let term_width = term.width() as usize;
         let rule_width = self.resolve_width(term_width);
 
@@ -191,24 +217,6 @@ impl TerminalRenderable for HorizontalRule {
         }
     }
 
-    fn layout(&self) -> &Layout {
-        &self.layout
-    }
-
-    fn layout_mut(&mut self) -> &mut Layout {
-        &mut self.layout
-    }
-
-    fn is_block_level(&self) -> bool {
-        true
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-impl HorizontalRule {
     /// Resolves the width of the rule in characters based on the terminal
     /// width and the CSS-like width specification.
     ///
@@ -318,7 +326,7 @@ impl HorizontalRule {
     /// [`DEFAULT_CELL_WIDTH`]×[`DEFAULT_CELL_HEIGHT`] (8×16 px) per cell.
     /// This matches typical monospace fonts at common DPI; oversized fonts
     /// render a proportionally thicker-looking rule.
-    fn render_image_tier(&self, term: &Terminal) -> Option<String> {
+    pub(crate) fn render_image_tier(&self, term: &Terminal) -> Option<String> {
         if !term.is_tty
             || !matches!(
                 term.image_support,
