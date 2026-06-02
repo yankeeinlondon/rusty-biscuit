@@ -10,7 +10,10 @@ read-side expression surfaces used for local files.
   code block.
 - Read-side expression functions that accept file inputs, such as
   `frontmatter(url)`, `markdown_title(url)`, and `file_exists(url)`, can read
-  HTTP(S) URLs through the remote fetch cache.
+  HTTP(S) URLs through the remote fetch cache. The URL argument must be a
+  quoted string literal, e.g. `{{ markdown_title("https://example.com/doc.md") }}`,
+  because the interpolation expression parser only accepts a string literal
+  there.
 - Ordinary rendered links and image URLs such as
   `[site](https://example.com)` are validated for URL shape and preserved in the
   output. They are not fetched by composition.
