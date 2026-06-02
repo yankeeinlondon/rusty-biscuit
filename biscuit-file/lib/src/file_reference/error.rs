@@ -47,6 +47,9 @@ pub enum FetchError {
     #[error("unsupported URL scheme: {0}")]
     UnsupportedScheme(String),
 
+    #[error("failed to build fetch client: {0}")]
+    ClientBuild(#[source] reqwest::Error),
+
     #[error("HTTP request failed: {0}")]
     RequestFailed(#[source] reqwest::Error),
 

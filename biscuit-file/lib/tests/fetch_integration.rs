@@ -1,14 +1,16 @@
 //! HTTP mock server integration tests for the fetch primitive.
 
-use biscuit_file::file_reference::fetch::policy_client;
-use biscuit_file::{Conditional, FetchError, FetchPolicy, HostPattern, fetch, fetch_blocking};
-use reqwest::Client;
+use biscuit_file::{
+    Conditional, FetchError, FetchPolicy, HostPattern, PolicyClient, fetch, fetch_blocking,
+};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-async fn setup_server() -> (MockServer, Client, FetchPolicy) {
+async fn setup_server() -> (MockServer, PolicyClient, FetchPolicy) {
     let server = MockServer::start().await;
-    let client = Client::new();
+    // The public primitive accepts only a `PolicyClient`, so every caller —
+    // including these tests — gets a redirect-disabled client by construction.
+    let client = PolicyClient::new().unwrap();
     let policy = FetchPolicy::deny_all().allow_host("127.0.0.1");
     (server, client, policy)
 }
@@ -122,7 +124,7 @@ async fn fetch_500_returns_http_error() {
 #[tokio::test]
 async fn fetch_policy_denied_host() {
     let server = MockServer::start().await;
-    let client = Client::new();
+    let client = PolicyClient::new().unwrap();
     let policy = FetchPolicy::deny_all();
 
     let url = url::Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
@@ -138,7 +140,7 @@ async fn fetch_policy_denied_host() {
 
 #[tokio::test]
 async fn fetch_unsupported_scheme() {
-    let client = Client::new();
+    let client = PolicyClient::new().unwrap();
     let policy = FetchPolicy::deny_all().allow_host("example.com");
     let url = url::Url::parse("ftp://example.com/file.txt").unwrap();
 
@@ -182,7 +184,7 @@ async fn fetch_wildcard_does_not_match_bare_parent_host() {
     // before any network access — exact-host coverage lives in the other tests
     // via `setup_server`.
     let server = MockServer::start().await;
-    let client = Client::new();
+    let client = PolicyClient::new().unwrap();
     let policy = FetchPolicy::deny_all().allow(HostPattern::Wildcard("127.0.0.1".to_string()));
 
     let url = url::Url::parse(&format!("{}/ok", server.uri())).unwrap();
@@ -196,9 +198,11 @@ async fn fetch_wildcard_does_not_match_bare_parent_host() {
 #[tokio::test]
 async fn policy_client_blocks_redirect_to_unallowed_host() {
     // The allowed host serves a 302 pointing at a host the policy never
-    // authorized. `policy_client()` does not follow redirects, so the primitive
-    // surfaces the 302 as `RedirectBlocked` instead of fetching the blocked
-    // host's body — the SSRF bypass the redirect would otherwise open.
+    // authorized. `fetch` accepts only a `PolicyClient`, which never follows
+    // redirects, so the primitive surfaces the 302 as `RedirectBlocked` instead
+    // of fetching the blocked host's body — the SSRF bypass the redirect would
+    // otherwise open. There is no `fetch` overload that takes a bare
+    // redirect-following client, so this contract holds for every caller.
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/redirect"))
@@ -208,7 +212,7 @@ async fn policy_client_blocks_redirect_to_unallowed_host() {
         .mount(&server)
         .await;
 
-    let client = policy_client();
+    let client = PolicyClient::new().unwrap();
     let policy = FetchPolicy::deny_all().allow_host("127.0.0.1");
     let url = url::Url::parse(&format!("{}/redirect", server.uri())).unwrap();
 
@@ -238,7 +242,7 @@ async fn policy_client_blocks_redirect_to_unsupported_scheme() {
         .mount(&server)
         .await;
 
-    let client = policy_client();
+    let client = PolicyClient::new().unwrap();
     let policy = FetchPolicy::deny_all().allow_host("127.0.0.1");
     let url = url::Url::parse(&format!("{}/to-ftp", server.uri())).unwrap();
 
@@ -268,7 +272,7 @@ fn fetch_blocking_works() {
         server
     });
 
-    let client = Client::new();
+    let client = PolicyClient::new().unwrap();
     let policy = FetchPolicy::deny_all().allow_host("127.0.0.1");
     let url = url::Url::parse(&format!("{}/sync", server.uri())).unwrap();
 

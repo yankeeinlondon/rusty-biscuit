@@ -145,8 +145,8 @@ pub use self::file_reference::Resolved;
 #[cfg(feature = "fetch")]
 pub use self::file_reference::{
     fetch::{
-        Conditional, FetchPolicy, FetchResponse, HostPattern, fetch, fetch_blocking, post,
-        post_blocking,
+        Conditional, FetchPolicy, FetchResponse, HostPattern, PolicyClient, fetch, fetch_blocking,
+        post, post_blocking,
     },
     error::FetchError,
 };

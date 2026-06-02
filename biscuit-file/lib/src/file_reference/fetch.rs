@@ -105,22 +105,38 @@ impl FetchResponse {
     }
 }
 
-/// Builds a [`reqwest::Client`] suitable for policy-enforced fetching.
+/// A [`reqwest::Client`] that is guaranteed never to follow redirects.
 ///
-/// Redirect-following is disabled so a 3xx response cannot bypass the host
-/// allowlist by pointing at a host the policy never authorized. [`fetch`] and
-/// [`post`] surface any such response as [`FetchError::RedirectBlocked`] rather
-/// than silently returning the empty 3xx body. Every consumer of this feature
-/// builds its shared client here so the SSRF boundary holds at the only place
-/// requests are issued.
-pub fn policy_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        // A builder failure (TLS backend init) is not recoverable here; fall
-        // back to the default client, which still routes through the same
-        // 3xx-rejecting primitive below.
-        .unwrap_or_else(|_| reqwest::Client::new())
+/// [`fetch`] and [`post`] accept **only** this type, never a bare
+/// `reqwest::Client`. That makes the redirect-policy bypass impossible by
+/// construction: there is no way to hand the primitive a redirect-following
+/// client, so a 3xx can never be followed to a host the [`FetchPolicy`] never
+/// authorized. Redirects always surface as [`FetchError::RedirectBlocked`]
+/// (see [`reject_redirect`]) instead of silently re-issuing the request against
+/// the `Location` target. This is the single place every consumer of the
+/// `fetch` feature obtains its shared client, so the SSRF boundary holds at the
+/// only place requests are issued.
+#[derive(Debug, Clone)]
+pub struct PolicyClient {
+    inner: reqwest::Client,
+}
+
+impl PolicyClient {
+    /// Builds a policy-enforcing client with redirect-following disabled.
+    ///
+    /// ## Errors
+    ///
+    /// [`FetchError::ClientBuild`] if the underlying TLS/HTTP backend fails to
+    /// initialize. The failure is surfaced rather than swallowed: silently
+    /// falling back to a default client would substitute a redirect-following
+    /// client and reopen the bypass this type exists to close.
+    pub fn new() -> Result<Self, FetchError> {
+        let inner = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(FetchError::ClientBuild)?;
+        Ok(Self { inner })
+    }
 }
 
 /// Returns `Err(FetchError::RedirectBlocked)` when `status` is a redirect.
@@ -142,20 +158,20 @@ fn reject_redirect(status: u16, headers: &reqwest::header::HeaderMap) -> Result<
 /// Perform an async HTTP GET with policy enforcement and optional
 /// conditional headers.
 ///
-/// The caller supplies a shared [`reqwest::Client`] so connection pooling
-/// and TLS configuration are managed externally.
+/// The caller supplies a shared [`PolicyClient`] so connection pooling and TLS
+/// configuration are managed externally. Because the parameter is a
+/// [`PolicyClient`] rather than a bare `reqwest::Client`, redirect-following is
+/// guaranteed disabled and the allowlist cannot be bypassed mid-request.
 ///
 /// ## Errors
 ///
 /// - [`FetchError::PolicyDenied`] if the host is not in the allowlist.
 /// - [`FetchError::UnsupportedScheme`] for non-HTTP(S) URLs.
-/// - [`FetchError::RedirectBlocked`] if the server returns a redirect (the
-///   feature's clients do not follow redirects so the allowlist cannot be
-///   bypassed mid-request).
+/// - [`FetchError::RedirectBlocked`] if the server returns a redirect.
 /// - [`FetchError::RequestFailed`] if the request itself fails.
 /// - [`FetchError::HttpError`] for non-success HTTP status codes.
 pub async fn fetch(
-    client: &reqwest::Client,
+    client: &PolicyClient,
     url: &Url,
     policy: &FetchPolicy,
     conditional: &Conditional,
@@ -177,7 +193,7 @@ pub async fn fetch(
         });
     }
 
-    let mut request = client.get(url.as_str());
+    let mut request = client.inner.get(url.as_str());
 
     if let Some(ref etag) = conditional.if_none_match {
         request = request.header("If-None-Match", etag);
@@ -229,7 +245,7 @@ pub async fn fetch(
 /// Perform an async HTTP POST with the same scheme and host policy enforcement
 /// as [`fetch()`].
 pub async fn post(
-    client: &reqwest::Client,
+    client: &PolicyClient,
     url: &Url,
     policy: &FetchPolicy,
     body: impl Into<bytes::Bytes>,
@@ -252,6 +268,7 @@ pub async fn post(
     }
 
     let response = client
+        .inner
         .post(url.as_str())
         .body(body.into())
         .send()
@@ -301,7 +318,7 @@ pub async fn post(
 /// Spawns a minimal Tokio runtime for the duration of the request.
 /// Callers that already have a runtime should prefer [`fetch()`] directly.
 pub fn fetch_blocking(
-    client: &reqwest::Client,
+    client: &PolicyClient,
     url: &Url,
     policy: &FetchPolicy,
     conditional: &Conditional,
@@ -316,7 +333,7 @@ pub fn fetch_blocking(
 
 /// Synchronous convenience wrapper around [`post()`].
 pub fn post_blocking(
-    client: &reqwest::Client,
+    client: &PolicyClient,
     url: &Url,
     policy: &FetchPolicy,
     body: impl Into<bytes::Bytes>,
