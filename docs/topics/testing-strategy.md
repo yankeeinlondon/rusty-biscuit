@@ -3,6 +3,7 @@
 We employ the following _types_ of tests in Rusty Biscuit:
 
 - Style and Formatting: **Lint Tests**
+- Coverage: **Coverage Reporting**
 - Functionality: **Unit Tests** and **Integration Tests**
 - Performance: **Performance Tests**
 - Edge Cases: **Fuzz Testing**
@@ -73,7 +74,6 @@ Though not really a form of testing, formatting Rust code often gets lumped into
             - when run with no parameters it just runs all of the sanity tests, however, a developer can add as many individual tests as parameters so they can add their own tests into the sanity test
         - once a developer has gotten all their tests to pass (along with the sanity tests validating that existing functionality "probably works"), the developer should complete their work by running `just test` and `just lint` which will make sure ALL tests pass
 
-
 > **A Note on CLI Testing:**
 > 
 > - a lot of packages in **Rusty Biscuit** are CLI applications and for these we have adopted a terminology for three levels of integration testing:
@@ -81,6 +81,17 @@ Though not really a form of testing, formatting Rust code often gets lumped into
 >     - **Level 1 [in-process / PTY]** Unit tests, plus tests that spawn the binary in a pseudo-TTY and feed it manufactured input bytes. Useful and necessary, but does NOT verify the terminal emulator's encoder/decoder behaviour — *we* generate those bytes. Cannot catch bugs like "WezTerm does not emit bare-modifier press events because we forgot to push `REPORT_ALL_KEYS_AS_ESCAPE_CODES`.
 >     - **Level 2 (run-in-real-terminal with IPC).** Spawn the binary inside an actual terminal emulator (WezTerm, Kitty) or multiplexer (tmux), capture the rendered pane text via the terminal's CLI (`wezterm cli get-text`, `kitty @ get-text`, `tmux capture-pane`). Verifies that glyphs, widths, SGR styling, and scrolling render correctly through the real terminal. Input is still byte-level injected via the terminal's CLI, so the terminal's input encoder is NOT exercised.
 >     - **Level 3 (OS keyboard injection).** Real OS keyboard events (`cliclick` on macOS, `xdotool` on Linux) injected into the spawned terminal window. The terminal's input encoder fires — this is the only level that can verify "what bytes does the terminal actually emit when the user presses bare Ctrl?" Required for any UX requirement of the form "when the user holds/presses key X, Y happens." Currently env-gated behind `RUN_LEVEL3=1` because focus stability is platform-specific.
+
+## Coverage Tests
+
+Coverage tests provide an important feedback look for unit and integration tests. It is critical that we run coverage tests
+as part of the lifecycle of each package area's development.
+
+### Crap Tests
+
+We use [`cargo-crap`](https://github.com/minikin/cargo-crap) to measure an overall score which represents a combination of cyclometric complexity and test coverage.
+
+- this test is expensive to run because it requires the `.lcov` coverage files from LLVM, however, whenever we generate a coverage file the cost of producing this report is dirt cheap and should be leveraged every time we run coverage.
 
 ## Performance Testing
 
@@ -121,6 +132,8 @@ in a document located at `{package-area}/docs/performance-testing.md`.
 **Fuzz testing** takes a program, function, parser, API, etc. and pushes a large volume of random (often malformed) inputs through it.
 The **fuzzer** explores the input space automatically and keeps inputs that trigger new code paths or failures. It is especially useful for parsers, serialization/deserialization, compilers, interpreters, protocol implementations, file-format readers, and security-sensitive code where unusual inputs are likely to expose hidden assumptions.
 
+- we use `cargo-fuzz` for fuzz testing, use the 'rust-testing' skill for more information on the tool.
+
 ### Usage in Package Areas
 
 
@@ -135,3 +148,19 @@ The **fuzzer** explores the input space automatically and keeps inputs that trig
 
 - all packages in Rusty Biscuit are intended to be executable on macOS, Linux, and Windows
 - no one OS is more or less important than the other, however, there is a natural tendency in developer for macOS to get a larger amount of testing
+
+
+## Simplified Usage with `just`
+
+We use the [just]() runner to simplify common commands across the board and this is heavily leveraged for testing:
+
+### Package Area Commands
+
+- `just sanity`
+- `just sanity <t1> <t2> <t3>`
+- `just test`
+- `just test-l3`
+- `just bench`
+- `just coverage`
+
+### Root Commands
