@@ -187,6 +187,7 @@ pub enum RepoAction {
         on_error: Option<String>,
     },
     Worktrees {
+        md: bool,
         list: bool,
         csv: bool,
         verbose: bool,
@@ -602,12 +603,16 @@ pub enum RepoSubcommand {
     /// List all worktrees in the repository
     #[command(name = "worktrees")]
     Worktrees {
-        /// Output as bullet list (one item per line with `- ` prefix)
-        #[arg(long, conflicts_with = "csv")]
+        /// Render as a Markdown unordered list (one `- name` per line)
+        #[arg(long, conflicts_with_all = ["list", "csv"])]
+        md: bool,
+
+        /// Output as a newline-delimited list (one name per line)
+        #[arg(long, conflicts_with_all = ["md", "csv"])]
         list: bool,
 
         /// Output as comma-separated values on a single line
-        #[arg(long, conflicts_with = "list")]
+        #[arg(long, conflicts_with_all = ["md", "list"])]
         csv: bool,
     },
     /// Output the repository name (plain text); use -v for version + language/monorepo info

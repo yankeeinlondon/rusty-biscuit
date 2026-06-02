@@ -750,7 +750,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return handle_no_results(*no_error, on_error, cli.plain, &perf);
             }
-            crate::args::RepoAction::Worktrees { list, csv, .. } => {
+            crate::args::RepoAction::Worktrees {
+                md, list, csv, ..
+            } => {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
@@ -798,11 +800,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     let rendered = lines.join("\n") + "\n";
                     output::emit_text(&rendered, cli.plain);
-                } else if *list {
+                } else if *md {
                     let mut out = String::new();
                     for entry in &entries {
                         let marker = if entry.is_current { "* " } else { "" };
                         writeln!(out, "- {}{}", marker, entry.name).unwrap();
+                    }
+                    output::emit_text(&out, cli.plain);
+                } else if *list {
+                    let mut out = String::new();
+                    for entry in &entries {
+                        let marker = if entry.is_current { "* " } else { "" };
+                        writeln!(out, "{}{}", marker, entry.name).unwrap();
                     }
                     output::emit_text(&out, cli.plain);
                 } else {
