@@ -325,7 +325,9 @@ mod tests {
         let mut runtime = ShellExpansionRuntime::new();
         let (result, report) =
             run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
-        assert_eq!(result, "hello\n\nworld\n");
+        // Each command's output is concatenated verbatim; the line break between
+        // them is each `echo`'s own trailing newline, not an inserted blank line.
+        assert_eq!(result, "hello\nworld\n");
         assert_eq!(report.shell_blocks_applied, 1);
     }
 
@@ -515,11 +517,9 @@ mod tests {
         let (result, report) =
             run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(report.shell_blocks_applied, 1);
-        // Empty outputs should be omitted; non-empty should have blank line between
-        assert_eq!(
-            result, "hello\n\nworld\n",
-            "Expected mixed output: {result}"
-        );
+        // `echo -n` contributes an empty string, so it simply concatenates to
+        // nothing; the surviving outputs keep their own trailing newlines.
+        assert_eq!(result, "hello\nworld\n", "Expected mixed output: {result}");
     }
 
     #[test]
@@ -567,10 +567,11 @@ mod tests {
             "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
         let (result, report) = run_block_stage(content);
         assert_eq!(report.shell_blocks_applied, 1);
-        // Every output line — including the blank separator — keeps the opener's
-        // 4-space indent so the lines stay nested under the list item rather than
-        // becoming siblings of the outer list.
-        assert!(result.contains("    hello\n    \n    world\n"), "got: {result:?}");
+        // Every output line keeps the opener's 4-space indent so the lines stay
+        // nested under the list item rather than becoming siblings of the outer
+        // list. The two outputs are adjacent (each `echo`'s own trailing newline
+        // separates them) — no blank line is inserted between commands.
+        assert!(result.contains("    hello\n    world\n"), "got: {result:?}");
         assert!(!result.contains("\nhello\n"), "got: {result:?}");
     }
 
@@ -580,7 +581,7 @@ mod tests {
             "- intro\n\n\t::shell-block\n\techo hello\n\techo world\n\t::end-block\n\n- next\n";
         let (result, report) = run_block_stage(content);
         assert_eq!(report.shell_blocks_applied, 1);
-        assert!(result.contains("\thello\n\t\n\tworld\n"), "got: {result:?}");
+        assert!(result.contains("\thello\n\tworld\n"), "got: {result:?}");
     }
 
     #[test]
@@ -588,16 +589,30 @@ mod tests {
         let content = "intro\n\n::shell-block\necho hello\necho world\n::end-block\n\nnext\n";
         let (result, report) = run_block_stage(content);
         assert_eq!(report.shell_blocks_applied, 1);
-        assert!(result.contains("hello\n\nworld\n"), "got: {result:?}");
+        assert!(result.contains("hello\nworld\n"), "got: {result:?}");
         assert!(!result.contains("    hello"), "got: {result:?}");
     }
 
     #[test]
+    fn block_output_preserves_trailing_whitespace_and_line_endings() {
+        // Spec requirement 5: the only transformation a shell block applies to
+        // captured output is container indentation. Trailing spaces and the
+        // command's exact newline shape must survive byte-for-byte — the old
+        // `trim()` contract stripped both.
+        let content = "intro\n\n::shell-block\nprintf 'a  \\n\\nb\\n'\n::end-block\n\nnext\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        // `a  ` keeps its two trailing spaces; the interior blank line and the
+        // final newline are preserved exactly as emitted.
+        assert!(result.contains("a  \n\nb\n"), "got: {result:?}");
+    }
+
+    #[test]
     fn indented_block_trailing_newline_does_not_become_indent_only_line() {
-        // `render_block_output` trims each command and appends a single newline,
-        // so a block whose only command emits a trailing newline still ends in a
-        // bare newline after re-indenting — never an indentation-only `"    "`
-        // line. Mirrors the `::shell` trailing-newline guarantee.
+        // `render_block_output` preserves the command's trailing newline
+        // verbatim, so after re-indenting the block ends in a bare newline —
+        // never an indentation-only `"    "` line. Mirrors the `::shell`
+        // trailing-newline guarantee.
         let content = "- intro\n\n    ::shell-block\n    printf 'one\\n'\n    ::end-block\n\n- next\n";
         let (result, report) = run_block_stage(content);
         assert_eq!(report.shell_blocks_applied, 1);
@@ -651,12 +666,12 @@ mod tests {
     fn blockquote_marked_shell_block_output_is_re_quoted() {
         // A `>`-led shell block is recognized: the opener, body, and closer
         // markers are stripped for execution, and the rendered output is
-        // re-quoted with the opener's `> ` prefix — including the blank
-        // separator — so it stays inside the block quote rather than escaping it.
+        // re-quoted with the opener's `> ` prefix on every line so it stays
+        // inside the block quote rather than escaping it.
         let content = "> ::shell-block\n> echo hello\n> echo world\n> ::end-block\n";
         let (result, report) = run_block_stage(content);
         assert_eq!(report.shell_blocks_applied, 1);
-        assert!(result.contains("> hello\n> \n> world\n"), "got: {result:?}");
+        assert!(result.contains("> hello\n> world\n"), "got: {result:?}");
         assert!(!result.contains("\nhello\n"), "got: {result:?}");
     }
 
@@ -674,13 +689,13 @@ mod tests {
     #[test]
     fn nested_blockquote_marked_shell_block_output_is_re_quoted() {
         // A `> > `-led shell block replays the nested block-quote markers on
-        // every emitted line — including the blank separator — so the output
-        // stays inside the nested quote rather than escaping it.
+        // every emitted line so the output stays inside the nested quote rather
+        // than escaping it.
         let content = "> > ::shell-block\n> > echo hello\n> > echo world\n> > ::end-block\n";
         let (result, report) = run_block_stage(content);
         assert_eq!(report.shell_blocks_applied, 1);
         assert!(
-            result.contains("> > hello\n> > \n> > world\n"),
+            result.contains("> > hello\n> > world\n"),
             "got: {result:?}"
         );
         assert!(!result.contains("\nhello\n"), "got: {result:?}");

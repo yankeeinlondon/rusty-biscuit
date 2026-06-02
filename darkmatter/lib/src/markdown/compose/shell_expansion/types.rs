@@ -783,10 +783,20 @@ impl ShellRuleSet {
     }
 }
 
+/// How long a thread will block waiting for a concurrently-pending allow-once
+/// approval of the *same* command before falling back to treating it as a
+/// conflict. Mirrors the single-flight timeout in the compose cache so a wedged
+/// peer can never hang composition indefinitely.
+const RESERVATION_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Runtime state for shell expansion across recursive document composition.
 #[derive(Debug, Clone)]
 pub struct ShellExpansionRuntime {
     shared: Arc<std::sync::Mutex<SharedShellExpansionRuntime>>,
+    /// Signaled whenever a pending allow-once reservation is completed, so
+    /// threads blocked on the same command can re-evaluate. Shared (same `Arc`)
+    /// across child runtimes alongside `shared`.
+    reservation_done: Arc<std::sync::Condvar>,
     pub approvals_used: usize,
 }
 
@@ -829,6 +839,7 @@ impl ShellExpansionRuntime {
     pub fn new() -> Self {
         Self {
             shared: Arc::new(std::sync::Mutex::new(SharedShellExpansionRuntime::default())),
+            reservation_done: Arc::new(std::sync::Condvar::new()),
             approvals_used: 0,
         }
     }
@@ -838,6 +849,7 @@ impl ShellExpansionRuntime {
     pub fn clone_for_child(&self) -> Self {
         Self {
             shared: Arc::clone(&self.shared),
+            reservation_done: Arc::clone(&self.reservation_done),
             approvals_used: 0,
         }
     }
@@ -870,7 +882,15 @@ impl ShellExpansionRuntime {
         }
     }
 
-    /// Attempts to reserve a command for allow-once approval.
+    /// Reserves a command for allow-once approval.
+    ///
+    /// When `may_wait` is `true` and another thread is mid-approval of this
+    /// *exact* command, blocks (up to [`RESERVATION_WAIT_TIMEOUT`]) until that
+    /// approval resolves, then re-evaluates — so concurrent sibling
+    /// transclusions sharing one command reuse a single approval instead of
+    /// racing into a spurious "approval required" error. Callers pass
+    /// `may_wait = false` once they already hold a reservation in the current
+    /// chain, since blocking while holding one risks a hold-and-wait deadlock.
     ///
     /// ## Returns
     ///
@@ -881,30 +901,55 @@ impl ShellExpansionRuntime {
     ///   `allow_once` set; the caller need not prompt or release anything for
     ///   this command.
     /// - [`ReserveOutcome::Pending`] when another thread is currently approving
-    ///   this exact command. The caller MUST NOT implicitly approve other
+    ///   this exact command and the caller either passed `may_wait = false` or
+    ///   the wait timed out. The caller MUST NOT implicitly approve other
     ///   un-reserved commands in the same chain.
-    pub(crate) fn try_reserve_allow_once(&mut self, normalized: &str) -> ReserveOutcome {
+    pub(crate) fn reserve_allow_once(&mut self, normalized: &str, may_wait: bool) -> ReserveOutcome {
         let mut shared = self.shared.lock().unwrap();
-        if shared.allow_once.contains(normalized) {
-            return ReserveOutcome::AlreadyAllowed;
-        }
-        if shared.pending_allow_once.insert(normalized.to_string()) {
-            ReserveOutcome::Reserved
-        } else {
-            ReserveOutcome::Pending
+        loop {
+            if shared.allow_once.contains(normalized) {
+                return ReserveOutcome::AlreadyAllowed;
+            }
+            if shared.pending_allow_once.insert(normalized.to_string()) {
+                return ReserveOutcome::Reserved;
+            }
+            if !may_wait {
+                return ReserveOutcome::Pending;
+            }
+
+            // Another thread owns the pending reservation for this exact
+            // command. We hold no reservations of our own (the caller only
+            // waits before reserving anything), so blocking here cannot
+            // deadlock. Wake when the peer either approves it (now in
+            // `allow_once`) or releases it (no longer pending).
+            let (guard, timeout) = self
+                .reservation_done
+                .wait_timeout_while(shared, RESERVATION_WAIT_TIMEOUT, |state| {
+                    state.pending_allow_once.contains(normalized)
+                        && !state.allow_once.contains(normalized)
+                })
+                .unwrap();
+            shared = guard;
+            if timeout.timed_out() {
+                return ReserveOutcome::Pending;
+            }
         }
     }
 
     /// Completes an allow-once reservation.
     ///
     /// Removes the command from the pending set. If `approved` is `true`, also
-    /// inserts it into the allow-once set.
+    /// inserts it into the allow-once set. Wakes any thread blocked in
+    /// [`Self::reserve_allow_once`] waiting on this command.
     pub(crate) fn complete_allow_once(&mut self, normalized: &str, approved: bool) {
-        let mut shared = self.shared.lock().unwrap();
-        shared.pending_allow_once.remove(normalized);
-        if approved {
-            shared.allow_once.insert(normalized.to_string());
+        {
+            let mut shared = self.shared.lock().unwrap();
+            shared.pending_allow_once.remove(normalized);
+            if approved {
+                shared.allow_once.insert(normalized.to_string());
+            }
         }
+        self.reservation_done.notify_all();
     }
 
     pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {

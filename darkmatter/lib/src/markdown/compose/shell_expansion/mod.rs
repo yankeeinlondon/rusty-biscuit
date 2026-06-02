@@ -243,7 +243,10 @@ pub(crate) fn prepare_directive(
             if check_whitelist(&runtime_snapshot.whitelist, &exe, normalized) {
                 continue;
             }
-            match shell_runtime.try_reserve_allow_once(normalized) {
+            // Block on a same-command peer approval only while we hold no
+            // reservations of our own; otherwise a hold-and-wait cycle across
+            // cross-ordered chains could deadlock.
+            match shell_runtime.reserve_allow_once(normalized, reserved.is_empty()) {
                 types::ReserveOutcome::Reserved => reserved.push(normalized.clone()),
                 types::ReserveOutcome::AlreadyAllowed => {}
                 types::ReserveOutcome::Pending => {

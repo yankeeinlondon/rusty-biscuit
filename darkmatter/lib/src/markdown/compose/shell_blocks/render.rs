@@ -6,35 +6,14 @@ use super::types::ShellBlockCommandResult;
 ///
 /// ## Contract
 ///
-/// - Trim each command's combined output.
-/// - Drop empty command outputs entirely.
-/// - Append one newline after each non-empty command output.
-/// - Insert one blank line between non-empty command outputs.
-/// - Return empty string if all outputs are empty.
+/// Concatenates each command's captured combined output verbatim. No trimming,
+/// blank-line insertion, or other normalization is applied — the only
+/// transformation a shell block performs on captured output is the container
+/// indentation added by the caller at the splice boundary (spec requirement 5).
+/// Separation between commands therefore comes from the commands' own trailing
+/// newlines, exactly as a single `::shell` directive preserves its output.
 pub(crate) fn render_block_output(results: &[ShellBlockCommandResult]) -> String {
-    let mut non_empty: Vec<&str> = Vec::new();
-
-    for result in results {
-        let trimmed = result.output.trim();
-        if !trimmed.is_empty() {
-            non_empty.push(trimmed);
-        }
-    }
-
-    if non_empty.is_empty() {
-        return String::new();
-    }
-
-    let mut output = String::new();
-    for (i, text) in non_empty.iter().enumerate() {
-        if i > 0 {
-            output.push('\n');
-        }
-        output.push_str(text);
-        output.push('\n');
-    }
-
-    output
+    results.iter().map(|result| result.output.as_str()).collect()
 }
 
 #[cfg(test)]
@@ -53,51 +32,44 @@ mod tests {
     }
 
     #[test]
-    fn single_output() {
-        let results = vec![make_result("hello")];
+    fn single_output_is_verbatim() {
+        // Each command's own trailing newline is preserved, never added or stripped.
+        let results = vec![make_result("hello\n")];
         assert_eq!(render_block_output(&results), "hello\n");
     }
 
     #[test]
-    fn multiple_outputs() {
-        let results = vec![make_result("hello"), make_result("world")];
-        assert_eq!(render_block_output(&results), "hello\n\nworld\n");
+    fn multiple_outputs_concatenate_verbatim() {
+        // Separation comes from the commands' own trailing newlines, not an
+        // inserted blank line.
+        let results = vec![make_result("hello\n"), make_result("world\n")];
+        assert_eq!(render_block_output(&results), "hello\nworld\n");
     }
 
     #[test]
-    fn empty_output_omitted() {
-        let results = vec![make_result("hello"), make_result(""), make_result("world")];
-        assert_eq!(render_block_output(&results), "hello\n\nworld\n");
+    fn empty_output_contributes_nothing() {
+        let results = vec![make_result("hello\n"), make_result(""), make_result("world\n")];
+        assert_eq!(render_block_output(&results), "hello\nworld\n");
     }
 
     #[test]
     fn all_empty() {
-        let results = vec![make_result(""), make_result("  "), make_result("")];
+        let results = vec![make_result(""), make_result(""), make_result("")];
         assert_eq!(render_block_output(&results), "");
     }
 
     #[test]
-    fn trimmed_output() {
-        let results = vec![make_result("  hello  "), make_result("world\n")];
-        assert_eq!(render_block_output(&results), "hello\n\nworld\n");
+    fn leading_and_trailing_whitespace_preserved() {
+        // Byte-for-byte preservation: surrounding spaces survive unchanged.
+        let results = vec![make_result("  hello  \n"), make_result("world")];
+        assert_eq!(render_block_output(&results), "  hello  \nworld");
     }
 
     #[test]
-    fn mixed_empty_and_non_empty() {
-        let results = vec![
-            make_result(""),
-            make_result("a"),
-            make_result(""),
-            make_result(""),
-            make_result("b"),
-            make_result(""),
-        ];
-        assert_eq!(render_block_output(&results), "a\n\nb\n");
-    }
-
-    #[test]
-    fn single_empty_amidst_empty() {
-        let results = vec![make_result(""), make_result("only"), make_result("")];
-        assert_eq!(render_block_output(&results), "only\n");
+    fn output_without_trailing_newline_preserved() {
+        // A command that emits no trailing newline keeps that shape; the next
+        // command's output is appended directly (no normalization).
+        let results = vec![make_result("a"), make_result("b\n")];
+        assert_eq!(render_block_output(&results), "ab\n");
     }
 }
