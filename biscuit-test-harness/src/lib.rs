@@ -417,8 +417,18 @@ pub fn apply_color_forcing_env(cmd: &mut std::process::Command) {
 /// Waits for a shell prompt to appear in the harness output.
 ///
 /// Polls [`TerminalHarness::capture`] every 100 ms, looking for a
-/// trailing `$`, `#`, or `%` character on the last line. Times out
-/// after 5 seconds and returns silently so that callers don't hang.
+/// trailing `$`, `#`, or `%` character on the last **non-blank** line.
+/// Times out after 5 seconds and returns silently so that callers don't
+/// hang.
+///
+/// ## Notes
+///
+/// The prompt is detected on the last non-blank line rather than the
+/// literal last line: some backends (notably tmux's `capture-pane`) pad
+/// the capture to the full pane height with trailing blank lines, so the
+/// shell prompt is never the literal last line. Scanning past trailing
+/// blanks lets prompt detection succeed in a few polls instead of
+/// exhausting the full 5-second timeout on every call.
 pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
     for _ in 0..50 {
         std::thread::sleep(Duration::from_millis(100));
@@ -426,8 +436,13 @@ pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
             Ok(f) => f,
             Err(_) => continue,
         };
-        if let Some(last_line) = frame.plain.lines().last() {
-            let trimmed = last_line.trim_end();
+        let last_content_line = frame
+            .plain
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty());
+        if let Some(line) = last_content_line {
+            let trimmed = line.trim_end();
             if trimmed.ends_with('$') || trimmed.ends_with('#') || trimmed.ends_with('%') {
                 return Ok(());
             }
