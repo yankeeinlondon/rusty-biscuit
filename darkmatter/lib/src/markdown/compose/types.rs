@@ -2593,7 +2593,10 @@ mod tests {
         let options = ComposeOptions::new();
         let config = options.remote_read_config();
         assert!(config.allowed_hosts.is_empty());
-        assert_eq!(config.remote_concurrency, 4);
+        assert_eq!(
+            config.remote_concurrency,
+            crate::markdown::compose::remote::DEFAULT_REMOTE_CONCURRENCY
+        );
         assert_eq!(config.freshness_mode, RemoteFreshnessMode::Fallback);
     }
 
