@@ -357,10 +357,7 @@ pub(crate) fn is_identifier_char(ch: char) -> bool {
 /// assert_eq!(directive_prefix_len("> > ::shell x"), 4);
 /// ```
 pub(crate) fn directive_prefix_len(line: &str) -> usize {
-    line.len()
-        - line
-            .trim_start_matches(|c: char| c == '>' || c == ' ' || c == '\t')
-            .len()
+    line.len() - line.trim_start_matches(['>', ' ', '\t']).len()
 }
 
 /// Strips a leading block-quote marker prefix from `line`, returning the bare
