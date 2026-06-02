@@ -13,7 +13,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use super::json_number;
-use super::resolve_ctx::{ResolutionContext, normalize_path_arg};
+use super::resolve_ctx::{ResolutionContext, is_remote_url, normalize_path_arg};
 use crate::markdown::Markdown;
 use crate::markdown::schemas::DarkmatterSchemas;
 
@@ -614,6 +614,12 @@ pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
         Ok(s) => s,
         Err(_) => return Ok(Value::Bool(false)),
     };
+    // A remote URL "exists" when it was fetched successfully; a denied,
+    // unregistered, or failed fetch reads as non-existent (never errors).
+    if is_remote_url(raw) {
+        let exists = matches!(ctx.fetch_remote_text(raw), Ok(Some(_)));
+        return Ok(Value::Bool(exists));
+    }
     let exists = match resolve_arg(raw, ctx) {
         Ok(Some(p)) => p.exists(),
         _ => false,
@@ -657,6 +663,15 @@ pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Str
 /// Loads a Markdown file via the resolution context. `Err` if the path is
 /// invalid or unreadable.
 fn load_markdown(raw: &str, ctx: &ResolutionContext, fname: &str) -> Result<Markdown, String> {
+    // HTTP(S) arguments read from the run's remote-fetch cache instead of disk,
+    // mirroring how `::file`/`::code` directives resolve remote targets.
+    if is_remote_url(raw) {
+        return match ctx.fetch_remote_text(raw)? {
+            Some(body) => Markdown::try_from_content(body)
+                .map_err(|e| format!("{fname}() failed to parse {raw:?}: {e}")),
+            None => Err(format!("{fname}() remote reads are not enabled for {raw:?}")),
+        };
+    }
     let path = resolve_arg(raw, ctx)?.ok_or_else(|| format!("{fname}() invalid file path: {raw:?}"))?;
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("{fname}() invalid file path {raw:?}: {e}"))?;
@@ -1427,5 +1442,71 @@ mod tests {
                 true
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod fn_remote_tests {
+    use super::*;
+    use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
+    use biscuit_file::file_reference::fetch::FetchPolicy;
+    use serde_json::json;
+    use std::time::Duration;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Builds a context whose remote-fetch runtime has already fetched `url`.
+    async fn ready_ctx(url: &str, allow: bool) -> ResolutionContext {
+        let policy = if allow {
+            FetchPolicy::deny_all().allow_host("127.0.0.1")
+        } else {
+            FetchPolicy::deny_all()
+        };
+        let rt = RemoteFetchRuntime::with_policy(policy);
+        rt.register_and_fetch(url::Url::parse(url).unwrap());
+        // Allow the eager fetch task to settle before reading point-of-use.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        ResolutionContext {
+            remote_fetch: Some(rt),
+            ..ResolutionContext::new(std::path::PathBuf::from("."))
+        }
+    }
+
+    #[tokio::test]
+    async fn frontmatter_title_and_exists_read_remote_url() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/doc.md"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "---\ntitle: Remote Title\nstatus: draft\n---\n# H1\n\nBody\n",
+            ))
+            .mount(&server)
+            .await;
+        let url = format!("{}/doc.md", server.uri());
+        let ctx = ready_ctx(&url, true).await;
+
+        assert_eq!(
+            frontmatter_fn(&[json!(url.clone()), json!("status")], &ctx).unwrap(),
+            json!("draft")
+        );
+        assert_eq!(
+            markdown_title_fn(&[json!(url.clone())], &ctx).unwrap(),
+            json!("Remote Title")
+        );
+        assert_eq!(
+            markdown_body_empty_fn(&[json!(url.clone())], &ctx).unwrap(),
+            json!(false)
+        );
+        assert_eq!(file_exists_fn(&[json!(url)], &ctx).unwrap(), json!(true));
+    }
+
+    #[tokio::test]
+    async fn file_exists_false_for_policy_denied_remote() {
+        let server = MockServer::start().await;
+        // No mock mounted and a deny-all policy: the fetch never reaches the
+        // network, so the URL is treated as non-existent.
+        let url = format!("{}/blocked.md", server.uri());
+        let ctx = ready_ctx(&url, false).await;
+        assert_eq!(file_exists_fn(&[json!(url)], &ctx).unwrap(), json!(false));
     }
 }

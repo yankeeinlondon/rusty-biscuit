@@ -1,5 +1,12 @@
 use darkmatter::effects::EffectEngine;
 use serde_json::json;
+use std::io::Write;
+use std::net::TcpListener;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+use std::thread;
 
 #[test]
 fn file_and_dir_verbs() {
@@ -37,4 +44,33 @@ fn file_and_dir_verbs() {
 
     // mutation-root escape is refused
     assert!(eng.ensure_file("../escape.md").is_err());
+}
+
+#[test]
+fn http_post_uses_allowed_host_policy() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let request_count = Arc::clone(&requests);
+
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        request_count.fetch_add(1, Ordering::SeqCst);
+        let mut buf = [0_u8; 4096];
+        let _ = std::io::Read::read(&mut stream, &mut buf);
+        let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+
+    let eng = EffectEngine::builder()
+        .allowed_hosts(["127.0.0.1"])
+        .build();
+
+    let response = eng
+        .http_post(&format!("http://{addr}/hook"), b"{\"ok\":true}")
+        .unwrap();
+
+    assert_eq!(response["status"], json!(200));
+    assert_eq!(response["body"], json!("ok"));
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
 }

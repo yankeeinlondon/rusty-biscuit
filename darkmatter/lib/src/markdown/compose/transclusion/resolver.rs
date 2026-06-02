@@ -20,6 +20,12 @@ pub(crate) fn resolve_target(
     debug!("transclusion: resolving target");
     match kind {
         DirectiveKind::Url => resolve_url_target(raw_target, options),
+        // `::file`/`::code` accept HTTP(S) targets too; route those to the URL
+        // resolver so remote transclusion works through the same directives as
+        // local paths.
+        DirectiveKind::File | DirectiveKind::Code if is_url_like(raw_target) => {
+            resolve_url_target(raw_target, options)
+        }
         DirectiveKind::File | DirectiveKind::Code => {
             let path = resolve_path(raw_target, kind, options, source, line, ctx)?;
             validate_local_target(kind, &path, options)?;

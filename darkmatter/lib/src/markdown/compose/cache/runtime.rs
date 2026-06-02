@@ -11,6 +11,7 @@ use super::hashing::{
 };
 use super::manifest::{
     CACHE_VERSION, ComposedDocumentManifest, DocumentSnapshotManifest, OperationResultManifest,
+    RemoteUrlManifest,
 };
 use super::store::FileStore;
 use super::types::{
@@ -1014,6 +1015,17 @@ impl RunLocalCache {
                     return None;
                 }
                 Some(manifest.closure_hash)
+            }
+            ArtifactClass::RemoteUrl => {
+                // The remote dependency's current closure value is the content
+                // hash of the cached body. A re-fetch that changes the body
+                // updates this hash, invalidating any parent that referenced
+                // the prior content.
+                let manifest: RemoteUrlManifest = store
+                    .read_manifest(ArtifactClass::RemoteUrl, dependency.entry_key)
+                    .ok()
+                    .flatten()?;
+                Some(manifest.content_hash)
             }
             ArtifactClass::DocumentSnapshot => None,
         }

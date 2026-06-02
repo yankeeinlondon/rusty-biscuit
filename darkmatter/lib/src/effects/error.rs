@@ -15,6 +15,12 @@ pub enum EffectError {
     #[error("network host not allowed: {0}")]
     HostNotAllowed(String),
 
+    #[error("invalid URL: {0}")]
+    InvalidUrl(String),
+
+    #[error("network request failed: {0}")]
+    Network(String),
+
     #[error("frontmatter property {prop:?} has the wrong type for {op}")]
     PropertyType { op: &'static str, prop: String },
 

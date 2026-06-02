@@ -5,6 +5,7 @@ use crate::effects::error::EffectError;
 use crate::effects::fs_write::{atomic_write_guarded, ensure_within};
 use crate::markdown::Markdown;
 use crate::markdown::hash::MdHashOptions;
+use biscuit_file::file_reference::fetch::{FetchPolicy, HostPattern};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -259,6 +260,33 @@ impl EffectEngine {
         let line = serde_json::to_string(&obj).map_err(|e| EffectError::Markdown(e.to_string()))?;
         self.append_line(file, &line)
     }
+
+    /// `http_post(url, body)` -> object with `status` and `body`.
+    pub fn http_post(&self, url: &str, body: impl Into<Vec<u8>>) -> Result<Value, EffectError> {
+        let url = url::Url::parse(url).map_err(|e| EffectError::InvalidUrl(e.to_string()))?;
+        let mut policy = FetchPolicy::deny_all();
+        for host in self.allowed_hosts() {
+            policy = policy.allow(HostPattern::Exact(host.clone()));
+        }
+
+        let client = reqwest::Client::new();
+        let response = biscuit_file::file_reference::fetch::post_blocking(
+            &client,
+            &url,
+            &policy,
+            body.into(),
+        )
+        .map_err(|e| match e {
+            biscuit_file::FetchError::PolicyDenied { host } => EffectError::HostNotAllowed(host),
+            other => EffectError::Network(other.to_string()),
+        })?;
+
+        let response_body = String::from_utf8_lossy(&response.body).to_string();
+        Ok(serde_json::json!({
+            "status": response.status,
+            "body": response_body,
+        }))
+    }
 }
 
 /// Strips a leading `file://` and collapses doubled `/` (engine-local copy of
@@ -328,5 +356,16 @@ mod tests {
         assert_eq!(merged["owner"], json!("ken"));
         let removed = eng.delete_frontmatter("d.md", "owner").unwrap();
         assert_eq!(removed, json!("ken"));
+    }
+
+    #[test]
+    fn http_post_denies_hosts_by_default() {
+        let eng = EffectEngine::builder().build();
+
+        let err = eng
+            .http_post("https://example.com/hook", b"{}")
+            .unwrap_err();
+
+        assert!(matches!(err, crate::effects::EffectError::HostNotAllowed(_)));
     }
 }

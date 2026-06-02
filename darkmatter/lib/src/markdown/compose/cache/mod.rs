@@ -9,6 +9,7 @@
 pub(crate) mod hashing;
 pub(crate) mod manifest;
 pub(crate) mod operation;
+pub(crate) mod remote_cache;
 pub(crate) mod runtime;
 pub(crate) mod store;
 pub(crate) mod types;
