@@ -259,6 +259,10 @@ sibling specs.
    `TerminalImage`, `MermaidDiagram`, `DarkmatterPage`). One verification
    condition: the `Image`/`ThematicBreak`/`Code{mermaid}` node renderers must own
    the document lowering (helper calls to the exempt components are fine).
+   **Verification completed 2026-06-02** — see
+   [`../2026-06-02-non-structural/phase-5-notes.md`](../2026-06-02-non-structural/phase-5-notes.md)
+   for mechanical-search evidence, test results, and the Phase 4/5 checklist
+   sign-off.
 6. **Mermaid on the tree.** ✅ **Resolved — designed in graphics-policy** as a
    promoted `Code` node (static `<svg>` browser, raster terminal; interactive
    mermaid.js an orthogonal opt-in). Built in Phase 0a, before cutover.

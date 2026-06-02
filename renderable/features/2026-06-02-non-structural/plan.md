@@ -46,6 +46,13 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4:
   - renderable/features/2026-06-02-non-structural/phase-4-notes.md
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - renderable/features/2026-06-02-non-structural/plan.md
+  - renderable/features/2026-06-02-tree-cutover/spec.md
+docs_created_during_phase_5:
+  - renderable/features/2026-06-02-non-structural/phase-5-notes.md
+skills_files_updated_during_phase_5: []
 packages:
   - renderable
   - biscuit-terminal
@@ -94,9 +101,9 @@ packages:
 
 ## Phase 5: Cutover Readiness Validation
 
-- [ ] Run mechanical searches confirming no remaining document-pipeline route calls the legacy `RuleProcessor`, `output/html.rs`, `output/terminal.rs`, or exempt helper components directly for `Image`, `ThematicBreak`, or Mermaid code nodes.
-- [ ] Run the narrow package tests covering `renderable`, `biscuit-terminal`, and `darkmatter` renderer behavior touched or verified by this work.
-- [ ] Run any existing component-catalog or documentation validation commands that cover `renderable/docs/components.md` and the feature specs.
-- [ ] Update the tree-cutover Phase 4/5 checklist, if present, with the final exemption-register and node-kind verification status.
-- [ ] Record final evidence in the implementation notes or PR summary: changed docs, verified renderer paths, tests run, and any remaining cutover blockers.
-- [ ] Validation checkpoint: the cutover can consume this spec without treating the registered non-structural components as blockers, and all document-pipeline components remain either tree-render-only or explicitly tracked for cutover.
+- [x] Run mechanical searches confirming no remaining document-pipeline route calls the legacy `RuleProcessor`, `output/html.rs`, `output/terminal.rs`, or exempt helper components directly for `Image`, `ThematicBreak`, or Mermaid code nodes.
+- [x] Run the narrow package tests covering `renderable`, `biscuit-terminal`, and `darkmatter` renderer behavior touched or verified by this work.
+- [x] Run any existing component-catalog or documentation validation commands that cover `renderable/docs/components.md` and the feature specs.
+- [x] Update the tree-cutover Phase 4/5 checklist, if present, with the final exemption-register and node-kind verification status.
+- [x] Record final evidence in the implementation notes or PR summary: changed docs, verified renderer paths, tests run, and any remaining cutover blockers.
+- [x] Validation checkpoint: the cutover can consume this spec without treating the registered non-structural components as blockers, and all document-pipeline components remain either tree-render-only or explicitly tracked for cutover.
