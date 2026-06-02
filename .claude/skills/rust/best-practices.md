@@ -179,7 +179,7 @@ fn read_safely(data: &[u32], index: usize) -> Option<u32> {
 
 ## 3. Idiomatic Error Handling
 
-Rust treats errors as data - no exceptions.
+Rust treats errors as data - not exceptions.
 
 ### Result and Option
 
@@ -215,17 +215,19 @@ pub enum DatabaseError {
 
 ### Application-Level Errors
 
-Use **`anyhow`** crate for binaries.
+Use **`color-eyre`** for binaries — rich, colorized error reports with context. (In the rusty-biscuit monorepo this is the standard for CLI error reporting; `anyhow` is a viable alternative in other projects.)
 
 ```rust
-use anyhow::{Context, Result};
+use color_eyre::eyre::{Result, WrapErr};
 
 fn main() -> Result<()> {
+    color_eyre::install()?;
+
     let config = read_config()
-        .context("Failed to read config file")?;
+        .wrap_err("Failed to read config file")?;
 
     let db = connect_db(&config.db_url)
-        .context("Failed to connect to database")?;
+        .wrap_err("Failed to connect to database")?;
 
     Ok(())
 }
@@ -319,7 +321,6 @@ cargo bench
 
 # Code quality
 cargo clippy        # Linter (700+ checks)
-cargo fmt          # Formatter
 
 # Security and performance
 cargo audit        # Vulnerability scanner
@@ -330,20 +331,7 @@ cargo bloat        # Binary size analysis
 cargo doc --open   # Generate and view docs
 ```
 
-### Clippy Configuration
-
-Add to `Cargo.toml`:
-
-```toml
-[lints.clippy]
-# Deny common mistakes
-unwrap_used = "deny"
-expect_used = "deny"
-panic = "deny"
-
-# Pedantic (opt-in)
-pedantic = "warn"
-```
+Formatting (`cargo fmt`) is best run as a periodic standalone pass rather than on every change, since it can produce large diffs that obscure behavior changes.
 
 ## 6. Project Structure
 
