@@ -29,7 +29,6 @@ prompt: |-
     - make sure your output is clean, idiomatic, and standards based Markdown (CommonMark + GFM)
 last_updated: 2026-05-28
 ---
-Now let me fetch more specific documentation pages and the CHANGELOG:Now let me get the bencher CI tracking docs for criterion:Now I have all the research. Let me compose the final Markdown document:
 
 # `criterion` crate
 
@@ -42,6 +41,56 @@ Criterion.rs is a statistics-driven micro-benchmarking library for Rust, ported 
 - **License**: Apache-2.0 OR MIT
 - **Latest Version**: 0.8.2 (2026-02-04)
 - **Total Downloads**: 210M+
+
+## Getting Started
+
+Add Criterion as a dev-dependency and declare a benchmark target with `harness = false`:
+
+```toml
+[dev-dependencies]
+criterion = { version = "0.8", features = ["async_tokio"] }
+
+[[bench]]
+name = "my_benchmark"
+harness = false
+```
+
+Write the benchmark file at `benches/my_benchmark.rs`:
+
+```rust
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+
+fn fibonacci(n: u64) -> u64 {
+    match n {
+        0 | 1 => 1,
+        n => fibonacci(n - 1) + fibonacci(n - 2),
+    }
+}
+
+fn fibonacci_benchmark(c: &mut Criterion) {
+    c.bench_function("fib 20", |b| {
+        b.iter(|| fibonacci(black_box(20)))
+    });
+}
+
+criterion_group!(benches, fibonacci_benchmark);
+criterion_main!(benches);
+```
+
+Run with:
+
+```bash
+cargo bench
+```
+
+For mixed lib/CLI workspaces, start with a few high-signal, non-gating benchmarks:
+
+- policy or matcher evaluation hot paths
+- stream parsing throughput
+- config loading or dispatch setup on repeated calls
+
+Add them first as local or scheduled CI checks before enforcing regression budgets on every PR.
 
 ## Features
 
@@ -60,17 +109,6 @@ Criterion exposes the following cargo features (as of 0.8.2):
 | `async_tokio`         | No      | Enables async benchmarking with the `tokio` executor (`tokio::runtime::Runtime` or `Handle`).                                       |
 | `real_blackbox`       | No      | No-op since 0.6.0. Previously used `std::hint::black_box()` on nightly. Now always uses it.                                         |
 | `stable`              | No      | Convenience feature that enables `csv_output`, `html_reports`, and all async executor features.                                     |
-
-**Typical `Cargo.toml` setup:**
-
-```toml
-[dev-dependencies]
-criterion = { version = "0.8", features = ["async_tokio"] }
-
-[[bench]]
-name = "my_benchmark"
-harness = false
-```
 
 ## Version Timeline
 
@@ -191,25 +229,6 @@ gantt
 | **0.8.2** | 2026-02-04 | Latest release.                                   |
 
 ## Configuration and Best Practices
-
-### Basic Benchmark Structure
-
-Every Criterion benchmark follows this pattern:
-
-```rust
-use criterion::{criterion_group, criterion_main, Criterion};
-
-fn my_benchmark(c: &mut Criterion) {
-    c.bench_function("my_function", |b| {
-        b.iter(|| {
-            // code to benchmark
-        })
-    });
-}
-
-criterion_group!(benches, my_benchmark);
-criterion_main!(benches);
-```
 
 ### Configuring via `BenchmarkGroup`
 
@@ -675,4 +694,34 @@ c.bench_function("async_handler", |b| {
 });
 ```
 
-Supported executors: Tokio (`Runtime` or `Handle`), Smol, Futures. Async benchmarks have higher measurement overhead than sync benchmarks, so prefer sync when possible, especially for sub-microsecond functions.The research and document are complete. The output above is the full Markdown body content (no frontmatter) covering all requested topics: features, version timeline with a Mermaid Gantt chart, configuration best practices, naming conventions, preventing over-optimization, metadata enrichment, all output types (HTML/CSV/JSON), HTML report structure and optimization, report cardinality, and Bencher integration (both local and CI, Cloud and Self-Hosted, plus the JSON adapter alternative).
+Supported executors: Tokio (`Runtime` or `Handle`), Smol, Futures. Async benchmarks have higher measurement overhead than sync benchmarks, so prefer sync when possible, especially for sub-microsecond functions.
+
+## Best Practices Checklist
+
+1. **Isolate the code under test** — minimize setup inside the measured section. Use `iter_batched` when setup is expensive or stateful.
+2. **Use realistic data** — benchmark with production-shaped inputs, not toy values.
+3. **Wrap inputs and outputs in `black_box`** — prevents the optimizer from constant-folding or eliminating the work.
+4. **Build in release mode** — `cargo bench` does this by default; double-check if you invoke benches via a custom runner.
+5. **Disable CPU frequency scaling** for stable numbers (`cpupower frequency-set --governor performance` on Linux; on macOS pin the machine to AC power and disable Low Power Mode).
+6. **Watch the variance** — a wide `time:` confidence interval signals measurement contamination (background noise, thermals, allocator state), not real perf signal.
+7. **Set `Throughput`** for I/O- or size-driven benchmarks so reports include bytes/elements per second.
+8. **Use `BenchmarkGroup` over flat `bench_function`** when you have more than one related benchmark — it produces grouped reports and lets you sweep parameters with `BenchmarkId`.
+
+## Profiling After Benchmarking
+
+Once Criterion identifies a slow benchmark, drill in with a sampling profiler:
+
+```bash
+# Build with debug symbols
+RUSTFLAGS="-C debuginfo=2" cargo build --release
+
+# Linux: perf
+perf record -g target/release/my_binary
+perf report
+
+# Flamegraph (any platform)
+cargo install flamegraph
+cargo flamegraph
+```
+
+On macOS, use `cargo instruments -t "Time Profiler"` (from the `cargo-instruments` crate) or open the release binary in Instruments.app directly.
