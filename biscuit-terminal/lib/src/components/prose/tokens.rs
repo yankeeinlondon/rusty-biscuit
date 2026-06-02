@@ -1,22 +1,22 @@
-//! Bracketed-tag parser that builds the target-neutral [`ProseNode`] tree.
+//! Bracketed-tag parser that builds shared [`RenderNode`] values directly.
 //!
 //! The atomic-token grammar (`{{token}}`) has been removed — `{{…}}` is now
 //! ordinary literal text. Only bracketed tags (`<tag>…</tag>`) and the
 //! Markdown subset (pre-processed into bracketed tags) are recognized.
 //!
 //! Parsing is target-neutral: no terminal capability decisions are made
-//! here. The parser resolves tag names to [`ProseStyle`]/[`ProseNode`]
-//! intent only; degradation happens in each target emitter.
+//! here. The parser resolves tag names to [`ProseStyle`] intent only;
+//! degradation happens in each target renderer.
 
 use std::iter::Peekable;
 use std::str::Chars;
 
 use renderable::color::{BasicColor, Color, RgbColor};
 use renderable::style::UnderlineStyle;
+use renderable::tree::RenderNode;
 
-use super::ir::{ProseNode, ProseStyle};
 use super::markdown::{CODE_BLOCK_PLACEHOLDER_MARK, FencedCode};
-use super::styles::{parse_rgb, tailwind_by_name, web_color_by_name};
+use super::styles::{ProseStyle, parse_rgb, tailwind_by_name, web_color_by_name};
 
 /// Parse an opening tag into its name and attributes.
 pub(super) fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(String, String)>)> {
@@ -285,23 +285,82 @@ fn take_code_placeholder(chars: &mut Peekable<Chars<'_>>) -> Option<usize> {
     digits.parse().ok()
 }
 
-/// Push the accumulated literal text (if any) as a [`ProseNode::Text`].
-fn flush_text(text: &mut String, nodes: &mut Vec<ProseNode>) {
+/// Scan a bracketed-tag declaration, assuming the opening `<` was already
+/// consumed.
+///
+/// The scan is quote-aware (a `>` inside a quoted attribute value is not the
+/// terminator) and escape-aware (the `\<`, `\>`, `\\`, `\"`, `\'` sequences
+/// produced by [`Prose::quoted_attr`](super::Prose::quoted_attr) are preserved
+/// verbatim, so an escaped delimiter never ends the tag). The returned content
+/// is raw — [`parse_opening_tag`] resolves the escapes inside attribute values,
+/// and keeping it raw lets an unrecognized declaration fall back to literal
+/// text intact.
+///
+/// ## Returns
+///
+/// The raw tag content (without the surrounding `<` / `>`) and whether a
+/// closing `>` was found before input ran out.
+fn scan_tag_declaration(chars: &mut Peekable<Chars<'_>>) -> (String, bool) {
+    let mut tag_content = String::new();
+    let mut found_close = false;
+    let mut quote: Option<char> = None;
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                tag_content.push('\\');
+                if let Some(&next) = chars.peek()
+                    && matches!(next, '<' | '>' | '\\' | '"' | '\'')
+                {
+                    tag_content.push(next);
+                    chars.next();
+                }
+            }
+            '"' | '\'' => {
+                match quote {
+                    Some(q) if q == c => quote = None,
+                    None => quote = Some(c),
+                    Some(_) => {}
+                }
+                tag_content.push(c);
+            }
+            '>' if quote.is_none() => {
+                found_close = true;
+                break;
+            }
+            _ => tag_content.push(c),
+        }
+    }
+    (tag_content, found_close)
+}
+
+/// Push the accumulated literal text (if any) as a [`NodeKind::Text`] node.
+///
+/// [`NodeKind::Text`]: renderable::tree::NodeKind::Text
+fn flush_render_text(text: &mut String, nodes: &mut Vec<RenderNode>) {
     if !text.is_empty() {
-        nodes.push(ProseNode::Text(std::mem::take(text)));
+        nodes.push(RenderNode::text(std::mem::take(text)));
     }
 }
 
-/// Parse pre-processed Prose `content` into a flat list of [`ProseNode`]s.
+/// Parse pre-processed Prose `content` directly into shared
+/// [`RenderNode`](renderable::tree::RenderNode) values.
 ///
-/// Recurses into recognized bracketed tags. Unknown tags and former
-/// atomic-token syntax become literal [`ProseNode::Text`]. Fenced
-/// code-block placeholders are resolved against `code_blocks` and emitted
-/// as opaque [`ProseNode::CodeBlock`]s — their bodies are never scanned
-/// for markup, so a body containing `</code-block>`, `<red>`, or any
-/// other delimiter stays inert.
-pub(super) fn parse_nodes(content: &str, code_blocks: &[FencedCode]) -> Vec<ProseNode> {
-    let mut nodes: Vec<ProseNode> = Vec::new();
+/// This is the render-tree counterpart of [`parse_nodes`]: it shares the same
+/// scanner ([`scan_tag_declaration`], [`scan_inner`], [`resolve_tag`],
+/// [`take_code_placeholder`]) but builds canonical tree nodes without an
+/// intervening component-local IR. Styled spans lower through
+/// [`project_span`](super::tree::project_span) to semantic
+/// `Strong`/`Emphasis`/`Delete` wrappers or a styled `Span`; links, code
+/// blocks, and literal text map to `Link`, `Code`, and `Text`.
+///
+/// Two render-tree-only policies diverge from the old bespoke IR path:
+///
+/// - `<inverse>` / `<reverse>` carry `TextEmphasis::inverse` through the
+///   styled `Span`, lowered per target by the shared renderers.
+/// - `<hidden>` is dropped — it has no semantic peer and degrades to inert
+///   literal text exactly like an unknown tag.
+pub(super) fn parse_render_nodes(content: &str, code_blocks: &[FencedCode]) -> Vec<RenderNode> {
+    let mut nodes: Vec<RenderNode> = Vec::new();
     let mut text = String::new();
     let mut chars = content.chars().peekable();
 
@@ -311,14 +370,13 @@ pub(super) fn parse_nodes(content: &str, code_blocks: &[FencedCode]) -> Vec<Pros
             if let Some(block) =
                 take_code_placeholder(&mut chars).and_then(|index| code_blocks.get(index))
             {
-                flush_text(&mut text, &mut nodes);
-                nodes.push(ProseNode::CodeBlock {
-                    lang: Some(block.lang.clone()).filter(|s| !s.is_empty()),
-                    value: block.body.clone(),
-                });
+                flush_render_text(&mut text, &mut nodes);
+                nodes.push(RenderNode::code(
+                    Some(block.lang.clone()).filter(|s| !s.is_empty()),
+                    None,
+                    block.body.clone(),
+                ));
             }
-            // A malformed placeholder leaves the sentinel dropped; it is a
-            // control character with no visible rendering either way.
             continue;
         }
 
@@ -336,73 +394,40 @@ pub(super) fn parse_nodes(content: &str, code_blocks: &[FencedCode]) -> Vec<Pros
 
         // ── Block tags: <tag>content</tag> ────────────────────────────────
         if ch == '<' {
-            // Scan the tag declaration up to its terminating `>`. The scan
-            // is quote-aware (a `>` inside a quoted attribute value is not
-            // the terminator) and escape-aware (the `\<`, `\>`, `\\`, `\"`,
-            // `\'` sequences produced by `Prose::quoted_attr` are preserved
-            // verbatim, so an escaped delimiter never ends the tag).
-            // `parse_opening_tag` resolves the escapes inside attribute
-            // values; keeping `tag_content` raw here lets an unrecognized
-            // declaration fall back to literal text intact.
-            let mut tag_content = String::new();
-            let mut found_close = false;
-            let mut quote: Option<char> = None;
-            while let Some(c) = chars.next() {
-                match c {
-                    '\\' => {
-                        tag_content.push('\\');
-                        if let Some(&next) = chars.peek()
-                            && matches!(next, '<' | '>' | '\\' | '"' | '\'')
-                        {
-                            tag_content.push(next);
-                            chars.next();
-                        }
-                    }
-                    '"' | '\'' => {
-                        match quote {
-                            Some(q) if q == c => quote = None,
-                            None => quote = Some(c),
-                            Some(_) => {}
-                        }
-                        tag_content.push(c);
-                    }
-                    '>' if quote.is_none() => {
-                        found_close = true;
-                        break;
-                    }
-                    _ => tag_content.push(c),
-                }
-            }
+            let (tag_content, found_close) = scan_tag_declaration(&mut chars);
 
             if found_close
                 && !tag_content.starts_with('/')
                 && let Some((tag_name, attrs)) = parse_opening_tag(&tag_content)
             {
                 let resolution = resolve_tag(&tag_name, &attrs);
-                if !matches!(resolution, TagResolution::Unknown) {
+                // `<hidden>` is recognized by `resolve_tag` (the bespoke path
+                // still emits SGR 8 for it), but the render-tree path drops it:
+                // it falls through to the literal-text branch below alongside
+                // unknown tags.
+                let recognized = !matches!(resolution, TagResolution::Unknown)
+                    && !matches!(&resolution, TagResolution::Styled(style) if style.hidden);
+                if recognized {
                     let inner = scan_inner(&mut chars, &tag_name);
                     match resolution {
                         TagResolution::Styled(style) => {
-                            flush_text(&mut text, &mut nodes);
-                            nodes.push(ProseNode::Span {
-                                style,
-                                children: parse_nodes(&inner, code_blocks),
-                            });
+                            flush_render_text(&mut text, &mut nodes);
+                            let children = parse_render_nodes(&inner, code_blocks);
+                            nodes.push(super::tree::project_span(&style, children));
                         }
                         TagResolution::Link(href) => {
-                            flush_text(&mut text, &mut nodes);
-                            nodes.push(ProseNode::Link {
-                                href,
-                                children: parse_nodes(&inner, code_blocks),
-                            });
+                            flush_render_text(&mut text, &mut nodes);
+                            let children = parse_render_nodes(&inner, code_blocks);
+                            let resolved = super::styles::resolve_href(&href);
+                            nodes.push(RenderNode::link(resolved, None, children));
                         }
                         TagResolution::Transparent => {
-                            flush_text(&mut text, &mut nodes);
-                            nodes.extend(parse_nodes(&inner, code_blocks));
+                            flush_render_text(&mut text, &mut nodes);
+                            nodes.extend(parse_render_nodes(&inner, code_blocks));
                         }
                         TagResolution::Code(lang) => {
-                            flush_text(&mut text, &mut nodes);
-                            nodes.push(ProseNode::CodeBlock { lang, value: inner });
+                            flush_render_text(&mut text, &mut nodes);
+                            nodes.push(RenderNode::code(lang, None, inner));
                         }
                         TagResolution::Unknown => unreachable!("guarded above"),
                     }
@@ -410,7 +435,7 @@ pub(super) fn parse_nodes(content: &str, code_blocks: &[FencedCode]) -> Vec<Pros
                 }
             }
 
-            // Not a valid block tag — emit as literal text.
+            // Not a recognized tree-path tag — emit as literal text.
             text.push('<');
             text.push_str(&tag_content);
             if found_close {
@@ -422,6 +447,6 @@ pub(super) fn parse_nodes(content: &str, code_blocks: &[FencedCode]) -> Vec<Pros
         text.push(ch);
     }
 
-    flush_text(&mut text, &mut nodes);
+    flush_render_text(&mut text, &mut nodes);
     nodes
 }

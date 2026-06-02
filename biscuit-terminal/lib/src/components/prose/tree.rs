@@ -1,40 +1,40 @@
-//! Prose → render-tree inline node projection.
+//! Prose → render-tree projection and the [`TreeRenderable`] impl.
 //!
-//! The [`ProseDocument`] IR is private to the `prose` module; this file
-//! lowers it into the canonical [`RenderNode`] inline shape used by
-//! [`renderable::tree`]. Containers that embed a [`Prose`] component (today:
-//! [`BlockQuote`](crate::components::block_quote::BlockQuote)) can call
-//! [`Prose::to_render_nodes`] to project a styled paragraph that the
-//! terminal tree renderer lowers back to SGR — preserving the inline
-//! `<b>` / `<i>` / `<red>` styling that the user authored.
+//! Prose parses its bracket-tag grammar **directly** into the canonical
+//! [`RenderNode`] shape used by [`renderable::tree`] (see
+//! [`parse_render_nodes`](super::tokens::parse_render_nodes)); there is no
+//! intervening `ProseDocument` on this path. Containers that embed a
+//! [`Prose`] component (today:
+//! [`BlockQuote`](crate::components::block_quote::BlockQuote)) call
+//! [`Prose::to_render_nodes`] for the inline node sequence, and Prose's own
+//! [`TreeRenderable::render_tree`] wraps that sequence into a document-shaped
+//! root.
 //!
-//! Mapping:
-//! - `ProseNode::Text` → `NodeKind::Text`
-//! - `ProseNode::Span` with bold/italic/strikethrough only → semantic
-//!   `NodeKind::Strong` / `NodeKind::Emphasis` / `NodeKind::Delete`
-//!   wrappers (nested in that order so a single span carrying multiple
-//!   emphasis flags still expresses each one).
-//! - `ProseNode::Span` carrying color/background/dim/blink/underline →
-//!   `NodeKind::Span` with a [`Style`] attached on `attrs` so the terminal
-//!   renderer's `render_inline_node` path lowers it to SGR via
-//!   `text_appearance_sgr`.
-//! - `ProseNode::Link` → `NodeKind::Link` with un-resolved `href` (each
-//!   target re-resolves per its own rules, matching the existing Prose
-//!   emitters).
-//! - `ProseNode::CodeBlock` → `NodeKind::Code` (block-level). Code blocks
-//!   only appear at top level in practice, but we preserve them so a
-//!   future container that allows them gets the right tree shape.
+//! The tag → node mapping (applied by the parser via
+//! [`project_span`] and the `RenderNode` constructors):
+//! - literal text → `NodeKind::Text`
+//! - bold/italic/strikethrough only → semantic `NodeKind::Strong` /
+//!   `NodeKind::Emphasis` / `NodeKind::Delete` wrappers (nested in that order
+//!   so a single span carrying multiple emphasis flags still expresses each
+//!   one).
+//! - color/background/dim/blink/underline/inverse → `NodeKind::Span` with a
+//!   [`Style`] attached on `attrs` so the terminal renderer's
+//!   `render_inline_node` path lowers it to SGR via `text_appearance_sgr`.
+//! - links → `NodeKind::Link` with un-resolved `href` (each target re-resolves
+//!   per its own rules).
+//! - code blocks → `NodeKind::Code` (block-level).
 //!
-//! `inverse` and `hidden` from `ProseStyle` have no semantic peer in
-//! `Style` and are intentionally dropped — they were Prose-only knobs.
+//! `<inverse>` / `<reverse>` carry `TextEmphasis::inverse`. `<hidden>` has no
+//! semantic peer and is dropped by the parser to inert literal text, so it
+//! never reaches this projection.
 
 use renderable::color::Color;
-use renderable::layout::TargetValue;
+use renderable::layout::{Layout, TargetValue};
 use renderable::style::{PerMode, Style, TextEmphasis};
-use renderable::tree::RenderNode;
+use renderable::tree::{NodeKind, RenderNode, TreeRenderable};
 
-use super::ir::{ProseDocument, ProseNode, ProseStyle};
 use super::prose::Prose;
+use super::styles::ProseStyle;
 
 impl Prose {
     /// Projects this prose into a sequence of inline [`RenderNode`]s.
@@ -46,8 +46,54 @@ impl Prose {
     /// blob.
     #[must_use]
     pub fn to_render_nodes(&self) -> Vec<RenderNode> {
-        let doc: ProseDocument = self.document();
-        doc.children.iter().map(node_to_render_node).collect()
+        let pre = super::markdown::preprocess_markdown(self.content());
+        super::tokens::parse_render_nodes(&pre.text, &pre.code_blocks)
+    }
+}
+
+impl TreeRenderable for Prose {
+    /// Projects the prose into a document-shaped canonical render tree.
+    ///
+    /// Contiguous top-level inline nodes are wrapped in a `Paragraph`; any
+    /// top-level `Code` block stays a direct block-level child of the root.
+    /// This satisfies `TreeRenderable`'s single-node contract and render-tree
+    /// validation (a `Root` of block-level children) while leaving the inline
+    /// embedding shape returned by [`Prose::to_render_nodes`] unchanged for
+    /// containers.
+    fn render_tree(&self) -> RenderNode {
+        let mut blocks: Vec<RenderNode> = Vec::new();
+        let mut paragraph: Vec<RenderNode> = Vec::new();
+
+        for node in self.to_render_nodes() {
+            if matches!(node.kind, NodeKind::Code { .. }) {
+                if !paragraph.is_empty() {
+                    blocks.push(RenderNode::paragraph(std::mem::take(&mut paragraph)));
+                }
+                blocks.push(node);
+            } else {
+                paragraph.push(node);
+            }
+        }
+        if !paragraph.is_empty() {
+            blocks.push(RenderNode::paragraph(paragraph));
+        }
+
+        let mut root = RenderNode::root(blocks);
+        if self.layout != Layout::default() {
+            root.attrs.set_layout(&self.layout);
+        }
+        root
+    }
+
+    /// Surfaces Prose's layout (margins, alignment, word wrap) to the tree
+    /// renderers so [`Prose::with_layout`](super::Prose) and the margin /
+    /// word-wrap helpers keep affecting rendered output through the tree path.
+    fn tree_layout(&self) -> Option<Layout> {
+        if self.layout != Layout::default() {
+            Some(self.layout.clone())
+        } else {
+            None
+        }
     }
 }
 
@@ -93,41 +139,17 @@ fn is_prose_only(style: &ProseStyle) -> bool {
     style.emphasis.is_empty()
         && style.fg.is_none()
         && style.bg.is_none()
-        && (style.inverse || style.hidden)
+        && style.hidden
 }
 
-/// Project a single `ProseNode` into a `RenderNode`.
-fn node_to_render_node(node: &ProseNode) -> RenderNode {
-    match node {
-        ProseNode::Text(value) => RenderNode::text(value),
-        ProseNode::Link { href, children } => {
-            let kids: Vec<RenderNode> = children.iter().map(node_to_render_node).collect();
-            RenderNode::link(href, None, kids)
-        }
-        ProseNode::CodeBlock { lang, value } => {
-            // `Code` is block-level; in the inline context we currently
-            // emit it the renderable tree call expects. The Prose IR only
-            // produces CodeBlock at top level, so a downstream rendering
-            // of an inline-stream-with-a-code-block reads as a fenced
-            // block in Markdown / `<pre><code>` in Browser / dim block in
-            // Terminal — the established mapping.
-            RenderNode::code(lang.clone(), None, value.clone())
-        }
-        ProseNode::Span { style, children } => {
-            let kids: Vec<RenderNode> = children.iter().map(node_to_render_node).collect();
-            project_span(style, kids)
-        }
-    }
-}
-
-/// Project a `ProseNode::Span` into a render-tree inline node.
+/// Project a styled Prose span into a render-tree inline node.
 ///
 /// Pure emphasis styles map onto semantic wrappers (Strong / Emphasis /
 /// Delete) for the cleanest cross-target output. Anything richer — colors,
 /// dim, blink, underline variants — rides on a `NodeKind::Span` with a
 /// `Style` attached, which the terminal renderer lowers through
 /// `text_appearance_sgr`.
-fn project_span(style: &ProseStyle, children: Vec<RenderNode>) -> RenderNode {
+pub(super) fn project_span(style: &ProseStyle, children: Vec<RenderNode>) -> RenderNode {
     // Prose-only knobs with no inline peer in `Style` (`inverse`, `hidden`):
     // drop the wrapper and emit children as a bare `Span` carrying nothing.
     if is_prose_only(style) {
@@ -158,7 +180,7 @@ fn project_span(style: &ProseStyle, children: Vec<RenderNode>) -> RenderNode {
 /// `true` when only bold/italic/strikethrough are set — no dim, blink, or
 /// underline variant.
 fn pure_semantic_emphasis(em: &TextEmphasis) -> bool {
-    !em.dim && !em.blink && em.underline.is_none()
+    !em.dim && !em.blink && !em.inverse && em.underline.is_none()
 }
 
 /// Nests `Strong` (bold) > `Emphasis` (italic) > `Delete` (strikethrough)

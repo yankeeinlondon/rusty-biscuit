@@ -4,11 +4,10 @@
 //! and [`render_terminal_document`] does the same for a whole [`Document`].
 //!
 //! The renderer reuses biscuit-terminal's existing components wherever they
-//! fit — [`Prose`] for inline runs, [`Table`], [`BlockQuote`], and
-//! [`HorizontalRule`] — rather than re-implementing terminal formatting.
-//! Headings, sections, and lists are rendered natively. Inline subtrees are
-//! projected into [`Prose`] block-tag markup so color, styling, and OSC8
-//! hyperlinks are handled by the established component.
+//! fit — [`Table`], [`BlockQuote`], and [`HorizontalRule`] — rather than
+//! re-implementing terminal formatting. Headings, sections, and lists are
+//! rendered natively. Inline subtrees are lowered directly to ANSI SGR
+//! escapes, OSC8 hyperlinks, and markdown fallback syntax.
 //!
 //! ## Strictness
 //!
@@ -32,7 +31,7 @@
 //! ```
 
 use renderable::color::TerminalCodeContext;
-use renderable::style::Style;
+use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
     ColumnAlign, ColumnConditional, Diagnostic, Document, HintNamespace, NodeKind, ProgressHints,
     RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
@@ -426,8 +425,7 @@ impl Writer<'_> {
                 // empty or whitespace-only title is ignored.
                 match node.attrs.table_title() {
                     Some(title) if !title.trim().is_empty() => {
-                        let heading = self.render_prose(&Prose::escape_text(title.trim()));
-                        Ok(format!("{heading}\n{table}"))
+                        Ok(format!("{}\n{table}", title.trim()))
                     }
                     _ => Ok(table),
                 }
@@ -516,9 +514,7 @@ impl Writer<'_> {
                 kind if is_inline_kind(kind) => {
                     let effective = self.effective.clone();
                     let markup = self.render_inline_node(child, &effective)?;
-                    // Lower the Prose markup to terminal SGR without
-                    // applying Prose's word-wrap / trailing-newline trim.
-                    output.push_str(&Prose::new(&markup).render_optimistic(None));
+                    output.push_str(&markup);
                 }
                 _ => {
                     let rendered = self.render(child)?;
@@ -641,11 +637,10 @@ impl Writer<'_> {
         result
     }
 
-    /// Renders a sequence of inline nodes into [`Prose`] block-tag markup.
+    /// Renders a sequence of inline nodes into terminal SGR output.
     ///
-    /// Literal text is escaped with [`Prose::escape_text`] so document text
-    /// never accidentally triggers Prose markup; styling wraps the escaped
-    /// runs in block tags the [`Prose`] parser already understands.
+    /// Each inline node is lowered directly to ANSI escapes without an
+    /// intermediate Prose markup pass.
     ///
     /// `effective` is the text appearance (color, emphasis) inherited from the
     /// enclosing block and ancestor spans. A nested
@@ -663,37 +658,43 @@ impl Writer<'_> {
         Ok(output)
     }
 
-    /// Projects a single inline node into [`Prose`] markup.
+    /// Projects a single inline node into terminal SGR output.
     fn render_inline_node(
         &mut self,
         node: &RenderNode,
         effective: &Style,
     ) -> Result<String, RenderError> {
+        let term = &self.opts.context.terminal;
         match &node.kind {
             NodeKind::Text { value } => Ok(apply_classes(
-                &Prose::escape_text(value),
+                value,
                 &node.attrs.classes,
+                effective,
+                term,
             )),
             NodeKind::Emphasis { children } => {
                 let inner = self.render_inline(children, effective)?;
-                Ok(apply_classes(
-                    &format!("<italic>{inner}</italic>"),
-                    &node.attrs.classes,
-                ))
+                let mut child_effective = effective.clone();
+                child_effective.emphasis.italic = true;
+                let open = style::text_appearance_sgr(&child_effective, term);
+                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Strong { children } => {
                 let inner = self.render_inline(children, effective)?;
-                Ok(apply_classes(
-                    &format!("<bold>{inner}</bold>"),
-                    &node.attrs.classes,
-                ))
+                let mut child_effective = effective.clone();
+                child_effective.emphasis.bold = true;
+                let open = style::text_appearance_sgr(&child_effective, term);
+                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Delete { children } => {
                 let inner = self.render_inline(children, effective)?;
-                Ok(apply_classes(
-                    &format!("<strikethrough>{inner}</strikethrough>"),
-                    &node.attrs.classes,
-                ))
+                let mut child_effective = effective.clone();
+                child_effective.emphasis.strikethrough = true;
+                let open = style::text_appearance_sgr(&child_effective, term);
+                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Span { children } => {
                 // An inline `Span` may carry a declared `Style`. Its
@@ -704,8 +705,7 @@ impl Writer<'_> {
                     Some(span_style) => {
                         let child_effective = span_style.inherited_from(effective);
                         let inner = self.render_inline(children, &child_effective)?;
-                        let styled = self.render_span_classes(node, &inner)?;
-                        let term = &self.opts.context.terminal;
+                        let styled = self.render_span_classes(node, &inner, &child_effective)?;
                         let open = style::text_appearance_sgr(&child_effective, term);
                         // Reset, then restore the ancestor appearance so the
                         // run after the span keeps the inherited color/emphasis.
@@ -718,24 +718,31 @@ impl Writer<'_> {
                     }
                     None => {
                         let inner = self.render_inline(children, effective)?;
-                        self.render_span_classes(node, &inner)
+                        self.render_span_classes(node, &inner, effective)
                     }
                 }
             }
-            NodeKind::InlineCode { value } => Ok(apply_classes(
-                &format!("<dim>{}</dim>", Prose::escape_text(value)),
-                &node.attrs.classes,
-            )),
+            NodeKind::InlineCode { value } => {
+                let mut child_effective = effective.clone();
+                child_effective.emphasis.dim = true;
+                let open = style::text_appearance_sgr(&child_effective, term);
+                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                Ok(apply_classes(&format!("{open}{value}{close}"), &node.attrs.classes, effective, term))
+            }
             NodeKind::Link {
                 url,
                 title: _,
                 children,
             } => {
                 let inner = self.render_inline(children, effective)?;
-                Ok(format!(
-                    "<a href=\"{}\">{inner}</a>",
-                    Prose::escape_text(url)
-                ))
+                if url.is_empty() {
+                    Ok(inner)
+                } else if term.osc_link_support {
+                    Ok(format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, inner))
+                } else {
+                    let desc = inner.replace(']', "\\]");
+                    Ok(format!("[{desc}]({url})"))
+                }
             }
             NodeKind::Image { alt, .. } => {
                 // Terminal inline images are out of scope for this phase
@@ -745,26 +752,30 @@ impl Writer<'_> {
                     "image rendered as alt text; inline terminal images are out of scope",
                     Some(node.span.clone()),
                 ));
-                Ok(format!("[{}]", Prose::escape_text(alt)))
+                Ok(format!("[{alt}]"))
             }
             NodeKind::FootnoteReference { identifier } => {
-                Ok(format!("[^{}]", Prose::escape_text(identifier)))
+                Ok(format!("[^{identifier}]"))
             }
             NodeKind::SoftBreak => Ok(" ".to_string()),
             NodeKind::HardBreak => Ok("\n".to_string()),
-            // Built-in tokens lower to Prose markup: `mark` highlights via
-            // reverse video (`<reverse>` → SGR 7) and `dim` dims (`<dim>` → SGR
-            // 2), mirroring the legacy span-class path in `apply_classes`. An
-            // unrecognized token renders its children as plain inline content.
+            // Built-in tokens lower to direct SGR: `mark` highlights via
+            // reverse video (SGR 7) and `dim` dims (SGR 2), mirroring the
+            // legacy span-class path in `apply_classes`. An unrecognized token
+            // renders its children as plain inline content.
             NodeKind::Extended {
                 token, children, ..
             } => {
                 let inner = self.render_inline(children, effective)?;
-                Ok(match token.as_ref() {
-                    "mark" => format!("<reverse>{inner}</reverse>"),
-                    "dim" => format!("<dim>{inner}</dim>"),
-                    _ => inner,
-                })
+                let mut child_effective = effective.clone();
+                match token.as_ref() {
+                    "mark" => child_effective.emphasis.inverse = true,
+                    "dim" => child_effective.emphasis.dim = true,
+                    _ => return Ok(inner),
+                }
+                let open = style::text_appearance_sgr(&child_effective, term);
+                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                Ok(format!("{open}{inner}{close}"))
             }
             // A non-inline node appearing in an inline position is a
             // structural problem the validator would have rejected; treat it
@@ -788,9 +799,10 @@ impl Writer<'_> {
         }
     }
 
-    /// Renders [`Prose`] markup to a styled terminal string.
+    /// Returns markup as-is — inline content is already rendered to terminal
+    /// SGR by [`Self::render_inline_node`].
     fn render_prose(&self, markup: &str) -> String {
-        Prose::new(markup).render(&self.opts.context.terminal)
+        markup.to_string()
     }
 
     /// Renders a heading line from a depth and pre-rendered inline `markup`.
@@ -1069,7 +1081,10 @@ impl Writer<'_> {
         } else {
             None
         };
-        let prose = Prose::new(markup).with_word_wrap(WordWrap::WrapProse(None, hang));
+        // Escape Prose-special characters so literal `<b>` etc. in the
+        // rendered inline output are not mis-parsed as tags during wrap.
+        let safe = Prose::escape_text(markup);
+        let prose = Prose::new(safe).with_word_wrap(WordWrap::WrapProse(None, hang));
         let rendered = prose.render_in_width(term, child_width);
 
         let mut out = String::new();
@@ -1119,17 +1134,18 @@ impl Writer<'_> {
     /// is shown as a header so the lossy projection is visible.
     fn render_code(&self, lang: Option<&str>, value: &str) -> String {
         let body = value.trim_end_matches('\n');
+        let dim_open = "\x1b[2m";
+        let dim_close = "\x1b[0m";
         let header = lang
             .filter(|l| !l.is_empty())
-            .map(|l| format!("<dim>```{l}</dim>\n"))
+            .map(|l| format!("{dim_open}```{l}{dim_close}\n"))
             .unwrap_or_default();
-        let escaped: String = body
+        let indented: String = body
             .lines()
-            .map(|line| format!("    {}", Prose::escape_text(line)))
+            .map(|line| format!("    {line}"))
             .collect::<Vec<_>>()
             .join("\n");
-        let markup = format!("{header}<dim>{escaped}</dim>");
-        self.render_prose(&markup)
+        format!("{header}{dim_open}{indented}{dim_close}")
     }
 
     /// Renders a [`NodeKind::Table`] node with a native two-pass renderer.
@@ -1195,7 +1211,7 @@ impl Writer<'_> {
             Ok(plan) => plan,
             // Width planning failed (table cannot fit): degrade to the
             // structured error message, matching the bespoke component.
-            Err(error) => return Ok(self.render_prose(&Prose::escape_text(&error.to_string()))),
+            Err(error) => return Ok(error.to_string()),
         };
 
         // ── Pass 2: native emit ────────────────────────────────────────────
@@ -1309,7 +1325,7 @@ impl Writer<'_> {
         Ok(cells)
     }
 
-    /// Maps semantic span classes to Prose styling.
+    /// Maps semantic span classes to direct SGR styling.
     ///
     /// The documented class vocabulary — `mark`, `dim`, `sup`, `sub` — maps
     /// to visual treatment; unknown classes are ignored, with a diagnostic
@@ -1318,8 +1334,9 @@ impl Writer<'_> {
         &mut self,
         node: &RenderNode,
         inner: &str,
+        effective: &Style,
     ) -> Result<String, RenderError> {
-        let styled = apply_classes(inner, &node.attrs.classes);
+        let styled = apply_classes(inner, &node.attrs.classes, effective, &self.opts.context.terminal);
         for class in &node.attrs.classes {
             if !is_known_class(class) && self.opts.strictness == RenderStrictness::Warn {
                 self.diagnostics.push(Diagnostic::lossy(
@@ -1376,10 +1393,9 @@ impl Writer<'_> {
                     format!("unsupported content dropped: {label}"),
                     Some(node.span.clone()),
                 ));
-                Ok(self.render_prose(&format!(
-                    "<dim>[unsupported: {}]</dim>",
-                    Prose::escape_text(label)
-                )))
+                let dim_open = "\x1b[2m";
+                let dim_close = "\x1b[0m";
+                Ok(format!("{dim_open}[unsupported: {label}]{dim_close}"))
             }
             RenderStrictness::Lossy => Ok(String::new()),
         }
@@ -1596,20 +1612,28 @@ fn prefix_first_line(prefix: &str, body: &str) -> String {
     out
 }
 
-/// Wraps `inner` in Prose markup for any recognized semantic classes.
+/// Applies recognized semantic classes as direct SGR escapes.
 ///
 /// `mark` highlights via reverse video, `dim` dims, and `sup`/`sub` are
 /// approximated as dim text since terminals lack super/subscript.
-fn apply_classes(inner: &str, classes: &[String]) -> String {
-    let mut out = inner.to_string();
+fn apply_classes(inner: &str, classes: &[String], effective: &Style, term: &crate::terminal::Terminal) -> String {
+    let mut emphasis = TextEmphasis::default();
     for class in classes {
-        out = match class.as_str() {
-            "mark" => format!("<reverse>{out}</reverse>"),
-            "dim" | "sup" | "sub" => format!("<dim>{out}</dim>"),
-            _ => out,
-        };
+        match class.as_str() {
+            "mark" => emphasis.inverse = true,
+            "dim" | "sup" | "sub" => emphasis.dim = true,
+            _ => {}
+        }
     }
-    out
+    if emphasis.is_empty() {
+        return inner.to_string();
+    }
+    let mut style = Style::default();
+    style.emphasis = emphasis;
+    let child_effective = style.inherited_from(effective);
+    let open = style::text_appearance_sgr(&child_effective, term);
+    let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+    format!("{open}{inner}{close}")
 }
 
 /// The terminal checkbox marker for a task-list item in a given [`TaskState`].

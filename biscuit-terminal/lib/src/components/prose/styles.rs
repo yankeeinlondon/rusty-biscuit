@@ -13,34 +13,6 @@ use crate::{
     utils::color::{Tailwind, WebColor},
 };
 
-/// Resolves the opening SGR escape for a `<double-underline>` request
-/// against the terminal's actual underline-support profile.
-///
-/// ## Returns
-///
-/// - `Some("\x1b[4:2m")` when no terminal context is available (legacy
-///   optimistic behavior) **or** when the terminal advertises
-///   [`UnderlineSupport::double`].
-/// - `Some("\x1b[4m")` when only [`UnderlineSupport::straight`] is
-///   advertised — the canonical Apple Terminal path.
-/// - `None` when neither variant is supported, signalling the caller to
-///   suppress the underline entirely (no SGR at all).
-///
-/// ## Notes
-///
-/// The closing SGR for any non-`None` return is always `"\x1b[24m"`.
-///
-/// [`UnderlineSupport::double`]: crate::discovery::detection::UnderlineSupport::double
-/// [`UnderlineSupport::straight`]: crate::discovery::detection::UnderlineSupport::straight
-pub(super) fn degraded_double_underline_open(term: Option<&Terminal>) -> Option<&'static str> {
-    match term {
-        None => Some("\x1b[4:2m"),
-        Some(t) if t.underline_support.double => Some("\x1b[4:2m"),
-        Some(t) if t.underline_support.straight => Some("\x1b[4m"),
-        Some(_) => None,
-    }
-}
-
 /// Parse an RGB string in multiple formats into (r, g, b).
 ///
 /// Supported formats:
@@ -220,17 +192,6 @@ fn find_package_root(start: &Path, git_root: &Path) -> Option<PathBuf> {
     }
 
     None
-}
-
-/// Render a [`Color`](renderable::color::Color) as a CSS color string.
-///
-/// Shared by the Browser and MarkdownPlus emitters. Colors that have no RGB
-/// representation degrade to `inherit`.
-pub(super) fn css_color(color: &renderable::color::Color) -> String {
-    match color.to_rgb() {
-        Some((r, g, b)) => format!("rgb({}, {}, {})", r, g, b),
-        None => "inherit".to_string(),
-    }
 }
 
 /// Compare two strings case-insensitively, skipping hyphens in `input`.
@@ -812,5 +773,73 @@ impl StyleState {
             StyleLayer::Inverse => &mut self.inverse,
             StyleLayer::Hidden => &mut self.hidden,
         }
+    }
+}
+
+// ── ProseStyle (moved from deleted ir.rs) ──────────────────────────
+
+use renderable::color::Color;
+use renderable::style::{TextEmphasis, UnderlineStyle};
+
+/// Inline style intent carried by a Prose span.
+///
+/// The parser produces one span per bracketed tag, so in practice exactly
+/// one attribute is set on any given `ProseStyle`. The emitters nonetheless
+/// handle arbitrary combinations so the type stays composable.
+///
+/// Weight and decoration intent (bold, dim, italic, underline,
+/// strikethrough, blink) live in the shared [`TextEmphasis`] leaf, reused by
+/// the render-tree style primitive. `inverse` and `hidden` are `Prose`-only
+/// and stay local. Colors use [`renderable::color::Color`] directly — `Prose`
+/// keeps no color type of its own.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct ProseStyle {
+    /// Shared weight / decoration leaf.
+    pub emphasis: TextEmphasis,
+        /// `<hidden>` — `Prose`-only.
+    pub hidden: bool,
+    /// Foreground color.
+    pub fg: Option<Color>,
+    /// Background color.
+    pub bg: Option<Color>,
+}
+
+impl ProseStyle {
+    /// A span carrying a single mutation of the default style.
+    fn build(set: impl FnOnce(&mut ProseStyle)) -> Self {
+        let mut s = ProseStyle::default();
+        set(&mut s);
+        s
+    }
+
+    pub(super) fn bold() -> Self {
+        Self::build(|s| s.emphasis.bold = true)
+    }
+    pub(super) fn dim() -> Self {
+        Self::build(|s| s.emphasis.dim = true)
+    }
+    pub(super) fn italic() -> Self {
+        Self::build(|s| s.emphasis.italic = true)
+    }
+    pub(super) fn blink() -> Self {
+        Self::build(|s| s.emphasis.blink = true)
+    }
+    pub(super) fn strikethrough() -> Self {
+        Self::build(|s| s.emphasis.strikethrough = true)
+    }
+    pub(super) fn underline(kind: UnderlineStyle) -> Self {
+        Self::build(|s| s.emphasis.underline = Some(kind))
+    }
+    pub(super) fn inverse() -> Self {
+        Self::build(|s| s.emphasis.inverse = true)
+    }
+    pub(super) fn hidden() -> Self {
+        Self::build(|s| s.hidden = true)
+    }
+    pub(super) fn fg(color: Color) -> Self {
+        Self::build(|s| s.fg = Some(color))
+    }
+    pub(super) fn bg(color: Color) -> Self {
+        Self::build(|s| s.bg = Some(color))
     }
 }

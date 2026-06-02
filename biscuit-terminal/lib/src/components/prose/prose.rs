@@ -1,12 +1,21 @@
-//! Public [`Prose`] struct, builder methods, and the `parse_tokens` entry point.
+//! Public [`Prose`] struct, builder methods, and target trait implementations.
+
+use std::any::Any;
+
+use renderable::browser::{BrowserRenderable, PageOptions};
+use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::html::HtmlPage;
+use renderable::markdown::MarkdownRenderable;
+use renderable::tree::render::{
+    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
+    render_markdown_node,
+};
+use renderable::tree::TreeRenderable;
 
 use crate::{
-    terminal::Terminal,
     utils::layout::{Layout, Length, TargetValue},
     utils::wrap_policy::WordWrap,
 };
-
-use super::ir::ProseDocument;
 
 /// Styled text with token and block tag support for rich terminal output.
 ///
@@ -239,22 +248,7 @@ impl Prose {
         format!("{quote}{body}{quote}")
     }
 
-    /// Parse the raw content into the target-neutral [`ProseDocument`] IR.
-    ///
-    /// Pre-processes the supported Markdown subset (`**bold**`, `_italics_`,
-    /// `[desc](ref)`) and parses bracketed tags. Former atomic-token syntax
-    /// (`{{…}}`) is treated as ordinary literal text.
-    pub(super) fn document(&self) -> ProseDocument {
-        ProseDocument::parse(&self.content)
-    }
 
-    /// Parse and render the content to terminal ANSI/OSC8 output.
-    ///
-    /// Builds the [`ProseDocument`] IR and renders it through the terminal
-    /// emitter. Only the outermost emit produces the final `\x1b[0m` reset.
-    pub(super) fn parse_tokens(&self, term: Option<&Terminal>) -> String {
-        super::terminal::render(&self.document(), term)
-    }
 }
 
 impl Default for Prose {
@@ -302,5 +296,79 @@ impl IntoProseVec for &str {
 impl IntoProseVec for String {
     fn into_prose_vec(self) -> Vec<Prose> {
         vec![Prose::new(self)]
+    }
+}
+
+impl MarkdownRenderable for Prose {
+    /// Renders the prose as portable Markdown via the canonical render tree.
+    fn render_markdown(&self) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        match render_markdown_node(&node, &MarkdownRenderOptions::default()) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Prose",
+                    dialect = "Markdown",
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+
+    /// Renders the prose as MarkdownPlus via the canonical render tree.
+    fn render_markdown_plus(&self) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = MarkdownRenderOptions {
+            dialect: MarkdownDialect::MarkdownPlus,
+            ..MarkdownRenderOptions::default()
+        };
+        match render_markdown_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Prose",
+                    dialect = "MarkdownPlus",
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+}
+
+impl BrowserRenderable for Prose {
+    /// Renders the prose as an HTML fragment via the canonical render tree.
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = BrowserRenderOptions::default();
+        match render_browser_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Prose",
+                    error = %error,
+                    "render_browser_node failed; emitting empty fragment"
+                );
+                BrowserFragment::new()
+                    .define_as_text_fragment(String::new())
+                    .finalize()
+            }
+        }
+    }
+
+    /// Wraps the HTML fragment in a complete [`HtmlPage`].
+    fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
+        let mut html_page = HtmlPage::from(self.render_html_fragment());
+        if let Some(options) = page {
+            html_page.apply_page_options(options);
+        }
+        html_page
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
