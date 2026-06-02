@@ -998,6 +998,33 @@ impl ComposeOptions {
         }
     }
 
+    /// Builds the [`ResolutionContext`] used by read-side expression functions
+    /// during interpolation.
+    ///
+    /// Carries the document's base directory (so relative/`@` references
+    /// resolve where the source lives), the configured magic search paths, and
+    /// — only when remote reads are enabled — the run's remote-fetch runtime so
+    /// HTTP(S) URL arguments read from the fetch cache rather than disk.
+    ///
+    /// [`ResolutionContext`]: super::expression::ResolutionContext
+    pub(crate) fn expression_resolution_context(
+        &self,
+        remote_fetch: &super::remote_fetch::RemoteFetchRuntime,
+    ) -> super::expression::ResolutionContext {
+        let base_dir = match &self.source {
+            ComposeSource::File(path) => path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from(".")),
+            _ => PathBuf::from("."),
+        };
+        super::expression::ResolutionContext {
+            base_dir,
+            magic_paths: self.magic_paths.clone(),
+            remote_fetch: self.allow_remote_transclusion.then(|| remote_fetch.clone()),
+        }
+    }
+
     /// Returns a `ShellExpansionOptions` view of the shell-related fields.
     ///
     /// Used internally to pass shell config to executor and policy functions

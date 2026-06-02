@@ -334,7 +334,12 @@ fn scan_function_url(
 
     while let Some(offset) = line[search_from..].find(&pattern) {
         let abs_offset = search_from + offset + pattern.len();
-        let rest = &line[abs_offset..];
+        // The interpolation expression parser only accepts a quoted string
+        // literal for the URL argument, so the canonical authoring form is
+        // `frontmatter("https://…")`. Skip an optional opening quote so the
+        // quoted form is registered; the bare form is still recognized for
+        // best-effort discovery. `extract_url_arg` stops at the closing quote.
+        let rest = line[abs_offset..].trim_start_matches(['"', '\'']);
 
         let url_str = if rest.starts_with("https://") {
             extract_url_arg(rest, "https://")
@@ -467,6 +472,17 @@ mod tests {
     #[test]
     fn discover_from_expression_frontmatter() {
         let content = "Some text\n{{ frontmatter(https://example.com/api.md) }}\nMore text";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].consumer, RemoteUrlConsumer::ExpressionFunction);
+        assert_eq!(results[0].url.as_str(), "https://example.com/api.md");
+    }
+
+    #[test]
+    fn discover_from_expression_quoted_url() {
+        // The interpolation expression parser requires the quoted form, so
+        // discovery must register it too (the bare form stays best-effort).
+        let content = "{{ frontmatter(\"https://example.com/api.md\", \"status\") }}";
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].consumer, RemoteUrlConsumer::ExpressionFunction);
