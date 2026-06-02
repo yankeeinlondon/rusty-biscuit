@@ -850,10 +850,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let overrides = BespokeStyleOverrides {
-            code_theme: true,
-            ..BespokeStyleOverrides::default()
-        };
+        let overrides = BespokeStyleOverrides { code_theme: true };
 
         let page = apply_bespoke_style(page, &style, overrides, None).unwrap();
         assert!(page.page_code_theme().is_none(), "CLI override should skip frontmatter code theme");

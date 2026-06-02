@@ -2339,7 +2339,7 @@ fn level2_style_images_local_style_colors_fallback_in_terminal() {
     // remote line shouldn't add a second red occurrence.
     let red_hits = frame.raw.matches(red_semi).count() + frame.raw.matches(red_colon).count();
     assert!(
-        red_hits >= 1 && red_hits <= 4,
+        (1..=4).contains(&red_hits),
         "unexpected red SGR hit count {red_hits} (heuristic). raw len={}",
         frame.raw.len()
     );

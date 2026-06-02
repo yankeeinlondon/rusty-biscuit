@@ -363,6 +363,9 @@ fn is_numberlike(s: &str) -> bool {
 }
 
 #[cfg(test)]
+// `3.14` appears as a plain decimal-string fixture, not as an approximation of
+// `PI`; the `approx_constant` lint is a false positive here.
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
     use serde_json::json;
