@@ -76,8 +76,9 @@ document serializers) may only be removed once **all** of the following hold:
    only`.** Components the document pipeline does not render — terminal-only
    presentation primitives, standalone graphics/viz widgets, node-kind
    builder/helpers, and the page frame — are exempt, enumerated with
-   justification in the [Exemption Register](#exemption-register) of
-   [`../2026-06-02-non-structural/spec.md`](../features/2026-06-02-non-structural/spec.md).
+   justification in the
+   [Exemption Register](../features/2026-06-02-non-structural/spec.md#exemption-register)
+   of the Non-Structural Component Exemptions spec.
    Exempt components retain their native render path and do not block bespoke
    deletion.
 3. **No functional or fidelity regressions** versus the bespoke
