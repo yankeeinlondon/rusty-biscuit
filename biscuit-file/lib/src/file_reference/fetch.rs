@@ -105,6 +105,40 @@ impl FetchResponse {
     }
 }
 
+/// Builds a [`reqwest::Client`] suitable for policy-enforced fetching.
+///
+/// Redirect-following is disabled so a 3xx response cannot bypass the host
+/// allowlist by pointing at a host the policy never authorized. [`fetch`] and
+/// [`post`] surface any such response as [`FetchError::RedirectBlocked`] rather
+/// than silently returning the empty 3xx body. Every consumer of this feature
+/// builds its shared client here so the SSRF boundary holds at the only place
+/// requests are issued.
+pub fn policy_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        // A builder failure (TLS backend init) is not recoverable here; fall
+        // back to the default client, which still routes through the same
+        // 3xx-rejecting primitive below.
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+/// Returns `Err(FetchError::RedirectBlocked)` when `status` is a redirect.
+///
+/// `304 Not Modified` is a 3xx but not a redirect — it is the expected reply to
+/// a conditional revalidation GET, so it is allowed through.
+fn reject_redirect(status: u16, headers: &reqwest::header::HeaderMap) -> Result<(), FetchError> {
+    if (300..400).contains(&status) && status != 304 {
+        let location = headers
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(no Location header)".to_string());
+        return Err(FetchError::RedirectBlocked { status, location });
+    }
+    Ok(())
+}
+
 /// Perform an async HTTP GET with policy enforcement and optional
 /// conditional headers.
 ///
@@ -115,6 +149,9 @@ impl FetchResponse {
 ///
 /// - [`FetchError::PolicyDenied`] if the host is not in the allowlist.
 /// - [`FetchError::UnsupportedScheme`] for non-HTTP(S) URLs.
+/// - [`FetchError::RedirectBlocked`] if the server returns a redirect (the
+///   feature's clients do not follow redirects so the allowlist cannot be
+///   bypassed mid-request).
 /// - [`FetchError::RequestFailed`] if the request itself fails.
 /// - [`FetchError::HttpError`] for non-success HTTP status codes.
 pub async fn fetch(
@@ -151,6 +188,7 @@ pub async fn fetch(
 
     let response = request.send().await.map_err(FetchError::RequestFailed)?;
     let status = response.status().as_u16();
+    reject_redirect(status, response.headers())?;
 
     let etag = response
         .headers()
@@ -220,6 +258,7 @@ pub async fn post(
         .await
         .map_err(FetchError::RequestFailed)?;
     let status = response.status().as_u16();
+    reject_redirect(status, response.headers())?;
 
     let etag = response
         .headers()

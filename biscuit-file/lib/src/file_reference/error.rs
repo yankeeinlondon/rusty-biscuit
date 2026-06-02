@@ -53,6 +53,9 @@ pub enum FetchError {
     #[error("HTTP error status {status} from {url}")]
     HttpError { status: u16, url: String },
 
+    #[error("redirect (HTTP {status}) to `{location}` blocked by fetch policy")]
+    RedirectBlocked { status: u16, location: String },
+
     #[error("failed to read response body: {0}")]
     BodyReadFailed(#[source] reqwest::Error),
 

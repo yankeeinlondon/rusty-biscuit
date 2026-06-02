@@ -1,5 +1,6 @@
 //! HTTP mock server integration tests for the fetch primitive.
 
+use biscuit_file::file_reference::fetch::policy_client;
 use biscuit_file::{Conditional, FetchError, FetchPolicy, HostPattern, fetch, fetch_blocking};
 use reqwest::Client;
 use wiremock::matchers::{header, method, path};
@@ -190,6 +191,68 @@ async fn fetch_wildcard_does_not_match_bare_parent_host() {
         .unwrap_err();
 
     assert!(matches!(err, FetchError::PolicyDenied { .. }));
+}
+
+#[tokio::test]
+async fn policy_client_blocks_redirect_to_unallowed_host() {
+    // The allowed host serves a 302 pointing at a host the policy never
+    // authorized. `policy_client()` does not follow redirects, so the primitive
+    // surfaces the 302 as `RedirectBlocked` instead of fetching the blocked
+    // host's body — the SSRF bypass the redirect would otherwise open.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/redirect"))
+        .respond_with(
+            ResponseTemplate::new(302).insert_header("location", "http://blocked-host.example/secret"),
+        )
+        .mount(&server)
+        .await;
+
+    let client = policy_client();
+    let policy = FetchPolicy::deny_all().allow_host("127.0.0.1");
+    let url = url::Url::parse(&format!("{}/redirect", server.uri())).unwrap();
+
+    let err = fetch(&client, &url, &policy, &Conditional::default())
+        .await
+        .unwrap_err();
+
+    match err {
+        FetchError::RedirectBlocked { status, location } => {
+            assert_eq!(status, 302);
+            assert_eq!(location, "http://blocked-host.example/secret");
+        }
+        other => panic!("expected RedirectBlocked, got: {other}"),
+    }
+}
+
+#[tokio::test]
+async fn policy_client_blocks_redirect_to_unsupported_scheme() {
+    // A redirect to a non-HTTP(S) scheme is blocked at the redirect itself,
+    // before any scheme handling — the request is never re-issued.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/to-ftp"))
+        .respond_with(
+            ResponseTemplate::new(301).insert_header("location", "ftp://blocked-host.example/file"),
+        )
+        .mount(&server)
+        .await;
+
+    let client = policy_client();
+    let policy = FetchPolicy::deny_all().allow_host("127.0.0.1");
+    let url = url::Url::parse(&format!("{}/to-ftp", server.uri())).unwrap();
+
+    let err = fetch(&client, &url, &policy, &Conditional::default())
+        .await
+        .unwrap_err();
+
+    match err {
+        FetchError::RedirectBlocked { status, location } => {
+            assert_eq!(status, 301);
+            assert_eq!(location, "ftp://blocked-host.example/file");
+        }
+        other => panic!("expected RedirectBlocked, got: {other}"),
+    }
 }
 
 #[test]
