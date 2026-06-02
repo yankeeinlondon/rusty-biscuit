@@ -1021,7 +1021,7 @@ impl ComposeOptions {
         super::expression::ResolutionContext {
             base_dir,
             magic_paths: self.magic_paths.clone(),
-            remote_fetch: self.allow_remote_transclusion.then(|| remote_fetch.clone()),
+            remote_fetch: self.remote_reads_enabled().then(|| remote_fetch.clone()),
         }
     }
 
@@ -1076,6 +1076,22 @@ impl ComposeOptions {
     pub fn with_remote_read_config(mut self, config: RemoteReadConfig) -> Self {
         self.remote_read_config = config;
         self
+    }
+
+    /// Whether the remote-fetch capability is enabled for this run.
+    ///
+    /// Read-side expression URL reads (`markdown_title(url)`, `frontmatter(url)`,
+    /// …) are a separate capability from `::file`/`::code` block transclusion: a
+    /// caller that configures an allowed host via [`with_remote_read_config`]
+    /// enables them without also opting into remote transclusion. Block
+    /// transclusion keeps its own explicit [`with_allow_remote_transclusion`]
+    /// gate. An empty allowlist with the transclusion flag unset means remote
+    /// reads stay fully disabled, preserving the deny-all default.
+    ///
+    /// [`with_remote_read_config`]: Self::with_remote_read_config
+    /// [`with_allow_remote_transclusion`]: Self::with_allow_remote_transclusion
+    pub(crate) fn remote_reads_enabled(&self) -> bool {
+        self.allow_remote_transclusion || !self.remote_read_config.allowed_hosts.is_empty()
     }
 
     /// Adds a single allowed host for remote URL reads.

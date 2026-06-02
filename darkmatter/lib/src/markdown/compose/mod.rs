@@ -486,16 +486,19 @@ impl Markdown {
             remote_fetch,
         );
 
-        // Eagerly register discovered remote URLs and start fetching. Directive
-        // (`::file`/`::code`) discovery is tied to block transclusion, while
-        // URL-typed expression-function arguments (`frontmatter(url)`, …) are an
-        // independent read-side use case tied to interpolation. Either path is
-        // in scope whenever remote reads are enabled, so a caller that enables
-        // only interpolation can still prefetch its expression URLs.
-        if options.allow_remote_transclusion {
+        // Eagerly register discovered remote URLs and start fetching. The two
+        // discovery paths gate independently: directive (`::file`/`::code`)
+        // discovery requires the explicit remote-transclusion opt-in, while
+        // URL-typed expression-function arguments (`frontmatter(url)`, …) are a
+        // read-side capability enabled whenever remote reads are configured —
+        // so a caller that allows a host but never enables transclusion can
+        // still prefetch and read its expression URLs.
+        if options.remote_reads_enabled() {
             let mut catalog = remote::RemoteUrlCatalog::new();
 
-            if options.is_enabled(ComposeOperation::BlockTransclusion) {
+            if options.allow_remote_transclusion
+                && options.is_enabled(ComposeOperation::BlockTransclusion)
+            {
                 let directives = transclusion::parse_directives(
                     &self.content,
                     self.source_context_for_errors(),
@@ -5620,9 +5623,11 @@ Rounded: {{ round(pi) }}"#;
 
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn interpolation_only_discovers_and_reads_remote_expression_url() {
-            // Finding 2: a caller that enables only interpolation (block
-            // transclusion disabled) must still prefetch and read remote
-            // expression URLs.
+            // Review 7: a library caller following the documented API enables
+            // remote expression reads via `with_remote_read_config` alone — an
+            // allowed host is sufficient. No `with_allow_remote_transclusion`
+            // call is required, since expression URL reads are a read-side
+            // capability independent of block transclusion.
             let server = MockServer::start().await;
             Mock::given(method("GET"))
                 .and(path("/doc.md"))
@@ -5645,7 +5650,6 @@ Rounded: {{ round(pi) }}"#;
             };
             let options = ComposeOptions::new()
                 .with_source_file(&root)
-                .with_allow_remote_transclusion(true)
                 .with_remote_read_config(config)
                 .only(&[ComposeOperation::Interpolation]);
             let md: Markdown = body.clone().into();
