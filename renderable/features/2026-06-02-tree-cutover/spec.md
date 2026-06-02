@@ -124,8 +124,10 @@ renderers"):
    Output parity, or a deliberate documented improvement (e.g. `<mark>`).
 4. **Net performance trend toward faster.** The corpus-wide trend must
    improve; mild localized regressions are acceptable so long as the general
-   direction is faster. The concrete metric is a
-   [Decision To Be Made](#decisions-to-be-made).
+   direction is faster. The concrete metric is the two-part perf gate defined in
+   [`../2026-06-02-perf-gate/spec.md`](../2026-06-02-perf-gate/spec.md)
+   (bespoke geomean ≤ 1.0× with a 1.5× per-fixture ceiling, plus a >10%
+   baseline-trend guard).
 
 ## Phases
 
@@ -236,10 +238,11 @@ These need brainstorming/sign-off; they do not change the overall direction.
 2. **Terminal graphics opt-out shape.** ✅ **Resolved — framework
    `GraphicsMode` on the render context** (graphics-policy B-1; Bucket A
    stopgaps dropped). Raster gated to `Rich`; `TerminalImageMode::Never → Off`.
-3. **Concrete perf gate for Acceptance Criteria #4.** Define the metric, e.g.
-   "corpus geomean of tree/legacy ≤ 1.0 and no single fixture regresses beyond
-   N×." Pick the threshold (browser `large_table` is currently 11× — is it
-   fixed pre-cutover, or accepted under the tolerance?).
+3. **Concrete perf gate for Acceptance Criteria #4.** ✅ **Resolved — see
+   [`../2026-06-02-perf-gate/spec.md`](../2026-06-02-perf-gate/spec.md).**
+   Two-part gate: bespoke comparison (per-target geomean ≤ 1.0×, hard 1.5×
+   per-fixture ceiling) via `migration_parity`, plus a >10% baseline-trend guard
+   on a comprehensive tree-only suite. Also subsumes Decision #9.
 4. **`Prose` exemption.** ✅ **Resolved — full collapse onto the shared tree.**
    `Prose`'s parser will emit `RenderNode` directly and `ProseDocument` is
    deleted; the two shared-tree prerequisites (`inverse` on `TextEmphasis`,
@@ -257,8 +260,10 @@ These need brainstorming/sign-off; they do not change the overall direction.
    `scan_inline_hr_warnings` preflight surface and document the difference.
 8. **Deprecation window vs hard flip.** Keep legacy behind a feature flag for a
    release before deletion, or flip-and-delete once validated.
-9. **`large_table` browser hotspot.** Investigate and fix the 11× regression
-   (preferred) or accept it under the Decision-3 tolerance.
+9. **`large_table` browser hotspot.** ✅ **Subsumed by the perf gate** — at
+   ≈ 11× bespoke it fails the gate's 1.5× per-fixture ceiling, so it must be
+   fixed before Phase 5 or carry a documented exception. See
+   [`../2026-06-02-perf-gate/spec.md`](../2026-06-02-perf-gate/spec.md).
 
 ## Out of Scope
 
@@ -271,6 +276,9 @@ These need brainstorming/sign-off; they do not change the overall direction.
 
 - [`../2026-06-02-prose-tree/spec.md`](../2026-06-02-prose-tree/spec.md) —
   resolves Decision #4; supplies Phase 0c prerequisites and a Phase 3 holdout.
+- [`../2026-06-02-perf-gate/spec.md`](../2026-06-02-perf-gate/spec.md) —
+  resolves Decision #3, subsumes Decision #9, supplies Acceptance Criteria #4's
+  metric; the gate runs at Phase 4/5.
 - [`../2026-05-26-inline-span/spec.md`](../2026-05-26-inline-span/spec.md)
 - [`../2026-05-26-block-extension/spec.md`](../2026-05-26-block-extension/spec.md)
 - [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md)

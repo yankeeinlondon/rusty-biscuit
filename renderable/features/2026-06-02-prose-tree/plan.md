@@ -25,6 +25,14 @@ docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
 packages_during_phase_2:
   - renderable
+source_files_during_phase_3:
+  - biscuit-terminal/lib/src/components/prose/parity.rs
+  - biscuit-terminal/lib/src/components/prose/mod.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages_during_phase_3:
+  - biscuit-terminal
 ---
 
 # Execution Plan: Prose to Shared Render Tree
@@ -150,50 +158,50 @@ before Prose routes Markdown output through it.*
   in parallel after the target `render_span` branch is identified.
 
 ---
- - Capture Current Prose Parity Snapshots
+## Phase 3 - Capture Current Prose Parity Snapshots
 
 *Pin today's bespoke Prose output before changing parsing or deleting emitters.*
 
 ### Tasks
 
-- [ ] Inventory existing Prose tests and identify which target policies are
+- [x] Inventory existing Prose tests and identify which target policies are
   already covered for terminal, browser, Markdown, and MarkdownPlus.
 
-- [ ] Add a representative Prose fixture corpus covering nested style
+- [x] Add a representative Prose fixture corpus covering nested style
   restoration, colors, background colors, dim, blink, underline variants,
   `<inverse>`, `<hidden>`, links, path-like links, OSC8 and non-OSC8 terminal
   behavior, unknown tags, escaped literal markup, code fences, layout, margin,
   and word wrapping.
 
-- [ ] Capture current bespoke terminal output snapshots, including capability
+- [x] Capture current bespoke terminal output snapshots, including capability
   variants for OSC8 support and underline degradation.
 
-- [ ] Capture current bespoke browser output snapshots, including HTML escaping,
+- [x] Capture current bespoke browser output snapshots, including HTML escaping,
   href attribute escaping, code block escaping, and inverse filter output.
 
-- [ ] Capture current bespoke Markdown and MarkdownPlus snapshots, including
+- [x] Capture current bespoke Markdown and MarkdownPlus snapshots, including
   Markdown link destination escaping and MarkdownPlus color spans.
 
-- [ ] Label `<hidden>` expectations as intentionally removed after the cutover
+- [x] Label `<hidden>` expectations as intentionally removed after the cutover
   so future diffs are reviewed as an approved behavior drop, not a regression.
 
-- [ ] Keep these tests pinned to the current bespoke emitters until Phase 5
+- [x] Keep these tests pinned to the current bespoke emitters until Phase 5
   flips Prose rendering to the tree.
 
 ### Validation
 
-- [ ] Run the focused Prose test filters and confirm the new snapshots pass on
+- [x] Run the focused Prose test filters and confirm the new snapshots pass on
   the pre-migration bespoke path.
 
-- [ ] Run `cargo test -p biscuit-terminal --lib -- prose` or the closest
+- [x] Run `cargo test -p biscuit-terminal --lib -- prose` or the closest
   existing Prose-focused filter.
 
-- [ ] Record any existing unrelated failures before changing production Prose
+- [x] Record any existing unrelated failures before changing production Prose
   code.
 
 ### Parallelizable Work
 
-- [ ] Terminal, browser, and markdown snapshot fixtures can be authored in
+- [x] Terminal, browser, and markdown snapshot fixtures can be authored in
   parallel once the shared fixture corpus shape is agreed.
 
 ---

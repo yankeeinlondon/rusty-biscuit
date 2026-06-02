@@ -8,11 +8,12 @@ reviewed: true
 ## Status
 
 **Architecture approved.** This spec defines a single graphics-policy surface
-(`GraphicsMode`) on the per-target render contexts, has every graphical
+(`GraphicsMode`) on the per-target render options/context, has every graphical
 component consult it, brings **Mermaid into scope** as a first-class tree
-lowering, and resolves the deferred browser-HR fidelity question in favor of
-restoring the styled SVG. A few implementation-level details remain — see
-[Open Questions](#open-questions) — but they do not change the architecture.
+lowering through the existing code-renderer extension point, and resolves the
+deferred browser-HR fidelity question in favor of restoring the styled SVG.
+The remaining open questions are implementation trade-offs that do not change
+the architecture.
 
 This spec was carved out of
 [`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md) so
@@ -31,10 +32,14 @@ Decision lineage (so the choices are not re-litigated):
 | Middle-tier name | **`Vector`.** | Intent: scalable vector / native-markup graphics — no raster bitmaps, no scripts. |
 | Mermaid | **In scope.** | Designed here, not deferred. |
 | Mermaid IR shape | **`Code` node, renderer promotes.** | `NodeKind::Code { lang: "mermaid", meta, value }`; the renderer upgrades it to a diagram. Inherits all code-block meta; `Off` degradation is lossless. |
-| Browser Mermaid at `Rich` | **Static `<svg>` (default).** | Interactive mermaid.js is an orthogonal browser opt-in, default off. |
+| Mermaid promotion owner | **`CodeRenderer` / adapter-owned promotion.** | `renderable` owns the policy and dispatch point; `darkmatter` / `biscuit-terminal` own Mermaid rendering so `renderable` does not gain a `biscuit-visualized` dependency. |
+| Mermaid opt-in | **Legacy `MermaidMode` still controls whether Mermaid is promoted.** | `GraphicsMode` is a ceiling, not a request to promote every `lang="mermaid"` code node. This preserves public defaults where Mermaid fences render as code unless the caller opts into Mermaid rendering. |
+| Browser Mermaid at `Rich` | **Static `<svg>` when Mermaid promotion is enabled.** | Interactive mermaid.js is an orthogonal browser opt-in, default off. |
 | Browser HR fidelity (was B-3 vs B-4) | **B-3 — restore styled `<svg>` at `Vector`+.** | B-4 (ratify the plain-`<hr>` downgrade) rejected; it would violate the cutover's no-regression rule. |
+| HR SVG owner | **Dependency-correct shared builder.** | Do not call from `renderable` into `biscuit-terminal`; move or mirror the pure SVG builder into `renderable` and have `biscuit-terminal` delegate where practical. |
 | Default `GraphicsMode` | **`Rich`.** | Behavior-compatible: terminal rasterizes when capable, browser emits styled SVG — legacy parity. |
-| Policy placement | **Per-target render context.** | Matches the existing `TerminalRenderContext` / `BrowserRenderContext` split. |
+| Policy placement | **Per-target render options/context.** | `TerminalRenderContext` carries capability + policy; `BrowserRenderOptions` carries browser policy because there is no separate browser context type today. |
+| Legacy precedence | **Image mode is the terminal graphics ceiling; Mermaid mode is a component opt-in.** | `TerminalImageMode::Never` suppresses all terminal image attempts, including Mermaid `Image`; `MermaidMode::Off`/`Text` keeps Mermaid as code even when `GraphicsMode::Rich`. |
 | Bucket A stopgaps | **Dropped.** | This is an implementation spec, not a perf-unblocker; go straight to the framework. |
 
 ## Background
@@ -86,17 +91,17 @@ Three axes that are tangled in one decision tree today:
 | Axis | Question | Owner |
 |------|----------|-------|
 | **Capability** | What can the target render? (`image_support`, SVG-in-HTML) | runtime environment (`Terminal`, browser context) |
-| **Policy** | What does the caller *want* rendered? | **`GraphicsMode` — this spec** |
+| **Policy** | What does the caller *want* rendered? | **`GraphicsMode` on the render options/context — this spec** |
 | **Fidelity** | If policy permits, how rich a representation? | `capability ∧ policy`, decided per component |
 
-`GraphicsMode` makes **policy** a first-class field on each render context.
-Capability stays a property of the environment. Fidelity becomes the product of
-`capability ∧ policy`, chosen by each component.
+`GraphicsMode` makes **policy** a first-class field on each render
+options/context. Capability stays a property of the environment. Fidelity
+becomes the product of `capability ∧ policy`, chosen by each component.
 
 ### `GraphicsMode`
 
 ```rust
-// Cross-target intent names; the per-target context carries the field.
+// Cross-target intent names; the per-target options/context carries the field.
 pub enum GraphicsMode {
     /// No graphical lowering. Text/structural fallback only.
     Off,
@@ -130,6 +135,8 @@ the `Vector` tier for one component and a different tier for another. Default is
 Where a component has no distinct rung for a tier (e.g. HR browser `Vector` vs
 `Rich` are both styled SVG; terminal has no vector form) the tiers coincide for
 that component. That is expected — not every component uses all three rungs.
+The Mermaid rows assume the caller has opted into Mermaid promotion; without
+that opt-in, Mermaid remains an ordinary code block at every tier.
 
 This mapping is what fixes both leaks structurally:
 
@@ -141,40 +148,63 @@ This mapping is what fixes both leaks structurally:
 
 ## Proposed Architecture
 
-### B-1: `GraphicsMode` on the render contexts
+### B-1: `GraphicsMode` on the render options/context
 
-Add the field to each per-target render context, default `Rich`:
+Add the field to each per-target render options/context, default `Rich`:
 
 ```rust
-// renderable::tree — BrowserRenderContext / BrowserRenderOptions
-pub struct BrowserRenderContext {
+// renderable::tree::render::browser
+pub struct BrowserRenderOptions {
     // existing fields…
     pub graphics_mode: GraphicsMode,
-    /// Orthogonal to GraphicsMode. When true, browser Mermaid emits the
-    /// client-side mermaid.js path instead of a pre-rendered static <svg>.
-    /// Default false. Reproduces legacy `MermaidMode::Image` interactivity.
-    pub mermaid_interactive: bool,
+    /// Orthogonal to GraphicsMode. Controls whether lang="mermaid" code blocks
+    /// remain code, become static SVG, or use the client-side mermaid.js path.
+    /// Defaults to Code for public behavior compatibility.
+    pub mermaid_mode: BrowserMermaidMode,
+}
+
+pub enum BrowserMermaidMode {
+    /// Render mermaid fences as ordinary code blocks.
+    Code,
+    /// Render promoted mermaid fences as sanitized static SVG.
+    StaticSvg,
+    /// Render promoted mermaid fences through the client-side mermaid.js path.
+    Interactive,
 }
 
 // biscuit_terminal::render_tree — TerminalRenderContext
 pub struct TerminalRenderContext {
-    pub terminal: Terminal,            // capability
-    pub graphics_mode: GraphicsMode,   // policy
+    // existing fields…
+    pub terminal: Terminal,          // capability snapshot
+    pub graphics_mode: GraphicsMode, // policy ceiling
+    /// True only for `TerminalImageMode::Force`; attempts image protocol output
+    /// even when capability detection says unsupported.
+    pub force_graphics: bool,
 }
 ```
 
-Markdown has no graphics; its renderer is unaffected.
+Markdown has no graphics; its renderer is unaffected except that Mermaid fences
+must remain ordinary fenced code in every markdown dialect.
 
-The darkmatter entry point maps its legacy enums onto the policy:
+The darkmatter entry point maps its legacy enums onto the policy and the
+component opt-ins:
 
-- `TerminalImageMode::Never → Off`, `Auto → Rich`, `Force → Rich`. `Force`'s
+- `TerminalImageMode::Never → graphics_mode: Off`, `Auto → Rich`, `Force → Rich`
+  plus `force_graphics: true`. `Force`'s
   *capability override* ("attempt regardless of detection") is orthogonal to
   fidelity and stays a separate capability concern, not a `GraphicsMode` value.
-- `MermaidMode::Off → code` (the node renders as a code block at any tier below
-  promotion), `Image → Rich`, `Text → Off`.
-- Where the two legacy enums disagree for a single render (e.g. `image_mode:
-  Never` with `mermaid_mode: Image`), a documented precedence rule applies — see
-  [Open Questions](#open-questions).
+- `MermaidMode::Off → Code`, `Text → Code`, `Image → Promote`. Promotion is
+  still capped by `GraphicsMode`: terminal `image_mode: Never` + `mermaid_mode:
+  Image` renders the Mermaid source as a code block and does not attempt `mmdc`,
+  `biscuit-visualized`, `resvg`, or image protocol output. This matches the
+  legacy terminal contract where `TerminalImageMode::Never` is a deterministic
+  image kill switch.
+
+Reader note: this is an intentional split between **ceiling** and **opt-in**.
+Using `GraphicsMode::Rich` alone to promote every Mermaid code fence would
+change the public defaults of `Markdown::as_html`, `Markdown::for_terminal`,
+and the plain tree browser renderer. Keeping Mermaid opt-in separate preserves
+those defaults while still giving the tree path a first-class promotion route.
 
 ### B-2: Lazy lowering — the renderer picks the tier
 
@@ -186,12 +216,20 @@ the context's say-so.
 
 ### B-3: Restore HR SVG fidelity at `Vector`+
 
-Wire `render_browser_svg`
-(`biscuit-terminal/.../horizontal_rule/browser.rs`) into
-`render_thematic_break` (`renderable/src/tree/render/browser.rs`) for
-`GraphicsMode::Vector` and `Rich`. `Off` keeps a plain `<hr>`. This closes the
-deferred "HR CSS variables" gap; the tree browser path reaches parity with
-legacy for the styled-HR case. (B-4 — ratifying the downgrade — is rejected.)
+Move the pure styled-HR SVG construction out of
+`biscuit-terminal/.../horizontal_rule/browser.rs` into a dependency-correct
+helper owned by `renderable` (for example
+`renderable::tree::graphics::horizontal_rule_svg`) or mirror it there with
+byte-parity tests against the legacy helper during the transition. Then
+`render_thematic_break` (`renderable/src/tree/render/browser.rs`) uses that
+helper for `GraphicsMode::Vector` and `Rich`; `Off` keeps a plain `<hr>`.
+
+This closes the deferred "HR CSS variables" gap; the tree browser path reaches
+parity with legacy for the styled-HR case. It also avoids an accidental
+dependency inversion: `renderable` must not depend on `biscuit-terminal` to
+render browser HR SVG. Once the shared helper exists, `biscuit-terminal` should
+delegate to it where practical so the legacy and tree paths cannot drift. (B-4
+— ratifying the downgrade — is rejected.)
 
 ### Mermaid as a promoted `Code` node
 
@@ -203,14 +241,28 @@ not a new node kind:
   `highlight=…`) ride on the `Code` node's `meta` and are consumed by the
   `CodeRenderer` hook (`build_code_meta`). Because Mermaid *is* a code node
   until promoted, those params are inherited automatically and the `Off`
-  degradation is lossless — a `` ```mermaid `` block at `Off` renders as a full
-  titled / line-numbered / highlighted code block.
-- Under `Vector`/`Rich` (+ capability), the renderer promotes the node to a
-  diagram: terminal rasterizes via `biscuit-visualized` at `Rich`; browser
-  emits a pre-rendered static `<svg>` at `Vector`/`Rich`, or the interactive
-  mermaid.js path when `mermaid_interactive` is set.
-- No `NodeKind::Mermaid` variant is introduced; promotion keys on
-  `lang == "mermaid"` + `GraphicsMode`.
+  degradation is lossless — a `` ```mermaid `` block with promotion disabled
+  or capped by `GraphicsMode::Off` renders as a full titled / line-numbered /
+  highlighted code block.
+- Promotion is implemented by the target's Mermaid-aware `CodeRenderer` (or an
+  equivalent adapter installed through the render options), not by adding a
+  `biscuit-visualized` dependency to `renderable`. The renderer dispatch still
+  keys on `lang == "mermaid"`, but the package that already owns Mermaid
+  rendering performs the actual SVG/PNG generation.
+- The code-renderer context must include the effective graphics policy. Terminal
+  can carry it through `TerminalCodeContext`; browser should add a small
+  `BrowserCodeContext` or install the Mermaid-promoting renderer only when the
+  effective browser policy permits promotion. Either way, the hook must be able
+  to tell `Off`/`Code` from `Vector`/`Rich` without ambient detection.
+- Under `Vector`/`Rich` (+ opt-in + capability), terminal rasterizes via
+  `biscuit-visualized` at `Rich`; browser emits a pre-rendered static `<svg>` at
+  `Vector`/`Rich`, or the interactive mermaid.js path when browser
+  `mermaid_mode` requests it.
+- Rendering failure is lossy, not fatal by default: failed Mermaid promotion
+  records a diagnostic and falls back to the original code block under
+  `RenderStrictness::Warn` / `Lossy`; under `Strict`, the same failure escalates
+  according to the existing render-tree strictness model.
+- No `NodeKind::Mermaid` variant is introduced.
 
 ### Composition with darkmatter `style:` frontmatter
 
@@ -231,6 +283,9 @@ lost — only its graphical expression is capped.
 - Restore HR SVG fidelity on the tree browser path.
 - Stop overloading capability fields (`is_tty`, `image_support`,
   `ColorDepth::None`) to express policy.
+- Preserve existing public defaults: Mermaid fences remain code unless the
+  caller opts into Mermaid rendering, and `TerminalImageMode::Never` remains a
+  terminal-wide image kill switch.
 
 ## Non-Goals
 
@@ -241,42 +296,61 @@ lost — only its graphical expression is capped.
 - Reworking the legacy `TerminalImageMode` / `MermaidMode` enums; only their
   mapping to `GraphicsMode` at the entry point is in scope.
 - Designing the interactive mermaid.js asset/loader story beyond exposing the
-  `mermaid_interactive` toggle (its delivery mechanism is a follow-up).
+  `BrowserMermaidMode::Interactive` toggle (its delivery mechanism is a
+  follow-up).
+- Adding a `biscuit-visualized` or `biscuit-terminal` dependency to
+  `renderable`; promotion must stay behind adapters/hooks owned by downstream
+  packages.
 
 ## Migration Plan
 
 Ordered so each step lands on a green tree:
 
 1. **Add `GraphicsMode`** (`renderable::tree`) and the `graphics_mode` field to
-   `BrowserRenderContext` and `TerminalRenderContext`, default `Rich`. Update
-   every construction site (`from_terminal`, entry points, bench harness).
-   Behavior-neutral.
+   `BrowserRenderOptions` and `TerminalRenderContext`, default `Rich`. Add the
+   separate terminal `force_graphics` capability override and the browser
+   Mermaid opt-in field. Update every construction site (`from_terminal`, entry
+   points, bench harness). Behavior-neutral for callers that do not opt into
+   Mermaid promotion.
 2. **B-2 lazy HR lowering**: move the rasterize decision to the renderer; HR
    honors `graphics_mode ∧ capability`.
-3. **B-3**: wire styled `<svg>` into `render_thematic_break` for `Vector`/`Rich`.
-4. **Mermaid promotion**: terminal raster at `Rich`; browser static `<svg>` at
-   `Vector`/`Rich`; `Off` and no-capability render the code block. Add the
-   `mermaid_interactive` browser toggle (default off).
+3. **B-3**: add the dependency-correct HR SVG helper in `renderable`, wire it
+   into `render_thematic_break` for `Vector`/`Rich`, and add parity coverage
+   against the current `biscuit-terminal` browser HR SVG output.
+4. **Mermaid promotion**: implement adapter-owned promotion through the
+   Mermaid-aware `CodeRenderer` path. Terminal rasterizes at `Rich`; browser
+   emits static `<svg>` at `Vector`/`Rich`; `Off`, no opt-in, no capability, and
+   promotion failure render the original code block. Add the browser Mermaid
+   opt-in field (default code).
 5. **Entry-point mapping**: darkmatter maps `TerminalImageMode` / `MermaidMode`
    → `GraphicsMode`; remove the `image_mode`-dropping bug.
 6. **`TerminalImage`**: route its alt-text-vs-image choice through
    `graphics_mode` (`Off`/`Vector` → alt text, `Rich` → image protocol).
 7. **Tests + parity**: HR snapshot parity at each tier; `mark_dim_hr`
-   no-rasterization at `Off`; Mermaid code-block meta preserved at `Off`;
-   browser SVG parity with legacy at `Rich`. Re-run `migration_parity`.
+   no-rasterization at `Off`; `TerminalImageMode::Never` suppresses Mermaid
+   `Image`; Mermaid code-block meta preserved when promotion is disabled or
+   capped; browser SVG parity with legacy at `Rich`; renderable core does not
+   acquire `biscuit-visualized` / `biscuit-terminal` dependencies. Re-run
+   `migration_parity`.
 
 ## Open Questions
 
 Architecture is locked; these are implementation-level.
 
-- **Legacy-enum precedence.** When `TerminalImageMode` and `MermaidMode`
-  disagree for one render, what is the combined `GraphicsMode`? Likely
-  per-component: HR/image honor `TerminalImageMode`, Mermaid honors
-  `MermaidMode`, both reading the same `GraphicsMode` ceiling. Pin during
-  implementation.
-- **`mermaid_interactive` placement / delivery.** Field on
-  `BrowserRenderContext` vs a darkmatter page option; how the mermaid.js asset
-  is delivered (inline vs CDN). Default off regardless.
+- **Interactive Mermaid delivery.** The toggle belongs on browser render
+  options, but the mermaid.js asset/loader mechanism still needs a follow-up
+  decision:
+  - **Inline bundled script.** Pros: deterministic offline output, no CDN
+    dependency. Cons: large HTML payload; needs CSP/nonce coordination.
+  - **External relative asset.** Pros: works with existing
+    `RelativeAssetPath` conventions and keeps HTML smaller. Cons: caller must
+    arrange asset copying/serving.
+  - **CDN URL.** Pros: smallest HTML and easiest prototype. Cons: network
+    dependency and weaker privacy/security defaults.
+
+  Recommendation: use an external relative asset for the production path and
+  allow an explicit inline mode for single-file exports. This matches the
+  existing browser asset model without making CDN loading the default.
 - **Does `GraphicsMode` ever belong on `Document`** rather than the per-target
   contexts? Decided: per-target (avoids forcing every caller to reason about
   every target, matches existing option types). Recorded here in case a
