@@ -456,6 +456,48 @@ mod tests {
     }
 
     #[test]
+    fn rewrite_preserves_schema_property_with_inline_value() {
+        // Phase 5 Task 2: `$schema` must survive the inline rewrite so the
+        // document continues to validate on subsequent runs.
+        let original = concat!(
+            "---\n",
+            "$schema:\n",
+            "  title: 'string(required)'\n",
+            "prompt: |-\n",
+            "  write a title\n",
+            "title: Hello\n",
+            "---\n",
+            "Old body\n",
+        );
+
+        let rewritten =
+            rewrite_inline_document(original, "Fresh body\n", "2026-05-26", &[]).unwrap();
+
+        assert!(rewritten.contains("$schema:"));
+        assert!(rewritten.contains("title: 'string(required)'"));
+        assert!(rewritten.contains("last_updated: 2026-05-26"));
+        assert!(rewritten.ends_with("---\nFresh body\n"));
+    }
+
+    #[test]
+    fn rewrite_does_not_persist_set_only_keys() {
+        // Phase 5 Task 2: interactive-collected values flow through
+        // `--set` overrides during composition only; they must not appear
+        // in the rewritten document. The rewrite reuses the original
+        // frontmatter text and only adds `last_updated` + any new keys
+        // explicitly handed to it. Pass an empty `new_properties` slice
+        // to simulate the inline closure path.
+        let original = "---\n$schema:\n  title: 'string(required)'\n---\nOld\n";
+        let rewritten = rewrite_inline_document(original, "New body\n", "2026-05-26", &[]).unwrap();
+
+        // The collected `title` value is never in the original document
+        // and should not be inserted on the way out.
+        assert!(!rewritten.contains("title: Plan"));
+        assert!(rewritten.contains("$schema:"));
+        assert!(rewritten.contains("last_updated: 2026-05-26"));
+    }
+
+    #[test]
     fn rewrite_preserves_crlf_line_endings() {
         let original = "---\r\nlast_updated: 2026-01-01\r\n---\r\nBody\r\n";
         let rewritten =

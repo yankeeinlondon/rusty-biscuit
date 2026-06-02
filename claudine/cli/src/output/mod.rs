@@ -170,7 +170,7 @@ pub(crate) fn log_compose_prompt(
 
 #[allow(dead_code)]
 pub(crate) fn log_system_prompt(
-    effective_sp: &claudine::system_prompt::EffectiveSystemPrompt,
+    effective_sp: &claudine::system_prompt::ResolvedSystemPrompt,
     verbose: bool,
     silent: bool,
     quiet: bool,
@@ -180,7 +180,7 @@ pub(crate) fn log_system_prompt(
 }
 
 pub(crate) fn log_system_prompt_with_scope(
-    effective_sp: &claudine::system_prompt::EffectiveSystemPrompt,
+    effective_sp: &claudine::system_prompt::ResolvedSystemPrompt,
     verbose: bool,
     silent: bool,
     quiet: bool,
@@ -188,7 +188,7 @@ pub(crate) fn log_system_prompt_with_scope(
     term: &Terminal,
 ) {
     use claudine::prompt_reporting::{
-        PromptVerbosity, parse_frontmatter_verbosity, report_system_prompt_empty,
+        ReportMode, parse_frontmatter_verbosity, report_system_prompt_empty,
         report_system_prompt_with_base, resolve_system_prompt_report_config_with_change,
         state::check_and_record,
     };
@@ -200,10 +200,10 @@ pub(crate) fn log_system_prompt_with_scope(
     let env_verbosity = std::env::var("CLAUDINE_SYSTEM_PROMPT")
         .ok()
         .as_deref()
-        .and_then(PromptVerbosity::parse);
+        .and_then(ReportMode::parse);
 
     let (line_count, frontmatter_verbosity, unchanged) = match effective_sp {
-        claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
+        claudine::system_prompt::ResolvedSystemPrompt::Ready(prepared) => {
             let frontmatter = parse_frontmatter_verbosity(&prepared.raw_text);
             let unchanged = scope
                 .map(|s| {

@@ -22,6 +22,11 @@ retries = 3
 # and finish in 5–10s isolated but get squeezed past 15s under heavy parallel
 # load. 30s catches real hangs without killing healthy-but-contended tests.
 slow-timeout = { period = "5s", terminate-after = 6 }
+# Fail any test that leaves a child process holding its stdout/stderr open when
+# it exits (nextest's `LEAK` status). Keep the default 100ms grace period so
+# clean tests are not slowed — only an actual leak waits the window out. To
+# downgrade leaks back to a non-fatal warning, drop `result = "fail"`.
+leak-timeout = { period = "100ms", result = "fail" }
 
 # Tests that intentionally wait on a real clock (e.g. rate-limit pause policies)
 # need an even longer leash than the default termination window.
@@ -34,6 +39,8 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 retries = 3
 # Stricter slow-test marker for CI, same generous termination ceiling.
 slow-timeout = { period = "10s", terminate-after = 3 }
+# Leaked child processes are a hard failure in CI as well.
+leak-timeout = { period = "100ms", result = "fail" }
 # JUnit XML for CI dashboards.
 junit = { path = "test-results.xml" }
 

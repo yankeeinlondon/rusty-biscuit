@@ -223,6 +223,38 @@ Scans all shell command sources in the document before execution begins.
 | `--set` / `key=value` setters                     | Override template variables before Darkmatter processes the document |
 | `--perf`                                          | Enables Darkmatter composition performance collection                |
 
+#### Step 4b: Schema Validation (compose)
+
+After `prepare_direct` produces the effective frontmatter, the schema-aware
+wrapper translates Darkmatter's structural failures into typed claudine errors:
+
+1. **No `$schema`** — pass through unchanged.
+2. **Required value missing** — return `CompositionError::MissingProperties`
+   carrying the prompt path, the missing names in declaration order, their
+   type labels and descriptions, and the frontmatter `description` for context.
+   When Interactive Mode is allowed (config `prompt_for_missing` + stdin/stderr
+   TTYs + not `--silent`) the CLI consumes this error to drive a `biscuit-tui`
+   prompt loop and re-runs preparation with the collected overrides.
+3. **Required value present but invalid** — return
+   `CompositionError::SchemaValidation` as a hard abort; no prompting.
+4. **Optional value present but invalid** — drop the key from a clone of the
+   markdown, emit a `tracing::warn!`, and retry preparation once. Residual
+   problems (typically a missing required) surface after the retry.
+5. **`$schema` itself unresolvable / uncompilable** — return
+   `CompositionError::SchemaLoad`.
+
+This stage runs before provider/model selection so a schema failure aborts
+without launching anything.
+
+**Affected by:**
+
+| Input                              | Impact                                                                                                  |
+|------------------------------------|---------------------------------------------------------------------------------------------------------|
+| Frontmatter `$schema`              | Activates schema validation; controls required vs optional classification and Interactive Mode mapping  |
+| `--set` / `key=value` setters      | Applied before validation so users can satisfy required values without entering the interactive prompt  |
+| Config `prompt_for_missing`        | Required (along with TTY/silent checks) to enable Interactive Mode for missing-required collection      |
+| `--silent`                         | Forces Interactive Mode off; missing required values surface as `MissingProperties` instead of prompts  |
+
 #### Step 5: Build Execution Request (compose)
 
 Constructs a `CompositionExecutionRequest` with `mode: ChainedDocument`, the prepared composition, all CLI flags, and an empty env override map. `resolved_target` is set to `None` — the executor will resolve provider and model.
@@ -439,6 +471,17 @@ Identical to compose Step 3.
 | Frontmatter `prompt`          | Required; the text that gets composed and sent as the agent's task |
 | `.claudine/inline-compose.md` | Custom guardrails file; overrides default instructions             |
 
+#### Step 6b: Schema Validation (inline-compose)
+
+Schema validation runs **after** the `prompt` property check so a missing or
+non-string `prompt` still surfaces as `PromptPropertyMissing` /
+`PromptPropertyWrongType` instead of a generic schema error. After that
+guard, the same typed translation as direct compose applies — `SchemaLoad`,
+`SchemaValidation`, `MissingProperties`, automatic drop-and-retry for invalid
+optionals. The original `$schema` declaration is preserved byte-for-byte by
+the inline rewrite, and interactive values collected during the run are never
+persisted to the source file.
+
 #### Step 7: Build Execution Request (inline-compose)
 
 Constructs `CompositionExecutionRequest` with `mode: InlineFrontmatterPrompt` and `closure: Inline(InlineClosurePlan)`.
@@ -568,6 +611,17 @@ For each step (0..total_steps):
 | Step overlay variables (`state`, `step`, etc.) | Injected as set overrides; cannot be overridden by `--set` or `key=value`        |
 | `FAIL_FAST` env var                            | Injected per step so `{{env.FAIL_FAST}}` and `::shell` directives see the policy |
 | `--set` / `key=value` setters                  | Override template variables but lose to reserved overlay keys                    |
+
+##### Phase 1a.5: Aggregate Schema Validation Across Steps
+
+Every step is validated against its `$schema` during Phase 1a, before any
+provider session is launched. When multiple steps share the same missing
+required property with the same shape and description, the interactive prompt
+fires once and the answer is reused for the remaining steps (unless a step
+overlay supplies a different value). When Interactive Mode is denied or one
+or more steps have invalid required values, claudine returns a single
+aggregated `CompositionError::SequenceMissingProperties` listing every
+failing step so the user can fix the entire sequence in one edit pass.
 
 ##### Phase 1b: Resolve Provider/Model for Every Step
 

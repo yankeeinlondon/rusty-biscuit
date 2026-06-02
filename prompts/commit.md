@@ -97,7 +97,18 @@ Your task is to:
 
       - the subagent is then responsible for:
           - reviewing the changes and drafting a useful commit message following the format above,
-          - committing ONLY the files assigned to them (using `git commit --only -m "message" -- path1 path2`),
+          - committing ONLY the files assigned to them. **Never pass the message inline with `-m "…"`.** Commit bodies routinely contain backticks (inline code like `` `::end-block` ``), `$`, and other shell metacharacters; inside a double-quoted `-m` string the shell evaluates those (backticks are command substitution even within double quotes), which corrupts the message and makes OpenCode's snapshot subsystem try to `git add` the extracted tokens as pathspecs (`fatal: pathspec '::end-block' did not match any files`). Instead, feed the message on stdin via a **single-quoted heredoc** so nothing is expanded:
+
+            ```
+            git commit --only -F - -- path1 path2 <<'COMMIT_MSG'
+            refactor(darkmatter): scope block-quote support to ::shell-block
+
+            - Add `quoted` field to stack entries
+            - `::end-block` only closes matching quoted openers
+            COMMIT_MSG
+            ```
+
+            The `'COMMIT_MSG'` delimiter must be single-quoted — that is what disables expansion. `-F -` reads the message from stdin; the `-- path1 path2` pathspecs still restrict the commit to the assigned files.
           - **retrying on git lock contention.** Because multiple subagents commit in parallel against the same worktree, `git commit` can fail with `fatal: Unable to create '.git/index.lock': File exists.` (or the equivalent `refs/heads/<branch>.lock` variant). This is not corruption — git's locks are fail-fast, not queuing. On such a failure, wait 1–3 seconds and retry the same `git commit --only …` command. Retry up to 5 times with short backoff before giving up and reporting failure to the orchestrator.
           - and finally, to let the orchestrator know of any problems they ran into and how they were able to overcome these issues
    - NOTE: if the subagent is not able to make a commit for any reason then this needs to be communicated back to the orchestrator with details on why they weren't able to commit.

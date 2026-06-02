@@ -236,6 +236,63 @@ fn test_double_verbose_flag() {
 }
 
 #[test]
+fn with_network_flag_parses() {
+    // The flag should be accepted globally; pair with a fast subcommand
+    // so the test doesn't pay full-detection cost.
+    cargo_bin_cmd!("sniff")
+        .args(["--with-network", "repo", "name"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn with_network_flag_parses_before_json() {
+    cargo_bin_cmd!("sniff")
+        .args(["--with-network", "repo", "name", "--json"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn repo_name_json_is_leaf_only() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "name", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json_str = std::str::from_utf8(&output).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
+
+    let obj = json.as_object().expect("json should be an object");
+
+    // The only key allowed is `name`. No version, language, is_monorepo,
+    // or package_count may appear at the leaf level.
+    assert_eq!(
+        obj.len(),
+        1,
+        "repo name --json must contain exactly one key; got: {json}"
+    );
+    assert!(
+        obj.contains_key("name"),
+        "repo name --json must contain `name`: {json}"
+    );
+    assert!(
+        obj.get("name").and_then(|v| v.as_str()).is_some(),
+        "`name` must be a string: {json}"
+    );
+
+    for forbidden in ["version", "language", "is_monorepo", "package_count"] {
+        assert!(
+            !obj.contains_key(forbidden),
+            "repo name --json must NOT contain `{forbidden}`: {json}"
+        );
+    }
+}
+
+#[test]
 fn test_base_flag_before_subcommand() {
     cargo_bin_cmd!("sniff")
         .args(["-b", ".", "filesystem"])
@@ -4902,6 +4959,30 @@ fn test_repo_worktrees_default_output() {
 }
 
 #[test]
+fn test_repo_worktrees_md_output() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--md",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    for line in stdout.trim().lines() {
+        assert!(
+            line.starts_with("- "),
+            "md output should start with '- ': {line}"
+        );
+    }
+}
+
+#[test]
 fn test_repo_worktrees_list_output() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
@@ -4917,12 +4998,17 @@ fn test_repo_worktrees_list_output() {
         .success();
 
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-    for line in stdout.trim().lines() {
+    let lines: Vec<&str> = stdout.trim().lines().collect();
+    for line in &lines {
         assert!(
-            line.starts_with("- "),
-            "list output should start with '- ': {line}"
+            !line.starts_with("- "),
+            "list output should not use markdown bullets: {line}"
         );
     }
+    assert!(
+        lines.iter().any(|l| l.contains("my-worktree")),
+        "list should contain worktree name: {stdout}"
+    );
 }
 
 #[test]

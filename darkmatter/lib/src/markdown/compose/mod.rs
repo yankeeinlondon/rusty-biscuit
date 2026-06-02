@@ -4,13 +4,14 @@
 //! for running operations in three phases:
 //!
 //! **Inline Pre** (serial):
-//! 0. **Schema Validation** - Validate frontmatter against `$schema` or
-//!    `ComposeOptions::baseline_schema`. Runs after `--set` / `--state`
-//!    overrides are applied but before interpolation or shell expansion.
-//! 1. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
+//! 0. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
 //!    When shell expansion is enabled, templated keys that reference
 //!    shell-pending values (top-level `$(...)`) are deferred for a second
 //!    interpolation pass after step 2 completes.
+//! 1. **Schema Validation** - Validate frontmatter against `$schema` or
+//!    `ComposeOptions::baseline_schema`. Runs after `--set` / `--state`
+//!    overrides and frontmatter interpolation are applied, but before
+//!    frontmatter shell expansion.
 //! 2. **Frontmatter Shell Expansion** - Execute shell commands in frontmatter
 //!    values, then re-run interpolation to resolve any keys deferred above.
 //! 3. **Text Replacement** - Replace literal strings from frontmatter `replace` map
@@ -57,6 +58,7 @@ pub mod conditions;
 pub mod context;
 mod frontmatter_interpolation;
 pub(crate) mod frontmatter_shell_expansion;
+pub(crate) mod indent;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
 mod schema_validation;
@@ -496,14 +498,6 @@ impl Markdown {
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion),
             );
 
-            // Schema Validation: check frontmatter against $schema or baseline
-            // after overrides are applied but before interpolation/shell expansion.
-            let sv_start = perf.is_enabled().then(std::time::Instant::now);
-            schema_validation::run(self, &options)?;
-            if let Some(start) = sv_start {
-                perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
-            }
-
             let shell_expansion_enabled =
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
 
@@ -530,6 +524,33 @@ impl Markdown {
                         perf::PerfMetricKind::FrontmatterInterpolation,
                         start.elapsed(),
                     );
+                }
+            }
+
+            // Schema Validation: check frontmatter against $schema or baseline
+            // AFTER frontmatter interpolation so template values like
+            // `runtime_agent: '{{ env.AGENT }}'` are evaluated to their
+            // resolved form before being checked. Runs BEFORE shell
+            // expansion so the validator can fail-fast without triggering
+            // (potentially expensive or side-effectful) shell commands when
+            // the resolved frontmatter is invalid. This stage also coerces
+            // schema-recognized scalars (e.g. the string "true" against a
+            // boolean field) and writes the real types back into frontmatter,
+            // so later stages and the composed output see coerced values.
+            //
+            // For frontmatter values that depend on shell-expanded inputs,
+            // the second interpolation pass below will re-resolve them and
+            // the prepare-time consumer (e.g. claudine's `prepare_*_with_schema`)
+            // can re-validate the post-shell effective frontmatter.
+            // Skipped by internal non-terminal passes (shell-command
+            // discovery) that strip FrontmatterShellExpansion: validating a
+            // still-literal `$(...)` value there would wrongly report it as a
+            // final violation. See `ComposeOptions::skip_schema_validation`.
+            if !options.skip_schema_validation {
+                let sv_start = perf.is_enabled().then(std::time::Instant::now);
+                schema_validation::run(self, &options)?;
+                if let Some(start) = sv_start {
+                    perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
                 }
             }
 
@@ -1226,7 +1247,10 @@ impl Markdown {
         for directive in directives {
             let execution =
                 execute_directive_detailed(&directive, options, &policy_paths, &mut runtime.shell)?;
-            replacements.push((directive.span.clone(), execution.combined_output()));
+            // Re-indent multi-line output to the directive's column so generated
+            // lines stay nested under the surrounding list or block quote.
+            let output = indent::indent_text(&execution.combined_output(), &directive.indent, None);
+            replacements.push((directive.span.clone(), output));
             report.warnings.extend(execution.warnings);
             report.shell_expansions_applied += 1;
         }
@@ -4442,6 +4466,130 @@ Rounded: {{ round(pi) }}"#;
                 Some(&serde_json::json!("fallback"))
             );
         }
+
+        #[test]
+        fn ternary_motivating_workflow_true_branch_through_full_pipeline() {
+            // Review finding 4: exercise the motivating spec_file workflow
+            // through the full compose pipeline so frontmatter interpolation,
+            // pre-interpolation snapshot capture, and frontmatter shell
+            // expansion are all wired together. With `has_spec: true` the
+            // then-branch wins and produces the basename of the spec path.
+            let temp_dir = TempDir::new().unwrap();
+            let content = concat!(
+                "---\n",
+                "has_spec: true\n",
+                "spec: /tmp/example-spec.md\n",
+                "spec_file: \"$({{has_spec}} ? basename {{spec}} : '')\"\n",
+                "---\n",
+                "Spec: {{spec_file}}\n",
+            );
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec_file"),
+                Some(&serde_json::json!("example-spec.md"))
+            );
+            assert!(
+                composed.content().contains("Spec: example-spec.md"),
+                "Expected body to interpolate spec_file, got:\n{}",
+                composed.content()
+            );
+        }
+
+        #[test]
+        fn ternary_motivating_workflow_false_branch_through_full_pipeline() {
+            // Counterpart to the true-branch test: with `has_spec: false`
+            // the else-branch (`''`) wins, short-circuiting to an empty
+            // string without invoking the shell.
+            let temp_dir = TempDir::new().unwrap();
+            let content = concat!(
+                "---\n",
+                "has_spec: false\n",
+                "spec: /tmp/example-spec.md\n",
+                "spec_file: \"$({{has_spec}} ? basename {{spec}} : '')\"\n",
+                "---\n",
+                "Spec: {{spec_file}}\n",
+            );
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec_file"),
+                Some(&serde_json::json!(""))
+            );
+            assert!(
+                composed.content().contains("Spec: "),
+                "Expected body to render with empty spec_file, got:\n{}",
+                composed.content()
+            );
+        }
+
+        #[test]
+        fn ternary_stringified_false_condition_selects_else_branch_in_pipeline() {
+            // Review finding 2 at compose level: when an earlier frontmatter
+            // interpolation rewrites `has_spec` from a boolean into the
+            // string `"false"`, the ternary condition must still resolve
+            // to the else-branch.
+            let temp_dir = TempDir::new().unwrap();
+            let content = concat!(
+                "---\n",
+                "raw_false: false\n",
+                "has_spec: \"{{raw_false}}\"\n",
+                "spec_file: \"$({{has_spec}} ? echo present : '')\"\n",
+                "---\n",
+            );
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, _report) = md.compose_with(options).unwrap();
+            // has_spec is rendered to the string "false"; the ternary must
+            // see it as boolean-false and pick the empty branch.
+            assert_eq!(
+                composed.frontmatter().as_map().get("has_spec"),
+                Some(&serde_json::json!("false"))
+            );
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec_file"),
+                Some(&serde_json::json!(""))
+            );
+        }
     }
 
     mod infix_logic_conditions {
@@ -4624,6 +4772,32 @@ Rounded: {{ round(pi) }}"#;
         }
 
         #[test]
+        fn schema_violation_on_shell_value_reported_when_shell_expansion_disabled() {
+            // A `$(...)` frontmatter value violates the schema, but
+            // FrontmatterShellExpansion is NOT in the enabled set. Because no
+            // later stage will expand or re-validate `spec`, the violation must
+            // surface here rather than being deferred and silently accepted.
+            let content =
+                "---\n$schema:\n  spec: 'number(required)'\nspec: \"$(echo 1)\"\n---\nBody\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+
+            let err = md.compose_with(options).unwrap_err();
+            match err {
+                MarkdownError::SchemaValidationFailed { problems, .. } => {
+                    assert!(
+                        problems
+                            .iter()
+                            .any(|p| p.property.as_deref() == Some("spec") || p.path == "/spec"),
+                        "Error should mention the spec property, got: {problems:?}"
+                    );
+                }
+                other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+            }
+        }
+
+        #[test]
         fn schema_validation_reports_zero_shell_replacements() {
             let content = "---\n$schema:\n  spec: 'file(required)'\nspec: \"\"\ndir: \"$(dirname '{{ spec }}')\"\n---\nBody\n";
             let md: Markdown = content.into();
@@ -4642,6 +4816,95 @@ Rounded: {{ round(pi) }}"#;
                 MarkdownError::SchemaValidationFailed { .. } => {}
                 other => panic!("Expected SchemaValidationFailed, got {other:?}"),
             }
+        }
+
+        #[test]
+        fn coercion_write_back_flows_to_composed_frontmatter() {
+            // `has_spec` derives from a ternary, resolves to the string "true"
+            // during frontmatter interpolation, and is coerced to a real JSON
+            // bool by schema validation. The composed frontmatter must hold the
+            // bool, not the string.
+            let content = "---\n$schema:\n  spec: string(required)\n  has_spec: boolean\nspec: design.md\nhas_spec: \"{{spec ? true : false}}\"\n---\nBody\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::Interpolation,
+            ]);
+
+            let (composed, _report) = md.compose_with(options).unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("has_spec"),
+                Some(&serde_json::json!(true))
+            );
+        }
+
+        #[test]
+        fn implement_md_three_arm_union_ternaries_coerce_and_defer_shell() {
+            // Faithful reproduction of the original failing `claudine compose
+            // prompts/implement.md spec=… --claude` invocation: a 3-arm root
+            // union where every arm types the `has_*` trio as strict `boolean`,
+            // computed `has_*` ternaries that render into quoted scalars
+            // ("true"/"false"), and a `$(...)`-bearing `dir`. A `spec=` value is
+            // supplied via --set, so arm 2 (`spec: string(required)`) validates
+            // post-coercion. Before this feature the strict `boolean` arms
+            // rejected the "false"/"true" strings; now they coerce.
+            //
+            // Frontmatter shell expansion is left disabled to keep the test
+            // hermetic (no real `dirname` invocation). `dir` is typed `string`,
+            // so its literal `$(...)` value is already a valid string: coercion
+            // skips it and validation raises no type problem, so it survives
+            // untouched into the composed output as a deferred shell expression.
+            let content = "---\n\
+                $schema:\n\
+                \x20 - review: string(required)\n\
+                \x20   spec: string\n\
+                \x20   iteration: number\n\
+                \x20   has_plan: boolean\n\
+                \x20   has_spec: boolean\n\
+                \x20   has_review: boolean\n\
+                \x20 - spec: string(required)\n\
+                \x20   has_plan: boolean\n\
+                \x20   has_spec: boolean\n\
+                \x20   has_review: boolean\n\
+                \x20 - plan: string(required)\n\
+                \x20   spec: string\n\
+                \x20   iteration: number\n\
+                \x20   has_plan: boolean\n\
+                \x20   has_spec: boolean\n\
+                \x20   has_review: boolean\n\
+                has_spec: \"{{spec ? true : false}}\"\n\
+                has_plan: \"{{plan ? true : false}}\"\n\
+                has_review: \"{{review ? true : false}}\"\n\
+                dir: \"$(dirname '{{spec || plan}}')\"\n\
+                ---\nBody\n";
+            let md: Markdown = content.into();
+
+            // `spec=` provided via --set; no `plan`/`review` → second arm wins.
+            let options = ComposeOptions::new()
+                .with_set_overrides(serde_json::json!({ "spec": "features/plan.md" }))
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::Interpolation,
+                ]);
+
+            let (composed, _report) = md
+                .compose_with(options)
+                .expect("compose should succeed once the has_* strings coerce");
+
+            let fm = composed.frontmatter();
+            let map = fm.as_map();
+            // The motivating fix: the ternary-derived strings become real bools.
+            assert_eq!(map.get("has_spec"), Some(&serde_json::json!(true)));
+            assert_eq!(map.get("has_plan"), Some(&serde_json::json!(false)));
+            assert_eq!(map.get("has_review"), Some(&serde_json::json!(false)));
+            // The `$(...)` `dir` value is deferred: coercion skips it pre-shell,
+            // and the unresolved interpolation/shell template never errored.
+            let dir = map.get("dir").and_then(serde_json::Value::as_str).unwrap();
+            assert!(
+                dir.contains("$(") && dir.contains("dirname"),
+                "dir should remain a deferred shell expression, got: {dir}"
+            );
         }
 
         #[test]

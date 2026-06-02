@@ -1,26 +1,41 @@
-We already have a command `sniff repo worktree` which returns the current worktree the user is in. What we don't have currently is a way to list all of the worktrees in the current repo. This feature will add `sniff repo worktrees` which will list all of the worktrees using the same pretty file printing that you find in `sniff repo dirty-files`.
+We already have a command `sniff repo worktree` which returns the current worktree the user is in. What we don't have currently is a way to list all of the worktrees in the current repo. This feature adds `sniff repo worktrees` which lists all of the worktrees using the same pretty file printing that you find in `sniff repo dirty-files`.
+
+> **Status:** Implemented. This spec describes the shipped behavior.
 
 ### Requirements
 
 *   **Inclusion:** The list must include all worktrees, including the main worktree.
-    *   The main worktree should be named after its directory.
-    *   The output must visually highlight the worktree the user is currently "in" (e.g., via an asterisk or color).
-*   **Sorting:** The default output should be sorted alphabetically by the worktree name.
+    *   The main worktree is named after its directory basename.
+    *   The output visually highlights the worktree the user is currently "in" with a leading `* ` marker (non-current entries are space-padded to align).
+*   **Sorting:** The default output is sorted alphabetically by the worktree name.
 
 ### CLI Switches
 
-The default output is a plain list but we should include the following CLI switches:
+The default output is the pretty, highlighted list. The following CLI switches select alternate output formats:
 
 ```sh
---json          -- Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
---list          -- Output as bullet list (one item per line with `- ` prefix)
+--json          -- Output as JSON instead of text
+--md            -- Output as a Markdown unordered list (one `- name` per line)
+--list          -- Output as a newline-delimited list (one name per line)
 --csv           -- Output as comma-separated values on a single line
 
---verbose       -- Show not only the worktree name but `<b>{worktree}</b> (<dim><i>on</i> {branch} <i>branch, located at </i><blue>{path}</blue></dim>)`
+--verbose       -- Show the worktree name plus branch and path detail (see below)
 ```
+
+`--md`, `--list`, and `--csv` are mutually exclusive. The current-worktree marker (`* `) is retained for `--md` and `--list`; `--csv` emits names only.
 
 ### Verbose Output Details
 
-*   The "path" in the verbose output should be an OSC8 link.
-*   The displayed path should use the `~` alias for the user's home directory if the worktree is located inside the user's home directory.
-*   **Detached HEAD:** If a worktree is in a detached HEAD state (not on a specific branch), the verbose output should fall back to: `<b>{worktree}</b> (<dim><i>on</i> detached HEAD <i>located at </i><blue>{path}</blue></dim>)`.
+With `--verbose` (or `-v`), each entry renders as:
+
+```
+{marker}<b>{worktree}</b> (on <green>{branch}</green> branch, located at <a href="{absolute}">{path}</a>)
+```
+
+*   The "path" in the verbose output is an OSC8 link whose target is the worktree's absolute path.
+*   The displayed path uses the `~` alias for the user's home directory when the worktree is located inside it.
+*   **Detached HEAD:** If a worktree is in a detached HEAD state, the branch text falls back to `detached HEAD`:
+
+    ```
+    {marker}<b>{worktree}</b> (on <green>detached HEAD</green> branch, located at <a href="{absolute}">{path}</a>)
+    ```

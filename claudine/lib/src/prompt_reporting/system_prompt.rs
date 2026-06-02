@@ -9,7 +9,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 
-use crate::system_prompt::{EffectiveSystemPrompt, SystemPromptMode, SystemPromptSource};
+use crate::system_prompt::{ResolvedSystemPrompt, SystemPromptMode, SystemPromptSource};
 
 use super::formatting::prompt_body_width;
 use super::{
@@ -135,7 +135,7 @@ pub fn render_system_prompt_body(
 /// Top-level system-prompt reporter. Returns `None` when `config` suppresses
 /// output.
 pub fn report_system_prompt(
-    effective_sp: &EffectiveSystemPrompt,
+    effective_sp: &ResolvedSystemPrompt,
     config: SystemPromptReportConfig,
     term: &Terminal,
 ) -> Option<String> {
@@ -145,7 +145,7 @@ pub fn report_system_prompt(
 /// Variant of [`report_system_prompt`] that accepts a base path for relative
 /// path display in the summary's hyperlink label.
 pub fn report_system_prompt_with_base(
-    effective_sp: &EffectiveSystemPrompt,
+    effective_sp: &ResolvedSystemPrompt,
     config: SystemPromptReportConfig,
     base_path: Option<&Path>,
     term: &Terminal,
@@ -155,13 +155,13 @@ pub fn report_system_prompt_with_base(
     }
 
     let prepared = match effective_sp {
-        EffectiveSystemPrompt::Ready(p) => p,
-        EffectiveSystemPrompt::None => {
+        ResolvedSystemPrompt::Ready(p) => p,
+        ResolvedSystemPrompt::None => {
             // For None, only show something in verbose mode
             // In Summary mode (default), suppress
             return None;
         }
-        EffectiveSystemPrompt::Disabled { .. } => {
+        ResolvedSystemPrompt::Disabled { .. } => {
             // For Disabled, only show something in verbose mode
             return None;
         }
@@ -226,7 +226,7 @@ pub fn report_system_prompt_with_base(
 /// This produces output only when verbose reporting is requested (i.e.
 /// `config.format` is `FullPrompt`).
 pub fn report_system_prompt_empty(
-    effective_sp: &EffectiveSystemPrompt,
+    effective_sp: &ResolvedSystemPrompt,
     config: SystemPromptReportConfig,
     term: &Terminal,
 ) -> Option<String> {
@@ -235,11 +235,11 @@ pub fn report_system_prompt_empty(
     }
 
     let (action, body_text) = match effective_sp {
-        EffectiveSystemPrompt::None => ("none", "the system prompt has not been modified"),
-        EffectiveSystemPrompt::Disabled { .. } => {
+        ResolvedSystemPrompt::None => ("none", "the system prompt has not been modified"),
+        ResolvedSystemPrompt::Disabled { .. } => {
             ("disabled", "the system prompt has been disabled")
         }
-        EffectiveSystemPrompt::Ready(_) => return None,
+        ResolvedSystemPrompt::Ready(_) => return None,
     };
 
     if config.format != PromptReportFormat::FullPrompt {
@@ -617,7 +617,7 @@ mod tests {
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
+        let result = report_system_prompt(&ResolvedSystemPrompt::Ready(prepared), config, &term);
         assert!(result.is_none());
     }
 
@@ -631,7 +631,7 @@ mod tests {
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
+        let result = report_system_prompt(&ResolvedSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         assert!(output.contains("■"));
         assert!(output.contains("System Prompt"));
@@ -649,7 +649,7 @@ mod tests {
             format: PromptReportFormat::FullPrompt,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
+        let result = report_system_prompt(&ResolvedSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("■"));
@@ -671,7 +671,7 @@ mod tests {
             format: PromptReportFormat::PartialPrompt,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
+        let result = report_system_prompt(&ResolvedSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("■"));
@@ -694,7 +694,7 @@ mod tests {
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(&EffectiveSystemPrompt::None, config, &term);
+        let result = report_system_prompt(&ResolvedSystemPrompt::None, config, &term);
         assert!(result.is_none());
     }
 
@@ -709,7 +709,7 @@ mod tests {
             truncation: TruncationMode::FrontBack,
         };
         let result =
-            report_system_prompt(&EffectiveSystemPrompt::Disabled { source }, config, &term);
+            report_system_prompt(&ResolvedSystemPrompt::Disabled { source }, config, &term);
         assert!(result.is_none());
     }
 
@@ -722,7 +722,7 @@ mod tests {
             format: PromptReportFormat::FullPrompt,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt_empty(&EffectiveSystemPrompt::None, config, &term);
+        let result = report_system_prompt_empty(&ResolvedSystemPrompt::None, config, &term);
         let output = result.expect("should produce output in full mode");
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("■"));
@@ -741,7 +741,7 @@ mod tests {
             truncation: TruncationMode::FrontBack,
         };
         let result =
-            report_system_prompt_empty(&EffectiveSystemPrompt::Disabled { source }, config, &term);
+            report_system_prompt_empty(&ResolvedSystemPrompt::Disabled { source }, config, &term);
         let output = result.expect("should produce output in full mode");
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("■"));
@@ -763,7 +763,7 @@ mod tests {
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
+        let result = report_system_prompt(&ResolvedSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
         let mut lines = plain.lines().filter(|l| !l.trim().is_empty());
@@ -795,7 +795,7 @@ mod tests {
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
+        let result = report_system_prompt(&ResolvedSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         assert!(output.contains("replaced"));
     }

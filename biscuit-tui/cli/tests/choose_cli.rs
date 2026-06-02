@@ -520,45 +520,19 @@ fn choose_one_height_rejects_percent_above_100() {
         .stderr(predicate::str::contains("between 1 and 100"));
 }
 
-#[test]
-fn choose_one_height_cells_reaches_event_loop() {
-    cargo_bin_cmd!("question")
-        .args(["choose-one", "a", "b", "c", "--height", "5"])
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("question:"));
-}
-
-#[test]
-fn choose_one_height_percent_reaches_event_loop() {
-    cargo_bin_cmd!("question")
-        .args(["choose-one", "a", "b", "c", "--height", "50%"])
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("question:"));
-}
-
-#[test]
-fn choose_many_height_cells_reaches_event_loop() {
-    cargo_bin_cmd!("question")
-        .args(["choose-many", "a", "b", "c", "--height", "8"])
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("question:"));
-}
-
-#[test]
-fn choose_many_height_percent_reaches_event_loop() {
-    cargo_bin_cmd!("question")
-        .args(["choose-many", "a", "b", "c", "--height", "25%"])
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("question:"));
-}
+// Acceptance of `--height N` / `--height N%` is covered without
+// invoking the prompt by:
+//   - `parse_height_spec` unit tests in
+//     `cli/src/commands/common_choose.rs`
+//   - `run_propagates_{cells,percent}_height_to_prompt` unit tests in
+//     `cli/src/commands/choose_one.rs` and
+//     `cli/src/commands/choose_many.rs`
+//   - `choose_one_help_lists_height_flag` above
+// A "reaches event loop" smoke test for `--height` would force the
+// `Viewport::Inline` path, which has no terminal-driven rescue event
+// when the subprocess inherits a controlling tty — making the test
+// hang for 30s × 4 retries under `just test` from an interactive
+// shell. The omission is deliberate.
 
 // --- Phase 12: named regressions covering the finished CLI surface. --------
 

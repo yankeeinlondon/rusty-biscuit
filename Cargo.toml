@@ -65,6 +65,12 @@ members = [
 ]
 exclude = ["schematic/schema"]
 
+[profile.dev]
+# Keep panic/backtrace line numbers but drop full DWARF (variables/types) -- the bulk of
+# debug-build artifact size. Shrinks target/ substantially and speeds linking. Switch to
+# `debug = true` if you need a step-debugger (lldb/gdb) with variable inspection.
+debug = "line-tables-only"
+
 [profile.profiling]
 inherits = "release"
 debug = true

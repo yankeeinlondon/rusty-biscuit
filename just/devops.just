@@ -94,7 +94,7 @@ _lint pkg:
     echo
 
     exit_code=0
-    cargo clippy -p {{ pkg }} -- -D warnings || exit_code=$?
+    cargo clippy -p {{ pkg }} --all-targets -- -D warnings || exit_code=$?
 
     duration=$SECONDS
     commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
@@ -396,16 +396,158 @@ _doctest pkg *args="":
     fi
     cargo test --doc -p {{ pkg }} {{ args }}
 
+# Print a stable, host-derived baseline name for cargo bench.
+# Format: {host8}--{arch}--{os}--{cores}c--{mem}g
+#
+# host8 is an 8-hex-char xxHash prefix (via bh) of a stable machine
+# identifier — IOPlatformUUID on macOS, /etc/machine-id on Linux, hostname
+# fallback. Benchmark baselines are thereby self-segregating: results from
+# one machine cannot be silently compared against another.
+#
+# Requires `sniff`, `bh`, and `jq` on PATH.
+_bench_id:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$(uname -s)" in
+        Darwin)
+            machine_id="$(ioreg -d2 -c IOPlatformExpertDevice 2>/dev/null \
+                | awk -F'"' '/IOPlatformUUID/{print $4; exit}')"
+            ;;
+        Linux)
+            machine_id="$(cat /etc/machine-id 2>/dev/null \
+                || cat /var/lib/dbus/machine-id 2>/dev/null \
+                || hostname)"
+            ;;
+        *)
+            machine_id="$(hostname)"
+            ;;
+    esac
+    [[ -z "${machine_id:-}" ]] && machine_id="$(hostname)"
+    host8="$(printf '%016x' "$(bh "$machine_id")" | cut -c1-8)"
+
+    cpu_json="$(sniff cpu --json)"
+    os_json="$(sniff os --json)"
+    mem_json="$(sniff memory --json)"
+
+    arch="$(jq -r .arch          <<< "$cpu_json")"
+    cores="$(jq -r .physical_cores <<< "$cpu_json")"
+    os="$(jq -r .distribution    <<< "$os_json")"
+    mem_gb="$(jq -r '.total_bytes / 1073741824 | floor' <<< "$mem_json")"
+
+    echo "${host8}--${arch}--${os}--${cores}c--${mem_gb}g"
+
+# Warn (and gate) when the host is in a state that invalidates bench results.
+# Checks: on battery, < 30% memory available, 1-min load avg > cores/2.
+#
+# Interactive TTY: prints warnings, prompts ENTER to run / Q to quit.
+# Non-interactive (CI=true or BENCH_NONINTERACTIVE=1): refuses unless
+# BENCH_YES=1.
+_bench_preflight:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    warnings=()
+
+    case "$(uname -s)" in
+        Darwin)
+            if pmset -g batt 2>/dev/null | head -1 | grep -q "Battery Power"; then
+                warnings+=("on battery power — thermal throttling likely")
+            fi
+            load1="$(sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}')"
+            ;;
+        Linux)
+            if [[ -r /sys/class/power_supply/AC/online ]] \
+                && [[ "$(cat /sys/class/power_supply/AC/online)" == "0" ]]; then
+                warnings+=("on battery power — thermal throttling likely")
+            fi
+            load1="$(awk '{print $1}' /proc/loadavg)"
+            ;;
+        *)
+            load1="0"
+            ;;
+    esac
+
+    mem_json="$(sniff memory --json)"
+    avail_pct="$(jq -r '(.available_bytes / .total_bytes * 100) | floor' <<< "$mem_json")"
+    (( avail_pct < 30 )) && warnings+=("only ${avail_pct}% memory available (< 30%)")
+
+    cores="$(sniff cpu --json | jq -r .physical_cores)"
+    threshold="$(awk -v c="$cores" 'BEGIN{print c/2}')"
+    if awk -v l="${load1:-0}" -v t="$threshold" 'BEGIN{exit !(l>t)}'; then
+        warnings+=("1-min load avg ${load1} > ${threshold} (cores/2)")
+    fi
+
+    [[ ${#warnings[@]} -eq 0 ]] && exit 0
+
+    echo
+    echo -e "{{ yellow }}⚠  Host is in a constrained state — bench results may not be comparable:{{ reset }}"
+    for w in "${warnings[@]}"; do
+        echo -e "   • $w"
+    done
+    echo
+
+    if [[ -n "${CI:-}" || -n "${BENCH_NONINTERACTIVE:-}" ]]; then
+        if [[ -z "${BENCH_YES:-}" ]]; then
+            echo -e "{{ red }}Refusing to run benches in non-interactive mode.{{ reset }}"
+            echo -e "{{ dim }}Set BENCH_YES=1 to override.{{ reset }}"
+            exit 1
+        fi
+        echo -e "{{ dim }}BENCH_YES=1 set — proceeding despite constrained state.{{ reset }}"
+        exit 0
+    fi
+
+    if [[ -n "${BENCH_YES:-}" ]]; then
+        echo -e "{{ dim }}BENCH_YES=1 set — proceeding despite constrained state.{{ reset }}"
+        exit 0
+    fi
+
+    read -r -p "Press ENTER to run anyway, Q to quit: " reply
+    case "${reply:-}" in
+        q|Q) echo "Aborted."; exit 130 ;;
+        *)   exit 0 ;;
+    esac
+
 # Criterion benches. Packages that opt out via
 # `[package.metadata.benchmarks] required = false` should make their
 # package-level `bench` recipe a documented no-op rather than calling this.
+#
+# For the canonical before/after workflow use `_bench_save` and
+# `_bench_compare` instead.
 _bench pkg *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    just _bench_preflight
     echo
     echo -e "⚙️  Benches for {{ bold }}{{ pkg }}{{ reset }}"
     echo
     cargo bench -p {{ pkg }} {{ args }}
+
+# Save current run as the baseline for this host. Run before your change.
+_bench_save pkg *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just _bench_preflight
+    name="$(just _bench_id)"
+    echo
+    echo -e "💾 Saving bench baseline {{ bold }}${name}{{ reset }} for {{ bold }}{{ pkg }}{{ reset }}"
+    echo
+    cargo bench -p {{ pkg }} {{ args }} -- --save-baseline "$name"
+
+# Compare current run against this host's saved baseline. Run after your change.
+_bench_compare pkg *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just _bench_preflight
+    name="$(just _bench_id)"
+    target_dir="$(cargo metadata --no-deps --format-version 1 | jq -r .target_directory)"
+    if ! find "${target_dir}/criterion" -type d -name "$name" 2>/dev/null | grep -q .; then
+        echo -e "{{ red }}No baseline named '${name}' found.{{ reset }}" >&2
+        echo -e "{{ dim }}Run 'just bench-save {{ pkg }}' before your change first.{{ reset }}" >&2
+        exit 1
+    fi
+    echo
+    echo -e "📊 Comparing {{ bold }}{{ pkg }}{{ reset }} against baseline {{ bold }}${name}{{ reset }}"
+    echo
+    cargo bench -p {{ pkg }} {{ args }} -- --baseline "$name"
 
 # Per-package LCOV coverage. Writes a `lcov-<pkg>.info` artifact next to the
 # package's own working directory.

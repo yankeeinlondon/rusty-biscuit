@@ -106,6 +106,13 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub plain: bool,
 
+    /// Include network-dependent supplemental data (requires connectivity).
+    /// Affects both terminal and JSON output. No effect on subcommands that
+    /// do not currently consume network data — included as the well-known
+    /// surface for future opt-in.
+    #[arg(long, global = true)]
+    pub with_network: bool,
+
     /// Generate shell completions for the specified shell
     #[arg(long, value_name = "SHELL", hide = true)]
     pub completions: Option<Shell>,
@@ -936,7 +943,8 @@ impl Commands {
                     no_error: *no_error,
                     on_error: on_error.clone(),
                 },
-                Some(RepoSubcommand::Worktrees { list, csv }) => RepoAction::Worktrees {
+                Some(RepoSubcommand::Worktrees { md, list, csv }) => RepoAction::Worktrees {
+                    md: *md,
                     list: *list,
                     csv: *csv,
                     verbose: false,
@@ -2116,10 +2124,11 @@ mod tests {
         fn repo_worktrees_parses() {
             let cli = parse_args(&["repo", "worktrees"]).unwrap();
             if let Some(Commands::Repo {
-                repo_subcommand: Some(RepoSubcommand::Worktrees { list, csv }),
+                repo_subcommand: Some(RepoSubcommand::Worktrees { md, list, csv }),
                 ..
             }) = cli.command
             {
+                assert!(!md);
                 assert!(!list);
                 assert!(!csv);
             } else {
@@ -2128,13 +2137,30 @@ mod tests {
         }
 
         #[test]
-        fn repo_worktrees_list_parses() {
-            let cli = parse_args(&["repo", "worktrees", "--list"]).unwrap();
+        fn repo_worktrees_md_parses() {
+            let cli = parse_args(&["repo", "worktrees", "--md"]).unwrap();
             if let Some(Commands::Repo {
-                repo_subcommand: Some(RepoSubcommand::Worktrees { list, csv }),
+                repo_subcommand: Some(RepoSubcommand::Worktrees { md, list, csv }),
                 ..
             }) = cli.command
             {
+                assert!(md);
+                assert!(!list);
+                assert!(!csv);
+            } else {
+                panic!("Expected repo worktrees --md");
+            }
+        }
+
+        #[test]
+        fn repo_worktrees_list_parses() {
+            let cli = parse_args(&["repo", "worktrees", "--list"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees { md, list, csv }),
+                ..
+            }) = cli.command
+            {
+                assert!(!md);
                 assert!(list);
                 assert!(!csv);
             } else {
@@ -2146,10 +2172,11 @@ mod tests {
         fn repo_worktrees_csv_parses() {
             let cli = parse_args(&["repo", "worktrees", "--csv"]).unwrap();
             if let Some(Commands::Repo {
-                repo_subcommand: Some(RepoSubcommand::Worktrees { list, csv }),
+                repo_subcommand: Some(RepoSubcommand::Worktrees { md, list, csv }),
                 ..
             }) = cli.command
             {
+                assert!(!md);
                 assert!(!list);
                 assert!(csv);
             } else {
@@ -2272,12 +2299,19 @@ mod tests {
         fn to_repo_action_worktrees() {
             let cmd = Commands::Repo {
                 repo_subcommand: Some(RepoSubcommand::Worktrees {
+                    md: false,
                     list: true,
                     csv: false,
                 }),
             };
             match cmd.to_repo_action() {
-                Some(RepoAction::Worktrees { list, csv, verbose }) => {
+                Some(RepoAction::Worktrees {
+                    md,
+                    list,
+                    csv,
+                    verbose,
+                }) => {
+                    assert!(!md);
                     assert!(list);
                     assert!(!csv);
                     assert!(!verbose);
@@ -2340,6 +2374,18 @@ mod tests {
         fn repo_worktrees_list_csv_conflict() {
             let result = parse_args(&["repo", "worktrees", "--list", "--csv"]);
             assert!(result.is_err(), "--list and --csv should conflict");
+        }
+
+        #[test]
+        fn repo_worktrees_md_format_conflicts() {
+            assert!(
+                parse_args(&["repo", "worktrees", "--md", "--list"]).is_err(),
+                "--md and --list should conflict"
+            );
+            assert!(
+                parse_args(&["repo", "worktrees", "--md", "--csv"]).is_err(),
+                "--md and --csv should conflict"
+            );
         }
 
         #[test]

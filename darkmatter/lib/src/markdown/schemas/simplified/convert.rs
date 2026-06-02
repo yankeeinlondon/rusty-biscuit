@@ -33,6 +33,17 @@ use crate::markdown::schemas::errors::SchemaError;
 /// Draft 2020-12 schema URI emitted on every generated root schema.
 pub const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
 
+/// String spellings a `boolish` field accepts (and that coercion maps to a
+/// real boolean). Single source of truth shared with [`super::super::coerce`].
+pub(in crate::markdown::schemas) const BOOLISH_VALUES: [&str; 6] =
+    ["true", "false", "True", "False", "TRUE", "FALSE"];
+
+/// Pattern the `numberlike` string arm carries — the source for the schema the
+/// validator compiles. Single source of truth shared with
+/// [`super::super::coerce`], which matches it exactly when recognizing a
+/// numberlike `anyOf` arm.
+pub(in crate::markdown::schemas) const NUMBERLIKE_PATTERN: &str = r"^-?\d+(\.\d+)?$";
+
 /// Converts a [`SimplifiedSchema`] into a Draft 2020-12 JSON Schema value.
 ///
 /// ## Errors
@@ -329,17 +340,21 @@ fn numberlike_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, 
     Ok(json!({
         "anyOf": [
             { "type": "number" },
-            { "type": "string", "pattern": r"^-?\d+(\.\d+)?$" }
+            { "type": "string", "pattern": NUMBERLIKE_PATTERN }
         ]
     }))
 }
 
 fn boolish_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
     reject_unsupported(name, "boolish", constraints, &[])?;
+    let enum_members: Vec<Value> = BOOLISH_VALUES
+        .iter()
+        .map(|s| Value::String((*s).into()))
+        .collect();
     Ok(json!({
         "anyOf": [
             { "type": "boolean" },
-            { "enum": ["true", "false", "True", "False", "TRUE", "FALSE"] }
+            { "enum": enum_members }
         ]
     }))
 }

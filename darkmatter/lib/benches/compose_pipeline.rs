@@ -30,7 +30,7 @@ const CORPUS_SIZE: usize = 200;
 /// Builds one benchmark document. The `index` seeds deterministic variety
 /// across frontmatter values while keeping every feature present.
 fn build_document(index: usize) -> String {
-    let published = index % 2 == 0;
+    let published = index.is_multiple_of(2);
     format!(
         "---\n\
          title: Post {index}\n\

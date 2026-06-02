@@ -2,6 +2,33 @@
 phases: 5
 created: 2026-05-25
 start_phase: 1
+source_files_during_phase_1:
+  - claudine/lib/src/system_prompt/types.rs
+  - claudine/lib/src/system_prompt/mod.rs
+  - claudine/lib/src/system_prompt/prepare.rs
+  - claudine/lib/src/prompt_reporting/system_prompt.rs
+  - claudine/cli/src/output/mod.rs
+  - claudine/cli/src/commands/wrap/system_prompt.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/tests/system_prompt_perf_bench.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+  - .claude/skills/claudine/SKILL.md
+source_files_during_phase_2:
+  - claudine/lib/src/prompt_reporting/types.rs
+  - claudine/lib/src/prompt_reporting/frontmatter.rs
+  - claudine/lib/src/prompt_reporting/precedence.rs
+  - claudine/lib/src/prompt_reporting/mod.rs
+  - biscuit-tui/lib/src/core/standalone/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+  - claudine
+  - claudine-cli
+  - tui-chrome
 ---
 
 # Plan: Prompt Reporting Encapsulation (Stage 0)

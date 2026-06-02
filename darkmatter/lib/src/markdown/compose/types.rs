@@ -506,6 +506,14 @@ pub struct ComposeOptions {
     /// the same property, the document wins.
     pub(crate) baseline_schema: Option<crate::markdown::schemas::SimplifiedSchema>,
 
+    /// When `true`, the always-on schema validation stage is skipped
+    /// entirely. Used by internal non-terminal passes (e.g. shell-command
+    /// discovery) that strip `FrontmatterShellExpansion` to avoid executing
+    /// commands but where validating still-literal `$(...)` values would
+    /// wrongly report them as final schema violations. The terminal compose
+    /// pass validates the resolved frontmatter. Default: `false`.
+    pub(crate) skip_schema_validation: bool,
+
     // ── Link normalization ────────────────────────────────────────
     /// Environment variables that may be used as path-prefix abstractions
     /// during the Finalization stage's Link Normalization operation.
@@ -639,6 +647,7 @@ impl ComposeOptions {
             shell_strip_ansi: true,
             env_path_whitelist: Vec::new(),
             baseline_schema: None,
+            skip_schema_validation: false,
         }
     }
 
@@ -1482,8 +1491,8 @@ pub struct ComposePerfReport {
 /// a deterministic, intuitive ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComposeStage {
-    SchemaValidation,
     FrontmatterInterpolation,
+    SchemaValidation,
     FrontmatterShellExpansion,
     EffectiveStateBuild,
     TextReplacement,
@@ -1504,8 +1513,8 @@ pub enum ComposeStage {
 impl std::fmt::Display for ComposeStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::SchemaValidation => "schema validation",
             Self::FrontmatterInterpolation => "frontmatter interpolation",
+            Self::SchemaValidation => "schema validation",
             Self::FrontmatterShellExpansion => "frontmatter shell expansion",
             Self::EffectiveStateBuild => "effective state build",
             Self::TextReplacement => "text replacement",

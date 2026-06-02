@@ -4,13 +4,14 @@
 //! parses them, validates the executable-token interpolation rule, and returns
 //! structured directives ready for execution.
 
-use super::expression::{evaluate, is_truthy, parse};
+use super::expression::{evaluate, is_truthy, parse_condition};
 use super::frontmatter_interpolation::FrontmatterSeedState;
+use super::interpolation::{Evaluator, ScanMode, interpolate_text};
 use super::shell_expansion::store::resolve_policy_paths;
 use super::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use super::shell_expansion::types::{
-    ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective, ShellExpansionError,
-    ShellPipeline, ShellPolicyPaths,
+    ChainOperator, ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective,
+    ShellExpansionError, ShellPipeline, ShellPolicyPaths,
 };
 use super::shell_expansion::{PreparedShellDirective, execute_prepared_directive, prepare_directive};
 use super::types::{ComposeOptions, ComposeWarning};
@@ -52,14 +53,23 @@ pub(crate) enum FrontmatterShellAst {
 ///
 /// `Empty` corresponds to a literal empty string (`''` / `""`) and contributes
 /// no command; selecting it short-circuits the directive to `""`. `Pipeline`
-/// holds a parsed command pipeline subject to the existing executable-literal
-/// rule and allowlist policy.
+/// carries the pre-interpolation branch text from the original ternary AST.
+/// At execution time the text is interpolated against the frontmatter seed
+/// state and then tokenized into a pipeline. Anchoring the branch boundary
+/// to the original — instead of re-splitting the resolved whole `$(...)`
+/// body — prevents condition interpolation from introducing `?` or `:`
+/// that would retroactively shift branch boundaries and bleed executable
+/// text into a branch.
 #[derive(Debug, Clone)]
 pub(crate) enum Branch {
     /// Literal empty string branch — produces no shell invocation.
     Empty,
-    /// Command pipeline branch — runs through the existing prepare/execute path.
-    Pipeline(ShellPipeline),
+    /// Command pipeline branch — interpolated and tokenized at execute time.
+    Pipeline {
+        /// Pre-interpolation branch text, exactly as sliced from the original
+        /// `$(...)` body.
+        original_text: String,
+    },
 }
 
 /// Which side of a ternary a parse error or validation diagnostic refers to.
@@ -80,21 +90,16 @@ impl BranchPosition {
 }
 
 impl Branch {
-    /// Returns the executable names of every command in this branch.
+    /// Returns the static (pre-interpolation) source text for this branch.
     ///
-    /// `Branch::Empty` yields nothing; `Branch::Pipeline` yields one entry per
-    /// chained action. Used by allowlist enforcement to gather the reachable
-    /// command set across both branches of a ternary.
-    #[allow(dead_code)] // Wired into allowlist enforcement in phase 4.
-    pub(crate) fn commands(&self) -> Box<dyn Iterator<Item = &str> + '_> {
+    /// `Branch::Empty` yields nothing; `Branch::Pipeline` yields the single
+    /// original branch slice. Used by diagnostics and tests; allowlist
+    /// enforcement walks the interpolated pipeline at execute time.
+    #[allow(dead_code)]
+    pub(crate) fn original_text(&self) -> Option<&str> {
         match self {
-            Self::Empty => Box::new(std::iter::empty()),
-            Self::Pipeline(pipeline) => Box::new(
-                pipeline
-                    .actions
-                    .iter()
-                    .map(|action| action.command.executable.as_str()),
-            ),
+            Self::Empty => None,
+            Self::Pipeline { original_text } => Some(original_text.as_str()),
         }
     }
 }
@@ -103,16 +108,19 @@ impl Branch {
 ///
 /// Holds the parsed [`FrontmatterShellAst`] alongside execution-time metadata.
 /// The legacy `executable`, `args`, and `pipeline` fields are retained for
-/// callers that still consume the pipeline shape directly; for a `Ternary` AST
-/// they reflect a placeholder pipeline and execution selects the pipeline
-/// (or empty short-circuit) from the appropriate branch.
+/// in-crate inspection by parser tests; production code reads the AST
+/// directly via `directive_reachable_pipelines` and `ast`. For a `Ternary`
+/// AST the legacy fields are placeholders (empty / `None`).
 #[derive(Debug, Clone)]
 pub(crate) struct FrontmatterShellDirective {
     pub key: String,
     pub raw_command: String,
+    #[allow(dead_code)] // Inspected by parser tests; production reads `ast`.
     pub executable: String,
+    #[allow(dead_code)] // Inspected by parser tests; production reads `ast`.
     pub args: Vec<String>,
     pub timeout_override: Option<std::time::Duration>,
+    #[allow(dead_code)] // Inspected by parser tests; production uses `directive_reachable_pipelines`.
     pub pipeline: Option<ShellPipeline>,
     pub ast: FrontmatterShellAst,
 }
@@ -197,23 +205,20 @@ pub(crate) fn parse_shell_value(
     let original_inner = extract_original_inner(original_value, key, ctx)?;
     let validation_inner = original_inner.unwrap_or(inner_command);
 
-    // Ternary path? Structure is determined from the original so that
-    // interpolation cannot retroactively change the shape of the directive.
+    // Ternary path? Structure is determined exclusively from the original so
+    // that interpolation in the condition cannot retroactively change branch
+    // boundaries. Per-branch resolved text is produced at execution time by
+    // interpolating each original branch slice independently.
     if let Some((orig_cond, orig_then, orig_else)) = split_top_level_ternary(validation_inner) {
-        // The resolved inner must split into the same shape; otherwise an
-        // interpolation produced a `?` or `:` that wasn't there before, or
-        // consumed one that was — either way, reject.
-        let (_res_cond, res_then, res_else) =
-            split_top_level_ternary(inner_command).ok_or_else(|| {
-                frontmatter_parse_error(
-                    key,
-                    ctx,
-                    "Frontmatter shell ternary structure must be preserved after interpolation",
-                )
-            })?;
+        // Reject nested ternaries (a v1 non-goal): a top-level `?` followed
+        // by a later top-level `:` inside a branch indicates a second ternary.
+        // A bare colon without a preceding `?` is allowed — it is valid
+        // pipeline content (URLs, times, key:value arguments).
+        reject_nested_ternary(orig_then, BranchPosition::Then, key, ctx)?;
+        reject_nested_ternary(orig_else, BranchPosition::Else, key, ctx)?;
 
-        let then_branch = parse_branch(orig_then, res_then, BranchPosition::Then, key, ctx)?;
-        let else_branch = parse_branch(orig_else, res_else, BranchPosition::Else, key, ctx)?;
+        let then_branch = parse_branch_from_original(orig_then, BranchPosition::Then, key, ctx)?;
+        let else_branch = parse_branch_from_original(orig_else, BranchPosition::Else, key, ctx)?;
 
         let condition_source = orig_cond.trim().to_string();
         if condition_source.is_empty() {
@@ -241,7 +246,7 @@ pub(crate) fn parse_shell_value(
 
     // A top-level `?` without a matching `:` is an unbalanced ternary, not a
     // silent fall-through to pipeline parsing.
-    if find_top_level_char(validation_inner, '?').is_some() {
+    if find_top_level_separator(validation_inner, '?').is_some() {
         return Err(frontmatter_parse_error(
             key,
             ctx,
@@ -261,6 +266,18 @@ pub(crate) fn parse_shell_value(
     // Parse into a pipeline
     let pipeline =
         parse_pipeline(&tokens, ctx).map_err(|error| remap_parse_error(error, key, ctx))?;
+
+    // Shape preservation: an interpolation in argument position must not
+    // synthesize new pipeline actions or change the executable token. We
+    // already reject `{{...}}` in executable position via
+    // `validate_no_executable_interpolation`; this catches arg-position
+    // values that contain `&&` / `||` (or quote-escaping payloads) that
+    // would extend the pipeline at execute time.
+    if original_inner.is_some() {
+        let original_pipeline = parse_static_pipeline_shape(validation_inner, ctx)
+            .map_err(|error| remap_parse_error(error, key, ctx))?;
+        validate_pipeline_shape_preserved(&original_pipeline, &pipeline, None, key, ctx)?;
+    }
 
     let executable = pipeline.actions[0].command.executable.clone();
     let args = pipeline.actions[0].command.args.clone();
@@ -298,16 +315,20 @@ fn extract_original_inner<'a>(
 }
 
 /// Splits the inner text of a `$(...)` body at the first top-level
-/// `?` / `:` pair, returning `(condition, then, else)` slices.
+/// whitespace-padded `?` / `:` separator pair, returning
+/// `(condition, then, else)` slices.
 ///
 /// "Top-level" means: not inside single quotes, double quotes, or a balanced
-/// `(` / `)` pair, and not preceded by a backslash escape. Returns `None`
-/// when there is no top-level `?` or when a `?` is found but no later
-/// top-level `:` is.
+/// `(` / `)` pair, and not preceded by a backslash escape. A `?` or `:`
+/// counts as a separator only when surrounded by whitespace (or sitting at
+/// the slice boundary). This keeps URL-style arguments like
+/// `http://example.com`, `cmd:arg` key/value pairs, and glob fragments such
+/// as `file?.txt` from being misclassified as ternary punctuation. Returns
+/// `None` when no such pair exists.
 fn split_top_level_ternary(inner: &str) -> Option<(&str, &str, &str)> {
-    let q_pos = find_top_level_char(inner, '?')?;
+    let q_pos = find_top_level_separator(inner, '?')?;
     let after_q = &inner[q_pos + '?'.len_utf8()..];
-    let c_rel = find_top_level_char(after_q, ':')?;
+    let c_rel = find_top_level_separator(after_q, ':')?;
     let c_pos = q_pos + '?'.len_utf8() + c_rel;
     Some((
         &inner[..q_pos],
@@ -316,13 +337,22 @@ fn split_top_level_ternary(inner: &str) -> Option<(&str, &str, &str)> {
     ))
 }
 
-/// Returns the byte offset of the first top-level occurrence of `target`,
-/// respecting single quotes, double quotes, parentheses, and backslash escapes.
-fn find_top_level_char(input: &str, target: char) -> Option<usize> {
+/// Returns the byte offset of the first top-level whitespace-padded
+/// occurrence of `target`.
+///
+/// "Top-level" respects single quotes, double quotes, parentheses, and
+/// backslash escapes. "Whitespace-padded" means the byte immediately
+/// before `target` is whitespace (or `target` sits at the start of the
+/// slice) and the byte immediately after is whitespace (or end-of-slice).
+/// This is the rule that distinguishes ternary separators from the same
+/// characters appearing inside argument text such as `http://`, `cmd:arg`,
+/// or `file?.txt`.
+fn find_top_level_separator(input: &str, target: char) -> Option<usize> {
     let mut in_single = false;
     let mut in_double = false;
     let mut escaped = false;
     let mut paren_depth: u32 = 0;
+    let bytes = input.as_bytes();
 
     for (idx, ch) in input.char_indices() {
         if escaped {
@@ -335,54 +365,46 @@ fn find_top_level_char(input: &str, target: char) -> Option<usize> {
             '"' if !in_single => in_double = !in_double,
             '(' if !in_single && !in_double => paren_depth += 1,
             ')' if !in_single && !in_double && paren_depth > 0 => paren_depth -= 1,
-            c if c == target && !in_single && !in_double && paren_depth == 0 => return Some(idx),
+            c if c == target && !in_single && !in_double && paren_depth == 0 => {
+                let pre_ok = idx == 0
+                    || matches!(
+                        bytes.get(idx.saturating_sub(1)),
+                        Some(b' ') | Some(b'\t')
+                    );
+                let after_idx = idx + c.len_utf8();
+                let post_ok = after_idx == bytes.len()
+                    || matches!(bytes.get(after_idx), Some(b' ') | Some(b'\t'));
+                if pre_ok && post_ok {
+                    return Some(idx);
+                }
+            }
             _ => {}
         }
     }
     None
 }
 
-/// Parses one side of a ternary into a [`Branch`].
+/// Parses one side of a ternary into a [`Branch`] from the original
+/// (pre-interpolation) source slice.
 ///
-/// `original` is the pre-interpolation slice and drives the executable-token
-/// interpolation check. `resolved` is the post-interpolation slice and is
-/// what actually gets tokenized into a pipeline (so commands match the
-/// allowlist by their final names). A bare empty-string literal — `''` or
-/// `""`, with optional surrounding whitespace — produces [`Branch::Empty`]
-/// and bypasses tokenization entirely.
-fn parse_branch(
+/// The resolved branch text is produced at execution time by interpolating
+/// `original_text` against the frontmatter seed state; deferring tokenization
+/// keeps the branch boundary pinned to the original ternary AST. A bare
+/// empty-string literal — `''` or `""`, with optional surrounding whitespace
+/// — produces [`Branch::Empty`] and contributes no command.
+fn parse_branch_from_original(
     original: &str,
-    resolved: &str,
     position: BranchPosition,
     key: &str,
     ctx: &SourceContext,
 ) -> Result<Branch, ShellExpansionError> {
-    let resolved_trim = resolved.trim();
     let original_trim = original.trim();
 
-    if is_empty_string_literal(resolved_trim) {
-        // If the original was also empty-literal, this is the intended shape.
-        // If the original wasn't empty-literal but interpolation produced one,
-        // the branch effectively short-circuits; accept it.
+    if is_empty_string_literal(original_trim) {
         return Ok(Branch::Empty);
     }
 
-    if is_empty_string_literal(original_trim) {
-        // The original was an empty literal, but interpolation produced a
-        // non-empty value. That would turn a `Branch::Empty` into a pipeline
-        // built entirely from interpolated text — a security regression we
-        // refuse to allow.
-        return Err(frontmatter_parse_error(
-            key,
-            ctx,
-            format!(
-                "Frontmatter shell ternary {} must remain an empty string literal after interpolation",
-                position.name()
-            ),
-        ));
-    }
-
-    if resolved_trim.is_empty() || original_trim.is_empty() {
+    if original_trim.is_empty() {
         return Err(frontmatter_parse_error(
             key,
             ctx,
@@ -395,12 +417,36 @@ fn parse_branch(
 
     validate_branch_no_executable_interpolation(original, position, key, ctx)?;
 
-    let tokens =
-        tokenize(resolved, ctx).map_err(|error| remap_branch_parse_error(error, position, key, ctx))?;
-    let pipeline = parse_pipeline(&tokens, ctx)
-        .map_err(|error| remap_branch_parse_error(error, position, key, ctx))?;
+    Ok(Branch::Pipeline {
+        original_text: original.to_string(),
+    })
+}
 
-    Ok(Branch::Pipeline(pipeline))
+/// Rejects nested ternaries inside a branch slice.
+///
+/// A nested ternary manifests as an additional separator-style `?`
+/// (whitespace-padded, top-level, unquoted) inside one of the branches.
+/// Bare colons are not a signal — they appear legitimately in URLs
+/// (`http://`), times (`12:30`), and `key:value` arguments — so only
+/// `?` is checked. Glob `?` and other in-word question marks are ignored
+/// by the separator rule and pass through to the shell tokenizer.
+fn reject_nested_ternary(
+    branch: &str,
+    position: BranchPosition,
+    key: &str,
+    ctx: &SourceContext,
+) -> Result<(), ShellExpansionError> {
+    if find_top_level_separator(branch, '?').is_some() {
+        return Err(frontmatter_parse_error(
+            key,
+            ctx,
+            format!(
+                "Frontmatter shell ternary {} contains an additional separator-style '?'; nested ternaries are not supported",
+                position.name()
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Recognizes `''` or `""` as a bare empty-string literal branch form.
@@ -450,6 +496,135 @@ fn remap_branch_parse_error(
             format!("In {} of ternary: {message}", position.name()),
         ),
         other => other,
+    }
+}
+
+/// Parses the static shape of a pre-interpolation pipeline by first masking
+/// every `{{...}}` placeholder with a shell-inert sentinel token, then
+/// running the shared tokenizer and pipeline parser.
+///
+/// The returned [`ShellPipeline`] captures the author's intended action
+/// count, chain operators, and executable tokens. Arg counts will not
+/// match the post-interpolation pipeline (an interpolated value can
+/// legally expand to additional words) — only the structural fields are
+/// suitable for comparison.
+fn parse_static_pipeline_shape(
+    original: &str,
+    ctx: &SourceContext,
+) -> Result<ShellPipeline, ShellExpansionError> {
+    let masked = mask_interpolations(original);
+    let tokens = tokenize(&masked, ctx)?;
+    parse_pipeline(&tokens, ctx)
+}
+
+/// Replaces every `{{...}}` interpolation marker with a sentinel word that
+/// contains no shell metacharacters, so the original text can be fed to
+/// the shell tokenizer without risk of the placeholder body confusing
+/// quote tracking or chain-operator detection.
+///
+/// Unterminated `{{` with no matching `}}` is left untouched; the
+/// downstream tokenizer will surface a diagnostic against the original
+/// shape if that matters.
+fn mask_interpolations(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    let mut counter: usize = 0;
+    while let Some(open) = rest.find("{{") {
+        out.push_str(&rest[..open]);
+        let after_open = &rest[open + 2..];
+        match after_open.find("}}") {
+            Some(close) => {
+                out.push_str(&format!("__DM_INTERP_{counter}__"));
+                counter += 1;
+                rest = &after_open[close + 2..];
+            }
+            None => {
+                out.push_str(&rest[open..]);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Asserts that interpolation has not changed the static shape of a
+/// pipeline — its action count, chain operators, or executable tokens.
+///
+/// Argument counts intentionally are not compared: an interpolated value
+/// can legally tokenize into multiple words (e.g. `echo {{x}}` with
+/// `x = "a b"` becomes `echo a b`). The structural fields are the ones
+/// that gate the static-allowlist invariant: every executable the
+/// directive could run must be statically determinable at parse time.
+///
+/// `position` is `Some(...)` when validating a ternary branch and `None`
+/// for a bare pipeline; the diagnostic text adapts accordingly.
+fn validate_pipeline_shape_preserved(
+    original: &ShellPipeline,
+    resolved: &ShellPipeline,
+    position: Option<BranchPosition>,
+    key: &str,
+    ctx: &SourceContext,
+) -> Result<(), ShellExpansionError> {
+    let where_text = match position {
+        Some(p) => format!(" in {} of ternary", p.name()),
+        None => String::new(),
+    };
+
+    if original.actions.len() != resolved.actions.len() {
+        return Err(frontmatter_parse_error(
+            key,
+            ctx,
+            format!(
+                "Frontmatter shell pipeline{where_text} changed from {} action(s) to {} after interpolation; \
+                 interpolated argument values may not introduce new chain operators ('&&' / '||') or break out of quoting",
+                original.actions.len(),
+                resolved.actions.len(),
+            ),
+        ));
+    }
+
+    for (idx, (orig_action, new_action)) in original
+        .actions
+        .iter()
+        .zip(resolved.actions.iter())
+        .enumerate()
+    {
+        if orig_action.operator != new_action.operator {
+            return Err(frontmatter_parse_error(
+                key,
+                ctx,
+                format!(
+                    "Frontmatter shell pipeline{where_text} chain operator at action {} changed from {} to {} after interpolation",
+                    idx,
+                    operator_label(orig_action.operator),
+                    operator_label(new_action.operator),
+                ),
+            ));
+        }
+        if orig_action.command.executable != new_action.command.executable {
+            return Err(frontmatter_parse_error(
+                key,
+                ctx,
+                format!(
+                    "Frontmatter shell pipeline{where_text} executable at action {} changed from `{}` to `{}` after interpolation; \
+                     interpolation may not change the executable",
+                    idx,
+                    orig_action.command.executable,
+                    new_action.command.executable,
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn operator_label(op: ChainOperator) -> &'static str {
+    match op {
+        ChainOperator::None => "(first)",
+        ChainOperator::And => "'&&'",
+        ChainOperator::Or => "'||'",
     }
 }
 
@@ -637,27 +812,8 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                 then_branch,
                 else_branch,
             } => {
-                // Phase 4: every command that the directive could execute must
-                // be allowlisted, so prepare BOTH branches before evaluating
-                // the condition. An unselected branch with an un-approved
-                // command still fails the entire directive.
-                let then_prepared = prepare_optional_branch(
-                    then_branch,
-                    candidate,
-                    options,
-                    &policy_paths,
-                    runtime,
-                    ctx,
-                )?;
-                let else_prepared = prepare_optional_branch(
-                    else_branch,
-                    candidate,
-                    options,
-                    &policy_paths,
-                    runtime,
-                    ctx,
-                )?;
-
+                // The seed state drives both per-branch interpolation and
+                // condition evaluation; build it once on first ternary.
                 let state = match seed_state.as_ref() {
                     Some(s) => s,
                     None => {
@@ -671,6 +827,31 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                         seed_state.as_ref().unwrap()
                     }
                 };
+
+                // Every command that the directive could execute must be
+                // allowlisted, so prepare BOTH branches before evaluating
+                // the condition. An unselected branch with an un-approved
+                // command still fails the entire directive.
+                let then_prepared = prepare_optional_branch(
+                    then_branch,
+                    candidate,
+                    options,
+                    &policy_paths,
+                    runtime,
+                    ctx,
+                    state,
+                    BranchPosition::Then,
+                )?;
+                let else_prepared = prepare_optional_branch(
+                    else_branch,
+                    candidate,
+                    options,
+                    &policy_paths,
+                    runtime,
+                    ctx,
+                    state,
+                    BranchPosition::Else,
+                )?;
 
                 let pick_then = evaluate_ternary_condition(
                     condition_source,
@@ -723,13 +904,86 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     })
 }
 
+/// Returns every shell pipeline that this directive could execute at runtime.
+///
+/// For a [`FrontmatterShellAst::Pipeline`] directive: returns the single
+/// captured pipeline. For a [`FrontmatterShellAst::Ternary`] directive:
+/// interpolates each non-[`Branch::Empty`] branch against a freshly built
+/// [`FrontmatterSeedState`] (using `frontmatter`'s current values and
+/// `options.context()`), tokenizes, and parses each into a [`ShellPipeline`].
+/// [`Branch::Empty`] contributes no pipeline.
+///
+/// Used by preflight shell-command discovery so the allowlist/approval
+/// workflow surfaces commands from *both* ternary branches — not just the
+/// one that runtime condition evaluation would select.
+///
+/// ## Errors
+///
+/// Returns an error if a branch's text fails interpolation, tokenization,
+/// or pipeline parsing.
+pub(crate) fn directive_reachable_pipelines(
+    directive: &FrontmatterShellDirective,
+    frontmatter: &Frontmatter,
+    options: &ComposeOptions,
+    ctx: &SourceContext,
+) -> Result<Vec<ShellPipeline>, ShellExpansionError> {
+    match &directive.ast {
+        FrontmatterShellAst::Pipeline(pipeline) => Ok(vec![pipeline.clone()]),
+        FrontmatterShellAst::Ternary {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            let map: HashMap<String, Value> = frontmatter
+                .as_map()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            let state = FrontmatterSeedState::new(map, options.context().clone());
+
+            let mut pipelines = Vec::new();
+            for (branch, position) in [
+                (then_branch, BranchPosition::Then),
+                (else_branch, BranchPosition::Else),
+            ] {
+                if let Branch::Pipeline { original_text } = branch {
+                    let resolved = interpolate_branch_text(
+                        original_text,
+                        &state,
+                        position,
+                        &directive.key,
+                        ctx,
+                    )?;
+                    let tokens = tokenize(&resolved, ctx).map_err(|error| {
+                        remap_branch_parse_error(error, position, &directive.key, ctx)
+                    })?;
+                    let pipeline = parse_pipeline(&tokens, ctx).map_err(|error| {
+                        remap_branch_parse_error(error, position, &directive.key, ctx)
+                    })?;
+                    pipelines.push(pipeline);
+                }
+            }
+            Ok(pipelines)
+        }
+    }
+}
+
 /// Evaluates a ternary's condition and returns `true` when the then-branch
 /// should be selected.
 ///
-/// The condition source is the original pre-interpolation slice; if it is a
-/// single `{{ ... }}` expression the braces are stripped before parsing so the
-/// inner template expression is fed straight to the shared expression parser.
-/// Any other shape is parsed as-is. Parse and evaluation failures surface as
+/// The condition source is the original pre-interpolation slice. It is
+/// first run through the shared interpolation engine against the seed
+/// state, then the resulting text is parsed as a *condition-mode*
+/// template expression (the same grammar used by `::block when="..."`
+/// and `::file when="..."`) and evaluated. The two-step shape matters
+/// when a frontmatter value itself was rendered from a template — e.g.
+/// `has_spec: "{{ false }}"` resolves to the string `"false"`, which a
+/// direct variable lookup would treat as a truthy non-empty string.
+/// Parsing the interpolated text as an expression recovers the literal
+/// boolean (`false`) before the truthy check runs. Condition-mode
+/// parsing additionally enables infix `&&` / `||` / `!` and comparisons
+/// in the condition, matching the spec's "single boolean expression"
+/// contract. Parse, interpolation, and evaluation failures surface as
 /// [`ShellExpansionError::ParseDirective`] tagged with the frontmatter key.
 fn evaluate_ternary_condition(
     condition_source: &str,
@@ -737,9 +991,32 @@ fn evaluate_ternary_condition(
     key: &str,
     ctx: &SourceContext,
 ) -> Result<bool, ShellExpansionError> {
-    let expression_text = strip_interpolation_braces(condition_source);
+    let evaluator = Evaluator::new(state);
+    let rewrite = interpolate_text(
+        condition_source,
+        &evaluator,
+        ScanMode::Plain,
+        true,
+        "frontmatter-shell-ternary-condition",
+    )
+    .map_err(|err| {
+        frontmatter_parse_error(
+            key,
+            ctx,
+            format!("Frontmatter shell ternary condition interpolation failed: {err}"),
+        )
+    })?;
 
-    let parsed = parse(expression_text).map_err(|err| {
+    let expression_text = rewrite.output.trim().to_string();
+    if expression_text.is_empty() {
+        return Err(frontmatter_parse_error(
+            key,
+            ctx,
+            "Frontmatter shell ternary condition resolved to empty text",
+        ));
+    }
+
+    let parsed = parse_condition(&expression_text).map_err(|err| {
         frontmatter_parse_error(
             key,
             ctx,
@@ -785,6 +1062,7 @@ fn prepare_branch_pipeline(
         executable,
         args,
         span: 0..0,
+        indent: String::new(),
         origin: ShellCommandOrigin::Frontmatter {
             key: candidate.key.clone(),
         },
@@ -801,9 +1079,12 @@ fn prepare_branch_pipeline(
 ///
 /// `Branch::Empty` short-circuits to no shell invocation and contributes no
 /// command to the allowlist-reachable set, so it is skipped entirely.
-/// `Branch::Pipeline` is dispatched through [`prepare_branch_pipeline`] so
-/// its commands are validated against the user's allowlist before the ternary
-/// condition is evaluated.
+/// `Branch::Pipeline` is interpolated against the seed state, tokenized into
+/// a pipeline, and dispatched through [`prepare_branch_pipeline`] so its
+/// commands are validated against the user's allowlist before the ternary
+/// condition is evaluated. Per-branch interpolation keeps the branch
+/// boundary anchored to the original ternary AST.
+#[allow(clippy::too_many_arguments)]
 fn prepare_optional_branch(
     branch: &Branch,
     candidate: &FrontmatterShellDirective,
@@ -811,13 +1092,35 @@ fn prepare_optional_branch(
     policy_paths: &ShellPolicyPaths,
     runtime: &mut PipelineRuntime,
     ctx: &SourceContext,
+    state: &FrontmatterSeedState,
+    position: BranchPosition,
 ) -> Result<Option<Box<PreparedShellDirective>>, ShellExpansionError> {
     match branch {
         Branch::Empty => Ok(None),
-        Branch::Pipeline(pipeline) => {
+        Branch::Pipeline { original_text } => {
+            // Anchor the static command-set to the ORIGINAL branch text. Any
+            // expansion that introduces a new action or changes an executable
+            // would let an interpolation value smuggle past the allowlist.
+            let original_pipeline = parse_static_pipeline_shape(original_text, ctx)
+                .map_err(|error| remap_branch_parse_error(error, position, &candidate.key, ctx))?;
+
+            let resolved = interpolate_branch_text(original_text, state, position, &candidate.key, ctx)?;
+            let tokens = tokenize(&resolved, ctx)
+                .map_err(|error| remap_branch_parse_error(error, position, &candidate.key, ctx))?;
+            let pipeline = parse_pipeline(&tokens, ctx)
+                .map_err(|error| remap_branch_parse_error(error, position, &candidate.key, ctx))?;
+
+            validate_pipeline_shape_preserved(
+                &original_pipeline,
+                &pipeline,
+                Some(position),
+                &candidate.key,
+                ctx,
+            )?;
+
             let raw_command = pipeline.display_string();
             let prepared = prepare_branch_pipeline(
-                pipeline.clone(),
+                pipeline,
                 raw_command,
                 candidate,
                 options,
@@ -830,21 +1133,38 @@ fn prepare_optional_branch(
     }
 }
 
-/// Strips one outer `{{ ... }}` wrap from a condition expression, if present,
-/// so authors can write `$({{enabled}} ? ... : ...)` and the inner template
-/// expression reaches the parser directly.
-fn strip_interpolation_braces(source: &str) -> &str {
-    let trimmed = source.trim();
-    if let Some(inner) = trimmed.strip_prefix("{{").and_then(|s| s.strip_suffix("}}")) {
-        let inner = inner.trim();
-        // Reject a wrap that hides additional `{{ }}` expressions; treat the
-        // whole thing as a bare expression instead, which will fail to parse
-        // cleanly and surface a useful diagnostic.
-        if !inner.contains("{{") && !inner.contains("}}") {
-            return inner;
-        }
-    }
-    trimmed
+/// Interpolates a single branch's pre-interpolation text against the
+/// frontmatter seed state, producing the final command text.
+///
+/// Interpolation runs in [`ScanMode::Plain`] so the entire branch is
+/// scanned. Failures are surfaced as branch-tagged
+/// [`ShellExpansionError::ParseDirective`] errors.
+fn interpolate_branch_text(
+    original_text: &str,
+    state: &FrontmatterSeedState,
+    position: BranchPosition,
+    key: &str,
+    ctx: &SourceContext,
+) -> Result<String, ShellExpansionError> {
+    let evaluator = Evaluator::new(state);
+    let rewrite = interpolate_text(
+        original_text,
+        &evaluator,
+        ScanMode::Plain,
+        true,
+        "frontmatter-shell-ternary-branch",
+    )
+    .map_err(|err| {
+        frontmatter_parse_error(
+            key,
+            ctx,
+            format!(
+                "Frontmatter shell ternary {} interpolation failed: {err}",
+                position.name()
+            ),
+        )
+    })?;
+    Ok(rewrite.output)
 }
 
 fn frontmatter_parse_error(
@@ -882,6 +1202,12 @@ fn find_unquoted_closing_paren(
     let mut in_single = false;
     let mut in_double = false;
     let mut escaped = false;
+    // Tracking nested parens lets parenthesized sub-expressions inside the
+    // directive body — including the spec's parenthesized condition form
+    // `(flag ? a : b)` — coexist with the surrounding `$(...)` without the
+    // inner `)` prematurely closing the directive. The ternary splitter
+    // already respects paren depth; this mirrors that view of "top-level".
+    let mut paren_depth: u32 = 0;
 
     for (idx, ch) in rest.char_indices() {
         if escaped {
@@ -893,6 +1219,8 @@ fn find_unquoted_closing_paren(
             '\\' if !in_single => escaped = true,
             '\'' if !in_double => in_single = !in_single,
             '"' if !in_single => in_double = !in_double,
+            '(' if !in_single && !in_double => paren_depth += 1,
+            ')' if !in_single && !in_double && paren_depth > 0 => paren_depth -= 1,
             ')' if !in_single && !in_double => return Ok(idx),
             _ => {}
         }
@@ -1241,10 +1569,11 @@ mod tests {
             .expect("directive should be returned");
         let (cond, then_b, else_b) = unwrap_ternary(&directive);
         assert_eq!(cond, "{{has_spec}}");
+        // Branches now carry the ORIGINAL slice; resolved text is produced
+        // by per-branch interpolation at execute time.
         match then_b {
-            Branch::Pipeline(p) => {
-                assert_eq!(p.actions[0].command.executable, "basename");
-                assert_eq!(p.actions[0].command.args, vec!["/tmp/spec.md"]);
+            Branch::Pipeline { original_text } => {
+                assert_eq!(original_text.trim(), "basename '{{spec}}'");
             }
             Branch::Empty => panic!("expected then-branch pipeline"),
         }
@@ -1261,11 +1590,12 @@ mod tests {
         let (cond, then_b, else_b) = unwrap_ternary(&directive);
         assert_eq!(cond, "cond");
         match (then_b, else_b) {
-            (Branch::Pipeline(then_p), Branch::Pipeline(else_p)) => {
-                assert_eq!(then_p.actions[0].command.executable, "echo");
-                assert_eq!(then_p.actions[0].command.args, vec!["yes"]);
-                assert_eq!(else_p.actions[0].command.executable, "echo");
-                assert_eq!(else_p.actions[0].command.args, vec!["no"]);
+            (
+                Branch::Pipeline { original_text: then_text },
+                Branch::Pipeline { original_text: else_text },
+            ) => {
+                assert_eq!(then_text.trim(), "echo yes");
+                assert_eq!(else_text.trim(), "echo no");
             }
             _ => panic!("expected both branches to be pipelines"),
         }
@@ -1345,9 +1675,10 @@ mod tests {
             .expect("directive should parse");
         let (_, then_b, _) = unwrap_ternary(&directive);
         match then_b {
-            Branch::Pipeline(p) => {
-                assert_eq!(p.actions[0].command.executable, "basename");
-                assert_eq!(p.actions[0].command.args, vec!["README.md"]);
+            Branch::Pipeline { original_text } => {
+                // Branch retains the original {{file}} placeholder; expansion
+                // happens at execute time via per-branch interpolation.
+                assert_eq!(original_text.trim(), "basename {{file}}");
             }
             Branch::Empty => panic!("expected pipeline branch"),
         }
@@ -1376,10 +1707,8 @@ mod tests {
             .expect("directive should parse");
         let (_, then_b, _) = unwrap_ternary(&directive);
         match then_b {
-            Branch::Pipeline(p) => {
-                assert_eq!(p.actions.len(), 2);
-                assert_eq!(p.actions[0].command.executable, "echo");
-                assert_eq!(p.actions[1].command.executable, "echo");
+            Branch::Pipeline { original_text } => {
+                assert_eq!(original_text.trim(), "echo a && echo b");
             }
             Branch::Empty => panic!("expected pipeline branch"),
         }
@@ -1396,6 +1725,148 @@ mod tests {
             FrontmatterShellAst::Pipeline(_) => {}
             FrontmatterShellAst::Ternary { .. } => {
                 panic!("expected Pipeline AST, got Ternary")
+            }
+        }
+    }
+
+    #[test]
+    fn ternary_rejects_nested_in_then_branch() {
+        // Review finding 3: a second top-level `?` (here turning the then-
+        // branch into another ternary `b ? echo two : echo three`) must be
+        // refused at parse time rather than silently tokenized.
+        let inner = "$(a ? b ? echo two : echo three : echo c)";
+        let err = parse_shell_value(inner, "key", None).unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { message, .. } => {
+                assert!(
+                    message.contains("nested ternaries are not supported")
+                        && message.contains("additional separator-style '?'")
+                        && message.contains("then-branch"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ternary_rejects_nested_in_else_branch() {
+        // Review finding 3: a second top-level `?` in the else-branch is
+        // also rejected.
+        let inner = "$(a ? echo one : b ? echo two : echo three)";
+        let err = parse_shell_value(inner, "key", None).unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { message, .. } => {
+                assert!(
+                    message.contains("nested ternaries are not supported")
+                        && message.contains("additional separator-style '?'")
+                        && message.contains("else-branch"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ternary_accepts_bare_colon_in_else_branch_argument() {
+        // A bare top-level `:` in a branch is valid pipeline content —
+        // URLs and key:value arguments commonly contain it — so it must
+        // not be rejected as a nested ternary. After the outer split, the
+        // else-branch text `echo two : echo three` parses as a single
+        // command with three arguments.
+        let inner = "$(a ? echo one : echo two : echo three)";
+        let directive = parse_shell_value(inner, "key", None)
+            .unwrap()
+            .expect("directive should parse");
+        let (_, _, else_b) = unwrap_ternary(&directive);
+        match else_b {
+            Branch::Pipeline { original_text } => {
+                assert_eq!(original_text.trim(), "echo two : echo three");
+            }
+            Branch::Empty => panic!("expected pipeline else-branch"),
+        }
+    }
+
+    #[test]
+    fn ternary_accepts_url_with_colon_in_then_branch() {
+        // Review finding 2: `:` inside a URL argument is normal pipeline
+        // content and must round-trip through both branches.
+        let inner = "$(flag ? echo http://example.com : echo none)";
+        let directive = parse_shell_value(inner, "key", None)
+            .unwrap()
+            .expect("directive should parse");
+        let (_, then_b, _) = unwrap_ternary(&directive);
+        match then_b {
+            Branch::Pipeline { original_text } => {
+                assert_eq!(original_text.trim(), "echo http://example.com");
+            }
+            Branch::Empty => panic!("expected pipeline then-branch"),
+        }
+    }
+
+    #[test]
+    fn ternary_accepts_url_with_colon_in_else_branch() {
+        let inner = "$(flag ? echo none : echo http://example.com)";
+        let directive = parse_shell_value(inner, "key", None)
+            .unwrap()
+            .expect("directive should parse");
+        let (_, _, else_b) = unwrap_ternary(&directive);
+        match else_b {
+            Branch::Pipeline { original_text } => {
+                assert_eq!(original_text.trim(), "echo http://example.com");
+            }
+            Branch::Empty => panic!("expected pipeline else-branch"),
+        }
+    }
+
+    #[test]
+    fn ternary_branch_boundaries_pin_to_original_snapshot() {
+        // Review finding 1: when an interpolated condition introduces
+        // top-level `?` / `:` punctuation, the resolved inner naively
+        // re-split would shift branch boundaries and let condition text
+        // bleed into the then-branch executable. Anchoring the AST to the
+        // original snapshot keeps the then-branch text statically equal to
+        // what the author wrote.
+        let original = "$({{cond}} ? basename README.md : '')";
+        // Suppose `cond` was rendered to the literal text `true ? date : false`
+        // by an earlier interpolation pass.
+        let resolved = "$(true ? date : false ? basename README.md : '')";
+        let directive = parse_shell_value(resolved, "key", Some(original))
+            .expect("parse should succeed")
+            .expect("directive should be returned");
+        let (cond, then_b, else_b) = unwrap_ternary(&directive);
+        assert_eq!(cond, "{{cond}}");
+        match then_b {
+            Branch::Pipeline { original_text } => {
+                // Critically, the then-branch text is the ORIGINAL slice
+                // (`basename README.md`), NOT the resolved slice (`date`)
+                // that a naive resplit would have produced.
+                assert_eq!(original_text.trim(), "basename README.md");
+            }
+            Branch::Empty => panic!("expected pipeline then-branch"),
+        }
+        assert!(matches!(else_b, Branch::Empty));
+    }
+
+    #[test]
+    fn ternary_separator_requires_whitespace_padding() {
+        // Review-3 medium finding: the separator detection contract requires
+        // whitespace padding on both sides of `?` and `:`. An unpadded `?`
+        // like `flag? echo yes : ''` is parsed as part of the executable
+        // token (`flag?`) — not as a ternary separator. This lock-in test
+        // documents that the implementation matches the spec's
+        // whitespace-padded rule rather than a raw "any top-level `?`" rule.
+        let inner = "$(flag? echo yes : '')";
+        let directive = parse_shell_value(inner, "key", None)
+            .unwrap()
+            .expect("directive should parse");
+        match directive.ast {
+            FrontmatterShellAst::Pipeline(ref pipeline) => {
+                assert_eq!(pipeline.actions[0].command.executable, "flag?");
+            }
+            FrontmatterShellAst::Ternary { .. } => {
+                panic!("expected Pipeline AST, got Ternary — separator must require whitespace padding")
             }
         }
     }
@@ -1882,5 +2353,402 @@ mod execution_tests {
             execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
         assert_eq!(report.replacements, 1);
         assert_eq!(fm.as_map().get("out"), Some(&json!("present")));
+    }
+
+    #[test]
+    fn ternary_with_stringified_false_condition_selects_else_branch() {
+        // Review finding 2: when a frontmatter value is itself rendered from
+        // a template (`has_spec: "{{ false }}"`), the post-interpolation
+        // value is the string `"false"`. The condition `{{has_spec}}` must
+        // be recognized as boolean-false — not as a truthy non-empty string
+        // — and select the else-branch.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "has_spec": "false",
+            "spec_file": "$({{has_spec}} ? echo present : '')"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("spec_file"), Some(&json!("")));
+    }
+
+    #[test]
+    fn ternary_with_stringified_true_condition_selects_then_branch() {
+        // Symmetric to the false case: a stringified `"true"` condition
+        // selects the then-branch.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "has_spec": "true",
+            "spec_file": "$({{has_spec}} ? echo present : '')"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("spec_file"), Some(&json!("present")));
+    }
+
+    #[test]
+    fn ternary_condition_interpolation_cannot_bleed_into_then_branch_executable() {
+        // Review finding 1: a condition variable whose value contains
+        // top-level `?` / `:` punctuation must not shift the then-branch
+        // boundary or let condition text become a branch executable. With
+        // the original snapshot anchoring the branch slices, the
+        // then-branch runs the static `basename README.md` (or doesn't run
+        // at all, depending on how the rewritten condition evaluates), but
+        // it never tokenizes anything from the condition text.
+        let temp_dir = TempDir::new().unwrap();
+        // `cond` is itself the literal string `"true ? date : false"`. Once
+        // it lands in the directive value, a naive split-of-resolved would
+        // pick `date` as the then-branch executable.
+        let mut fm = fm_from_json(json!({
+            "cond": "true ? date : false",
+            "out": "$(true ? date : false ? basename README.md : '')"
+        }));
+        let mut snapshot = std::collections::HashMap::new();
+        snapshot.insert(
+            "out".to_string(),
+            "$({{cond}} ? basename README.md : '')".to_string(),
+        );
+
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("basename README.md".to_string());
+
+        let options = ComposeOptions::new()
+            .with_pre_approved_commands(approved)
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                ..Default::default()
+            });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, Some(&snapshot))
+                .unwrap();
+        assert_eq!(report.replacements, 1);
+        // Result is either `README` (basename ran from the then-branch) or
+        // `""` (else-branch selected); either way, `date` from the
+        // condition text must not be the executable that ran.
+        let out = fm
+            .as_map()
+            .get("out")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            out == "README" || out.is_empty(),
+            "expected branch text to remain anchored to the original snapshot; got {out:?}"
+        );
+    }
+
+    #[test]
+    fn ternary_branch_arg_interpolation_cannot_inject_new_action() {
+        // Review 2 finding 1: an interpolation in argument position must
+        // not be able to introduce `&& date` (or any other chain
+        // continuation) after the executable-interpolation check has
+        // already accepted the branch. Even though the then-branch's
+        // static executable is `basename`, a malicious `spec` value with
+        // an embedded `&& date` would extend the pipeline to two
+        // additional actions. The shape-preservation guard must catch the
+        // action-count drift and reject the directive.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "has_spec": true,
+            // Crafted value: closes the outer single quote, chains `date`,
+            // then reopens a quote so the surrounding directive still
+            // tokenizes cleanly.
+            "spec": "README.md' && date && echo '",
+            "out": "$({{has_spec}} ? basename '{{spec}}' : '')"
+        }));
+        let mut snapshot = std::collections::HashMap::new();
+        snapshot.insert(
+            "out".to_string(),
+            "$({{has_spec}} ? basename '{{spec}}' : '')".to_string(),
+        );
+
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("basename".to_string());
+        approved.insert("date".to_string());
+        approved.insert("echo".to_string());
+
+        let options = ComposeOptions::new()
+            .with_pre_approved_commands(approved)
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                ..Default::default()
+            });
+        let mut runtime = make_runtime();
+
+        let err =
+            match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, Some(&snapshot))
+            {
+                Ok(_) => panic!("expected directive to fail with a shape-preservation error"),
+                Err(err) => err,
+            };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("changed from 1 action") || msg.contains("introduce new chain operators"),
+            "expected pipeline-shape error mentioning action count, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn ternary_branch_quoted_interpolation_breakout_is_rejected() {
+        // Review 2 finding 1: a `{{spec}}` interpolation inside double
+        // quotes must not be able to introduce a closing `"` followed by
+        // additional commands. Depending on how the resolved text lands,
+        // the directive is rejected either by the shape guard (action
+        // count drift) or by the tokenizer (unterminated quote). Both
+        // refuse to execute the smuggled command — that is what matters.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "has_spec": true,
+            "spec": "README.md\" && evil",
+            "out": "$({{has_spec}} ? basename \"{{spec}}\" : '')"
+        }));
+        let mut snapshot = std::collections::HashMap::new();
+        snapshot.insert(
+            "out".to_string(),
+            "$({{has_spec}} ? basename \"{{spec}}\" : '')".to_string(),
+        );
+
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("basename".to_string());
+        approved.insert("evil".to_string());
+
+        let options = ComposeOptions::new()
+            .with_pre_approved_commands(approved)
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                ..Default::default()
+            });
+        let mut runtime = make_runtime();
+
+        let err =
+            match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, Some(&snapshot))
+            {
+                Ok(_) => panic!("expected quote-breakout to fail"),
+                Err(err) => err,
+            };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("changed from 1 action")
+                || msg.contains("introduce new chain operators")
+                || msg.contains("Unterminated double quote")
+                || msg.contains("Unterminated single quote"),
+            "expected pipeline-shape or tokenizer rejection, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn non_ternary_arg_interpolation_cannot_inject_new_action() {
+        // The same static-command-invariant applies to bare (non-ternary)
+        // pipelines: an interpolated argument value may not introduce
+        // additional `&&` / `||` actions even when the executable token is
+        // statically `basename`. In a real compose run, frontmatter
+        // interpolation has already rewritten `{{spec}}` before shell
+        // expansion runs — so `out`'s value here is the RESOLVED text and
+        // the snapshot carries the ORIGINAL with the placeholder intact.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "spec": "README.md' && date && echo '",
+            "out": "$(basename 'README.md' && date && echo '')"
+        }));
+        let mut snapshot = std::collections::HashMap::new();
+        snapshot.insert("out".to_string(), "$(basename '{{spec}}')".to_string());
+
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let err =
+            match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, Some(&snapshot))
+            {
+                Ok(_) => panic!("expected non-ternary directive to fail"),
+                Err(err) => err,
+            };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("changed from 1 action") || msg.contains("introduce new chain operators"),
+            "expected pipeline-shape error mentioning action count, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn ternary_condition_supports_infix_and() {
+        // Review-3 high finding: condition-mode infix `&&` must lower to
+        // `and(a, b)` and select the then-branch when both operands are
+        // truthy. The non-condition `parse` entrypoint refuses bare `&&`
+        // outside `{{ }}` interpolation; only `parse_condition` accepts it.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "a": true,
+            "b": true,
+            "out": "$(a && b ? echo yes : echo no)"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("out"), Some(&json!("yes")));
+    }
+
+    #[test]
+    fn ternary_condition_infix_and_selects_else_when_one_falsy() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "a": true,
+            "b": false,
+            "out": "$(a && b ? echo yes : echo no)"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(fm.as_map().get("out"), Some(&json!("no")));
+        assert_eq!(report.replacements, 1);
+    }
+
+    #[test]
+    fn ternary_condition_supports_infix_or() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "a": false,
+            "b": true,
+            "out": "$(a || b ? echo yes : echo no)"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("out"), Some(&json!("yes")));
+    }
+
+    #[test]
+    fn ternary_condition_supports_negation() {
+        // Condition-mode parses `!flag` as `not(flag)`.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "flag": false,
+            "out": "$(!flag ? echo yes : echo no)"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("out"), Some(&json!("yes")));
+    }
+
+    #[test]
+    fn ternary_condition_supports_comparison() {
+        // The spec's "single boolean expression" contract includes
+        // comparisons. `count == 3` must evaluate to true and select the
+        // then-branch.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "count": 3,
+            "out": "$(count == 3 ? echo equal : echo unequal)"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("out"), Some(&json!("equal")));
+    }
+
+    #[test]
+    fn ternary_condition_supports_nested_expression_ternary() {
+        // Condition-mode supports `?:` inside the condition expression
+        // itself. Here `(flag ? true : false)` evaluates to `true`, which
+        // selects the outer then-branch.
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "flag": true,
+            "out": "$((flag ? true : false) ? echo yes : echo no)"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("out"), Some(&json!("yes")));
+    }
+
+    #[test]
+    fn ternary_branch_url_with_colon_argument_executes() {
+        // Review 2 finding 2: a bare `:` inside a branch argument (here
+        // part of a URL) must not be misclassified as a nested ternary.
+        let temp_dir = TempDir::new().unwrap();
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("echo http://example.com".to_string());
+        approved.insert("echo none".to_string());
+
+        let mut fm = fm_from_json(json!({
+            "flag": true,
+            "out": "$(flag ? echo http://example.com : echo none)"
+        }));
+        let options = ComposeOptions::new()
+            .with_pre_approved_commands(approved)
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                ..Default::default()
+            });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("out"), Some(&json!("http://example.com")));
     }
 }

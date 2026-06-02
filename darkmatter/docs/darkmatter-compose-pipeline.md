@@ -9,21 +9,22 @@ block-beta
 
     block:pre
         columns 1
-        preTitle["<b>Inline Pre</b> (<i>serial</i>)"]
+        preTitle["<b>1. Inline Pre</b> (<i>serial</i>)"]
         preFlightChecks("<a href='./inline/preflight-checks.md'>0. Pre-flight checks 🏁</a>")
         fmInterpolate("<a href='./inline/fm-interpolation.md'>1. Frontmatter Interpolation 🏁</a>")
-        shellExp("<a href='./inline/fm-shell-expansion.md'>2. Frontmatter Shell Expansion 🏁</a>")
-        textReplacement("<a href='./inline/text-replacement.md'>3. Text Replacement 🏁</a>")
-        pageBlocks("<a href='./inline/page-blocks.md'>4. Page Blocks 🏁</a>")
-        interpolation("<a href='./inline/interpolation.md'>5. Interpolation 🏁</a>")
-        shellExpansion("<a href='./inline/shell-expansion.md'>6. Shell Expansion 🏁</a>")
-        shellBlocks("<a href='./inline/shell-blocks.md'>7. Shell Blocks 🏁</a>")
-        linkResolve("<a href='./operations/link-resolve.md'>8. Link Resolve (abs) 🏁</a>")
+        schemaValidation("<a href='./inline/schema-validation.md'>2. Schema Validation 🏁</a>")
+        shellExp("<a href='./inline/fm-shell-expansion.md'>3. Frontmatter Shell Expansion 🏁</a>")
+        textReplacement("<a href='./inline/text-replacement.md'>4. Text Replacement 🏁</a>")
+        pageBlocks("<a href='./inline/page-blocks.md'>5. Page Blocks 🏁</a>")
+        interpolation("<a href='./inline/interpolation.md'>6. Interpolation 🏁</a>")
+        shellExpansion("<a href='./inline/shell-expansion.md'>7. Shell Expansion 🏁</a>")
+        shellBlocks("<a href='./inline/shell-blocks.md'>8. Shell Blocks 🏁</a>")
+        linkResolve("<a href='./operations/link-resolve.md'>9. Link Resolve (abs) 🏁</a>")
     end
 
     block:transclusion
         columns 1
-        transTitle["<b>Transclusion</b> (<i>parallel</i>)"]
+        transTitle["<b>2. Transclusion</b> (<i>parallel</i>)"]
         blockTransclusion("<a href='./transclusion/block-transclusion.md'>Block Transclusion 🏁</a>")
         fmTransclusion("<a href='./transclusion/fm-transclusion.md'>Frontmatter Transclusion 🏁</a>")
         codeBlockTransclusion("<a href='./transclusion/code-transclusion.md'>Code Block Transclusion 🏁</a>")
@@ -38,7 +39,7 @@ block-beta
 
     block:post
         columns 1
-        postTitle["<b>Inline Post</b> (<dim><i>serial</i></dim>)"]
+        postTitle["<b>3. Inline Post</b> (<dim><i>serial</i></dim>)"]
         cleaning("<a href='./inline/cleaning.md'>1. Cleaning 🏁</a>")
         structural("<a href='./inline/structural-normalization.md'>2. Structural Normalization 🏁</a>")
 
@@ -53,7 +54,7 @@ block-beta
 
     block:final
         columns 1
-        finalTitle["<b>Finalization</b> (<dim><i>serial</i></dim>)"]
+        finalTitle["<b>4. Finalization</b> (<dim><i>serial</i></dim>)"]
         links("<a href='./operations/link-normalization.md'>Link Normalization 🏁</a>")
 
         fs1[" "]

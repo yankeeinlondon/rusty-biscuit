@@ -146,7 +146,8 @@ sniff repo package                   # Package name for current directory
 sniff repo package-area              # Package area for current directory
 sniff repo dirty-packages            # Packages with uncommitted changes
 sniff repo worktrees                 # List all worktrees (marks current with *)
-sniff repo worktrees --list          # Bullet list output
+sniff repo worktrees --md            # Markdown unordered list (one `- name` per line)
+sniff repo worktrees --list          # Newline-delimited list (one name per line)
 sniff repo worktrees --csv           # Comma-separated names on a single line
 sniff repo worktrees --verbose       # Name, branch, and path for each worktree
 sniff repo worktrees --json          # JSON output with full worktree metadata

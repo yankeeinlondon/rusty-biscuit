@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 /// report has a deterministic, intuitive ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PerfMetricKind {
-    SchemaValidation,
     FrontmatterInterpolation,
+    SchemaValidation,
     FrontmatterShellExpansion,
     EffectiveStateBuild,
     TextReplacement,
@@ -35,8 +35,8 @@ impl PerfMetricKind {
     /// Convert to the public `ComposeStage` enum.
     fn stage(self) -> ComposeStage {
         match self {
-            Self::SchemaValidation => ComposeStage::SchemaValidation,
             Self::FrontmatterInterpolation => ComposeStage::FrontmatterInterpolation,
+            Self::SchemaValidation => ComposeStage::SchemaValidation,
             Self::FrontmatterShellExpansion => ComposeStage::FrontmatterShellExpansion,
             Self::EffectiveStateBuild => ComposeStage::EffectiveStateBuild,
             Self::TextReplacement => ComposeStage::TextReplacement,
@@ -58,8 +58,8 @@ impl PerfMetricKind {
     /// All variants in pipeline execution order.
     fn all() -> &'static [PerfMetricKind] {
         &[
-            Self::SchemaValidation,
             Self::FrontmatterInterpolation,
+            Self::SchemaValidation,
             Self::FrontmatterShellExpansion,
             Self::EffectiveStateBuild,
             Self::TextReplacement,
@@ -218,6 +218,32 @@ mod tests {
         let result = collector.measure(PerfMetricKind::TextReplacement, || 99);
         assert_eq!(result, 99);
         assert!(collector.finish().is_none());
+    }
+
+    #[test]
+    fn frontmatter_stages_in_pipeline_order() {
+        // The pipeline runs Frontmatter Interpolation, then Schema Validation,
+        // then Frontmatter Shell Expansion (see compose/mod.rs). The perf report
+        // must reflect that order so callers can read it as execution order.
+        let report = PerfCollector::new(true).finish().unwrap();
+        let stages: Vec<_> = report.metrics.iter().map(|m| m.stage).collect();
+        let fi = stages
+            .iter()
+            .position(|s| *s == ComposeStage::FrontmatterInterpolation)
+            .unwrap();
+        let sv = stages
+            .iter()
+            .position(|s| *s == ComposeStage::SchemaValidation)
+            .unwrap();
+        let fse = stages
+            .iter()
+            .position(|s| *s == ComposeStage::FrontmatterShellExpansion)
+            .unwrap();
+        assert!(fi < sv, "FrontmatterInterpolation must precede SchemaValidation");
+        assert!(
+            sv < fse,
+            "SchemaValidation must precede FrontmatterShellExpansion"
+        );
     }
 
     #[test]

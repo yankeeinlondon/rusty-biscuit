@@ -292,13 +292,25 @@ pub enum Command {
         #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
         input: Option<PathBuf>,
 
-        /// Only output the body/prose hash
-        #[arg(long)]
+        /// Hash kind to compute
+        #[arg(long, value_enum, conflicts_with_all = ["body", "frontmatter"])]
+        kind: Option<HashKind>,
+
+        /// Only output the body/prose hash (shorthand for `--kind body`)
+        #[arg(long, conflicts_with = "frontmatter")]
         body: bool,
 
-        /// Only output the frontmatter hash
-        #[arg(long)]
+        /// Only output the frontmatter hash (shorthand for `--kind fm`)
+        #[arg(long, visible_alias = "fm", conflicts_with = "body")]
         frontmatter: bool,
+
+        /// Write the computed hash back into the document's frontmatter
+        #[arg(long, conflicts_with = "diff")]
+        save: bool,
+
+        /// Report how the document differs from its stored hash (exits 2 on difference)
+        #[arg(long, conflicts_with = "save")]
+        diff: bool,
 
         /// Strict mode: no whitespace normalization or key reordering
         #[arg(long)]
@@ -462,6 +474,37 @@ pub enum GraphFormat {
     Mermaid,
     /// DOT (Graphviz) graph.
     Dot,
+}
+
+/// Structural kind for `md hash --kind`.
+///
+/// CLI-side mirror of [`darkmatter::markdown::hash::MdHashKind`]; the tokens
+/// match the library's serde/`FromStr` vocabulary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum HashKind {
+    /// Frontmatter only (keys and values).
+    Fm,
+    /// Body content only.
+    Body,
+    /// `{fm}-{body}` — the default.
+    Simple,
+    /// `{fm}-{fm_keys}-{body}-{body_structure}`.
+    Structured,
+    /// Nested object with per-section detail.
+    Detailed,
+}
+
+impl From<HashKind> for darkmatter::markdown::hash::MdHashKind {
+    fn from(value: HashKind) -> Self {
+        use darkmatter::markdown::hash::MdHashKind;
+        match value {
+            HashKind::Fm => MdHashKind::Fm,
+            HashKind::Body => MdHashKind::Body,
+            HashKind::Simple => MdHashKind::Simple,
+            HashKind::Structured => MdHashKind::Structured,
+            HashKind::Detailed => MdHashKind::Detailed,
+        }
+    }
 }
 
 /// Command-line interface for the darkmatter markdown renderer.

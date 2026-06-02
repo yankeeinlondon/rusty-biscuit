@@ -706,8 +706,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap_or_else(|| std::path::Path::new("."));
                 let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
                 if cli.json {
-                    let json = serde_json::to_value(&identity)?;
-                    output::print_json_value(json, perf.build_report().as_ref());
+                    let outcome = output::repo_json::name_outcome(identity.name.clone());
+                    output::print_json_value(outcome.value, perf.build_report().as_ref());
+                    if let Some(code) = outcome.exit_code {
+                        std::process::exit(code);
+                    }
                     return Ok(());
                 }
                 let rendered = output::render_repo_name(&identity, cli.verbose);
@@ -747,7 +750,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return handle_no_results(*no_error, on_error, cli.plain, &perf);
             }
-            crate::args::RepoAction::Worktrees { list, csv, .. } => {
+            crate::args::RepoAction::Worktrees {
+                md, list, csv, ..
+            } => {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
@@ -795,11 +800,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     let rendered = lines.join("\n") + "\n";
                     output::emit_text(&rendered, cli.plain);
-                } else if *list {
+                } else if *md {
                     let mut out = String::new();
                     for entry in &entries {
                         let marker = if entry.is_current { "* " } else { "" };
                         writeln!(out, "- {}{}", marker, entry.name).unwrap();
+                    }
+                    output::emit_text(&out, cli.plain);
+                } else if *list {
+                    let mut out = String::new();
+                    for entry in &entries {
+                        let marker = if entry.is_current { "* " } else { "" };
+                        writeln!(out, "{}{}", marker, entry.name).unwrap();
                     }
                     output::emit_text(&out, cli.plain);
                 } else {

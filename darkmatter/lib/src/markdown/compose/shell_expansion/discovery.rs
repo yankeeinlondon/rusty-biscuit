@@ -13,7 +13,9 @@ use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::EffectiveStateBuilder;
 use crate::markdown::compose::frontmatter_interpolation::interpolate_frontmatter;
-use crate::markdown::compose::frontmatter_shell_expansion::scan_frontmatter;
+use crate::markdown::compose::frontmatter_shell_expansion::{
+    directive_reachable_pipelines, scan_frontmatter,
+};
 use crate::markdown::compose::prepare_frontmatter_for_compose;
 use crate::markdown::compose::shell_expansion::alias::resolve_alias;
 use crate::markdown::compose::shell_expansion::parser::parse_directives;
@@ -172,7 +174,12 @@ pub fn collect_shell_commands(
     .filter(|op| options.is_enabled(*op))
     .collect();
 
-    let discovery_options = options.clone().only(&discovery_ops);
+    // Discovery is a non-terminal pass: it strips FrontmatterShellExpansion
+    // to avoid executing commands, so schema validation here would judge
+    // still-literal `$(...)` values as final violations. Skip it — the
+    // terminal compose pass validates the resolved frontmatter.
+    let mut discovery_options = options.clone().only(&discovery_ops);
+    discovery_options.skip_schema_validation = true;
 
     let (composed, report) = markdown.compose_with(discovery_options)?;
 
@@ -316,7 +323,11 @@ fn collect_frontmatter_commands_recursive(
     .filter(|op| options.is_enabled(*op))
     .collect();
 
-    let (prepared, _) = markdown.compose_with(options.clone().only(&inline_ops))?;
+    // Non-terminal pass (see Phase 2 below): skip schema validation so a
+    // still-literal `$(...)` value is not judged as a final violation.
+    let mut inline_options = options.clone().only(&inline_ops);
+    inline_options.skip_schema_validation = true;
+    let (prepared, _) = markdown.compose_with(inline_options)?;
     let transclusion_opts = options.transclusion_options();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter(
@@ -454,45 +465,74 @@ fn scan_one_frontmatter(
     )?;
 
     for candidate in candidates {
-        // Build a synthetic ShellDirective so we can reuse the chain expander.
-        let directive = ShellDirective {
-            raw_command: candidate.raw_command.clone(),
-            executable: candidate.executable.clone(),
-            args: candidate.args.clone(),
-            span: 0..0,
-            origin: ShellCommandOrigin::Frontmatter {
-                key: candidate.key.clone(),
-            },
-            error_handling: Default::default(),
-            timeout_override: candidate.timeout_override,
-            pipeline: candidate.pipeline.clone(),
-            ctx: scan_ctx.clone(),
-        };
+        // Walk every pipeline this directive could run — for a plain pipeline
+        // there is exactly one; for a ternary, every non-empty branch
+        // contributes a pipeline so both reachable command sets surface in
+        // discovery. The legacy `executable`/`args` fields on the candidate
+        // are placeholders for the ternary case (see `parse_shell_value`)
+        // and cannot be used directly.
+        let pipelines = directive_reachable_pipelines(
+            &candidate,
+            fm_clone.frontmatter(),
+            options,
+            &scan_ctx,
+        )?;
 
-        for (raw_action, exe_raw, args_raw) in directive_action_iter(&directive) {
-            let (executable, args) = if which::which(&exe_raw).is_ok() {
-                (exe_raw.clone(), args_raw.clone())
-            } else if let Some(resolved) = resolve_alias(&exe_raw) {
-                let mut merged_args = resolved.args;
-                merged_args.extend_from_slice(&args_raw);
-                (resolved.executable, merged_args)
-            } else {
-                (exe_raw.clone(), args_raw.clone())
+        for pipeline in pipelines {
+            // Build a synthetic per-pipeline ShellDirective so we can reuse the
+            // existing chain expander uniformly with the non-ternary path.
+            let executable = pipeline
+                .actions
+                .first()
+                .map(|a| a.command.executable.clone())
+                .unwrap_or_default();
+            let args = pipeline
+                .actions
+                .first()
+                .map(|a| a.command.args.clone())
+                .unwrap_or_default();
+            let raw_command = pipeline.display_string();
+
+            let directive = ShellDirective {
+                raw_command,
+                executable,
+                args,
+                span: 0..0,
+                indent: String::new(),
+                origin: ShellCommandOrigin::Frontmatter {
+                    key: candidate.key.clone(),
+                },
+                error_handling: Default::default(),
+                timeout_override: candidate.timeout_override,
+                pipeline: Some(pipeline),
+                ctx: scan_ctx.clone(),
             };
 
-            let normalized = normalize_command(&executable, &args);
+            for (raw_action, exe_raw, args_raw) in directive_action_iter(&directive) {
+                let (executable, args) = if which::which(&exe_raw).is_ok() {
+                    (exe_raw.clone(), args_raw.clone())
+                } else if let Some(resolved) = resolve_alias(&exe_raw) {
+                    let mut merged_args = resolved.args;
+                    merged_args.extend_from_slice(&args_raw);
+                    (resolved.executable, merged_args)
+                } else {
+                    (exe_raw.clone(), args_raw.clone())
+                };
 
-            if seen.insert(normalized.clone()) {
-                entries.push(ShellCommandEntry {
-                    raw_command: raw_action,
-                    executable,
-                    args,
-                    normalized,
-                    source_file: source_file.to_path_buf(),
-                    origin: ShellCommandOrigin::Frontmatter {
-                        key: candidate.key.clone(),
-                    },
-                });
+                let normalized = normalize_command(&executable, &args);
+
+                if seen.insert(normalized.clone()) {
+                    entries.push(ShellCommandEntry {
+                        raw_command: raw_action,
+                        executable,
+                        args,
+                        normalized,
+                        source_file: source_file.to_path_buf(),
+                        origin: ShellCommandOrigin::Frontmatter {
+                            key: candidate.key.clone(),
+                        },
+                    });
+                }
             }
         }
     }
@@ -706,6 +746,26 @@ replace:
             "Missing echo: {:?}",
             executables
         );
+    }
+
+    #[test]
+    fn discovers_frontmatter_command_when_schema_constrains_the_value() {
+        // Regression: a `$schema`-constrained frontmatter value that holds a
+        // `$(...)` expression must not abort discovery. Discovery composes
+        // with FrontmatterShellExpansion stripped (so the command is not yet
+        // executed), but schema validation is irrelevant to command
+        // collection and must not treat the still-literal `$(...)` value as a
+        // final schema violation — the real compose pass (with shell
+        // expansion) validates the resolved value downstream.
+        let content = "---\n$schema:\n  tier: 'enum(small, medium, large; required)'\ntier: $(echo small)\n---\n# Doc\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1, "entries: {:?}", entries);
+        assert_eq!(entries[0].executable, "echo");
+        assert_eq!(entries[0].raw_command, "echo small");
     }
 
     #[test]
@@ -991,6 +1051,117 @@ include_shell: false
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].raw_command, "echo always");
+    }
+
+    /// Review-3 high finding: both branches of a frontmatter ternary must
+    /// surface in discovery so the allowlist/approval workflow covers every
+    /// reachable command — not just the branch the runtime condition would
+    /// select.
+    #[test]
+    fn frontmatter_ternary_emits_both_branch_commands() {
+        let content = "\
+---
+flag: true
+out: \"$(flag ? echo yes : basename README.md)\"
+---
+";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
+        assert!(raw.contains(&"echo yes"), "missing echo yes: {raw:?}");
+        assert!(
+            raw.contains(&"basename README.md"),
+            "missing basename README.md: {raw:?}"
+        );
+    }
+
+    /// An empty branch contributes no shell entry — the literal `''`
+    /// short-circuits to `""` at runtime and runs no command.
+    #[test]
+    fn frontmatter_ternary_empty_branch_emits_nothing() {
+        let content = "\
+---
+flag: true
+out: \"$(flag ? echo only : '')\"
+---
+";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].raw_command, "echo only");
+    }
+
+    /// A ternary branch that contains a `&&` / `||` chain emits one entry
+    /// per chained action, mirroring the per-action expansion already
+    /// applied to bare frontmatter pipelines.
+    #[test]
+    fn frontmatter_ternary_branch_chain_emits_one_entry_per_action() {
+        let content = "\
+---
+flag: true
+out: \"$(flag ? echo a && pwd : ls)\"
+---
+";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        let executables: Vec<&str> = entries.iter().map(|e| e.executable.as_str()).collect();
+        assert!(executables.contains(&"echo"), "missing echo: {executables:?}");
+        assert!(executables.contains(&"pwd"), "missing pwd: {executables:?}");
+        assert!(executables.contains(&"ls"), "missing ls: {executables:?}");
+    }
+
+    /// Interpolated argument values inside a ternary branch must be
+    /// resolved against frontmatter state before discovery emits the
+    /// entry, so the allowlist sees the final argument shape.
+    #[test]
+    fn frontmatter_ternary_branch_arguments_are_interpolated() {
+        let content = "\
+---
+flag: true
+name: README.md
+out: \"$(flag ? basename {{name}} : '')\"
+---
+";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].executable, "basename");
+        assert_eq!(entries[0].args, vec!["README.md"]);
+    }
+
+    /// Executable-position interpolation inside a ternary branch is still
+    /// rejected — discovery refuses to materialize a directive whose
+    /// reachable executable name is not statically determinable.
+    #[test]
+    fn frontmatter_ternary_branch_rejects_interpolated_executable() {
+        let content = "\
+---
+flag: true
+cmd_name: echo
+out: \"$(flag ? {{cmd_name}} hi : '')\"
+---
+";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let err = collect_shell_commands(&md, &options).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("may not come from interpolation"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

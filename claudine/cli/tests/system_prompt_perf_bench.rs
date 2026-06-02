@@ -9,7 +9,7 @@
 //! The test is `#[ignore]`d by default — it's diagnostic, not a gate.
 
 use claudine::system_prompt::{
-    EffectiveSystemPrompt, LaunchContext, SystemPromptArgs, resolve_and_prepare_for_session,
+    ResolvedSystemPrompt, LaunchContext, SystemPromptArgs, resolve_and_prepare_for_session,
 };
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
@@ -66,7 +66,7 @@ fn bench_system_prompt_resolution_cold_and_warm() {
     eprintln!("warm #2 resolve_and_prepare_for_session: {warm2:?}");
 
     match cold {
-        EffectiveSystemPrompt::Ready(p) => {
+        ResolvedSystemPrompt::Ready(p) => {
             eprintln!(
                 "composed length (cold): {} chars",
                 p.composed_markdown.len()
@@ -75,7 +75,7 @@ fn bench_system_prompt_resolution_cold_and_warm() {
         other => panic!("expected Ready, got {:?}", other),
     }
     match warm {
-        EffectiveSystemPrompt::Ready(_) => {}
+        ResolvedSystemPrompt::Ready(_) => {}
         other => panic!("expected Ready, got {:?}", other),
     }
 }
