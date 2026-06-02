@@ -1,14 +1,12 @@
 ---
-status: draft
+status: ready for planning and implementation
 ---
 
 # Tree Cutover: Retire the Bespoke Renderers
 
 ## Status
 
-**Draft — direction approved, sequencing and acceptance gates to be settled.**
-The decision to switch all rendering onto the render-tree pipeline and remove
-the legacy bespoke renderers has been made. What remains is to (1) close the
+**Direction approved; all sub-decisions resolved.** The plan: (1) close the
 remaining fidelity gaps so the tree path is a true superset of the bespoke
 output, (2) establish a performance baseline once the tree path is
 fidelity-complete, (3) flip every render entry point — darkmatter's Markdown
@@ -16,10 +14,10 @@ document pipeline *and* every renderable component in biscuit-terminal and
 darkmatter — to the tree, (4) validate parity and performance, and only then
 (5) delete the bespoke renderers.
 
-Several sub-decisions are genuinely open and are recorded under
-[Decisions To Be Made](#decisions-to-be-made) rather than guessed. Nothing in
-the deletion phase happens until the gates in
-[Acceptance Criteria](#acceptance-criteria) are met.
+All nine sub-decisions are resolved — see the [Decisions](#decisions) log
+(several delegate to dedicated sibling specs: graphics-policy, prose-tree,
+perf-gate, non-structural). Nothing in the deletion phase happens until the
+gates in [Acceptance Criteria](#acceptance-criteria) are met.
 
 This spec is the umbrella for the cutover the prior specs were prerequisites
 for. Its direct inputs:
@@ -192,8 +190,9 @@ Criteria #4 trend gate.
   `DarkmatterPage::render` through the tree document renderers.
 - Update `DarkmatterPage::render`'s byte-for-byte `for_terminal` parity tests
   to the tree output (parity-or-better; the `<mark>` change is expected).
-- Behind a feature flag for a deprecation window, or hard flip — a
-  [Decision To Be Made](#decisions-to-be-made).
+- Hard flip (no runtime flag): legacy stays compilable for
+  `migration_parity`/parity comparison through Phase 4, then is deleted in
+  Phase 5. Git is the rollback (Decision #8).
 
 ### Phase 3 — Flip remaining component holdouts
 
@@ -231,9 +230,10 @@ Default render path still bespoke or off-tree (from
 | `Prose` | biscuit-terminal | component-local `ProseDocument` IR | **Resolved:** full collapse to the shared tree — see [`../2026-06-02-prose-tree/spec.md`](../2026-06-02-prose-tree/spec.md). |
 | `GraphExpression`, `MermaidDiagram`, `TerminalImage`, `Status`, `InlineContent`, `PadLeft`, `PadRight`, `HorizontalRule`, `DarkmatterPage`, `FileTree` | biscuit-terminal / darkmatter | `no changes` (no tree projection) | **Decision:** which need a tree projection vs are exempt (see below). |
 
-## Decisions To Be Made
+## Decisions
 
-These need brainstorming/sign-off; they do not change the overall direction.
+All resolved. Recorded here as the decision log; several delegate to dedicated
+sibling specs.
 
 1. **Browser HR fidelity.** ✅ **Resolved — restore styled `<svg>` at
    `Vector`+** (graphics-policy B-3; B-4 rejected). See
@@ -262,11 +262,18 @@ These need brainstorming/sign-off; they do not change the overall direction.
 6. **Mermaid on the tree.** ✅ **Resolved — designed in graphics-policy** as a
    promoted `Code` node (static `<svg>` browser, raster terminal; interactive
    mermaid.js an orthogonal opt-in). Built in Phase 0a, before cutover.
-7. **`StyleWarning` surfacing.** Thread strict-style warnings through the tree
-   entry points (parity with legacy), or keep the existing
-   `scan_inline_hr_warnings` preflight surface and document the difference.
-8. **Deprecation window vs hard flip.** Keep legacy behind a feature flag for a
-   release before deletion, or flip-and-delete once validated.
+7. **`StyleWarning` surfacing.** ✅ **Resolved — keep the renderer-agnostic
+   preflight.** Style warnings are a source preflight
+   (`scan_inline_hr_warnings` + `style:` parse + `--strict-style`) the CLI runs
+   independently of the renderer, so the flip doesn't touch them — no
+   regression. The tree fold's `Vec<Diagnostic>` stays a separate additive
+   channel. Sole obligation: `parse_hr_attribute_block` remains the single
+   source of truth so preflight and fold agree.
+8. **Deprecation window vs hard flip.** ✅ **Resolved — hard flip-and-delete.**
+   No runtime flag; flip the entry points (Phase 2–3), keep legacy compilable
+   for `migration_parity`/parity comparison through Phase 4, delete in Phase 5.
+   Matches the inline-span big-bang precedent; git is the rollback (darkmatter
+   is internal — no external consumers need a deprecation window).
 9. **`large_table` browser hotspot.** ✅ **Subsumed by the perf gate** — at
    ≈ 11× bespoke it fails the gate's 1.5× per-fixture ceiling, so it must be
    fixed before Phase 5 or carry a documented exception. See

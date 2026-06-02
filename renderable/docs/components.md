@@ -72,11 +72,14 @@ document serializers) may only be removed once **all** of the following hold:
 1. **Darkmatter render pipeline is on the tree.** `Markdown::as_html`,
    `Markdown::for_terminal`, and `DarkmatterPage::render` route through the
    render-tree document renderers (cutover #2 above).
-2. **Every renderable component renders through the tree** — in both
-   `biscuit-terminal` and `darkmatter`. No component retains a default bespoke
-   path: every **IR State** is `tree render only` (no `both avail, old
-   renders`, `no changes`, or component-local IR holdouts remain, or each is
-   explicitly retired with documented justification).
+2. **Every component the darkmatter document pipeline renders is `tree render
+   only`.** Components the document pipeline does not render — terminal-only
+   presentation primitives, standalone graphics/viz widgets, node-kind
+   builder/helpers, and the page frame — are exempt, enumerated with
+   justification in the [Exemption Register](#exemption-register) of
+   [`../2026-06-02-non-structural/spec.md`](../features/2026-06-02-non-structural/spec.md).
+   Exempt components retain their native render path and do not block bespoke
+   deletion.
 3. **No functional or fidelity regressions** versus the bespoke
    implementation. Output parity (or a deliberate, documented improvement such
    as the `<mark>` recovery) is required on every target.
@@ -117,30 +120,30 @@ valid v1 schema key should emit `KnownButInactive`; unsupported combinations
 fail with documented `StyleApplyError` variants.
 
 | Name            | Kind   | Terminal | Browser | Markdown | Tree | IR State                     | bt CLI        | Location                                                    | Description                                                                         |
-|-----------------|--------|----------|---------|----------|------|------------------------------|---------------|-------------------------------------------------------------|-------------------------------------------------------------------------------------|
+|-----------------|--------|----------|---------|----------|------|------------------------------|---------------|-------------------------------------------------------------|---------------------|
 | BlockQuote      | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/block_quote.rs`        | Quoted text with a distinctive `│ ` left border and optional attribution.           |
 | Compose         | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/compose.rs`             | Composes multiple renderable components into a single renderable output.            |
 | FileSystem      | Block  | ✅       | ✅      | ✅       | ✅   | both avail, old renders      | bespoke       | `biscuit-terminal/lib/src/components/filesystem/mod.rs`      | Directory trees with Unicode box-drawing, Nerd Font icons, and gitignore awareness. |
-| GraphExpression | Block  | ✅       | ✅      | ❌       | ❌   | no changes                   | bespoke       | `biscuit-terminal/lib/src/components/graph_expression.rs`   | Graph diagrams, delegating layout to `biscuit-visualized`.                          |
-| HorizontalRule  | Block  | ✅       | ✅      | ❌       | ❌   | no changes                   | —             | `biscuit-terminal/lib/src/components/horizontal_rule/mod.rs` | A horizontal rule for terminal and browser rendering.                               |
-| InlineContent   | Inline | ✅       | ❌      | ❌       | ❌   | no changes                   | —             | `biscuit-terminal/lib/src/components/inline_content.rs`      | Concatenates multiple items onto a single line with an optional separator.          |
-| MermaidDiagram  | Block  | ✅       | ❌      | ❌       | ❌   | no changes                   | bespoke       | `biscuit-terminal/lib/src/components/mermaid.rs`             | Mermaid diagrams (flowchart, pie, timeline, ERD, etc.) rendered inline via biscuit-visualized. |
+| GraphExpression | Block  | ✅       | ✅      | ❌       | ❌   | no changes — exempt (standalone graphics widget) | bespoke       | `biscuit-terminal/lib/src/components/graph_expression.rs`   | Graph diagrams, delegating layout to `biscuit-visualized`. Constructed directly by callers; not reached by any darkmatter fence. |
+| HorizontalRule  | Block  | ✅       | ✅      | ❌       | ❌   | no changes — exempt (node-kind builder/helper) | —             | `biscuit-terminal/lib/src/components/horizontal_rule/mod.rs` | A horizontal rule for terminal and browser rendering. Document HRs render via `NodeKind::ThematicBreak`; this component is a builder the tree renderer may call as a helper. |
+| InlineContent   | Inline | ✅       | ❌      | ❌       | ❌   | no changes — exempt (terminal layout primitive) | —             | `biscuit-terminal/lib/src/components/inline_content.rs`      | Concatenates multiple items onto a single line with an optional separator. Terminal-only line mechanics; no document-structure meaning. |
+| MermaidDiagram  | Block  | ✅       | ❌      | ❌       | ❌   | no changes — exempt (node-kind builder/helper) | bespoke       | `biscuit-terminal/lib/src/components/mermaid.rs`             | Mermaid diagrams rendered inline via biscuit-visualized. Document mermaid renders via `NodeKind::Code { lang:"mermaid" }` promotion; this component is the rasterizer the tree calls. |
 | OrderedList     | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/list.rs`                | Renders items with numeric prefixes as a numbered list.                             |
 | UnorderedList   | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/list.rs`                | Renders items as a bulleted list with nested-content support.                       |
-| PadLeft         | Block  | ✅       | ❌      | ❌       | ❌   | no changes                   | bespoke       | `biscuit-terminal/lib/src/components/pad.rs`                 | Pads content on the left with spaces to guarantee a minimum width.                  |
-| PadRight        | Block  | ✅       | ❌      | ❌       | ❌   | no changes                   | bespoke       | `biscuit-terminal/lib/src/components/pad.rs`                 | Pads content on the right with spaces to guarantee a minimum width.                 |
+| PadLeft         | Block  | ✅       | ❌      | ❌       | ❌   | no changes — exempt (terminal layout primitive) | bespoke       | `biscuit-terminal/lib/src/components/pad.rs`                 | Pads content on the left with spaces to guarantee a minimum width. Terminal-only; no document-structure meaning. |
+| PadRight        | Block  | ✅       | ❌      | ❌       | ❌   | no changes — exempt (terminal layout primitive) | bespoke       | `biscuit-terminal/lib/src/components/pad.rs`                 | Pads content on the right with spaces to guarantee a minimum width. Terminal-only; no document-structure meaning. |
 | Progress        | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/progress.rs`            | A horizontal progress bar for terminal display.                                     |
 | Prose           | Inline | ✅       | ✅      | ✅       | ✅   | tree render only             | tree          | `biscuit-terminal/lib/src/components/prose/mod.rs`           | Styled text with bracketed tags (`<red>…</red>`) and a Markdown subset.             |
 | Section         | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/section.rs`             | A Markdown-style heading (h1-h6) followed by arbitrary content.                     |
-| Status          | Block  | ✅       | ❌      | ❌       | ❌   | no changes                   | —             | `biscuit-terminal/lib/src/components/status.rs`              | A status indicator with themed icons for validation/action-item state.              |
+| Status          | Block  | ✅       | ❌      | ❌       | ❌   | no changes — exempt (terminal UI affordance) | —             | `biscuit-terminal/lib/src/components/status.rs`              | A status indicator with themed icons for validation/action-item state. UI chrome, not document content. |
 | StatusBlock     | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/status_block.rs`        | A severity-colored block with optional header, body, and hint content.              |
 | Table           | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/table/table.rs`         | A data table with typed columns, planned widths, and alignment.                     |
-| TerminalImage   | Block  | ✅       | ❌      | ❌       | ❌   | no changes                   | bespoke       | `biscuit-terminal/lib/src/components/terminal_image/mod.rs`  | Image rendering via the Kitty graphics protocol with iTerm2 fallback.               |
+| TerminalImage   | Block  | ✅       | ❌      | ❌       | ❌   | no changes — exempt (node-kind builder/helper) | bespoke       | `biscuit-terminal/lib/src/components/terminal_image/mod.rs`  | Image rendering via the Kitty graphics protocol with iTerm2 fallback. Document images render via `NodeKind::Image` (graphics-policy tiers); this component is the image-protocol encoder the tree calls. |
 | TextBlock       | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/text_block.rs`          | A uniformly styled block of text (colors, weight, italic, underline).               |
 | Todo            | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/todo.rs`                | A GFM-style task item with terminal-adaptive checkbox glyphs.                       |
 | TwoColumn       | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/two_column.rs`          | A responsive two-column layout that stacks vertically when narrow.                  |
-| DarkmatterPage  | Block  | ✅       | ❌      | ❌       | ❌   | no changes                   | —             | `darkmatter/lib/src/layout/page.rs`                          | Page-level layout owning margins, padding, background, max-width, and alignment.    |
-| FileTree        | Block  | ✅       | ❌      | ❌       | ❌   | no changes                   | —             | `darkmatter/lib/src/markdown/reference/file_tree/mod.rs`     | Visualizes a Markdown file's reference/transclusion dependency graph.               |
+| DarkmatterPage  | Block  | ✅       | ❌      | ❌       | ❌   | no changes — exempt (page frame / render shell) | —             | `darkmatter/lib/src/layout/page.rs`                          | Page-level layout owning margins, padding, background, max-width, and alignment. Wraps tree-rendered document output; not a document node. |
+| FileTree        | Block  | ✅       | ❌      | ❌       | ❌   | no changes — exempt (standalone viz tool) | —             | `darkmatter/lib/src/markdown/reference/file_tree/mod.rs`     | Visualizes a Markdown file's reference/transclusion dependency graph. A CLI/dev tool, terminal-only; not document content. |
 | YamlBlock       | Block  | ✅       | ✅      | ❌       | ✅   | both avail, old renders      | —             | `darkmatter/lib/src/markdown/yaml_block.rs`                  | Typed wrapper around validated YAML with code-block highlighting.                   |
 
 > **Column reference**
