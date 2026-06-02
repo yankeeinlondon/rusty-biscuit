@@ -10,7 +10,22 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::markdown::compose::ComposeSource;
+use crate::markdown::compose::expression::{Expr, ExpressionFinder, parse};
 use crate::markdown::compose::transclusion::BlockDirective;
+
+/// Expression-function identifiers whose first argument is a file/URL path the
+/// evaluator will actually read. Membership is an **exact** match — a longer
+/// identifier such as `not_frontmatter` is deliberately excluded so it never
+/// registers network egress.
+const REMOTE_READ_FUNCTIONS: &[&str] = &[
+    "frontmatter",
+    "file_exists",
+    "markdown_title",
+    "markdown_body_empty",
+    "validate_schema",
+    "absolute",
+    "relative",
+];
 
 /// What kind of directive or expression is consuming a remote URL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,12 +268,17 @@ pub fn discover_remote_urls_from_directives(
         .collect()
 }
 
-/// Scans interpolation expression content for URL arguments to known
-/// filesystem functions.
+/// Discovers URL arguments to read-side expression functions
+/// (`frontmatter("https://…")`, `file_exists("https://…")`, …).
 ///
-/// This is a best-effort scan that looks for function calls like
-/// `frontmatter(http://…)`, `file_exists(https://…)`, etc. It does not
-/// perform full expression parsing.
+/// Discovery is driven by the same parser the evaluator uses: only genuine
+/// `{{ … }}` expressions are considered (fenced/indented code blocks are
+/// skipped), each is parsed to an AST, and a URL is registered only for an
+/// exact-identifier [`REMOTE_READ_FUNCTIONS`] call whose first argument is a
+/// string literal that validates as an `http(s)` URL. Prose, inline code, and
+/// longer identifiers that merely *contain* a function name therefore never
+/// trigger network egress — an allowlisted host is contacted only for inputs
+/// the evaluator would actually read.
 pub fn discover_remote_urls_from_expressions(
     content: &str,
     source: &ComposeSource,
@@ -269,21 +289,13 @@ pub fn discover_remote_urls_from_expressions(
     };
 
     let mut results = Vec::new();
-    let functions = [
-        "frontmatter",
-        "file_exists",
-        "markdown_title",
-        "markdown_body_empty",
-        "validate_schema",
-        "absolute",
-        "relative",
-    ];
 
-    for line in content.lines() {
-        let line_num = find_line_number(content, line);
-        for func in &functions {
-            scan_function_url(line, func, &source_file, line_num, &mut results);
-        }
+    for loc in ExpressionFinder::new(content).find_all() {
+        let Ok(expr) = parse(&loc.expression) else {
+            continue;
+        };
+        let line = byte_offset_to_line(content, loc.start);
+        collect_expression_urls(&expr, &source_file, line, &mut results);
     }
 
     results
@@ -364,74 +376,65 @@ fn is_http_url(s: &str) -> bool {
     s.starts_with("http://") || s.starts_with("https://")
 }
 
-fn scan_function_url(
-    line: &str,
-    func_name: &str,
+/// Recursively walks a parsed expression, registering a remote URL for every
+/// exact-identifier [`REMOTE_READ_FUNCTIONS`] call whose first argument is a
+/// string-literal `http(s)` URL. Recurses into all sub-expressions so calls
+/// nested inside ternaries, comparisons, fallbacks, or other function
+/// arguments are still discovered.
+fn collect_expression_urls(
+    expr: &Expr,
     source_file: &Option<PathBuf>,
-    line_num: usize,
+    line: usize,
     results: &mut Vec<DiscoveredRemoteUrl>,
 ) {
-    let mut search_from = 0;
-    let pattern = format!("{func_name}(");
+    if let Expr::FunctionCall { name, args } = expr
+        && REMOTE_READ_FUNCTIONS.contains(&name.as_str())
+        && let Some(Expr::StringLiteral(raw)) = args.first()
+        && let Ok(url) = validate_url_for_remote_read(raw)
+    {
+        results.push(DiscoveredRemoteUrl {
+            normalized_key: url.to_string(),
+            url,
+            consumer: RemoteUrlConsumer::ExpressionFunction,
+            source_file: source_file.clone(),
+            line,
+        });
+    }
 
-    while let Some(offset) = line[search_from..].find(&pattern) {
-        let abs_offset = search_from + offset + pattern.len();
-        // The interpolation expression parser only accepts a quoted string
-        // literal for the URL argument, so the canonical authoring form is
-        // `frontmatter("https://…")`. Skip an optional opening quote so the
-        // quoted form is registered; the bare form is still recognized for
-        // best-effort discovery. `extract_url_arg` stops at the closing quote.
-        let rest = line[abs_offset..].trim_start_matches(['"', '\'']);
-
-        let url_str = if rest.starts_with("https://") {
-            extract_url_arg(rest, "https://")
-        } else if rest.starts_with("http://") {
-            extract_url_arg(rest, "http://")
-        } else {
-            search_from = abs_offset;
-            continue;
-        };
-
-        if let Some(url_str) = url_str
-            && let Ok(url) = validate_url_for_remote_read(&url_str)
-        {
-            results.push(DiscoveredRemoteUrl {
-                normalized_key: url.to_string(),
-                url,
-                consumer: RemoteUrlConsumer::ExpressionFunction,
-                source_file: source_file.clone(),
-                line: line_num,
-            });
-        }
-
-        search_from = abs_offset;
+    for child in expr_children(expr) {
+        collect_expression_urls(child, source_file, line, results);
     }
 }
 
-fn extract_url_arg(rest: &str, prefix: &str) -> Option<String> {
-    let url_start = prefix.len();
-    let mut end = url_start;
-    for ch in rest[url_start..].chars() {
-        if ch == ')' || ch == ',' || ch.is_whitespace() || ch == '"' || ch == '\'' {
-            break;
-        }
-        end += ch.len_utf8();
-    }
-    let candidate = &rest[..end];
-    if candidate.len() > prefix.len() {
-        Some(candidate.to_string())
-    } else {
-        None
+/// Returns the immediate sub-expressions of `expr` for recursive traversal.
+fn expr_children(expr: &Expr) -> Vec<&Expr> {
+    match expr {
+        Expr::Variable(_)
+        | Expr::StringLiteral(_)
+        | Expr::NumberLiteral(_)
+        | Expr::BoolLiteral(_) => Vec::new(),
+        Expr::UnaryNot(e) | Expr::UnaryMinus(e) | Expr::Paren(e) => vec![e.as_ref()],
+        Expr::Binary { left, right, .. } => vec![left.as_ref(), right.as_ref()],
+        Expr::Index { base, index } => vec![base.as_ref(), index.as_ref()],
+        Expr::MemberAccess { base, .. } => vec![base.as_ref()],
+        Expr::Fallback { primary, fallback } => vec![primary.as_ref(), fallback.as_ref()],
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => vec![condition.as_ref(), then_branch.as_ref(), else_branch.as_ref()],
+        Expr::Comparison { left, right, .. } => vec![left.as_ref(), right.as_ref()],
+        Expr::FunctionCall { args, .. } => args.iter().collect(),
     }
 }
 
-fn find_line_number(content: &str, target_line: &str) -> usize {
-    content
-        .lines()
-        .enumerate()
-        .find(|(_, l)| std::ptr::eq(l.as_ptr(), target_line.as_ptr()))
-        .map(|(i, _)| i + 1)
-        .unwrap_or(1)
+/// Converts a byte offset into a 1-based line number.
+fn byte_offset_to_line(content: &str, offset: usize) -> usize {
+    content[..offset.min(content.len())]
+        .bytes()
+        .filter(|&b| b == b'\n')
+        .count()
+        + 1
 }
 
 #[cfg(test)]
@@ -513,11 +516,14 @@ mod tests {
 
     #[test]
     fn discover_from_expression_frontmatter() {
-        let content = "Some text\n{{ frontmatter(https://example.com/api.md) }}\nMore text";
+        let content =
+            "Some text\n{{ frontmatter(\"https://example.com/api.md\") }}\nMore text";
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].consumer, RemoteUrlConsumer::ExpressionFunction);
         assert_eq!(results[0].url.as_str(), "https://example.com/api.md");
+        // Line of the `{{` (1-based): the expression is on the second line.
+        assert_eq!(results[0].line, 2);
     }
 
     #[test]
@@ -533,7 +539,7 @@ mod tests {
 
     #[test]
     fn discover_from_expression_file_exists() {
-        let content = "Check: {{ file_exists(https://example.com/remote.md) }}";
+        let content = "Check: {{ file_exists(\"https://example.com/remote.md\") }}";
         let results = discover_remote_urls_from_expressions(content, &unknown_source());
         assert_eq!(results.len(), 1);
         assert!(results[0].source_file.is_none());
@@ -541,7 +547,7 @@ mod tests {
 
     #[test]
     fn discover_from_expression_markdown_title() {
-        let content = "Title: {{ markdown_title(https://example.com/page.md) }}";
+        let content = "Title: {{ markdown_title(\"https://example.com/page.md\") }}";
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert_eq!(results.len(), 1);
     }
@@ -549,16 +555,67 @@ mod tests {
     #[test]
     fn discover_multiple_expression_functions() {
         let content = "\
-{{ frontmatter(https://a.com/f.md) }}
-{{ file_exists(https://b.com/f.md) }}
-{{ markdown_title(https://c.com/f.md) }}";
+{{ frontmatter(\"https://a.com/f.md\") }}
+{{ file_exists(\"https://b.com/f.md\") }}
+{{ markdown_title(\"https://c.com/f.md\") }}";
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert_eq!(results.len(), 3);
     }
 
     #[test]
     fn skip_expression_local_paths() {
-        let content = "{{ frontmatter(./local.md) }}";
+        let content = "{{ frontmatter(\"./local.md\") }}";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn discover_from_nested_expression_function() {
+        // A read-side call buried in a ternary branch is still discovered.
+        let content =
+            "{{ flag ? frontmatter(\"https://example.com/api.md\") : 'none' }}";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].url.as_str(), "https://example.com/api.md");
+    }
+
+    #[test]
+    fn no_fetch_for_prose_function_text() {
+        // Plain prose that merely contains a function-call-shaped substring is
+        // not an expression and must never be fetched.
+        let content = "See frontmatter(\"https://example.com/doc.md\") for details.";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn no_fetch_for_fenced_code_block() {
+        // Fenced code blocks are excluded from expression scanning entirely.
+        let content = "\
+Intro
+
+```text
+{{ frontmatter(\"https://example.com/doc.md\") }}
+```
+";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn no_fetch_for_inline_code_non_expression() {
+        // Inline code containing a function-call string but no `{{ }}` is prose,
+        // not an expression — the evaluator never runs it, so it is not fetched.
+        let content = "Try `frontmatter(\"https://example.com/doc.md\")` here.";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn no_fetch_for_longer_identifier() {
+        // A longer identifier that ends with a supported function name must not
+        // match — identifier comparison is exact.
+        let content = "{{ not_frontmatter(\"https://example.com/doc.md\") }}";
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert!(results.is_empty());
     }
@@ -735,7 +792,7 @@ mod tests {
         let directives = vec![
             make_directive(DirectiveKind::File, "https://example.com/a.md", 1),
         ];
-        let content = "{{ frontmatter(https://example.com/b.md) }}";
+        let content = "{{ frontmatter(\"https://example.com/b.md\") }}";
         let catalog = discover_all_remote_urls(&directives, content, &file_source());
 
         assert_eq!(catalog.len(), 2);
@@ -747,7 +804,7 @@ mod tests {
         let directives = vec![
             make_directive(DirectiveKind::File, "https://example.com/shared.md", 1),
         ];
-        let content = "{{ frontmatter(https://example.com/shared.md) }}";
+        let content = "{{ frontmatter(\"https://example.com/shared.md\") }}";
         let catalog = discover_all_remote_urls(&directives, content, &file_source());
 
         assert_eq!(catalog.len(), 2);

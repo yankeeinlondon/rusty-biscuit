@@ -511,8 +511,9 @@ pub struct ComposeOptions {
     /// Configuration for remote URL reads: allowed hosts, concurrency,
     /// TTL, freshness mode, and refresh behavior.
     ///
-    /// Defaults to deny-all. Phase 4 will wire this to the eager-fetch
-    /// orchestrator; Phase 3 only surfaces the configuration surface.
+    /// Defaults to deny-all. Wired into eager prefetch, read-side expression
+    /// resolution (`frontmatter(url)`, …), and the persistent remote-artifact
+    /// cache.
     pub(crate) remote_read_config: RemoteReadConfig,
 
     // ── Link normalization ────────────────────────────────────────

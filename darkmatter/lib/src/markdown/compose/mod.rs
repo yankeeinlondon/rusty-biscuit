@@ -1035,6 +1035,7 @@ impl Markdown {
                             refs,
                             state,
                             options,
+                            &runtime.remote_fetch,
                             report,
                             &mut prepared,
                             &mut next_order,
@@ -1614,11 +1615,13 @@ impl Markdown {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn prepare_frontmatter_transclusions(
         &self,
         refs: &transclusion::FrontmatterRefs,
         _state: &EffectiveState,
         options: &ComposeOptions,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
         _report: &mut ComposeReport,
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
@@ -1628,6 +1631,7 @@ impl Markdown {
                 reference,
                 SectionSlot::Prologue(index),
                 options,
+                remote_fetch,
                 prepared,
                 next_order,
             )?;
@@ -1638,6 +1642,7 @@ impl Markdown {
                 reference,
                 SectionSlot::Epilogue(index),
                 options,
+                remote_fetch,
                 prepared,
                 next_order,
             )?;
@@ -1651,6 +1656,7 @@ impl Markdown {
         reference: &str,
         slot: SectionSlot,
         options: &ComposeOptions,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
     ) -> MarkdownResult<()> {
@@ -1713,6 +1719,13 @@ impl Markdown {
             transclusion::ResolvedTarget::Url { url, .. }
                 if options.allow_remote_transclusion =>
             {
+                // Frontmatter `prologue`/`epilogue` URLs are not seen by the
+                // eager pre-scan (it only covers directives and expression
+                // arguments), so register the slot here. Without this,
+                // `PreparedTransclusion::RemoteFile` fails at point-of-use with
+                // "URL was not registered for fetching" — matching the
+                // directive path's register-on-discovery behavior.
+                remote_fetch.register_nested(url.clone());
                 prepared.push(PreparedTransclusion::RemoteFile {
                     order: *next_order,
                     target: ApplyTarget::Section(slot),
@@ -5854,6 +5867,85 @@ Rounded: {{ round(pi) }}"#;
                 !c2.content().contains("remote v1"),
                 "stale remote body served from cache: {}",
                 c2.content()
+            );
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_prologue_inserts_fetched_body() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/intro.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("# Intro\n\nFrom prologue"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/intro.md", server.uri());
+            let content = format!("---\nprologue: {remote_url}\n---\n# Local\n\nBody.\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("From prologue"), "content: {text}");
+            assert!(text.contains("# Local"), "content: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_epilogue_inserts_fetched_body() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/outro.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("# Outro\n\nFrom epilogue"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/outro.md", server.uri());
+            let content = format!("---\nepilogue: [\"{remote_url}\"]\n---\n# Local\n\nBody.\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("From epilogue"), "content: {text}");
+            assert!(text.contains("# Local"), "content: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_prologue_denied_by_policy() {
+            // Remote transclusion is enabled but the host is not allowlisted, so
+            // the registered fetch fails by policy and surfaces an error rather
+            // than a bogus "URL was not registered" message.
+            let server = MockServer::start().await;
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/intro.md", server.uri());
+            let content = format!("---\nprologue: {remote_url}\n---\n# Local\n\nBody.\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let md: Markdown = content.clone().into();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_allow_remote_transclusion(true)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let result = md.compose_with(options);
+            assert!(
+                result.is_err(),
+                "Expected error because no allowed hosts configured"
             );
         }
     }
