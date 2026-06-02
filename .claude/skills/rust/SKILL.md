@@ -2,7 +2,7 @@
 name: rust
 description: Expert knowledge for Rust systems programming — ownership, borrowing, type safety, error handling, async patterns, performance optimization, and 2024-edition improvements. Use when writing or reviewing idiomatic Rust, resolving borrow-checker or lifetime issues, structuring error handling, or optimizing performance.
 last_updated: 2026-06-02T00:00:00Z
-hash: 352b2caf7cdd68a6-5e51ae1f8d2f661c
+hash: 352b2caf7cdd68a6-fa9b36d77c452cdc
 ---
 
 # Rust
@@ -70,6 +70,23 @@ fn process() -> Result<()> {
     Ok(())
 }
 ```
+
+### Borrow-or-Own with Cow
+
+```rust
+// Allocate only when the input actually changes
+use std::borrow::Cow;
+
+fn normalize(input: &str) -> Cow<'_, str> {
+    if input.contains(' ') {
+        Cow::Owned(input.replace(' ', "_")) // allocates
+    } else {
+        Cow::Borrowed(input)                // zero-copy
+    }
+}
+```
+
+See [Best Practices → Borrowing for Performance](./best-practices.md#borrowing-for-performance) for when this pays off — and when it doesn't.
 
 ## Topics
 
