@@ -77,6 +77,10 @@ pub struct BrowserRenderOptions {
     /// highlighting). When `None`, [`NodeKind::Code`] nodes render as a plain
     /// `<pre><code>` block with a `language-<lang>` class.
     pub code_renderer: Option<Rc<dyn CodeRenderer>>,
+    /// The graphics fidelity tier for this render.
+    pub graphics_mode: crate::tree::GraphicsMode,
+    /// How Mermaid diagrams should be rendered in browser output.
+    pub mermaid_mode: crate::tree::BrowserMermaidMode,
 }
 
 impl std::fmt::Debug for BrowserRenderOptions {
@@ -87,6 +91,8 @@ impl std::fmt::Debug for BrowserRenderOptions {
             .field("raw_html", &self.raw_html)
             .field("page", &self.page)
             .field("code_renderer", &self.code_renderer.is_some())
+            .field("graphics_mode", &self.graphics_mode)
+            .field("mermaid_mode", &self.mermaid_mode)
             .finish()
     }
 }
@@ -412,35 +418,52 @@ impl Writer<'_> {
         fragment.finalize()
     }
 
-    /// Builds the `<hr>` for a [`NodeKind::ThematicBreak`], surfacing any
-    /// `darkmatter.hr.*` hints as `data-hr-*` HTML attributes so the styled
-    /// rule is user-observable rather than collapsing to a plain `<hr>`
-    /// (review-4 finding 2).
+    /// Builds the `<hr>` or styled SVG for a [`NodeKind::ThematicBreak`].
     ///
-    /// Renderers that do not understand the hints simply ignore the data
-    /// attributes — the design's "renderers that do not understand the hint
-    /// should render a normal thematic break" contract still holds because a
-    /// `<hr data-hr-kind="waves">` degrades to a plain rule when no CSS
-    /// targets the data attribute.
-    ///
-    /// The visual rule kind is surfaced as `data-hr-kind` (the canonical hint
-    /// key — legacy `style` is normalized to `kind` during the darkmatter
-    /// fold).
+    /// Under [`GraphicsMode::Off`] the node degrades to a plain `<hr>`
+    /// carrying any `darkmatter.hr.*` hints as `data-hr-*` attributes so the
+    /// styled rule is still user-observable. Under [`GraphicsMode::Vector`]
+    /// and [`GraphicsMode::Rich`] the hints drive an inline SVG whose
+    /// primitives reference CSS custom properties (`--hr-weight`,
+    /// `--hr-color`, `--hr-width`) so page-level overrides take effect.
     fn render_thematic_break(&self, attrs: &NodeAttrs) -> BrowserFragment<Ready> {
-        let mut fragment = BrowserFragment::new().define_as_void_tag(VoidTag::Hr);
-        for attr in node_attributes(attrs, is_inline_void_tag(&VoidTag::Hr)) {
-            fragment = fragment.add_attribute(attr);
-        }
-        const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-        for key in ["kind", "alignment", "weight", "width", "color"] {
-            if let Some(value) = attrs.get_hint(HR_NS, key).and_then(|v| v.as_str()) {
-                fragment = fragment.add_attribute(HtmlAttribute::Data(
-                    HtmlDataAttribute::new(format!("hr-{key}")),
-                    value.to_string(),
-                ));
+        use crate::tree::GraphicsMode;
+
+        match self.opts.graphics_mode {
+            GraphicsMode::Off => {
+                let mut fragment = BrowserFragment::new().define_as_void_tag(VoidTag::Hr);
+                for attr in node_attributes(attrs, is_inline_void_tag(&VoidTag::Hr)) {
+                    fragment = fragment.add_attribute(attr);
+                }
+                const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
+                for key in ["kind", "alignment", "weight", "width", "color"] {
+                    if let Some(value) = attrs.get_hint(HR_NS, key).and_then(|v| v.as_str()) {
+                        fragment = fragment.add_attribute(HtmlAttribute::Data(
+                            HtmlDataAttribute::new(format!("hr-{key}")),
+                            value.to_string(),
+                        ));
+                    }
+                }
+                fragment.finalize()
+            }
+            GraphicsMode::Vector | GraphicsMode::Rich => {
+                const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
+                let style = attrs.get_hint(HR_NS, "kind").and_then(|v| v.as_str());
+                let weight = attrs.get_hint(HR_NS, "weight").and_then(|v| v.as_str());
+                let width = attrs.get_hint(HR_NS, "width").and_then(|v| v.as_str());
+                let color = attrs.get_hint(HR_NS, "color").and_then(|v| v.as_str());
+
+                let svg = crate::tree::graphics::horizontal_rule_svg(
+                    style,
+                    weight,
+                    width,
+                    color,
+                    "0",
+                    "0",
+                );
+                BrowserFragment::new().define_as_raw_html(svg).finalize()
             }
         }
-        fragment.finalize()
     }
 
     /// Renders a section as `<section>` containing a heading tag and body.
@@ -1340,6 +1363,12 @@ mod tests {
         render(node).output.render()
     }
 
+    fn html_with_graphics_mode(node: &RenderNode, mode: crate::tree::GraphicsMode) -> String {
+        let mut opts = BrowserRenderOptions::default();
+        opts.graphics_mode = mode;
+        render_browser_node(node, &opts).expect("render").output.render()
+    }
+
     #[test]
     fn default_options_use_warn_and_escape() {
         let opts = BrowserRenderOptions::default();
@@ -1491,29 +1520,50 @@ mod tests {
 
     #[test]
     fn thematic_break_and_breaks() {
-        assert_eq!(html(&RenderNode::thematic_break()), "<hr>");
+        // Under GraphicsMode::Off a plain break degrades to <hr>.
+        assert_eq!(
+            html_with_graphics_mode(&RenderNode::thematic_break(), crate::tree::GraphicsMode::Off),
+            "<hr>"
+        );
+        // Under the default Rich mode a plain break produces the default SVG.
+        let svg = html(&RenderNode::thematic_break());
+        assert!(
+            svg.starts_with("<svg "),
+            "expected SVG under Rich mode, got: {svg}"
+        );
         assert_eq!(html(&RenderNode::hard_break()), "<br>");
         assert_eq!(html(&RenderNode::soft_break()), " ");
     }
 
-    /// Review-4 finding 2: a `<hr>` produced from darkmatter's HR-attribute
-    /// fold must surface its `darkmatter.hr.*` hints as `data-hr-*` HTML
-    /// attributes so the styled rule is user-observable in the browser. A
-    /// plain `ThematicBreak` (no hints) still degrades to a bare `<hr>`.
+    /// Review-4 finding 2: under GraphicsMode::Off a `<hr>` produced from
+    /// darkmatter's HR-attribute fold must surface its `darkmatter.hr.*`
+    /// hints as `data-hr-*` HTML attributes so the styled rule is still
+    /// user-observable. Under Vector/Rich the hints drive an SVG instead.
     #[test]
     fn thematic_break_surfaces_darkmatter_hr_hints_as_data_attrs() {
         let mut hr = RenderNode::thematic_break();
         let ns = HintNamespace("darkmatter.hr");
         hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
         hr.attrs.set_hint(ns, "weight", serde_json::json!("thick"));
-        let rendered = html(&hr);
+
+        let off = html_with_graphics_mode(&hr, crate::tree::GraphicsMode::Off);
         assert!(
-            rendered.contains(r#"data-hr-kind="waves""#),
-            "expected data-hr-kind attribute: {rendered}",
+            off.contains(r#"data-hr-kind="waves""#),
+            "expected data-hr-kind attribute: {off}",
         );
         assert!(
-            rendered.contains(r#"data-hr-weight="thick""#),
-            "expected data-hr-weight attribute: {rendered}",
+            off.contains(r#"data-hr-weight="thick""#),
+            "expected data-hr-weight attribute: {off}",
+        );
+
+        let rich = html(&hr);
+        assert!(
+            rich.starts_with("<svg "),
+            "expected SVG under Rich mode, got: {rich}"
+        );
+        assert!(
+            rich.contains("stroke-dasharray") || rich.contains("M0 20"),
+            "expected styled SVG content: {rich}"
         );
     }
 

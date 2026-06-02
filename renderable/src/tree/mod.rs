@@ -25,6 +25,7 @@ mod attrs;
 mod diagnostic;
 mod document;
 mod error;
+pub mod graphics;
 mod node;
 pub mod render;
 mod source;
@@ -38,12 +39,41 @@ pub use attrs::{
 pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
 pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
 pub use error::{RenderError, RenderStrictness, Rendered};
+pub use graphics::horizontal_rule_svg;
 pub use node::{ColumnAlign, HeadingDepth, HeadingDepthError, NodeKind, RenderNode};
 pub use render::{
     BrowserRenderOptions, CodeRenderer, MarkdownDialect, MarkdownRenderOptions,
     MarkdownStyleOptions, RawHtmlPolicy, render_browser_document, render_browser_node,
     render_markdown_document, render_markdown_node,
 };
+
+/// The graphics fidelity tier a renderer should use.
+///
+/// The [`Default`] is [`GraphicsMode::Rich`] — the highest tier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GraphicsMode {
+    /// No graphics: render text or structural fallbacks only.
+    Off,
+    /// Vector graphics only: SVG, box-drawing, and other scalable forms.
+    Vector,
+    /// Full graphics: raster images, interactive diagrams, and all rich media.
+    #[default]
+    Rich,
+}
+
+/// How Mermaid diagrams are rendered in browser output.
+///
+/// The [`Default`] is [`BrowserMermaidMode::Code`] — a plain fenced code block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BrowserMermaidMode {
+    /// Render as a plain `<pre><code>` block.
+    #[default]
+    Code,
+    /// Render as a static inline `<svg>`.
+    StaticSvg,
+    /// Render as an interactive Mermaid diagram (e.g. with pan/zoom).
+    Interactive,
+}
 
 // Re-export terminal capability types for tree-render consumers.
 pub use crate::color::{ColorDepth, ColorMode, TerminalCodeContext};
