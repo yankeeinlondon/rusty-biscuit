@@ -7,7 +7,8 @@
 
 #[cfg(test)]
 use std::collections::HashSet;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use biscuit_file::file_reference::fetch::{FetchPolicy, HostPattern};
 use dashmap::DashMap;
@@ -73,16 +74,19 @@ pub struct RemoteFetchStats {
 ///
 /// ## Concurrency
 ///
-/// The runtime owns a `tokio::sync::Semaphore` sized from
-/// `RemoteReadConfig::remote_concurrency`. Each spawned fetch task acquires a
-/// permit before issuing its request, so at most `remote_concurrency` requests
-/// are in flight at once regardless of how many URLs are registered.
+/// All fetch tasks run on a single shared multi-thread Tokio runtime owned by
+/// this struct and built lazily on the first registration. Its worker-thread
+/// count is bounded by `RemoteReadConfig::remote_concurrency`, so registering
+/// many URLs never spawns one OS thread or runtime per URL. A
+/// `tokio::sync::Semaphore` sized from the same cap is acquired inside each
+/// task before its request, so at most `remote_concurrency` requests are in
+/// flight at once regardless of how many URLs are registered.
 ///
 /// ## Lifecycle
 ///
 /// 1. Construct with `RemoteFetchRuntime::with_store(config, store)`.
-/// 2. Call `register_and_fetch(url)` for each discovered URL to start eager
-///    fetches on the ambient Tokio runtime.
+/// 2. Call `register_and_fetch(url)` for each discovered URL to spawn its
+///    fetch task onto the shared runtime.
 /// 3. Call `get_content(url)` at point-of-use to block until the fetch
 ///    completes and retrieve the body text.
 /// 4. Call `stats()` after the compose run to collect metrics.
@@ -101,11 +105,57 @@ struct RemoteFetchInner {
     /// spawned fetch task, so the slot map may hold more entries than there
     /// are permits without all requests being issued at once.
     semaphore: Arc<tokio::sync::Semaphore>,
+    /// Shared executor for all fetch tasks, built lazily on first use so a
+    /// compose run with no remote references never spawns worker threads. Its
+    /// worker-thread count is bounded by `concurrency`. `None` means the build
+    /// failed and every fetch is reported as a failure.
+    runtime: OnceLock<Option<tokio::runtime::Runtime>>,
+    /// Concurrency cap: sizes both the semaphore and the shared runtime's
+    /// worker-thread pool.
+    concurrency: usize,
+    /// Current number of in-flight fetches (past the semaphore), and the
+    /// high-water mark observed. The peak proves the cap bounds spawned work,
+    /// not merely request entry.
+    in_flight: AtomicUsize,
+    peak_in_flight: AtomicUsize,
     /// Optional persistent store for remote artifacts. When absent, every
     /// fetch hits the network with no cross-run caching.
     store: Option<Arc<FileStore>>,
     /// TTL, refresh, and freshness-mode inputs for cache evaluation.
     cache_config: RemoteCacheConfig,
+}
+
+impl RemoteFetchInner {
+    /// Returns the shared fetch runtime, building it on first use.
+    ///
+    /// `get_or_init` guarantees the multi-thread runtime is built at most once
+    /// even under concurrent registration, so no runtime is ever dropped in an
+    /// async context. Returns `None` only if the build failed.
+    fn runtime(&self) -> Option<&tokio::runtime::Runtime> {
+        self.runtime
+            .get_or_init(|| {
+                tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(self.concurrency.max(1))
+                    .enable_all()
+                    .build()
+                    .ok()
+            })
+            .as_ref()
+    }
+}
+
+impl Drop for RemoteFetchInner {
+    /// Shuts the shared runtime down without blocking.
+    ///
+    /// A `RemoteFetchRuntime` is commonly dropped from within an async context
+    /// (e.g. a `#[tokio::test]` body or a caller's own runtime). The blocking
+    /// shutdown in `Runtime`'s own `Drop` would panic there, so the runtime is
+    /// taken out and shut down in the background instead.
+    fn drop(&mut self) {
+        if let Some(Some(runtime)) = self.runtime.take() {
+            runtime.shutdown_background();
+        }
+    }
 }
 
 impl std::fmt::Debug for RemoteFetchInner {
@@ -177,6 +227,10 @@ impl RemoteFetchRuntime {
                 client: reqwest::Client::new(),
                 // A zero cap would deadlock every fetch; clamp to at least one.
                 semaphore: Arc::new(tokio::sync::Semaphore::new(concurrency.max(1))),
+                runtime: OnceLock::new(),
+                concurrency: concurrency.max(1),
+                in_flight: AtomicUsize::new(0),
+                peak_in_flight: AtomicUsize::new(0),
                 store,
                 cache_config,
             }),
@@ -234,30 +288,42 @@ impl RemoteFetchRuntime {
             Entry::Vacant(vacant) => {
                 vacant.insert(slot.clone());
                 let inner = Arc::clone(&self.inner);
-                std::thread::spawn(move || {
-                    let result = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .map_err(|e| format!("failed to initialize remote fetch runtime: {e}"))
-                        .and_then(|rt| {
-                            rt.block_on(async {
-                                let _permit = inner.semaphore.clone().acquire_owned().await;
-                                fetch_with_cache(
-                                    inner.store.as_deref(),
-                                    &inner.client,
-                                    &url,
-                                    &inner.policy,
-                                    &inner.cache_config,
-                                )
-                                .await
-                            })
-                        });
+                let Some(runtime) = inner.runtime() else {
+                    // Runtime build failed: fail the slot rather than leave
+                    // waiters blocked forever on a fetch that will never run.
+                    {
+                        let mut stats = inner.stats.lock().unwrap();
+                        stats.failures += 1;
+                    }
+                    *slot.state.lock().unwrap() =
+                        FetchSlot::Failed("failed to initialize remote fetch runtime".to_string());
+                    slot.notify.notify_all();
+                    return;
+                };
 
-                    let mut guard = slot.state.lock().unwrap();
+                let task_inner = Arc::clone(&self.inner);
+                let task_slot = Arc::clone(&slot);
+                runtime.spawn(async move {
+                    let _permit = task_inner.semaphore.clone().acquire_owned().await;
+                    // Count in-flight only past the semaphore so the peak
+                    // reflects requests actually issued, bounded by the cap.
+                    let current = task_inner.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    task_inner.peak_in_flight.fetch_max(current, Ordering::SeqCst);
+                    let result = fetch_with_cache(
+                        task_inner.store.as_deref(),
+                        &task_inner.client,
+                        &url,
+                        &task_inner.policy,
+                        &task_inner.cache_config,
+                    )
+                    .await;
+                    task_inner.in_flight.fetch_sub(1, Ordering::SeqCst);
+
+                    let mut guard = task_slot.state.lock().unwrap();
                     match result {
                         Ok(outcome) => {
                             {
-                                let mut stats = inner.stats.lock().unwrap();
+                                let mut stats = task_inner.stats.lock().unwrap();
                                 if outcome.revalidated {
                                     stats.revalidations += 1;
                                 }
@@ -279,13 +345,13 @@ impl RemoteFetchRuntime {
                         }
                         Err(err) => {
                             {
-                                let mut stats = inner.stats.lock().unwrap();
+                                let mut stats = task_inner.stats.lock().unwrap();
                                 stats.failures += 1;
                             }
                             *guard = FetchSlot::Failed(err);
                         }
                     }
-                    slot.notify.notify_all();
+                    task_slot.notify.notify_all();
                 });
             }
         }
@@ -359,6 +425,16 @@ impl RemoteFetchRuntime {
     #[cfg(test)]
     pub fn registered_urls(&self) -> HashSet<String> {
         self.inner.slots.iter().map(|e| e.key().clone()).collect()
+    }
+
+    /// Returns the high-water mark of concurrent in-flight fetches observed.
+    ///
+    /// A fetch counts as in-flight only after it acquires a semaphore permit,
+    /// so this value can never exceed the configured concurrency cap. Tests use
+    /// it to prove the cap bounds spawned work, not just request entry.
+    #[cfg(test)]
+    pub fn peak_in_flight(&self) -> usize {
+        self.inner.peak_in_flight.load(Ordering::SeqCst)
     }
 }
 
@@ -560,6 +636,48 @@ mod integration_tests {
             assert!(rt.get_content(url).unwrap().is_some());
         }
         assert_eq!(rt.stats().fetched, 3);
+    }
+
+    #[tokio::test]
+    async fn concurrency_cap_bounds_in_flight_fetches() {
+        let server = MockServer::start().await;
+        // Each response is delayed so that, absent a cap, all six fetches would
+        // be in flight at once. The delay forces real overlap to test against.
+        for i in 0..6 {
+            Mock::given(method("GET"))
+                .and(path(format!("/f{i}.md")))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string("body")
+                        .set_delay(std::time::Duration::from_millis(200)),
+                )
+                .mount(&server)
+                .await;
+        }
+
+        let policy = FetchPolicy::deny_all().allow_host("127.0.0.1");
+        let rt = RemoteFetchRuntime::with_policy_and_concurrency(policy, 2);
+        let urls: Vec<Url> = (0..6)
+            .map(|i| Url::parse(&format!("{}/f{i}.md", server.uri())).unwrap())
+            .collect();
+        for url in &urls {
+            rt.register_and_fetch(url.clone());
+        }
+
+        // Three batches of two at 200ms each ≈ 600ms; wait generously to drain.
+        tokio::time::sleep(std::time::Duration::from_millis(1400)).await;
+
+        for url in &urls {
+            assert!(rt.get_content(url).unwrap().is_some());
+        }
+        assert_eq!(rt.stats().fetched, 6);
+        // The semaphore bounds spawned work: at most two fetches run at once,
+        // and the delay guarantees two genuinely overlapped.
+        assert_eq!(
+            rt.peak_in_flight(),
+            2,
+            "peak in-flight must equal the cap of 2"
+        );
     }
 }
 

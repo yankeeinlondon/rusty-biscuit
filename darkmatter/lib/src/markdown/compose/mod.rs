@@ -1018,6 +1018,7 @@ impl Markdown {
                             transclusion::DirectiveKind::File,
                             state,
                             options,
+                            &runtime.remote_fetch,
                             report,
                             &mut prepared,
                             &mut next_order,
@@ -1043,6 +1044,7 @@ impl Markdown {
                             transclusion::DirectiveKind::Code,
                             state,
                             options,
+                            &runtime.remote_fetch,
                             report,
                             &mut prepared,
                             &mut next_order,
@@ -1386,6 +1388,7 @@ impl Markdown {
         kind: transclusion::DirectiveKind,
         state: &EffectiveState,
         options: &ComposeOptions,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
         report: &mut ComposeReport,
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
@@ -1545,6 +1548,12 @@ impl Markdown {
                 transclusion::ResolvedTarget::Url { url, .. }
                     if options.allow_remote_transclusion =>
                 {
+                    // The eager pre-scan only sees URLs present in the original
+                    // content. A directive whose URL was produced by an earlier
+                    // compose phase (interpolation, replacement) reaches here
+                    // unregistered, so register it now to start its fetch and
+                    // keep point-of-use from failing with "not registered".
+                    remote_fetch.register_nested(url.clone());
                     if directive.kind == transclusion::DirectiveKind::Code {
                         let language = transclusion::infer_language(
                             std::path::Path::new(url.path()),
@@ -5702,6 +5711,66 @@ Rounded: {{ round(pi) }}"#;
             assert!(text.contains("nested child body"), "content: {text}");
             let rf = report.remote_fetch_stats.unwrap();
             assert_eq!(rf.fetched, 2, "Both parent and nested child fetched once");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn interpolated_directive_creates_fetchable_remote_file() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/late.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("late remote body"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/late.md", server.uri());
+            // The directive's URL only materializes after interpolation expands
+            // `{{ remote_ref }}`, so the eager pre-scan never sees it. It must be
+            // registered when prepared, or point-of-use fails "not registered".
+            let content = format!(
+                "---\nremote_ref: \"{remote_url}\"\n---\n# Local\n\n::file {{{{ remote_ref }}}}\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("late remote body"), "content: {text}");
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn interpolated_directive_creates_fetchable_remote_code() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/late.rs"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("fn main() {}"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/late.rs", server.uri());
+            let content = format!(
+                "---\nremote_ref: \"{remote_url}\"\n---\n# Doc\n\n::code {{{{ remote_ref }}}}\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("fn main()"), "content: {text}");
+            assert!(text.contains("```rs"), "content: {text}");
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1);
         }
     }
 }
