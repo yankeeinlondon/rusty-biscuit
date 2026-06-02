@@ -44,6 +44,58 @@ IR state values:
   and the Terminal, Browser, and Markdown emitters all render from that single
   model. `Prose` implements no `TreeRenderable` and produces no `RenderNode`.
 
+## Two distinct tree cutovers
+
+There are two independent migrations onto the tree renderer. This table tracks
+only the first; do not read it as a statement about the second.
+
+1. **Component default render paths** *(tracked here, in the **IR State**
+   column).* Whether an individual component's own `render()` —
+   `BlockQuote::render()`, `Table::render()`, etc. — routes through the tree
+   renderer. Most `biscuit-terminal` components have cut over (`both avail,
+   tree renders`); a few still default to bespoke (`YamlBlock`, `FileSystem`'s
+   terminal path, the `Prose` `ProseDocument` IR, and the `no changes`
+   components).
+
+2. **The darkmatter Markdown *document* pipeline** *(NOT tracked here).* The
+   whole-document Markdown serializers — `Markdown::as_html`,
+   `Markdown::for_terminal`, and `DarkmatterPage::render` — still run the
+   **legacy event-stream renderers** (`output/html.rs`, `output/terminal.rs`,
+   `RuleProcessor`). `DarkmatterPage::render` is pinned byte-for-byte to
+   `for_terminal(default)`. The render-tree document entry points
+   (`render_tree_html` / `render_tree_terminal` / `render_tree_markdown` in
+   `darkmatter/lib/src/markdown/render_tree/entrypoints.rs`) are `pub(crate)`
+   and reached only from tests. This is the path the `migration_parity`
+   benchmark and the `2026-05-26-inline-span` / `2026-05-26-block-extension`
+   specs target; its public cutover has **not** happened.
+
+## Removing the bespoke renderers
+
+The bespoke render paths (component-level *and* the darkmatter Markdown
+document serializers) may only be removed once **all** of the following hold:
+
+1. **Darkmatter render pipeline is on the tree.** `Markdown::as_html`,
+   `Markdown::for_terminal`, and `DarkmatterPage::render` route through the
+   render-tree document renderers (cutover #2 above).
+2. **Every renderable component renders through the tree** — in both
+   `biscuit-terminal` and `darkmatter`. No component retains a default bespoke
+   path: every **IR State** is `tree render only` (no `both avail, old
+   renders`, `no changes`, or component-local IR holdouts remain, or each is
+   explicitly retired with documented justification).
+3. **No functional or fidelity regressions** versus the bespoke
+   implementation. Output parity (or a deliberate, documented improvement such
+   as the `<mark>` recovery) is required on every target.
+4. **The overall performance trend is toward faster.** The net trend line
+   across the corpus must improve; mild, localized regressions in specific
+   areas are acceptable so long as the general direction is faster. Known
+   regressions to resolve or consciously accept before cutover #2 include the
+   browser/HTML path (2–11× slower than legacy on several fixtures, worst on
+   table-heavy input) and the `mark_dim_hr` terminal regression (unconditional
+   HR PNG rasterization, owned by the graphics-policy spec).
+
+Until conditions 1 and 2 both hold, the legacy serializers and the remaining
+bespoke component paths are load-bearing and must stay.
+
 ## Darkmatter `style:` frontmatter coverage
 
 The darkmatter `style:` frontmatter pipeline currently wires component-facing
