@@ -51,3 +51,34 @@ Below we provide a list of pros and cons for each but both are excellent choices
 - You need to test multiple data structures or data sizes: If you are comparing a HashMap vs. a BTreeMap, or tracking how an algorithm scales across inputs of $10, 100, 1000,$ and $10000$ items.
 - Tracking memory matters as much as time: If you need to catch sneaky, accidental heap allocations happening inside your hot paths.
 - You are testing concurrent code: If you need to quickly benchmark how your code holds up under multi-threaded lock contention.
+
+## Code Example: Divan
+
+A minimal Divan benchmark — note the attribute-style API, similar to Rust's native `#[test]`:
+
+```toml
+[dev-dependencies]
+divan = "0.1"
+
+[[bench]]
+name = "divan_bench"
+harness = false
+```
+
+```rust
+fn main() {
+    divan::main();
+}
+
+#[divan::bench]
+fn fibonacci_divan() -> u64 {
+    fibonacci(20)
+}
+
+#[divan::bench(args = [10, 20, 30])]
+fn fibonacci_parametric(n: u64) -> u64 {
+    fibonacci(n)
+}
+```
+
+For Criterion code examples and the full feature/configuration reference, see [`criterion.md`](./criterion.md).

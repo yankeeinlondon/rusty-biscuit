@@ -97,6 +97,34 @@ fn my_test() {
 }
 ```
 
+### `leak-sweep` binary — post-run orphan detector
+
+A cross-platform (macOS / Windows / Linux) helper that runs a command, then
+reports any **child process that outlived it**. It snapshots the live process
+set before and after the run and flags new survivors whose executable or command
+line points inside the workspace root.
+
+This complements nextest's per-test `LEAK` status: `LEAK` only catches children
+still holding a test's stdout/stderr pipes, whereas this sweep also catches
+detached orphans that closed or redirected those handles. Attribution is by
+workspace path (not parent PID), because orphan reparenting is OS-specific.
+
+It is feature-gated so library consumers do not inherit `clap`/`sysinfo`:
+
+```bash
+# wrap any command
+cargo run -p test-toolkit --features leak-sweep --bin leak-sweep -- cargo nextest run
+
+# or, from the repo root, wrap the whole test run:
+just test-leaks            # all areas
+just test-leaks claudine   # specific areas
+```
+
+Exit codes: the wrapped command's status, or `99` when the command succeeded but
+leaked processes were found. Pass `--warn-only` to report without failing,
+`--root <path>` to override the attribution root, and `--settle-ms <n>` to tune
+the grace period before the final snapshot.
+
 ## Running tests
 
 Use `cargo test` for standard test execution, or `cargo nextest run` for parallel, profile-aware test execution:

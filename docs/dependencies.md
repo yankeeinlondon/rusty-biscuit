@@ -279,7 +279,7 @@ This is a Rust workspace with the following modules:
 
 - [test-toolkit](./tools/test-toolkit) _v0.1.0_
 
-    _Shared test lifecycle helpers, including tracing phase spans and environment-variable guards._
+    _Shared test lifecycle helpers, including tracing phase spans and environment-variable guards. The optional `leak-sweep` feature adds a cross-platform post-run orphan-process detector binary (pulls `clap` + `sysinfo`, gated off by default so dev-dependency consumers do not inherit them)._
 
     _Tags: workspace, library, testing_
 

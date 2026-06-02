@@ -9,6 +9,19 @@ description = "Shared test lifecycle helpers for the Rusty Biscuit workspace"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
+# Pulled in only for the `leak-sweep` binary (feature-gated) so the many crates
+# that depend on this crate as a dev-dependency do not inherit them.
+clap = { version = "4", features = ["derive"], optional = true }
+sysinfo = { version = "0.38", default-features = false, features = ["system"], optional = true }
+
+[features]
+# Enables the cross-platform `leak-sweep` post-run orphan detector binary.
+leak-sweep = ["dep:clap", "dep:sysinfo"]
+
+[[bin]]
+name = "leak-sweep"
+required-features = ["leak-sweep"]
+
 [dev-dependencies]
 serial_test = "3"
 
