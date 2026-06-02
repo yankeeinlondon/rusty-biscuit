@@ -7,6 +7,7 @@
 //!
 //! - [`markdown`] - Markdown document manipulation with frontmatter support
 //! - [`diff`] - Reusable diff utilities
+//! - [`effects`] - Mutating side-effect engine (library surface only)
 //! - [`layout`] - Page-level layout primitive (`DarkmatterPage`)
 //! - [`mermaid`] - Mermaid diagram theming and rendering
 //! - [`render`] - Hyperlink rendering utilities
@@ -15,6 +16,7 @@
 
 pub mod diff;
 pub mod editor;
+pub mod effects;
 pub mod layout;
 pub mod markdown;
 pub mod mermaid;
