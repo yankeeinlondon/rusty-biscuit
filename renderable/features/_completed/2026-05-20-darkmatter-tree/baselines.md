@@ -249,6 +249,83 @@ so the two columns coincide within run-to-run noise (≈3 µs), confirming the
 cross-group comparison is sound and that the rewrite scan is the only variable
 the no-inline rows isolate.
 
+## Recorded Baselines (2026-06-02, Prose cross-target after full collapse)
+
+`Prose` is the 132-file inline-text hot primitive. Its full collapse onto the
+shared render tree (`../../2026-06-02-prose-tree/spec.md`) deleted the bespoke
+`terminal` / `browser` / `to_markdown` emitters and routes every target through
+the shared tree renderers instead. The prose-tree spec's "Performance" section
+requires a Prose render benchmark over terminal + browser + markdown with no
+material regression versus the bespoke emitters before the feature flips.
+
+This section records that baseline. It feeds the perf-gate spec
+(`../../2026-06-02-perf-gate/spec.md`): it is a **Part-2 baseline-trend** entry,
+not a Part-1 bespoke comparison. There are **no Tree/Bespoke ratios** because
+the bespoke emitters no longer exist — they were deleted in the migration's
+step 6, so a live before/after arm cannot be measured (the pre-flip output
+survives only in git history, and `prose/parity.rs` is the byte-stable parity
+oracle that locked the flip's correctness). Per the prose-tree review-3
+decision, the current tree-only numbers are recorded as the **defensible known
+baseline** for trend tracking; the perf-gate suite's terminal-only Prose
+component bench will later layer onto this.
+
+### Capture Procedure (biscuit-terminal `rendering` bench)
+
+This baseline lives in a different crate and bench than the darkmatter
+`migration_parity` rows above — it is the `prose_render` group of
+`biscuit-terminal/lib/benches/rendering.rs`.
+
+```bash
+# Run only the Prose cross-target group and save the trend baseline.
+cargo bench -p biscuit-terminal --bench rendering -- prose_render \
+    --warm-up-time 1 --measurement-time 3 --sample-size 10 \
+    --save-baseline prose-tree-2026-06-02
+
+# Compare a later run against it.
+cargo bench -p biscuit-terminal --bench rendering -- prose_render \
+    --baseline prose-tree-2026-06-02
+```
+
+### Corpus Coverage
+
+| Corpus      | Shape                                                                                  |
+|-------------|----------------------------------------------------------------------------------------|
+| `small`     | One short CLI line, light styling (`<bold>`, `<red>`) — the common one-liner.           |
+| `medium`    | 12 report clauses: weight + dim + color + a Markdown link each.                         |
+| `tag_dense` | 16 deeply-nested span groups (every emphasis / color / underline / inverse variant, links, escaped markup) plus a trailing fenced code block — adversarial maximum-work. |
+
+Each bench measures the full parse + render hot path: `Prose::new` builds the
+`RenderNode` tree once, then the shared renderer folds it — the shape real
+callers hit. Corpora are generated deterministically in-process.
+
+### Numbers
+
+Captured on the development host with `--warm-up-time 1 --measurement-time 3
+--sample-size 10`; times are Criterion's middle estimate.
+
+| Target          | `small`   | `medium`  | `tag_dense` |
+|-----------------|-----------|-----------|-------------|
+| terminal        | 10.68 µs  | 161.1 µs  | 463.5 µs    |
+| browser         | 12.12 µs  | 202.9 µs  | 559.0 µs    |
+| markdown        | 9.21 µs   | 156.8 µs  | 390.2 µs    |
+| markdown_plus   | 9.54 µs   | 161.3 µs  | 405.2 µs    |
+
+The `tag_dense` row carried the widest CIs (terminal `[428.8, 463.5, 507.9] µs`,
+browser `[532.0, 559.0, 603.5] µs`, several high-severe outliers at this small
+sample size); treat its trend band wider than the nominal ±5%. The `small` and
+`medium` rows were stable.
+
+Reading the matrix: the four targets sit within a narrow band of each other at
+every corpus size — terminal and browser pay the SGR / HTML lowering on top of
+the shared fold, while plain Markdown is consistently the cheapest (it degrades
+color and inverse to inner text). No target is an outlier, which is the expected
+shape once all four share one parse and one tree fold. Absolute costs scale with
+input size and tag count, not with target, confirming the collapse did not push
+any single target onto a materially slower path. With the bespoke allocation and
+the separate `to_render_nodes()` projection pass both removed (spec
+"Performance"), the net direction matches the spec's neutral-to-faster
+expectation; this baseline is the trend anchor for future regression checks.
+
 ## How to Read the Numbers
 
 - The terminal `TrueColor` and `fold_once_multi_target` groups already

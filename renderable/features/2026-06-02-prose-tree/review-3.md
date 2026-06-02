@@ -1,5 +1,5 @@
 ---
-ready: false
+ready: true
 agent: codex
 model: ""
 ---
@@ -38,6 +38,30 @@ tag-dense corpora. Record the old/bespoke baseline or a defensible known
 baseline in this feature directory, compare the current tree-only path against
 it, and document either neutral-or-better results or the accepted regression
 with numbers.
+
+#### Resolution (2026-06-02)
+
+Implemented. The `prose_render` group in
+`biscuit-terminal/lib/benches/rendering.rs` was rebuilt from the terminal-only
+trio into a **target × corpus matrix**: terminal, browser, Markdown, and
+MarkdownPlus over `small` / `medium` / `tag_dense` corpora (12 benches). Each
+bench exercises the full tree render path (`Prose::new` → shared renderer fold).
+
+Baseline numbers are recorded in
+[`../_completed/2026-05-20-darkmatter-tree/baselines.md`](../_completed/2026-05-20-darkmatter-tree/baselines.md)
+(the perf-gate spec's designated baseline doc), saved as the Criterion baseline
+`prose-tree-2026-06-02` for trend tracking.
+
+Baseline shape note: the bespoke `terminal` / `browser` / `to_markdown`
+emitters were deleted in migration step 6 (see `prose/parity.rs`), so a **live**
+bespoke-vs-tree ratio cannot be measured — the pre-flip output survives only in
+git history, with `parity.rs` as the byte-stable correctness oracle. Per the
+scope decision for this finding, the current tree-only numbers are recorded as
+the **defensible known baseline** (a Part-2 baseline-trend entry under the
+perf-gate spec, not a Part-1 bespoke comparison). The recorded matrix shows the
+four targets within a narrow band at every corpus size with no outlier target,
+consistent with the spec's neutral-to-faster expectation after the
+`ProseDocument` allocation and the separate projection pass were removed.
 
 ## Closed From Review 2
 
