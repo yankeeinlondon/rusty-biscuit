@@ -162,6 +162,7 @@ fn browser_options_from_html_options(_opts: &HtmlOptions) -> BrowserRenderOption
         raw_html: RawHtmlPolicy::Escape,
         page: None,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        ..Default::default()
     }
 }
 

@@ -327,6 +327,7 @@ fn pinned_browser_options() -> BrowserRenderOptions {
         raw_html: RawHtmlPolicy::Escape,
         page: None,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        ..Default::default()
     }
 }
 
