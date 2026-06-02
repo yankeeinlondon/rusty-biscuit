@@ -35,7 +35,7 @@ pub enum OutputFormat {
 /// accepted values rather than silently degrading to a single mode.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum RemoteFreshness {
-    /// Serve cache without revalidation when within TTL.
+    /// Serve any cached artifact without revalidation, even when stale.
     Optimistic,
     /// Always revalidate with a conditional GET.
     Strict,

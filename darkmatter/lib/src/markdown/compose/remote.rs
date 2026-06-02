@@ -82,7 +82,8 @@ fn resolve_remote_concurrency_from(
 /// How to handle cache staleness for remote artifacts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RemoteFreshnessMode {
-    /// Serve cache without revalidation when within TTL.
+    /// Serve any cached artifact without revalidation, even when stale (TTL is
+    /// ignored).
     Optimistic,
     /// Always revalidate with conditional GET.
     Strict,
