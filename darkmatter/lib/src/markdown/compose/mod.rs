@@ -5773,5 +5773,84 @@ Rounded: {{ round(pi) }}"#;
             let rf = report.remote_fetch_stats.unwrap();
             assert_eq!(rf.fetched, 1);
         }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn cached_local_child_revalidates_nested_remote_under_refresh() {
+            use std::sync::Arc;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            use wiremock::{Request, Respond};
+
+            // Serves "remote v1" on the first request and "remote v2" on every
+            // later request, so a missed revalidation surfaces as stale output.
+            struct Versioned {
+                hits: Arc<AtomicUsize>,
+            }
+            impl Respond for Versioned {
+                fn respond(&self, _req: &Request) -> ResponseTemplate {
+                    let n = self.hits.fetch_add(1, Ordering::SeqCst);
+                    let body = if n == 0 { "remote v1" } else { "remote v2" };
+                    ResponseTemplate::new(200).set_body_string(body)
+                }
+            }
+
+            let server = MockServer::start().await;
+            let hits = Arc::new(AtomicUsize::new(0));
+            Mock::given(method("GET"))
+                .and(path("/remote.md"))
+                .respond_with(Versioned {
+                    hits: Arc::clone(&hits),
+                })
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let cache_root = dir.path().join("cache");
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+            let remote_url = format!("{}/remote.md", server.uri());
+            std::fs::write(&root, "# Root\n\n::file ./child.md\n").unwrap();
+            std::fs::write(&child, format!("# Child\n\n::file {remote_url}\n")).unwrap();
+
+            let mk_options = |refresh: bool| {
+                let config = RemoteReadConfig {
+                    allowed_hosts: vec!["127.0.0.1".into()],
+                    refresh,
+                    ..Default::default()
+                };
+                ComposeOptions::new()
+                    .with_source_file(&root)
+                    .with_allow_remote_transclusion(true)
+                    .with_remote_read_config(config)
+                    .with_cache_root(&cache_root)
+                    .disable(ComposeOperation::Cleanup)
+                    .disable(ComposeOperation::Normalization)
+            };
+
+            // Run 1: populate the local-child and remote caches; remote → v1.
+            let md1 = Markdown::try_from(root.as_path()).unwrap();
+            let (c1, _) = md1.compose_with(mk_options(false)).unwrap();
+            assert!(
+                c1.content().contains("remote v1"),
+                "run 1 should embed the original remote body: {}",
+                c1.content()
+            );
+
+            // Run 2: the remote body has changed and `--remote-refresh` forces a
+            // revalidation. The cached local child must NOT be accepted against
+            // the stale remote manifest.
+            let md2 = Markdown::try_from(root.as_path()).unwrap();
+            let (c2, _) = md2.compose_with(mk_options(true)).unwrap();
+            assert!(
+                c2.content().contains("remote v2"),
+                "cached local child must revalidate its nested remote URL under \
+                 --remote-refresh; got: {}",
+                c2.content()
+            );
+            assert!(
+                !c2.content().contains("remote v1"),
+                "stale remote body served from cache: {}",
+                c2.content()
+            );
+        }
     }
 }
