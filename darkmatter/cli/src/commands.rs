@@ -237,7 +237,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 remote_concurrency,
                 remote_ttl,
                 remote_refresh,
-                &remote_freshness,
+                remote_freshness,
             );
             run_compose(
                 parsed.input.as_ref(),
@@ -378,22 +378,24 @@ fn resolve_list_spacing(compact: bool, loose: bool) -> ListSpacingMode {
 
 fn build_remote_read_config(
     allowed_hosts: &[String],
-    concurrency: usize,
+    concurrency: Option<usize>,
     ttl_secs: Option<u64>,
     refresh: bool,
-    freshness: &str,
+    freshness: crate::args::RemoteFreshness,
 ) -> darkmatter::markdown::compose::RemoteReadConfig {
-    use darkmatter::markdown::compose::RemoteFreshnessMode;
+    use crate::args::RemoteFreshness;
+    use darkmatter::markdown::compose::{RemoteFreshnessMode, resolve_remote_concurrency};
 
-    let freshness_mode = match freshness.to_ascii_lowercase().as_str() {
-        "optimistic" => RemoteFreshnessMode::Optimistic,
-        "fallback" => RemoteFreshnessMode::Fallback,
-        _ => RemoteFreshnessMode::Strict,
+    let freshness_mode = match freshness {
+        RemoteFreshness::Optimistic => RemoteFreshnessMode::Optimistic,
+        RemoteFreshness::Strict => RemoteFreshnessMode::Strict,
+        RemoteFreshness::Fallback => RemoteFreshnessMode::Fallback,
     };
 
     darkmatter::markdown::compose::RemoteReadConfig {
         allowed_hosts: allowed_hosts.to_vec(),
-        remote_concurrency: concurrency.max(1),
+        // Precedence: CLI `--remote-concurrency` > env var > spec default.
+        remote_concurrency: resolve_remote_concurrency(concurrency),
         remote_ttl: ttl_secs.map(std::time::Duration::from_secs),
         refresh,
         freshness_mode,
