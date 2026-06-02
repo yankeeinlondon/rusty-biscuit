@@ -1,5 +1,6 @@
 ---
 status: ready for planning and implementation
+reviewed: true
 ---
 
 # Non-Structural Component Exemptions
@@ -13,6 +14,11 @@ component renders through the tree" requirement, and by producing the
 **Exemption Register** — the documented justification Acceptance Criteria #2
 requires. It also narrows that criterion's wording.
 
+This is a sub-spec of the tree-cutover work. It has no implementation
+dependency on the cutover being complete; instead, the cutover consumes this
+spec before Phase 3/5 so those phases know which component holdouts are real
+blockers and which are documented non-structural exemptions.
+
 No component in scope here needs to migrate onto the tree for the cutover to
 complete. The deliverable is the register plus a small verification condition on
 the node-kind renderers.
@@ -22,6 +28,7 @@ Decision lineage:
 | Question | Decision | Notes |
 |---|---|---|
 | Exemption criterion | **Document-pipeline participation.** | A component must be `tree render only` iff the darkmatter Markdown→tree document pipeline renders it. Everything else is exempt with documented justification. |
+| Component-vs-node distinction | **Node semantics stay on-tree; helper types may stay native.** | `Image`, `ThematicBreak`, and Mermaid code blocks are document nodes. `TerminalImage`, `HorizontalRule`, and `MermaidDiagram` are helper components only when called by the tree renderer. |
 | Components in scope | **All exempt** (4 categories). | Terminal-only chrome, standalone graphics/viz widgets, node-kind builder/helpers, and the page frame. |
 | Cutover AC#2 wording | **Narrowed.** | "Every component the document pipeline renders is on the tree" — not "every component that exists." |
 
@@ -64,6 +71,12 @@ etc. There is **no** node kind for graphs, padding, inline-concatenation, status
 glyphs, file-dependency trees, or a page frame — which is precisely why those
 components are not document content.
 
+Reader note: this criterion applies to **public component types**, not to the
+document semantics they might help render internally. A document image, HR, or
+Mermaid fence is still a tree node and must be rendered by the corresponding
+node renderer. The helper component is exempt only when it is an implementation
+detail called from that node renderer.
+
 ## Exemption Register
 
 | Component | Crate | Category | Justification |
@@ -78,6 +91,22 @@ components are not document content.
 | `TerminalImage` | biscuit-terminal | node-kind builder/helper | Document images render via `NodeKind::Image` (graphics-policy tiers). The component is the image-protocol encoder the tree calls. |
 | `MermaidDiagram` | biscuit-terminal | node-kind builder/helper | Document mermaid renders via `NodeKind::Code { lang:"mermaid" }` promotion (graphics-policy). The component is the rasterizer the tree calls. |
 | `DarkmatterPage` | darkmatter | page frame / render shell | Wraps tree-rendered document output (margins/padding/background/max-width). Not a document node. Gains a minimal browser render per the perf-gate spec, but remains the shell, not a tree node. |
+
+### Register Maintenance
+
+Any future `biscuit-terminal` or `darkmatter` component that remains off-tree at
+cutover time must be classified before Phase 5:
+
+1. If the darkmatter Markdown→tree document pipeline emits it or relies on it as
+   a document node, migrate it to `tree render only`.
+2. If it is an internal helper for an existing `NodeKind`, keep the helper
+   native but add the node-kind verification described below.
+3. If it is terminal-only chrome, standalone application UI, a standalone
+   visualization, or a page/render shell, add it to this register with a short
+   justification.
+
+Unclassified `no changes` / `both avail, old renders` components are cutover
+blockers. They are not silently exempt.
 
 ### Categories
 
@@ -109,6 +138,26 @@ Before bespoke deletion (cutover Phase 5), confirm for each of `Image`,
 output self-contained (helper calls are fine) and that removing the legacy
 serializers does not orphan it. This is the one place an "exempt builder" could
 silently re-introduce a bespoke document path.
+
+Concrete assertions for the Phase 4/5 checklist:
+
+- `NodeKind::ThematicBreak` renders terminal, browser, and markdown output from
+  `render_*_node` / `render_*_document`; any `HorizontalRule` call is a pure
+  helper call beneath the node renderer.
+- `NodeKind::Image` renders through the tree renderer's graphics-policy path;
+  `TerminalImage` may encode the chosen terminal tier, but the darkmatter
+  document pipeline does not dispatch to `TerminalImage` as a standalone
+  component.
+- `NodeKind::Code { lang: "mermaid", .. }` stays a code node until the
+  Mermaid-aware renderer promotes it according to `MermaidMode` and
+  `GraphicsMode`; any `MermaidDiagram` call is below that promotion boundary.
+- A mechanical search finds no remaining document-pipeline route that calls the
+  legacy `RuleProcessor`, `output/html.rs`, `output/terminal.rs`, or a helper
+  component directly for these three node kinds after deletion.
+
+`Status` has a similar naming trap: `StatusBlock` is document content and is on
+the tree; bare `Status` is a smaller UI glyph. Before Phase 5, mechanically
+confirm no darkmatter document path emits a bare `Status`.
 
 ## Refinement to Cutover Acceptance Criteria #2
 
@@ -156,12 +205,8 @@ These are explicitly **not** cutover blockers.
 
 ## Open Questions
 
-- **`Status` vs `StatusBlock`.** `StatusBlock` is on the tree; `Status` is the
-  smaller glyph and is exempt. Confirm no document path emits a bare `Status`
-  (it should be UI-only). Mechanical check during implementation.
-- **Helper-call audit granularity.** The Verification Condition needs a concrete
-  checklist per node kind; settle the exact assertions when graphics-policy
-  lands (it owns the `Image`/`ThematicBreak`/`Code{mermaid}` renderers).
+None. The remaining work is verification, not a design decision; the checks are
+listed in [Verification Condition](#verification-condition).
 
 ## Related Specs
 
