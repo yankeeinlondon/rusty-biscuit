@@ -5,7 +5,20 @@ interpolation through the `ctx` frontmatter property.
 
 - read [context variables](@darkmatter/docs/topics/context-variables.md) for context on what we provide today
 
-In this feature we will add to this set of available context variables _and_ add some "context functions" to compliment them. In both cases it's critical that we keep an eye on performance. The current set of context variables uses a performant and lazily loaded approach to sourcing the context information that works well but as we add more information we should always take the time to consider the most performant way of achieving the functional goal and then make sure our benchmark testing is able to detect regressions.
+In this feature we will:
+
+- add to this set of available context variables, _and_ 
+- add additional functions to the expression engine
+- and finally we'll also add the initial set of "side effects"
+
+> - Context variables are the properties which hang off of the `ctx` object 
+> - inside of a interpolation you can also use the functions and operators provided by the "expression engine" 
+>     - the expression engine provides functions and operators which allows the author to mutate state ONLY on the page it resides on
+>     - while functions in the expression engine provides way to "read" information from the external environment, it is strictly forbidden for it to _mutate_ any external entities
+> - "side effects" are the set of functions which Darkmatter provides which **are** allowed to cause mutations in the external environment
+>     - things like setting other files Frontmatter props, etc. are chosen because they are "relatively safe"
+ 
+In both cases it's critical that we keep an eye on performance. The current set of context variables uses a performant and lazily loaded approach to sourcing the context information that works well but as we add more information we should always take the time to consider the most performant way of achieving the functional goal and then make sure our benchmark testing is able to detect regressions.
 
 ## New Context Variables
 
