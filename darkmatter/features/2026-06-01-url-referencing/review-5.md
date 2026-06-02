@@ -1,5 +1,5 @@
 ---
-ready: false
+ready: true
 agent: codex
 model: ""
 ---
@@ -48,3 +48,35 @@ The feature is not production-ready yet because the targeted Level 1 remote test
 ## Recommendation
 
 Do not mark this ready for production until the stale concurrency assertion is fixed and the targeted remote test command passes. The remaining freshness wording issue is low risk but should be cleaned up in the same iteration because it affects CLI/user-facing semantics.
+
+## Resolution
+
+Both findings are addressed.
+
+### High: stale concurrency assertion fixed
+
+`remote_read_config_defaults_to_deny_all` in
+`darkmatter/lib/src/markdown/compose/types.rs` asserted the old default of `4`.
+It now asserts against the canonical
+`crate::markdown::compose::remote::DEFAULT_REMOTE_CONCURRENCY` constant, so a
+future change to the default can never re-stale this test.
+
+Verification — the reviewer's exact command now passes:
+
+```bash
+GIT_TERMINAL_PROMPT=0 cargo test -p biscuit-file -p darkmatter -p darkmatter-cli remote --color=never
+```
+
+`darkmatter` runs 102 remote tests, 0 failed; `biscuit-file` and
+`darkmatter-cli` report 0 failures. Clean `clippy -D warnings`.
+
+### Low: `Optimistic` freshness wording corrected
+
+The `Optimistic` doc comment on `RemoteFreshnessMode`
+(`darkmatter/lib/src/markdown/compose/remote.rs`) and the CLI `RemoteFreshness`
+help (`darkmatter/cli/src/args.rs`) said "Serve cache without revalidation when
+within TTL", which contradicts the implementation (TTL is ignored). Both now
+read "Serve any cached artifact without revalidation, even when stale", matching
+`remote_cache.rs` and the persistent-cache tests. The topic docs
+(`docs/topics/remote-url-references.md`, `docs/topics/caching.md`) already
+described this accurately and were left unchanged.
