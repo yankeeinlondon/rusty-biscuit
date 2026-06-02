@@ -109,6 +109,9 @@ pub(crate) fn run_shell_blocks_stage(
                 executable: command.executable.clone(),
                 args: command.args.clone(),
                 span: command.physical_span.clone(),
+                // Opener indentation is applied once to the combined block output
+                // at the splice boundary, not per command.
+                indent: String::new(),
                 origin: ShellCommandOrigin::ShellBlock {
                     start_line: pair.start_line,
                     command_line: command.start_line,
@@ -173,7 +176,15 @@ pub(crate) fn run_shell_blocks_stage(
             }
         }
 
-        let output = render::render_block_output(&results);
+        // Re-indent the combined block output to the opener's column so
+        // generated lines stay nested under the surrounding list or block
+        // quote. `indent_text` returns an empty rendered block unchanged, so an
+        // empty block never becomes an indentation-only string.
+        let output = super::indent::indent_text(
+            &render::render_block_output(&results),
+            &region.indent,
+            None,
+        );
         replacements.push((pair.span.clone(), output));
         report.shell_blocks_applied += 1;
     }
@@ -538,5 +549,101 @@ mod tests {
             }
             other => panic!("Expected Command error, got: {other:?}"),
         }
+    }
+
+    // ── Phase 4 indentation tests ─────────────────────────────────────
+
+    /// Composes a shell-block through the stage with an allow-once handler,
+    /// returning the rewritten content.
+    fn run_block_stage(content: &str) -> (String, ComposeReport) {
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let mut runtime = ShellExpansionRuntime::new();
+        run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap()
+    }
+
+    #[test]
+    fn indented_block_output_under_list_item_is_reindented() {
+        let content =
+            "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        // Every output line — including the blank separator — keeps the opener's
+        // 4-space indent so the lines stay nested under the list item rather than
+        // becoming siblings of the outer list.
+        assert!(result.contains("    hello\n    \n    world\n"), "got: {result:?}");
+        assert!(!result.contains("\nhello\n"), "got: {result:?}");
+    }
+
+    #[test]
+    fn tab_indented_block_output_is_reindented() {
+        let content =
+            "- intro\n\n\t::shell-block\n\techo hello\n\techo world\n\t::end-block\n\n- next\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert!(result.contains("\thello\n\t\n\tworld\n"), "got: {result:?}");
+    }
+
+    #[test]
+    fn root_level_block_output_has_no_indent() {
+        let content = "intro\n\n::shell-block\necho hello\necho world\n::end-block\n\nnext\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert!(result.contains("hello\n\nworld\n"), "got: {result:?}");
+        assert!(!result.contains("    hello"), "got: {result:?}");
+    }
+
+    #[test]
+    fn empty_indented_block_does_not_become_indentation_only() {
+        let content = "- intro\n\n    ::shell-block\n    ::end-block\n\n- next\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        // An empty rendered block stays empty; it must never collapse to a line
+        // holding only the captured indent.
+        assert_eq!(result, "- intro\n\n\n- next\n");
+    }
+
+    /// Composes a shell-block through the stage, then renders the rewritten
+    /// content to HTML so the splice can be validated against the CommonMark
+    /// block structure rather than raw substrings.
+    fn run_block_stage_to_html(content: &str) -> String {
+        let (rewritten, _report) = run_block_stage(content);
+        let md: crate::markdown::Markdown = rewritten.as_str().into();
+        md.as_html(crate::markdown::output::HtmlOptions::default())
+            .unwrap()
+    }
+
+    #[test]
+    fn indented_block_output_is_nested_under_list_item_in_commonmark() {
+        // Re-indented block output is a continuation of the first list item, so
+        // the document stays a single list with two items — the generated lines
+        // are children of the parent <li>, not siblings of the outer list.
+        let content =
+            "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
+        let html = run_block_stage_to_html(content);
+        assert_eq!(html.matches("<ul>").count(), 1, "got: {html}");
+        assert_eq!(html.matches("<li>").count(), 2, "got: {html}");
+    }
+
+    #[test]
+    fn root_level_block_output_is_a_sibling_block_in_commonmark() {
+        // The column-1 baseline is intentionally a top-level sibling: the spliced
+        // output splits the surrounding list into two separate <ul> blocks.
+        let content =
+            "- intro\n\n::shell-block\necho hello\necho world\n::end-block\n\n- next\n";
+        let html = run_block_stage_to_html(content);
+        assert_eq!(html.matches("<ul>").count(), 2, "got: {html}");
+    }
+
+    #[test]
+    fn blockquote_marked_shell_block_is_not_a_directive() {
+        // A `>`-led opener is not recognized as a shell-block: `scan_block_pairs`
+        // requires the trimmed line to start with `::shell-block`, and the
+        // captured indent only ever covers leading whitespace. This mirrors the
+        // `::shell` parser's column-1 / leading-whitespace semantics, so a
+        // block-quoted shell block is left as literal text unchanged.
+        let content = "> ::shell-block\n> echo hello\n> ::end-block\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 0);
+        assert_eq!(result, content);
     }
 }

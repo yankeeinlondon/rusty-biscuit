@@ -11,11 +11,19 @@ pub(crate) fn parse_shell_block_region(
 ) -> Result<ShellBlockRegion, ShellBlockError> {
     let opening_text = &content[pair.span.start..pair.span.end];
     let opener_line = opening_text.lines().next().unwrap_or(opening_text);
-    let (options, timeout_override) = parse_opener_params(opener_line, pair.start_line)?;
+    // Exact leading whitespace prefix; preserved verbatim so the block's
+    // rendered output can be re-indented under its container. An indented
+    // opener must also have its whitespace stripped before parameter parsing,
+    // otherwise `strip_prefix("::shell-block")` fails and the param parser
+    // chokes on the leading `:`.
+    let indent = opener_line[..opener_line.len() - opener_line.trim_start().len()].to_string();
+    let (options, timeout_override) =
+        parse_opener_params(opener_line.trim_start(), pair.start_line)?;
 
     Ok(ShellBlockRegion {
         options,
         timeout_override,
+        indent,
     })
 }
 
@@ -309,6 +317,47 @@ mod tests {
         let (handling, timeout) = parse_opener_params("::shell-block", 1).unwrap();
         assert!(handling.is_empty());
         assert!(timeout.is_none());
+    }
+
+    /// Build a `BlockPair` directly from `content` so `parse_shell_block_region`
+    /// can be exercised without relying on the Markdown indented-code-block
+    /// classification that `scan_block_pairs` applies (a column-0 indented line
+    /// would otherwise be treated as a code block and skipped).
+    fn shell_pair(content: &str) -> super::super::super::block_pairs::BlockPair {
+        use super::super::super::block_pairs::{BlockOpenKind, BlockPair};
+        let opener_line = content.lines().next().unwrap_or(content);
+        BlockPair {
+            kind: BlockOpenKind::Shell,
+            span: 0..content.len(),
+            body_span: 0..0,
+            start_line: 1,
+            end_line: content.lines().count(),
+            opening_text: opener_line.to_string(),
+        }
+    }
+
+    #[test]
+    fn indented_opener_captures_indent_and_parses_params() {
+        // Regression: an indented opener previously failed to parse because the
+        // leading whitespace defeated `strip_prefix("::shell-block")`.
+        let content = "    ::shell-block timeout=5\n    echo hi\n    ::end-block\n";
+        let region = parse_shell_block_region(content, &shell_pair(content)).unwrap();
+        assert_eq!(region.indent, "    ");
+        assert_eq!(region.timeout_override, Some(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn column1_opener_has_empty_indent() {
+        let content = "::shell-block\necho hi\n::end-block\n";
+        let region = parse_shell_block_region(content, &shell_pair(content)).unwrap();
+        assert!(region.indent.is_empty());
+    }
+
+    #[test]
+    fn tab_indented_opener_captures_tab_indent() {
+        let content = "\t::shell-block\n\techo hi\n\t::end-block\n";
+        let region = parse_shell_block_region(content, &shell_pair(content)).unwrap();
+        assert_eq!(region.indent, "\t");
     }
 
     #[test]
