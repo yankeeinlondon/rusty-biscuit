@@ -81,9 +81,9 @@ with `--warm-up-time 1 --measurement-time 3 --sample-size 10`.
 
 | Gap | Target | Owner | Notes |
 |---|---|---|---|
-| HR rasterization not opt-out-able (`TerminalImageMode` dropped by tree entry point) | Terminal | graphics-policy A-1/B-1 | Causes the `mark_dim_hr` + no-color terminal regression. |
-| HR lowers to plain `<hr data-hr-*>` vs legacy CSS-variable `<svg>` | Browser | graphics-policy B-3/B-4 | Fidelity downgrade; **decision: restore vs ratify.** |
-| Mermaid deferred on the tree path | Terminal/Browser | graphics-policy / this spec | Tree path has no Mermaid adapter yet. |
+| HR rasterization not opt-out-able (`TerminalImageMode` dropped by tree entry point) | Terminal | graphics-policy ✅ | Resolved: raster gated to `Rich`; `TerminalImageMode::Never → Off`. |
+| HR lowers to plain `<hr data-hr-*>` vs legacy CSS-variable `<svg>` | Browser | graphics-policy ✅ | Resolved: styled `<svg>` restored at `Vector`+ (B-3). |
+| Mermaid deferred on the tree path | Terminal/Browser | graphics-policy ✅ | Resolved: promoted `Code` node — static `<svg>` browser, raster terminal. |
 | `<mark>` element recovery (`<span class="mark">` → `<mark>`) | Browser | inline-span (done) | **Deliberate improvement, not a regression** — snapshot updates allowed. |
 | `large_table` browser path ≈ 11× slower | Browser | this spec (perf) | Not graphics; a tree browser renderer hotspot. |
 | `StyleWarning` not surfaced through tree entry points | all | block-extension (deferred) | Legacy strict-style warnings; parity question. |
@@ -134,20 +134,21 @@ fidelity gap is closed.
 
 ### Phase 0 — Fidelity (graphics-policy first)
 
-**Hard prerequisite.** Resolve the graphics-policy decisions, then implement
-the chosen items, then close the non-graphics fidelity gaps.
+**Hard prerequisite.** Implement graphics-policy (architecture approved), then
+close the remaining non-graphics fidelity gaps.
 
-0a. **Resolve graphics-policy decisions** — at minimum the terminal image-mode
-   plumbing (A-1/B-1) and the browser HR fidelity branch (B-3 *restore SVG* vs
-   B-4 *ratify plain `<hr>`*). These are decisions, not code; see that spec.
-0b. **Implement the chosen graphics-policy items** so the tree terminal path
-   honors an image-mode/graphics-policy opt-out and the tree browser HR output
-   meets the agreed fidelity bar.
-0c. **Close non-graphics fidelity gaps:** Mermaid on the tree path (or a
-   documented deferral), `StyleWarning` surfacing through tree entry points (or
-   a documented deferral), and any parity gap the `render_tree_parity` /
-   `render_tree_hr_snapshots` tests surface.
-0d. **Prose prerequisites** (from
+0a. **Implement graphics-policy** — see
+   [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md)
+   (architecture approved). `GraphicsMode { Off, Vector, Rich }` on the
+   per-target render contexts; terminal raster gated to `Rich` with
+   `TerminalImageMode::Never → Off`; styled HR `<svg>` restored at `Vector`+;
+   Mermaid brought on-tree as a promoted `Code` node (static `<svg>` browser,
+   raster terminal). This clears the terminal `mark_dim_hr` regression, the
+   browser HR fidelity gap, and the Mermaid deferral in one piece of work.
+0b. **Close remaining non-graphics fidelity gaps:** `StyleWarning` surfacing
+   through tree entry points (or a documented deferral), and any parity gap the
+   `render_tree_parity` / `render_tree_hr_snapshots` tests surface.
+0c. **Prose prerequisites** (from
    [`../2026-06-02-prose-tree/spec.md`](../2026-06-02-prose-tree/spec.md), shared
    so other components/darkmatter benefit): add `inverse` to
    `renderable::style::TextEmphasis` with terminal SGR 7 / browser / markdown
@@ -229,13 +230,12 @@ Default render path still bespoke or off-tree (from
 
 These need brainstorming/sign-off; they do not change the overall direction.
 
-1. **Browser HR fidelity (graphics-policy B-3 vs B-4).** Restore the
-   CSS-variable `<svg>` on the tree browser path (B-3, satisfies "no
-   regressions" literally) or ratify the plain `<hr data-hr-*>` downgrade
-   (B-4, cheaper). The "no regressions" rule leans B-3; confirm.
-2. **Terminal graphics opt-out shape (graphics-policy A-1 vs B-1).** Stopgap
-   entry-point capability mutation, or the framework `GraphicsMode` on the
-   render context. Affects how `mark_dim_hr` stops over-rasterizing.
+1. **Browser HR fidelity.** ✅ **Resolved — restore styled `<svg>` at
+   `Vector`+** (graphics-policy B-3; B-4 rejected). See
+   [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md).
+2. **Terminal graphics opt-out shape.** ✅ **Resolved — framework
+   `GraphicsMode` on the render context** (graphics-policy B-1; Bucket A
+   stopgaps dropped). Raster gated to `Rich`; `TerminalImageMode::Never → Off`.
 3. **Concrete perf gate for Acceptance Criteria #4.** Define the metric, e.g.
    "corpus geomean of tree/legacy ≤ 1.0 and no single fixture regresses beyond
    N×." Pick the threshold (browser `large_table` is currently 11× — is it
@@ -243,15 +243,15 @@ These need brainstorming/sign-off; they do not change the overall direction.
 4. **`Prose` exemption.** ✅ **Resolved — full collapse onto the shared tree.**
    `Prose`'s parser will emit `RenderNode` directly and `ProseDocument` is
    deleted; the two shared-tree prerequisites (`inverse` on `TextEmphasis`,
-   MarkdownPlus inline-`Style` lowering) move to Phase 0d. See
+   MarkdownPlus inline-`Style` lowering) move to Phase 0c. See
    [`../2026-06-02-prose-tree/spec.md`](../2026-06-02-prose-tree/spec.md).
 5. **Non-structural components.** `PadLeft`/`PadRight`, `InlineContent`,
    `TerminalImage`, `Status`, `DarkmatterPage`, `FileTree` may have no
    document-structure tree equivalent. Define the exemption criteria so
    "every component on the tree" is an achievable bar, not an impossible one.
-6. **Mermaid on the tree.** Build a tree Mermaid adapter before cutover, or
-   ship cutover with Mermaid documented as a known deferred gap (legacy kept
-   only for Mermaid would defeat the deletion goal).
+6. **Mermaid on the tree.** ✅ **Resolved — designed in graphics-policy** as a
+   promoted `Code` node (static `<svg>` browser, raster terminal; interactive
+   mermaid.js an orthogonal opt-in). Built in Phase 0a, before cutover.
 7. **`StyleWarning` surfacing.** Thread strict-style warnings through the tree
    entry points (parity with legacy), or keep the existing
    `scan_inline_hr_warnings` preflight surface and document the difference.
@@ -270,7 +270,7 @@ These need brainstorming/sign-off; they do not change the overall direction.
 ## Related Specs
 
 - [`../2026-06-02-prose-tree/spec.md`](../2026-06-02-prose-tree/spec.md) —
-  resolves Decision #4; supplies Phase 0d prerequisites and a Phase 3 holdout.
+  resolves Decision #4; supplies Phase 0c prerequisites and a Phase 3 holdout.
 - [`../2026-05-26-inline-span/spec.md`](../2026-05-26-inline-span/spec.md)
 - [`../2026-05-26-block-extension/spec.md`](../2026-05-26-block-extension/spec.md)
 - [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md)

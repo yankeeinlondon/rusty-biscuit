@@ -18,6 +18,13 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
   - .claude/skills/renderable/style.md
+source_files_during_phase_2:
+  - renderable/src/tree/render/markdown.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages_during_phase_2:
+  - renderable
 ---
 
 # Execution Plan: Prose to Shared Render Tree
@@ -101,50 +108,49 @@ before Prose routes Markdown output through it.*
 
 ### Tasks
 
-- [ ] Extend `renderable/src/tree/render/markdown.rs::render_span` so
+- [x] Extend `renderable/src/tree/render/markdown.rs::render_span` so
   `MarkdownDialect::MarkdownPlus` emits inline HTML for nodes carrying a
   concrete `Style`.
 
-- [ ] Convert supported inline `Style` fields to concrete CSS declarations:
+- [x] Convert supported inline `Style` fields to concrete CSS declarations:
   foreground color, background color, and underline variants needed for Prose
   parity.
 
-- [ ] Preserve existing class-based span behavior, and emit one `<span>` with
+- [x] Preserve existing class-based span behavior, and emit one `<span>` with
   both `class` and `style` attributes when both are present.
 
-- [ ] Escape literal `<`, `>`, and `&` in MarkdownPlus inline-HTML bodies while
+- [x] Escape literal `<`, `>`, and `&` in MarkdownPlus inline-HTML bodies while
   preserving the renderer's existing Markdown sigil escaping rules.
 
-- [ ] Keep plain Markdown behavior unchanged: strict mode rejects classed or
+- [x] Keep plain Markdown behavior unchanged: strict mode rejects classed or
   styled spans where strictness already applies, warn mode records a lossy
   diagnostic and emits inner text, and lossy mode emits inner text.
 
-- [ ] Audit Markdown link destination escaping in the shared renderer against
+- [x] Audit Markdown link destination escaping in the shared renderer against
   Prose's current bespoke behavior before Prose delegates to this path.
 
 ### Validation
 
-- [ ] Add MarkdownPlus renderer tests for foreground color, background color,
+- [x] Add MarkdownPlus renderer tests for foreground color, background color,
   underline variants, HTML body escaping, class+style coalescing, and Markdown
   sigil escaping inside styled spans.
 
-- [ ] Add plain Markdown strict/warn/lossy tests for styled spans with no
+- [x] Add plain Markdown strict/warn/lossy tests for styled spans with no
   classes.
 
-- [ ] Add or update link destination tests covering parentheses, backslashes,
+- [x] Add or update link destination tests covering parentheses, backslashes,
   whitespace angle-bracket wrapping, and line-ending degradation to spaces.
 
-- [ ] Run `cargo test -p renderable --lib -- markdown` or the closest focused
+- [x] Run `cargo test -p renderable --lib -- markdown` or the closest focused
   markdown renderer filter.
 
 ### Parallelizable Work
 
-- [ ] CSS declaration serialization and Markdown escaping tests can be developed
+- [x] CSS declaration serialization and Markdown escaping tests can be developed
   in parallel after the target `render_span` branch is identified.
 
 ---
-
-## Phase 3 - Capture Current Prose Parity Snapshots
+ - Capture Current Prose Parity Snapshots
 
 *Pin today's bespoke Prose output before changing parsing or deleting emitters.*
 
