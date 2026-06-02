@@ -12,6 +12,15 @@ spec: that the tree node renderers and `pub(crate)` tree entry points own the
 document lowering for `Image`, `ThematicBreak`, and `Code{mermaid}`, and that
 every exempt-helper call sits below the node renderer (helper calls are fine).
 
+For `Code{mermaid}`, "own the lowering" currently means rendering it as a plain
+highlighted code block: the tree path has **no** `lang == "mermaid"` branch and
+makes **no** `MermaidDiagram` call. The promotion boundary that would lower a
+mermaid fence to a diagram (and call `MermaidDiagram` below it) does not yet
+exist; it is owned by the graphics-policy spec and tracked as ⏳ Pending in the
+Phase 4/5 Checklist Sign-Off below. The exemption holds either way — the helper
+is not reached by any document-pipeline route — but the promoted behavior is
+unverified because it is unimplemented.
+
 It does **not** verify the public document-pipeline cutover. The public APIs
 `Markdown::as_html`, `Markdown::as_terminal`, and `as_terminal_with_layout`
 still delegate to the legacy serializers (`output::as_html`,
@@ -151,7 +160,8 @@ Result: **All passed**
 |---|---|---|
 | `NodeKind::ThematicBreak` renders terminal/browser/markdown from `render_*_node` / `render_*_document`; `HorizontalRule` is a helper below the node renderer | ✅ | `biscuit-terminal/lib/src/render_tree/render.rs:418-421`, `renderable/src/tree/render/browser.rs:273`, `renderable/src/tree/render/markdown.rs:259` |
 | `NodeKind::Image` renders through the tree renderer's graphics-policy path; `TerminalImage` is not dispatched as a standalone component | ✅ | `biscuit-terminal/lib/src/render_tree/render.rs:747-756`, `renderable/src/tree/render/browser.rs:292-294`, `renderable/src/tree/render/markdown.rs:308-317` |
-| `NodeKind::Code { lang: "mermaid" }` stays a code node until promotion; `MermaidDiagram` is below the boundary | ✅ | `darkmatter/lib/src/markdown/render_tree/code_renderer.rs:78`, `renderable/src/tree/render/browser.rs:270`, `renderable/src/tree/render/markdown.rs:247` |
+| `NodeKind::Code { lang: "mermaid" }` is rendered as a plain highlighted code block by the tree; no `MermaidDiagram` dispatch occurs | ✅ | `darkmatter/lib/src/markdown/render_tree/code_renderer.rs:77` (no `lang == "mermaid"` branch), `renderable/src/tree/render/browser.rs:270`, `renderable/src/tree/render/markdown.rs:247` |
+| Mermaid promotion boundary (`Code{mermaid}` → diagram per `MermaidMode`/`GraphicsMode`, with any `MermaidDiagram` call below it) exists and is tested for the promoted `Text`/`Image` modes | ⏳ Pending | Boundary does not yet exist (`phase-5-notes.md` mechanical search; `code_renderer.rs:77` has no Mermaid branch). Owned by graphics-policy spec (`../2026-05-26-graphics-policy/spec.md`). Only `MermaidMode::Off` parity is covered (`darkmatter/lib/tests/render_tree_parity.rs:1283`) |
 | No *tree* route calls legacy `RuleProcessor`, `output/html.rs`, `output/terminal.rs`, or helpers directly; every exempt-helper call sits below the node renderer | ✅ | Mechanical searches (see above) |
 | Public `Markdown::as_html` / `as_terminal` / `as_terminal_with_layout` route through the tree (retiring the legacy serializers) | ⏳ Pending | Owned by tree-cutover condition #1; public APIs still delegate to `output::*` (`darkmatter/lib/src/markdown/mod.rs:595,620,626`) |
 | No darkmatter document path emits bare `Status` | ✅ | `StatusBlock` is the document type; mechanical search finds no bare `Status` emission |
@@ -161,7 +171,10 @@ Result: **All passed**
 None from the non-structural exemption verification. The registered non-structural components are **not** blockers for the tree cutover.
 
 Separate cutover blockers (owned by sibling specs):
-- Graphics-policy implementation (Phase 0a of tree-cutover spec).
+- Graphics-policy implementation (Phase 0a of tree-cutover spec) — includes the
+  Mermaid promotion boundary (`Code{mermaid}` → diagram per `MermaidMode`/
+  `GraphicsMode`). Until it lands the tree renders mermaid as a plain code block
+  and the promoted `Text`/`Image` behavior is unverified.
 - Browser performance hotspot (`large_table` ≈ 11× slower — owned by perf-gate spec).
 - `Prose` collapse onto shared tree (owned by prose-tree spec).
 - `FileSystem` terminal flip (owned by tree-cutover Phase 3).
@@ -172,6 +185,6 @@ Separate cutover blockers (owned by sibling specs):
 ✅ The cutover can consume the non-structural spec without treating the registered exempt components as blockers.
 ✅ All document-pipeline components remain either tree-render-only or explicitly tracked for cutover.
 ✅ Every exempt helper call is either below the node renderer or in a legacy path scheduled for deletion.
-✅ The tree node renderers and `pub(crate)` entry points own the document lowering for `Image`, `ThematicBreak`, and `Code{mermaid}` (helper calls below the node renderer).
+✅ The tree node renderers and `pub(crate)` entry points own the document lowering for `Image` and `ThematicBreak` (helper calls below the node renderer). `Code{mermaid}` currently lowers to a plain highlighted code block with no `MermaidDiagram` dispatch; the Mermaid promotion boundary that would call the rasterizer is **pending** (owned by the graphics-policy spec) — see the `⏳ Pending` row in the Phase 4/5 Checklist Sign-Off.
 
 ⏳ **Not verified here (out of scope):** the public document-pipeline cutover. `Markdown::as_html` / `as_terminal` / `as_terminal_with_layout` and `DarkmatterPage::render` still route through the legacy serializers. Retiring those public routes is tree-cutover condition #1 and remains pending; only after it lands does the "no remaining document-pipeline route calls the legacy serializers" state hold for the public surface.

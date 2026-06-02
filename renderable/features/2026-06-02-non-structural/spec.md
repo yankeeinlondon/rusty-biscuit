@@ -89,7 +89,7 @@ detail called from that node renderer.
 | `FileTree` | darkmatter | standalone viz tool | Visualizes a file's reference/transclusion dependency graph. A CLI/dev tool, terminal-only; not document content. |
 | `HorizontalRule` | biscuit-terminal | node-kind builder/helper | Document HRs render via `NodeKind::ThematicBreak` (graphics-policy). The component is a terminal/SVG builder the tree may call as a helper. |
 | `TerminalImage` | biscuit-terminal | node-kind builder/helper | Document images render via `NodeKind::Image` (graphics-policy tiers). The component is the image-protocol encoder the tree calls. |
-| `MermaidDiagram` | biscuit-terminal | node-kind builder/helper | Document mermaid renders via `NodeKind::Code { lang:"mermaid" }` promotion (graphics-policy). The component is the rasterizer the tree calls. |
+| `MermaidDiagram` | biscuit-terminal | node-kind builder/helper | Document mermaid renders via `NodeKind::Code { lang:"mermaid" }` promotion (graphics-policy). The component is the rasterizer the tree's promotion path will call once implemented; until then the tree renders mermaid as a plain code block. |
 | `DarkmatterPage` | darkmatter | page frame / render shell | Wraps tree-rendered document output (margins/padding/background/max-width). Not a document node. Gains a minimal browser render per the perf-gate spec, but remains the shell, not a tree node. |
 
 ### Register Maintenance

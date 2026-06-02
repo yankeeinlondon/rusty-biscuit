@@ -2,6 +2,19 @@
 phases: 4
 created: 2026-06-02
 start_phase: 1
+source_files_during_phase_1:
+  - renderable/src/tree/mod.rs
+  - renderable/src/tree/render/browser.rs
+  - biscuit-terminal/lib/src/render_tree/options.rs
+  - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+  - darkmatter/lib/benches/migration_parity.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - renderable
+  - biscuit-terminal
+  - darkmatter
 ---
 
 # Execution Plan: Graphics Policy
