@@ -515,6 +515,49 @@ fn test_compose_remote_deny_all_fails_without_request() {
 }
 
 #[test]
+fn test_compose_remote_expression_function_reads_url() {
+    // Read-side expression functions must work through the real `md compose`
+    // pipeline, not just helper-level unit tests. The URL argument is quoted
+    // because the interpolation expression parser requires a string literal.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "# Remote Heading\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/remote.md");
+
+    md_cmd()
+        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .write_stdin(format!("Title: {{{{ markdown_title(\"{url}\") }}}}\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Title: Remote Heading"));
+
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn test_compose_remote_expression_function_denied_host_reads_false() {
+    // `file_exists` against a host that is not allowed must read as `false`
+    // (the fetch is policy-denied, never issued) rather than failing compose.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "should not be fetched\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/blocked.md");
+
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin(format!("Exists: {{{{ file_exists(\"{url}\") }}}}\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Exists: false"));
+
+    assert_eq!(server.request_count(), 0);
+}
+
+#[test]
 fn test_compose_remote_refresh_revalidates_cached_url() {
     let cache_dir = tempfile::TempDir::new().unwrap();
     let server = mock_http_server(vec![
