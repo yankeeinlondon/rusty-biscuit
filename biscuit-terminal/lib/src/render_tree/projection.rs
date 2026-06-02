@@ -34,7 +34,9 @@
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
-use renderable::tree::{Diagnostic, DiagnosticKind, RenderNode, RenderStrictness, Severity};
+use renderable::tree::{
+    Diagnostic, DiagnosticKind, NodeKind, RenderNode, RenderStrictness, Severity,
+};
 use tracing::{debug, warn};
 
 use crate::components::prose::Prose;
@@ -320,6 +322,49 @@ pub(crate) fn project_renderable_content(
             }
         }
     }
+}
+
+/// Folds a flat sequence of [`Prose`]-projected nodes into block-level
+/// children.
+///
+/// Contiguous inline nodes are flushed into a single
+/// [`Paragraph`](renderable::tree::NodeKind::Paragraph); each block-level
+/// [`Code`](renderable::tree::NodeKind::Code) node — the only block-level node
+/// the Prose parser emits — is preserved as a block-level sibling.
+///
+/// Containers that embed `Prose` via [`Prose::to_render_nodes`] must fold the
+/// sequence this way. Wrapping the whole sequence in one `Paragraph` nests a
+/// block-level `Code` inside phrasing content, which render-tree validation
+/// rejects (the terminal renderer then emits empty output and the Markdown /
+/// HTML renderers surface a validation error).
+///
+/// This is the shared producer behind [`Prose`]'s own
+/// [`render_tree`](TreeRenderable::render_tree) split and the `BlockQuote` /
+/// list-item container projections, so all three stay in lockstep. When the
+/// sequence is purely inline (the common case) it returns a single
+/// `Paragraph`, matching the historical container shape exactly.
+///
+/// [`Prose`]: crate::components::prose::Prose
+/// [`Prose::to_render_nodes`]: crate::components::prose::Prose::to_render_nodes
+/// [`TreeRenderable::render_tree`]: renderable::tree::TreeRenderable::render_tree
+#[must_use]
+pub(crate) fn fold_prose_nodes_into_blocks(nodes: Vec<RenderNode>) -> Vec<RenderNode> {
+    let mut blocks: Vec<RenderNode> = Vec::new();
+    let mut paragraph: Vec<RenderNode> = Vec::new();
+    for node in nodes {
+        if matches!(node.kind, NodeKind::Code { .. }) {
+            if !paragraph.is_empty() {
+                blocks.push(RenderNode::paragraph(std::mem::take(&mut paragraph)));
+            }
+            blocks.push(node);
+        } else {
+            paragraph.push(node);
+        }
+    }
+    if !paragraph.is_empty() {
+        blocks.push(RenderNode::paragraph(paragraph));
+    }
+    blocks
 }
 
 impl RenderableTerminalContent {

@@ -507,12 +507,17 @@ impl BrowserRenderable for BlockQuote {
 }
 
 impl BlockQuote {
-    /// Builds the inline children for the quote's main paragraph in the
+    /// Builds the inline node sequence for inline quote content in the
     /// canonical render tree.
     ///
     /// Used only when the content is inherently inline — a plain `String` or a
-    /// [`Prose`] component. Non-`Prose` block-level components project
-    /// structurally through [`Self::project_block_children`] instead.
+    /// [`Prose`] component. The caller
+    /// ([`Self::project_block_children`]) folds the returned sequence into
+    /// block-level children: a plain `String` is one `Text` node that becomes
+    /// a single `Paragraph`, while a `Prose` body that carries a fenced code
+    /// block yields a `Code` node that must stay a block-level sibling rather
+    /// than nesting inside a `Paragraph`. Non-`Prose` block-level components
+    /// project structurally through [`Self::project_block_children`] instead.
     ///
     /// Delegates to the shared
     /// [`project_renderable_content`](crate::render_tree::projection::project_renderable_content)
@@ -528,9 +533,12 @@ impl BlockQuote {
     /// Builds the top-level children for the quote's projected
     /// [`NodeKind::BlockQuote`].
     ///
-    /// `String` content and [`Prose`] components are inline — they produce a
-    /// single `Paragraph` wrapping inline nodes. Any other component projects
-    /// structurally via
+    /// `String` content and [`Prose`] components are inline — their projected
+    /// node sequence is folded into block-level children via
+    /// [`fold_prose_nodes_into_blocks`](crate::render_tree::projection::fold_prose_nodes_into_blocks),
+    /// so contiguous inline runs become a single `Paragraph` and any fenced
+    /// code block a `Prose` body carries stays a block-level sibling. Any
+    /// other component projects structurally via
     /// [`ProjectionMode::Structural`](crate::render_tree::projection::ProjectionMode::Structural):
     /// its `render_tree_node` output (or the structural fallback) becomes a
     /// direct block-level child of the `BlockQuote`. This closes the Stage 3
@@ -542,9 +550,16 @@ impl BlockQuote {
     /// wrapped in a `Paragraph` so the `BlockQuote` contract still has
     /// block-level children.
     fn project_block_children(&self) -> Vec<RenderNode> {
-        use crate::render_tree::projection::{ProjectionMode, project_renderable_content};
+        use crate::render_tree::projection::{
+            ProjectionMode, fold_prose_nodes_into_blocks, project_renderable_content,
+        };
 
-        // Inline content (String, Prose) always wraps in a single Paragraph.
+        // Inline content (String, Prose) folds into block-level children:
+        // contiguous inline runs become a single `Paragraph` and any fenced
+        // code block a `Prose` body carries stays a block-level sibling.
+        // Wrapping the whole sequence in one `Paragraph` would nest that
+        // block-level `Code` inside phrasing content, which the render tree
+        // rejects.
         let is_inline_content = match &self.content {
             RenderableTerminalContent::String(_) => true,
             RenderableTerminalContent::Component(component) => {
@@ -552,7 +567,7 @@ impl BlockQuote {
             }
         };
         if is_inline_content {
-            return vec![RenderNode::paragraph(self.paragraph_children())];
+            return fold_prose_nodes_into_blocks(self.paragraph_children());
         }
 
         let nodes = project_renderable_content(
@@ -1458,5 +1473,63 @@ mod tests {
             "expected a foreground color SGR for <red>; got: {rendered:?}"
         );
         assert!(strip_ansi(&rendered).contains("error"));
+    }
+
+    // =========================================================================
+    // Embedded Prose Fenced Code (regression for review-2 container gap)
+    // =========================================================================
+
+    /// `true` if any `Paragraph` node anywhere in the tree directly contains a
+    /// block-level `Code` child — the invalid shape that tripped render-tree
+    /// validation before the fold fix.
+    fn paragraph_contains_code(node: &RenderNode) -> bool {
+        let bad_here = matches!(node.kind, NodeKind::Paragraph { .. })
+            && node
+                .children()
+                .iter()
+                .any(|c| matches!(c.kind, NodeKind::Code { .. }));
+        bad_here || node.children().iter().any(paragraph_contains_code)
+    }
+
+    /// `true` if a block-level `Code` node appears anywhere in the tree.
+    fn has_code(node: &RenderNode) -> bool {
+        matches!(node.kind, NodeKind::Code { .. })
+            || node.children().iter().any(has_code)
+    }
+
+    /// Regression: a `Prose` body carrying a fenced code block embedded in a
+    /// `BlockQuote` must project to a render-tree-valid shape. Before the fold
+    /// fix the quote wrapped the whole Prose node sequence — including the
+    /// block-level `Code` node — in a single `Paragraph`, which tree
+    /// validation rejected, so the terminal renderer emitted empty output
+    /// (`bt quote '<red>before \`\`\`code\`\`\` after</red>'`).
+    #[test]
+    fn test_prose_fenced_code_in_block_quote_renders_via_tree() {
+        let prose = Prose::new("<red>before\n```\ncode\n```\nafter</red>");
+        let quote = BlockQuote::from(prose);
+        let term = Terminal::new_optimistic(80);
+        let rendered = quote.render(&term);
+
+        // A non-empty render proves validation passed: `render_via_tree`
+        // swallows a validation failure into an empty string.
+        assert!(!rendered.is_empty(), "expected non-empty render");
+        let stripped = strip_ansi(&rendered);
+        assert!(stripped.contains("before"), "missing `before`: {stripped:?}");
+        assert!(stripped.contains("code"), "missing `code`: {stripped:?}");
+        assert!(stripped.contains("after"), "missing `after`: {stripped:?}");
+    }
+
+    /// The embedded fenced code block stays a block-level sibling of the
+    /// surrounding paragraphs instead of nesting inside one.
+    #[test]
+    fn test_prose_fenced_code_in_block_quote_is_block_sibling() {
+        let prose = Prose::new("<red>before\n```\ncode\n```\nafter</red>");
+        let quote = BlockQuote::from(prose);
+        let node = quote.render_tree();
+        assert!(
+            !paragraph_contains_code(&node),
+            "a block-level Code node must not nest inside a Paragraph"
+        );
+        assert!(has_code(&node), "expected a block-level Code node in the tree");
     }
 }

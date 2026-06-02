@@ -61,22 +61,9 @@ impl TreeRenderable for Prose {
     /// embedding shape returned by [`Prose::to_render_nodes`] unchanged for
     /// containers.
     fn render_tree(&self) -> RenderNode {
-        let mut blocks: Vec<RenderNode> = Vec::new();
-        let mut paragraph: Vec<RenderNode> = Vec::new();
-
-        for node in self.to_render_nodes() {
-            if matches!(node.kind, NodeKind::Code { .. }) {
-                if !paragraph.is_empty() {
-                    blocks.push(RenderNode::paragraph(std::mem::take(&mut paragraph)));
-                }
-                blocks.push(node);
-            } else {
-                paragraph.push(node);
-            }
-        }
-        if !paragraph.is_empty() {
-            blocks.push(RenderNode::paragraph(paragraph));
-        }
+        let blocks = crate::render_tree::projection::fold_prose_nodes_into_blocks(
+            self.to_render_nodes(),
+        );
 
         let mut root = RenderNode::root(blocks);
         if self.layout != Layout::default() {
