@@ -7,7 +7,7 @@
 
 use std::ops::Range;
 
-use super::parse_utils::{find_code_regions, is_in_code_region};
+use super::parse_utils::{find_code_regions, is_in_code_region, strip_blockquote_prefix};
 
 /// Which kind of block opened a pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,7 +95,12 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
         if !trimmed.is_empty() {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
             if !is_in_code_region(first_non_ws, &code_regions) {
-                if let Some(after) = trimmed.strip_prefix("::block") {
+                // Recognize directives that sit inside a block quote by skipping
+                // any leading `>` markers; the marker prefix is captured later
+                // (in `parse_shell_block_region`) so the rendered output can be
+                // re-quoted at the splice boundary.
+                let directive = strip_blockquote_prefix(trimmed);
+                if let Some(after) = directive.strip_prefix("::block") {
                     // Make sure it's not ::blockquote or similar
                     if after.is_empty() || after.starts_with(char::is_whitespace) {
                         let body_start = span_end;
@@ -108,7 +113,7 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
                             opening_text,
                         ));
                     }
-                } else if let Some(after) = trimmed.strip_prefix("::shell-block") {
+                } else if let Some(after) = directive.strip_prefix("::shell-block") {
                     // Make sure it's not a longer prefix like ::shell-blocker
                     if after.is_empty() || after.starts_with(char::is_whitespace) {
                         let body_start = span_end;
@@ -121,7 +126,7 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
                             opening_text,
                         ));
                     }
-                } else if let Some(after) = trimmed.strip_prefix("::end-block") {
+                } else if let Some(after) = directive.strip_prefix("::end-block") {
                     let trailing = after.trim();
                     if !trailing.is_empty() {
                         return Err(BlockPairError::TrailingContent {
@@ -210,6 +215,17 @@ mod tests {
         let pairs = scan_block_pairs(content).unwrap();
         assert_eq!(pairs.len(), 1);
         assert_eq!(pairs[0].kind, BlockOpenKind::Page);
+    }
+
+    #[test]
+    fn blockquote_marked_shell_block_is_paired() {
+        // `>`-led opener and closer are recognized once their block-quote markers
+        // are skipped, so a block-quoted shell block pairs like any other.
+        let content = "> ::shell-block\n> echo hi\n> ::end-block\n";
+        let pairs = scan_block_pairs(content).unwrap();
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].kind, BlockOpenKind::Shell);
+        assert_eq!(&content[pairs[0].body_span.clone()], "> echo hi\n");
     }
 
     #[test]

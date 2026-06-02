@@ -593,6 +593,19 @@ mod tests {
     }
 
     #[test]
+    fn indented_block_trailing_newline_does_not_become_indent_only_line() {
+        // `render_block_output` trims each command and appends a single newline,
+        // so a block whose only command emits a trailing newline still ends in a
+        // bare newline after re-indenting — never an indentation-only `"    "`
+        // line. Mirrors the `::shell` trailing-newline guarantee.
+        let content = "- intro\n\n    ::shell-block\n    printf 'one\\n'\n    ::end-block\n\n- next\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert!(result.contains("    one\n\n- next"), "got: {result:?}");
+        assert!(!result.contains("    one\n    "), "got: {result:?}");
+    }
+
+    #[test]
     fn empty_indented_block_does_not_become_indentation_only() {
         let content = "- intro\n\n    ::shell-block\n    ::end-block\n\n- next\n";
         let (result, report) = run_block_stage(content);
@@ -635,15 +648,26 @@ mod tests {
     }
 
     #[test]
-    fn blockquote_marked_shell_block_is_not_a_directive() {
-        // A `>`-led opener is not recognized as a shell-block: `scan_block_pairs`
-        // requires the trimmed line to start with `::shell-block`, and the
-        // captured indent only ever covers leading whitespace. This mirrors the
-        // `::shell` parser's column-1 / leading-whitespace semantics, so a
-        // block-quoted shell block is left as literal text unchanged.
-        let content = "> ::shell-block\n> echo hello\n> ::end-block\n";
+    fn blockquote_marked_shell_block_output_is_re_quoted() {
+        // A `>`-led shell block is recognized: the opener, body, and closer
+        // markers are stripped for execution, and the rendered output is
+        // re-quoted with the opener's `> ` prefix — including the blank
+        // separator — so it stays inside the block quote rather than escaping it.
+        let content = "> ::shell-block\n> echo hello\n> echo world\n> ::end-block\n";
         let (result, report) = run_block_stage(content);
-        assert_eq!(report.shell_blocks_applied, 0);
-        assert_eq!(result, content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert!(result.contains("> hello\n> \n> world\n"), "got: {result:?}");
+        assert!(!result.contains("\nhello\n"), "got: {result:?}");
+    }
+
+    #[test]
+    fn blockquote_shell_block_output_is_nested_in_blockquote_in_commonmark() {
+        // The re-quoted output keeps the whole region inside a single
+        // <blockquote> rather than breaking out into a sibling block.
+        let content = "> ::shell-block\n> echo hello\n> echo world\n> ::end-block\n";
+        let html = run_block_stage_to_html(content);
+        assert_eq!(html.matches("<blockquote>").count(), 1, "got: {html}");
+        assert!(html.contains("hello"), "got: {html}");
+        assert!(html.contains("world"), "got: {html}");
     }
 }

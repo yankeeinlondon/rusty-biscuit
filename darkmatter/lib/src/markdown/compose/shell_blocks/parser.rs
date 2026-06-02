@@ -1,6 +1,7 @@
 //! Parameter parsing for `::shell-block` opener lines.
 
 use super::types::{ShellBlockError, ShellBlockRegion, SourceExcerpt};
+use crate::markdown::compose::parse_utils::directive_prefix_len;
 use crate::markdown::compose::shell_expansion::types::ErrorHandling;
 use std::time::Duration;
 
@@ -11,14 +12,16 @@ pub(crate) fn parse_shell_block_region(
 ) -> Result<ShellBlockRegion, ShellBlockError> {
     let opening_text = &content[pair.span.start..pair.span.end];
     let opener_line = opening_text.lines().next().unwrap_or(opening_text);
-    // Exact leading whitespace prefix; preserved verbatim so the block's
-    // rendered output can be re-indented under its container. An indented
-    // opener must also have its whitespace stripped before parameter parsing,
-    // otherwise `strip_prefix("::shell-block")` fails and the param parser
-    // chokes on the leading `:`.
-    let indent = opener_line[..opener_line.len() - opener_line.trim_start().len()].to_string();
+    // Capture the opener's leading prefix — indentation whitespace plus any
+    // block-quote markers (e.g. `> `). It is preserved verbatim so the block's
+    // rendered output can be re-indented and re-quoted under its container, and
+    // it must be stripped before parameter parsing, otherwise
+    // `strip_prefix("::shell-block")` fails and the param parser chokes on the
+    // leading `>` / `:`.
+    let prefix_len = directive_prefix_len(opener_line);
+    let indent = opener_line[..prefix_len].to_string();
     let (options, timeout_override) =
-        parse_opener_params(opener_line.trim_start(), pair.start_line)?;
+        parse_opener_params(&opener_line[prefix_len..], pair.start_line)?;
 
     Ok(ShellBlockRegion {
         options,
@@ -358,6 +361,16 @@ mod tests {
         let content = "\t::shell-block\n\techo hi\n\t::end-block\n";
         let region = parse_shell_block_region(content, &shell_pair(content)).unwrap();
         assert_eq!(region.indent, "\t");
+    }
+
+    #[test]
+    fn blockquote_opener_captures_marker_indent_and_parses_params() {
+        // The `> ` block-quote marker is captured as the indent and stripped
+        // before parameter parsing, so options after the marker still parse.
+        let content = "> ::shell-block timeout=5\n> echo hi\n> ::end-block\n";
+        let region = parse_shell_block_region(content, &shell_pair(content)).unwrap();
+        assert_eq!(region.indent, "> ");
+        assert_eq!(region.timeout_override, Some(Duration::from_secs(5)));
     }
 
     #[test]

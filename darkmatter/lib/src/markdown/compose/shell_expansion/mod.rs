@@ -775,6 +775,37 @@ mod integration_tests {
         assert!(!body.contains("    one"), "got: {body:?}");
     }
 
+    #[test]
+    fn indented_shell_trailing_newline_does_not_become_indent_only_line() {
+        // Output ending in a trailing newline keeps that newline bare: the final
+        // content line is indented, but the trailing newline is NOT followed by
+        // an indentation-only `"    "` line. There is no further output line for
+        // such a prefix to keep nested, and a trailing `""` vs `"    "` are
+        // CommonMark-equivalent at the end of a container.
+        let content = "- intro\n\n    ::shell printf 'one\\n'\n\n- next\n";
+        let body = compose_shell_only(content);
+        assert!(body.contains("    one\n\n- next"), "got: {body:?}");
+        assert!(!body.contains("    one\n    "), "got: {body:?}");
+    }
+
+    #[test]
+    fn blockquote_shell_output_is_prefixed_with_markers() {
+        // A `::shell` directive inside a block quote replays the `> ` markers on
+        // every emitted line — including the blank separator — so the output
+        // stays inside the quote.
+        let content = "> intro\n>\n> ::shell printf 'one\\n\\ntwo\\n'\n";
+        let body = compose_shell_only(content);
+        assert!(body.contains("> one\n> \n> two\n"), "got: {body:?}");
+        assert!(!body.contains("\none\n"), "got: {body:?}");
+    }
+
+    #[test]
+    fn nested_blockquote_shell_output_is_prefixed_with_nested_markers() {
+        let content = "> > ::shell printf 'one\\ntwo\\n'\n";
+        let body = compose_shell_only(content);
+        assert!(body.contains("> > one\n> > two\n"), "got: {body:?}");
+    }
+
     /// Composes `content` through the shell stage, then renders the result to
     /// HTML so the splice can be validated against the CommonMark block
     /// structure rather than raw substrings.
@@ -803,6 +834,18 @@ mod integration_tests {
         let content = "- intro\n\n::shell printf 'one\\ntwo\\n'\n\n- next\n";
         let html = compose_shell_to_html(content);
         assert_eq!(html.matches("<ul>").count(), 2, "got: {html}");
+    }
+
+    #[test]
+    fn blockquote_shell_output_is_nested_inside_blockquote_in_commonmark() {
+        // The `> ` markers keep the spliced output inside the quote, so the whole
+        // document renders as a single <blockquote> rather than the directive
+        // breaking out of it.
+        let content = "> intro\n>\n> ::shell printf 'one\\ntwo\\n'\n";
+        let html = compose_shell_to_html(content);
+        assert_eq!(html.matches("<blockquote>").count(), 1, "got: {html}");
+        assert!(html.contains("one"), "got: {html}");
+        assert!(html.contains("two"), "got: {html}");
     }
 
     #[test]

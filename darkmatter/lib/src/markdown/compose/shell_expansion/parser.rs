@@ -2,7 +2,9 @@
 
 use super::tokenize::{ShellToken, parse_pipeline, tokenize};
 use super::types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionError};
-use crate::markdown::compose::parse_utils::{find_code_regions, is_in_code_region};
+use crate::markdown::compose::parse_utils::{
+    directive_prefix_len, find_code_regions, is_in_code_region,
+};
 use biscuit_terminal::errors::SourceContext;
 
 /// Parses all `::shell` directives from markdown content.
@@ -47,11 +49,14 @@ pub fn parse_directives(
 
         // Check if this line is inside a code region
         if !is_in_code_region(line_start, &code_regions) {
-            let trimmed = line.trim();
-            if let Some(command_text) = trimmed.strip_prefix("::shell ") {
-                // Exact leading whitespace prefix; preserved verbatim so the
-                // directive's output can be re-indented under its container.
-                let indent = line[..line.len() - line.trim_start().len()].to_string();
+            // Detect the directive after any block-quote markers and indentation
+            // whitespace. The captured prefix (e.g. `> > ` or `    `) is replayed
+            // verbatim on every output line so the splice stays nested in its
+            // container — a block quote, a list item, or the document root.
+            let prefix_len = directive_prefix_len(line);
+            let after = line[prefix_len..].trim_end();
+            if let Some(command_text) = after.strip_prefix("::shell ") {
+                let indent = line[..prefix_len].to_string();
 
                 // Parse the command
                 let tokens = tokenize(command_text, &ctx).map_err(|e| {
@@ -367,6 +372,34 @@ And `::shell echo inline` should also be ignored.
         let content = "::shell echo hello\n";
         let directives = parse_directives(content, dummy_ctx(content)).unwrap();
         assert_eq!(directives[0].indent, "");
+    }
+
+    #[test]
+    fn parse_directive_in_blockquote_captures_marker_indent() {
+        let content = "> ::shell echo hello\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].executable, "echo");
+        assert_eq!(directives[0].args, vec!["hello"]);
+        assert_eq!(directives[0].indent, "> ");
+    }
+
+    #[test]
+    fn parse_directive_in_nested_blockquote_captures_marker_indent() {
+        let content = "> > ::shell echo hello\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].executable, "echo");
+        assert_eq!(directives[0].indent, "> > ");
+    }
+
+    #[test]
+    fn parse_directive_mid_line_after_blockquote_is_not_a_directive() {
+        // `::shell` must be at the directive position (only markers/whitespace
+        // before it); a `::shell` that follows prose stays literal text.
+        let content = "> some text ::shell echo hello\n";
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+        assert_eq!(directives.len(), 0);
     }
 
     #[test]
