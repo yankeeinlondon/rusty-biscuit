@@ -1,13 +1,13 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
-assertion_line: 52
 expression: out
 ---
 ⤫ TransclusionError: The reference in doc.md could not be resolved.
 ┃ Invalid file reference //weird found in:
 ┃ 
-┃     1 │ line 1
-┃   > 2 │ line 2
-┃     3 │ line 3
-┃     4 │ line 4
+┃ ```md
+┃       1 │ line 1
+┃     > 2 │ line 2
+┃       3 │ line 3
+┃       4 │ line 4
 Verify the path exists and matches your configuration limits.

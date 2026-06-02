@@ -1,14 +1,14 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/condition.rs
-assertion_line: 30
 expression: out
 ---
 ⤫ ConditionError: parse failed
 ┃ Condition parsing failed for when="a &&& b":
 ┃ 
-┃     3 │ line 3
-┃   > 4 │ line 4
-┃     5 │ line 5
+┃ ```md
+┃       3 │ line 3
+┃     > 4 │ line 4
+┃       5 │ line 5
 ┃ 
 ┃     ^ (near position 3)
 ┃ 
