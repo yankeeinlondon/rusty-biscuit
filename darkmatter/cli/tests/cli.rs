@@ -1,3 +1,10 @@
+// The resolved-layout-precedence tests exercise `DarkmatterPage`'s still-active
+// `Page*` getters (`margin()`, `padding()`, `fill_for()`, `alignment_for()`).
+// Migrating those to `renderable::layout::Layout` is the deferred Spec A
+// milestone; until then this mirrors the library's own module-level allow in
+// `darkmatter/lib/src/layout/mod.rs`.
+#![allow(deprecated)]
+
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::io::Write;

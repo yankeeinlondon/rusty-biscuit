@@ -3,6 +3,11 @@
 //! These tests capture the full terminal output for the worked example described
 //! in `darkmatter/features/2026-05-08-darkmatter-layout/spec.md`.
 
+// Exercises `DarkmatterPage`'s still-active `Page*` types; migration to
+// `renderable::layout::Layout` is the deferred Spec A milestone. Mirrors the
+// library's own allow in `darkmatter/lib/src/layout/mod.rs`.
+#![allow(deprecated)]
+
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::layout::{DarkmatterPage, PageAlignment, PageBackground, PageComponent};
 use darkmatter::markdown::Markdown;
