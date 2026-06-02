@@ -438,6 +438,10 @@ pub struct ReleaseInfo {
 /// CI/CD pipeline or workflow information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CiCdInfo {
+    /// CI/CD provider name (e.g., "GitHub Actions", "GitLab CI").
+    pub provider: String,
+    /// Path to the CI/CD configuration file.
+    pub config_path: Option<String>,
     /// Workflow/pipeline name.
     pub name: String,
     /// Current status: "running", "completed", "failed", etc.
@@ -448,6 +452,10 @@ pub struct CiCdInfo {
     pub html_url: Option<String>,
     /// When this run started.
     pub started_at: Option<String>,
+    /// Branch this run was triggered from.
+    pub head_branch: Option<String>,
+    /// Event that triggered this run (e.g., "push", "pull_request").
+    pub event: Option<String>,
 }
 
 /// A reference to another repository in the same organization.
