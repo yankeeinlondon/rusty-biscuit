@@ -334,6 +334,22 @@ envelope.** If it falsely matches as an autolink or partial HTML tag,
 the format breaks and we need a different visible bracket pair (e.g.
 `{{|NAME|}}`).
 
+> **RESOLVED (Phase 1).** The `<<NAME>>` form is **broken**: pulldown-cmark
+> tokenizes the inner `<name>` as inline HTML (`<mark>` is a real element,
+> `<dim>` still matches the open-tag production). The locked envelope marker
+> is the **pipe-free** **`{{!TOKEN!}}`** + U+FDD0, giving the canonical envelope
+> `~~{{!TOKEN!}}\u{FDD0}payload{{!TOKEN!}}\u{FDD0}~~`. See
+> [`phase-1-prototype-notes.md`](./phase-1-prototype-notes.md) and the
+> prototype `darkmatter/lib/tests/inline_envelope_prototype.rs`. All later
+> references to `<<NAME>>` / `<<TOKEN>>` in this spec are superseded by
+> `{{!TOKEN!}}`.
+>
+> **REVISED (review-1).** The marker was originally `{{|TOKEN|}}`; the `|` bytes
+> corrupted GFM table cells holding a mark/dim span, so the marker is now
+> pipe-free (`{{!TOKEN!}}`). The rewriter also pre-parses the source to leave
+> code spans, code blocks, raw HTML, link destinations/titles, and image
+> constructs untouched. See `darkmatter/lib/src/markdown/render_tree/inline_extension.rs`.
+
 ### Multi-field payload separator
 
 Tooltips encode `[term]^{def}` as `<<tooltip>>U+FDD0 term ‖ def

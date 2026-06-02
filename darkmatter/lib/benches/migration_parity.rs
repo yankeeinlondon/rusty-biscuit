@@ -341,7 +341,7 @@ fn source_for(name: &str) -> SourceDescriptor {
 /// Fixtures whose names imply darkmatter-inline content (`==mark==`,
 /// `⌄dim⌄`, HR-attribute paragraphs) must route through
 /// [`fold_markdown_spanned_with_frontmatter`] so the recorded baseline
-/// reflects the span-aware processor cost the spec's DMTR-6 corpus calls out
+/// reflects the inline-span rewriter cost the spec's DMTR-6 corpus calls out
 /// — closes review-4 finding 3. All other fixtures stay on the plain
 /// [`fold_markdown_to_document`] path because that is what the legacy
 /// terminal / HTML renderers consume.
@@ -363,7 +363,7 @@ fn fold_fixture(
 }
 
 /// Returns `true` for fixture names that contain darkmatter-inline content
-/// the span-aware processor chain is responsible for.
+/// the inline-span rewriter is responsible for.
 fn uses_span_aware_fold(name: &str) -> bool {
     matches!(name, "mark_dim_hr")
 }
@@ -506,6 +506,36 @@ fn bench_fold_only(c: &mut Criterion) {
     group.finish();
 }
 
+/// `fold_production`: folds **every** fixture through the production span-aware
+/// fold ([`fold_markdown_spanned_with_frontmatter`]) — the path the public
+/// `to_render_document` entry point always takes.
+///
+/// [`bench_fold_only`] routes only `mark_dim_hr` through the span-aware fold and
+/// every other fixture through the plain [`fold_markdown_to_document`], which
+/// matches what the *legacy* renderers consume but hides the source-rewrite
+/// scan cost the production tree path pays on ordinary, no-inline documents.
+/// This group exposes that cost: each no-inline fixture here pays the
+/// `rewrite_inline_extensions` scan (and, when a candidate delimiter is found,
+/// the protected-region pre-parse) exactly as production does. Closes review-1
+/// finding 4.
+fn bench_fold_production(c: &mut Criterion) {
+    let fixtures = fixtures();
+
+    let mut group = c.benchmark_group("migration/fold_production");
+    group.sample_size(20);
+    for (name, input) in &fixtures {
+        let md: Markdown = input.as_str().into();
+        group.bench_function(*name, |b| {
+            b.iter(|| {
+                let (doc, diags) =
+                    fold_markdown_spanned_with_frontmatter(source_for(name), black_box(&md));
+                black_box((doc, diags))
+            })
+        });
+    }
+    group.finish();
+}
+
 /// `full_pipeline`: compose + render, side by side. Uses
 /// [`compose_with`](Markdown::compose_with) with default options so the
 /// composition cost is included on both sides.
@@ -594,6 +624,7 @@ criterion_group!(
     bench_browser,
     bench_markdown,
     bench_fold_only,
+    bench_fold_production,
     bench_full_pipeline,
     bench_fold_once_multi_target,
 );

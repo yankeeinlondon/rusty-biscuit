@@ -463,6 +463,7 @@ impl Writer<'_> {
             | NodeKind::Strong { .. }
             | NodeKind::Delete { .. }
             | NodeKind::Span { .. }
+            | NodeKind::Extended { .. }
             | NodeKind::InlineCode { .. }
             | NodeKind::Link { .. }
             | NodeKind::Image { .. }
@@ -751,6 +752,20 @@ impl Writer<'_> {
             }
             NodeKind::SoftBreak => Ok(" ".to_string()),
             NodeKind::HardBreak => Ok("\n".to_string()),
+            // Built-in tokens lower to Prose markup: `mark` highlights via
+            // reverse video (`<reverse>` → SGR 7) and `dim` dims (`<dim>` → SGR
+            // 2), mirroring the legacy span-class path in `apply_classes`. An
+            // unrecognized token renders its children as plain inline content.
+            NodeKind::Extended {
+                token, children, ..
+            } => {
+                let inner = self.render_inline(children, effective)?;
+                Ok(match token.as_ref() {
+                    "mark" => format!("<reverse>{inner}</reverse>"),
+                    "dim" => format!("<dim>{inner}</dim>"),
+                    _ => inner,
+                })
+            }
             // A non-inline node appearing in an inline position is a
             // structural problem the validator would have rejected; treat it
             // defensively by rendering it as a block. Enumerated explicitly
@@ -1392,16 +1407,18 @@ fn wrap_column_lines(rendered: &str, width: u32) -> String {
 /// Builds a [`HorizontalRule`] from `darkmatter.hr.*` hints on a
 /// [`NodeKind::ThematicBreak`] node.
 ///
-/// Darkmatter's span-aware fold lowers HR-attribute paragraphs (e.g.
-/// `--- { style: waves, weight: thick }`) into a [`NodeKind::ThematicBreak`]
+/// Darkmatter's fold lowers HR-attribute paragraphs (e.g.
+/// `--- { kind: waves, weight: thick }`) into a [`NodeKind::ThematicBreak`]
 /// whose [`NodeAttrs::data`] carries string-valued hints under the
 /// `darkmatter.hr` namespace — see
 /// `renderable/features/2026-05-20-darkmatter-tree/span-aware-processor-design.md`.
-/// Without consuming those hints the terminal renderer would emit a plain
-/// rule for every HR regardless of authored attributes (review-4 finding 2).
+/// The visual rule kind lives under the canonical `kind` hint (legacy `style`
+/// is normalized to `kind` during the fold). Without consuming those hints the
+/// terminal renderer would emit a plain rule for every HR regardless of
+/// authored attributes (review-4 finding 2).
 ///
 /// Unknown enum values fall back to the [`HorizontalRule`] defaults so a
-/// malformed `style: dashse` still produces output rather than panicking.
+/// malformed `kind: dashse` still produces output rather than panicking.
 ///
 /// [`NodeAttrs::data`]: renderable::tree::NodeAttrs
 fn horizontal_rule_from_attrs(attrs: &renderable::tree::NodeAttrs) -> HorizontalRule {
@@ -1414,8 +1431,8 @@ fn horizontal_rule_from_attrs(attrs: &renderable::tree::NodeAttrs) -> Horizontal
     };
 
     let mut rule = HorizontalRule::new();
-    if let Some(style) = hint_str("style") {
-        rule = match style.as_str() {
+    if let Some(kind) = hint_str("kind") {
+        rule = match kind.as_str() {
             "dashes" => rule.style(RuleStyle::Dashes),
             "dots" => rule.style(RuleStyle::Dots),
             "waves" => rule.style(RuleStyle::Waves),
@@ -1538,6 +1555,7 @@ fn is_inline_kind(kind: &NodeKind) -> bool {
             | NodeKind::Strong { .. }
             | NodeKind::Delete { .. }
             | NodeKind::Span { .. }
+            | NodeKind::Extended { .. }
             | NodeKind::InlineCode { .. }
             | NodeKind::Link { .. }
             | NodeKind::Image { .. }
@@ -1982,6 +2000,46 @@ mod render_tree_tests {
         let node = RenderNode::paragraph(vec![RenderNode::text("hello world")]);
         let out = render(&node);
         assert!(strip_escape_codes(&out.output).contains("hello world"));
+    }
+
+    #[test]
+    fn render_tree_extended_unknown_token_renders_children() {
+        // An unrecognized token renders its children as plain inline content;
+        // the wrapper itself adds nothing to the output.
+        let node = RenderNode::paragraph(vec![
+            RenderNode::text("before "),
+            RenderNode::extended(
+                "custom-token",
+                vec![RenderNode::strong(vec![RenderNode::text("inner")])],
+                None,
+            ),
+            RenderNode::text(" after"),
+        ]);
+        let out = strip_escape_codes(&render(&node).output);
+        assert_eq!(out, "before inner after");
+    }
+
+    #[test]
+    fn render_tree_extended_mark_and_dim_emit_sgr() {
+        // `mark` highlights via reverse video (SGR 7); `dim` dims (SGR 2). The
+        // payload text survives once the escape codes are stripped.
+        let mark = RenderNode::paragraph(vec![RenderNode::extended(
+            "mark",
+            vec![RenderNode::text("highlighted")],
+            None,
+        )]);
+        let out = render(&mark);
+        assert!(out.output.contains("\x1b[7m"));
+        assert!(strip_escape_codes(&out.output).contains("highlighted"));
+
+        let dim = RenderNode::paragraph(vec![RenderNode::extended(
+            "dim",
+            vec![RenderNode::text("quiet")],
+            None,
+        )]);
+        let out = render(&dim);
+        assert!(out.output.contains("\x1b[2m"));
+        assert!(strip_escape_codes(&out.output).contains("quiet"));
     }
 
     /// Builds render options with a terminal of explicit color / nerd-font
@@ -2981,7 +3039,7 @@ mod render_tree_tests {
 
         let mut hr = RenderNode::thematic_break();
         let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "style", serde_json::json!("waves"));
+        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
 
         let term = Terminal::builder()
             .width(40)

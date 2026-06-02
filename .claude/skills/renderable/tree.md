@@ -13,12 +13,20 @@ the tree into concrete output.
 
 - **`RenderNode`** — a node with a `kind` (`NodeKind`), a `SourceSpan`, and
   `NodeAttrs` (id / classes / `data` map).
-- **`NodeKind`** — 26 block and inline variants: `Root`, `Heading`,
+- **`NodeKind`** — 27 block and inline variants: `Root`, `Heading`,
   `Section`, `Paragraph`, `BlockQuote`, `List`, `ListItem`, `Code`,
   `ThematicBreak`, `Table`, `TableRow`, `TableCell`, `FootnoteDefinition`,
   `Text`, `Emphasis`, `Strong`, `Delete`, `Span`, `InlineCode`, `Link`,
   `Image`, `FootnoteReference`, `SoftBreak`, `HardBreak`, `Html`,
-  `Unsupported`.
+  `Extended`, `Unsupported`. `Extended { token, children, payload }` is the
+  target-agnostic inline-extension node: renderers dispatch on `token`. The
+  built-in `mark` and `dim` tokens lower per target — `mark` to `<mark>`
+  (Browser, recovering semantic fidelity), reverse video / SGR 7 (Terminal),
+  and `==children==` (Markdown); `dim` to `<span style="opacity:0.6">`
+  (Browser), `<dim>` / SGR 2 (Terminal), and `⌄children⌄` (Markdown). A token a
+  renderer does not recognize falls back to a neutral default that preserves
+  `children` (a `<span class="extended-{token}">` in Browser, plain inline
+  content in Markdown and Terminal).
 - **`Document`** — a `RenderNode` tree plus a `SourceRegistry` of origins and
   `DocumentMetadata` (`Frontmatter`).
 - **Origin tracking** — `SourceSpan`, `SourceLocation`, `SourceId`,

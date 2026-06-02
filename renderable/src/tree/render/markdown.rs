@@ -330,8 +330,30 @@ impl Writer<'_> {
                 "  \n".to_string()
             }),
             NodeKind::Html { value, block } => self.render_html(node, value, *block),
+            NodeKind::Extended {
+                token, children, ..
+            } => self.render_extended(token, children),
             NodeKind::Unsupported { label } => self.render_unsupported(node, label),
         }
+    }
+
+    /// Renders a [`NodeKind::Extended`] node.
+    ///
+    /// Built-in tokens roundtrip to their darkmatter source syntax: `mark`
+    /// emits `==children==` and `dim` emits `⌄children⌄` (U+2304). A token
+    /// without a Markdown spelling falls back to rendering its `children` as
+    /// plain inline Markdown.
+    fn render_extended(
+        &mut self,
+        token: &str,
+        children: &[RenderNode],
+    ) -> Result<String, RenderError> {
+        let inner = self.render_inline(children)?;
+        Ok(match token {
+            "mark" => format!("=={inner}=="),
+            "dim" => format!("\u{2304}{inner}\u{2304}"),
+            _ => inner,
+        })
     }
 
     /// Renders a sequence of block-level nodes, joined by blank lines.
@@ -748,6 +770,48 @@ mod tests {
         assert_eq!(render(&em).output, "_e_");
         assert_eq!(render(&st).output, "**s**");
         assert_eq!(render(&de).output, "~~d~~");
+    }
+
+    #[test]
+    fn extended_unknown_token_renders_children_transparently() {
+        // An unrecognized token has no Markdown spelling, so it drops its
+        // wrapper and renders its children.
+        let node =
+            RenderNode::extended("custom-token", vec![RenderNode::text("highlighted")], None);
+        assert_eq!(render(&node).output, "highlighted");
+
+        // Nested inline content is preserved through the fallback.
+        let nested = RenderNode::extended(
+            "custom-token",
+            vec![
+                RenderNode::text("a "),
+                RenderNode::strong(vec![RenderNode::text("b")]),
+            ],
+            None,
+        );
+        assert_eq!(render(&nested).output, "a **b**");
+    }
+
+    #[test]
+    fn extended_mark_and_dim_roundtrip_to_source_syntax() {
+        // `mark` roundtrips to `==…==` and `dim` to `⌄…⌄` (U+2304).
+        let mark = RenderNode::extended("mark", vec![RenderNode::text("highlighted")], None);
+        assert_eq!(render(&mark).output, "==highlighted==");
+
+        let dim = RenderNode::extended("dim", vec![RenderNode::text("quiet")], None);
+        assert_eq!(render(&dim).output, "\u{2304}quiet\u{2304}");
+
+        // Nested mark/dim preserves the inner markdown.
+        let nested = RenderNode::extended(
+            "mark",
+            vec![RenderNode::extended(
+                "dim",
+                vec![RenderNode::strong(vec![RenderNode::text("b")])],
+                None,
+            )],
+            None,
+        );
+        assert_eq!(render(&nested).output, "==\u{2304}**b**\u{2304}==");
     }
 
     #[test]

@@ -184,8 +184,15 @@ No renderable tree IR change is required.
 
 ## Preserved Behavior
 
-- Byte-identical output for every existing HR-attribute fixture, including
-  `mark_dim_hr`.
+- Byte-stable output for every existing HR-attribute fixture, including
+  `mark_dim_hr`. The lift must not change what the render-tree pipeline emits.
+  This is **not** a legacy-renderer-vs-tree byte-equality claim — those are two
+  different renderers and equality between them is meaningless (see
+  `darkmatter/lib/tests/render_tree_parity.rs`, which asserts only semantic
+  invariants between the pipelines). The byte-stable contract is enforced by
+  pinning the **tree pipeline's own** output for the HR fixtures with insta
+  snapshots in `darkmatter/lib/tests/render_tree_hr_snapshots.rs`; any drift in
+  the lifted `BlockExtensionProcessor` path fails an exact-match assertion.
 - Same simple-paragraph policy. Paragraphs with emphasis, links, inline code,
   mark/dim spans, raw HTML, or any other nested inline events must not rewrite
   to an HR.
@@ -249,13 +256,51 @@ Ordered so each step can land on a green tree:
 5. **Retire `SpannedRuleProcessor`.** Delete or make unreachable the old
    `SpannedRuleProcessor` path from `span.rs` once the new processor is
    verified. `span.rs` should then contain only inline-span compatibility
-   code until the sibling spec removes it completely.
+   code until the sibling spec removes it completely. This step retires the
+   **span-aware** HR processor only; the legacy event-stream `RuleProcessor`
+   is intentionally preserved — see [Legacy `RuleProcessor` Retention](#legacy-ruleprocessor-retention).
 6. **Run tests and parity checks.** Verify the full test corpus,
    HR-attribute unit tests, strict-style warning tests, and the
    `migration_parity` bench outputs. Expected performance change is neutral;
    expected output change is none.
 7. **Hand off to inline-span.** The sibling spec can then replace and delete
    `SpannedInlineStyleProcessor` without losing HR-attribute support.
+
+## Legacy `RuleProcessor` Retention
+
+This lift retires the **span-aware** `SpannedRuleProcessor` from the
+render-tree chain. It deliberately does **not** retire the legacy
+event-stream `RuleProcessor`
+(`darkmatter/lib/src/markdown/block/rule_processor.rs`).
+
+`RuleProcessor` remains the active HR-attribute processor for the legacy
+renderers — `Markdown::as_html` (`output/html.rs`) and `for_terminal`
+(`output/terminal.rs`) — which back darkmatter's current public render API.
+The render-tree pipeline is still an internal/experimental entry point
+(`render_tree/mod.rs` keeps `render_tree_html` / `render_tree_terminal`
+`pub(crate)`); the public cutover to the tree path is owned by the
+darkmatter-tree entry-point work, not this spec. Until that cutover lands,
+deleting `RuleProcessor` would break the public renderers.
+
+The two processors now share one parser (`parse_hr_attribute_block`), so there
+is no behavioral fork to worry about while both exist — only one extra
+event-stream iterator adapter that the legacy renderers still depend on.
+
+**Follow-up removal gate.** `RuleProcessor` may be deleted once **all** of the
+following hold:
+
+1. `Markdown::as_html` and `for_terminal` are cut over to the render-tree
+   pipeline (the darkmatter-tree entry-point cutover), or those legacy
+   renderers are themselves retired.
+2. No remaining caller constructs `RuleProcessor` or routes through the
+   `InlineEvent::HorizontalRule` event-stream path.
+3. The shared `parse_hr_attribute_block` helper and the
+   `scan_inline_hr_warnings` preflight remain the single source of truth for
+   HR-attribute parsing and warnings.
+
+Tracking this as an explicit gate keeps the lift honest: the architectural
+goal of removing the HR dependency on **inline-span transport** is met by this
+spec; removing the legacy **event-stream** HR path is a separate, gated step.
 
 ## Performance Expectation
 

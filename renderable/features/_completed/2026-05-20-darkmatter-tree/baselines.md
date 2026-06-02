@@ -176,6 +176,79 @@ legacy comparator renders three targets too, each of which re-parses.
 | `large_code_block` | 64.00 ms      | 38.09 ms     | ≈ 0.60×       |
 | `mark_dim_hr`      | 6.36 ms       | 6.57 ms      | ≈ 1.03×       |
 
+## Recorded Baselines (2026-06-01, `mark_dim_hr` after inline-span cutover)
+
+Captured after the inline-span cutover (`2026-05-26-inline-span` Phase 6),
+which deleted the per-event span-aware inline transport and routes
+`fold_markdown_spanned_with_frontmatter` through the source-layer
+`inline_extension` rewriter. Only the `mark_dim_hr` fixture was re-run, with
+`--warm-up-time 1 --measurement-time 3 --sample-size 10`; the other fixtures'
+rows above are unchanged. Times are Criterion's middle estimate.
+
+| Group                        | Legacy     | Tree       | Tree / Legacy |
+|------------------------------|------------|------------|---------------|
+| `terminal` (TrueColor)       | 5.83 ms    | 4.44 ms    | ≈ 0.76×       |
+| `terminal_no_color`          | 5.87 ms    | 4.45 ms    | ≈ 0.76×       |
+| `browser`                    | 126.61 µs  | 652.04 µs  | ≈ 5.15×       |
+| `markdown` (tree only)       | —          | 573.40 µs  | —             |
+| `fold_only`                  | 9.05 µs    | 157.38 µs  | ≈ 17.4×       |
+| `fold_once_multi_target`     | 5.99 ms    | 5.37 ms    | ≈ 0.90×       |
+
+The `fold_only/tree` cost (157 µs) is the source-rewrite inline-span path that
+replaced the deleted span-aware processor; it is marginally cheaper than the
+prior processor's 164 µs row above, confirming the cutover carried no fold-cost
+regression. The `browser` ratio is dominated by the `mark`/`dim` inline node
+construction plus the `<mark>` recovery, not HR SVG generation (the tree path
+emits a plain `<hr>`). On this capture the terminal `no_color` legacy row no
+longer hits the old `ColorDepth::None` fast path the 2026-05-21 subset recorded
+— the legacy and TrueColor terminal numbers now coincide — so that group is
+reported as captured rather than compared against the earlier microsecond
+figure.
+
+## Recorded Baselines (2026-06-02, `migration/fold_production` production-path fold)
+
+The 2026-06-01 section above only re-ran `mark_dim_hr`, which left the
+production tree path's cost on **no-inline** documents unrecorded. The public
+`to_render_document` entry point always routes through
+`fold_markdown_spanned_with_frontmatter`, so every document — even one with no
+`==mark==` / `⌄dim⌄` — pays the source-layer `rewrite_inline_extensions` scan
+that the legacy renderers never run. This section records that path directly.
+
+Both groups were captured in the same session with
+`--warm-up-time 1 --measurement-time 3 --sample-size 10`. Times are Criterion's
+middle (mean) estimate. The `fold_only/tree` column is the legacy-shaped
+routing: no-inline fixtures fold through the plain `fold_markdown_to_document`
+(no rewriter), and only `mark_dim_hr` folds span-aware. The `fold_production`
+column folds **every** fixture span-aware, as production does. For a no-inline
+fixture the difference between the two columns is precisely the cost the
+production path adds.
+
+| Fixture               | Inline? | `fold_only/tree` | `fold_production` | Scan overhead |
+|-----------------------|---------|------------------|-------------------|---------------|
+| `small_prose`         | no      | 1.20 µs          | 1.99 µs           | +0.79 µs      |
+| `large_prose`         | no      | 47.49 µs         | 61.59 µs          | +14.10 µs     |
+| `large_code_block`    | no      | 6.87 µs          | 34.90 µs          | +28.03 µs     |
+| `large_table`         | no      | 203.97 µs        | 240.47 µs         | +36.50 µs     |
+| `deeply_nested_lists` | no      | 10.15 µs         | 12.90 µs          | +2.75 µs      |
+| `many_links_images`   | no      | 89.68 µs         | 137.44 µs         | +47.76 µs     |
+| `image_heavy`         | no      | 88.61 µs         | 137.57 µs         | +48.96 µs     |
+| `mark_dim_hr`         | yes     | 173.88 µs        | 170.94 µs         | ≈ 0 (same path) |
+
+The no-inline production overhead is the `rewrite_inline_extensions` scan and
+nothing more. `scan_delimiters` makes one linear pass; finding no `==` / `⌄`
+candidate, the rewriter returns the borrowed source unchanged and **never**
+reaches the protected-region pre-parse or the rewrite allocation
+(`inline_extension.rs`, the `delimiters.is_empty()` fast return). The overhead
+therefore tracks document size, not structure: `large_code_block` shows the
+largest *relative* jump (≈5×) only because folding one 600-line code block is
+otherwise trivial, so the ~28 µs linear scan of its ~30 KB source dominates;
+the absolute cost is still small and is paid once per render.
+
+The `mark_dim_hr` row is the control: it routes span-aware in **both** groups,
+so the two columns coincide within run-to-run noise (≈3 µs), confirming the
+cross-group comparison is sound and that the rewrite scan is the only variable
+the no-inline rows isolate.
+
 ## How to Read the Numbers
 
 - The terminal `TrueColor` and `fold_once_multi_target` groups already
@@ -206,6 +279,11 @@ legacy comparator renders three targets too, each of which re-parses.
 - The `fold_only` numbers measure tree-fold cost in isolation. They are
   the lower bound for any tree-target render and are stable across runs
   to within ±2%.
+- The `fold_production` numbers (2026-06-02 section) are the production
+  entry point's true per-document fold cost, including the
+  `rewrite_inline_extensions` scan every document pays. For no-inline
+  documents that scan is the *only* overhead over the plain fold; it is
+  linear in source size and never triggers the protected-region pre-parse.
 
 ## Update Protocol
 

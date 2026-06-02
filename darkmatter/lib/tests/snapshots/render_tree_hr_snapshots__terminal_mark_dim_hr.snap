@@ -1,0 +1,9 @@
+---
+source: darkmatter/lib/tests/render_tree_hr_snapshots.rs
+expression: term
+---
+Lead paragraph with [7mhighlighted phrase[27m and [2mdimmed phrase[22m inline.[0m
+
+≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋≋
+
+Trailing paragraph.

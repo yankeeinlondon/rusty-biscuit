@@ -24,14 +24,18 @@
 //! frontmatter flows through [`renderable::tree::DocumentMetadata::frontmatter`]
 //! without re-parsing through `pulldown-cmark`'s metadata-block options (DMTR-4).
 //!
-//! A span-aware processor chain for `==mark==` / dim inline styles lives in
-//! [`span`]. It produces [`span::SpannedInlineEvent`]s with byte ranges so the
-//! fold can preserve every node's [`renderable::tree::SourceLocation`] when
-//! those Darkmatter constructs appear (DMTR-3). HR-attribute paragraphs are
+//! `==mark==` / `⌄dim⌄` inline styles are handled by the source-layer rewriter
+//! in [`inline_extension`]: it turns those constructs into canonical
+//! GFM-strikethrough envelopes before parsing, and the fold's strikethrough
+//! dispatcher lowers each envelope to a [`renderable::tree::NodeKind::Extended`]
+//! node (`mark` / `dim`) while resolving every span back to the original source
+//! through the rewriter's provenance table. HR-attribute paragraphs are still
 //! lifted out of the event stream by the `block_extension` module, a dedicated
-//! offset-aware block processor that sits between `pulldown-cmark` and the
-//! inline-span chain. The legacy non-spanned `InlineStyleProcessor` and
-//! `RuleProcessor` still back the public renderers and are unchanged.
+//! offset-aware block processor that sits between `pulldown-cmark` and the fold.
+//! See `renderable/features/2026-05-26-inline-span/spec.md`.
+//!
+//! The legacy non-spanned `InlineStyleProcessor` and `RuleProcessor` still back
+//! the public renderers and are unchanged.
 //!
 //! [`Tag`]: pulldown_cmark::Tag
 //!
@@ -54,6 +58,12 @@
 
 pub(crate) mod block_extension;
 pub mod code_renderer;
+// The inline source rewriter backs `fold_markdown_spanned_with_frontmatter`.
+// A few `pub(crate)` helpers on its result types (e.g. `InlineRewrite::
+// was_rewritten`) are exercised only by the module's own unit tests, so the
+// lib-side dead-code lint stays silenced.
+#[allow(dead_code)]
+pub(crate) mod inline_extension;
 // `entrypoints` exposes `pub(crate)` adapter functions that are exercised by
 // integration tests, benches, and the parity harness — none of which live in
 // the lib crate. Silence the lib-side dead-code warnings until the public
@@ -64,7 +74,6 @@ pub mod fold;
 pub mod inventory;
 pub mod pipeline;
 pub mod source;
-pub mod span;
 
 pub use code_renderer::TerminalCodeRenderer;
 pub use fold::{

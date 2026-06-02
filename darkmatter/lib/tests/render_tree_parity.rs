@@ -1228,15 +1228,19 @@ fn render_tree_parity_subscript_divergence() {
 // ---------------------------------------------------------------------------
 // MarkdownPlus target parity (DMTR-5 / DMTR-8 cutover order item 2).
 //
-// MarkdownPlus is the Markdown renderer's richer dialect: span classes the
-// portable Markdown dialect would drop survive as inline HTML. These tests pin
-// that the tree MarkdownPlus path preserves darkmatter-inline structure that
-// portable Markdown cannot, so the cutover-order item-2 target has explicit
-// coverage rather than only smoke tests.
+// MarkdownPlus is the Markdown renderer's richer dialect. The inline-span
+// rewrite folds `==mark==` to an `Extended { token: "mark" }` node, which the
+// Markdown renderer roundtrips to its darkmatter source syntax `==…==` in both
+// dialects — a true source roundtrip rather than the legacy
+// `<span class="mark">` inline-HTML form. This test pins that roundtrip so the
+// cutover-order item-2 target has explicit coverage rather than only smoke
+// tests.
 // ---------------------------------------------------------------------------
 
-/// MarkdownPlus preserves the `mark`-class span (via the span-aware fold) as
-/// inline HTML, where portable Markdown would drop the class.
+/// The inline-span rewrite roundtrips `==highlighted phrase==` back to its
+/// `==…==` source syntax on both the MarkdownPlus and portable Markdown
+/// dialects — the `Extended { token: "mark" }` node has the same Markdown
+/// spelling regardless of dialect.
 #[test]
 fn render_tree_markdown_plus_preserves_mark_span() {
     let name = "mark";
@@ -1244,23 +1248,15 @@ fn render_tree_markdown_plus_preserves_mark_span() {
 
     let plus = tree_markdown_plus_spanned(name, markdown);
     assert!(
-        plus.contains("highlighted phrase"),
-        "MarkdownPlus must preserve the mark text; output:\n{plus}",
-    );
-    assert!(
-        plus.contains("class=\"mark\""),
-        "MarkdownPlus must preserve the mark-class span as inline HTML; output:\n{plus}",
+        plus.contains("==highlighted phrase=="),
+        "MarkdownPlus must roundtrip the mark to its `==…==` source syntax; output:\n{plus}",
     );
 
-    // Portable Markdown drops the class but keeps the visible text.
+    // Portable Markdown roundtrips the same `==…==` source syntax.
     let portable = tree_markdown_portable_spanned(name, markdown);
     assert!(
-        portable.contains("highlighted phrase"),
-        "portable Markdown must keep the visible mark text; output:\n{portable}",
-    );
-    assert!(
-        !portable.contains("class=\"mark\""),
-        "portable Markdown has no span-class equivalent; output:\n{portable}",
+        portable.contains("==highlighted phrase=="),
+        "portable Markdown must roundtrip the mark to its `==…==` source syntax; output:\n{portable}",
     );
 }
 

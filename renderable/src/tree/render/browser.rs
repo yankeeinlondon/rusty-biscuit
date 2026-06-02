@@ -299,7 +299,38 @@ impl Writer<'_> {
             NodeKind::SoftBreak => Ok(text_fragment(" ")),
             NodeKind::HardBreak => Ok(self.void(VoidTag::Br, &node.attrs)),
             NodeKind::Html { value, block } => self.render_html(node, value, *block),
+            NodeKind::Extended {
+                token, children, ..
+            } => self.render_extended(node, token, children),
             NodeKind::Unsupported { label } => self.render_unsupported(node, label),
+        }
+    }
+
+    /// Renders a [`NodeKind::Extended`] node.
+    ///
+    /// Built-in tokens lower to their semantic browser form: `mark` recovers
+    /// the `<mark>` element (closing the legacy `<span class="mark">` fidelity
+    /// regression) and `dim` becomes a `<span>` carrying the shared dim visual
+    /// policy (`opacity:0.6`, matching [`Style`]'s dim emphasis). An
+    /// unrecognized token falls back to a neutral `<span class="extended-{token}">`
+    /// wrapper whose class lets a stylesheet target it; the nested `children`
+    /// are preserved in every case.
+    ///
+    /// [`Style`]: crate::style::Style
+    fn render_extended(
+        &mut self,
+        node: &RenderNode,
+        token: &str,
+        children: &[RenderNode],
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        match token {
+            "mark" => self.block(BlockTag::Mark, &node.attrs, children),
+            "dim" => self.block_with_extra_style(BlockTag::Span, &node.attrs, "opacity:0.6", children),
+            _ => {
+                let mut attrs = node.attrs.clone();
+                attrs.classes.push(format!("extended-{token}"));
+                self.block(BlockTag::Span, &attrs, children)
+            }
         }
     }
 
@@ -333,6 +364,44 @@ impl Writer<'_> {
         Ok(fragment.finalize())
     }
 
+    /// Builds an inline block-tag fragment that also carries an `extra_css`
+    /// inline `style` declaration, merging it onto any `style` produced from
+    /// the node's attrs rather than overwriting it.
+    ///
+    /// Used for tokens (such as `dim`) whose browser lowering has no dedicated
+    /// element and is expressed purely as inline CSS.
+    fn block_with_extra_style(
+        &mut self,
+        tag: BlockTag,
+        attrs: &NodeAttrs,
+        extra_css: &str,
+        children: &[RenderNode],
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        let inline = is_inline_block_tag(&tag);
+        let mut fragment = BrowserFragment::new().define_as_block_tag(tag, "");
+        let mut style_emitted = false;
+        for attr in node_attributes(attrs, inline) {
+            match attr {
+                HtmlAttribute::Other(key, value) if key == "style" => {
+                    fragment = fragment.add_attribute(HtmlAttribute::Other(
+                        "style".into(),
+                        format!("{value};{extra_css}"),
+                    ));
+                    style_emitted = true;
+                }
+                other => fragment = fragment.add_attribute(other),
+            }
+        }
+        if !style_emitted {
+            fragment = fragment
+                .add_attribute(HtmlAttribute::Other("style".into(), extra_css.to_string()));
+        }
+        for child in children {
+            fragment = fragment.add_component(self.render(child)?);
+        }
+        Ok(fragment.finalize())
+    }
+
     /// Builds a void-tag fragment carrying `attrs`.
     fn void(&self, tag: VoidTag, attrs: &NodeAttrs) -> BrowserFragment<Ready> {
         let inline = is_inline_void_tag(&tag);
@@ -351,15 +420,19 @@ impl Writer<'_> {
     /// Renderers that do not understand the hints simply ignore the data
     /// attributes — the design's "renderers that do not understand the hint
     /// should render a normal thematic break" contract still holds because a
-    /// `<hr data-hr-style="waves">` degrades to a plain rule when no CSS
+    /// `<hr data-hr-kind="waves">` degrades to a plain rule when no CSS
     /// targets the data attribute.
+    ///
+    /// The visual rule kind is surfaced as `data-hr-kind` (the canonical hint
+    /// key — legacy `style` is normalized to `kind` during the darkmatter
+    /// fold).
     fn render_thematic_break(&self, attrs: &NodeAttrs) -> BrowserFragment<Ready> {
         let mut fragment = BrowserFragment::new().define_as_void_tag(VoidTag::Hr);
         for attr in node_attributes(attrs, is_inline_void_tag(&VoidTag::Hr)) {
             fragment = fragment.add_attribute(attr);
         }
         const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-        for key in ["style", "alignment", "weight", "width", "color"] {
+        for key in ["kind", "alignment", "weight", "width", "color"] {
             if let Some(value) = attrs.get_hint(HR_NS, key).and_then(|v| v.as_str()) {
                 fragment = fragment.add_attribute(HtmlAttribute::Data(
                     HtmlDataAttribute::new(format!("hr-{key}")),
@@ -1002,6 +1075,7 @@ fn is_inline_block_tag(tag: &BlockTag) -> bool {
             | BlockTag::Span
             | BlockTag::Code
             | BlockTag::A
+            | BlockTag::Mark
     )
 }
 
@@ -1294,6 +1368,54 @@ mod tests {
     }
 
     #[test]
+    fn extended_unknown_token_falls_back_to_classed_span() {
+        // An unrecognized token wraps its children in a neutral
+        // `<span class="extended-{token}">` that a stylesheet can target.
+        let node = RenderNode::extended("custom-token", vec![RenderNode::text("hi")], None);
+        assert_eq!(html(&node), "<span class=\"extended-custom-token\">hi</span>");
+
+        // Nested inline content is preserved, and any author classes are kept
+        // alongside the generated `extended-{token}` class.
+        let mut nested = RenderNode::extended(
+            "custom-token",
+            vec![RenderNode::strong(vec![RenderNode::text("b")])],
+            None,
+        );
+        nested.attrs.classes.push("authored".to_string());
+        assert_eq!(
+            html(&nested),
+            "<span class=\"authored extended-custom-token\"><strong>b</strong></span>"
+        );
+    }
+
+    #[test]
+    fn extended_mark_recovers_semantic_mark_element() {
+        // `mark` lowers to the semantic `<mark>` element, not a classed span —
+        // this recovers the legacy `<span class="mark">` fidelity regression.
+        let node = RenderNode::extended("mark", vec![RenderNode::text("hi")], None);
+        let out = html(&node);
+        assert_eq!(out, "<mark>hi</mark>");
+        assert!(!out.contains("class=\"mark\""));
+        assert!(!out.contains("extended-mark"));
+
+        // Nested inline content is preserved inside the `<mark>`.
+        let nested = RenderNode::extended(
+            "mark",
+            vec![RenderNode::strong(vec![RenderNode::text("b")])],
+            None,
+        );
+        assert_eq!(html(&nested), "<mark><strong>b</strong></mark>");
+    }
+
+    #[test]
+    fn extended_dim_lowers_to_opacity_span() {
+        // `dim` has no dedicated element; it lowers to a span carrying the
+        // shared dim visual policy (`opacity:0.6`).
+        let node = RenderNode::extended("dim", vec![RenderNode::text("hi")], None);
+        assert_eq!(html(&node), "<span style=\"opacity:0.6\">hi</span>");
+    }
+
+    #[test]
     fn text_is_escaped() {
         let para = RenderNode::paragraph(vec![RenderNode::text("a < b & c")]);
         assert_eq!(html(&para), "<p>a &lt; b &amp; c</p>");
@@ -1379,12 +1501,12 @@ mod tests {
     fn thematic_break_surfaces_darkmatter_hr_hints_as_data_attrs() {
         let mut hr = RenderNode::thematic_break();
         let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "style", serde_json::json!("waves"));
+        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
         hr.attrs.set_hint(ns, "weight", serde_json::json!("thick"));
         let rendered = html(&hr);
         assert!(
-            rendered.contains(r#"data-hr-style="waves""#),
-            "expected data-hr-style attribute: {rendered}",
+            rendered.contains(r#"data-hr-kind="waves""#),
+            "expected data-hr-kind attribute: {rendered}",
         );
         assert!(
             rendered.contains(r#"data-hr-weight="thick""#),

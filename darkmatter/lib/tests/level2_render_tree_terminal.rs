@@ -36,6 +36,7 @@
 //! right boundary, blank-line rhythm) — properties an in-process ANSI string
 //! cannot verify. See `run_page_in_pane` and the `level2_page_*` tests.
 
+use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::render_tree::{
     TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
 };
@@ -116,7 +117,7 @@ fn render_tree_terminal_to_tempfile(
         diags.is_empty(),
         "Level 2 fixture must fold without diagnostics: {diags:?}"
     );
-    write_doc_to_tempfile(doc, name)
+    write_doc_to_tempfile(doc, name, None)
 }
 
 /// Renders `body` through the render-tree terminal pipeline using the
@@ -128,6 +129,27 @@ fn render_tree_terminal_spanned_to_tempfile(
     body: &str,
     name: &str,
 ) -> (tempfile::TempDir, std::path::PathBuf) {
+    write_doc_to_tempfile(fold_spanned_doc(body, name), name, None)
+}
+
+/// Like [`render_tree_terminal_spanned_to_tempfile`] but renders at the
+/// **text tier** (`ImageSupport::None`). `HorizontalRule` emits an embedded
+/// image on an image-capable terminal, which the text-capture harness cannot
+/// observe; disabling images forces the glyph form so a styled rule (e.g. the
+/// `≋` waves glyph) is visible in the captured pane.
+fn render_tree_terminal_spanned_text_tier_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    write_doc_to_tempfile(
+        fold_spanned_doc(body, name),
+        name,
+        Some(ImageSupport::None),
+    )
+}
+
+/// Folds `body` through the **span-aware** fold, asserting it folds cleanly.
+fn fold_spanned_doc(body: &str, name: &str) -> renderable::tree::Document {
     let source = SourceDescriptor::Virtual { name: name.into() };
     let md: Markdown = body.into();
     let (doc, diags) = fold_markdown_spanned_with_frontmatter(source, &md);
@@ -135,17 +157,23 @@ fn render_tree_terminal_spanned_to_tempfile(
         diags.is_empty(),
         "Level 2 span-aware fixture must fold without diagnostics: {diags:?}"
     );
-    write_doc_to_tempfile(doc, name)
+    doc
 }
 
-/// Shared write-and-render path for both `render_tree_terminal_to_tempfile`
-/// and `render_tree_terminal_spanned_to_tempfile`. Pins a 120-wide
-/// optimistic terminal so the visible width is repeatable.
+/// Shared write-and-render path for the render-tree terminal fixtures. Pins a
+/// 120-wide optimistic terminal so the visible width is repeatable.
+/// `image_override` forces a specific [`ImageSupport`] tier (e.g.
+/// [`ImageSupport::None`] to make glyph-based components observable as text);
+/// `None` keeps the optimistic terminal's default capabilities.
 fn write_doc_to_tempfile(
     doc: renderable::tree::Document,
     name: &str,
+    image_override: Option<ImageSupport>,
 ) -> (tempfile::TempDir, std::path::PathBuf) {
-    let term = Terminal::new_optimistic(120);
+    let mut term = Terminal::new_optimistic(120);
+    if let Some(support) = image_override {
+        term.image_support = support;
+    }
     // Wire darkmatter's code renderer so fenced code blocks reproduce the
     // syntax-highlighted code-block path the production entry point uses,
     // not the render tree's plain-fence fallback (review-10 finding 2).
@@ -171,6 +199,15 @@ fn run_in_pane(body: &str, name: &str) -> Option<(CapturedFrame, tempfile::TempD
 /// Drives the shared WezTerm pane with the **span-aware** fold path.
 fn run_in_pane_spanned(body: &str, name: &str) -> Option<(CapturedFrame, tempfile::TempDir)> {
     drive_pane(body, name, render_tree_terminal_spanned_to_tempfile)
+}
+
+/// Drives the shared WezTerm pane with the **span-aware** fold at the text
+/// tier (images disabled) so glyph-based components render as observable text.
+fn run_in_pane_spanned_text_tier(
+    body: &str,
+    name: &str,
+) -> Option<(CapturedFrame, tempfile::TempDir)> {
+    drive_pane(body, name, render_tree_terminal_spanned_text_tier_to_tempfile)
 }
 
 /// Shared pane driver — the fold choice is decided by the caller-supplied
@@ -515,7 +552,10 @@ fn level2_tree_dim_renders_dim_sgr_in_real_terminal() {
 #[serial(level2_terminal)]
 fn level2_tree_hr_attributes_render_styled_rule_in_real_terminal() {
     let body = "Lead paragraph.\n\n--- { style: waves }\n\nTrailing paragraph.\n";
-    let Some((frame, _dir)) = run_in_pane_spanned(body, "hr_attributes_spanned") else {
+    // Render at the text tier: an image-capable terminal would emit the rule
+    // as an embedded image the text-capture harness cannot see, so the glyph
+    // form is forced to make the styled rule observable.
+    let Some((frame, _dir)) = run_in_pane_spanned_text_tier(body, "hr_attributes_spanned") else {
         return;
     };
 
@@ -535,20 +575,26 @@ fn level2_tree_hr_attributes_render_styled_rule_in_real_terminal() {
         frame.plain
     );
 
-    // The waves rule glyph is `≋` (U+224B) in Unicode-capable terminals or
-    // `~` in ASCII fallback. A plain (dashed) rule renders `─` (U+2500) or
-    // `-`, so either waves marker is sufficient to prove the renderer
-    // honored the `style: waves` hint instead of falling back to the
-    // default.
-    let has_waves_glyph = frame.plain.contains('\u{224B}') || frame.plain.contains('~');
+    // Isolate the rule line and require it to be a contiguous run of the
+    // waves glyph — `≋` (U+224B) in Unicode-capable terminals, `~` in ASCII
+    // fallback. A plain (dashed) rule renders `─` (U+2500) or `-`, so a line
+    // made entirely of waves glyphs proves the renderer honored `style: waves`
+    // (normalized to the `kind` hint) instead of falling back to the default.
+    //
+    // A bare `frame.plain.contains('~')` was a false-positive risk: a stray
+    // `~` anywhere in the pane (a shell prompt, a `~/path` cwd) satisfied it
+    // with no styled rule present. Matching a whole line of glyphs excludes
+    // those, and the length floor excludes a lone prompt tilde.
+    let is_waves_glyph = |c: char| c == '\u{224B}' || c == '~';
+    let waves_rule_line = frame.plain.lines().find(|line| {
+        let trimmed = line.trim();
+        trimmed.chars().count() >= 10 && trimmed.chars().all(is_waves_glyph)
+    });
     assert!(
-        has_waves_glyph,
-        "expected waves rule glyph (`≋` or `~`) in styled HR output; plain:\n{}",
+        waves_rule_line.is_some(),
+        "expected a styled waves rule line (a run of `≋` or `~`); plain:\n{}",
         frame.plain
     );
-    // Sanity: the plain dashed rule glyph must not dominate (the test would
-    // also pass if Tea-Time Unicode font missing forces all-`~` ASCII, so
-    // we only assert *positive* evidence of the waves style above).
 }
 
 // ---------------------------------------------------------------------------

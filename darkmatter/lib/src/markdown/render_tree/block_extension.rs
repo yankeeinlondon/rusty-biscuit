@@ -14,12 +14,12 @@
 //!
 //! ## Why a separate processor
 //!
-//! HR-attribute syntax is a whole-paragraph construct, but the previous
-//! implementation lived inside the span-aware inline transport
-//! (`render_tree::span::SpannedRuleProcessor`). That coupled the HR path to
-//! `SpannedInlineEvent`, blocking the inline-span replacement. Lifting the
-//! processor up to the offset-event layer lets HR-attribute handling run
-//! before inline extension logic and removes the dependency.
+//! HR-attribute syntax is a whole-paragraph construct, but an earlier
+//! implementation lived inside a span-aware inline transport that coupled the
+//! HR path to per-event inline transport types, blocking the inline-span
+//! replacement. Lifting the processor up to the offset-event layer lets
+//! HR-attribute handling run before inline extension logic and removes the
+//! dependency.
 //!
 //! ## Range Policy
 //!
@@ -27,8 +27,8 @@
 //! - **Generated HR events** point their `body_range` at the buffered
 //!   `Event::Text` byte range — *not* the `End(Paragraph)` range, which
 //!   `pulldown-cmark` may extend to include a trailing newline. This matches
-//!   the legacy `render_tree::span::SpannedRuleProcessor` policy (now
-//!   retired) so generated provenance stays byte-identical.
+//!   the retired span-aware HR policy so generated provenance stays
+//!   byte-identical.
 
 use std::collections::VecDeque;
 use std::ops::Range;
@@ -37,7 +37,6 @@ use pulldown_cmark::{Event, Tag, TagEnd};
 
 use crate::markdown::block::{matches_horizontal_rule_pattern, parse_hr_attribute_block};
 use crate::markdown::inline::HorizontalRuleAttrs;
-use crate::style::warning::StyleWarning;
 
 /// Single item produced by [`BlockExtensionProcessor`].
 ///
@@ -87,6 +86,18 @@ enum State<'a> {
 /// runs the simple-paragraph HR-attribute matcher on close, and either emits
 /// a synthetic [`BlockExtensionEvent::HorizontalRule`] or flushes the
 /// buffered paragraph verbatim.
+///
+/// ## Warnings
+///
+/// This processor carries only parsed attributes, not warnings. HR
+/// deprecation/style warnings (e.g. the legacy `style` key) reach callers
+/// solely through the
+/// [`scan_inline_hr_warnings`](crate::markdown::block::scan_inline_hr_warnings)
+/// preflight, which shares the same
+/// [`parse_hr_attribute_block`] parser. The render-tree fold does not surface
+/// style warnings; exposing them through the tree entry points is a separate
+/// public-entrypoint decision (see the block-extension spec's "Warning
+/// Surface" section).
 pub(crate) struct BlockExtensionProcessor<'a, I>
 where
     I: Iterator<Item = (Event<'a>, Range<usize>)>,
@@ -94,10 +105,6 @@ where
     inner: I,
     pending: VecDeque<BlockExtensionEvent<'a>>,
     state: State<'a>,
-    /// `StyleWarning`s accumulated while parsing matched HR-attribute blocks.
-    /// Phase 3 will surface these through the fold's diagnostic channel; for
-    /// now they are stored so callers can opt in to a parity check.
-    warnings: Vec<StyleWarning>,
 }
 
 impl<'a, I> BlockExtensionProcessor<'a, I>
@@ -111,15 +118,7 @@ where
             inner,
             pending: VecDeque::new(),
             state: State::Idle,
-            warnings: Vec::new(),
         }
-    }
-
-    /// Returns the deprecation/style warnings produced by every matched HR
-    /// attribute block this processor has emitted so far.
-    #[allow(dead_code)]
-    pub(crate) fn warnings(&self) -> &[StyleWarning] {
-        &self.warnings
     }
 
     /// Closes the open paragraph: either fires the HR rewrite or replays the
@@ -146,10 +145,12 @@ where
             && let Some((_, attribute_str)) = matches_horizontal_rule_pattern(text.as_ref())
         {
             let body_range = text_range.clone();
-            let result = parse_hr_attribute_block(&attribute_str);
-            self.warnings.extend(result.warnings);
+            // Only the parsed attributes are carried forward; style/deprecation
+            // warnings are surfaced by the `scan_inline_hr_warnings` preflight,
+            // which parses through the same `parse_hr_attribute_block` helper.
+            let attrs = parse_hr_attribute_block(&attribute_str).attrs;
             self.pending.push_back(BlockExtensionEvent::HorizontalRule {
-                attrs: result.attrs,
+                attrs,
                 body_range,
             });
             return;
@@ -485,17 +486,21 @@ mod tests {
     }
 
     #[test]
-    fn legacy_style_records_deprecation_warning() {
-        // Even though the HR event itself only carries `attrs`, the processor
-        // must collect a deprecation `StyleWarning` for legacy `style` so
-        // Phase 3 can surface it through the fold's diagnostic channel.
-        let parser = Parser::new("--- { style: waves }").into_offset_iter();
-        let mut processor = BlockExtensionProcessor::new(parser);
-        let events: Vec<_> = processor.by_ref().collect();
+    fn legacy_style_attr_parsed_and_surfaced_by_preflight() {
+        // The block-extension processor carries only the parsed attributes —
+        // it does not surface style warnings. Deprecation/style warnings reach
+        // callers through the `scan_inline_hr_warnings` preflight, which parses
+        // through the same `parse_hr_attribute_block` helper. This test pins
+        // that parser parity: the legacy `style` key lands on
+        // `attrs.legacy_style` here, and the preflight reports its deprecation
+        // for the same source.
+        let events = run("--- { style: waves }");
         assert_eq!(count_hr(&events), 1);
         let (attrs, _) = first_hr(&events).unwrap();
         assert_eq!(attrs.legacy_style, Some("waves".to_string()));
-        assert_eq!(processor.warnings().len(), 1);
-        assert_eq!(processor.warnings()[0].path, "hr.inline.style");
+
+        let warnings = crate::markdown::block::scan_inline_hr_warnings("--- { style: waves }");
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].path, "hr.inline.style");
     }
 }

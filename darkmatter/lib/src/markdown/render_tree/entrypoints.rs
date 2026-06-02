@@ -354,16 +354,14 @@ mod tests {
     // through the lower-level `fold_markdown_spanned_with_frontmatter` helper.
     // -----------------------------------------------------------------------
 
-    /// `to_render_document` must produce a `Span` carrying class `"mark"` for
-    /// `==highlighted==`, proving the entry point uses the span-aware fold.
+    /// `to_render_document` must produce an `Extended { token: "mark" }` node
+    /// for `==highlighted==`, proving the entry point uses the span-aware fold.
     #[test]
     fn to_render_document_uses_span_aware_fold_for_mark() {
         use renderable::tree::NodeKind;
 
         fn has_mark(node: &renderable::tree::RenderNode) -> bool {
-            if matches!(node.kind, NodeKind::Span { .. })
-                && node.attrs.classes.iter().any(|c| c == "mark")
-            {
+            if matches!(&node.kind, NodeKind::Extended { token, .. } if token == "mark") {
                 return true;
             }
             node.children().iter().any(has_mark)
@@ -377,21 +375,18 @@ mod tests {
         );
         assert!(
             has_mark(&doc.root),
-            "to_render_document must surface a `mark` Span — entry point did not use the span-aware fold",
+            "to_render_document must surface a `mark` Extended node — entry point did not use the span-aware fold",
         );
     }
 
-    /// `to_render_document` must produce a `Span` whose
-    /// `Style.emphasis.dim` is set for `⌄dimmed⌄` — the design's required
-    /// shape for dim per `span-aware-processor-design.md`.
+    /// `to_render_document` must produce an `Extended { token: "dim" }` node
+    /// for `⌄dimmed⌄`, proving the entry point uses the span-aware fold.
     #[test]
     fn to_render_document_uses_span_aware_fold_for_dim() {
         use renderable::tree::NodeKind;
 
         fn has_dim(node: &renderable::tree::RenderNode) -> bool {
-            if matches!(node.kind, NodeKind::Span { .. })
-                && node.attrs.style().is_some_and(|s| s.emphasis.dim)
-            {
+            if matches!(&node.kind, NodeKind::Extended { token, .. } if token == "dim") {
                 return true;
             }
             node.children().iter().any(has_dim)
@@ -402,7 +397,7 @@ mod tests {
         assert!(diags.is_empty(), "dim fixture must fold cleanly: {diags:?}");
         assert!(
             has_dim(&doc.root),
-            "to_render_document must surface a dim Span carrying Style.emphasis.dim",
+            "to_render_document must surface a `dim` Extended node",
         );
     }
 
@@ -436,8 +431,8 @@ mod tests {
     }
 
     /// The terminal entry point must keep the mark text and surface ANSI
-    /// styling — proving the span-aware fold's `Span(class=mark)` reaches the
-    /// terminal renderer through `render_tree_terminal`.
+    /// styling — proving the span-aware fold's `Extended { token: "mark" }`
+    /// reaches the terminal renderer through `render_tree_terminal`.
     #[test]
     fn render_tree_terminal_preserves_mark_text() {
         let md: Markdown = "before ==highlighted== after\n".into();
@@ -452,8 +447,8 @@ mod tests {
         );
     }
 
-    /// The HTML entry point must keep the mark text inside a `<mark>` or
-    /// classed span — proving the span-aware fold's `Span(class=mark)` reaches
+    /// The HTML entry point must keep the mark text inside a `<mark>` element
+    /// — proving the span-aware fold's `Extended { token: "mark" }` reaches
     /// the browser renderer through `render_tree_html`.
     #[test]
     fn render_tree_html_preserves_mark_text() {

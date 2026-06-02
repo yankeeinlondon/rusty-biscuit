@@ -51,6 +51,13 @@ You are done when:
 - Once all Frontmatter has been set to the plan file ({{plan}}), consider if there was anything surprising or novel that you discovered during this phase that would be valuable to know in future stages. If there is, then add a H2 heading `## Phase {{phase}}` to the end of the file `memory/{{memory}}.md`
 ::end-block
 
+## Be Efficient in Testing/Building
+
+- when building or testing, make sure to only build/test the _specific packages_ or package area you are working; not the entire monorepo (this will take too long)
+- The session was started in the "{{area}}" package area and so that's very likely an area you'll be focused on however, 
+- most plan's will have a `packages` Frontmatter property which will explicitly state which packages are being mutated in this plan
+- use to to ensure that you're being efficient while testing and building
+
 **IMPORTANT:** 
 
 ::block when="area"
