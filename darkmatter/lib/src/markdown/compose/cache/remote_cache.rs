@@ -17,7 +17,7 @@
 
 use std::time::{Duration, SystemTime};
 
-use biscuit_file::file_reference::fetch::{Conditional, FetchPolicy, fetch};
+use biscuit_file::file_reference::fetch::{Conditional, FetchPolicy, PolicyClient, fetch};
 use biscuit_hash::xx_hash;
 use url::Url;
 
@@ -202,7 +202,7 @@ fn write_cached(
 /// body is not valid UTF-8.
 pub(crate) async fn fetch_with_cache(
     store: Option<&FileStore>,
-    client: &reqwest::Client,
+    client: &PolicyClient,
     url: &Url,
     policy: &FetchPolicy,
     cfg: &RemoteCacheConfig,

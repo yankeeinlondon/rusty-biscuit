@@ -83,8 +83,9 @@ pub use biscuit_file::PathPosition;
 pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 pub use context::ContextMergeDiagnostic;
 pub use remote::{
-    DiscoveredRemoteUrl, RemoteFreshnessMode, RemoteReadConfig, RemoteReadError, RemoteUrlCatalog,
-    RemoteUrlConsumer,
+    DEFAULT_REMOTE_CONCURRENCY, DiscoveredRemoteUrl, REMOTE_CONCURRENCY_ENV, RemoteFreshnessMode,
+    RemoteReadConfig, RemoteReadError, RemoteUrlCatalog, RemoteUrlConsumer,
+    resolve_remote_concurrency,
 };
 pub use remote_fetch::RemoteFetchStats;
 pub use shell_blocks::ShellBlockError;

@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
-use biscuit_file::file_reference::fetch::{FetchPolicy, HostPattern};
+use biscuit_file::file_reference::fetch::{FetchPolicy, HostPattern, PolicyClient};
 use dashmap::DashMap;
 use url::Url;
 
@@ -68,7 +68,7 @@ pub struct RemoteFetchStats {
 
 /// Shared runtime for remote URL fetching across a compose pipeline.
 ///
-/// Holds a single `reqwest::Client` and a deduplicated map of in-flight
+/// Holds a single redirect-disabled `PolicyClient` and a deduplicated map of in-flight
 /// fetch slots. Each unique URL is fetched at most once per compose run;
 /// subsequent consumers block on the same slot and reuse the result.
 ///
@@ -99,8 +99,10 @@ struct RemoteFetchInner {
     slots: DashMap<String, Arc<SlotGuard>>,
     policy: FetchPolicy,
     stats: Mutex<RemoteFetchStats>,
-    /// Shared HTTP client reused for every fetch in a compose run.
-    client: reqwest::Client,
+    /// Shared redirect-disabled HTTP client reused for every fetch in a compose
+    /// run. `None` means the client build failed; every fetch is then reported
+    /// as a failure rather than falling back to a redirect-following client.
+    client: Option<PolicyClient>,
     /// Caps concurrent in-flight network requests. Acquired inside each
     /// spawned fetch task, so the slot map may hold more entries than there
     /// are permits without all requests being issued at once.
@@ -224,7 +226,7 @@ impl RemoteFetchRuntime {
                 slots: DashMap::new(),
                 policy,
                 stats: Mutex::new(RemoteFetchStats::default()),
-                client: biscuit_file::file_reference::fetch::policy_client(),
+                client: PolicyClient::new().ok(),
                 // A zero cap would deadlock every fetch; clamp to at least one.
                 semaphore: Arc::new(tokio::sync::Semaphore::new(concurrency.max(1))),
                 runtime: OnceLock::new(),
@@ -309,14 +311,19 @@ impl RemoteFetchRuntime {
                     // reflects requests actually issued, bounded by the cap.
                     let current = task_inner.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
                     task_inner.peak_in_flight.fetch_max(current, Ordering::SeqCst);
-                    let result = fetch_with_cache(
-                        task_inner.store.as_deref(),
-                        &task_inner.client,
-                        &url,
-                        &task_inner.policy,
-                        &task_inner.cache_config,
-                    )
-                    .await;
+                    let result = match task_inner.client.as_ref() {
+                        Some(client) => {
+                            fetch_with_cache(
+                                task_inner.store.as_deref(),
+                                client,
+                                &url,
+                                &task_inner.policy,
+                                &task_inner.cache_config,
+                            )
+                            .await
+                        }
+                        None => Err("failed to initialize remote fetch client".to_string()),
+                    };
                     task_inner.in_flight.fetch_sub(1, Ordering::SeqCst);
 
                     let mut guard = task_slot.state.lock().unwrap();

@@ -86,7 +86,7 @@ md compose doc.md iteration=1 draft=false name=Alice
 - `--shell`: report shell commands discovered in the compose tree and exit without executing them. The report includes body `::shell` directives and top-level frontmatter `$(...)` shell expressions, including commands discovered through markdown transclusions.
 - `--perf`: emit a structured performance report to stderr after compose completes. The report includes both command-level timings (input loading, context capture, validation, option construction) and per-stage compose pipeline timings. The report is printed after any compose warnings and deferred validation issues.
 - `--allow-host <HOST>`: allow remote URL reads from a host. Repeat for multiple hosts. The default remote policy is deny-all.
-- `--remote-concurrency <N>`: maximum concurrent remote fetches. Defaults to `4`.
+- `--remote-concurrency <N>`: maximum concurrent remote fetches. Defaults to `16`, or the value of the `DARKMATTER_REMOTE_CONCURRENCY` environment variable when the flag is omitted. An explicit flag overrides the env var, which overrides the default.
 - `--remote-ttl <SECONDS>`: override remote artifact freshness TTL. Without this, server cache headers are used when present.
 - `--remote-refresh`: force revalidation of cached remote artifacts.
 - `--remote-freshness <strict|fallback|optimistic>`: choose stale-cache behavior for remote artifacts. Defaults to `fallback`, which serves the stale cached body when revalidation fails on the network.

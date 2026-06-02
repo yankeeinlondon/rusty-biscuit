@@ -269,7 +269,8 @@ impl EffectEngine {
             policy = policy.allow(HostPattern::Exact(host.clone()));
         }
 
-        let client = biscuit_file::file_reference::fetch::policy_client();
+        let client = biscuit_file::file_reference::fetch::PolicyClient::new()
+            .map_err(|e| EffectError::Network(e.to_string()))?;
         let response = biscuit_file::file_reference::fetch::post_blocking(
             &client,
             &url,

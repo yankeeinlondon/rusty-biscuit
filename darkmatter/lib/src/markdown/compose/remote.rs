@@ -40,6 +40,45 @@ pub struct DiscoveredRemoteUrl {
     pub line: usize,
 }
 
+/// Environment variable overriding the default remote-fetch concurrency cap.
+pub const REMOTE_CONCURRENCY_ENV: &str = "DARKMATTER_REMOTE_CONCURRENCY";
+
+/// Default remote-fetch concurrency cap. Matches the value documented in the
+/// spec's eager-prefetch section.
+pub const DEFAULT_REMOTE_CONCURRENCY: usize = 16;
+
+/// Resolves the remote-fetch concurrency cap with precedence:
+/// explicit `override_value` (e.g. a CLI flag) > the
+/// [`REMOTE_CONCURRENCY_ENV`] environment variable > [`DEFAULT_REMOTE_CONCURRENCY`].
+///
+/// A programmatic [`RemoteReadConfig`] value sits above all of these: callers
+/// that build the config directly (the `ComposeOptions` path) never go through
+/// this resolver. Values of `0` from any source are promoted to `1` so the
+/// fetch runtime always makes forward progress.
+pub fn resolve_remote_concurrency(override_value: Option<usize>) -> usize {
+    resolve_remote_concurrency_from(override_value, std::env::var(REMOTE_CONCURRENCY_ENV).ok())
+}
+
+/// Pure core of [`resolve_remote_concurrency`], split out so precedence can be
+/// tested without mutating the process environment.
+fn resolve_remote_concurrency_from(
+    override_value: Option<usize>,
+    env_value: Option<String>,
+) -> usize {
+    if let Some(n) = override_value {
+        return n.max(1);
+    }
+    if let Some(n) = env_value
+        .as_deref()
+        .map(str::trim)
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+    {
+        return n;
+    }
+    DEFAULT_REMOTE_CONCURRENCY
+}
+
 /// How to handle cache staleness for remote artifacts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RemoteFreshnessMode {
@@ -85,7 +124,7 @@ impl Default for RemoteReadConfig {
     fn default() -> Self {
         Self {
             allowed_hosts: Vec::new(),
-            remote_concurrency: 4,
+            remote_concurrency: DEFAULT_REMOTE_CONCURRENCY,
             remote_ttl: None,
             refresh: false,
             freshness_mode: RemoteFreshnessMode::Fallback,
@@ -578,10 +617,53 @@ mod tests {
         assert!(!config.is_host_allowed("example.com"));
         assert!(!config.is_host_allowed("localhost"));
         assert!(!config.is_host_allowed(""));
-        assert_eq!(config.remote_concurrency, 4);
+        assert_eq!(config.remote_concurrency, DEFAULT_REMOTE_CONCURRENCY);
         assert!(config.remote_ttl.is_none());
         assert!(!config.refresh);
         assert_eq!(config.freshness_mode, RemoteFreshnessMode::Fallback);
+    }
+
+    #[test]
+    fn concurrency_default_when_no_override_or_env() {
+        // Lowest precedence: no CLI override and no env var → the spec default.
+        assert_eq!(resolve_remote_concurrency_from(None, None), DEFAULT_REMOTE_CONCURRENCY);
+    }
+
+    #[test]
+    fn concurrency_env_overrides_default() {
+        assert_eq!(resolve_remote_concurrency_from(None, Some("8".to_string())), 8);
+    }
+
+    #[test]
+    fn concurrency_cli_override_beats_env() {
+        // An explicit CLI flag wins over the env var.
+        assert_eq!(resolve_remote_concurrency_from(Some(3), Some("8".to_string())), 3);
+    }
+
+    #[test]
+    fn concurrency_invalid_or_zero_env_falls_back_to_default() {
+        // Garbage, empty, and zero env values are ignored rather than silently
+        // deadlocking or weakening the cap.
+        assert_eq!(resolve_remote_concurrency_from(None, Some("nope".to_string())), DEFAULT_REMOTE_CONCURRENCY);
+        assert_eq!(resolve_remote_concurrency_from(None, Some("".to_string())), DEFAULT_REMOTE_CONCURRENCY);
+        assert_eq!(resolve_remote_concurrency_from(None, Some("0".to_string())), DEFAULT_REMOTE_CONCURRENCY);
+    }
+
+    #[test]
+    fn concurrency_zero_cli_override_is_promoted_to_one() {
+        // A `0` CLI flag would deadlock every fetch; clamp it to one.
+        assert_eq!(resolve_remote_concurrency_from(Some(0), None), 1);
+    }
+
+    #[test]
+    fn concurrency_compose_options_value_is_authoritative() {
+        // Highest precedence: a programmatically constructed config carries its
+        // own value, never consulting the resolver/env at all.
+        let config = RemoteReadConfig {
+            remote_concurrency: 32,
+            ..Default::default()
+        };
+        assert_eq!(config.remote_concurrency, 32);
     }
 
     #[test]
