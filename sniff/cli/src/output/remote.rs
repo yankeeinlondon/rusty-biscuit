@@ -190,10 +190,10 @@ fn render_documents(docs: &[DocumentRef], term: &Terminal) -> String {
 /// Render CI/CD information.
 ///
 /// When entries have workflow run details (`started_at` is present), renders
-/// a compact table with conclusion glyphs, workflow name, branch, event, and
-/// relative start time. Falls back to an unordered list for presence-only
-/// detection.
-fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
+/// a compact table with a styled status cell (see [`cicd_status_cell`]),
+/// workflow name, branch, event, and relative start time. Falls back to an
+/// unordered list for presence-only detection.
+pub fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
     if cicd.is_empty() {
         return String::new();
     }
@@ -210,7 +210,9 @@ fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
         write!(out, "{}", Prose::new(&heading).display(term)).unwrap();
 
         let columns = vec![
-            TableColumn::new("").with_fixed_width(2),
+            // Status cell: a glyph for completed runs, or dim status text for
+            // runs still in flight — min-width lets it grow to fit the word.
+            TableColumn::new("").with_min_width(2),
             TableColumn::new("Workflow"),
             TableColumn::new("Branch").with_min_width(8),
             TableColumn::new("Event").with_min_width(6),
@@ -221,7 +223,9 @@ fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
         let now = Utc::now();
 
         for ci in run_shaped.iter().take(10) {
-            let glyph = cicd_conclusion_glyph(ci);
+            // Table cells are not markup-aware (they only strip ANSI for width),
+            // so the status markup must be rendered to ANSI before it goes in.
+            let status = Prose::new(cicd_status_cell(ci)).render(term);
             let time_str = ci
                 .started_at
                 .as_deref()
@@ -229,7 +233,7 @@ fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
                 .unwrap_or_default();
 
             table.add_row(vec![
-                glyph.into(),
+                status.into(),
                 ci.name.clone().into(),
                 ci.head_branch.clone().unwrap_or_default().into(),
                 ci.event.clone().unwrap_or_default().into(),
@@ -259,26 +263,32 @@ fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
     out
 }
 
-/// Map a CI/CD run conclusion/status to a glyph string.
-fn cicd_conclusion_glyph(ci: &CiCdInfo) -> String {
-    // Active runs: use a spinner-like glyph
-    match ci.status.as_str() {
-        "in_progress" => return "⟳".to_string(),
-        "queued" | "waiting" | "pending" => return "◌".to_string(),
-        _ => {}
-    }
+/// Build the styled status cell for a CI/CD run row.
+///
+/// Completed runs map their conclusion to a glyph; runs that have not concluded
+/// yet (`conclusion` is `None`) show their dim status text instead. The returned
+/// string carries biscuit-terminal markup for color/dim styling:
+///
+/// | conclusion / status | cell | style |
+/// |---------------------|------|-------|
+/// | `success`           | `✓`  | green |
+/// | `failure`           | `✗`  | red   |
+/// | `cancelled`, `skipped` | `⊘` | dim |
+/// | in-progress / queued (no conclusion) | status text | dim |
+fn cicd_status_cell(ci: &CiCdInfo) -> String {
+    let Some(conclusion) = ci.conclusion.as_deref() else {
+        // No conclusion yet: the run is queued / in progress / waiting.
+        return format!("<dim>{}</dim>", ci.status);
+    };
 
-    // Completed runs: map conclusion to glyph
-    match ci.conclusion.as_deref() {
-        Some("success") => "✓".to_string(),
-        Some("failure") => "✗".to_string(),
-        Some("cancelled") => "⊘".to_string(),
-        Some("skipped") => "⊝".to_string(),
-        Some("timed_out") => "⏱".to_string(),
-        Some("action_required") => "⚠".to_string(),
-        Some("neutral") => "○".to_string(),
-        Some(other) => other.chars().next().unwrap_or('?').to_string(),
-        None => "?".to_string(),
+    match conclusion {
+        "success" => "<green>✓</green>".to_string(),
+        "failure" => "<red>✗</red>".to_string(),
+        "cancelled" | "skipped" => "<dim>⊘</dim>".to_string(),
+        "timed_out" => "<red>⏱</red>".to_string(),
+        "action_required" => "<yellow>⚠</yellow>".to_string(),
+        "neutral" => "<dim>○</dim>".to_string(),
+        other => format!("<dim>{}</dim>", other.chars().next().unwrap_or('?')),
     }
 }
 
@@ -1032,81 +1042,112 @@ mod tests {
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_success() {
+    fn test_cicd_status_cell_success_green_check() {
         let ci = make_test_cicd("CI", "completed", Some("success"), None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "✓");
+        assert_eq!(cicd_status_cell(&ci), "<green>✓</green>");
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_failure() {
+    fn test_cicd_status_cell_failure_red_cross() {
         let ci = make_test_cicd("CI", "completed", Some("failure"), None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "✗");
+        assert_eq!(cicd_status_cell(&ci), "<red>✗</red>");
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_cancelled() {
+    fn test_cicd_status_cell_cancelled_dim_circle() {
         let ci = make_test_cicd("CI", "completed", Some("cancelled"), None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "⊘");
+        assert_eq!(cicd_status_cell(&ci), "<dim>⊘</dim>");
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_skipped() {
+    fn test_cicd_status_cell_skipped_dim_circle() {
+        // Spec requires `⊘` (not `⊝`) for skipped, dimmed.
         let ci = make_test_cicd("CI", "completed", Some("skipped"), None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "⊝");
+        assert_eq!(cicd_status_cell(&ci), "<dim>⊘</dim>");
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_timed_out() {
+    fn test_cicd_status_cell_timed_out() {
         let ci = make_test_cicd("CI", "completed", Some("timed_out"), None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "⏱");
+        assert_eq!(cicd_status_cell(&ci), "<red>⏱</red>");
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_action_required() {
+    fn test_cicd_status_cell_action_required() {
         let ci = make_test_cicd("CI", "completed", Some("action_required"), None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "⚠");
+        assert_eq!(cicd_status_cell(&ci), "<yellow>⚠</yellow>");
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_neutral() {
+    fn test_cicd_status_cell_neutral() {
         let ci = make_test_cicd("CI", "completed", Some("neutral"), None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "○");
+        assert_eq!(cicd_status_cell(&ci), "<dim>○</dim>");
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_in_progress() {
+    fn test_cicd_status_cell_in_progress_dim_status_text() {
+        // Active runs (no conclusion) render the dim status word, not a glyph.
         let ci = make_test_cicd("CI", "in_progress", None, None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "⟳");
+        assert_eq!(cicd_status_cell(&ci), "<dim>in_progress</dim>");
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_queued() {
+    fn test_cicd_status_cell_queued_dim_status_text() {
         let ci = make_test_cicd("CI", "queued", None, None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "◌");
+        assert_eq!(cicd_status_cell(&ci), "<dim>queued</dim>");
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_waiting() {
+    fn test_cicd_status_cell_waiting_dim_status_text() {
         let ci = make_test_cicd("CI", "waiting", None, None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "◌");
+        assert_eq!(cicd_status_cell(&ci), "<dim>waiting</dim>");
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_pending() {
+    fn test_cicd_status_cell_pending_dim_status_text() {
         let ci = make_test_cicd("CI", "pending", None, None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "◌");
+        assert_eq!(cicd_status_cell(&ci), "<dim>pending</dim>");
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_unknown_conclusion() {
+    fn test_cicd_status_cell_unknown_conclusion() {
         let ci = make_test_cicd("CI", "completed", Some("weird"), None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "w");
+        assert_eq!(cicd_status_cell(&ci), "<dim>w</dim>");
     }
 
     #[test]
-    fn test_cicd_conclusion_glyph_no_conclusion() {
+    fn test_cicd_status_cell_no_conclusion_shows_status() {
+        // A run with no conclusion falls back to its dim status word.
         let ci = make_test_cicd("CI", "completed", None, None, None, None);
-        assert_eq!(cicd_conclusion_glyph(&ci), "?");
+        assert_eq!(cicd_status_cell(&ci), "<dim>completed</dim>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_renders_green_ansi_on_color_terminal() {
+        // Verify the markup actually produces a green SGR sequence when rendered
+        // through a color-capable terminal (sniff's styling contract end-to-end,
+        // minus the physical terminal). biscuit-terminal owns the real-terminal
+        // capture coverage for its color primitives.
+        let term = Terminal::new_optimistic(80);
+        let ci = make_test_cicd("CI", "completed", Some("success"), None, None, None);
+        let rendered = Prose::new(cicd_status_cell(&ci)).render(&term);
+        assert!(
+            rendered.contains("\x1b[32m") || rendered.contains("32m"),
+            "success cell should emit a green SGR sequence, got: {rendered:?}"
+        );
+        assert!(rendered.contains('✓'));
+    }
+
+    #[test]
+    fn test_cicd_status_cell_renders_red_ansi_on_color_terminal() {
+        let term = Terminal::new_optimistic(80);
+        let ci = make_test_cicd("CI", "completed", Some("failure"), None, None, None);
+        let rendered = Prose::new(cicd_status_cell(&ci)).render(&term);
+        assert!(
+            rendered.contains("\x1b[31m") || rendered.contains("31m"),
+            "failure cell should emit a red SGR sequence, got: {rendered:?}"
+        );
+        assert!(rendered.contains('✗'));
     }
 
     #[test]
