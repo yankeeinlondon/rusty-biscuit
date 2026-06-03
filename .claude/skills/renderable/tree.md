@@ -152,6 +152,12 @@ pub trait CodeRenderer {
   `MarkdownRenderOptions` and `MarkdownDialect` (`Markdown` / `MarkdownPlus`).
 - **Browser** — `render_browser_node` / `render_browser_document` with
   `BrowserRenderOptions` and `RawHtmlPolicy` (`Allow` / `Escape` / `Reject`).
+  `render_browser_document_html(doc, opts)` is the direct `Document` → final
+  HTML `String` path: it streams the tree into one buffer (no fragment per
+  node) and emits bytes identical to
+  `render_browser_document(..)?.output.render()`. Use it when you only need the
+  final string; use `render_browser_document` when you need an `HtmlPage` /
+  `BrowserFragment<Ready>` for composition.
 - **Terminal** — `render_terminal_node` / `render_terminal_document` with
   `TerminalRenderOptions` / `TerminalRenderContext`. Heading/section, lists,
   and tables render **natively** (no delegation back to bespoke components).
