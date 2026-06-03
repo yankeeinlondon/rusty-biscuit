@@ -863,6 +863,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: toml, parser, formatting_
 
+- [quick-xml](https://github.com/tafia/quick-xml) _v0.39_ [📄](https://docs.rs/quick-xml)
+
+    _Fast streaming XML reader/writer. Used by `darkmatter/lib` to allowlist-sanitize the promoted Mermaid static `<svg>` before it is emitted as raw HTML, stripping `<script>`/`<foreignObject>`/event-handler/external-ref payloads._
+
+    _Tags: xml, parsing, sanitization, security_
+
 ### SQL & Database
 
 - [rusqlite](https://github.com/rusqlite/rusqlite) _v0.31_ [📄](https://docs.rs/rusqlite)
