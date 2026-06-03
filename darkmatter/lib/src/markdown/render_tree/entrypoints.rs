@@ -22,7 +22,7 @@ use biscuit_terminal::terminal::Terminal;
 use renderable::tree::{
     BrowserRenderOptions, Diagnostic, Document, GraphicsMode, MarkdownDialect, MarkdownRenderOptions,
     RawHtmlPolicy, RenderStrictness, SourceDescriptor, TerminalMermaidMode,
-    render_browser_document, render_markdown_document,
+    render_browser_document_html, render_markdown_document,
 };
 
 use super::code_renderer::TerminalCodeRenderer;
@@ -67,10 +67,17 @@ pub(crate) fn to_render_document(md: &Markdown) -> (Document, Vec<Diagnostic>) {
 /// `hr_css_variables` `:root` injection has no tree-side equivalent and is
 /// dropped at this boundary.
 ///
+/// Uses the direct document-string renderer
+/// ([`render_browser_document_html`]) — the production browser path needs the
+/// complete final HTML string, so it streams straight into one buffer rather
+/// than building an intermediate [`HtmlPage`](renderable::html::HtmlPage) /
+/// [`BrowserFragment`](renderable::browser::BrowserFragment) tree and then
+/// serializing it. See `renderable/features/2026-06-03-browser-perf/spec.md`.
+///
 /// ## Errors
 ///
 /// Propagates any fatal [`RenderError`] from
-/// [`render_browser_document`]. Non-fatal diagnostics are returned in the
+/// [`render_browser_document_html`]. Non-fatal diagnostics are returned in the
 /// [`PipelineResult`] without being demoted to errors.
 pub(crate) fn render_tree_html(
     md: &Markdown,
@@ -78,9 +85,9 @@ pub(crate) fn render_tree_html(
 ) -> PipelineRenderResult<String> {
     let (doc, fold_diagnostics) = to_render_document(md);
     let browser_opts = browser_options_from_html_options(options);
-    let rendered = render_browser_document(&doc, &browser_opts)?;
+    let rendered = render_browser_document_html(&doc, &browser_opts)?;
     Ok(PipelineResult::new(
-        rendered.output.render(),
+        rendered.output,
         fold_diagnostics,
         rendered.diagnostics,
     ))

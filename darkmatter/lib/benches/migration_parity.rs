@@ -43,7 +43,7 @@ use darkmatter::markdown::render_tree::{
 use pulldown_cmark::{Options, Parser};
 use renderable::tree::{
     BrowserRenderOptions, MarkdownRenderOptions, RawHtmlPolicy, RenderStrictness, SourceDescriptor,
-    render_browser_document, render_markdown_document,
+    render_browser_document_html, render_markdown_document,
 };
 
 // ---------------------------------------------------------------------------
@@ -445,11 +445,22 @@ fn bench_terminal_no_color(c: &mut Criterion) {
 }
 
 /// Browser/HTML output, side by side: legacy `as_html` vs fold + render-tree
-/// `render_browser_document`.
+/// `render_browser_document_html` (the direct final-string renderer).
+///
+/// Both arms measure the same production surface: a final HTML `String`. The
+/// legacy `as_html` already returns a `String`; the tree arm uses the direct
+/// document-string renderer ([`render_browser_document_html`]) — the same path
+/// the production `render_tree_html` entry point now takes. This streams HTML
+/// into one buffer instead of building an intermediate `HtmlPage` /
+/// `BrowserFragment` tree and serializing it, so the gate measures the path
+/// production actually pays (see `2026-06-03-browser-perf/spec.md` §4 "the
+/// browser gate under-measures the tree path").
 fn bench_browser(c: &mut Criterion) {
     let fixtures = fixtures();
     let html_opts = pinned_html_options();
     let browser_opts = pinned_browser_options();
+
+    report_browser_byte_sizes(&fixtures, &html_opts, &browser_opts);
 
     let mut group = c.benchmark_group("migration/browser");
     group.sample_size(20);
@@ -461,11 +472,47 @@ fn bench_browser(c: &mut Criterion) {
         group.bench_function(format!("{name}/tree"), |b| {
             b.iter(|| {
                 let (doc, _diags) = fold_fixture(name, black_box(input));
-                render_browser_document(&doc, &browser_opts).expect("tree browser render")
+                black_box(
+                    render_browser_document_html(&doc, &browser_opts)
+                        .expect("tree browser render")
+                        .output,
+                )
             })
         });
     }
     group.finish();
+}
+
+/// Prints a per-fixture legacy/tree HTML byte-length diagnostic to stderr once
+/// per `bench_browser` run.
+///
+/// The byte sizes settle the "fidelity vs structural overhead" question the
+/// browser-perf spec raises before any profiling: equal byte length ⇒ the same
+/// output produced by a slower path (pure overhead); a larger tree string ⇒ the
+/// tree path emits extra markup (classes / `data-*` / provenance) that is
+/// heavier and arguably higher-fidelity. It is a diagnostic, not a measurement —
+/// it runs once, outside the timed `b.iter` loops.
+fn report_browser_byte_sizes(
+    fixtures: &[(&'static str, String)],
+    html_opts: &HtmlOptions,
+    browser_opts: &BrowserRenderOptions,
+) {
+    eprintln!("\n[migration/browser] per-fixture HTML byte sizes (legacy vs tree):");
+    eprintln!("  {:<22} {:>12} {:>12} {:>10}", "fixture", "legacy", "tree", "tree/legacy");
+    for (name, input) in fixtures {
+        let md: Markdown = input.as_str().into();
+        let legacy_len = as_html(&md, html_opts.clone())
+            .expect("legacy as_html")
+            .len();
+        let (doc, _diags) = fold_fixture(name, input);
+        let tree_len = render_browser_document_html(&doc, browser_opts)
+            .expect("tree browser render")
+            .output
+            .len();
+        let ratio = tree_len as f64 / legacy_len as f64;
+        eprintln!("  {name:<22} {legacy_len:>12} {tree_len:>12} {ratio:>10.3}");
+    }
+    eprintln!();
 }
 
 /// Markdown round-trip output. There is no legacy Markdown roundtrip in
@@ -622,7 +669,13 @@ fn bench_fold_once_multi_target(c: &mut Criterion) {
             b.iter(|| {
                 let (doc, _diags) = fold_fixture(name, black_box(input));
                 let t = render_terminal_document(&doc, &tree_term_opts).expect("tree terminal");
-                let h = render_browser_document(&doc, &browser_opts).expect("tree browser");
+                // Render the browser output to the final HTML string through the
+                // direct document-string renderer so this arm measures the same
+                // production surface as the legacy `as_html` arm above (which
+                // returns a `String`).
+                let h = render_browser_document_html(&doc, &browser_opts)
+                    .expect("tree browser")
+                    .output;
                 let m = render_markdown_document(&doc, &md_opts).expect("tree markdown");
                 black_box((t, h, m));
             })

@@ -93,7 +93,7 @@ use darkmatter::markdown::render_tree::{
 };
 use renderable::tree::{
     BrowserRenderOptions, Diagnostic, Document, MarkdownDialect, MarkdownRenderOptions, NodeKind,
-    RawHtmlPolicy, RenderNode, RenderStrictness, SourceDescriptor, render_browser_document,
+    RawHtmlPolicy, RenderNode, RenderStrictness, SourceDescriptor, render_browser_document_html,
     render_markdown_document,
 };
 
@@ -335,13 +335,18 @@ fn tree_html_options() -> BrowserRenderOptions {
     }
 }
 
-/// Renders fixture text to HTML via the render-tree browser renderer.
+/// Renders fixture text to a final HTML string via the render-tree browser
+/// document renderer.
+///
+/// Uses [`render_browser_document_html`] — the direct final-string path the
+/// production `render_tree_html` entry point takes — so this parity harness
+/// compares the legacy renderer against the browser string surface production
+/// actually serves.
 fn tree_html(name: &str, markdown: &str) -> String {
     let doc = fold(name, markdown);
-    render_browser_document(&doc, &tree_html_options())
+    render_browser_document_html(&doc, &tree_html_options())
         .expect("tree browser render must succeed")
         .output
-        .render()
 }
 
 /// Renders fixture text to a terminal string via the legacy `for_terminal`.
@@ -389,10 +394,9 @@ fn tree_terminal(name: &str, markdown: &str) -> String {
 /// fixtures stay comparable to the legacy renderer.
 fn tree_html_spanned(name: &str, markdown: &str) -> String {
     let doc = fold_spanned(name, markdown);
-    render_browser_document(&doc, &tree_html_options())
+    render_browser_document_html(&doc, &tree_html_options())
         .expect("tree browser render must succeed")
         .output
-        .render()
 }
 
 /// Renders fixture text to a terminal string via the render-tree renderer

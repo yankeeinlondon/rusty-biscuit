@@ -26,7 +26,7 @@ use darkmatter::markdown::render_tree::{
 };
 use renderable::tree::{
     BrowserMermaidMode, BrowserRenderOptions, RawHtmlPolicy, RenderStrictness, SourceDescriptor,
-    render_browser_document,
+    render_browser_document_html,
 };
 
 fn corpus() -> String {
@@ -120,16 +120,22 @@ fn bench_render_pipeline_browser(c: &mut Criterion) {
             black_box((doc, diags))
         })
     });
+    // `render` / `full` measure the direct final-string document path
+    // (`render_browser_document_html`) — the same surface the production
+    // `render_tree_html` entry point now uses — so this localization bench
+    // attributes cost to the path production actually pays.
     group.bench_function("render", |b| {
         let md: Markdown = input.as_str().into();
         let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md);
-        b.iter(|| render_browser_document(black_box(&doc), &browser_opts).expect("browser render"))
+        b.iter(|| {
+            render_browser_document_html(black_box(&doc), &browser_opts).expect("browser render")
+        })
     });
     group.bench_function("full", |b| {
         b.iter(|| {
             let md: Markdown = black_box(input.as_str()).into();
             let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md);
-            render_browser_document(&doc, &browser_opts).expect("browser render")
+            render_browser_document_html(&doc, &browser_opts).expect("browser render")
         })
     });
     group.finish();
