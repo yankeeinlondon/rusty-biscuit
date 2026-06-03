@@ -33,8 +33,18 @@ for. Its direct inputs:
   owns the HR/image fidelity decisions that block this cutover. **Hard
   upstream dependency — see [Phase 0](#phase-0--fidelity-graphics-policy-first).**
 - [`../2026-06-03-browser-perf/spec.md`](../2026-06-03-browser-perf/spec.md) —
-  owns the browser render-step perf work; the browser gate is the single
-  remaining blocker for this cutover's Phase 4/5.
+  owns the browser render-step perf work. **Resolved (2026-06-03, Phase 6):**
+  the structural overhead is fixed (a per-node `format!` in `NodeAttrs::get_hint`
+  + the direct document-string renderer), dropping the browser geomean from
+  ≈ 4.15× to **1.58×** with **5 of 8 fixtures passing** and the non-exception
+  geomean at **0.88× ≤ 1.0×**. The three residual breaches (`small_prose`,
+  `deeply_nested_lists`, `mark_dim_hr`) are **added fidelity, not structural
+  overhead** (tree emits 1.4–6.4× more markup; time/byte ≈ 1.2–1.5×) and are
+  documented as accepted exceptions in
+  [`baselines.md`](../_completed/2026-05-20-darkmatter-tree/baselines.md)
+  ("Post-Fix Browser Gate"). The cutover owner **signed off on all three
+  fidelity exceptions on 2026-06-03**, so the browser gate is **cleared for
+  Phase 4/5** — no structural perf blocker remains.
 
 ## Background
 
@@ -67,9 +77,13 @@ with `--warm-up-time 1 --measurement-time 3 --sample-size 10`.
   `mark_dim_hr` (≈ 1.14× slower — unconditional HR PNG rasterization).
 - **Multi-target (`fold_once_multi_target`):** tree wins 1.6–154× — the
   architectural payoff (fold once, render N targets).
-- **Browser:** tree is **2–11× slower** across the board (worst:
-  `large_table` ≈ 11×; parity only on `large_code_block`). This is the main
-  perf blocker.
+- **Browser:** at the 2026-06-02 measurement, tree was **2–11× slower** across
+  the board (worst: `large_table` ≈ 11×; parity only on `large_code_block`) —
+  the main perf blocker. **Resolved 2026-06-03** by the `browser-perf` work:
+  geomean **1.58×**, 5/8 fixtures pass, `large_table` now **1.43×**, two
+  fixtures faster than legacy; the three residual breaches are documented
+  fidelity exceptions (see the "Post-Fix Browser Gate" section in
+  `../_completed/2026-05-20-darkmatter-tree/baselines.md`).
 - **Inline fold path:** the inline-span cutover was perf-neutral
   (`mark_dim_hr` fold ≈ 170 µs, ≈ unchanged from the old span processor), and
   the production fold now pays a small linear source-scan tax on every
@@ -284,10 +298,13 @@ sibling specs.
    for `migration_parity`/parity comparison through Phase 4, delete in Phase 5.
    Matches the inline-span big-bang precedent; git is the rollback (darkmatter
    is internal — no external consumers need a deprecation window).
-9. **`large_table` browser hotspot.** ✅ **Subsumed by the perf gate** — at
-   ≈ 11× bespoke it fails the gate's 1.5× per-fixture ceiling, so it must be
-   fixed before Phase 5 or carry a documented exception. See
-   [`../2026-06-02-perf-gate/spec.md`](../2026-06-02-perf-gate/spec.md).
+9. **`large_table` browser hotspot.** ✅ **Resolved (2026-06-03).** The ≈ 11×
+   was structural per-node overhead scaled by node count — a per-node `format!`
+   in `NodeAttrs::get_hint` paid by every node probe (`browser-perf` Phase 6).
+   With the empty-`data` fast-path it is **1.43× (time/byte 1.21×)**, under the
+   1.5× ceiling — no exception needed. See the "Post-Fix Browser Gate" section
+   in [`../_completed/2026-05-20-darkmatter-tree/baselines.md`](../_completed/2026-05-20-darkmatter-tree/baselines.md)
+   and [`../2026-06-02-perf-gate/spec.md`](../2026-06-02-perf-gate/spec.md).
 
 ## Out of Scope
 

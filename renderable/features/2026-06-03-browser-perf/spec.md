@@ -8,6 +8,18 @@ depends-on: ../2026-06-02-perf-gate/spec.md
 
 ## Status
 
+**Complete — browser perf gate satisfied (2026-06-03).** Implementation landed
+the direct document-string renderer and the `NodeAttrs::get_hint` structural fix,
+dropping the full-corpus geomean from ≈ 4.15× to **1.58×** (non-exception geomean
+**0.88× ≤ 1.0×**, 5/8 fixtures passing, two faster than legacy). The three
+residual breaches — `small_prose` (9.74×), `deeply_nested_lists` (3.70×), and
+`mark_dim_hr` (2.08×) — are documented **added-fidelity** exceptions (byte ratio
+tracks time ratio in each case) and were **signed off one by one by the cutover
+owner (Ken Snyder) on 2026-06-03**. See the accepted-exception table in
+[`baselines.md`](../_completed/2026-05-20-darkmatter-tree/baselines.md)
+("Post-Fix Browser Gate") and [`review-1.md`](./review-1.md) ("Resolution"). No
+structural perf blocker remains; the tree cutover's browser gate is cleared.
+
 **Ready for planning and implementation.** The review locks the design direction:
 the production browser tree-document path should add a direct
 `RenderNode` → full HTML string renderer instead of building a second

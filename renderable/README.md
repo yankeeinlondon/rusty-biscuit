@@ -206,7 +206,12 @@ The canonical render tree and its target renderers.
   `MarkdownPlus`)
 - **Browser tree renderer** — `render_browser_node` / `render_browser_document`
   with `BrowserRenderOptions` and `RawHtmlPolicy` (`Allow` / `Escape` /
-  `Reject`)
+  `Reject`). `render_browser_document_html` is the direct
+  `Document` → final HTML `String` path: it streams the whole tree into one
+  buffer (skipping a fragment per node) and emits bytes identical to
+  `render_browser_document(..)?.output.render()`. Use it when you already own a
+  `Document` and only need the final string; use `render_browser_document` when
+  you need an `HtmlPage` or `BrowserFragment<Ready>` for further composition.
 
 ### Target (`target.rs`)
 

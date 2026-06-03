@@ -57,6 +57,16 @@ every renderer until it makes a deliberate decision):
 | Browser  | `render_browser_node` / `render_browser_document`     | `renderable`      |
 | Terminal | `render_terminal_node` / `render_terminal_document`   | `biscuit-terminal`|
 
+The browser target adds `render_browser_document_html(doc, opts)`: a direct
+`Document` → final HTML `String` path that streams the whole tree into one
+buffer instead of building a `BrowserFragment` per node. Its bytes are identical
+to `render_browser_document(doc, opts)?.output.render()` — same validation,
+diagnostics, page options, head ordering, raw-HTML policy, and code-renderer
+hooks. Reach for it when a caller already owns a `Document` and only needs the
+final string (the cutover path and the browser perf benches); keep
+`render_browser_document` for callers that compose through `HtmlPage` /
+`BrowserFragment<Ready>`.
+
 The Terminal renderer lives in `biscuit-terminal` because a meaningful terminal
 renderer needs `Terminal`, `Layout`, color depth, and OSC8 — types `renderable`
 cannot depend on. `renderable` gains **no** `pulldown-cmark` or
