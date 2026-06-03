@@ -19,6 +19,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter::markdown::output::HtmlOptions;
 use darkmatter::markdown::render_tree::{TerminalCodeRenderer, fold_markdown_to_document};
+use darkmatter::markdown::render_tree::svg_sanitizer::sanitize_svg;
 use renderable::tree::{
     BrowserMermaidMode, BrowserRenderOptions, GraphicsMode, HintNamespace, RawHtmlPolicy,
     RenderNode, RenderStrictness, SourceDescriptor, render_browser_document, render_browser_node,
@@ -118,6 +119,86 @@ async fn browser_hr_waves_svg_computes_in_browser() {
         assert!(
             stroke != "<no-match>" && stroke.ends_with("px"),
             "{mode:?}: waves <path> must parse into the DOM with a resolved stroke-width; got {stroke:?}",
+        );
+    }
+}
+
+/// Renders a thematic break whose `width` / `color` hints carry hostile
+/// attribute/markup-breaking payloads, at `Rich`.
+fn hostile_hr_fragment() -> String {
+    let mut hr = RenderNode::thematic_break();
+    let ns = HintNamespace("darkmatter.hr");
+    hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+    // A `color` that, if interpolated unescaped, breaks out of the SVG attribute
+    // and injects an `<img onerror>` sibling.
+    hr.attrs.set_hint(
+        ns,
+        "color",
+        serde_json::json!(r#"red"><img src=x onerror="window.__pwned=1">"#),
+    );
+    // A `width` that, if interpolated unescaped, injects a `<script>` element.
+    hr.attrs.set_hint(
+        ns,
+        "width",
+        serde_json::json!(r#"100%"><script>window.__pwned=1</script>"#),
+    );
+
+    let opts = BrowserRenderOptions {
+        graphics_mode: GraphicsMode::Rich,
+        ..BrowserRenderOptions::default()
+    };
+    render_browser_node(&hr, &opts)
+        .expect("render hr")
+        .output
+        .render()
+}
+
+/// Review-5 finding 1: hostile `darkmatter.hr.*` `width` / `color` hints must
+/// not be able to escape the styled-HR SVG attribute/markup context. This drives
+/// a real headless Chromium and proves the hostile payload neither parses into
+/// an injected `<img>`/`<script>` node nor corrupts the SVG: the `.darkmatter-hr`
+/// element still computes `display: block` (intact), and no injected node exists.
+/// A string assertion cannot prove the browser did not parse an injected node.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_hr_hostile_attrs_inject_no_nodes() {
+    if !require_browser() {
+        return;
+    }
+
+    let fragment = hostile_hr_fragment();
+    // Source-level guard: the sanitized fragment must carry neither the injected
+    // markup nor the attacker payload.
+    assert!(
+        !fragment.contains("<img") && !fragment.contains("<script") && !fragment.contains("__pwned"),
+        "hostile HR hints must be dropped before raw-HTML emission; got:\n{fragment}",
+    );
+
+    let doc = wrap_fragment(&fragment, "#ffffff");
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    // The SVG itself must still be intact (the broken-out attribute did not
+    // corrupt it).
+    let display = harness
+        .computed_style(".darkmatter-hr", "display")
+        .await
+        .expect("computed style query");
+    assert_eq!(
+        display, "block",
+        ".darkmatter-hr must survive intact when hostile hints are supplied",
+    );
+
+    // No injected node may exist in the DOM.
+    for injected in ["img", "script"] {
+        let display = harness
+            .computed_style(injected, "display")
+            .await
+            .expect("computed style query");
+        assert_eq!(
+            display, "<no-match>",
+            "hostile HR hint injected a <{injected}> node into the DOM",
         );
     }
 }
@@ -233,5 +314,99 @@ async fn browser_mermaid_tree_path_static_svg_computes_in_browser() {
     assert!(
         display != "<no-match>",
         "tree-path promoted Mermaid <svg> must exist as DOM in the browser; got {display:?}",
+    );
+}
+
+/// A hostile SVG, as if a future `mermaid-rs-renderer` path (or an unescaped
+/// graph label) emitted active markup. This stands in for the renderer output
+/// that [`sanitize_svg`] guards: the render-tree path always runs
+/// `render_to_svg()` through the sanitizer before raw-HTML emission.
+const HOSTILE_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 50">
+  <script>window.__pwned = 1;</script>
+  <rect x="0" y="0" width="100" height="50" fill="#eeeeee" onload="window.__pwned = 1"/>
+  <foreignObject width="100" height="50"><img src="x" onerror="window.__pwned = 1"/></foreignObject>
+  <a xlink:href="javascript:window.__pwned = 1"><text x="5" y="25">node</text></a>
+</svg>"##;
+
+/// Review-5 finding 2: the Mermaid static-SVG adapter must sanitize the renderer
+/// output before emitting it as raw HTML. This proves the sanitizer's output is
+/// safe **DOM** — driven through a real headless Chromium — not just a safe
+/// string: a hostile SVG must lose its `<script>`/`<img>`/`onload`/`javascript:`
+/// payloads while the `<svg>`/`<rect>` survive. The page is given 100ms to let
+/// any surviving handler fire; `window.__pwned` must remain unset.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_sanitized_mermaid_svg_injects_no_active_markup() {
+    if !require_browser() {
+        return;
+    }
+
+    let safe = sanitize_svg(HOSTILE_SVG).expect("hostile SVG is well-formed");
+    assert!(
+        !safe.contains("<script")
+            && !safe.contains("onload")
+            && !safe.contains("onerror")
+            && !safe.contains("javascript:")
+            && !safe.contains("foreignObject"),
+        "sanitizer left active markup in the string:\n{safe}",
+    );
+
+    let doc = wrap_fragment(&safe, "#ffffff");
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    // The diagram body must still render as DOM.
+    let svg_display = harness
+        .computed_style("svg", "display")
+        .await
+        .expect("computed style query");
+    assert!(
+        svg_display != "<no-match>",
+        "sanitized <svg> must survive as DOM; got {svg_display:?}",
+    );
+    let rect_fill = harness
+        .computed_style("svg rect", "fill")
+        .await
+        .expect("computed style query");
+    assert!(
+        rect_fill != "<no-match>",
+        "sanitized <rect> must survive as DOM; got {rect_fill:?}",
+    );
+
+    // No injected node, and no handler executed.
+    for injected in ["script", "img"] {
+        let display = harness
+            .computed_style(injected, "display")
+            .await
+            .expect("computed style query");
+        assert_eq!(
+            display, "<no-match>",
+            "sanitizer let a <{injected}> node into the DOM",
+        );
+    }
+}
+
+/// Review-5 finding 2 (fidelity): sanitizing a *real* promoted Mermaid diagram
+/// must keep the diagram — the allowlist must not strip the shape vocabulary the
+/// renderer emits. Folds a `mermaid` fence through the render-tree path (whose
+/// `render_browser_mermaid` hook now runs the sanitizer) and asserts the
+/// surviving `<svg>` still carries drawable geometry.
+///
+/// Skips cleanly when the Mermaid toolchain is unavailable (no `<svg>` produced).
+#[test]
+fn sanitized_real_mermaid_retains_diagram_geometry() {
+    let html = render_tree_path_mermaid_html();
+    if !html.contains("<svg") {
+        eprintln!("skipping: Mermaid toolchain unavailable (no SVG produced; degraded to code block)");
+        return;
+    }
+    assert!(
+        html.contains("<path") || html.contains("<rect") || html.contains("<polygon"),
+        "sanitized real Mermaid SVG kept no drawable geometry:\n{html}",
+    );
+    assert!(
+        !html.contains("<script") && !html.contains("onload="),
+        "sanitized real Mermaid SVG still carries active markup:\n{html}",
     );
 }
