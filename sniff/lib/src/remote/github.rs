@@ -235,8 +235,8 @@ fn map_workflow_run(run: WorkflowRun) -> CiCdInfo {
     CiCdInfo {
         provider: "GitHub Actions".to_string(),
         config_path: None,
-        name: run.name.unwrap_or_else(|| "Unknown".to_string()),
-        status: run.status.unwrap_or_else(|| "unknown".to_string()),
+        name: run.name.unwrap_or_else(|| "workflow".to_string()),
+        status: run.status.unwrap_or_default(),
         conclusion: run.conclusion,
         html_url: run.html_url,
         started_at: run.created_at,
@@ -540,8 +540,7 @@ impl RemoteRepoProvider for GitHubRemote {
         repo: &str,
         limit: usize,
     ) -> Result<Vec<CiCdInfo>, SniffError> {
-        let request = ListWorkflowRunsRequest::new(owner, repo)
-            .with_per_page(limit as i64);
+        let request = ListWorkflowRunsRequest::new(owner, repo).with_per_page(limit as i64);
 
         // Attempt the request with the configured client first. If it fails
         // because no credentials are available, or with a 401/403 response,
@@ -783,8 +782,8 @@ mod tests {
         let info = map_workflow_run(run);
 
         assert_eq!(info.provider, "GitHub Actions");
-        assert_eq!(info.name, "Unknown");
-        assert_eq!(info.status, "unknown");
+        assert_eq!(info.name, "workflow");
+        assert_eq!(info.status, "");
         assert_eq!(info.conclusion, None);
         assert_eq!(info.html_url, None);
         assert_eq!(info.started_at, None);
