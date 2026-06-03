@@ -299,6 +299,10 @@ pub struct CiCdInfo {
     pub html_url: Option<String>,
     /// When this run started.
     pub started_at: Option<String>,
+    /// Branch this run was triggered from.
+    pub head_branch: Option<String>,
+    /// Event that triggered this run (e.g., "push", "pull_request").
+    pub event: Option<String>,
 }
 
 /// A reference to another repository in the same organization.
