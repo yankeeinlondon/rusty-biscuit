@@ -3,7 +3,7 @@ $schema:
     - iteration: number
       spec: string(required)
     - review: string(required)
-      iteration: number
+      implement: boolean
     - type: enum(comprehensive,performance,feature,fix,sentrux; required)
 name: Implement Review Suggestions
 description: |-
@@ -12,11 +12,12 @@ description: |-
     1. a review path and optionally an iteration number (if not 1) 
     2. a spec path and optionally an iteration number (if not 1)
 iteration: 1
+implement: false
 area: "{{ ctx.current_package ? ctx.current_package : ctx.current_package_area }}"
 target: "{{ review || spec }}"
 file: "$(basename '{{target}}')"
 dir: "$(dirname '{{target}}')"
-review_path: "@{{area}}/{{dir}}/review-{{iteration}}.md"
+review_path: "{{ review ? '@{{area}}/{{target}}' : '' }}"
 spec_path: "@{{area}}/{{dir}}/{{file}}"
 ---
 ::block when="spec"
@@ -103,19 +104,28 @@ test is at the wrong level under "Findings" with severity at least "high".
 
 ::block when="!spec && review"
 
+::block when="implement"
 The following review has just completed:
 
 - {{review_path}}
 
-::block when="iteration != 1"
-A prior review did NOT deem the implementation to be "production ready" but we have now implemented all of the suggestions from that review and your task is to again compare the implementation of the specification relative to the written intention of the specification.
-
-> Note: you should also validate that all of the "complaints/suggestions" of the _prior_ review have now been fully addressed. You are current performing review #{{iteration}} so you should be looking for review in the 
-{{dir}} directory with a name similar to "review-{ {{iteration}} - 1 }.md"
-::end-block
-::block when="iteration == 1"
+Your task is to implement all the suggestions found in the review.
 
 ::end-block
+::block when="!implement"
 
+The review -- {{review_path}} -- was implemented and your task is to validate that:
 
+- all of the suggestions in the review were actually implemented
+- test coverage is high for all updated or added functionality
+- all tests pass
+- no lint warnings
+
+Save all of your summary findings as well as any outstanding suggestions/fixes to:
+
+- {{area}}/{{dir}}/review-{{iteration}}.md
+
+::end-block
+## IMPORTANT
+- use the '{{area}}' and 'rust' skill
 ::end-block
