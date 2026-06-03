@@ -71,6 +71,21 @@ excepted before Phase 5.
 > in the bench's pinned options it should fall back under the ceiling; if it
 > does not, the same fix-or-except rule applies.
 
+#### Known, accepted exception — terminal no-color is not gated
+
+Part 1 enforces only the **terminal** and **browser** targets. The
+`migration/terminal_no_color` group is measured but **not gated**. The tree
+terminal renderer has no `ColorDepth::None` fast path — it always builds and
+walks an owned `Document`, where legacy short-circuits — so no-color fixtures
+run well above 1.0× (e.g. `small_prose` no-color ≈ 155×: ~15 µs vs ~99 ns).
+The absolute cost is small (microseconds for a one-shot render), so this is an
+**accepted known regression**, not a gate failure. Post-cutover the tree path
+becomes the *only* no-color path; if no-color latency ever matters, a dedicated
+`ColorDepth::None` fast walk can be added then. (This is the sole surviving idea
+from the removed `2026-05-21-isolated-perf` investigation; its terminal-
+rasterization items are owned by graphics-policy and its fold-hygiene item by
+`2026-06-03-browser-perf` §4.)
+
 ### Part 2 — Baseline trend (the tree-only suite)
 
 Applies to the comprehensive tree-only benchmark suite below, including paths
@@ -203,7 +218,7 @@ Implementation-level only:
   `Prose` joins the component suite after its collapse.
 - [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md) —
   `mark_dim_hr` / HR fixtures must be re-measured after its Phase 0.
-- [`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md) —
-  owns per-component rasterization micro-optimizations the gate may motivate.
+- [`../2026-06-03-browser-perf/spec.md`](../2026-06-03-browser-perf/spec.md) —
+  owns the browser render-step fixes the gate's browser half motivates.
 - [`../_completed/2026-05-20-darkmatter-tree/baselines.md`](../_completed/2026-05-20-darkmatter-tree/baselines.md) —
   where Part-1 ratios and the Part-2 baseline are recorded.

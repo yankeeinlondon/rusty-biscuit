@@ -1,16 +1,28 @@
 ---
-status: draft
+status: ready for planning and implementation
+reviewed: true
+depends-on: ../2026-06-02-perf-gate/spec.md
 ---
 
 # Browser Tree-Renderer Performance
 
 ## Status
 
-**Draft — problem statement and measurement setup.** This spec captures the
-state of play, how performance is measured, and the context a fresh session
-needs to start the browser-perf investigation. It deliberately does **not**
-root-cause or design the fix — that is the next phase. Treat this as the
-handoff document: read it, then investigate.
+**Ready for planning and implementation.** The review locks the design direction:
+the production browser tree-document path should add a direct
+`RenderNode` → full HTML string renderer instead of building a second
+`BrowserFragment` tree and then serializing it. The existing
+`BrowserRenderable` / `BrowserFragment<Ready>` composition contract remains
+intact for component composition; the string path is a render-tree document
+entry point used by the cutover path and benchmarks.
+
+The problem statement and measurement setup (below) stand. The investigation
+phase is complete; its results and the chosen fix direction are recorded in
+[§4 Investigation Findings](#4-investigation-findings-2026-06-03). One outcome
+of the investigation: the sibling `2026-05-21-isolated-perf` spec was removed —
+its terminal/fold items did not bear on the browser gate (see §4). Treat §1–§3
+as the original handoff context and §4 plus the reviewed sections that follow
+as the implementation contract.
 
 The browser tree renderer is the **single remaining blocker** for the tree
 cutover ([`../2026-06-02-tree-cutover/spec.md`](../2026-06-02-tree-cutover/spec.md)).
@@ -171,12 +183,176 @@ Recorded in
   this work unblocks its browser cutover (Phase 4 gate / Phase 5 deletion).
 - [`../2026-06-02-perf-gate/spec.md`](../2026-06-02-perf-gate/spec.md) — defines
   the acceptance bar and the bench suite used here.
-- [`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md) —
-  owns tree-pipeline perf hotspots and "fold hygiene." This browser work is its
-  natural continuation; the investigation may extend that spec or supersede its
-  browser items. Decide during the investigation.
+- `2026-05-21-isolated-perf` (removed) — was a tree-pipeline perf
+  investigation. **Decided (see §4): it did not bear on the browser gate**
+  (terminal/fold work measured against a different baseline), so it was removed;
+  its one surviving idea (the accepted terminal no-color exception) moved to the
+  perf-gate spec, and its fold-hygiene item is captured in §4 here.
 - [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md) —
   the styled-HR-SVG browser cost (relevant to `mark_dim_hr`).
+
+## 4. Investigation Findings (2026-06-03)
+
+### Root cause: an architecture cost, not a hotspot
+
+The §1 framing holds — it is the whole non-code browser path — and the reason
+is structural, confirmed by reading both render paths:
+
+- **Legacy** (`html.rs` `as_html`) walks the pulldown-cmark event stream and
+  `push_str`s straight into one `String`. One pass, one buffer.
+- **Tree** folds Markdown → an owned `RenderNode` tree (**tree #1**), then
+  `render_browser_document` walks tree #1 and **builds a second owned tree** of
+  `BrowserFragment<Ready>` / `ComposableNode` (**tree #2**,
+  `renderable/src/tree/render/browser.rs`), then serializes tree #2 to the
+  `String` (`renderable/src/browser/fragment.rs`).
+
+Tree #2 is overhead legacy never pays, and it is expensive *per node*:
+
+- every child is a heap-allocated `Box<BrowserFragment>` (`fragment.rs:89`);
+- every `BrowserFragment` carries a `HashMap` + two `Vec`s
+  (`fragment.rs:108-115`), constructed per node;
+- `node_attributes` (`browser.rs:1265`) allocates a fresh `Vec<HtmlAttribute>`
+  + per-attribute `String`s + a `join` for **every** node, including
+  attribute-less text cells;
+- `text_fragment` (`browser.rs:1471`) clones each text run into a `String` to
+  wrap it, which is escaped into *another* `String` at serialization.
+
+`large_table` is the 18× worst purely because it has the most nodes (200×8 =
+1600 cells → ~3000+ fragments); the per-node overhead multiplies. The browser
+`render_table` (`browser.rs:892`) does **no** column-width / alignment planning
+— it emits `<thead>`/`<tbody>` directly with a per-cell `text-align`. So the
+spec's open question is settled: **the 18× is structural per-node overhead
+scaled by node count, not a distinct table algorithm.**
+
+### Key finding: the browser gate under-measures the tree path
+
+`migration_parity.rs:461-467` measures the tree side as
+`fold + render_browser_document` but **never calls `.output.render()`** — it
+stops at the built `HtmlPage` (tree #2). Production *does* serialize
+(`render_tree/entrypoints.rs:81-83`; `DarkmatterPage::render_to_browser`,
+`layout/page.rs:910`). Consequences:
+
+1. The reported 3.80× / 18× is dominated by **building tree #2**; serialization
+   is not even in the number.
+2. `HtmlPage::render()` (`html/mod.rs:250`) adds cost production pays but the
+   gate hides: `merged_metadata()`, `stylesheet()`, `first_h1_text()`, and
+   `collect_dedup_links()` each call `all_fragments()`, a **separate full
+   recursive walk building a `Vec<&BrowserFragment>` of every node** — 3-4 whole-
+   tree traversals before one body byte is written — plus return-string-and-
+   concat serialization (`fragment.rs:303-324`) that re-copies all descendant
+   bytes at each nesting level.
+
+The browser gate therefore compares "legacy full string" against "tree without
+serialization." **Fix the bench (add `.output.render()` to the tree side)
+before re-baselining**, or the numbers understate the real end-to-end gap.
+
+### Opportunities, ranked by leverage
+
+1. **Bypass tree #2 for the document path** — render `RenderNode` → `String`
+   directly via a streaming writer, keeping the `BrowserFragment` API only for
+   external composition consumers. Removes the largest measured cost and the
+   biggest table multiplier. **This is the chosen direction.**
+2. **Streaming writer instead of return-and-concat** — even if tree #2 stays,
+   write into `&mut String` so deep/wide trees stop re-copying descendant bytes
+   per level. Disproportionately helps `large_table` / `deeply_nested_lists`.
+3. **Collapse the `HtmlPage::render` rollup walks** — one combined traversal, or
+   short-circuit when metadata / features / stylesheets are empty (the norm for
+   parsed Markdown). Removes 3-4 full-tree `Vec` allocations.
+4. **Per-node allocation hygiene** — skip the `node_attributes` `Vec` +
+   `format!` temporaries when a node has no attrs; `write!` attributes directly
+   (`render_attributes` / `push_pair`).
+5. **Stream-escape text runs** — write escaped bytes straight to the buffer
+   instead of `to_string()` → escape-into-new-`String`.
+
+All preserve byte-output, guarded by the `render_tree_parity` / HR-snapshot
+tests.
+
+### Reviewed design decision: add a document-string renderer
+
+Implement a public render-tree document entry point that returns the final HTML
+string, tentatively named:
+
+```rust
+render_browser_document_html(
+    doc: &Document,
+    opts: &BrowserRenderOptions,
+) -> Result<Rendered<String>, RenderError>
+```
+
+The exact name can follow local API naming during implementation, but the
+behavioral contract is fixed:
+
+- It validates the `Document` with the same `gate` / strictness / diagnostics
+  semantics as `render_browser_document`.
+- It emits the same full-page bytes as
+  `render_browser_document(doc, opts)?.output.render()` for supported tree
+  inputs, including `RawHtmlPolicy`, `GraphicsMode`, Mermaid mode, styled HR,
+  page options, escaping, attributes, and semantic wrapping.
+- It streams HTML into one output buffer and does not construct a full
+  `BrowserFragment` tree for every render-tree node.
+- It keeps `render_browser_document` and `render_browser_node` available and
+  behavior-compatible for callers that need `HtmlPage` or
+  `BrowserFragment<Ready>` composition.
+- If `BrowserRenderOptions::code_renderer` returns a `BrowserFragment`, the new
+  writer may serialize that isolated hook result into the output buffer. That is
+  acceptable because the hook is an extension island; it must not reintroduce a
+  second fragment tree for the whole document.
+
+Reader note: this is an intentional addition to the renderable browser contract,
+not a reversal of the existing "no legacy string surface for
+`BrowserRenderable`" decision. Components still compose through
+`BrowserFragment<Ready>`. The new string surface is for the shared render-tree
+document renderer, where the caller already has an owned `Document` and needs
+the final browser output.
+
+Rejected alternatives:
+
+| Alternative | Pros | Cons |
+|---|---|---|
+| Optimize `BrowserFragment` construction only | Lowest API churn; improves all fragment users somewhat | Leaves tree #2 in the document hot path and keeps the largest measured cost, especially for tables |
+| Change `BrowserRenderable` to return strings | Direct and fast for simple components | Breaks established composition semantics for stylesheets, metadata, links, and features |
+| Keep the current API and only collapse `HtmlPage::render` traversals | Small, localized patch | Fixes hidden serialization overhead but not the measured gate failure, which is dominated by building tree #2 |
+
+### The removed `isolated-perf` spec — why it didn't bear on this gate
+
+Every item of the former `2026-05-21-isolated-perf` spec was checked against the
+browser problem:
+
+| Item | Target | Helps browser? | Disposition |
+|---|---|---|---|
+| QW-1 raster memo | Terminal/graphics | No | Owned by graphics-policy |
+| QW-2 SVG string | Terminal HR | No | Owned by graphics-policy |
+| QW-3 resvg Options | Terminal | No | Owned by graphics-policy |
+| QW-4 fold hygiene | All targets | Partially — fold is ~11% of browser cost | Captured below |
+| FC-2 no-color fast path | Terminal | No | Accepted exception in perf-gate spec |
+
+`isolated-perf` was almost entirely terminal / fold work, measured against the
+*slow* legacy terminal renderer. Browser is the render step (~89% of cost)
+measured against the *fast* legacy HTML streamer. Only QW-4 touched the browser,
+and only the fold (~29 µs), not the render step where the gate fails. **Running
+`isolated-perf` first would not have moved the browser gate**, and none of its
+items were approved work — so the spec was removed. Its substance is preserved:
+the terminal-rasterization items (QW-1/2/3) are owned by graphics-policy, the
+no-color observation (FC-2) is recorded as an accepted exception in the perf-gate
+spec, and the fold-hygiene item (QW-4) is folded into the sequence below — it may
+be pulled forward opportunistically (shared fold) but is secondary to the
+render-step / tree-#2 fixes this spec owns.
+
+### Recommended implementation sequence
+
+1. Fix the gate measurement gap (`.output.render()` on the tree side); run the
+   two cheap diagnostics already listed in §"To Investigate" (per-fixture byte-
+   size parity; re-capture the baseline on a quiescent host) for honest numbers.
+2. Add the direct document-string renderer and switch the production darkmatter
+   browser cutover path plus the browser gate benchmark to measure that final
+   string. Keep `render_browser_document` intact for composition callers and
+   tests that need `HtmlPage`.
+3. Collapse `HtmlPage::render` rollup walks for the fragment-composition API so
+   non-tree component users also avoid avoidable full-tree traversals.
+4. Apply per-node allocation hygiene in the shared browser writer: stream
+   attributes and text escaping into the destination buffer, and skip temporary
+   vectors/strings for attribute-less nodes.
+5. Pull QW-4 forward opportunistically.
 
 ## Goals
 
@@ -184,18 +360,51 @@ Recorded in
   no fixture beyond 1.5× legacy — or documented, signed-off exceptions.
 - Preserve browser output fidelity (parity or intended improvements only).
 - Keep fixes in the shared `renderable` browser renderer where possible.
+- Preserve the existing `BrowserRenderable` / `BrowserFragment<Ready>` /
+  `HtmlPage` public composition contract while adding the faster document-string
+  path.
 
 ## Non-Goals
 
-- Root-causing or designing the fix — that is the investigation phase this spec
-  hands off to.
 - Terminal perf (already passes).
-- Changing the gate criterion or the bench suite.
+- Changing the perf-gate criterion. Updating `migration_parity` to measure the
+  final tree HTML string is a benchmark correctness fix, not a criterion change.
+- Replacing `BrowserFragment<Ready>` as the component composition currency.
 - Re-litigating the cutover sequencing or any resolved cutover decision.
 
-## To Investigate (next phase — not done here)
+## Acceptance Criteria
 
-A checklist for the investigation, deliberately not pre-judged:
+1. `migration_parity` browser tree benches measure the same production surface
+   as legacy: a final HTML `String`. The tree side must not stop at
+   `Rendered<HtmlPage>`.
+2. A fresh quiescent-host baseline is captured after the measurement fix and
+   again after the renderer work; `baselines.md` records the ratios and any
+   signed-off exceptions.
+3. Browser parity tests compare final HTML strings for legacy vs tree, including
+   at least prose, table, list, links/images, code, raw HTML policy, `mark`,
+   and graphics-policy HR fixtures.
+4. The direct document-string renderer and the existing
+   `render_browser_document(...).output.render()` path produce identical bytes
+   for the shared fixture corpus unless a deliberate fidelity improvement is
+   documented in this spec or the dependency specs.
+5. Existing public fragment/page composition tests still pass. Add at least one
+   regression test proving `BrowserFragment` metadata, dependency links,
+   stylesheets, and features still roll up through `HtmlPage::render`.
+6. Rustdoc and skill docs are updated where public browser-renderer surfaces are
+   added or behavior is clarified.
+
+## To Investigate (largely resolved in §4)
+
+This checklist drove the investigation. **Resolved:** the table 18× is
+structural overhead scaled by node count, not a table algorithm (no width
+planning exists); the cost is concentrated in building/serializing the
+intermediate fragment tree (#4); the `isolated-perf` spec was removed as not
+bearing on this gate.
+**Still open / first implementation steps:** the byte-size fidelity-vs-overhead
+diagnostic and the quiescent-host re-baseline (both deferred to the gate-fix
+step in §4's sequence).
+
+The original checklist, for reference:
 
 - **Separate "added fidelity" from "structural overhead."** Some of the regression
   is real work the tree path *should* do: `mark_dim_hr` now emits styled HR
@@ -220,12 +429,28 @@ A checklist for the investigation, deliberately not pre-judged:
   legacy streamer; identify the highest-leverage reductions.
 - Decide whether any fixture's residual gap is an accepted, documented exception
   vs a must-fix.
-- Decide whether this folds into `2026-05-21-isolated-perf` or stands alone.
+
+## Open Questions
+
+No architecture-level question remains open after review. Implementation should
+settle these small choices locally:
+
+- **Public function name.** Recommended:
+  `render_browser_document_html`, because it mirrors
+  `render_browser_document` while making the final string surface explicit.
+  `render_browser_document_to_string` is acceptable if the surrounding module
+  strongly prefers verb-style names.
+- **Head streaming implementation.** Recommended: factor shared head/body
+  helpers so the string renderer and `HtmlPage::render` cannot drift. Duplicating
+  head construction would be faster to write, but it makes title, metadata,
+  stylesheet, script, and link ordering harder to keep compatible.
+- **Exception policy after honest measurement.** Recommended: no new browser
+  exceptions unless a fixture's remaining gap is caused by documented added
+  fidelity, not by structural overhead.
 
 ## Related Specs
 
 - [`../2026-06-02-tree-cutover/spec.md`](../2026-06-02-tree-cutover/spec.md)
 - [`../2026-06-02-perf-gate/spec.md`](../2026-06-02-perf-gate/spec.md)
-- [`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md)
 - [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md)
 - [`../_completed/2026-05-20-darkmatter-tree/baselines.md`](../_completed/2026-05-20-darkmatter-tree/baselines.md)

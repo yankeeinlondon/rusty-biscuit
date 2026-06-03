@@ -15,11 +15,11 @@ deferred browser-HR fidelity question in favor of restoring the styled SVG.
 The remaining open questions are implementation trade-offs that do not change
 the architecture.
 
-This spec was carved out of
-[`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md) so
-the perf spec stays focused on perf and the policy questions — which touch the
-shared renderable ↔ biscuit-terminal ↔ darkmatter contract — are reasoned about
-as one cross-target concern. It is **Phase 0 of the cutover**
+This spec was carved out of an earlier tree-pipeline perf investigation (the
+since-removed `2026-05-21-isolated-perf`) so the policy questions — which touch
+the shared renderable ↔ biscuit-terminal ↔ darkmatter contract — are reasoned
+about as one cross-target concern rather than per-component. It is **Phase 0 of
+the cutover**
 ([`../2026-06-02-tree-cutover/spec.md`](../2026-06-02-tree-cutover/spec.md)):
 the terminal `mark_dim_hr` regression and the browser HR fidelity gap both
 block the public terminal/browser cutover (DMTR-8), and this work clears them.
@@ -66,9 +66,8 @@ fire its graphical path. Capability is conflated with policy: there is no shared
 "the caller asked us not to render graphics" surface that isn't expressed as a
 capability lie.
 
-Two concrete leaks (from
-[`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md))
-motivate the work:
+Two concrete leaks (surfaced by the `migration_parity` benches) motivate the
+work:
 
 1. **Terminal `mark_dim_hr` regression.** The tree terminal renderer has no
    equivalent of legacy `TerminalImageMode`; the HR image tier fires off
@@ -366,8 +365,10 @@ Architecture is locked; these are implementation-level.
 
 - [`../2026-06-02-tree-cutover/spec.md`](../2026-06-02-tree-cutover/spec.md) —
   this spec is its Phase 0; clearing both leaks unblocks the public cutover.
-- [`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md) —
-  the perf spec this carves out from; retains fold-hygiene / no-color items.
+- [`../2026-06-02-perf-gate/spec.md`](../2026-06-02-perf-gate/spec.md) —
+  the gate this spec's Phase 0 re-measurement feeds; also records the accepted
+  terminal no-color exception (formerly tracked in the removed isolated-perf
+  spec).
 - [`../2026-05-20-darkmatter-tree/spec.md`](../2026-05-20-darkmatter-tree/spec.md) —
   parent migration spec.
 - [`../2026-05-20-darkmatter-tree/baselines.md`](../2026-05-20-darkmatter-tree/baselines.md) —

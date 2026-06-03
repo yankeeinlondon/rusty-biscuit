@@ -37,8 +37,9 @@ Decision lineage:
 The sibling spec
 [`../2026-05-26-inline-span/spec.md`](../2026-05-26-inline-span/spec.md)
 covers inline darkmatter extensions (mark, dim, future emoji, var,
-tooltip). Performance context lives in
-[`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md).
+tooltip). Performance context lived in the `2026-05-21-isolated-perf` spec
+(since removed; its surviving items moved to the perf-gate and browser-perf
+specs).
 The render-side decision about HR graphical rendering is owned by
 [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md);
 this spec is the parse-side story only.
@@ -449,8 +450,8 @@ generalize from HR attributes alone.
 - [`../2026-05-26-inline-span/spec.md`](../2026-05-26-inline-span/spec.md) —
   sibling spec. This HR lift is a hard prerequisite for that spec's
   `SpannedInlineStyleProcessor` deletion step.
-- [`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md) —
-  perf context. This refactor is not a perf win on its own.
+- `2026-05-21-isolated-perf` (removed) — perf context. This refactor is not a
+  perf win on its own.
 - [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md) —
   cross-target graphics policy. Owns render-side HR decisions; this spec's
   parsed `HorizontalRuleAttrs` are graphics-policy input.

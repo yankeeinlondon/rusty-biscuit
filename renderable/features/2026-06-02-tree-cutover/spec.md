@@ -32,8 +32,9 @@ for. Its direct inputs:
 - [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md) —
   owns the HR/image fidelity decisions that block this cutover. **Hard
   upstream dependency — see [Phase 0](#phase-0--fidelity-graphics-policy-first).**
-- [`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md) —
-  the perf hotspots surfaced by `migration_parity`.
+- [`../2026-06-03-browser-perf/spec.md`](../2026-06-03-browser-perf/spec.md) —
+  owns the browser render-step perf work; the browser gate is the single
+  remaining blocker for this cutover's Phase 4/5.
 
 ## Background
 
@@ -308,6 +309,6 @@ sibling specs.
 - [`../2026-05-26-inline-span/spec.md`](../2026-05-26-inline-span/spec.md)
 - [`../2026-05-26-block-extension/spec.md`](../2026-05-26-block-extension/spec.md)
 - [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md)
-- [`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md)
+- [`../2026-06-03-browser-perf/spec.md`](../2026-06-03-browser-perf/spec.md)
 - [`../_completed/2026-05-20-darkmatter-tree/spec.md`](../_completed/2026-05-20-darkmatter-tree/spec.md)
 - [`../_completed/2026-05-20-darkmatter-tree/baselines.md`](../_completed/2026-05-20-darkmatter-tree/baselines.md)

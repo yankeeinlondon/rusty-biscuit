@@ -29,8 +29,8 @@ The sibling spec
 covers the narrow lift of HR attributes out of the inline span-aware
 processor; it deliberately does not design a general block-extension
 architecture (that would be premature from one data point).
-Performance context lives in
-[`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md).
+Performance context lived in the `2026-05-21-isolated-perf` spec (since removed;
+its surviving items moved to the perf-gate and browser-perf specs).
 
 ## Background
 
@@ -449,10 +449,9 @@ contributors don't accidentally regress it.
   sibling spec; lifts HR attributes out of `SpannedInlineStyleProcessor`.
   Implementations interleave at the `SpannedInlineStyleProcessor`
   deletion step (block-extension's Phase 1 must land first).
-- [`../2026-05-21-isolated-perf/spec.md`](../2026-05-21-isolated-perf/spec.md) —
-  the perf spec. Once measurement lands in step 8, the perf numbers
-  graduate from this spec's expectation section into the perf spec's
-  recorded outcomes.
+- `2026-05-21-isolated-perf` (removed) — was the perf spec. Once measurement
+  lands in step 8, the perf numbers graduate from this spec's expectation
+  section into the perf spec's recorded outcomes.
 - [`../2026-05-26-graphics-policy/spec.md`](../2026-05-26-graphics-policy/spec.md) —
   cross-target graphics policy (unrelated; listed for navigation).
 - [`../_completed/2026-05-20-darkmatter-tree/spec.md`](../_completed/2026-05-20-darkmatter-tree/spec.md) —
