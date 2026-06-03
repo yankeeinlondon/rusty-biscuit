@@ -590,6 +590,11 @@ fn wrapper_sets_interactive_true_by_default() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    // Isolate HOME so the wrapper reads a seeded empty config instead of the
+    // developer's real `~/.claudine/config.json`, whose lifecycle actions can
+    // spawn detached side-effect processes that hold the stdout pipe open
+    // (assert_cmd then blocks on the pipe and nextest reports leaked handles).
+    seed_minimal_config(workspace.path());
     let env_path = workspace.path().join("env.txt");
 
     write_executable(
@@ -602,6 +607,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args(["codex", "--", "--version"])

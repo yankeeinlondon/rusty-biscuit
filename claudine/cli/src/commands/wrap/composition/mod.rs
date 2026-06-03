@@ -1995,9 +1995,13 @@ mod tests {
     #[serial_test::serial]
     fn select_launch_workspace_falls_back_once_when_prep_missing() {
         reset_launch_workspace_fallbacks_for_tests();
-        let cwd = std::env::current_dir().unwrap();
+        // Point the fallback walker at an empty tempdir rather than the real
+        // current dir: the counter increments before the walk, so the
+        // contract holds, while avoiding an expensive repo scan of the whole
+        // monorepo worktree.
+        let cwd = tempfile::tempdir().unwrap();
 
-        let _ = select_launch_workspace(None, &cwd, None);
+        let _ = select_launch_workspace(None, cwd.path(), None);
 
         assert_eq!(
             launch_workspace_fallback_count_for_tests(),
