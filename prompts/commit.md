@@ -19,8 +19,15 @@ operation: commit
 > 1. If the change appears to have no relationship to any particular package in the monorepo.
 > 2. If there are bunch of small changes which are all related to the same underlying event or cause and the changes do not touch any source code
 
-The valid operations we use include: fix, docs, chore, feat, refactor, style, perf, test, ci, style.
+The valid operations we use include: fix, docs, chore, feat, refactor, style, perf, test, ci, style, planning.
 
+> **Note:**
+> - when you detect that a directory of files with a "spec.md" are being **moved INTO** a directory containing `_completed` in the directory path:
+>     - mark the operation as "planning"
+>     - this movement indicates that the feature/fixture/review has now been completed; it is kept in git but moved out of the hotpath of actively planned items
+> - when you detect that a directory of files with a "spec.md" are being **moved OUT OF** a directory containing `_unscheduled` in the directory path:
+>     - mark the operation as "planning"
+>     - this indicates that a specification that had no immediacy before has been scheduled to be implemented very soon
 > **Note:** the action 'refactor' should be reserved for commits which have at least some source code files.
 
 ## Package in this Monorepo
