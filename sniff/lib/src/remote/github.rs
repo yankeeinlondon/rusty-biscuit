@@ -558,10 +558,13 @@ impl RemoteRepoProvider for GitHubRemote {
             Err(err) => return Err(map_schematic_error(err)),
         };
 
+        // `per_page` bounds the server-side page, but a generous or non-honoring
+        // response could still exceed `limit`; `take(limit)` pins the invariant.
         Ok(response
             .workflow_runs
             .into_iter()
             .map(map_workflow_run)
+            .take(limit)
             .collect())
     }
 

@@ -620,6 +620,42 @@ mod github_tests {
     }
 
     #[tokio::test]
+    async fn list_workflow_runs_caps_results_at_limit() {
+        let (server, provider) = setup_github_mock().await;
+
+        // GitHub honors `per_page`, but a server that over-delivers (or ignores
+        // the page size) must not blow past `limit`. Respond with five runs to a
+        // `limit=2` request and assert `take(limit)` clamps the mapped vec to 2.
+        let over_limit = serde_json::json!({
+            "total_count": 5,
+            "workflow_runs": (0..5).map(|i| serde_json::json!({
+                "id": 200 + i,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "event": "push",
+                "head_branch": "main",
+                "html_url": format!("https://github.com/test-owner/test-repo/actions/runs/{}", 200 + i),
+                "created_at": "2024-06-20T10:00:00Z"
+            })).collect::<Vec<_>>()
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/actions/runs"))
+            .and(query_param("per_page", "2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(over_limit))
+            .mount(&server)
+            .await;
+
+        let runs = provider
+            .list_workflow_runs("test-owner", "test-repo", 2)
+            .await
+            .unwrap();
+
+        assert_eq!(runs.len(), 2);
+    }
+
+    #[tokio::test]
     async fn fetch_report_via_enum_includes_workflow_runs() {
         // Regression: the production CLI dispatches through `GitRemote`, not
         // `GitHubRemote` directly. If the enum fails to forward
