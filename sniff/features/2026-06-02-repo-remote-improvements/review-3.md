@@ -1,7 +1,7 @@
 ---
 agent: codex
 model: ""
-ready: false
+ready: true
 ---
 
 # Review: `sniff repo remote` PR count + CI/CD runs
