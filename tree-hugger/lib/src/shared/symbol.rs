@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tree_sitter::Language;
 
+use super::DiagnosticMetadata;
+
 /// Programming languages supported by tree-hugger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProgrammingLanguage {
@@ -149,6 +151,28 @@ impl ProgrammingLanguage {
             Self::Scala => tree_sitter_scala::LANGUAGE.into(),
             Self::Lua => tree_sitter_lua::LANGUAGE.into(),
         }
+    }
+
+    /// Returns all supported languages.
+    pub fn all() -> Vec<Self> {
+        vec![
+            Self::Rust,
+            Self::JavaScript,
+            Self::TypeScript,
+            Self::Go,
+            Self::Python,
+            Self::Java,
+            Self::Php,
+            Self::Perl,
+            Self::Bash,
+            Self::Zsh,
+            Self::C,
+            Self::Cpp,
+            Self::CSharp,
+            Self::Swift,
+            Self::Scala,
+            Self::Lua,
+        ]
     }
 
     /// Returns the tree-sitter language for an extension.
@@ -624,6 +648,9 @@ pub struct LintDiagnostic {
     /// Source context for displaying the diagnostic with visual markers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<SourceContext>,
+    /// Diagnostic metadata for policy and display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<DiagnosticMetadata>,
 }
 
 /// A syntax diagnostic derived from parse errors.
@@ -635,6 +662,9 @@ pub struct SyntaxDiagnostic {
     /// Source context for displaying the diagnostic with visual markers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<SourceContext>,
+    /// Diagnostic metadata for policy and display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<DiagnosticMetadata>,
 }
 
 /// Categorizes the source of a diagnostic.
@@ -680,6 +710,9 @@ pub struct Diagnostic {
     /// Source context for displaying the diagnostic with visual markers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<SourceContext>,
+    /// Diagnostic metadata for policy and display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<DiagnosticMetadata>,
 }
 
 impl Diagnostic {
@@ -705,6 +738,7 @@ impl Diagnostic {
             severity: lint.severity,
             rule: lint.rule,
             context: lint.context,
+            metadata: lint.metadata,
         }
     }
 
@@ -717,6 +751,7 @@ impl Diagnostic {
             severity: syntax.severity,
             rule: None,
             context: syntax.context,
+            metadata: syntax.metadata,
         }
     }
 }
