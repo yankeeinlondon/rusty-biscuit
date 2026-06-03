@@ -1,10 +1,46 @@
 ---
-ready: false
+ready: true
 agent: codex
 model: ""
 ---
 
 # Review 1
+
+> **Resolution (2026-06-02).** All seven findings addressed. Summary:
+>
+> - **High — Terminal `Vector` rasterizes HR.** `render.rs` `ThematicBreak` now
+>   maps `Off | Vector → render_text_tier` and `Rich → render_image_tier`
+>   (the terminal has no vector HR form). L1 regression
+>   `render_tree_thematic_break_vector_mode_uses_text_tier`.
+> - **High — Terminal Mermaid ignores opt-in.** New `TerminalMermaidMode`
+>   (`renderable::tree`) + `TerminalRenderContext::mermaid_mode`. Promotion now
+>   requires `mermaid_mode == Image` **and** `graphics_mode == Rich`; darkmatter
+>   maps `MermaidMode::Image → Image`. Tests:
+>   `mermaid_rich_without_opt_in_falls_through_to_code_renderer`,
+>   `terminal_options_mapping_maps_mermaid_opt_in`.
+> - **High — Browser `Off` promotes Mermaid via hook.** `render_code_block`
+>   handles every `lang="mermaid"` in its own policy-gated branch and never
+>   falls through to the generic code-renderer hook. Test
+>   `mermaid_off_bypasses_svg_emitting_code_renderer`.
+> - **High — `MermaidMode::Image → Interactive`.** Browser mapping now emits
+>   `BrowserMermaidMode::StaticSvg`; test renamed to
+>   `browser_options_mapping_maps_mermaid_image_to_static_svg`.
+> - **High — `force_graphics` not enforced.** New `Writer::effective_terminal`
+>   upgrades the capability snapshot (TTY + Kitty) when `force_graphics` is set;
+>   consumed by HR image tier, Mermaid, and image rendering. Test
+>   `render_tree_thematic_break_force_graphics_rasterizes_on_unsupported_terminal`.
+> - **High — Rich terminal images were a TODO.** `Writer::render_terminal_image`
+>   ports the legacy security contract (remote/absolute/traversal/10 MiB) and
+>   renders via `TerminalImage` at `Rich`; `image_base_path` threaded through
+>   `TerminalRenderContext` + the darkmatter terminal entry point.
+> - **Medium — Promotion failures ignore strictness.** `render_code_node`
+>   (terminal) and `render_code_block` (browser) now return `Result` and route
+>   failed promotion through Strict (reject) / Warn (diagnostic + fall back) /
+>   Lossy (silent). Tests `mermaid_promotion_failure_rejects_under_strict`,
+>   `mermaid_static_svg_failure_honors_strictness`.
+>
+> L2 real-terminal capture coverage for the image-protocol paths remains a
+> separate follow-up (the policy/selection logic above is covered at L1).
 
 ## Findings
 
