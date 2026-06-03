@@ -1,5 +1,10 @@
 ; Go lint rules
 ; Capture names follow @diagnostic.{rule-id} convention
 
-; No pattern-based rules for Go
-; Semantic checks (unused-symbol, unused-import, undefined-symbol) are handled in code
+; Detect fmt.Println() calls
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @_pkg
+    field: (field_identifier) @_fn)
+  (#eq? @_pkg "fmt")
+  (#eq? @_fn "Println")) @diagnostic.fmt-println

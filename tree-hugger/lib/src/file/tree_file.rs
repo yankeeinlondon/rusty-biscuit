@@ -7,6 +7,7 @@ use tree_sitter::{Node, Parser, QueryCursor, StreamingIterator};
 use crate::error::TreeHuggerError;
 use crate::file::extract::*;
 use crate::queries::{GrammarRef, QueryKind, format_rule_message, query_for, severity_for_rule};
+use crate::rule_registry::{RuleRegistry, diagnostic_metadata_from_rule};
 use crate::shared::{
     AnalysisPass, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FileSymbolIndex,
     ImportSymbol, LintDiagnostic, ProgrammingLanguage, ReferencedSymbol, SourceContext, SymbolInfo,
@@ -29,6 +30,8 @@ pub struct TreeFile {
     grammar: tree_sitter::Language,
     /// Stable identifier for the grammar variant, used to key query caching.
     grammar_id: &'static str,
+    /// Whether to enable experimental semantic rules.
+    pub experimental_semantics: bool,
 }
 
 impl TreeFile {
@@ -86,6 +89,7 @@ impl TreeFile {
             tree,
             grammar: tree_language,
             grammar_id,
+            experimental_semantics: false,
         })
     }
 
@@ -97,6 +101,18 @@ impl TreeFile {
             grammar: &self.grammar,
             id: self.grammar_id,
         }
+    }
+
+    fn diagnostic_metadata(&self, rule_id: &str) -> crate::shared::DiagnosticMetadata {
+        diagnostic_metadata_from_rule(
+            rule_id,
+            &RuleRegistry::new(),
+            &[],
+            &[],
+            &[],
+            false,
+            self.experimental_semantics,
+        )
     }
 
     /// Provides the list of symbols imported by this file.
@@ -1028,6 +1044,7 @@ impl TreeFile {
                         severity: severity_for_rule(rule_id),
                         rule: Some(rule_id.to_string()),
                         context: Some(context),
+                        metadata: Some(self.diagnostic_metadata(rule_id)),
                     });
                 }
             }
@@ -1058,29 +1075,35 @@ impl TreeFile {
         let referenced_names: std::collections::HashSet<&str> =
             references.iter().map(|r| r.name.as_str()).collect();
 
-        // Check for undefined symbols
-        diagnostics.extend(self.check_undefined_symbols(
-            &references,
-            &defined_names,
-            &imported_names,
-        ));
+        // Check for undefined symbols (experimental)
+        if self.experimental_semantics {
+            diagnostics.extend(self.check_undefined_symbols(
+                &references,
+                &defined_names,
+                &imported_names,
+            ));
+        }
 
-        // Check for unused symbols
-        diagnostics.extend(self.check_unused_symbols(
-            &definitions,
-            &exported_names,
-            &referenced_names,
-        ));
+        // Check for unused symbols (experimental)
+        if self.experimental_semantics {
+            diagnostics.extend(self.check_unused_symbols(
+                &definitions,
+                &exported_names,
+                &referenced_names,
+            ));
+        }
 
-        // Check for unused imports
+        // Check for unused imports (stable)
         diagnostics.extend(self.check_unused_imports(&imports, &referenced_names));
 
-        // Check for qualified references with undefined qualifiers
-        diagnostics.extend(self.check_qualified_references(
-            &references,
-            &defined_names,
-            &imported_names,
-        ));
+        // Check for qualified references with undefined qualifiers (experimental)
+        if self.experimental_semantics {
+            diagnostics.extend(self.check_qualified_references(
+                &references,
+                &defined_names,
+                &imported_names,
+            ));
+        }
 
         // Check for dead code
         diagnostics.extend(self.check_dead_code());
@@ -1100,6 +1123,7 @@ impl TreeFile {
                     severity: severity_for_rule("dead-code"),
                     rule: Some("dead-code".to_string()),
                     context: Some(context),
+                    metadata: Some(self.diagnostic_metadata("dead-code")),
                 }
             })
             .collect()
@@ -1219,6 +1243,7 @@ impl TreeFile {
                 severity: severity_for_rule("undefined-symbol"),
                 rule: Some("undefined-symbol".to_string()),
                 context: Some(context),
+                metadata: Some(self.diagnostic_metadata("undefined-symbol")),
             });
         }
 
@@ -1270,6 +1295,7 @@ impl TreeFile {
                 severity: severity_for_rule("unused-symbol"),
                 rule: Some("unused-symbol".to_string()),
                 context: Some(context),
+                metadata: Some(self.diagnostic_metadata("unused-symbol")),
             });
         }
 
@@ -1310,6 +1336,7 @@ impl TreeFile {
                 severity: severity_for_rule("unused-import"),
                 rule: Some("unused-import".to_string()),
                 context: Some(context),
+                metadata: Some(self.diagnostic_metadata("unused-import")),
             });
         }
 
@@ -1386,6 +1413,7 @@ impl TreeFile {
                 severity: severity_for_rule("undefined-module"),
                 rule: Some("undefined-module".to_string()),
                 context: Some(context),
+                metadata: Some(self.diagnostic_metadata("undefined-module")),
             });
         }
 
@@ -1464,6 +1492,7 @@ impl TreeFile {
                     range,
                     severity: DiagnosticSeverity::Error,
                     context: Some(context),
+                    metadata: Some(self.diagnostic_metadata("invalid-syntax")),
                 });
             }
 
@@ -1773,4 +1802,3 @@ impl TreeFile {
         Ok(symbols)
     }
 }
-

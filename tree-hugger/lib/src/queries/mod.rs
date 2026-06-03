@@ -1,3 +1,10 @@
+pub mod compatibility;
+pub mod drift;
+pub mod inventory;
+pub mod provenance;
+
+pub use provenance::{query_provenance, vendor_query_provenance, overlay_query_provenance};
+
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -365,7 +372,8 @@ pub fn severity_for_rule(rule_id: &str) -> DiagnosticSeverity {
         | "dead-code" | "undefined-module" => DiagnosticSeverity::Warning,
         // Warning-level rules (pattern)
         "unwrap-call" | "expect-call" | "dbg-macro" | "eval-call" | "exec-call"
-        | "debugger-statement" | "breakpoint-call" | "deprecated-syntax" => {
+        | "debugger-statement" | "breakpoint-call" | "deprecated-syntax"
+        | "console-log" | "print-call" | "fmt-println" => {
             DiagnosticSeverity::Warning
         }
         // Default to info
@@ -390,6 +398,9 @@ pub fn format_rule_message(rule_id: &str) -> String {
         "exec-call" => "Use of exec() is discouraged".to_string(),
         "debugger-statement" => "Debugger statement found".to_string(),
         "breakpoint-call" => "Breakpoint call found".to_string(),
+        "console-log" => "console.log() call found".to_string(),
+        "print-call" => "print() call found".to_string(),
+        "fmt-println" => "fmt.Println() call found".to_string(),
         // Legacy rules (kept for compatibility)
         "unused-variable" => "Potentially unused variable".to_string(),
         "shadowed-variable" => "Variable shadows outer binding".to_string(),
