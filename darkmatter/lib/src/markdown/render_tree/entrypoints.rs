@@ -854,6 +854,44 @@ mod tests {
         assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::StaticSvg);
     }
 
+    /// Review-3 finding 1: a `lang="mermaid"` fence carrying code-block DSL
+    /// (`title` / `line-numbering` / `highlight`) that is NOT promoted —
+    /// `MermaidMode::Off` maps to `BrowserMermaidMode::Code` — must still render
+    /// the full darkmatter code-block presentation through the wired
+    /// `render_browser_code` hook, not collapse to a bare `<pre><code>` that
+    /// drops the metadata. This is the spec's lossless-fallback contract,
+    /// exercised end-to-end with the real darkmatter code renderer.
+    #[test]
+    fn render_tree_html_mermaid_off_preserves_code_block_metadata() {
+        let md: Markdown =
+            "```mermaid title=\"Flow\" line-numbering=true highlight=2\nflowchart LR\n    A --> B\n```\n"
+                .into();
+        let opts = HtmlOptions {
+            mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
+            ..HtmlOptions::default()
+        };
+
+        let result = render_tree_html(&md, &opts).expect("html render");
+        let out = &result.output;
+
+        assert!(
+            out.contains("code-block-title") && out.contains("Flow"),
+            "non-promoted mermaid must keep its title block; raw output:\n{out}",
+        );
+        assert!(
+            out.contains("code-table") && out.contains("ln-gutter"),
+            "non-promoted mermaid must keep its line-number table; raw output:\n{out}",
+        );
+        assert!(
+            out.contains("highlighted"),
+            "non-promoted mermaid must keep its highlighted-line markup; raw output:\n{out}",
+        );
+        assert!(
+            !out.contains("<svg"),
+            "MermaidMode::Off must not promote to SVG; raw output:\n{out}",
+        );
+    }
+
     /// The terminal entry point must map `TerminalImageMode::Never` to
     /// `GraphicsMode::Off` so the tree renderer suppresses both inline images
     /// and Mermaid promotion.

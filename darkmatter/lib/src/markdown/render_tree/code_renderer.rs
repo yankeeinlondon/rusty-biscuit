@@ -162,24 +162,11 @@ impl CodeRenderer for TerminalCodeRenderer {
         meta: Option<&str>,
         _attrs: &NodeAttrs,
     ) -> Option<BrowserFragment<Ready>> {
-        let is_mermaid = lang
-            .map(|l| l.eq_ignore_ascii_case("mermaid"))
-            .unwrap_or(false);
-
-        if is_mermaid {
-            let diagram = MermaidDiagram::new(value);
-            match diagram.render_to_svg() {
-                Ok(svg) => {
-                    return Some(
-                        BrowserFragment::new().define_as_raw_html(svg).finalize(),
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "Mermaid SVG rendering failed, falling back to code block");
-                }
-            }
-        }
-
+        // Mermaid is intentionally NOT handled here. The render tree routes
+        // `lang="mermaid"` to `render_browser_mermaid`, whose `None` return is
+        // an observable promotion failure the renderer can apply strictness to.
+        // Catching the SVG failure here and returning a code-block fragment
+        // would hide that failure behind `Some(_)` and bypass strictness.
         let options = HtmlOptions::default();
         // Code blocks contrast against the page: resolve the theme *variant*
         // against the INVERTED color mode (a light code panel on a dark page,
@@ -197,6 +184,19 @@ impl CodeRenderer for TerminalCodeRenderer {
         let html =
             render_html_code_block(value, language, &code_meta, &highlighter, &options).ok()?;
         Some(BrowserFragment::new().define_as_raw_html(html).finalize())
+    }
+
+    fn render_browser_mermaid(
+        &self,
+        value: &str,
+        _meta: Option<&str>,
+        _attrs: &NodeAttrs,
+    ) -> Option<BrowserFragment<Ready>> {
+        // `None` on failure is the contract: it surfaces the promotion failure
+        // to the render tree so strictness can reject or diagnose it, rather
+        // than silently degrading to a code block here.
+        let svg = MermaidDiagram::new(value).render_to_svg().ok()?;
+        Some(BrowserFragment::new().define_as_raw_html(svg).finalize())
     }
 }
 
@@ -371,42 +371,49 @@ mod tests {
         );
     }
 
-    /// Mermaid code blocks on the browser path attempt SVG generation via
-    /// `biscuit_terminal::components::mermaid::MermaidDiagram::render_to_svg`.
-    /// On success the raw SVG is returned as a `BrowserFragment`; on failure
-    /// the hook falls back to a syntax-highlighted code block.
+    /// Mermaid promotion lives in the dedicated `render_browser_mermaid` hook,
+    /// which returns `Some(svg)` on success and `None` on failure — the renderer
+    /// applies strictness to that `None`. `render_browser_code` must NOT special-
+    /// case mermaid; doing so would hide an SVG failure behind a code-block
+    /// fallback and bypass strictness (review-2 finding 2).
     #[test]
-    fn browser_code_mermaid_attempts_svg_then_fallback() {
+    fn browser_mermaid_returns_svg_or_none_never_silent_code_block() {
         let renderer = TerminalCodeRenderer::new();
 
-        // The hook tries SVG first.
-        let fragment = renderer.render_browser_code(
-            Some("mermaid"),
-            "flowchart LR\n    A --> B",
-            None,
-            &NodeAttrs::default(),
-        );
-
-        match fragment {
+        match renderer.render_browser_mermaid("flowchart LR\n    A --> B", None, &NodeAttrs::default())
+        {
             Some(f) => {
                 let html = f.render();
-                if html.contains("<svg") {
-                    assert!(
-                        html.contains("</svg>"),
-                        "Mermaid SVG must be well-formed; got: {html}"
-                    );
-                } else {
-                    // Fallback to syntax-highlighted code block.
-                    assert!(
-                        html.contains("language-mermaid"),
-                        "Mermaid fallback must be a code block; got: {html}"
-                    );
-                }
+                assert!(
+                    html.contains("<svg") && html.contains("</svg>"),
+                    "successful promotion must be well-formed SVG; got: {html}"
+                );
             }
             None => {
-                // If the hook returns None (e.g. host lacks deps), the tree
-                // renderer's plain fallback runs — this is acceptable.
+                // Host lacks the Mermaid toolchain: a `None` is the correct
+                // failure signal — the renderer degrades per strictness.
             }
         }
+    }
+
+    /// `render_browser_code` must treat `lang="mermaid"` as an ordinary code
+    /// block (no SVG promotion), so the only promotion path is the fallible
+    /// `render_browser_mermaid` hook.
+    #[test]
+    fn browser_code_does_not_promote_mermaid() {
+        let renderer = TerminalCodeRenderer::new();
+        let html = renderer
+            .render_browser_code(
+                Some("mermaid"),
+                "flowchart LR\n    A --> B",
+                None,
+                &NodeAttrs::default(),
+            )
+            .expect("renders a code block")
+            .render();
+        assert!(
+            !html.contains("<svg"),
+            "render_browser_code must not promote mermaid to SVG; got: {html}"
+        );
     }
 }

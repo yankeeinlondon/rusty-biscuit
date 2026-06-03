@@ -1015,3 +1015,89 @@ fn level2_page_no_double_blank_rows_between_code_blocks() {
         }
     }
 }
+
+/// A valid 2×2 RGB PNG, embedded so the image-node Level-2 test needs no
+/// on-disk fixture or `image`-crate dependency.
+const TINY_PNG: &[u8] = &[
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0,
+    0, 0, 253, 212, 154, 115, 0, 0, 0, 16, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 0, 68, 12,
+    16, 10, 0, 31, 238, 3, 253, 139, 95, 20, 212, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+
+/// Review-3 finding 3: a `Rich` image node through the render-tree path is
+/// user-visible terminal graphics, but was only verified for the missing-file
+/// and `Off`/`Vector` alt-text fallbacks. This Level-2 test renders a real
+/// image node through `render_terminal_document` (the production tree path),
+/// confirms the iTerm2 image protocol bytes are emitted, then `cat`s them into
+/// a real WezTerm pane to prove the terminal *consumes* the image rather than
+/// falling back to literal `[cat]` alt text.
+///
+/// WezTerm strips image-protocol bytes from its text capture, so the
+/// user-visible assertion is the **absence** of the alt-text fallback in the
+/// captured pane, paired with the in-process proof that the protocol fired.
+#[test]
+#[serial(level2_terminal)]
+fn level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal() {
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
+    }
+
+    // Fixture image + rendered bytes share one temp dir so the relative
+    // `pic.png` resolves against `image_base_path` at render time.
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("pic.png"), TINY_PNG).unwrap();
+
+    let source = SourceDescriptor::Virtual {
+        name: "rich_image".into(),
+    };
+    let (doc, diags) = fold_markdown_to_document(source, "![cat](pic.png)\n");
+    assert!(diags.is_empty(), "image fixture must fold cleanly: {diags:?}");
+
+    // Rich tier on an iTerm2-capable TTY (WezTerm renders iTerm2 graphics).
+    let mut term = Terminal::new_optimistic(120);
+    term.image_support = ImageSupport::ITerm;
+    term.is_tty = true;
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.graphics_mode = renderable::tree::GraphicsMode::Rich;
+    context.image_base_path = Some(dir.path().to_path_buf());
+    let opts = TerminalRenderOptions {
+        context,
+        strictness: RenderStrictness::Warn,
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+    };
+    let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
+
+    // In-process proof the production tree path emitted the inline image
+    // protocol (iTerm2 OSC 1337), not the alt-text fallback.
+    assert!(
+        rendered.output.contains("\u{1b}]1337;File="),
+        "Rich image node must emit the iTerm2 image protocol; rendered bytes:\n{:?}",
+        rendered.output,
+    );
+    assert!(
+        !rendered.output.contains("[cat]"),
+        "successful image render must not emit the bracketed alt-text fallback",
+    );
+
+    let path = dir.path().join("rich_image.ansi");
+    fs::write(&path, rendered.output).unwrap();
+
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().unwrap();
+    run_with_sentinel(harness, "clear");
+    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+
+    // User-visible: the real terminal consumed the image bytes — the literal
+    // `[cat]` alt-text fallback must NOT appear in the captured pane.
+    assert!(
+        !frame.plain.contains("[cat]"),
+        "real terminal showed the alt-text fallback instead of consuming the image. plain:\n{}",
+        frame.plain,
+    );
+}
