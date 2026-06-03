@@ -2731,6 +2731,158 @@ mod render_tree_tests {
         }
     }
 
+    /// Writes a tiny valid 2×2 PNG into a fresh temp dir. Returns the dir
+    /// (kept alive by the caller for the file's lifetime) plus the relative
+    /// file name to reference against an `image_base_path`.
+    fn temp_png() -> (tempfile::TempDir, String) {
+        use image::{ImageBuffer, ImageFormat, Rgb};
+        use std::io::Cursor;
+
+        let img: ImageBuffer<Rgb<u8>, Vec<u8>> =
+            ImageBuffer::from_fn(2, 2, |_x, _y| Rgb([255u8, 0u8, 0u8]));
+        let mut buffer = Cursor::new(Vec::new());
+        img.write_to(&mut buffer, ImageFormat::Png)
+            .expect("encode test png");
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("pic.png"), buffer.into_inner()).expect("write png");
+        (dir, "pic.png".to_string())
+    }
+
+    /// Finding 3 (review-3): the success path. At `Rich` on an image-capable
+    /// TTY, a resolvable image node must emit the inline image protocol — the
+    /// fallback-only tests never proved the protocol actually fires.
+    #[test]
+    fn render_tree_image_rich_emits_image_protocol() {
+        use crate::discovery::detection::ImageSupport;
+
+        let (dir, name) = temp_png();
+        let node = RenderNode::paragraph(vec![RenderNode::image(&name, None, "a cat")]);
+
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::Kitty)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.image_base_path = Some(dir.path().to_path_buf());
+
+        let out = render_terminal_node(&node, &opts).expect("render").output;
+        assert!(
+            out.contains("\x1b_G"),
+            "Rich + Kitty must emit the Kitty image protocol; got: {out:?}",
+        );
+        assert!(
+            !strip_escape_codes(&out).contains("[a cat]"),
+            "the success path must not fall back to bracketed alt text; got: {out:?}",
+        );
+    }
+
+    /// Finding 3 (review-3): the no-capability fallback. At `Rich` with a real,
+    /// resolvable file but a terminal that advertises no image protocol, the
+    /// node degrades to alt text — there is no protocol to target.
+    #[test]
+    fn render_tree_image_rich_no_capability_falls_back_to_alt_text() {
+        use crate::discovery::detection::ImageSupport;
+
+        let (dir, name) = temp_png();
+        let node = RenderNode::paragraph(vec![RenderNode::image(&name, None, "a cat")]);
+
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::None)
+            .is_tty(false)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.image_base_path = Some(dir.path().to_path_buf());
+
+        let out = render_terminal_node(&node, &opts).expect("render").output;
+        assert!(
+            strip_escape_codes(&out).contains("[a cat]"),
+            "no image capability at Rich must degrade to alt text; got: {out:?}",
+        );
+        assert!(
+            !out.contains("\x1b_G"),
+            "no-capability fallback must not emit image protocol bytes; got: {out:?}",
+        );
+    }
+
+    /// Finding 3 (review-3): the security contract. At `Rich` on a fully
+    /// image-capable terminal, out-of-contract sources — a remote URL, an
+    /// absolute path, and a path-traversal escape from the base dir — must all
+    /// be rejected and degrade to alt text, never reaching the image pipeline.
+    #[test]
+    fn render_tree_image_rich_rejects_remote_absolute_and_traversal() {
+        use crate::discovery::detection::ImageSupport;
+
+        // A base dir with a sibling file *outside* it, reachable only via `..`.
+        let parent = tempfile::tempdir().expect("tempdir");
+        let base = parent.path().join("base");
+        std::fs::create_dir(&base).expect("mkdir base");
+        let (img_dir, _name) = temp_png();
+        let outside = parent.path().join("outside.png");
+        std::fs::copy(img_dir.path().join("pic.png"), &outside).expect("copy outside");
+
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::Kitty)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.image_base_path = Some(base.clone());
+
+        for url in [
+            "https://example.com/cat.png",
+            "http://example.com/cat.png",
+            "/etc/hosts",
+            "../outside.png",
+        ] {
+            let node = RenderNode::paragraph(vec![RenderNode::image(url, None, "blocked")]);
+            let out = render_terminal_node(&node, &opts).expect("render").output;
+            assert!(
+                strip_escape_codes(&out).contains("[blocked]") && !out.contains("\x1b_G"),
+                "out-of-contract source {url:?} must be rejected to alt text; got: {out:?}",
+            );
+        }
+    }
+
+    /// Finding 3 (review-3): `force_graphics`. On a terminal that advertises no
+    /// image support, forcing graphics upgrades the capability snapshot so a
+    /// resolvable image node still emits the image protocol at `Rich`.
+    #[test]
+    fn render_tree_image_force_graphics_emits_protocol_on_unsupported_terminal() {
+        use crate::discovery::detection::ImageSupport;
+
+        let (dir, name) = temp_png();
+        let node = RenderNode::paragraph(vec![RenderNode::image(&name, None, "a cat")]);
+
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::None)
+            .is_tty(false)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.image_base_path = Some(dir.path().to_path_buf());
+
+        // Without force: no protocol (mirrors the no-capability test).
+        let plain = render_terminal_node(&node, &opts).expect("render").output;
+        assert!(
+            !plain.contains("\x1b_G"),
+            "no image support without force must degrade to alt text; got: {plain:?}",
+        );
+
+        // With force: the snapshot is upgraded to Kitty and the protocol fires.
+        opts.context.force_graphics = true;
+        let forced = render_terminal_node(&node, &opts).expect("render").output;
+        assert!(
+            forced.contains("\x1b_G"),
+            "force_graphics must emit the image protocol on an unsupported terminal; got: {forced:?}",
+        );
+    }
+
     #[test]
     fn render_tree_invalid_tree_errors_before_output() {
         // An orphaned TableCell inside a Paragraph is a structural error.
