@@ -50,18 +50,18 @@ pub(crate) fn spawn_flush_if_idle_ticker(
     watchdog_state: Option<Arc<std::sync::Mutex<WatchdogState>>>,
     section_tracker: Option<Arc<Mutex<SectionTracker>>>,
     timeout_config: TimeoutConfig,
-) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
+) -> (super::TickerCancel, thread::JoinHandle<()>) {
     const SILENCE_WINDOW: Duration = Duration::from_secs(30);
     const CADENCE: Duration = Duration::from_secs(30);
 
-    let done = Arc::new(AtomicBool::new(false));
-    let done_flag = Arc::clone(&done);
+    let cancel = super::TickerCancel::new();
+    let cancel_flag = cancel.clone();
     let handle = thread::spawn(move || {
         let section_stream = section_tracker.map(|tracker| {
             super::super::section::SectionStream::with_tracker(stream_output.clone(), tracker)
         });
         let mut next_tick = Instant::now() + CADENCE;
-        while !done_flag.load(Ordering::Relaxed) {
+        while !cancel_flag.is_cancelled() {
             let now = Instant::now();
             if now >= next_tick {
                 if let Ok(mut r) = text_renderer.lock() {
@@ -98,11 +98,13 @@ pub(crate) fn spawn_flush_if_idle_ticker(
             let sleep_for = next_tick
                 .saturating_duration_since(now)
                 .min(Duration::from_secs(1));
-            thread::sleep(sleep_for);
+            if cancel_flag.sleep(sleep_for) {
+                break;
+            }
         }
     });
 
-    (done, handle)
+    (cancel, handle)
 }
 
 /// Spawn the unified timeout watchdog ticker.
@@ -127,15 +129,15 @@ pub(crate) fn spawn_timeout_watchdog_ticker(
     watchdog_tx: std::sync::mpsc::Sender<WatchdogTermination>,
     live_metrics: LiveMetrics,
     stream_output: Arc<StreamOutput>,
-) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
-    let done = Arc::new(AtomicBool::new(false));
-    let done_flag = Arc::clone(&done);
+) -> (super::TickerCancel, thread::JoinHandle<()>) {
+    let cancel = super::TickerCancel::new();
+    let cancel_flag = cancel.clone();
     let fired = Arc::new(AtomicBool::new(false));
     let cadence = config.interval;
 
     let handle = thread::spawn(move || {
         let mut next_tick = Instant::now() + cadence;
-        while !done_flag.load(Ordering::Relaxed) {
+        while !cancel_flag.is_cancelled() {
             let now = Instant::now();
             if now >= next_tick {
                 match evaluate_timeout_tick(
@@ -158,11 +160,13 @@ pub(crate) fn spawn_timeout_watchdog_ticker(
             let sleep_for = next_tick
                 .saturating_duration_since(now)
                 .min(Duration::from_secs(1));
-            thread::sleep(sleep_for);
+            if cancel_flag.sleep(sleep_for) {
+                break;
+            }
         }
     });
 
-    (done, handle)
+    (cancel, handle)
 }
 
 /// Spawn the prompt-scoped timing monitor.
@@ -184,9 +188,9 @@ pub(crate) fn spawn_prompt_timing_monitor(
     hard_step_timeout: Option<Duration>,
     live_metrics: LiveMetrics,
     stream_output: Arc<StreamOutput>,
-) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
-    let done = Arc::new(AtomicBool::new(false));
-    let done_flag = Arc::clone(&done);
+) -> (super::TickerCancel, thread::JoinHandle<()>) {
+    let cancel = super::TickerCancel::new();
+    let cancel_flag = cancel.clone();
     let prompt_path_display = prompt_timing.absolute_path.display().to_string();
 
     let handle = thread::spawn(move || {
@@ -205,7 +209,7 @@ pub(crate) fn spawn_prompt_timing_monitor(
         let mut timeout_warn_fired = false;
         let poll_interval = Duration::from_secs(1);
 
-        while !done_flag.load(Ordering::Relaxed) {
+        while !cancel_flag.is_cancelled() {
             let now = Instant::now();
             let elapsed = now.saturating_duration_since(started_at);
 
@@ -260,11 +264,13 @@ pub(crate) fn spawn_prompt_timing_monitor(
             let sleep_for = next_header_tick
                 .saturating_duration_since(now)
                 .min(poll_interval);
-            thread::sleep(sleep_for);
+            if cancel_flag.sleep(sleep_for) {
+                break;
+            }
         }
     });
 
-    (done, handle)
+    (cancel, handle)
 }
 
 fn emit_timing_header(
