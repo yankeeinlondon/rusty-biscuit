@@ -274,7 +274,7 @@ impl Writer<'_> {
                 self.render_list_item(node, *checked, children)
             }
             NodeKind::Code { lang, meta, value } => {
-                Ok(self.render_code_block(node, lang.as_deref(), meta.as_deref(), value))
+                self.render_code_block(node, lang.as_deref(), meta.as_deref(), value)
             }
             NodeKind::ThematicBreak => Ok(self.render_thematic_break(&node.attrs)),
             NodeKind::Table { align, children } => self.render_table(node, align, children),
@@ -707,7 +707,8 @@ impl Writer<'_> {
     /// ## Mermaid promotion
     ///
     /// Mermaid code blocks are promoted based on [`BrowserRenderOptions::graphics_mode`]
-    /// and [`BrowserRenderOptions::mermaid_mode`]:
+    /// (the fidelity ceiling) and [`BrowserRenderOptions::mermaid_mode`] (the
+    /// opt-in):
     ///
     /// | `graphics_mode` | `mermaid_mode`   | Result                                          |
     /// |-----------------|------------------|-------------------------------------------------|
@@ -715,45 +716,75 @@ impl Writer<'_> {
     /// | `Vector`/`Rich` | `Code`           | Plain `<pre><code class="language-mermaid">`   |
     /// | `Vector`/`Rich` | `Interactive`    | `<pre class="mermaid">` with escaped source    |
     /// | `Vector`/`Rich` | `StaticSvg`      | Delegates to [`CodeRenderer`] hook; falls back  |
+    ///
+    /// A `lang="mermaid"` block is handled entirely within the Mermaid branch
+    /// and never falls through to the generic [`CodeRenderer`] hook below. That
+    /// matters because a Mermaid-aware hook (e.g. darkmatter's) emits SVG for
+    /// any `lang="mermaid"` regardless of policy; routing every Mermaid case
+    /// through the policy-gated branch keeps `GraphicsMode::Off` a lossless
+    /// plain code block.
+    ///
+    /// ## Errors
+    ///
+    /// Under [`RenderStrictness::Strict`] a `StaticSvg` promotion that cannot
+    /// produce an SVG returns [`RenderError::LossyRejected`]; under
+    /// [`RenderStrictness::Warn`] it records a lossy diagnostic and falls back
+    /// to the plain code block.
     fn render_code_block(
-        &self,
+        &mut self,
         node: &RenderNode,
         lang: Option<&str>,
         meta: Option<&str>,
         value: &str,
-    ) -> BrowserFragment<Ready> {
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
         use crate::tree::{BrowserMermaidMode, GraphicsMode};
 
         let is_mermaid = lang
             .map(|l| l.eq_ignore_ascii_case("mermaid"))
             .unwrap_or(false);
 
-        if is_mermaid && self.opts.graphics_mode != GraphicsMode::Off {
-            match self.opts.mermaid_mode {
-                BrowserMermaidMode::Interactive => {
-                    return self.render_mermaid_interactive(node, value);
-                }
+        if is_mermaid {
+            // Off caps promotion: a plain code block, bypassing every hook so a
+            // Mermaid-aware code renderer cannot re-promote it to SVG.
+            if self.opts.graphics_mode == GraphicsMode::Off {
+                return Ok(self.render_plain_code_block(node, lang, value));
+            }
+            return match self.opts.mermaid_mode {
+                BrowserMermaidMode::Interactive => Ok(self.render_mermaid_interactive(node, value)),
                 BrowserMermaidMode::StaticSvg => {
                     if let Some(renderer) = &self.opts.code_renderer
                         && let Some(fragment) =
                             renderer.render_browser_code(lang, value, meta, &node.attrs)
                     {
-                        return fragment;
+                        return Ok(fragment);
                     }
-                    return self.render_plain_code_block(node, lang, value);
+                    // The hook could not produce an SVG: degrade per strictness.
+                    match self.opts.strictness {
+                        RenderStrictness::Strict => Err(RenderError::LossyRejected {
+                            message: "Mermaid static SVG promotion failed".to_string(),
+                        }),
+                        RenderStrictness::Warn => {
+                            self.note_lossy(
+                                "Mermaid static SVG promotion failed; rendered as code block",
+                                node,
+                            );
+                            Ok(self.render_plain_code_block(node, lang, value))
+                        }
+                        RenderStrictness::Lossy => {
+                            Ok(self.render_plain_code_block(node, lang, value))
+                        }
+                    }
                 }
-                BrowserMermaidMode::Code => {
-                    return self.render_plain_code_block(node, lang, value);
-                }
-            }
+                BrowserMermaidMode::Code => Ok(self.render_plain_code_block(node, lang, value)),
+            };
         }
 
         if let Some(renderer) = &self.opts.code_renderer
             && let Some(fragment) = renderer.render_browser_code(lang, value, meta, &node.attrs)
         {
-            return fragment;
+            return Ok(fragment);
         }
-        self.render_plain_code_block(node, lang, value)
+        Ok(self.render_plain_code_block(node, lang, value))
     }
 
     /// Renders a Mermaid code block as an interactive `<pre class="mermaid">`.
@@ -1752,6 +1783,97 @@ mod tests {
         assert!(
             out.contains(r#"<pre><code class="language-mermaid">"#),
             "Off mode must suppress StaticSvg, got: {out}"
+        );
+    }
+
+    /// A code renderer whose browser hook always emits SVG for `lang="mermaid"`
+    /// — exactly the shape darkmatter installs.
+    struct MermaidSvgHook;
+    impl crate::tree::CodeRenderer for MermaidSvgHook {
+        fn render_terminal_code(
+            &self,
+            _lang: Option<&str>,
+            _value: &str,
+            _meta: Option<&str>,
+            _attrs: &crate::tree::NodeAttrs,
+            _context: crate::color::TerminalCodeContext,
+        ) -> Option<String> {
+            None
+        }
+        fn render_browser_code(
+            &self,
+            lang: Option<&str>,
+            _value: &str,
+            _meta: Option<&str>,
+            _attrs: &crate::tree::NodeAttrs,
+        ) -> Option<BrowserFragment<Ready>> {
+            (lang == Some("mermaid")).then(|| {
+                BrowserFragment::new()
+                    .define_as_raw_html("<svg></svg>".to_string())
+                    .finalize()
+            })
+        }
+    }
+
+    /// Finding 3 (review-1): under `GraphicsMode::Off`, a `lang="mermaid"` block
+    /// must render as a plain code block even when a Mermaid-aware code renderer
+    /// (which would otherwise emit SVG through the generic hook) is installed.
+    /// The Mermaid branch must never fall through to that hook.
+    #[test]
+    fn mermaid_off_bypasses_svg_emitting_code_renderer() {
+        use std::rc::Rc;
+
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD; A to B");
+        let opts = BrowserRenderOptions {
+            graphics_mode: crate::tree::GraphicsMode::Off,
+            // Default mermaid_mode (Code) — and a hook that would emit SVG.
+            code_renderer: Some(Rc::new(MermaidSvgHook)),
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            !out.contains("<svg"),
+            "Off must not emit SVG even with an SVG-capable hook installed, got: {out}"
+        );
+        assert!(
+            out.contains(r#"<pre><code class="language-mermaid">"#),
+            "Off must degrade to a plain code block, got: {out}"
+        );
+    }
+
+    /// Finding 7 (review-1): a `StaticSvg` promotion that cannot produce an SVG
+    /// (no hook installed) must reject under `Strict` and degrade with a lossy
+    /// diagnostic under `Warn`.
+    #[test]
+    fn mermaid_static_svg_failure_honors_strictness() {
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD");
+
+        let strict = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::StaticSvg,
+            strictness: RenderStrictness::Strict,
+            ..BrowserRenderOptions::default()
+        };
+        let err = render_browser_node(&block, &strict)
+            .err()
+            .expect("strict StaticSvg failure must reject");
+        assert!(
+            matches!(err, RenderError::LossyRejected { .. }),
+            "expected LossyRejected; got {err:?}",
+        );
+
+        let warn = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::StaticSvg,
+            strictness: RenderStrictness::Warn,
+            ..BrowserRenderOptions::default()
+        };
+        let rendered = render_browser_node(&block, &warn).expect("warn renders");
+        assert!(
+            rendered.output.render().contains(r#"<pre><code class="language-mermaid">"#),
+            "warn StaticSvg failure must degrade to a code block",
+        );
+        assert!(
+            !rendered.diagnostics.is_empty(),
+            "warn StaticSvg failure must surface a diagnostic",
         );
     }
 

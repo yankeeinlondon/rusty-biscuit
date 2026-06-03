@@ -75,6 +75,22 @@ pub enum BrowserMermaidMode {
     Interactive,
 }
 
+/// How Mermaid diagrams are rendered in terminal output.
+///
+/// [`GraphicsMode`] is the fidelity *ceiling*; this is the orthogonal *opt-in*
+/// that decides whether a `lang="mermaid"` code block is promoted at all.
+/// The [`Default`] is [`TerminalMermaidMode::Code`] — Mermaid fences stay
+/// ordinary code blocks unless the caller opts in, preserving public defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TerminalMermaidMode {
+    /// Keep Mermaid fences as code blocks (no promotion).
+    #[default]
+    Code,
+    /// Promote Mermaid fences to rasterized images where the tier and
+    /// terminal capability allow (rasterized only at [`GraphicsMode::Rich`]).
+    Image,
+}
+
 // Re-export terminal capability types for tree-render consumers.
 pub use crate::color::{ColorDepth, ColorMode, TerminalCodeContext};
 pub use source::{
