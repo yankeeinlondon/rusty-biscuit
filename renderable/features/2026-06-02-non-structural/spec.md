@@ -90,7 +90,7 @@ detail called from that node renderer.
 | `HorizontalRule` | biscuit-terminal | node-kind builder/helper | Document HRs render via `NodeKind::ThematicBreak` (graphics-policy). The component is a terminal/SVG builder the tree may call as a helper. |
 | `TerminalImage` | biscuit-terminal | node-kind builder/helper | Document images render via `NodeKind::Image` (graphics-policy tiers). The component is the image-protocol encoder the tree calls. |
 | `MermaidDiagram` | biscuit-terminal | node-kind builder/helper | Document mermaid renders via `NodeKind::Code { lang:"mermaid" }` promotion (graphics-policy). The component is the rasterizer the tree's promotion path will call once implemented; until then the tree renders mermaid as a plain code block. |
-| `DarkmatterPage` | darkmatter | page frame / render shell | Wraps tree-rendered document output (margins/padding/background/max-width). Not a document node. Gains a minimal browser render per the perf-gate spec, but remains the shell, not a tree node. |
+| `DarkmatterPage` | darkmatter | page frame / render shell | Wraps document output (margins/padding/background/max-width). Renders to terminal (`render`) and browser (`render_to_browser`), both legacy-backed pre-cutover. The render shell around document output — not a document node. |
 
 ### Register Maintenance
 
@@ -181,9 +181,9 @@ document-pipeline role:
   standalone.
 - **`FileTree`** — if reference-graph output is ever wanted in browser/markdown
   documents rather than only the CLI, give it a tree projection then.
-- **`DarkmatterPage`** — its minimal browser path (perf-gate spec) may grow; if
-  page-frame concerns ever need to compose into a document tree, reconsider. Not
-  expected.
+- **`DarkmatterPage`** — already renders to both terminal and browser
+  (legacy-backed); both flip to the tree at cutover Phase 2. If page-frame
+  concerns ever need to compose into a document tree, reconsider. Not expected.
 
 These are explicitly **not** cutover blockers.
 
@@ -201,7 +201,8 @@ These are explicitly **not** cutover blockers.
   cutover).
 - Designing graph/file-tree fence syntax or node kinds (future, if needed).
 - Changing the document node kinds or the components' public APIs.
-- The `DarkmatterPage` browser path itself — owned by the perf-gate spec.
+- The `DarkmatterPage` browser path — it already exists (`render_to_browser`);
+  the perf-gate spec only benches it.
 
 ## Open Questions
 
@@ -216,6 +217,6 @@ listed in [Verification Condition](#verification-condition).
   owns the `Image` / `ThematicBreak` / `Code{mermaid}` node renderers the
   builder/helper exemptions depend on.
 - [`../2026-06-02-perf-gate/spec.md`](../2026-06-02-perf-gate/spec.md) —
-  owns the minimal `DarkmatterPage` browser path.
+  benches the existing `DarkmatterPage::render_to_browser`.
 - [`../../docs/components.md`](../../docs/components.md) — component catalog and
   IR-state column; exempt components are annotated there.

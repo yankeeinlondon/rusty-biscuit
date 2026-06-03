@@ -4,7 +4,7 @@
 
 **Goal:** Build the comprehensive benchmark suite that instruments the tree-cutover perf gate, add the minimal `DarkmatterPage` browser render path it requires, and capture the pre-cutover baseline.
 
-**Architecture:** Criterion benches in two crates. `biscuit-terminal` gets one `component_render` group covering every tree-rendering component. `darkmatter` gets step-broken render-pipeline groups (terminal + browser), component benches (`YamlBlock`, `DarkmatterPage` on both targets), and a compose-pipeline coverage audit. The existing `migration_parity.rs` stays the bespoke-vs-tree comparison arm. The one real feature is a minimal `DarkmatterPage::render_browser` (page-wrapper `<div>` around the legacy HTML body), built TDD-first.
+**Architecture:** Criterion benches in two crates. `biscuit-terminal` gets one `component_render` group covering every tree-rendering component. `darkmatter` gets step-broken render-pipeline groups (terminal + browser), component benches (`YamlBlock`, `DarkmatterPage` on both targets), and a compose-pipeline coverage audit. The existing `migration_parity.rs` stays the bespoke-vs-tree comparison arm. (Correction during execution: `DarkmatterPage::render_to_browser` already exists, so Task C1 — "build a minimal browser path" — was dropped; the suite benches the existing method.)
 
 **Tech Stack:** Rust, Criterion (`harness = false`), the `renderable::tree` renderers (`render_terminal_node`, `render_browser_document`), darkmatter fold helpers (`fold_markdown_spanned_with_frontmatter`).
 
@@ -16,7 +16,7 @@
 
 - **Modify** `biscuit-terminal/lib/benches/render_tree.rs` — replace the degenerate `component_render_path_comparison` group with a `component_render` group covering every tree component.
 - **Create** `darkmatter/lib/benches/render_pipeline_steps.rs` — new bench: `render_pipeline_terminal` + `render_pipeline_browser` step groups, plus `YamlBlock` and `DarkmatterPage` component groups. Registered in `darkmatter/lib/Cargo.toml`.
-- **Modify** `darkmatter/lib/src/layout/page.rs` — add `DarkmatterPage::render_browser` (the minimal browser feature) + unit tests.
+- ~~**Modify** `darkmatter/lib/src/layout/page.rs`~~ — DROPPED. `DarkmatterPage::render_to_browser` already exists (`pub`, tested, used by the CLI); no new browser method is needed.
 - **Modify** `darkmatter/lib/benches/compose_pipeline.rs` — only if the coverage audit finds a missing stage (Task D1).
 - **Modify** `darkmatter/lib/Cargo.toml` — register the new `[[bench]]`.
 - **Append** `../_completed/2026-05-20-darkmatter-tree/baselines.md` — record the pre-cutover baseline (Task D3).
@@ -364,7 +364,15 @@ git commit -m "perf(darkmatter): add step-broken render_pipeline_browser bench"
 
 ## Part C — `DarkmatterPage` browser feature + component benches
 
-### Task C1: `DarkmatterPage::render_browser` (the one real feature, TDD)
+### Task C1: ~~`DarkmatterPage::render_browser`~~ — DROPPED
+
+> **Superseded during execution (2026-06-03).** `DarkmatterPage::render_to_browser`
+> already exists — `pub`, tested, and used by the darkmatter CLI (`output.rs`).
+> The premise that no browser path existed was wrong, so no new method is built.
+> Task C2 benches the existing `render_to_browser`. The TDD detail below is
+> retained only as a record of the abandoned approach.
+
+### Task C1 (abandoned approach, for the record): `DarkmatterPage::render_browser`
 
 **Files:**
 - Modify: `darkmatter/lib/src/layout/page.rs` (new method + tests)
@@ -511,7 +519,7 @@ fn bench_darkmatter_components(c: &mut Criterion) {
     group.bench_function("darkmatter_page/browser", |b| {
         b.iter(|| {
             DarkmatterPage::new(&term).with_max_width(100)
-                .render_browser(black_box(&page_md)).expect("page browser render")
+                .render_to_browser(black_box(&page_md)).expect("page browser render")
         })
     });
     group.finish();
@@ -607,5 +615,5 @@ git commit -m "docs(perf): record pre-cutover perf-gate baseline"
 
 - **Spec coverage.** Part A → biscuit-terminal component suite (spec "Benchmark Inventory · biscuit-terminal"). Part B → render-pipeline terminal/browser step benches (spec items 2, 3). Part C1 → DarkmatterPage browser path (spec item 5 + "DarkmatterPage Browser Path"). Part C2 → YamlBlock terminal/browser (items 6, 7) + DarkmatterPage terminal (item 4). Part D1 → compose audit (item 1). Part D2/D3 → baseline capture + `baselines.md` (spec "Mechanics", gate Part 2). The gate *criterion* itself (geomean ≤ 1.0×, 1.5× ceiling, >10% trend) is documented in the spec and recorded in `baselines.md` (D3); enforcement runs at cutover Phase 4 — out of scope for this build plan.
 - **Known API lookups flagged, not hidden.** Three spots (StatusState variant A4-step4, PageRenderError conversion C1-step4, YamlBlock/BrowserFragment paths C2) carry an exact `grep` to confirm the real API — these are real, bounded lookups, not deferred design.
-- **Type consistency.** `fold_markdown_spanned_with_frontmatter`, `render_terminal_document`, `render_browser_document`, `TerminalRenderOptions`, `BrowserRenderOptions`, `TerminalCodeRenderer` are used exactly as `migration_parity.rs` uses them (cross-checked). `render_browser`'s signature in C1 matches its bench call in C2.
+- **Type consistency.** `fold_markdown_spanned_with_frontmatter`, `render_terminal_document`, `render_browser_document`, `TerminalRenderOptions`, `BrowserRenderOptions`, `TerminalCodeRenderer` are used exactly as `migration_parity.rs` uses them (cross-checked). C2 benches the existing `render_to_browser` (Task C1 dropped — the method already existed).
 - **No degenerate comparison.** Part A removes the misleading `component_render_path_comparison`; `migration_parity` remains the sole bespoke-vs-tree arm.

@@ -23,7 +23,7 @@ Decision lineage:
 | Gate shape | **Two-part: bespoke comparison + baseline trend.** | Covers both "tree beats bespoke" and "tree doesn't drift," and works even where the bespoke arm is already gone. |
 | Bespoke-compare threshold | **Per-target geomean ≤ 1.0×; hard per-fixture ceiling 1.5×.** | Geomean enforces the net-faster trend; the ceiling stops any single path from regressing badly under cover of a good average. |
 | Baseline-trend threshold | **No bench regresses >10% vs its saved baseline.** | A ±noise band below that absorbs run-to-run jitter. |
-| DarkmatterPage browser | **Build a minimal browser path, then bench it.** | Doubles as a cutover holdout advance (DarkmatterPage gains a browser render). |
+| DarkmatterPage browser | **Bench the existing `render_to_browser`.** | Correction: `DarkmatterPage::render_to_browser` already exists (`pub`, tested, used by the CLI). The earlier "build a minimal browser path" plan was based on a false premise; no new method is built. |
 | Bench organization | **Extend existing files; keep `migration_parity` as the comparison arm.** | Avoids duplicating the bespoke-vs-tree suite. |
 
 ## Background
@@ -119,21 +119,23 @@ measures a comparison (documented in the tree-cutover baseline note).
    `parse` / `fold` / `render` / `full` steps with the browser renderer.
 4. **DarkmatterPage (terminal)** — a component bench over a representative page
    (margins, padding, background, max-width) rendering a mixed-content body.
-5. **DarkmatterPage (browser)** — requires building a minimal browser render
-   first (see [DarkmatterPage Browser Path](#darkmatterpage-browser-path)), then
-   the equivalent bench.
+5. **DarkmatterPage (browser)** — benches the existing `pub`
+   `DarkmatterPage::render_to_browser` (legacy-backed, like terminal `render`).
+   No new method (see [DarkmatterPage Browser Path](#darkmatterpage-browser-path)).
 6. **YamlBlock (terminal)** — component bench (validated YAML body, highlighted).
 7. **YamlBlock (browser)** — component bench.
 
 ## DarkmatterPage Browser Path
 
-`DarkmatterPage` currently renders only to the terminal. Item #5 requires a
-minimal browser render: the page's layout policy (margin, padding, background,
-max-width, alignment) lowered to a styled container wrapping the body's browser
-output — e.g. a `<div>` carrying the corresponding CSS (max-width, padding,
-margin, background color). Scope is deliberately minimal: enough to render a
-faithful page wrapper and be benchmarked, not a full browser layout engine. It
-advances DarkmatterPage as a cutover holdout at the same time.
+**Correction (2026-06-03):** an earlier draft of this spec assumed
+`DarkmatterPage` had no browser render path and required building a minimal one.
+That was wrong. `DarkmatterPage::render_to_browser(&self, md: &Markdown) ->
+Result<String, PageRenderError>` already exists — `pub`, tested, and used by the
+darkmatter CLI (`output.rs`). It renders the body via `as_html` and wraps it in
+a full page container (margin/padding/background/colors), exactly analogous to
+how terminal `render` delegates to `for_terminal`. Both are legacy-backed and
+flip to the tree together at cutover Phase 2. Item #5 therefore benches the
+existing method and builds no new code.
 
 ## Mechanics
 
@@ -176,7 +178,8 @@ Ordered so each step lands on a green tree:
    and `render_pipeline_browser` with `parse`/`fold`/`render`/`full`.
 3. **Compose-pipeline coverage audit** — confirm/extend `compose_pipeline.rs`.
 4. **YamlBlock terminal + browser benches.**
-5. **DarkmatterPage terminal bench** + **minimal browser path** + browser bench.
+5. **DarkmatterPage terminal + browser benches** (both call existing methods;
+   no new browser path to build).
 6. **Wire the gate** — document Part-1 ratios and Part-2 baseline in
    `baselines.md`; define the exception-record format.
 
