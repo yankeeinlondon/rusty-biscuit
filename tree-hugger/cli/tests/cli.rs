@@ -1302,6 +1302,33 @@ fn test_lint_cache_separates_experimental_semantics_policy() {
 }
 
 #[test]
+fn test_lint_cache_reuse_respects_policy_selector_changes() {
+    // Policy is applied after the symbol cache is consulted, so reusing a cached
+    // entry must not pin the earlier run's severity. First run warms the cache
+    // with the default `unwrap-call` warning; the second run reuses it under
+    // `--deny` and must still escalate to an error and fail.
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("probe.rs");
+    std::fs::write(&path, "fn main() {\n    Some(1).unwrap();\n}\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["--plain", "lint", "probe.rs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("warning"))
+        .stdout(predicate::str::contains("[unwrap-call]"));
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["--plain", "lint", "--deny", "unwrap-call", "probe.rs"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("error"))
+        .stdout(predicate::str::contains("[unwrap-call]"));
+}
+
+#[test]
 fn test_lint_json_includes_syntax_metadata() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("broken.rs");
