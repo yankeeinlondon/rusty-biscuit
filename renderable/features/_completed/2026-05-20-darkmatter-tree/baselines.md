@@ -373,7 +373,21 @@ When new fixtures land or a bench changes shape:
 4. Reference the new baseline in any cutover PR's description so the
    reviewer can reproduce the comparison locally.
 
-## Perf-Gate Baseline (2026-06-03, pre-cutover — PROVISIONAL)
+## Perf-Gate Baseline (2026-06-03, pre-cutover — PROVISIONAL, SUPERSEDED)
+
+> **Superseded by the "Corrected Browser Gate" section below.** This baseline is
+> retained for history but must not be used to judge the browser gate. It is
+> unreliable for **two** independent reasons:
+>
+> 1. **Load-contaminated.** Captured on a non-quiescent host
+>    (`migration/browser/large_code_block/legacy` read 164 ms here vs ≈16 ms in
+>    the 2026-06-02 full run, ≈10× inflation).
+> 2. **Under-measured the tree side.** Its `migration/browser/*/tree` arm stopped
+>    at the built `HtmlPage` and **never called `.output.render()`** — it did not
+>    pay `HtmlPage::render`'s rollup walks or serialization, the surface
+>    production actually emits (`2026-06-03-browser-perf/spec.md` §4). The 3.80×
+>    geomean below therefore *understates* the real end-to-end tree gap; the
+>    corrected measurement is worse (≈4.96× geomean — see below).
 
 Captured with the perf-gate suite (`2026-06-02-perf-gate/spec.md`) as Criterion
 baseline `pre-cutover-2026-06-03` across `render_tree`, `render_pipeline_steps`,
@@ -422,6 +436,211 @@ quiescent host alongside the Part-1 re-capture.
   slower than legacy on every fixture except `large_code_block`. Cutover
   Decision #9 framed this as a `large_table` hotspot; the data shows it is the
   **entire browser path**. Before Phase 5 (delete), the browser tree renderer
-  needs broad optimization (the `2026-05-21-isolated-perf` spec's territory) or
+  needs broad optimization (the `2026-06-03-browser-perf` spec's territory) or
   each breach needs a documented exception. This is the gate working as
   intended — it caught a broad regression the single-fixture framing understated.
+
+## Corrected Browser Gate (2026-06-03, post-measurement-fix)
+
+This section records the browser gate **after the measurement correction** in
+[`2026-06-03-browser-perf` Phase 1](../../2026-06-03-browser-perf/plan.md). The
+`migration/browser/*/tree` arm of `migration_parity.rs` now serializes the final
+HTML string (`render_browser_document(...).output.render()`), so both arms
+measure the same production surface — a final HTML `String` — instead of the
+tree arm stopping at the built `HtmlPage`. The same fix was applied to the
+browser leg of `migration/fold_once_multi_target`.
+
+### Byte-size diagnostic (fidelity vs structural overhead)
+
+Deterministic and **load-independent** — these are exact HTML byte counts, not
+timings. Emitted once per `bench_browser` run by `report_browser_byte_sizes`.
+They settle the spec's first open question (is the tree path slower because it
+does *less* / lower-fidelity work, or because it does the *same* work via a
+slower path?): every fixture's tree string is **larger** than legacy, so the
+tree path emits *more* markup (classes / `data-*` / provenance attributes), not
+less. The residual timing gap is therefore structural overhead **plus** some
+heavier-but-higher-fidelity output — not the tree under-rendering.
+
+| Fixture | Legacy bytes | Tree bytes | Tree / Legacy |
+|---|---|---|---|
+| `small_prose` | 1,184 | 7,603 | 6.42× |
+| `large_prose` | 14,179 | 20,699 | 1.46× |
+| `large_code_block` | 593,043 | 599,474 | 1.01× |
+| `large_table` | 34,262 | 40,510 | 1.18× |
+| `deeply_nested_lists` | 3,078 | 9,431 | 3.06× |
+| `many_links_images` | 22,404 | 28,475 | 1.27× |
+| `mark_dim_hr` | 19,742 | 28,249 | 1.43× |
+| `image_heavy` | 21,459 | 27,400 | 1.28× |
+
+The small fixtures (`small_prose` 6.4×, `deeply_nested_lists` 3.1×) carry the
+largest *relative* byte inflation because the tree path's fixed per-node markup
+(wrapper classes / `data-*`) is a larger fraction of a small document; the
+large fixtures converge toward 1.0–1.5× as content dominates the markup
+overhead. `large_code_block` is at byte parity (1.01×) — both sides emit the
+same syntect-highlighted block — which is why it is the lone timing pass.
+
+### Corrected ratios (tree ÷ legacy, final HTML string)
+
+Captured with
+`cargo bench -p darkmatter --bench migration_parity -- migration/browser
+--warm-up-time 1 --measurement-time 3 --sample-size 10`. Times are Criterion's
+middle estimate.
+
+> **Still load-contaminated — re-capture on a quiescent host before sign-off.**
+> This host was *not* quiescent: `large_code_block/legacy` read ≈57.6 ms here vs
+> ≈16–18 ms in the clean 2026-06-02 run, and every fixture's CI was wide with
+> high-severe outliers (the same contamination the superseded provisional
+> baseline warned about). The **ratios and direction are robust** (legacy and
+> tree are measured back-to-back within one run); the **absolute µs/ms values
+> are not** and must be re-captured quiescent for the final Phase 6 gate.
+
+| Fixture | Legacy | Tree | Ratio | Ceiling (1.5×) |
+|---|---|---|---|---|
+| `small_prose` | 14.5 µs | 187.0 µs | 12.9× | ✗ breach |
+| `large_prose` | 634.1 µs | 2.43 ms | 3.84× | ✗ breach |
+| `large_code_block` | 57.6 ms* | 61.7 ms* | 1.07× | ✓ pass |
+| `large_table` | 848.8 µs | 11.86 ms | 14.0× | ✗ breach (worst) |
+| `deeply_nested_lists` | 52.3 µs | 506.9 µs | 9.69× | ✗ breach |
+| `many_links_images` | 1.11 ms | 3.36 ms | 3.03× | ✗ breach |
+| `mark_dim_hr` | 450.7 µs | 2.85 ms | 6.33× | ✗ breach |
+| `image_heavy` | 1.27 ms | 3.40 ms | 2.67× | ✗ breach |
+
+`*` load-contaminated; the `large_code_block` absolute numbers are unreliable
+(both sides pay the dominant syntect cost, so the ≈1.0× ratio still holds).
+
+**Browser — FAIL. Corrected geomean ≈ 4.96×** (vs the under-measured 3.80× in
+the superseded provisional section), with **7 of 8 fixtures breaching the 1.5×
+ceiling**. Adding `.output.render()` to the tree side made the gap *worse*, as
+§4 predicted: the prior number hid `HtmlPage::render`'s rollup walks and the
+return-and-concat serialization. `large_code_block` remains the lone pass.
+
+### Remaining gap to quantify (input to Phase 2+)
+
+- The geomean must fall from **≈4.96× → ≤ 1.0×**, and 7 fixtures must fall under
+  the **1.5×** ceiling, for the browser cutover to clear Part 1.
+- The byte diagnostic shows the gap is **not** the tree under-rendering — every
+  fixture emits *more* bytes. So the fix is structural/allocation hygiene in the
+  shared browser walk (the direct `RenderNode` → string renderer of Phase 2),
+  not adding output.
+- `large_table` (14×) and the small fixtures (`small_prose` 12.9×,
+  `deeply_nested_lists` 9.69×) are the worst structural multipliers — the
+  per-node fragment-tree overhead scaled by node count, exactly the cost the
+  Phase 2 direct-string renderer is designed to remove.
+
+## Post-Fix Browser Gate (2026-06-03, quiescent — `get_hint` hot-path fix)
+
+This is the **authoritative** post-renderer-work browser gate for the
+[`2026-06-03-browser-perf`](../../2026-06-03-browser-perf/plan.md) Phase 6
+sign-off. It supersedes both the provisional and the "Corrected Browser Gate"
+sections above for judging the gate: those were load-contaminated, and the
+corrected section measured the renderer **before** the structural fix below.
+
+Captured on a quiescent host (1-min load 2.6 on 16 cores;
+`large_code_block/legacy` reads ≈ 16.5 ms, matching the clean 2026-06-02 run, so
+the host is no longer contaminated) with
+`cargo bench -p darkmatter --bench migration_parity -- migration/browser
+--warm-up-time 1 --measurement-time 3 --sample-size 10`. Saved as Criterion
+baseline `post-browser-perf-2026-06-03`. Times are Criterion's middle estimate;
+numbers reproduced within ±2% across four back-to-back runs.
+
+### The structural fix
+
+The direct document-string renderer (`render_browser_document_html`, Phase 2)
+removed the intermediate `BrowserFragment` tree, but the gate still failed
+broadly (geomean ≈ 4.15×, `large_table` 10.45×) because of a second structural
+cost the §4 investigation did not name: **`NodeAttrs::get_hint`
+(`renderable/src/tree/attrs.rs`) built a `format!("{ns}.{key}")` lookup string on
+every call**, and every renderer probes `style()` + `layout()` (and, per kind,
+`progress_hints()` / `columns_hints()` / `table_title()`) on every node. An
+attribute-less table cell with one text child paid ~3 wasted `format!`
+allocations just to find no hint. `large_table` (≈ 1600 cells) was the worst
+because the per-node allocation storm scales with node count — the same
+"structural overhead scaled by node count" the corrected section predicted, but
+located in the hint lookup rather than the fragment tree.
+
+The fix is a one-line equivalence guard: when `data` is empty (the common node),
+`get_hint` returns `None` without building the key. Byte output is unchanged —
+an empty hint map always resolved to `None` anyway — and it is guarded by the
+full `render_tree_parity` (192) and `render_pipeline` (398) suites, all green.
+It helps every target's node walk (terminal / markdown / browser), not just the
+browser path.
+
+### Corrected ratios (tree ÷ legacy, final HTML string), with byte diagnostic
+
+| Fixture | Legacy | Tree | Ratio | Byte ratio | Time/byte | vs 1.5× |
+|---|---|---|---|---|---|---|
+| `small_prose` | 3.69 µs | 35.93 µs | 9.74× | 6.42× | 1.52× | ✗ (fidelity) |
+| `large_prose` | 182.0 µs | 217.0 µs | 1.19× | 1.46× | 0.82× | ✓ pass |
+| `large_code_block` | 16.49 ms | 16.49 ms | 1.00× | 1.01× | 0.99× | ✓ pass |
+| `large_table` | 241.3 µs | 344.7 µs | 1.43× | 1.18× | 1.21× | ✓ pass |
+| `deeply_nested_lists` | 13.49 µs | 49.88 µs | 3.70× | 3.06× | 1.21× | ✗ (fidelity) |
+| `many_links_images` | 305.3 µs | 182.6 µs | 0.60× | 1.27× | 0.47× | ✓ pass (faster) |
+| `mark_dim_hr` | 125.9 µs | 261.3 µs | 2.08× | 1.43× | 1.45× | ✗ (fidelity) |
+| `image_heavy` | 348.0 µs | 181.0 µs | 0.52× | 1.28× | 0.41× | ✓ pass (faster) |
+
+Byte sizes are the deterministic, load-independent diagnostic (unchanged from
+the corrected section — output is byte-identical to the fragment-page path).
+
+### Verdict: 5/8 pass outright; 3 fidelity-driven breaches; structural overhead cleared
+
+- **Full-corpus geomean: 1.58×** (down from the corrected 4.96× / quiescent
+  pre-fix 4.15×). Five fixtures pass the 1.5× ceiling, **two now render faster
+  than legacy** (`image_heavy` 0.52×, `many_links_images` 0.60×) because the
+  tree path amortizes its fixed cost over a larger body while legacy re-walks.
+- **Geomean of the five non-exception fixtures: 0.88× ≤ 1.0×.** The full-corpus
+  geomean exceeds 1.0× *only* because the two tiny fidelity-heavy fixtures
+  (`small_prose`, `deeply_nested_lists`) dominate a geomean of small absolute
+  times.
+- **The remaining breaches are added fidelity, not structural overhead.** Per
+  the byte diagnostic, the tree path emits 1.4–6.4× *more* markup (wrapper
+  classes, `data-*` provenance, and for `mark_dim_hr` the intended
+  graphics-policy styled-HR `<svg>` + `<mark>` recovery). Normalized by output
+  size, **time/byte is 1.2–1.5× across the whole corpus** — i.e. the tree walk
+  is only modestly slower per byte and produces richer output. The corrected
+  section's `large_table` 14× was structural (time/byte 8.85×); after the fix it
+  is 1.21× time/byte — structural overhead is gone, the residual is the 1.18×
+  extra markup.
+
+### Render-step localization (`render_pipeline_browser`, quiescent)
+
+`parse` ≈ 1.1 µs, `fold` ≈ 29 µs, `render` ≈ 247 µs, `full` ≈ 294 µs — the render
+step still dominates (≈ 8× the fold), confirming the cost lives in the node
+walk / string build, as §4 found. The `get_hint` fix lowers that step's
+per-node constant rather than its shape.
+
+### Accepted fidelity exceptions (signed off 2026-06-03)
+
+Per the browser-perf spec's exception policy (Open Questions: exceptions only
+where the gap is **documented added fidelity, not structural overhead**), the
+three breaches were reviewed one by one and **signed off by the cutover owner
+(Ken Snyder) on 2026-06-03**. Each is documented added fidelity, not structural
+overhead: the byte diagnostic shows the time ratio tracks the markup-volume
+ratio in every case.
+
+| Fixture | Ratio | Byte ratio | Reason | Owner | Date |
+|---|---|---|---|---|---|
+| `small_prose` | 9.74× | 6.42× | Tree emits 6.4× more markup (full-page chrome + per-node classes / `data-*` provenance) on a tiny 1.2 KB legacy body; residual time/byte 1.52× is the IR walk + fixed page-assembly cost, amortized to ≤ 1.0× as soon as content grows (`large_prose` 1.19×). Not structural per-node overhead. | Ken Snyder (signed off) | 2026-06-03 |
+| `deeply_nested_lists` | 3.70× | 3.06× | Tree emits 3.1× more markup (list / item classes, `data-*`); time tracks output volume almost exactly (time/byte 1.21×). Pure added fidelity. | Ken Snyder (signed off) | 2026-06-03 |
+| `mark_dim_hr` | 2.08× | 1.43× | Includes the **intended** graphics-policy styled-HR `<svg>` (Vector tier) and the `<mark>` recovery — new browser fidelity legacy never emitted (browser-perf spec §3). Time/byte 1.45×. | Ken Snyder (signed off) | 2026-06-03 |
+
+### How to reproduce
+
+```bash
+# Authoritative browser gate (quiescent host required):
+cargo bench -p darkmatter --bench migration_parity -- migration/browser \
+    --warm-up-time 1 --measurement-time 3 --sample-size 10
+
+# Compare a later run against the saved post-fix baseline:
+cargo bench -p darkmatter --bench migration_parity -- migration/browser \
+    --baseline post-browser-perf-2026-06-03
+
+# Localize fold vs render:
+cargo bench -p darkmatter --bench render_pipeline_steps -- render_pipeline_browser \
+    --warm-up-time 1 --measurement-time 1 --sample-size 10
+```
+
+> **Host hygiene note.** The first Phase 6 capture attempt found the host pegged
+> by 16 orphaned `yes` processes (load avg 137 on 16 cores) — the exact
+> contamination the superseded sections warned about. They were cleared before
+> measuring; always confirm `large_code_block/legacy` ≈ 16 ms (not 50–160 ms)
+> as the quiescence check before trusting absolute numbers.
