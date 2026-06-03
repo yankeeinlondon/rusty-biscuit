@@ -24,7 +24,7 @@ prompt: |-
     5. Product - information about a product
     6. Place - information about a place/location
     
-    ::block when="state.name = 'start'"
+    ::block when="state.name == 'start'"
     ## Task
 
     No prior research has been done but the Markdown document has been seeded with the **structure** of the document we are trying to create. Your task is to do broad based research on each of the entities described above and come up with an initial set of Rust structs and enums that shape these entities.
@@ -49,11 +49,11 @@ prompt: |-
     Once you've reviewed and updated each section in the document, and SAVED your updates, the task is complete.
     ::end-block
     
-    ::block when="state.name = 'closure'"
+    ::block when="state.name == 'closure'"
     We have gone through several iterations of defining schemas for the entities above. We have now reached the final step and your task is to read through each section:
 
     - look for errors, redundancies, or overlapping ideas and fix inline in the body of this document
-    - when you have completed all sections of the document add a new H2 heading at the end: `## Next Steps for Closure`
+    - when you have completed all sections of the document add a new H2 heading at the end: `## Next Steps for Closure
         - in this section describe how complete you believe these different entities are
         - mention any other entities you feel are missing from the current design
             - missing for the **Reaper** project which is a comprehensive screen scraping project
