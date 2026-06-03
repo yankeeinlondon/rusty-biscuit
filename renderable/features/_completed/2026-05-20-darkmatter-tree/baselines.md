@@ -372,3 +372,56 @@ When new fixtures land or a bench changes shape:
    `cargo bench -p darkmatter --bench migration_parity -- --save-baseline pre-cutover-YYYY-MM-DD`.
 4. Reference the new baseline in any cutover PR's description so the
    reviewer can reproduce the comparison locally.
+
+## Perf-Gate Baseline (2026-06-03, pre-cutover — PROVISIONAL)
+
+Captured with the perf-gate suite (`2026-06-02-perf-gate/spec.md`) as Criterion
+baseline `pre-cutover-2026-06-03` across `render_tree`, `render_pipeline_steps`,
+`compose_pipeline`, and `migration_parity`
+(`--warm-up-time 1 --measurement-time 3 --sample-size 10`).
+
+> **Provisional — re-capture on a quiescent host before treating as authoritative.**
+> This run showed load contamination: `migration/browser/large_code_block/legacy`
+> read 164 ms here vs ≈16 ms in the 2026-06-02 full run (≈10× inflation). The
+> Part-2 Criterion baseline (`pre-cutover-2026-06-03`) and the absolute numbers
+> below are therefore indicative; the **ratios and gate direction are robust**
+> (they compare legacy vs tree measured back-to-back within the same run).
+
+### Part 1 — bespoke comparison (`migration_parity`, tree ÷ legacy)
+
+**Terminal — PASS.** Geomean **0.122×** (tree ≈ 8× faster). Only `mark_dim_hr`
+exceeds 1.0× (1.10×), within the 1.5× per-fixture ceiling.
+
+**Browser — FAIL.** Geomean **3.80×**; **7 of 8 fixtures breach the 1.5×
+ceiling**. The regression is the whole browser tree path, not one hotspot.
+
+| Fixture | Legacy | Tree | Ratio | Ceiling (1.5×) |
+|---|---|---|---|---|
+| `small_prose` | 3.9 µs | 38.7 µs | 9.89× | ✗ breach |
+| `large_prose` | 552 µs | 4.18 ms | 7.57× | ✗ breach |
+| `large_code_block` | 164 ms* | 60.1 ms* | 0.37× | ✓ pass |
+| `large_table` | 1.48 ms | 27.29 ms | 18.38× | ✗ breach (worst) |
+| `deeply_nested_lists` | 24.0 µs | 84.6 µs | 3.53× | ✗ breach |
+| `many_links_images` | 302 µs | 714.6 µs | 2.37× | ✗ breach |
+| `mark_dim_hr` | 123.8 µs | 653.1 µs | 5.27× | ✗ breach |
+| `image_heavy` | 347.6 µs | 680.7 µs | 1.96× | ✗ breach |
+
+`*` load-contaminated; the `large_code_block` ratio in particular is unreliable.
+
+### Part 2 — tree-only baseline trend
+
+The tree-only suites (`component_render`, `render_pipeline_terminal/_browser`,
+`darkmatter_components`, `compose_pipeline`) are saved as Criterion baseline
+`pre-cutover-2026-06-03` for the >10% baseline-trend guard. Re-save on a
+quiescent host alongside the Part-1 re-capture.
+
+### Gate verdict and implication
+
+- **Terminal cutover: clears Part 1** (geomean ≪ 1.0×, no ceiling breach).
+- **Browser cutover: BLOCKED by Part 1.** The browser tree renderer is 2–18×
+  slower than legacy on every fixture except `large_code_block`. Cutover
+  Decision #9 framed this as a `large_table` hotspot; the data shows it is the
+  **entire browser path**. Before Phase 5 (delete), the browser tree renderer
+  needs broad optimization (the `2026-05-21-isolated-perf` spec's territory) or
+  each breach needs a documented exception. This is the gate working as
+  intended — it caught a broad regression the single-fixture framing understated.
