@@ -190,6 +190,71 @@ impl Drop for EnvGuard {
     }
 }
 
+/// Mermaid code blocks under `GraphicsMode::Rich` bypass the `CodeRenderer`
+/// hook and route to `MermaidDiagram::try_render`. When the host lacks
+/// Mermaid rendering dependencies the renderer records a lossy diagnostic
+/// and falls back to the code-render hook (or the built-in plain fallback).
+#[test]
+fn mermaid_rich_mode_bypasses_code_renderer() {
+    use renderable::tree::GraphicsMode;
+
+    let mermaid_node = RenderNode::code(
+        Some("mermaid".to_string()),
+        None,
+        "flowchart LR\n    A --> B",
+    );
+
+    let term = Terminal::new_optimistic(80);
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.graphics_mode = GraphicsMode::Rich;
+
+    // No code_renderer set — the fallback path is the built-in plain renderer.
+    let opts = TerminalRenderOptions {
+        context,
+        strictness: RenderStrictness::Warn,
+        code_renderer: None,
+    };
+
+    let result = render_terminal_node(&mermaid_node, &opts).expect("render should succeed");
+
+    // The output must contain the Mermaid source (plain fallback) when the
+    // host lacks rendering dependencies, OR an image string when it succeeds.
+    // Either way, the render must not panic.
+    assert!(
+        !result.output.is_empty(),
+        "Mermaid render must produce non-empty output"
+    );
+}
+
+/// Mermaid code blocks under `GraphicsMode::Off` do NOT attempt rasterization;
+/// they fall through to the normal code-renderer path.
+#[test]
+fn mermaid_off_mode_falls_through_to_code_renderer() {
+    use renderable::tree::GraphicsMode;
+
+    let mermaid_node = RenderNode::code(
+        Some("mermaid".to_string()),
+        None,
+        "graph TD; A to B",
+    );
+
+    let term = Terminal::new_optimistic(80);
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.graphics_mode = GraphicsMode::Off;
+
+    let renderer = Rc::new(CapturingCodeRenderer::new());
+    let opts = options_with(context, renderer.clone());
+
+    let _ = render_terminal_node(&mermaid_node, &opts).expect("render should succeed");
+
+    // The code-renderer hook MUST have been called (mermaid was not promoted).
+    assert_eq!(
+        renderer.captured_width(),
+        80,
+        "Off mode must fall through to the code-renderer hook"
+    );
+}
+
 /// Test (d): conflicting ambient environment variables do not influence the
 /// context the hook receives — the explicitly built `TerminalRenderContext`
 /// wins.

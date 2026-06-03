@@ -33,13 +33,14 @@
 use renderable::color::TerminalCodeContext;
 use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
-    ColumnAlign, ColumnConditional, Diagnostic, Document, HintNamespace, NodeKind, ProgressHints,
-    RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
+    ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HintNamespace, NodeKind,
+    ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
 };
 use renderable::tree::{ValidationError, ValidationMode, validate};
 
 use crate::components::block_quote::BlockQuote;
 use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
+use crate::components::mermaid::MermaidDiagram;
 use crate::components::prose::Prose;
 use crate::components::renderable::TerminalRenderable;
 use crate::components::table::cell::pad_cell;
@@ -417,7 +418,21 @@ impl Writer<'_> {
             }
             NodeKind::ThematicBreak => {
                 let rule = horizontal_rule_from_attrs(&node.attrs);
-                Ok(rule.render(&self.opts.context.terminal))
+                match self.opts.context.graphics_mode {
+                    renderable::tree::GraphicsMode::Off => {
+                        Ok(rule.render_text_tier(&self.opts.context.terminal))
+                    }
+                    renderable::tree::GraphicsMode::Vector
+                    | renderable::tree::GraphicsMode::Rich => {
+                        if let Some(image) =
+                            rule.render_image_tier(&self.opts.context.terminal)
+                        {
+                            Ok(image)
+                        } else {
+                            Ok(rule.render_text_tier(&self.opts.context.terminal))
+                        }
+                    }
+                }
             }
             NodeKind::Table { align, children } => {
                 let table = self.render_table(align, children, node)?;
@@ -745,14 +760,22 @@ impl Writer<'_> {
                 }
             }
             NodeKind::Image { alt, .. } => {
-                // Terminal inline images are out of scope for this phase
-                // (visual components keep bespoke renderers). The alt text
-                // stands in for the image.
-                self.diagnostics.push(Diagnostic::lossy(
-                    "image rendered as alt text; inline terminal images are out of scope",
-                    Some(node.span.clone()),
-                ));
-                Ok(format!("[{alt}]"))
+                match self.opts.context.graphics_mode {
+                    GraphicsMode::Off | GraphicsMode::Vector => {
+                        // Graphics disabled: render alt text fallback.
+                        Ok(format!("[{alt}]"))
+                    }
+                    GraphicsMode::Rich => {
+                        // Full graphics tier: attempt inline image rendering.
+                        // TODO: wire TerminalImage integration once the render
+                        // tree carries enough metadata for protocol dispatch.
+                        self.diagnostics.push(Diagnostic::lossy(
+                            "inline terminal images not yet implemented in tree renderer",
+                            Some(node.span.clone()),
+                        ));
+                        Ok(format!("[{alt}]"))
+                    }
+                }
             }
             NodeKind::FootnoteReference { identifier } => {
                 Ok(format!("[^{identifier}]"))
@@ -1107,13 +1130,40 @@ impl Writer<'_> {
     /// [`TerminalCodeContext`] containing the available render width, color
     /// depth, and color mode. A `Some` result is used verbatim; a `None`
     /// result falls back to [`Self::render_code`].
+    ///
+    /// ## Mermaid promotion
+    ///
+    /// Mermaid code blocks are promoted to terminal images when
+    /// [`TerminalRenderContext::graphics_mode`] is [`GraphicsMode::Rich`]
+    /// and the terminal supports inline images. On failure or when the
+    /// graphics mode is lower, the block degrades through the code-render
+    /// hook and finally to the built-in plain fallback.
     fn render_code_node(
-        &self,
+        &mut self,
         lang: Option<&str>,
         value: &str,
         meta: Option<&str>,
         attrs: &renderable::tree::NodeAttrs,
     ) -> String {
+        use renderable::tree::GraphicsMode;
+
+        let is_mermaid = lang
+            .map(|l| l.eq_ignore_ascii_case("mermaid"))
+            .unwrap_or(false);
+
+        if is_mermaid && self.opts.context.graphics_mode == GraphicsMode::Rich {
+            let diagram = MermaidDiagram::new(value);
+            match diagram.try_render(&self.opts.context.terminal) {
+                Ok(result) => return result.output,
+                Err(e) => {
+                    self.diagnostics.push(Diagnostic::lossy(
+                        format!("Mermaid rasterization failed, falling back to code block: {e}"),
+                        None,
+                    ));
+                }
+            }
+        }
+
         if let Some(renderer) = &self.opts.code_renderer {
             let context = TerminalCodeContext::new(
                 self.opts.context.available_width,
@@ -3141,6 +3191,61 @@ mod render_tree_tests {
         let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
         let out = render_terminal_node(&hr, &opts).expect("render hr").output;
         assert!(!out.is_empty(), "default rule must produce output");
+    }
+
+    /// GraphicsMode::Off must suppress the image tier and force the text
+    /// tier, even on a Kitty-capable TTY.
+    #[test]
+    fn render_tree_thematic_break_off_mode_suppresses_image_tier() {
+        use crate::discovery::detection::ImageSupport;
+        let mut hr = RenderNode::thematic_break();
+        let ns = HintNamespace("darkmatter.hr");
+        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+
+        let term = Terminal::builder()
+            .width(40)
+            .image_support(ImageSupport::Kitty)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = renderable::tree::GraphicsMode::Off;
+
+        let out = render_terminal_node(&hr, &opts).expect("render hr").output;
+        // Image tier is suppressed → no Kitty escape sequences.
+        assert!(
+            !out.contains("\x1b_G"),
+            "GraphicsMode::Off must suppress Kitty image tier: {out:?}"
+        );
+        // Text tier produces the waves glyph.
+        assert!(
+            out.contains('\u{224B}') || out.contains('~'),
+            "expected waves text tier under Off mode; got: {out:?}"
+        );
+    }
+
+    /// GraphicsMode::Rich on a Kitty-capable TTY should use the image tier
+    /// when available.
+    #[test]
+    fn render_tree_thematic_break_rich_mode_uses_image_tier_when_available() {
+        use crate::discovery::detection::ImageSupport;
+        let mut hr = RenderNode::thematic_break();
+        let ns = HintNamespace("darkmatter.hr");
+        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+
+        let term = Terminal::builder()
+            .width(40)
+            .image_support(ImageSupport::Kitty)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = renderable::tree::GraphicsMode::Rich;
+
+        let out = render_terminal_node(&hr, &opts).expect("render hr").output;
+        // Kitty image tier should be active.
+        assert!(
+            out.contains("\x1b_G"),
+            "GraphicsMode::Rich must use Kitty image tier when available: {out:?}"
+        );
     }
 
     #[test]
