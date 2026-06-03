@@ -11,7 +11,9 @@ use clap_complete::Shell;
 use owo_colors::{OwoColorize, Style};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
-use tree_hugger::adapter::{AdapterConfig, ExternalDiagnosticAdapter, OxlintAdapter};
+use tree_hugger::adapter::{
+    AdapterConfig, AdapterMetadata, ExternalDiagnosticAdapter, OxlintAdapter,
+};
 use tree_hugger::cache::{
     AnalyzerFingerprint, CacheConfig, FileCacheKey, InMemorySymbolCache, InProcessCache,
     PersistentCache, SymbolSnapshot,
@@ -236,6 +238,10 @@ struct LintArgs {
     /// without project context.
     #[arg(long, display_order = 44)]
     experimental_semantics: bool,
+
+    /// List registered lint rules and exit.
+    #[arg(long, display_order = 45)]
+    list_rules: bool,
 }
 
 /// Arguments for the completions command
@@ -331,6 +337,7 @@ impl Command {
                 allow: parse_selectors(&args.allow),
                 strict: args.strict,
                 experimental_semantics: args.experimental_semantics,
+                list_rules: args.list_rules,
             }),
             Self::Classes(args) => Some(CommandKind::Classes {
                 name_filter: args.name.clone(),
@@ -362,6 +369,7 @@ pub(crate) enum CommandKind {
         allow: Vec<RuleSelector>,
         strict: bool,
         experimental_semantics: bool,
+        list_rules: bool,
     },
     Classes {
         name_filter: Option<String>,
@@ -470,6 +478,20 @@ struct JsonOutput {
     language: ProgrammingLanguage,
     files: Vec<FileSummary>,
     symbol_indexes: Vec<tree_hugger::FileSymbolIndex>,
+    adapter_metadata: Vec<AdapterMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RuleListItem {
+    id: String,
+    title: String,
+    category: String,
+    default_severity: DiagnosticSeverity,
+    confidence: String,
+    enabled_by_default: bool,
+    requires_experimental_semantics: bool,
+    languages: Vec<ProgrammingLanguage>,
+    aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -818,6 +840,18 @@ fn main() -> Result<(), TreeHuggerError> {
 
     let command_kind = cli.command.kind().expect("completions already handled");
     let analysis_options = AnalysisOptions::from_command(&command_kind);
+
+    if matches!(
+        command_kind,
+        CommandKind::Lint {
+            list_rules: true,
+            ..
+        }
+    ) {
+        render_rule_list(output_format)?;
+        return Ok(());
+    }
+
     let scan_filters = classify_filters(filters, &command_kind, language);
     let excluded_symbol_globs = cli
         .exclude_symbols
@@ -958,6 +992,7 @@ fn main() -> Result<(), TreeHuggerError> {
 
     let mut summaries = Vec::new();
     let mut symbol_indexes = Vec::new();
+    let mut adapter_metadata = Vec::new();
     for file in files {
         let tree_file = TreeFile::with_language(&file, language)?;
         let index = analyze_tree_file(
@@ -982,6 +1017,7 @@ fn main() -> Result<(), TreeHuggerError> {
             &command_kind,
             &pkg_root,
             &analysis_options,
+            &mut adapter_metadata,
         )?;
         summaries.push(summary);
     }
@@ -998,6 +1034,7 @@ fn main() -> Result<(), TreeHuggerError> {
                 language: package_language,
                 files: summaries.clone(),
                 symbol_indexes,
+                adapter_metadata: adapter_metadata.clone(),
             };
 
             let json =
@@ -1008,6 +1045,7 @@ fn main() -> Result<(), TreeHuggerError> {
             println!("{json}");
         }
         OutputFormat::Pretty | OutputFormat::Plain => {
+            render_adapter_warnings(&adapter_metadata, &output_config);
             if matches!(
                 command_kind,
                 CommandKind::Functions | CommandKind::Types | CommandKind::Symbols
@@ -1356,6 +1394,7 @@ fn add_external_lint_diagnostics(
     command: &CommandKind,
     project_root: &Path,
     options: &AnalysisOptions,
+    adapter_metadata: &mut Vec<AdapterMetadata>,
 ) -> Result<(), TreeHuggerError> {
     if !options.use_external_adapters
         || !matches!(command, CommandKind::Lint { .. })
@@ -1380,6 +1419,8 @@ fn add_external_lint_diagnostics(
             source: std::io::Error::other(source),
         })?;
 
+    adapter_metadata.push(result.metadata.clone());
+
     if !result.success {
         return Ok(());
     }
@@ -1401,6 +1442,27 @@ fn add_external_lint_diagnostics(
     );
     summary.lint.extend(external_lint);
     Ok(())
+}
+
+fn render_adapter_warnings(metadata: &[AdapterMetadata], config: &OutputConfig) {
+    let mut warned = HashSet::new();
+    for item in metadata.iter().filter(|item| !item.tool_available) {
+        if !warned.insert(item.tool_name.clone()) {
+            continue;
+        }
+        if config.use_colors {
+            eprintln!(
+                "{} external lint adapter '{}' is unavailable; native diagnostics were used",
+                "warning:".yellow(),
+                item.tool_name
+            );
+        } else {
+            eprintln!(
+                "warning: external lint adapter '{}' is unavailable; native diagnostics were used",
+                item.tool_name
+            );
+        }
+    }
 }
 
 fn lint_diagnostic_from_external(diagnostic: Diagnostic) -> Option<LintDiagnostic> {
@@ -1648,6 +1710,7 @@ fn render_summary(
             allow,
             strict,
             experimental_semantics,
+            ..
         } => {
             let registry = RuleRegistry::new();
             let filtered = apply_lint_policy(
@@ -1674,6 +1737,69 @@ fn render_summary(
     }
 
     println!();
+}
+
+fn render_rule_list(format: OutputFormat) -> Result<(), TreeHuggerError> {
+    let rules = rule_list_items();
+
+    match format {
+        OutputFormat::Json => {
+            let json =
+                serde_json::to_string_pretty(&rules).map_err(|source| TreeHuggerError::Io {
+                    path: PathBuf::from("<stdout>"),
+                    source: std::io::Error::other(source),
+                })?;
+            println!("{json}");
+        }
+        OutputFormat::Pretty | OutputFormat::Plain => {
+            for rule in rules {
+                println!(
+                    "{}\t{}\t{}\t{}\t{}\t{}",
+                    rule.id,
+                    rule.category,
+                    severity_label(rule.default_severity),
+                    rule.confidence,
+                    if rule.enabled_by_default {
+                        "default-on"
+                    } else {
+                        "default-off"
+                    },
+                    rule.title
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn rule_list_items() -> Vec<RuleListItem> {
+    let registry = RuleRegistry::new();
+    let mut ids = registry.rule_ids().cloned().collect::<Vec<_>>();
+    ids.sort();
+
+    ids.into_iter()
+        .filter_map(|id| registry.get(&id))
+        .map(|rule| RuleListItem {
+            id: rule.id.clone(),
+            title: rule.title.clone(),
+            category: rule.category.to_string(),
+            default_severity: rule.default_severity,
+            confidence: rule.confidence.to_string(),
+            enabled_by_default: rule.enabled_by_default,
+            requires_experimental_semantics: rule.requires_experimental_semantics,
+            languages: rule.languages.clone(),
+            aliases: rule.aliases.clone(),
+        })
+        .collect()
+}
+
+fn severity_label(severity: DiagnosticSeverity) -> &'static str {
+    match severity {
+        DiagnosticSeverity::Info => "info",
+        DiagnosticSeverity::Warning => "warning",
+        DiagnosticSeverity::Error => "error",
+    }
 }
 
 fn render_symbol_summaries(

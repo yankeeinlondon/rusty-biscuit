@@ -1182,6 +1182,126 @@ fn test_lint_experimental_semantics_enables_semantic_diagnostics() {
 }
 
 #[test]
+fn test_lint_policy_selectors_affect_severity_and_exit_code() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("probe.rs");
+    std::fs::write(&path, "fn main() {\n    Some(1).unwrap();\n}\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--warn",
+            "unwrap-call",
+            "probe.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("warning"))
+        .stdout(predicate::str::contains("[unwrap-call]"));
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--deny",
+            "unwrap-call",
+            "probe.rs",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("error"))
+        .stdout(predicate::str::contains("[unwrap-call]"));
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--deny",
+            "category:suspicious",
+            "probe.rs",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("error"))
+        .stdout(predicate::str::contains("[unwrap-call]"));
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--allow",
+            "unwrap-call",
+            "probe.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("info"))
+        .stdout(predicate::str::contains("[unwrap-call]"));
+}
+
+#[test]
+fn test_lint_list_rules_exposes_rule_metadata() {
+    hug_cmd()
+        .args(["--plain", "lint", "--list-rules"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("unwrap-call"))
+        .stdout(predicate::str::contains("suspicious"))
+        .stdout(predicate::str::contains("default-on"));
+}
+
+#[test]
+fn test_lint_list_rules_json_exposes_rule_metadata() {
+    let output = hug_cmd()
+        .args(["--json", "lint", "--list-rules"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let unwrap_rule = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["id"] == "unwrap-call")
+        .unwrap();
+
+    assert_eq!(unwrap_rule["category"], "suspicious");
+    assert_eq!(unwrap_rule["enabled_by_default"], true);
+}
+
+#[test]
+fn test_lint_cache_separates_experimental_semantics_policy() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("probe.rs");
+    std::fs::write(&path, "fn main() {\n    missing_symbol();\n}\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["--plain", "lint", "probe.rs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("undefined-symbol").not());
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["--plain", "lint", "--experimental-semantics", "probe.rs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("undefined-symbol"));
+}
+
+#[test]
 fn test_lint_json_includes_syntax_metadata() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("broken.rs");
@@ -1253,4 +1373,45 @@ JSON
     assert_eq!(oxlint_diagnostic["message"], "Avoid debugger");
     assert_eq!(oxlint_diagnostic["metadata"]["source"], "ExternalTool");
     assert_eq!(oxlint_diagnostic["severity"], "Error");
+}
+
+#[test]
+fn test_lint_warns_when_oxlint_is_unavailable() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let bin_dir = dir.path().join("bin");
+    std::fs::create_dir(&bin_dir).unwrap();
+    std::fs::write(dir.path().join("probe.js"), "const value = 1;\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .env("PATH", bin_dir)
+        .args(["--plain", "lint", "probe.js"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "external lint adapter 'oxlint' is unavailable",
+        ));
+}
+
+#[test]
+fn test_lint_json_reports_unavailable_oxlint_metadata() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let bin_dir = dir.path().join("bin");
+    std::fs::create_dir(&bin_dir).unwrap();
+    std::fs::write(dir.path().join("probe.js"), "const value = 1;\n").unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .env("PATH", bin_dir)
+        .args(["--json", "lint", "probe.js"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let metadata = &json["adapter_metadata"][0];
+
+    assert_eq!(metadata["tool_name"], "oxlint");
+    assert_eq!(metadata["tool_available"], false);
 }
