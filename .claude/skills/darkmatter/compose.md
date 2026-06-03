@@ -271,6 +271,7 @@ darkmatter/lib/src/markdown/compose/
 ├── replacement.rs   # Text replacement engine
 ├── link_resolve.rs  # Link resolution (absolute paths)
 ├── link_normalization.rs # Link normalization (portable paths)
+├── remote.rs             # Remote URL discovery, catalog, RemoteReadConfig
 └── interpolation/
     ├── mod.rs       # Module exports
     ├── lexer.rs     # Tokenizer, expression finder

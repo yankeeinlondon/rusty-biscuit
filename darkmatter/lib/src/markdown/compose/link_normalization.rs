@@ -52,6 +52,9 @@ pub fn normalize_links(
     for record in records {
         let mut abs_path = None;
         let mut raw_abs = None;
+        if let ReferenceTarget::RemoteUrl { .. } = &record.target {
+            continue;
+        }
         if let ReferenceTarget::LocalPath { raw } = &record.target {
             if raw.is_absolute() {
                 raw_abs = Some(raw.clone());
@@ -581,5 +584,27 @@ mod tests {
             md.content()
         );
         assert_eq!(report.link_normalizations_applied, 4);
+    }
+
+    #[test]
+    fn test_normalize_links_preserves_remote_urls() {
+        let content = "[link](https://example.com/page) and ![img](http://cdn.example.com/img.png)";
+        let mut md = Markdown::new(content);
+        let options = ComposeOptions::new();
+        let mut report = ComposeReport::new();
+
+        normalize_links(&mut md, &options, &mut report).unwrap();
+
+        assert!(
+            md.content().contains("https://example.com/page"),
+            "HTTPS URL was modified. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains("http://cdn.example.com/img.png"),
+            "HTTP URL was modified. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_normalizations_applied, 0);
     }
 }

@@ -71,6 +71,8 @@ pub mod interpolation;
 pub(crate) mod link_normalization;
 pub(crate) mod link_resolve;
 pub mod page_blocks;
+pub(crate) mod remote_fetch;
+pub mod remote;
 pub mod replacement;
 pub mod shell_blocks;
 pub mod shell_expansion;
@@ -80,6 +82,12 @@ pub mod transclusion;
 pub use biscuit_file::PathPosition;
 pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 pub use context::ContextMergeDiagnostic;
+pub use remote::{
+    DEFAULT_REMOTE_CONCURRENCY, DiscoveredRemoteUrl, REMOTE_CONCURRENCY_ENV, RemoteFreshnessMode,
+    RemoteReadConfig, RemoteReadError, RemoteUrlCatalog, RemoteUrlConsumer,
+    resolve_remote_concurrency,
+};
+pub use remote_fetch::RemoteFetchStats;
 pub use shell_blocks::ShellBlockError;
 pub use shell_expansion::ShellCommandOrigin;
 pub use shell_expansion::ShellExpansionError;
@@ -340,6 +348,20 @@ enum PreparedTransclusion {
         directive_options: transclusion::BlockOptions,
         line: usize,
     },
+    RemoteFile {
+        order: usize,
+        target: ApplyTarget,
+        url: url::Url,
+        directive_options: transclusion::BlockOptions,
+        insertion_context: Option<(usize, usize)>,
+    },
+    RemoteCode {
+        order: usize,
+        span: std::ops::Range<usize>,
+        url: url::Url,
+        directive_options: transclusion::BlockOptions,
+        language: String,
+    },
     Toc {
         order: usize,
         span: std::ops::Range<usize>,
@@ -445,13 +467,66 @@ impl Markdown {
             cache::FileStore::resolve_cache_root(Some(root), options.cache_namespace.as_deref())
         });
 
-        let mut runtime = shell_expansion::types::PipelineRuntime::new(
+        // Share a persistent store with the remote-fetch runtime so remote
+        // artifacts are cached across runs alongside local compose artifacts.
+        let remote_store = persistent_root.as_ref().and_then(|root| {
+            cache::FileStore::new(root.clone())
+                .map(std::sync::Arc::new)
+                .ok()
+        });
+        let remote_fetch = remote_fetch::RemoteFetchRuntime::with_store(
+            &options.remote_read_config,
+            remote_store,
+        );
+
+        let mut runtime = shell_expansion::types::PipelineRuntime::with_remote_fetch(
             options.max_transclusion_depth,
             options.cache_access_mode,
             persistent_root,
+            remote_fetch,
         );
+
+        // Eagerly register discovered remote URLs and start fetching. The two
+        // discovery paths gate independently: directive (`::file`/`::code`)
+        // discovery requires the explicit remote-transclusion opt-in, while
+        // URL-typed expression-function arguments (`frontmatter(url)`, …) are a
+        // read-side capability enabled whenever remote reads are configured —
+        // so a caller that allows a host but never enables transclusion can
+        // still prefetch and read its expression URLs.
+        if options.remote_reads_enabled() {
+            let mut catalog = remote::RemoteUrlCatalog::new();
+
+            if options.allow_remote_transclusion
+                && options.is_enabled(ComposeOperation::BlockTransclusion)
+            {
+                let directives = transclusion::parse_directives(
+                    &self.content,
+                    self.source_context_for_errors(),
+                )
+                .unwrap_or_default();
+                for entry in
+                    remote::discover_remote_urls_from_directives(&directives, &options.source)
+                {
+                    catalog.add(entry);
+                }
+            }
+
+            if options.is_enabled(ComposeOperation::Interpolation) {
+                for entry in
+                    remote::discover_remote_urls_from_expressions(&self.content, &options.source)
+                {
+                    catalog.add(entry);
+                }
+            }
+
+            for url in catalog.urls() {
+                runtime.remote_fetch.register_and_fetch(url);
+            }
+        }
+
         let mut report = self.run_compose_pipeline_internal(options, &mut runtime)?;
         report.cache_stats = Some(runtime.cache.stats());
+        report.remote_fetch_stats = Some(runtime.remote_fetch.stats());
         Ok(report)
     }
 
@@ -803,7 +878,7 @@ impl Markdown {
             ComposeOperation::PageBlocks => self.run_page_blocks_stage(state, report),
             ComposeOperation::Interpolation => {
                 report.interpolations_applied =
-                    self.run_interpolation_stage(state, options, report)?;
+                    self.run_interpolation_stage(state, options, runtime, report)?;
                 Ok(())
             }
             ComposeOperation::ShellExpansion => {
@@ -953,6 +1028,7 @@ impl Markdown {
                             transclusion::DirectiveKind::File,
                             state,
                             options,
+                            &runtime.remote_fetch,
                             report,
                             &mut prepared,
                             &mut next_order,
@@ -965,6 +1041,7 @@ impl Markdown {
                             refs,
                             state,
                             options,
+                            &runtime.remote_fetch,
                             report,
                             &mut prepared,
                             &mut next_order,
@@ -978,6 +1055,7 @@ impl Markdown {
                             transclusion::DirectiveKind::Code,
                             state,
                             options,
+                            &runtime.remote_fetch,
                             report,
                             &mut prepared,
                             &mut next_order,
@@ -1045,6 +1123,7 @@ impl Markdown {
                                 inner.as_ref(),
                                 transclusion::TransclusionError::CycleDetected { .. }
                                     | transclusion::TransclusionError::MaxDepthExceeded { .. }
+                                    | transclusion::TransclusionError::RemoteFetchFailed { .. }
                             )
                     );
                     if is_structural || options.fail_fast {
@@ -1178,6 +1257,7 @@ impl Markdown {
         &mut self,
         state: &EffectiveState,
         options: &ComposeOptions,
+        runtime: &shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
     ) -> MarkdownResult<usize> {
         use interpolation::{Evaluator, ScanMode, interpolate_text};
@@ -1188,7 +1268,17 @@ impl Markdown {
             ScanMode::MarkdownAware
         };
 
-        let evaluator = Evaluator::new(state);
+        // Wrap the effective state with a resolution context so read-side
+        // expression functions (`frontmatter`, `file_exists`, `markdown_title`,
+        // …) resolve filesystem paths and — when remote reads are enabled —
+        // HTTP(S) URL arguments through the run's remote-fetch runtime. Bare
+        // `EffectiveState` returns no resolution context and those functions
+        // never run.
+        let lookup = state::ResolvingLookup::new(
+            state,
+            options.expression_resolution_context(&runtime.remote_fetch),
+        );
+        let evaluator = Evaluator::new(&lookup);
         let result = interpolate_text(
             &self.content,
             &evaluator,
@@ -1309,6 +1399,7 @@ impl Markdown {
         kind: transclusion::DirectiveKind,
         state: &EffectiveState,
         options: &ComposeOptions,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
         report: &mut ComposeReport,
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
@@ -1465,6 +1556,38 @@ impl Markdown {
                     prepared.push(item);
                     *next_order += 1;
                 }
+                transclusion::ResolvedTarget::Url { url, .. }
+                    if options.allow_remote_transclusion =>
+                {
+                    // The eager pre-scan only sees URLs present in the original
+                    // content. A directive whose URL was produced by an earlier
+                    // compose phase (interpolation, replacement) reaches here
+                    // unregistered, so register it now to start its fetch and
+                    // keep point-of-use from failing with "not registered".
+                    remote_fetch.register_nested(url.clone());
+                    if directive.kind == transclusion::DirectiveKind::Code {
+                        let language = transclusion::infer_language(
+                            std::path::Path::new(url.path()),
+                            &options.code_fallback_language,
+                        );
+                        prepared.push(PreparedTransclusion::RemoteCode {
+                            order: *next_order,
+                            span: directive.span.clone(),
+                            url,
+                            directive_options: directive.options.clone(),
+                            language,
+                        });
+                    } else {
+                        prepared.push(PreparedTransclusion::RemoteFile {
+                            order: *next_order,
+                            target: ApplyTarget::Replace(directive.span.clone()),
+                            url,
+                            directive_options: directive.options.clone(),
+                            insertion_context: Some((directive.span.start, directive.line)),
+                        });
+                    }
+                    *next_order += 1;
+                }
                 transclusion::ResolvedTarget::Url { url, .. } if ignore_invalid => {
                     let mut fixed_report = ComposeReport::new();
                     fixed_report.transclusions_skipped = 1;
@@ -1498,11 +1621,13 @@ impl Markdown {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn prepare_frontmatter_transclusions(
         &self,
         refs: &transclusion::FrontmatterRefs,
         _state: &EffectiveState,
         options: &ComposeOptions,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
         _report: &mut ComposeReport,
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
@@ -1512,6 +1637,7 @@ impl Markdown {
                 reference,
                 SectionSlot::Prologue(index),
                 options,
+                remote_fetch,
                 prepared,
                 next_order,
             )?;
@@ -1522,6 +1648,7 @@ impl Markdown {
                 reference,
                 SectionSlot::Epilogue(index),
                 options,
+                remote_fetch,
                 prepared,
                 next_order,
             )?;
@@ -1535,6 +1662,7 @@ impl Markdown {
         reference: &str,
         slot: SectionSlot,
         options: &ComposeOptions,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
     ) -> MarkdownResult<()> {
@@ -1594,6 +1722,25 @@ impl Markdown {
                 });
                 *next_order += 1;
             }
+            transclusion::ResolvedTarget::Url { url, .. }
+                if options.allow_remote_transclusion =>
+            {
+                // Frontmatter `prologue`/`epilogue` URLs are not seen by the
+                // eager pre-scan (it only covers directives and expression
+                // arguments), so register the slot here. Without this,
+                // `PreparedTransclusion::RemoteFile` fails at point-of-use with
+                // "URL was not registered for fetching" — matching the
+                // directive path's register-on-discovery behavior.
+                remote_fetch.register_nested(url.clone());
+                prepared.push(PreparedTransclusion::RemoteFile {
+                    order: *next_order,
+                    target: ApplyTarget::Section(slot),
+                    url,
+                    directive_options: transclusion::BlockOptions::default(),
+                    insertion_context: None,
+                });
+                *next_order += 1;
+            }
             transclusion::ResolvedTarget::Url { url, .. } if ignore_invalid => {
                 let mut fixed_report = ComposeReport::new();
                 fixed_report.transclusions_skipped = 1;
@@ -1637,6 +1784,28 @@ impl Markdown {
                 directive: directive.clone(),
             });
             *next_order += 1;
+        }
+    }
+
+    /// Records a fetched remote URL body as a closure-hash dependency.
+    ///
+    /// The dependency's `closure_hash` is the xxHash of the response body, so a
+    /// changed remote document invalidates any parent artifact transcluding it.
+    /// No-op when the URL's content hash is unavailable (unregistered or failed).
+    fn record_remote_dependency(
+        runtime_mutex: &std::sync::Mutex<&mut shell_expansion::types::PipelineRuntime>,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
+        url: &url::Url,
+    ) {
+        if let Some(content_hash) = remote_fetch.content_hash(url) {
+            let sid = cache::hashing::source_id_hash(url.as_str());
+            let dependency = cache::types::DependencyRef {
+                artifact_class: cache::types::ArtifactClass::RemoteUrl,
+                entry_key: sid,
+                source_id_hash: sid,
+                closure_hash: content_hash,
+            };
+            runtime_mutex.lock().unwrap().record_dependency(dependency);
         }
     }
 
@@ -1734,6 +1903,160 @@ impl Markdown {
                     order,
                     target: ApplyTarget::Replace(span),
                     content: Some(content),
+                    report: code_report,
+                    source_file: None,
+                })
+            }
+            PreparedTransclusion::RemoteFile {
+                order,
+                target,
+                url,
+                directive_options,
+                insertion_context,
+            } => {
+                let remote_fetch = {
+                    let runtime = runtime_mutex.lock().unwrap();
+                    runtime.remote_fetch.clone()
+                };
+                let body_text = remote_fetch
+                    .get_content(&url)
+                    .map_err(|e| {
+                        transclusion::TransclusionError::RemoteFetchFailed {
+                            url: url.to_string(),
+                            reason: e,
+                        }
+                    })?
+                    .ok_or_else(|| transclusion::TransclusionError::RemoteFetchFailed {
+                        url: url.to_string(),
+                        reason: "URL was not registered for fetching".to_string(),
+                    })?;
+
+                Self::record_remote_dependency(runtime_mutex, &remote_fetch, &url);
+
+                // Parse the fetched body as Markdown and recursively compose it.
+                let mut child =
+                    crate::markdown::Markdown::try_from_content(body_text).map_err(|e| {
+                        crate::markdown::types::MarkdownError::Transform(format!(
+                            "failed to parse fetched Markdown from '{}': {e}",
+                            url
+                        ))
+                    })?;
+
+                let child_source = ComposeSource::Url(url.clone());
+
+                // Eagerly register any remote URLs the fetched document itself
+                // references, so the child pipeline's point-of-use waits land on
+                // an already-in-flight slot rather than an unregistered one.
+                // Mirror the root pipeline's op-scoping: directive URLs follow
+                // block transclusion, expression URLs follow interpolation.
+                if options.allow_remote_transclusion {
+                    let mut child_catalog = remote::RemoteUrlCatalog::new();
+
+                    if options.is_enabled(ComposeOperation::BlockTransclusion) {
+                        let child_directives = transclusion::parse_directives(
+                            child.content(),
+                            child.source_context_for_errors(),
+                        )
+                        .unwrap_or_default();
+                        for entry in remote::discover_remote_urls_from_directives(
+                            &child_directives,
+                            &child_source,
+                        ) {
+                            child_catalog.add(entry);
+                        }
+                    }
+
+                    if options.is_enabled(ComposeOperation::Interpolation) {
+                        for entry in remote::discover_remote_urls_from_expressions(
+                            child.content(),
+                            &child_source,
+                        ) {
+                            child_catalog.add(entry);
+                        }
+                    }
+
+                    for nested in child_catalog.urls() {
+                        remote_fetch.register_nested(nested);
+                    }
+                }
+
+                let mut child_runtime = {
+                    let runtime = runtime_mutex.lock().unwrap();
+                    runtime.clone_for_child()
+                };
+                let mut child_options = options.clone();
+                child_options.source = child_source;
+
+                let child_report = child
+                    .run_compose_pipeline_internal(child_options, &mut child_runtime)?;
+                {
+                    let mut runtime = runtime_mutex.lock().unwrap();
+                    runtime.merge_child(&child_runtime);
+                }
+
+                let mut content = child.content().to_string();
+                let mut merged_report = child_report;
+                merged_report.transclusions_applied += 1;
+
+                if let Some((offset, line)) = insertion_context
+                    && let Some(parent_level) =
+                        transclusion::find_preceding_heading_level(&self.content, offset)
+                {
+                    let target_level =
+                        super::normalize::HeadingLevel::new((parent_level.as_u8() + 1).min(6))
+                            .unwrap_or(super::normalize::HeadingLevel::H6);
+                    let (releveled, warnings) =
+                        transclusion::relevel_with_overflow(&content, target_level);
+                    content = releveled;
+                    for warning in warnings {
+                        merged_report.add_warning(warning.at_line(line));
+                    }
+                }
+
+                let result = self.apply_wrappers(content, &directive_options);
+                Ok(ResolvedTransclusion {
+                    order,
+                    target,
+                    content: Some(result),
+                    report: merged_report,
+                    source_file: None,
+                })
+            }
+            PreparedTransclusion::RemoteCode {
+                order,
+                span,
+                url,
+                directive_options,
+                language,
+            } => {
+                let remote_fetch = {
+                    let runtime = runtime_mutex.lock().unwrap();
+                    runtime.remote_fetch.clone()
+                };
+                let body_text = remote_fetch
+                    .get_content(&url)
+                    .map_err(|e| {
+                        transclusion::TransclusionError::RemoteFetchFailed {
+                            url: url.to_string(),
+                            reason: e,
+                        }
+                    })?
+                    .ok_or_else(|| transclusion::TransclusionError::RemoteFetchFailed {
+                        url: url.to_string(),
+                        reason: "URL was not registered for fetching".to_string(),
+                    })?;
+
+                Self::record_remote_dependency(runtime_mutex, &remote_fetch, &url);
+
+                let fenced = transclusion::wrap_in_code_block(&body_text, &language);
+                let spaced = transclusion::ensure_vertical_spacing(&fenced);
+                let result = self.apply_wrappers(spaced, &directive_options);
+                let mut code_report = ComposeReport::new();
+                code_report.transclusions_applied = 1;
+                Ok(ResolvedTransclusion {
+                    order,
+                    target: ApplyTarget::Replace(span),
+                    content: Some(result),
                     report: code_report,
                     source_file: None,
                 })
@@ -5081,6 +5404,554 @@ Rounded: {{ round(pi) }}"#;
             assert!(
                 stats3.persistent_writes >= 1,
                 "run 3 must compute and write a fresh entry under the new baseline, got {stats3:?}"
+            );
+        }
+    }
+
+    mod remote_transclusion_tests {
+        use super::*;
+        use crate::markdown::compose::remote::RemoteReadConfig;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        async fn compose_with_remote(
+            content: &str,
+            source_file: &std::path::Path,
+            _server: &MockServer,
+            allowed_hosts: Vec<String>,
+        ) -> MarkdownResult<(Markdown, ComposeReport)> {
+            let md: Markdown = content.into();
+            let config = RemoteReadConfig {
+                allowed_hosts,
+                ..Default::default()
+            };
+            let options = ComposeOptions::new()
+                .with_source_file(source_file)
+                .with_allow_remote_transclusion(true)
+                .with_remote_read_config(config)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            md.compose_with(options)
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_file_transclusion_inserts_fetched_body() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/remote.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("# Remote\n\nHello from remote"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/remote.md", server.uri());
+            let content = format!("# Local\n\n::file {remote_url}\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("Hello from remote"), "content: {text}");
+            assert!(text.contains("# Local"), "content: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_code_transclusion_inserts_fetched_code() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/snippet.rs"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("fn main() {}"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/snippet.rs", server.uri());
+            let content = format!("# Doc\n\n::code {remote_url}\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("fn main()"), "content: {text}");
+            assert!(text.contains("```rs"), "content: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_transclusion_denied_by_default() {
+            let server = MockServer::start().await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/blocked.md", server.uri());
+            let content = format!("# Doc\n\n::file {remote_url}\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let md: Markdown = content.clone().into();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_allow_remote_transclusion(true)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let result = md.compose_with(options);
+            assert!(
+                result.is_err(),
+                "Expected error because no allowed hosts configured"
+            );
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_file_duplicate_consumers_one_fetch() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/shared.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("shared content"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/shared.md", server.uri());
+            // Two line-start directives referencing the same URL: directives
+            // are line-oriented, so each must begin its own line.
+            let content = format!(
+                "# Doc\n\n::file {remote_url}\n\n::file {remote_url}\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            let count = text.matches("shared content").count();
+            assert_eq!(count, 2, "Should appear twice (once per directive)");
+            assert_eq!(report.transclusions_applied, 2);
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1, "Only one actual network fetch should occur");
+        }
+
+        /// Mounts a single document and composes a body that reads it through
+        /// the given quoted URL expression, returning the composed text.
+        ///
+        /// The URL argument is quoted because the interpolation expression
+        /// parser only accepts a string literal there; the unquoted
+        /// `frontmatter(https://…)` form does not tokenize.
+        async fn compose_expr_against_doc(doc_body: &str, expr_template: &str) -> String {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/doc.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(doc_body.to_string()))
+                .mount(&server)
+                .await;
+            let url = format!("{}/doc.md", server.uri());
+            let body = expr_template.replace("{URL}", &url);
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, &body).unwrap();
+
+            let (composed, _) =
+                compose_with_remote(&body, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+            composed.content().to_string()
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_frontmatter_expression_reads_url() {
+            let text = compose_expr_against_doc(
+                "---\ntitle: Remote Title\nstatus: draft\n---\n# H1\n\nBody\n",
+                "S: {{ frontmatter(\"{URL}\", \"status\") }}\n",
+            )
+            .await;
+            assert_eq!(text, "S: draft\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_markdown_title_expression_reads_url() {
+            let text = compose_expr_against_doc(
+                "---\ntitle: Remote Title\n---\n# H1\n\nBody\n",
+                "T: {{ markdown_title(\"{URL}\") }}\n",
+            )
+            .await;
+            assert_eq!(text, "T: Remote Title\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_markdown_body_empty_expression_reads_url() {
+            let text = compose_expr_against_doc(
+                "---\ntitle: Empty Body\n---\n",
+                "E: {{ markdown_body_empty(\"{URL}\") }}\n",
+            )
+            .await;
+            assert_eq!(text, "E: true\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_validate_schema_expression_reads_url() {
+            // A document without `$schema` always validates as `true`.
+            let text = compose_expr_against_doc(
+                "---\ntitle: No Schema\n---\n# H1\n",
+                "V: {{ validate_schema(\"{URL}\") }}\n",
+            )
+            .await;
+            assert_eq!(text, "V: true\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_file_exists_expression_reads_url() {
+            let text = compose_expr_against_doc(
+                "# Present\n",
+                "X: {{ file_exists(\"{URL}\") }}\n",
+            )
+            .await;
+            assert_eq!(text, "X: true\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn file_exists_false_for_unallowed_remote_host() {
+            // Remote reads enabled but no allowed hosts: the URL is denied and
+            // never fetched, so `file_exists` reads it as non-existent rather
+            // than erroring out of composition.
+            let server = MockServer::start().await;
+            let url = format!("{}/blocked.md", server.uri());
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let body = format!("X: {{{{ file_exists(\"{url}\") }}}}\n");
+            std::fs::write(&root, &body).unwrap();
+
+            let (composed, _) = compose_with_remote(&body, &root, &server, vec![])
+                .await
+                .unwrap();
+            assert_eq!(composed.content(), "X: false\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn interpolation_only_discovers_and_reads_remote_expression_url() {
+            // Review 7: a library caller following the documented API enables
+            // remote expression reads via `with_remote_read_config` alone — an
+            // allowed host is sufficient. No `with_allow_remote_transclusion`
+            // call is required, since expression URL reads are a read-side
+            // capability independent of block transclusion.
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/doc.md"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string("---\ntitle: Interp Only\n---\n# H1\n"),
+                )
+                .mount(&server)
+                .await;
+            let url = format!("{}/doc.md", server.uri());
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let body = format!("T: {{{{ markdown_title(\"{url}\") }}}}\n");
+            std::fs::write(&root, &body).unwrap();
+
+            let config = RemoteReadConfig {
+                allowed_hosts: vec!["127.0.0.1".into()],
+                ..Default::default()
+            };
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_remote_read_config(config)
+                .only(&[ComposeOperation::Interpolation]);
+            let md: Markdown = body.clone().into();
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            assert_eq!(composed.content(), "T: Interp Only\n");
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1, "URL must be fetched without BlockTransclusion");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn local_markdown_title_expression_reads_relative_file() {
+            // The same resolution-context wiring resolves local relative paths
+            // against the source document's directory.
+            let server = MockServer::start().await;
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(
+                dir.path().join("other.md"),
+                "---\ntitle: Local Title\n---\n# H1\n",
+            )
+            .unwrap();
+            let root = dir.path().join("root.md");
+            let body = "T: {{ markdown_title(\"./other.md\") }}\n";
+            std::fs::write(&root, body).unwrap();
+
+            let (composed, _) = compose_with_remote(body, &root, &server, vec![])
+                .await
+                .unwrap();
+            assert_eq!(composed.content(), "T: Local Title\n");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn nested_remote_reference_is_discovered_and_fetched() {
+            let server = MockServer::start().await;
+            // The parent document itself transcludes a further remote child.
+            let child_url = format!("{}/child.md", server.uri());
+            Mock::given(method("GET"))
+                .and(path("/parent.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                    "# Parent\n\n::file {child_url}\n"
+                )))
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path("/child.md"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_string("nested child body"),
+                )
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let parent_url = format!("{}/parent.md", server.uri());
+            let content = format!("# Local\n\n::file {parent_url}\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("nested child body"), "content: {text}");
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 2, "Both parent and nested child fetched once");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn interpolated_directive_creates_fetchable_remote_file() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/late.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("late remote body"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/late.md", server.uri());
+            // The directive's URL only materializes after interpolation expands
+            // `{{ remote_ref }}`, so the eager pre-scan never sees it. It must be
+            // registered when prepared, or point-of-use fails "not registered".
+            let content = format!(
+                "---\nremote_ref: \"{remote_url}\"\n---\n# Local\n\n::file {{{{ remote_ref }}}}\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("late remote body"), "content: {text}");
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn interpolated_directive_creates_fetchable_remote_code() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/late.rs"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("fn main() {}"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/late.rs", server.uri());
+            let content = format!(
+                "---\nremote_ref: \"{remote_url}\"\n---\n# Doc\n\n::code {{{{ remote_ref }}}}\n"
+            );
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("fn main()"), "content: {text}");
+            assert!(text.contains("```rs"), "content: {text}");
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn cached_local_child_revalidates_nested_remote_under_refresh() {
+            use std::sync::Arc;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            use wiremock::{Request, Respond};
+
+            // Serves "remote v1" on the first request and "remote v2" on every
+            // later request, so a missed revalidation surfaces as stale output.
+            struct Versioned {
+                hits: Arc<AtomicUsize>,
+            }
+            impl Respond for Versioned {
+                fn respond(&self, _req: &Request) -> ResponseTemplate {
+                    let n = self.hits.fetch_add(1, Ordering::SeqCst);
+                    let body = if n == 0 { "remote v1" } else { "remote v2" };
+                    ResponseTemplate::new(200).set_body_string(body)
+                }
+            }
+
+            let server = MockServer::start().await;
+            let hits = Arc::new(AtomicUsize::new(0));
+            Mock::given(method("GET"))
+                .and(path("/remote.md"))
+                .respond_with(Versioned {
+                    hits: Arc::clone(&hits),
+                })
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let cache_root = dir.path().join("cache");
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+            let remote_url = format!("{}/remote.md", server.uri());
+            std::fs::write(&root, "# Root\n\n::file ./child.md\n").unwrap();
+            std::fs::write(&child, format!("# Child\n\n::file {remote_url}\n")).unwrap();
+
+            let mk_options = |refresh: bool| {
+                let config = RemoteReadConfig {
+                    allowed_hosts: vec!["127.0.0.1".into()],
+                    refresh,
+                    ..Default::default()
+                };
+                ComposeOptions::new()
+                    .with_source_file(&root)
+                    .with_allow_remote_transclusion(true)
+                    .with_remote_read_config(config)
+                    .with_cache_root(&cache_root)
+                    .disable(ComposeOperation::Cleanup)
+                    .disable(ComposeOperation::Normalization)
+            };
+
+            // Run 1: populate the local-child and remote caches; remote → v1.
+            let md1 = Markdown::try_from(root.as_path()).unwrap();
+            let (c1, _) = md1.compose_with(mk_options(false)).unwrap();
+            assert!(
+                c1.content().contains("remote v1"),
+                "run 1 should embed the original remote body: {}",
+                c1.content()
+            );
+
+            // Run 2: the remote body has changed and `--remote-refresh` forces a
+            // revalidation. The cached local child must NOT be accepted against
+            // the stale remote manifest.
+            let md2 = Markdown::try_from(root.as_path()).unwrap();
+            let (c2, _) = md2.compose_with(mk_options(true)).unwrap();
+            assert!(
+                c2.content().contains("remote v2"),
+                "cached local child must revalidate its nested remote URL under \
+                 --remote-refresh; got: {}",
+                c2.content()
+            );
+            assert!(
+                !c2.content().contains("remote v1"),
+                "stale remote body served from cache: {}",
+                c2.content()
+            );
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_prologue_inserts_fetched_body() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/intro.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("# Intro\n\nFrom prologue"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/intro.md", server.uri());
+            let content = format!("---\nprologue: {remote_url}\n---\n# Local\n\nBody.\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("From prologue"), "content: {text}");
+            assert!(text.contains("# Local"), "content: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+            let rf = report.remote_fetch_stats.unwrap();
+            assert_eq!(rf.fetched, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_epilogue_inserts_fetched_body() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/outro.md"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("# Outro\n\nFrom epilogue"))
+                .mount(&server)
+                .await;
+
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/outro.md", server.uri());
+            let content = format!("---\nepilogue: [\"{remote_url}\"]\n---\n# Local\n\nBody.\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let (composed, report) =
+                compose_with_remote(&content, &root, &server, vec!["127.0.0.1".into()])
+                    .await
+                    .unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("From epilogue"), "content: {text}");
+            assert!(text.contains("# Local"), "content: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn remote_prologue_denied_by_policy() {
+            // Remote transclusion is enabled but the host is not allowlisted, so
+            // the registered fetch fails by policy and surfaces an error rather
+            // than a bogus "URL was not registered" message.
+            let server = MockServer::start().await;
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let remote_url = format!("{}/intro.md", server.uri());
+            let content = format!("---\nprologue: {remote_url}\n---\n# Local\n\nBody.\n");
+            std::fs::write(&root, &content).unwrap();
+
+            let md: Markdown = content.clone().into();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_allow_remote_transclusion(true)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let result = md.compose_with(options);
+            assert!(
+                result.is_err(),
+                "Expected error because no allowed hosts configured"
             );
         }
     }

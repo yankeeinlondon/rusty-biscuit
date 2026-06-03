@@ -1004,9 +1004,14 @@ pub(crate) struct PipelineRuntime {
     pub shell: ShellExpansionRuntime,
     pub cache: crate::markdown::compose::cache::RunLocalCache,
     dependencies: Vec<crate::markdown::compose::cache::types::DependencyRef>,
+    pub remote_fetch: crate::markdown::compose::remote_fetch::RemoteFetchRuntime,
 }
 
 impl PipelineRuntime {
+    /// Test-only constructor with a default (deny-all) remote-fetch runtime.
+    /// Production code uses [`Self::with_remote_fetch`] to inject the run's
+    /// shared fetch runtime.
+    #[cfg(test)]
     pub fn new(
         max_depth: usize,
         cache_access_mode: crate::markdown::compose::cache::CacheAccessMode,
@@ -1016,6 +1021,11 @@ impl PipelineRuntime {
         if let Some(root) = cache_root {
             cache = cache.with_persistent(root);
         }
+        let remote_fetch = crate::markdown::compose::remote_fetch::RemoteFetchRuntime::with_store(
+            &crate::markdown::compose::remote::RemoteReadConfig::default(),
+            None,
+        );
+        cache = cache.with_remote_fetch(remote_fetch.clone());
         Self {
             transclusion: crate::markdown::compose::transclusion::TransclusionRuntime::new(
                 max_depth,
@@ -1023,6 +1033,33 @@ impl PipelineRuntime {
             shell: ShellExpansionRuntime::new(),
             cache,
             dependencies: Vec::new(),
+            remote_fetch,
+        }
+    }
+
+    /// Creates a `PipelineRuntime` with the given remote fetch runtime.
+    pub fn with_remote_fetch(
+        max_depth: usize,
+        cache_access_mode: crate::markdown::compose::cache::CacheAccessMode,
+        cache_root: Option<std::path::PathBuf>,
+        remote_fetch: crate::markdown::compose::remote_fetch::RemoteFetchRuntime,
+    ) -> Self {
+        let mut cache = crate::markdown::compose::cache::RunLocalCache::new(cache_access_mode);
+        if let Some(root) = cache_root {
+            cache = cache.with_persistent(root);
+        }
+        // Share the run's fetch runtime with the cache so compose-manifest
+        // validation can revalidate RemoteUrl dependencies under the active
+        // RemoteReadConfig (e.g. --remote-refresh, expired TTL).
+        cache = cache.with_remote_fetch(remote_fetch.clone());
+        Self {
+            transclusion: crate::markdown::compose::transclusion::TransclusionRuntime::new(
+                max_depth,
+            ),
+            shell: ShellExpansionRuntime::new(),
+            cache,
+            dependencies: Vec::new(),
+            remote_fetch,
         }
     }
 
@@ -1034,6 +1071,7 @@ impl PipelineRuntime {
             shell: self.shell.clone_for_child(),
             cache: self.cache.clone(),
             dependencies: Vec::new(),
+            remote_fetch: self.remote_fetch.clone(),
         }
     }
 

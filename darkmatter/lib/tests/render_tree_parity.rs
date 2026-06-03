@@ -85,7 +85,9 @@
 
 use std::rc::Rc;
 
+use biscuit_terminal::discovery::detection::ColorDepth as TerminalColorDepth;
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_document};
+use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::{HtmlOptions, TerminalOptions, as_html, for_terminal};
 use darkmatter::markdown::render_tree::{
@@ -354,10 +356,10 @@ fn legacy_terminal(markdown: &str) -> String {
 /// code path the user-observable entry point uses, not the bare
 /// `TerminalRenderOptions::default()` (which sets `code_renderer: None`).
 fn tree_terminal_options() -> TerminalRenderOptions {
-    // Start from the same detected-terminal default the original parity
-    // harness used (so hyperlink / color behavior is unchanged) and only add
-    // the code-render hook on top.
-    TerminalRenderOptions::default().with_code_renderer(Rc::new(TerminalCodeRenderer::new()))
+    let mut term = Terminal::new_optimistic(80);
+    term.color_depth = TerminalColorDepth::TrueColor;
+    TerminalRenderOptions::new(&term, RenderStrictness::default())
+        .with_code_renderer(Rc::new(TerminalCodeRenderer::new()))
 }
 
 /// Renders fixture text to a terminal string via the render-tree renderer.

@@ -28,6 +28,21 @@ pub enum OutputFormat {
     Json,
 }
 
+/// Cache-staleness handling for remote URL artifacts.
+///
+/// Mirrors `darkmatter::markdown::compose::RemoteFreshnessMode`. A closed value
+/// set so an unrecognized `--remote-freshness` argument fails fast with the
+/// accepted values rather than silently degrading to a single mode.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum RemoteFreshness {
+    /// Serve any cached artifact without revalidation, even when stale.
+    Optimistic,
+    /// Always revalidate with a conditional GET.
+    Strict,
+    /// Serve stale on network failure (the default).
+    Fallback,
+}
+
 /// CLI subcommands.
 #[derive(Clone, Debug, Subcommand)]
 pub enum Command {
@@ -173,6 +188,30 @@ pub enum Command {
         /// Emit a compose performance report to stderr after completion
         #[arg(long)]
         perf: bool,
+
+        /// Allow remote reads from the specified host (repeatable)
+        #[arg(long, value_name = "HOST")]
+        allow_host: Vec<String>,
+
+        /// Maximum concurrent remote fetches (default: 16, or $DARKMATTER_REMOTE_CONCURRENCY)
+        #[arg(long, value_name = "N")]
+        remote_concurrency: Option<usize>,
+
+        /// Remote artifact TTL in seconds (default: use server cache headers)
+        #[arg(long, value_name = "SECONDS")]
+        remote_ttl: Option<u64>,
+
+        /// Force revalidation of cached remote artifacts
+        #[arg(long)]
+        remote_refresh: bool,
+
+        /// Remote freshness mode (default: fallback)
+        #[arg(long, value_enum, default_value_t = RemoteFreshness::Fallback)]
+        remote_freshness: RemoteFreshness,
+
+        /// Persistent compose cache root (enables remote URL artifact caching)
+        #[arg(long, value_name = "DIR")]
+        cache_root: Option<PathBuf>,
     },
 
     /// Show markdown table of contents.

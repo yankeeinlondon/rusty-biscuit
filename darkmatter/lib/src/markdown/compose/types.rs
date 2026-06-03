@@ -9,6 +9,7 @@
 
 use super::super::normalize::NormalizationReport;
 use super::cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
+use super::remote::{RemoteFreshnessMode, RemoteReadConfig};
 use super::shell_expansion::types::ShellTimeoutBehavior;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -506,6 +507,16 @@ pub struct ComposeOptions {
     /// the same property, the document wins.
     pub(crate) baseline_schema: Option<crate::markdown::schemas::SimplifiedSchema>,
 
+    // ── Remote reads ────────────────────────────────────────────
+    /// Configuration for remote URL reads: allowed hosts, concurrency,
+    /// TTL, freshness mode, and refresh behavior.
+    ///
+    /// Defaults to deny-all. Wired into eager prefetch, read-side expression
+    /// resolution (`frontmatter(url)`, …), and the persistent remote-artifact
+    /// cache.
+    pub(crate) remote_read_config: RemoteReadConfig,
+
+    // ── Schema validation ──────────────────────────────────────────
     /// When `true`, the always-on schema validation stage is skipped
     /// entirely. Used by internal non-terminal passes (e.g. shell-command
     /// discovery) that strip `FrontmatterShellExpansion` to avoid executing
@@ -590,6 +601,7 @@ impl std::fmt::Debug for ComposeOptions {
                 &self.allow_reassigned_frontmatter_property,
             )
             .field("context", &self.context)
+            .field("remote_read_config", &self.remote_read_config)
             .finish()
     }
 }
@@ -647,6 +659,7 @@ impl ComposeOptions {
             shell_strip_ansi: true,
             env_path_whitelist: Vec::new(),
             baseline_schema: None,
+            remote_read_config: RemoteReadConfig::default(),
             skip_schema_validation: false,
         }
     }
@@ -996,6 +1009,33 @@ impl ComposeOptions {
         }
     }
 
+    /// Builds the [`ResolutionContext`] used by read-side expression functions
+    /// during interpolation.
+    ///
+    /// Carries the document's base directory (so relative/`@` references
+    /// resolve where the source lives), the configured magic search paths, and
+    /// — only when remote reads are enabled — the run's remote-fetch runtime so
+    /// HTTP(S) URL arguments read from the fetch cache rather than disk.
+    ///
+    /// [`ResolutionContext`]: super::expression::ResolutionContext
+    pub(crate) fn expression_resolution_context(
+        &self,
+        remote_fetch: &super::remote_fetch::RemoteFetchRuntime,
+    ) -> super::expression::ResolutionContext {
+        let base_dir = match &self.source {
+            ComposeSource::File(path) => path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from(".")),
+            _ => PathBuf::from("."),
+        };
+        super::expression::ResolutionContext {
+            base_dir,
+            magic_paths: self.magic_paths.clone(),
+            remote_fetch: self.remote_reads_enabled().then(|| remote_fetch.clone()),
+        }
+    }
+
     /// Returns a `ShellExpansionOptions` view of the shell-related fields.
     ///
     /// Used internally to pass shell config to executor and policy functions
@@ -1040,6 +1080,74 @@ impl ComposeOptions {
     pub(crate) fn with_replace_parent_wins(mut self, enabled: bool) -> Self {
         self.replace_parent_wins = enabled;
         self
+    }
+
+    /// Sets the remote read configuration.
+    #[must_use]
+    pub fn with_remote_read_config(mut self, config: RemoteReadConfig) -> Self {
+        self.remote_read_config = config;
+        self
+    }
+
+    /// Whether the remote-fetch capability is enabled for this run.
+    ///
+    /// Read-side expression URL reads (`markdown_title(url)`, `frontmatter(url)`,
+    /// …) are a separate capability from `::file`/`::code` block transclusion: a
+    /// caller that configures an allowed host via [`with_remote_read_config`]
+    /// enables them without also opting into remote transclusion. Block
+    /// transclusion keeps its own explicit [`with_allow_remote_transclusion`]
+    /// gate. An empty allowlist with the transclusion flag unset means remote
+    /// reads stay fully disabled, preserving the deny-all default.
+    ///
+    /// [`with_remote_read_config`]: Self::with_remote_read_config
+    /// [`with_allow_remote_transclusion`]: Self::with_allow_remote_transclusion
+    pub(crate) fn remote_reads_enabled(&self) -> bool {
+        self.allow_remote_transclusion || !self.remote_read_config.allowed_hosts.is_empty()
+    }
+
+    /// Adds a single allowed host for remote URL reads.
+    ///
+    /// Convenience wrapper that appends to the existing allowlist.
+    #[must_use]
+    pub fn with_allowed_host(mut self, host: impl Into<String>) -> Self {
+        self.remote_read_config.allowed_hosts.push(host.into());
+        self
+    }
+
+    /// Sets the maximum number of concurrent remote fetches.
+    #[must_use]
+    pub fn with_remote_concurrency(mut self, cap: usize) -> Self {
+        self.remote_read_config.remote_concurrency = cap.max(1);
+        self
+    }
+
+    /// Sets the remote artifact TTL override.
+    ///
+    /// When `None` (default), server-provided cache headers are used.
+    #[must_use]
+    pub fn with_remote_ttl(mut self, ttl: Option<Duration>) -> Self {
+        self.remote_read_config.remote_ttl = ttl;
+        self
+    }
+
+    /// Forces revalidation of remote artifacts even when cached content
+    /// is otherwise fresh.
+    #[must_use]
+    pub fn with_remote_refresh(mut self, refresh: bool) -> Self {
+        self.remote_read_config.refresh = refresh;
+        self
+    }
+
+    /// Sets the freshness mode for remote cache artifacts.
+    #[must_use]
+    pub fn with_remote_freshness_mode(mut self, mode: RemoteFreshnessMode) -> Self {
+        self.remote_read_config.freshness_mode = mode;
+        self
+    }
+
+    /// Returns a reference to the remote read configuration.
+    pub fn remote_read_config(&self) -> &RemoteReadConfig {
+        &self.remote_read_config
     }
 
     /// Internal builder: sets a one-off replace map for this document only.
@@ -1637,6 +1745,9 @@ pub struct ComposeReport {
 
     /// Source map tracking which byte ranges came from transcluded files.
     pub source_map: Vec<SourceRange>,
+
+    /// Remote-fetch statistics from this compose run.
+    pub remote_fetch_stats: Option<super::remote_fetch::RemoteFetchStats>,
 }
 
 /// Maps a byte range in composed output to its originating source file.
@@ -1782,6 +1893,22 @@ impl ComposeReport {
             parts.push(format!(
                 "cache: {} hit(s), {} miss(es)",
                 stats.hits, stats.misses
+            ));
+        }
+
+        if let Some(ref rf_stats) = self.remote_fetch_stats
+            && (rf_stats.fetched > 0 || rf_stats.cache_hits > 0 || rf_stats.not_modified > 0)
+        {
+            parts.push(format!(
+                "remote: {} fetched, {} cached, {} revalidated ({} not-modified, {} stale), \
+                 {} denied, {} failed",
+                rf_stats.fetched,
+                rf_stats.cache_hits,
+                rf_stats.revalidations,
+                rf_stats.not_modified,
+                rf_stats.stale_served,
+                rf_stats.policy_denials,
+                rf_stats.failures
             ));
         }
 
@@ -2486,5 +2613,77 @@ mod tests {
             options.effective_env_path_whitelist(),
             vec!["MY_VAR".to_string(), "OTHER".to_string()]
         );
+    }
+
+    #[test]
+    fn remote_read_config_defaults_to_deny_all() {
+        let options = ComposeOptions::new();
+        let config = options.remote_read_config();
+        assert!(config.allowed_hosts.is_empty());
+        assert_eq!(
+            config.remote_concurrency,
+            crate::markdown::compose::remote::DEFAULT_REMOTE_CONCURRENCY
+        );
+        assert_eq!(config.freshness_mode, RemoteFreshnessMode::Fallback);
+    }
+
+    #[test]
+    fn with_allowed_host_adds_to_allowlist() {
+        let options = ComposeOptions::new()
+            .with_allowed_host("example.com")
+            .with_allowed_host("cdn.example.com");
+        let config = options.remote_read_config();
+        assert!(config.is_host_allowed("example.com"));
+        assert!(config.is_host_allowed("cdn.example.com"));
+        assert!(!config.is_host_allowed("other.com"));
+    }
+
+    #[test]
+    fn with_remote_concurrency_sets_value() {
+        let options = ComposeOptions::new().with_remote_concurrency(8);
+        assert_eq!(options.remote_read_config().remote_concurrency, 8);
+    }
+
+    #[test]
+    fn with_remote_ttl_sets_duration() {
+        let options = ComposeOptions::new().with_remote_ttl(Some(Duration::from_secs(300)));
+        assert_eq!(
+            options.remote_read_config().remote_ttl,
+            Some(Duration::from_secs(300))
+        );
+    }
+
+    #[test]
+    fn with_remote_refresh_sets_flag() {
+        let options = ComposeOptions::new().with_remote_refresh(true);
+        assert!(options.remote_read_config().refresh);
+    }
+
+    #[test]
+    fn with_remote_freshness_mode_sets_mode() {
+        let options =
+            ComposeOptions::new().with_remote_freshness_mode(RemoteFreshnessMode::Optimistic);
+        assert_eq!(
+            options.remote_read_config().freshness_mode,
+            RemoteFreshnessMode::Optimistic
+        );
+    }
+
+    #[test]
+    fn with_remote_read_config_replaces_entire_config() {
+        let custom = RemoteReadConfig {
+            allowed_hosts: vec!["custom.host".to_string()],
+            remote_concurrency: 2,
+            remote_ttl: Some(Duration::from_secs(60)),
+            refresh: true,
+            freshness_mode: RemoteFreshnessMode::Fallback,
+        };
+        let options = ComposeOptions::new().with_remote_read_config(custom);
+        let config = options.remote_read_config();
+        assert!(config.is_host_allowed("custom.host"));
+        assert_eq!(config.remote_concurrency, 2);
+        assert_eq!(config.remote_ttl, Some(Duration::from_secs(60)));
+        assert!(config.refresh);
+        assert_eq!(config.freshness_mode, RemoteFreshnessMode::Fallback);
     }
 }

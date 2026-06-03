@@ -1,7 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 751ea2392b8b3231-7d4b443fb0147706
+hash: 751ea2392b8b3231-bb457d09f2d7bd27
+last_updated: 2026-06-02
 ---
 
 # darkmatter
@@ -126,6 +127,24 @@ Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via 
 - `ComposeOptions::with_baseline_schema(...)` for programmatic baseline injection.
 
 See `darkmatter/docs/topics/schema-definition.md` for the full topic documentation.
+
+## Remote URL Referencing
+
+Remote URL composition is supported for HTTP(S) `::file` / `::code` targets
+and read-side expression function file arguments. Ordinary rendered HTTP(S)
+links are preserved and not fetched.
+
+- All network egress goes through `biscuit-file`'s `FetchPolicy`, which is
+  deny-all by default.
+- CLI callers allow exact hosts with `md compose --allow-host <host>`.
+- Persistent remote artifacts require `--cache-root` or
+  `ComposeOptions::with_cache_root(...)`.
+- Remote freshness is controlled by `--remote-freshness`,
+  `--remote-refresh`, `--remote-ttl`, and `RemoteReadConfig`.
+- The side-effect `EffectEngine::http_post` uses the same shared fetch policy
+  for host allowlist enforcement.
+
+See `darkmatter/docs/topics/remote-url-references.md` for public guidance.
 
 ## Progressive Disclosure
 
