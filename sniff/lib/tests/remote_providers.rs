@@ -620,6 +620,39 @@ mod github_tests {
     }
 
     #[tokio::test]
+    async fn fetch_report_via_enum_includes_workflow_runs() {
+        // Regression: the production CLI dispatches through `GitRemote`, not
+        // `GitHubRemote` directly. If the enum fails to forward
+        // `list_workflow_runs`, `fetch_report` silently uses the trait default
+        // (empty vec) and falls back to presence detection — so the run-shaped
+        // CI/CD table never renders. This asserts the enum threads runs through.
+        let (server, provider) = setup_github_mock().await;
+        let remote = GitRemote::GitHub(provider);
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(github_repo_fixture()))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/actions/runs"))
+            .and(query_param("per_page", "5"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(github_workflow_runs_fixture()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let report = remote.fetch_report("test-owner", "test-repo").await.unwrap();
+
+        // Run-shaped entries (started_at populated) rather than presence detection.
+        assert_eq!(report.ci_cd.len(), 2);
+        assert_eq!(report.ci_cd[0].name, "CI");
+        assert_eq!(report.ci_cd[0].status, "completed");
+        assert!(report.ci_cd[0].started_at.is_some());
+    }
+
+    #[tokio::test]
     async fn provider_returns_github() {
         let (_, provider) = setup_github_mock().await;
         assert_eq!(provider.provider(), GitProvider::GitHub);
