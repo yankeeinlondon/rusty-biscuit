@@ -1032,24 +1032,21 @@ const TINY_PNG: &[u8] = &[
 /// a real WezTerm pane to confirm the terminal does not fall back to literal
 /// `[cat]` alt text.
 ///
-/// ## Verification scope — NOT production-ready image-render proof
+/// ## Verification scope — protocol + anti-regression
 ///
-/// Review-4 finding 2: this test does **not** prove the image was decoded and
-/// painted. The WezTerm harness exposes only `wezterm cli get-text`, which
-/// strips image-protocol bytes from its capture (there is no screenshot,
-/// pixel-readback, or backend image-placement query available — see
-/// `biscuit-test-harness/src/wezterm.rs`). The pane assertion is therefore the
-/// **absence** of the `[cat]` alt-text fallback, which a malformed, ignored, or
-/// zero-visible image payload could also satisfy. What this test verifies:
+/// This test deliberately verifies only two things via text capture:
 ///
 /// 1. **Level 1 (in-process):** the production tree path emits the iTerm2
 ///    image protocol (OSC 1337) at `Rich`, not the alt-text fallback.
 /// 2. **Level 2 (real terminal):** WezTerm consumes those bytes without
-///    surfacing the alt-text fallback in its text capture.
+///    surfacing the `[cat]` alt-text fallback in its text capture.
 ///
-/// Distinguishing "image decoded and painted" from "bytes silently dropped"
-/// requires pixel inspection the harness cannot perform, so this test must not
-/// be counted as production-ready verification of terminal image *rendering*.
+/// `wezterm cli get-text` strips image-protocol bytes, so the pane assertion is
+/// the **absence** of the alt-text fallback — which a malformed, ignored, or
+/// zero-visible image payload could also satisfy. Proof that the image is
+/// actually decoded and painted lives in
+/// [`level2_tree_rich_image_node_paints_distinctive_pixels`], which screen-
+/// captures the pane and samples the rendered pixels.
 #[test]
 #[serial(level2_terminal)]
 fn level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal() {
@@ -1116,5 +1113,158 @@ fn level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal() {
         !frame.plain.contains("[cat]"),
         "real terminal showed the alt-text fallback instead of consuming the image. plain:\n{}",
         frame.plain,
+    );
+}
+
+/// Encodes a `size`×`size` opaque PNG filled with a single RGB color.
+fn write_solid_png(path: &std::path::Path, size: u32, rgb: [u8; 3]) {
+    let img = image::RgbImage::from_pixel(size, size, image::Rgb(rgb));
+    img.save_with_format(path, image::ImageFormat::Png)
+        .expect("encode probe PNG");
+}
+
+/// Counts pixels in `png` that are near `target` RGB (per-channel within
+/// `tol`), and the total pixels that are not near-black. Returns
+/// `(near_target, non_black, total)`.
+fn classify_pixels(png: &[u8], target: [u8; 3], tol: i32) -> (u64, u64, u64) {
+    let img = image::load_from_memory(png).expect("decode screen capture");
+    let rgb = img.to_rgb8();
+    let mut near_target = 0u64;
+    let mut non_black = 0u64;
+    let total = (rgb.width() as u64) * (rgb.height() as u64);
+    for px in rgb.pixels() {
+        let [r, g, b] = px.0;
+        let near = (r as i32 - target[0] as i32).abs() <= tol
+            && (g as i32 - target[1] as i32).abs() <= tol
+            && (b as i32 - target[2] as i32).abs() <= tol;
+        if near {
+            near_target += 1;
+        }
+        if r > 30 || g > 30 || b > 30 {
+            non_black += 1;
+        }
+    }
+    (near_target, non_black, total)
+}
+
+/// Validates the pixel-classification pipeline used by
+/// [`level2_tree_rich_image_node_paints_distinctive_pixels`] without a terminal:
+/// a solid-magenta PNG must classify as (near-)all magenta and all non-black,
+/// while a solid-black PNG must register as near-zero non-black (the signature
+/// the paint test treats as "capture blocked → skip"). This guards the decode +
+/// threshold logic independently of the WezTerm/`screencapture` environment.
+#[test]
+fn pixel_classification_distinguishes_magenta_from_black() {
+    const MAGENTA: [u8; 3] = [255, 0, 255];
+    let dir = tempdir().unwrap();
+
+    let magenta_path = dir.path().join("m.png");
+    write_solid_png(&magenta_path, 64, MAGENTA);
+    let (near, non_black, total) = classify_pixels(&fs::read(&magenta_path).unwrap(), MAGENTA, 60);
+    assert_eq!(total, 64 * 64);
+    assert_eq!(near, total, "every magenta pixel must classify as near-target");
+    assert_eq!(non_black, total, "magenta is not black");
+
+    let black_path = dir.path().join("b.png");
+    write_solid_png(&black_path, 64, [0, 0, 0]);
+    let (near, non_black, _) = classify_pixels(&fs::read(&black_path).unwrap(), MAGENTA, 60);
+    assert_eq!(near, 0, "black has no magenta");
+    assert_eq!(non_black, 0, "black capture must read as blocked/empty");
+}
+
+/// Review-5 finding 3: the previous Level-2 image test proves only that the
+/// iTerm2 protocol bytes are emitted and that WezTerm does not surface the
+/// `[cat]` alt-text fallback — a dropped or malformed payload passes it too,
+/// because text capture strips graphics bytes. This test closes that gap with
+/// **pixel-readback**: it renders a `240×240` solid-magenta image through the
+/// production tree path, paints it into a real WezTerm pane, screen-captures the
+/// window via `screencapture`, and asserts the distinctive magenta is actually
+/// on screen. Magenta (`#ff00ff`) does not occur in terminal chrome, text, or
+/// the theme background, so its presence proves the image was decoded and
+/// painted — not merely that bytes were consumed.
+///
+/// ## Skips cleanly
+///
+/// Skips when WezTerm is unavailable (like the other Level-2 tests), when the
+/// harness cannot capture the window region (off macOS, or `screencapture`
+/// fails), or when the capture comes back essentially black — the signature of
+/// missing Screen Recording permission, which cannot be distinguished from a
+/// genuine paint failure and so must not hard-fail. Set
+/// `BISCUIT_TEST_LEVEL_REQUIRED=2` to enforce the WezTerm prerequisite; the
+/// pixel assertion still self-skips on a black capture.
+#[test]
+#[serial(level2_terminal)]
+fn level2_tree_rich_image_node_paints_distinctive_pixels() {
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
+    }
+
+    const MAGENTA: [u8; 3] = [255, 0, 255];
+
+    let dir = tempdir().unwrap();
+    let png_path = dir.path().join("probe.png");
+    write_solid_png(&png_path, 240, MAGENTA);
+
+    let source = SourceDescriptor::Virtual {
+        name: "rich_image_pixels".into(),
+    };
+    let (doc, diags) = fold_markdown_to_document(source, "![probe](probe.png)\n");
+    assert!(diags.is_empty(), "image fixture must fold cleanly: {diags:?}");
+
+    let mut term = Terminal::new_optimistic(120);
+    term.image_support = ImageSupport::ITerm;
+    term.is_tty = true;
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.graphics_mode = renderable::tree::GraphicsMode::Rich;
+    context.image_base_path = Some(dir.path().to_path_buf());
+    let opts = TerminalRenderOptions {
+        context,
+        strictness: RenderStrictness::Warn,
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+    };
+    let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
+    assert!(
+        rendered.output.contains("\u{1b}]1337;File="),
+        "Rich image node must emit the iTerm2 image protocol",
+    );
+
+    let path = dir.path().join("rich_image_pixels.ansi");
+    fs::write(&path, rendered.output).unwrap();
+
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().unwrap();
+    run_with_sentinel(harness, "clear");
+    let _ = run_with_sentinel(harness, &format!("cat {}", path.display()));
+
+    let Some(png) = harness.capture_window_png().expect("screen-capture call") else {
+        eprintln!(
+            "skipping pixel assertion: window-region capture unavailable (non-macOS or screencapture failed)"
+        );
+        return;
+    };
+
+    let (magenta, non_black, total) = classify_pixels(&png, MAGENTA, 60);
+    // A near-black capture means screen recording is blocked (no permission); we
+    // cannot tell that from a paint failure, so skip rather than hard-fail.
+    if non_black * 100 < total {
+        eprintln!(
+            "skipping pixel assertion: capture is essentially black ({non_black}/{total} non-black) \
+             — Screen Recording permission likely not granted to the parent terminal"
+        );
+        return;
+    }
+
+    // A real, non-black capture with no magenta means the image did not paint.
+    assert!(
+        magenta > 1000,
+        "Rich image node did not paint: only {magenta} magenta pixels in a {total}-pixel \
+         capture ({non_black} non-black). The image protocol bytes were emitted but the \
+         terminal did not render the decoded image.",
     );
 }
