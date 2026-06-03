@@ -661,6 +661,13 @@ impl NodeAttrs {
     /// assert_eq!(attrs.get_hint(HintNamespace::LAYOUT, "nonexistent"), None);
     /// ```
     pub fn get_hint(&self, ns: HintNamespace, key: &str) -> Option<&serde_json::Value> {
+        // The common node carries no hints at all (plain text runs, attribute-less
+        // table cells, list items). Skip building the `"{ns}.{key}"` lookup string
+        // for them — every renderer probes `style()` / `layout()` per node, so this
+        // avoids a `format!` allocation per probe on the hot tree-walk path.
+        if self.data.is_empty() {
+            return None;
+        }
         let full_key = format!("{}.{}", ns.0, key);
         self.data.get(&full_key)
     }

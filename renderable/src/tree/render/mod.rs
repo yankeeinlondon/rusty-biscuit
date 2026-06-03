@@ -16,7 +16,8 @@ pub mod markdown;
 mod shared;
 
 pub use browser::{
-    BrowserRenderOptions, RawHtmlPolicy, render_browser_document, render_browser_node,
+    BrowserRenderOptions, RawHtmlPolicy, render_browser_document, render_browser_document_html,
+    render_browser_node,
 };
 pub use markdown::{
     MarkdownDialect, MarkdownRenderOptions, MarkdownStyleOptions, render_markdown_document,

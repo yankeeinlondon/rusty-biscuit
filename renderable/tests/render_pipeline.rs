@@ -131,6 +131,71 @@ fn nested_component_aux_state_rolls_up_to_page() {
     assert!(page.features().contains(&PageFeature::DarkMode));
 }
 
+/// Regression guard for the Phase 4 rollup-hygiene refactor: `HtmlPage::render`
+/// now collects the fragment tree once and shares that single walk across the
+/// metadata, link, and stylesheet rollups. This proves every composition
+/// channel still reaches the rendered page after that change.
+///
+/// Dependency-link rollup runs through the same shared traversal but is not
+/// asserted here: `LinkTag` has no public constructor, so neither page links
+/// nor fragment dependency links can be populated from an integration test.
+#[test]
+fn html_page_render_rolls_up_every_composition_channel() {
+    use renderable::browser::ComponentStylesheet;
+    use renderable::browser::feature::PageFeature;
+    use renderable::microdata::MicrodataKey;
+    use renderable::stylesheet::{CssRule, CssStyle, Stylesheet};
+
+    // A nested component carries its own metadata, a scoped stylesheet, and a
+    // page feature, all of which must bubble up through the parent fragment.
+    let child = BrowserFragment::new()
+        .define_as_block_tag(BlockTag::Span, "child")
+        .with_stylesheet(ComponentStylesheet::new("child").add("label", CssStyle::new()))
+        .add_metadata_keypair(MicrodataKey::Description, "child description")
+        .add_feature(PageFeature::DarkMode)
+        .finalize();
+    let parent = BrowserFragment::new()
+        .define_as_block_tag(BlockTag::Div, "parent")
+        .add_component(child)
+        .finalize();
+
+    let mut page = HtmlPage::from(parent);
+    page.set_title("Rollup Page");
+    page.add_script_block("console.log('rollup');");
+
+    let mut sheet = Stylesheet::new();
+    sheet.push(CssRule::new(".page-rule", CssStyle::new()));
+    page.apply_page_options(PageOptions {
+        stylesheet: Some(sheet),
+        css_variables: Some(vec![("color-bg".to_string(), "#101010".to_string())]),
+        ..PageOptions::default()
+    });
+
+    let html = page.render();
+
+    // Page metadata (title) reached <head>.
+    assert!(html.contains("<title>Rollup Page</title>"), "{html}");
+    // Nested-component metadata reached <head>.
+    assert!(html.contains("child description"), "{html}");
+    // Page stylesheet rule rolled into the inline <style>.
+    assert!(html.contains(".page-rule"), "{html}");
+    // Nested component's scoped stylesheet rolled in.
+    assert!(html.contains(".child .label"), "{html}");
+    // CSS-variable override applied to the :root block.
+    assert!(html.contains("--color-bg: #101010;"), "{html}");
+    // Page-level script block rolled into the inline <script>.
+    assert!(html.contains("console.log('rollup');"), "{html}");
+    // The composed component body is present in <body>.
+    assert!(html.contains(r#"<div class="parent">"#), "{html}");
+
+    // Page-feature rollup is observed through the dedicated accessor, which
+    // shares the same recursive fragment walk.
+    assert!(
+        page.features().contains(&PageFeature::DarkMode),
+        "page feature rollup"
+    );
+}
+
 #[test]
 fn block_emits_base_class() {
     use renderable::browser::fragment::ComposableNode;

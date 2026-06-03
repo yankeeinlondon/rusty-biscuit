@@ -20,6 +20,13 @@ use crate::html::HtmlPage;
 ///   `String`, so the caller then calls [`HtmlPage::render`] for the
 ///   final string (see decisions.md item 7).
 /// - `as_any` enables downcasting to the concrete component type.
+///
+/// This trait is the **component composition** surface. A caller that already
+/// owns a render-tree [`Document`](crate::tree::Document) and only needs the
+/// final HTML string should reach for
+/// [`render_browser_document_html`](crate::tree::render::render_browser_document_html)
+/// instead — it walks the tree once into a single buffer and skips building a
+/// fragment per node. It does not replace this trait.
 pub trait BrowserRenderable: std::fmt::Debug + Any {
     /// Produces a fully-composed [`BrowserFragment<Ready>`] for this
     /// component.
