@@ -1029,12 +1029,27 @@ const TINY_PNG: &[u8] = &[
 /// and `Off`/`Vector` alt-text fallbacks. This Level-2 test renders a real
 /// image node through `render_terminal_document` (the production tree path),
 /// confirms the iTerm2 image protocol bytes are emitted, then `cat`s them into
-/// a real WezTerm pane to prove the terminal *consumes* the image rather than
-/// falling back to literal `[cat]` alt text.
+/// a real WezTerm pane to confirm the terminal does not fall back to literal
+/// `[cat]` alt text.
 ///
-/// WezTerm strips image-protocol bytes from its text capture, so the
-/// user-visible assertion is the **absence** of the alt-text fallback in the
-/// captured pane, paired with the in-process proof that the protocol fired.
+/// ## Verification scope — NOT production-ready image-render proof
+///
+/// Review-4 finding 2: this test does **not** prove the image was decoded and
+/// painted. The WezTerm harness exposes only `wezterm cli get-text`, which
+/// strips image-protocol bytes from its capture (there is no screenshot,
+/// pixel-readback, or backend image-placement query available — see
+/// `biscuit-test-harness/src/wezterm.rs`). The pane assertion is therefore the
+/// **absence** of the `[cat]` alt-text fallback, which a malformed, ignored, or
+/// zero-visible image payload could also satisfy. What this test verifies:
+///
+/// 1. **Level 1 (in-process):** the production tree path emits the iTerm2
+///    image protocol (OSC 1337) at `Rich`, not the alt-text fallback.
+/// 2. **Level 2 (real terminal):** WezTerm consumes those bytes without
+///    surfacing the alt-text fallback in its text capture.
+///
+/// Distinguishing "image decoded and painted" from "bytes silently dropped"
+/// requires pixel inspection the harness cannot perform, so this test must not
+/// be counted as production-ready verification of terminal image *rendering*.
 #[test]
 #[serial(level2_terminal)]
 fn level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal() {
@@ -1093,8 +1108,10 @@ fn level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal() {
     run_with_sentinel(harness, "clear");
     let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
 
-    // User-visible: the real terminal consumed the image bytes — the literal
-    // `[cat]` alt-text fallback must NOT appear in the captured pane.
+    // Anti-regression only: the real terminal must not surface the `[cat]`
+    // alt-text fallback. This does NOT prove the image was painted — the
+    // harness cannot inspect rendered pixels (see the verification-scope note
+    // on this fn). A dropped/ignored payload would also pass this assertion.
     assert!(
         !frame.plain.contains("[cat]"),
         "real terminal showed the alt-text fallback instead of consuming the image. plain:\n{}",

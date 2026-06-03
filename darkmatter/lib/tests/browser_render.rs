@@ -18,10 +18,13 @@ use biscuit_browser_harness::{BrowserHarness, ChromeHarness, require_browser, wr
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter::markdown::output::HtmlOptions;
+use darkmatter::markdown::render_tree::{TerminalCodeRenderer, fold_markdown_to_document};
 use renderable::tree::{
-    BrowserRenderOptions, GraphicsMode, HintNamespace, RenderNode, render_browser_node,
+    BrowserMermaidMode, BrowserRenderOptions, GraphicsMode, HintNamespace, RawHtmlPolicy,
+    RenderNode, RenderStrictness, SourceDescriptor, render_browser_document, render_browser_node,
 };
 use serial_test::serial;
+use std::rc::Rc;
 
 /// The `.code-block` background darkmatter emits for a `github` + dark page must
 /// compute, in a real browser, to the github-*light* panel color (`#ffffff`).
@@ -157,5 +160,78 @@ async fn browser_mermaid_static_svg_computes_in_browser() {
     assert!(
         display != "<no-match>",
         "promoted Mermaid <svg> must exist as DOM in the browser; got {display:?}",
+    );
+}
+
+/// Folds a `mermaid` fence to a render tree and renders it through the browser
+/// **tree graphics-policy path** with the same wiring the production
+/// `render_tree_html` entry point uses for `MermaidMode::Image`: the darkmatter
+/// [`TerminalCodeRenderer`] hook, `GraphicsMode::Rich`, and
+/// [`BrowserMermaidMode::StaticSvg`]. This mirrors
+/// `darkmatter::markdown::render_tree::entrypoints::browser_options_from_html_options`,
+/// which is `pub(crate)`, so the policy mapping is reconstructed here from the
+/// public `render_browser_document` surface.
+fn render_tree_path_mermaid_html() -> String {
+    const MERMAID_SRC: &str = "```mermaid\nflowchart LR\n    A --> B\n```\n";
+
+    let source = SourceDescriptor::Virtual {
+        name: "mermaid".into(),
+    };
+    let (doc, _diags) = fold_markdown_to_document(source, MERMAID_SRC);
+
+    let opts = BrowserRenderOptions {
+        strictness: RenderStrictness::Warn,
+        raw_html: RawHtmlPolicy::Escape,
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        graphics_mode: GraphicsMode::Rich,
+        mermaid_mode: BrowserMermaidMode::StaticSvg,
+        ..Default::default()
+    };
+    render_browser_document(&doc, &opts)
+        .expect("browser tree render")
+        .output
+        .render()
+}
+
+/// Review-4 finding 1: the browser Mermaid static-SVG promotion must be proven
+/// through the **render-tree graphics-policy path** — a
+/// `NodeKind::Code { lang: "mermaid", .. }` node promoted by
+/// `render_browser_document` when `GraphicsMode` and
+/// [`BrowserMermaidMode::StaticSvg`] permit it — not only through the legacy
+/// [`Markdown::as_html`] surface (covered by
+/// [`browser_mermaid_static_svg_computes_in_browser`]). This folds Markdown to a
+/// `Document` and renders it through the tree path, then drives a real headless
+/// Chromium and asserts the promoted `<svg>` parsed into the DOM (a matched
+/// element computes a non-sentinel `display`).
+///
+/// Skips cleanly when the host lacks the Mermaid toolchain: the promotion hook
+/// returns `None`, the renderer degrades to a code block, and no `<svg>` is
+/// produced — there is nothing browser-renderable to assert.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_mermaid_tree_path_static_svg_computes_in_browser() {
+    if !require_browser() {
+        return;
+    }
+
+    let html = render_tree_path_mermaid_html();
+    if !html.contains("<svg") {
+        eprintln!(
+            "skipping: Mermaid toolchain unavailable (no SVG produced; degraded to code block)"
+        );
+        return;
+    }
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&html).await.expect("render html");
+
+    let display = harness
+        .computed_style("svg", "display")
+        .await
+        .expect("computed style query");
+    assert!(
+        display != "<no-match>",
+        "tree-path promoted Mermaid <svg> must exist as DOM in the browser; got {display:?}",
     );
 }
