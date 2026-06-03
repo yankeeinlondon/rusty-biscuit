@@ -3,30 +3,8 @@
 use super::cleanup::apply_cleanup;
 use super::filter::HeadingFilter;
 use super::types::TocLinkingOptions;
+use crate::markdown::compose::indent::indent_text;
 use crate::markdown::toc::MarkdownTocNode;
-
-/// Applies effective indentation to a block of text.
-///
-/// Each line is prefixed with the effective indent. Returns the text
-/// unchanged when the effective indent is empty or the text is empty.
-pub(crate) fn indent_text(text: &str, indent: &str, inferred_indent: Option<&str>) -> String {
-    let effective_indent = if indent.is_empty() {
-        inferred_indent.unwrap_or("")
-    } else {
-        indent
-    };
-
-    if effective_indent.is_empty() || text.is_empty() {
-        text.to_string()
-    } else if text.contains('\n') {
-        text.lines()
-            .map(|line| format!("{}{}", effective_indent, line))
-            .collect::<Vec<_>>()
-            .join("\n")
-    } else {
-        format!("{}{}", effective_indent, text)
-    }
-}
 
 /// Renders a list of markdown links from TOC headings.
 ///

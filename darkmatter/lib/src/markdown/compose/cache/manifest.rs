@@ -74,6 +74,50 @@ pub struct ComposedDocumentManifest {
     pub expires_at: Option<SystemTime>,
 }
 
+/// Manifest for a cached remote URL artifact.
+///
+/// Stores the fetched HTTP(S) response body (as a blob) alongside the
+/// freshness metadata needed for TTL evaluation and conditional revalidation
+/// (`If-None-Match` / `If-Modified-Since`). The `content_hash` lets remote
+/// dependency changes flow into a parent document's `closure_hash`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteUrlManifest {
+    /// Cache format version for forward compatibility.
+    pub cache_version: u16,
+    /// Canonical request URL.
+    pub url: String,
+    /// xxHash of the URL string (also the manifest entry key).
+    pub source_id_hash: u64,
+    /// HTTP status code from the response that produced the cached body.
+    pub status: u16,
+    /// `ETag` header from the cached response, if present.
+    pub etag: Option<String>,
+    /// `Last-Modified` header from the cached response, if present.
+    pub last_modified: Option<String>,
+    /// `Cache-Control` header from the cached response, if present.
+    pub cache_control: Option<String>,
+    /// When the cached body was last fetched or revalidated.
+    pub fetched_at: SystemTime,
+    /// When the cached body is considered stale (`None` = no TTL known).
+    pub expires_at: Option<SystemTime>,
+    /// xxHash of the response body bytes (drives closure-hash invalidation).
+    pub content_hash: u64,
+    /// Blob hash used to locate the stored body (equals `content_hash`).
+    pub body_blob_hash: u64,
+    /// Size of the cached body in bytes.
+    pub size_bytes: u64,
+}
+
+impl RemoteUrlManifest {
+    /// Returns `true` if the cached body is still within its TTL at `now`.
+    ///
+    /// A manifest with no `expires_at` is never considered fresh, forcing
+    /// revalidation under `Strict`/`Fallback` modes.
+    pub fn is_fresh(&self, now: SystemTime) -> bool {
+        self.expires_at.map(|exp| now < exp).unwrap_or(false)
+    }
+}
+
 impl DocumentSnapshotManifest {
     /// Checks if the snapshot is still valid against the current file state.
     ///

@@ -200,13 +200,17 @@ Queries are cached globally for performance:
 // Internal: queries/mod.rs
 static QUERY_CACHE: OnceLock<Mutex<QueryCache>> = OnceLock::new();
 
-// Get a query (cached)
-let query = query_for(language, QueryKind::Locals)?;
+// Get a query (cached). The query text comes from `grammar.language`'s query
+// files but is compiled against `grammar.grammar` — the exact grammar that
+// parsed the tree — so TSX trees use a TSX-compiled query, not a plain
+// TypeScript one.
+let query = query_for(GrammarRef { language, grammar: &grammar, id }, QueryKind::Locals)?;
 ```
 
 The cache is:
 - Thread-safe via `Mutex`
-- Lazily initialized per language/kind
+- Lazily initialized per grammar variant (`GrammarRef::id`) and kind, so the
+  TypeScript and TSX grammars are compiled and cached independently
 - Never invalidated (assumes queries are static)
 
 ## Adding a New Language

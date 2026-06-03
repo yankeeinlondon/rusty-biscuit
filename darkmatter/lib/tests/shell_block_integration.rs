@@ -132,9 +132,11 @@ fn compose_shell_block_with_multiple_commands() {
     let (composed, _) = md.compose_with(options).unwrap();
     let output = composed.content();
 
+    // Command outputs are concatenated verbatim; the line break between them is
+    // each `echo`'s own trailing newline, not an inserted blank line.
     assert!(
-        output.contains("a\n\nb\n"),
-        "Expected blank line between command outputs, got: {output:?}"
+        output.contains("a\nb\n"),
+        "Expected verbatim-concatenated command outputs, got: {output:?}"
     );
 }
 

@@ -140,10 +140,10 @@ fn update_bg(params: &str, bg_active: &mut bool) {
                 // background (`100`-`107`) each activate a background fill.
                 // Colon-form `38:…` (foreground) parses here too and is
                 // intentionally ignored without state.
-                if let Ok(n) = other.parse::<u16>() {
-                    if (40..=47).contains(&n) || (100..=107).contains(&n) {
-                        *bg_active = true;
-                    }
+                if let Ok(n) = other.parse::<u16>()
+                    && ((40..=47).contains(&n) || (100..=107).contains(&n))
+                {
+                    *bg_active = true;
                 }
             }
         }

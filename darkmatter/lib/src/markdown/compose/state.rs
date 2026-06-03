@@ -304,6 +304,46 @@ impl super::expression::EvaluationLookup for EffectiveState {
     }
 }
 
+/// Wraps an [`EffectiveState`] with a [`ResolutionContext`] so the
+/// interpolation stage can evaluate read-side expression functions
+/// (`frontmatter`, `file_exists`, `markdown_title`, `markdown_body_empty`,
+/// `validate_schema`, `absolute`, `relative`).
+///
+/// Bare `EffectiveState` returns `None` from `resolution_context()`, which
+/// disables those functions; this adapter supplies the document-relative base
+/// directory, magic search paths, and the run's remote-fetch runtime so they
+/// resolve filesystem paths and HTTP(S) URL arguments.
+pub(crate) struct ResolvingLookup<'a> {
+    state: &'a EffectiveState,
+    resolution_context: super::expression::ResolutionContext,
+}
+
+impl<'a> ResolvingLookup<'a> {
+    pub(crate) fn new(
+        state: &'a EffectiveState,
+        resolution_context: super::expression::ResolutionContext,
+    ) -> Self {
+        Self {
+            state,
+            resolution_context,
+        }
+    }
+}
+
+impl super::expression::EvaluationLookup for ResolvingLookup<'_> {
+    fn get(&self, path: &str) -> Option<Value> {
+        self.state.get(path)
+    }
+
+    fn get_string(&self, path: &str) -> String {
+        self.state.get_string(path)
+    }
+
+    fn resolution_context(&self) -> Option<super::expression::ResolutionContext> {
+        Some(self.resolution_context.clone())
+    }
+}
+
 /// Builder for creating effective state with specific merge strategies.
 #[derive(Debug, Clone)]
 pub struct EffectiveStateBuilder {
