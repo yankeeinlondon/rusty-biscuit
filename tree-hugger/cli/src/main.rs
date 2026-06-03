@@ -11,12 +11,17 @@ use clap_complete::Shell;
 use owo_colors::{OwoColorize, Style};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
-use tree_hugger::cache::{AnalyzerFingerprint, FileCacheKey, InMemorySymbolCache, SymbolSnapshot};
+use tree_hugger::adapter::{AdapterConfig, ExternalDiagnosticAdapter, OxlintAdapter};
+use tree_hugger::cache::{
+    AnalyzerFingerprint, CacheConfig, FileCacheKey, InMemorySymbolCache, InProcessCache,
+    PersistentCache, SymbolSnapshot,
+};
 use tree_hugger::{
-    CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary,
-    FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
-    ProgrammingLanguage, SchemaVersion, SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic,
-    TreeFile, TreeHuggerError, TypeMetadata, VariantInfo, find_git_root, find_package_root,
+    CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo,
+    FileSummary, FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
+    ProgrammingLanguage, RuleRegistry, RuleSelector, SchemaVersion, SourceContext, SymbolInfo,
+    SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError, TypeMetadata, VariantInfo,
+    find_git_root, find_package_root,
 };
 mod import_format;
 mod prelude;
@@ -62,6 +67,12 @@ struct Cli {
     /// Disable colors and hyperlinks (plain text output)
     #[arg(long, global = true)]
     plain: bool,
+
+    /// Disable persistent and in-process caching.
+    ///
+    /// All files are re-parsed and re-analyzed on every invocation.
+    #[arg(long, global = true)]
+    no_cache: bool,
 
     /// Show symbol-level documentation comments in output
     #[arg(long, global = true)]
@@ -194,6 +205,37 @@ struct LintArgs {
     /// Show only syntax diagnostics (parse errors)
     #[arg(long, conflicts_with = "lint_only")]
     syntax_only: bool,
+
+    /// Treat selected rules or categories as errors.
+    ///
+    /// Accepts rule IDs (e.g. `unwrap-call`) or category selectors
+    /// (e.g. `category:correctness`). Use `all` to deny everything.
+    #[arg(long, value_name = "RULE|CATEGORY", display_order = 40)]
+    deny: Vec<String>,
+
+    /// Treat selected rules or categories as warnings.
+    ///
+    /// Accepts rule IDs or category selectors. Overrides default severity.
+    #[arg(long, value_name = "RULE|CATEGORY", display_order = 41)]
+    warn: Vec<String>,
+
+    /// Treat selected rules or categories as info (suppressed from exit code).
+    ///
+    /// Accepts rule IDs or category selectors.
+    #[arg(long, value_name = "RULE|CATEGORY", display_order = 42)]
+    allow: Vec<String>,
+
+    /// Promote all warnings to errors (does not enable experimental rules).
+    #[arg(long, display_order = 43)]
+    strict: bool,
+
+    /// Enable experimental semantic rules (undefined-symbol, unused-symbol,
+    /// undefined-module).
+    ///
+    /// These rules are gated because they have high false-positive rates
+    /// without project context.
+    #[arg(long, display_order = 44)]
+    experimental_semantics: bool,
 }
 
 /// Arguments for the completions command
@@ -284,6 +326,11 @@ impl Command {
             Self::Lint(args) => Some(CommandKind::Lint {
                 lint_only: args.lint_only,
                 syntax_only: args.syntax_only,
+                deny: parse_selectors(&args.deny),
+                warn: parse_selectors(&args.warn),
+                allow: parse_selectors(&args.allow),
+                strict: args.strict,
+                experimental_semantics: args.experimental_semantics,
             }),
             Self::Classes(args) => Some(CommandKind::Classes {
                 name_filter: args.name.clone(),
@@ -293,6 +340,11 @@ impl Command {
             Self::Completions(_) => None,
         }
     }
+}
+
+/// Parses rule selectors from CLI argument strings.
+fn parse_selectors(args: &[String]) -> Vec<RuleSelector> {
+    args.iter().filter_map(|s| RuleSelector::parse(s)).collect()
 }
 
 /// The kind of command being executed (without the arguments).
@@ -305,12 +357,75 @@ pub(crate) enum CommandKind {
     Lint {
         lint_only: bool,
         syntax_only: bool,
+        deny: Vec<RuleSelector>,
+        warn: Vec<RuleSelector>,
+        allow: Vec<RuleSelector>,
+        strict: bool,
+        experimental_semantics: bool,
     },
     Classes {
         name_filter: Option<String>,
         static_only: bool,
         instance_only: bool,
     },
+}
+
+#[derive(Debug, Clone, Default)]
+struct AnalysisOptions {
+    experimental_semantics: bool,
+    deny: Vec<RuleSelector>,
+    warn: Vec<RuleSelector>,
+    allow: Vec<RuleSelector>,
+    strict: bool,
+    use_external_adapters: bool,
+}
+
+impl AnalysisOptions {
+    fn from_command(command: &CommandKind) -> Self {
+        match command {
+            CommandKind::Lint {
+                deny,
+                warn,
+                allow,
+                strict,
+                experimental_semantics,
+                ..
+            } => Self {
+                experimental_semantics: *experimental_semantics,
+                deny: deny.clone(),
+                warn: warn.clone(),
+                allow: allow.clone(),
+                strict: *strict,
+                use_external_adapters: true,
+            },
+            _ => Self::default(),
+        }
+    }
+
+    fn fingerprint(&self) -> String {
+        format!(
+            "experimental_semantics={};deny={};warn={};allow={};strict={};external_adapters={}",
+            self.experimental_semantics,
+            selectors_fingerprint(&self.deny),
+            selectors_fingerprint(&self.warn),
+            selectors_fingerprint(&self.allow),
+            self.strict,
+            self.use_external_adapters,
+        )
+    }
+}
+
+fn selectors_fingerprint(selectors: &[RuleSelector]) -> String {
+    let mut values = selectors
+        .iter()
+        .map(|selector| match selector {
+            RuleSelector::All => "all".to_string(),
+            RuleSelector::Rule(rule) => format!("rule:{rule}"),
+            RuleSelector::Category(category) => format!("category:{category}"),
+        })
+        .collect::<Vec<_>>();
+    values.sort();
+    values.join(",")
 }
 
 /// Filter mode for symbol output.
@@ -702,6 +817,7 @@ fn main() -> Result<(), TreeHuggerError> {
     let display_root = Some(git_root.clone());
 
     let command_kind = cli.command.kind().expect("completions already handled");
+    let analysis_options = AnalysisOptions::from_command(&command_kind);
     let scan_filters = classify_filters(filters, &command_kind, language);
     let excluded_symbol_globs = cli
         .exclude_symbols
@@ -742,6 +858,20 @@ fn main() -> Result<(), TreeHuggerError> {
     }
 
     let analysis_cache = InMemorySymbolCache::new(files.len().max(1));
+    let in_process_cache = InProcessCache::with_config(CacheConfig {
+        enabled: !cli.no_cache,
+        persistent: false,
+        capacity: files.len().max(1),
+    });
+    let persistent_cache = if cli.no_cache {
+        None
+    } else {
+        let project_id = pkg_root
+            .to_string_lossy()
+            .replace(['/', '\\', ':', ' ', '.'], "_");
+        Some(PersistentCache::default_cache(
+            &project_id, true))
+    };
 
     // Handle classes command separately due to different output structure
     if let CommandKind::Classes {
@@ -755,7 +885,13 @@ fn main() -> Result<(), TreeHuggerError> {
 
         for file in files {
             let tree_file = TreeFile::with_language(&file, language)?;
-            let index = analyze_tree_file(&tree_file, &analysis_cache)?;
+            let index = analyze_tree_file(
+                tree_file,
+                &analysis_options,
+                &analysis_cache,
+                &in_process_cache,
+                &persistent_cache,
+            )?;
             let mut class_summaries = extract_class_summaries(
                 &index,
                 name_filter.as_deref(),
@@ -790,11 +926,7 @@ fn main() -> Result<(), TreeHuggerError> {
             }
 
             if !class_summaries.is_empty() {
-                all_class_summaries.push((
-                    tree_file.file.clone(),
-                    tree_file.language,
-                    class_summaries,
-                ));
+                all_class_summaries.push((index.file.clone(), index.language, class_summaries));
             }
         }
 
@@ -828,16 +960,28 @@ fn main() -> Result<(), TreeHuggerError> {
     let mut symbol_indexes = Vec::new();
     for file in files {
         let tree_file = TreeFile::with_language(&file, language)?;
-        let index = analyze_tree_file(&tree_file, &analysis_cache)?;
+        let index = analyze_tree_file(
+            tree_file,
+            &analysis_options,
+            &analysis_cache,
+            &in_process_cache,
+            &persistent_cache,
+        )?;
         if matches!(output_format, OutputFormat::Json) {
             symbol_indexes.push(index.clone());
         }
-        let summary = summarize_file(
+        let mut summary = summarize_file(
             &index,
             &command_kind,
             &symbol_filter,
             &scan_filters.symbol_globs,
             &excluded_symbol_globs,
+        )?;
+        add_external_lint_diagnostics(
+            &mut summary,
+            &command_kind,
+            &pkg_root,
+            &analysis_options,
         )?;
         summaries.push(summary);
     }
@@ -852,7 +996,7 @@ fn main() -> Result<(), TreeHuggerError> {
                 schema_version: SchemaVersion::V2_0,
                 root_dir,
                 language: package_language,
-                files: summaries,
+                files: summaries.clone(),
                 symbol_indexes,
             };
 
@@ -877,15 +1021,56 @@ fn main() -> Result<(), TreeHuggerError> {
                     render_options,
                 );
             } else {
-                for summary in summaries {
+                for summary in &summaries {
                     render_summary(
-                        &summary,
+                        summary,
                         &command_kind,
                         &output_config,
                         display_root.as_deref(),
                     );
                 }
             }
+        }
+    }
+
+    // Report cache stats
+    let cache_stats = in_process_cache.stats();
+    if cache_stats.parse_hits > 0 || cache_stats.symbol_hits > 0 {
+        if output_config.use_colors {
+            eprintln!(
+                "{} cache: {} parse hits, {} symbol hits, {} entries",
+                "▸".dimmed(),
+                cache_stats.parse_hits,
+                cache_stats.symbol_hits,
+                cache_stats.entries
+            );
+        } else {
+            eprintln!(
+                "cache: {} parse hits, {} symbol hits, {} entries",
+                cache_stats.parse_hits, cache_stats.symbol_hits, cache_stats.entries
+            );
+        }
+    }
+
+    // Exit with non-zero if lint found errors
+    if matches!(command_kind, CommandKind::Lint { .. }) {
+        let error_count: usize = summaries
+            .iter()
+            .map(|summary| {
+                summary
+                    .lint
+                    .iter()
+                    .filter(|d| d.severity == DiagnosticSeverity::Error)
+                    .count()
+                    + summary
+                        .syntax
+                        .iter()
+                        .filter(|d| d.severity == DiagnosticSeverity::Error)
+                        .count()
+            })
+            .sum();
+        if error_count > 0 {
+            std::process::exit(1);
         }
     }
 
@@ -1139,8 +1324,24 @@ fn summarize_file(
         CommandKind::Imports => {
             summary.imports = imports;
         }
-        CommandKind::Lint { .. } => {
-            // Lint diagnostics are already populated above
+        CommandKind::Lint {
+            deny,
+            warn,
+            allow,
+            strict,
+            experimental_semantics,
+            ..
+        } => {
+            let registry = RuleRegistry::new();
+            summary.lint = apply_lint_policy(
+                &summary.lint,
+                &registry,
+                deny,
+                warn,
+                allow,
+                *strict,
+                *experimental_semantics,
+            );
         }
         CommandKind::Classes { .. } => {
             // Classes are handled separately in main()
@@ -1150,10 +1351,81 @@ fn summarize_file(
     Ok(summary)
 }
 
+fn add_external_lint_diagnostics(
+    summary: &mut FileSummary,
+    command: &CommandKind,
+    project_root: &Path,
+    options: &AnalysisOptions,
+) -> Result<(), TreeHuggerError> {
+    if !options.use_external_adapters
+        || !matches!(command, CommandKind::Lint { .. })
+        || !matches!(
+            summary.language,
+            ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript
+        )
+    {
+        return Ok(());
+    }
+
+    let adapter = OxlintAdapter::new();
+    let result = adapter
+        .run(
+            std::slice::from_ref(&summary.file),
+            project_root,
+            summary.language,
+            &AdapterConfig::default(),
+        )
+        .map_err(|source| TreeHuggerError::Io {
+            path: summary.file.clone(),
+            source: std::io::Error::other(source),
+        })?;
+
+    if !result.success {
+        return Ok(());
+    }
+
+    let registry = RuleRegistry::new();
+    let external_lint = result
+        .diagnostics
+        .into_iter()
+        .filter_map(lint_diagnostic_from_external)
+        .collect::<Vec<_>>();
+    let external_lint = apply_lint_policy(
+        &external_lint,
+        &registry,
+        &options.deny,
+        &options.warn,
+        &options.allow,
+        options.strict,
+        options.experimental_semantics,
+    );
+    summary.lint.extend(external_lint);
+    Ok(())
+}
+
+fn lint_diagnostic_from_external(diagnostic: Diagnostic) -> Option<LintDiagnostic> {
+    if diagnostic.metadata.as_ref()?.source != tree_hugger::DiagnosticSource::ExternalTool {
+        return None;
+    }
+
+    Some(LintDiagnostic {
+        message: diagnostic.message,
+        range: diagnostic.range,
+        severity: diagnostic.severity,
+        rule: diagnostic.rule,
+        context: diagnostic.context,
+        metadata: diagnostic.metadata,
+    })
+}
+
 fn analyze_tree_file(
-    tree_file: &TreeFile,
+    mut tree_file: TreeFile,
+    options: &AnalysisOptions,
     cache: &InMemorySymbolCache,
+    in_process: &InProcessCache,
+    persistent: &Option<PersistentCache>,
 ) -> Result<FileSymbolIndex, TreeHuggerError> {
+    tree_file.experimental_semantics = options.experimental_semantics;
     let key = FileCacheKey {
         file_path: tree_file.file.clone(),
         language: tree_file.language,
@@ -1163,16 +1435,59 @@ fn analyze_tree_file(
             tree_hugger_version: env!("CARGO_PKG_VERSION").to_string(),
             grammar_fingerprint: tree_file.language.query_name().to_string(),
             query_fingerprint: "locals+imports+references".to_string(),
-            config_fingerprint: "default".to_string(),
+            config_fingerprint: options.fingerprint(),
         },
     };
+    let stable_key = key.stable_key();
 
-    if let Some(snapshot) = cache.get(&key) {
-        return Ok(snapshot.as_ref().clone().into());
+    // Try in-process cache first
+    if let Some(index) = in_process.get_symbol_index(&stable_key) {
+        return hydrate_diagnostics(&tree_file, index.as_ref().clone());
     }
 
+    // Try persistent cache second
+    if let Some(persistent) = persistent
+        && let Some(snapshot) = persistent.get::<SymbolSnapshot>(&stable_key)
+    {
+        let index: FileSymbolIndex = snapshot.into();
+        in_process.put_symbol_index(stable_key.clone(), symbol_cache_index(&index));
+        return hydrate_diagnostics(&tree_file, index);
+    }
+
+    // Try legacy in-memory cache third
+    if let Some(snapshot) = cache.get(&key) {
+        let index: FileSymbolIndex = snapshot.as_ref().clone().into();
+        let cache_index = symbol_cache_index(&index);
+        in_process.put_symbol_index(stable_key.clone(), cache_index.clone());
+        if let Some(persistent) = persistent {
+            let _ = persistent.put(&stable_key, &SymbolSnapshot::from(cache_index));
+        }
+        return hydrate_diagnostics(&tree_file, index);
+    }
+
+    // Miss: compute and store
     let index = tree_file.symbol_index_v2()?;
-    cache.put(SymbolSnapshot::from(index.clone()));
+    let cache_index = symbol_cache_index(&index);
+    let snapshot = SymbolSnapshot::from(cache_index.clone());
+    cache.put(snapshot.clone());
+    in_process.put_symbol_index(stable_key.clone(), cache_index);
+    if let Some(persistent) = persistent {
+        let _ = persistent.put(&stable_key, &snapshot);
+    }
+    Ok(index)
+}
+
+fn symbol_cache_index(index: &FileSymbolIndex) -> FileSymbolIndex {
+    let mut cache_index = index.clone();
+    cache_index.diagnostics.clear();
+    cache_index
+}
+
+fn hydrate_diagnostics(
+    tree_file: &TreeFile,
+    mut index: FileSymbolIndex,
+) -> Result<FileSymbolIndex, TreeHuggerError> {
+    index.diagnostics = tree_file.try_diagnostics()?;
     Ok(index)
 }
 
@@ -1255,6 +1570,7 @@ fn diagnostics_from_index(index: &FileSymbolIndex) -> (Vec<LintDiagnostic>, Vec<
                 range: diagnostic.range.clone(),
                 severity: diagnostic.severity,
                 context: diagnostic.context.clone(),
+                metadata: diagnostic.metadata.clone(),
             }),
             DiagnosticKind::Lint | DiagnosticKind::Semantic => lint.push(LintDiagnostic {
                 message: diagnostic.message.clone(),
@@ -1262,6 +1578,7 @@ fn diagnostics_from_index(index: &FileSymbolIndex) -> (Vec<LintDiagnostic>, Vec<
                 severity: diagnostic.severity,
                 rule: diagnostic.rule.clone(),
                 context: diagnostic.context.clone(),
+                metadata: diagnostic.metadata.clone(),
             }),
         }
     }
@@ -1326,14 +1643,31 @@ fn render_summary(
         CommandKind::Lint {
             lint_only,
             syntax_only,
-        } => render_diagnostics_filtered(
-            &summary.lint,
-            &summary.syntax,
-            &summary.file,
-            config,
-            *lint_only,
-            *syntax_only,
-        ),
+            deny,
+            warn,
+            allow,
+            strict,
+            experimental_semantics,
+        } => {
+            let registry = RuleRegistry::new();
+            let filtered = apply_lint_policy(
+                &summary.lint,
+                &registry,
+                deny,
+                warn,
+                allow,
+                *strict,
+                *experimental_semantics,
+            );
+            render_diagnostics_filtered(
+                &filtered,
+                &summary.syntax,
+                &summary.file,
+                config,
+                *lint_only,
+                *syntax_only,
+            );
+        }
         CommandKind::Classes { .. } => {
             // Classes are rendered separately
         }
@@ -1985,6 +2319,64 @@ fn render_source_context(context: &SourceContext, line_number: usize, config: &O
             width = line_num_width
         );
     }
+}
+
+/// Applies CLI policy to lint diagnostics.
+///
+/// Filters out experimental semantic rules unless `--experimental-semantics`
+/// is enabled, and adjusts severity based on `--deny`, `--warn`, `--allow`,
+/// and `--strict` selectors.
+fn apply_lint_policy(
+    lint: &[LintDiagnostic],
+    registry: &RuleRegistry,
+    deny: &[RuleSelector],
+    warn: &[RuleSelector],
+    allow: &[RuleSelector],
+    strict: bool,
+    experimental_semantics: bool,
+) -> Vec<LintDiagnostic> {
+    use tree_hugger::rule_registry::apply_policy;
+
+    lint
+        .iter()
+        .cloned()
+        .filter_map(|mut diagnostic| {
+            let rule_id = diagnostic.rule.as_deref()?;
+            let mut rule = registry.get_or_default(rule_id);
+            if !registry.has_rule(rule_id)
+                && let Some(metadata) = &diagnostic.metadata
+            {
+                rule.default_severity = metadata.default_severity;
+                rule.confidence = metadata.confidence;
+                rule.category = metadata.category;
+            }
+
+            if rule.requires_experimental_semantics && !experimental_semantics {
+                return None;
+            }
+
+            let effective = apply_policy(&rule, deny, warn, allow, strict);
+            diagnostic.severity = effective;
+
+            let mut metadata = diagnostic.metadata.clone().unwrap_or_default();
+            metadata.category = rule.category;
+            metadata.confidence = rule.confidence;
+            if metadata.source != tree_hugger::DiagnosticSource::ExternalTool {
+                metadata.source = if rule.requires_experimental_semantics {
+                    tree_hugger::DiagnosticSource::SemanticAnalysis
+                } else {
+                    tree_hugger::DiagnosticSource::TreeSitterQuery
+                };
+            }
+            metadata.default_severity = rule.default_severity;
+            metadata.effective_severity = effective;
+            metadata.is_enabled_by_default = rule.enabled_by_default;
+            metadata.requires_experimental_semantics = rule.requires_experimental_semantics;
+            diagnostic.metadata = Some(metadata);
+
+            Some(diagnostic)
+        })
+        .collect()
 }
 
 /// Renders diagnostics with optional filtering by kind.

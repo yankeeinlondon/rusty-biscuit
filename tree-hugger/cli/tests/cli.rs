@@ -1,5 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use serde_json::Value;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 #[allow(deprecated)] // We need Command struct to set current_dir
@@ -1136,4 +1138,119 @@ fn test_language_override_parses_tsx_as_typescript() {
         .assert()
         .success()
         .stdout(predicate::str::contains("AppRoot"));
+}
+
+#[test]
+fn test_lint_experimental_semantics_enables_semantic_diagnostics() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("probe.rs");
+    std::fs::write(&path, "fn main() {\n    missing_symbol();\n}\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["--no-cache", "--plain", "lint", "probe.rs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("undefined-symbol").not());
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--experimental-semantics",
+            "probe.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("undefined-symbol"));
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--experimental-semantics",
+            "--strict",
+            "probe.rs",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("undefined-symbol"));
+}
+
+#[test]
+fn test_lint_json_includes_syntax_metadata() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("broken.rs");
+    std::fs::write(&path, "fn main( {\n").unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .args(["--no-cache", "--json", "lint", "broken.rs"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let metadata = &json["files"][0]["syntax"][0]["metadata"];
+
+    assert_eq!(metadata["source"], "SyntaxParser");
+    assert_eq!(metadata["category"], "Correctness");
+    assert_eq!(metadata["effective_severity"], "Error");
+}
+
+#[test]
+fn test_lint_invokes_oxlint_for_javascript() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let bin_dir = dir.path().join("bin");
+    std::fs::create_dir(&bin_dir).unwrap();
+    let oxlint = bin_dir.join("oxlint");
+    std::fs::write(
+        &oxlint,
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "oxlint 1.0.0"
+  exit 0
+fi
+cat <<'JSON'
+{"messages":[{"message":"Avoid debugger","severity":2,"rule_id":"no-debugger","line":1,"column":1,"end_line":1,"end_column":9,"file_path":"probe.js","category":"correctness"}],"exit_code":1}
+JSON
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&oxlint).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&oxlint, permissions).unwrap();
+
+    let source = dir.path().join("probe.js");
+    std::fs::write(&source, "debugger;\n").unwrap();
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .env("PATH", path)
+        .args(["--no-cache", "--json", "lint", "probe.js"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let lint = json["files"][0]["lint"].as_array().unwrap();
+    let oxlint_diagnostic = lint
+        .iter()
+        .find(|diagnostic| diagnostic["rule"] == "no-debugger")
+        .unwrap();
+
+    assert_eq!(oxlint_diagnostic["message"], "Avoid debugger");
+    assert_eq!(oxlint_diagnostic["metadata"]["source"], "ExternalTool");
+    assert_eq!(oxlint_diagnostic["severity"], "Error");
 }
