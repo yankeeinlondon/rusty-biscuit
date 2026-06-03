@@ -6,11 +6,11 @@
 //! suite and benchmarks can drive the tree path without touching the public
 //! `Markdown::as_html`, `Markdown::as_terminal`, or `for_terminal` APIs (which
 //! continue to use the legacy event-stream serializers until the cutover gate
-//! in `renderable/features/2026-05-20-darkmatter-tree/spec.md`).
+//! in `renderable/features/_completed/2026-05-20-darkmatter-tree/spec.md`).
 //!
 //! All entry points are `pub(crate)` — they intentionally live below the
 //! public API surface. See
-//! `renderable/features/2026-05-20-darkmatter-tree/entry-point-shape.md`.
+//! `renderable/features/_completed/2026-05-20-darkmatter-tree/entry-point-shape.md`.
 
 use std::rc::Rc;
 
@@ -40,7 +40,7 @@ use crate::markdown::output::{ColorDepth, HtmlOptions, TerminalOptions};
 /// constructs are visible to the every render-tree target. Without this the
 /// experimental entry points would silently lose those features even though
 /// the span-aware helper exists; see review-2 finding 1 in
-/// `renderable/features/2026-05-20-darkmatter-tree/`.
+/// `renderable/features/_completed/2026-05-20-darkmatter-tree/`.
 ///
 /// Frontmatter is **not** re-parsed by this layer — darkmatter strips it
 /// before the parser ever sees content (`Markdown::try_from(...)`), and the
@@ -60,11 +60,12 @@ pub(crate) fn to_render_document(md: &Markdown) -> (Document, Vec<Diagnostic>) {
 /// Renders a [`Markdown`] to HTML via the render-tree pipeline.
 ///
 /// Maps [`HtmlOptions`] to [`BrowserRenderOptions`] narrowly: raw HTML
-/// defaults to [`RawHtmlPolicy::Escape`] (the safe baseline), and the
+/// defaults to [`RawHtmlPolicy::Escape`] (the safe baseline), the
 /// [`TerminalCodeRenderer`] hook is wired so fenced code blocks are
-/// syntax-highlighted (with title / line-number / highlight directives).
-/// Mermaid mode and HR CSS variables remain **documented parity gaps** for
-/// the internal path until adapter hooks land. See `entry-point-shape.md`.
+/// syntax-highlighted (with title / line-number / highlight directives),
+/// and `mermaid_mode` maps to the render-tree Mermaid opt-in. The legacy
+/// `hr_css_variables` `:root` injection has no tree-side equivalent and is
+/// dropped at this boundary.
 ///
 /// ## Errors
 ///
@@ -89,9 +90,9 @@ pub(crate) fn render_tree_html(
 ///
 /// Maps [`TerminalOptions`] to a [`TerminalRenderOptions`] built from a
 /// detected [`Terminal`] (respecting any pinned `max_width` /
-/// `color_depth`). Image and Mermaid handling stay deferred: the internal
-/// terminal renderer does not yet expose an image-renderer hook, so those
-/// modes are accepted parity gaps in the experimental phase.
+/// `color_depth`). `image_mode` maps to the graphics fidelity tier and
+/// `mermaid_mode` to the Mermaid promotion opt-in; see
+/// [`terminal_options_from_terminal_options`] for the full mapping.
 ///
 /// ## Errors
 ///
@@ -154,8 +155,8 @@ pub(crate) fn render_tree_markdown_dialect(
 /// The [`TerminalCodeRenderer`] hook is wired in so fenced code blocks
 /// reproduce darkmatter's syntax-highlighted HTML (title block, line-number
 /// table, highlighted-line markup) rather than the render tree's plain
-/// `<pre><code>` fallback. HR CSS variables remain documented parity gaps;
-/// see `entry-point-shape.md`.
+/// `<pre><code>` fallback. The legacy `hr_css_variables` `:root` injection
+/// has no tree-side equivalent and is dropped at this boundary.
 ///
 /// Maps `mermaid_mode` to the render-tree [`BrowserMermaidMode`] so the
 /// tree browser path honors the same Mermaid opt-in contract as the legacy
@@ -191,8 +192,9 @@ fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions
 /// falls back to detection. `opts.color_depth`, when set, overrides the
 /// terminal's resolved color depth so callers can pin the tree renderer to
 /// `ColorDepth::None` (matching the legacy renderer's no-color contract)
-/// without depending on host capability detection. Image and Mermaid modes
-/// stay deferred — see `entry-point-shape.md` for the documented gaps.
+/// without depending on host capability detection. `image_mode` and
+/// `mermaid_mode` map onto the context's graphics tier and Mermaid promotion
+/// opt-in (see the inline mapping below).
 ///
 /// The [`TerminalCodeRenderer`] hook is always wired in so fenced code blocks
 /// reproduce darkmatter's syntax-highlighted code-block output (header row
