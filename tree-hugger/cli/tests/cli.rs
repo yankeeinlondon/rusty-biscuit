@@ -962,22 +962,70 @@ fn test_symbols_prelude_comments_show_resolved_doc_comments() {
 
 #[test]
 fn test_functions_prelude_from_package_area_root_discovers_child_package_prelude() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    let package_area_root = repo_root.join("biscuit-terminal");
+    // A package-area root (no manifest of its own) holding `lib/` and `cli/`
+    // child packages, mirroring layouts like `biscuit-terminal/`. Built in a
+    // temp dir (outside the repo) so `--prelude` only walks these few files —
+    // running against a real area would parse hundreds of source files just to
+    // surface the handful of prelude-named functions.
+    let area = tempfile::TempDir::new().unwrap();
+    let root = area.path();
+
+    // `lib` child: a function defined in a deep module and re-exported through
+    // the child package's own prelude. Discovery must descend into `lib/` to
+    // find this prelude and resolve `parse_width_spec`.
+    std::fs::create_dir_all(root.join("lib/src/components")).unwrap();
+    std::fs::write(
+        root.join("lib/Cargo.toml"),
+        "[package]\nname = \"prelude-area-lib\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("lib/src/lib.rs"),
+        "pub mod components;\npub mod prelude;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("lib/src/prelude.rs"),
+        "pub use crate::components::width::parse_width_spec;\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("lib/src/components/mod.rs"), "pub mod width;\n").unwrap();
+    std::fs::write(
+        root.join("lib/src/components/width.rs"),
+        // `parse_width_spec` is prelude-exported; `not_in_prelude` is not.
+        "pub fn parse_width_spec(spec: &str) -> usize { spec.len() }\npub fn not_in_prelude() {}\n",
+    )
+    .unwrap();
+
+    // `cli` child: scanned as a second package but exports no prelude, so it
+    // contributes no symbols. This keeps the multi-package code path live while
+    // proving single-package output is not split with per-package headings.
+    std::fs::create_dir_all(root.join("cli/src")).unwrap();
+    std::fs::write(
+        root.join("cli/Cargo.toml"),
+        "[package]\nname = \"prelude-area-cli\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("cli/src/main.rs"),
+        "pub fn run_cli() {}\nfn main() {}\n",
+    )
+    .unwrap();
 
     let mut cmd = hug_cmd();
-    cmd.current_dir(&package_area_root)
+    cmd.current_dir(root)
         .args(["functions", "--prelude", "--plain"])
+        // A single child package supplies the prelude symbols, so output must
+        // not be split into per-package sections.
         .assert()
         .success()
-        .stdout(predicate::str::contains("\n\nbiscuit-terminal/cli\n\n").not())
-        .stdout(predicate::str::contains("\n\nbiscuit-terminal/lib\n\n").not())
+        .stdout(predicate::str::contains("\n\nlib\n\n").not())
+        .stdout(predicate::str::contains("\n\ncli\n\n").not())
+        // Discovered through `lib/`'s prelude.
         .stdout(predicate::str::contains("parse_width_spec"))
+        // Not prelude-exported, so excluded.
+        .stdout(predicate::str::contains("not_in_prelude").not())
+        .stdout(predicate::str::contains("run_cli").not())
         .stdout(predicate::str::contains("(no symbols)").not());
 }
 
