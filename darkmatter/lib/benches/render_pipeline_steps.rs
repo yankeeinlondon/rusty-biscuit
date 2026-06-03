@@ -1,0 +1,140 @@
+//! Step-broken render-pipeline benchmarks for the tree path (perf-gate Part 2).
+//!
+//! Each target's group isolates `parse` -> `fold` -> `render` and a `full`
+//! end-to-end run, so a regression points at the stage that moved. The
+//! bespoke-vs-tree comparison lives in `migration_parity.rs`; this file is
+//! tree-only and baseline-tracked. Run:
+//!
+//! ```text
+//! cargo bench -p darkmatter --bench render_pipeline_steps
+//! ```
+
+use std::hint::black_box;
+use std::rc::Rc;
+
+use biscuit_terminal::render_tree::{
+    TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
+};
+use biscuit_terminal::terminal::Terminal;
+use criterion::{Criterion, criterion_group, criterion_main};
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::render_tree::{
+    TerminalCodeRenderer, fold_markdown_spanned_with_frontmatter,
+};
+use renderable::tree::{
+    BrowserMermaidMode, BrowserRenderOptions, RawHtmlPolicy, RenderStrictness, SourceDescriptor,
+    render_browser_document,
+};
+
+fn corpus() -> String {
+    let mut out = String::from("# Pipeline corpus\n\n");
+    for s in 0..8 {
+        out.push_str(&format!("## Section {s}\n\nParagraph with ==highlight {s}== and \u{2304}dim {s}\u{2304} and *emphasis*.\n\n"));
+        out.push_str(&format!("- item {s}a\n- item {s}b\n\n"));
+        if s % 2 == 0 {
+            out.push_str("```rust\nfn x() -> usize { 1 }\n```\n\n");
+        } else {
+            out.push_str("| A | B |\n| --- | --- |\n| 1 | 2 |\n\n");
+        }
+    }
+    out
+}
+
+fn source() -> SourceDescriptor {
+    SourceDescriptor::Virtual { name: "pipeline_corpus".into() }
+}
+
+fn tree_terminal_options() -> TerminalRenderOptions {
+    let term = Terminal::new_optimistic(120);
+    TerminalRenderOptions {
+        context: TerminalRenderContext::from_terminal(&term),
+        strictness: RenderStrictness::Warn,
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+    }
+}
+
+fn browser_options() -> BrowserRenderOptions {
+    BrowserRenderOptions {
+        strictness: RenderStrictness::Warn,
+        raw_html: RawHtmlPolicy::Escape,
+        page: None,
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        mermaid_mode: BrowserMermaidMode::Code,
+        ..Default::default()
+    }
+}
+
+fn bench_render_pipeline_terminal(c: &mut Criterion) {
+    let input = corpus();
+    let term_opts = tree_terminal_options();
+    let mut group = c.benchmark_group("render_pipeline_terminal");
+    group.sample_size(20);
+
+    group.bench_function("parse", |b| {
+        b.iter(|| {
+            let md: Markdown = black_box(input.as_str()).into();
+            black_box(md)
+        })
+    });
+    group.bench_function("fold", |b| {
+        let md: Markdown = input.as_str().into();
+        b.iter(|| {
+            let (doc, diags) = fold_markdown_spanned_with_frontmatter(source(), black_box(&md));
+            black_box((doc, diags))
+        })
+    });
+    group.bench_function("render", |b| {
+        let md: Markdown = input.as_str().into();
+        let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md);
+        b.iter(|| render_terminal_document(black_box(&doc), &term_opts).expect("terminal render"))
+    });
+    group.bench_function("full", |b| {
+        b.iter(|| {
+            let md: Markdown = black_box(input.as_str()).into();
+            let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md);
+            render_terminal_document(&doc, &term_opts).expect("terminal render")
+        })
+    });
+    group.finish();
+}
+
+fn bench_render_pipeline_browser(c: &mut Criterion) {
+    let input = corpus();
+    let browser_opts = browser_options();
+    let mut group = c.benchmark_group("render_pipeline_browser");
+    group.sample_size(20);
+
+    group.bench_function("parse", |b| {
+        b.iter(|| {
+            let md: Markdown = black_box(input.as_str()).into();
+            black_box(md)
+        })
+    });
+    group.bench_function("fold", |b| {
+        let md: Markdown = input.as_str().into();
+        b.iter(|| {
+            let (doc, diags) = fold_markdown_spanned_with_frontmatter(source(), black_box(&md));
+            black_box((doc, diags))
+        })
+    });
+    group.bench_function("render", |b| {
+        let md: Markdown = input.as_str().into();
+        let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md);
+        b.iter(|| render_browser_document(black_box(&doc), &browser_opts).expect("browser render"))
+    });
+    group.bench_function("full", |b| {
+        b.iter(|| {
+            let md: Markdown = black_box(input.as_str()).into();
+            let (doc, _d) = fold_markdown_spanned_with_frontmatter(source(), &md);
+            render_browser_document(&doc, &browser_opts).expect("browser render")
+        })
+    });
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_render_pipeline_terminal,
+    bench_render_pipeline_browser,
+);
+criterion_main!(benches);

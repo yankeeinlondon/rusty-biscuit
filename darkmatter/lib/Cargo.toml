@@ -135,3 +135,7 @@ harness = false
 [[bench]]
 name = "prose_highlighter"
 harness = false
+
+[[bench]]
+name = "render_pipeline_steps"
+harness = false
