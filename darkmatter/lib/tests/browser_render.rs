@@ -387,6 +387,68 @@ async fn browser_sanitized_mermaid_svg_injects_no_active_markup() {
     }
 }
 
+/// A hostile SVG that smuggles external references through CSS surfaces rather
+/// than active markup: an `@import`, a `style="...url(...)"`, and a
+/// `filter="url(...)"`, alongside a local `url(#…)` fragment that must survive.
+/// This stands in for the renderer output that [`sanitize_svg`] must scrub of
+/// off-document fetches before raw-HTML emission.
+const HOSTILE_CSS_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
+  <style>@import url(https://attacker.example/x.css); rect { fill: url(https://attacker.example/p.svg#x) }</style>
+  <defs><linearGradient id="grad"><stop offset="0" stop-color="#00ff00"/></linearGradient></defs>
+  <rect x="0" y="0" width="100" height="50" style="fill:url(https://attacker.example/p.svg#x)" filter="url(https://attacker.example/filter.svg#f)"/>
+  <rect x="10" y="10" width="20" height="20" fill="url(#grad)"/>
+</svg>"##;
+
+/// Review-6 finding: the Mermaid static-SVG sanitizer must also scrub CSS
+/// external-reference surfaces — `@import`, `style="...url(...)"`, and
+/// `filter="url(...)"` — not just active markup. This proves, through a real
+/// headless Chromium, that no `attacker.example` reference reaches the applied
+/// DOM while the diagram geometry and a local `url(#grad)` fill survive.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_sanitized_mermaid_svg_strips_external_css_references() {
+    if !require_browser() {
+        return;
+    }
+
+    let safe = sanitize_svg(HOSTILE_CSS_SVG).expect("hostile SVG is well-formed");
+    assert!(
+        !safe.contains("attacker.example") && !safe.contains("@import"),
+        "sanitizer left an external CSS reference in the string:\n{safe}",
+    );
+    // The benign local-fragment fill must remain for diagram fidelity.
+    assert!(
+        safe.contains("url(#grad)"),
+        "sanitizer dropped the local fragment fill:\n{safe}",
+    );
+
+    let doc = wrap_fragment(&safe, "#ffffff");
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    // The diagram body must still render as DOM.
+    let svg_display = harness
+        .computed_style("svg", "display")
+        .await
+        .expect("computed style query");
+    assert!(
+        svg_display != "<no-match>",
+        "sanitized <svg> must survive as DOM; got {svg_display:?}",
+    );
+
+    // The hostile `filter="url(https://attacker.example/...)"` must not apply:
+    // with the attribute stripped, the rect's computed filter is `none`.
+    let rect_filter = harness
+        .computed_style("svg rect", "filter")
+        .await
+        .expect("computed style query");
+    assert!(
+        !rect_filter.contains("attacker"),
+        "external filter reference reached the DOM; got {rect_filter:?}",
+    );
+}
+
 /// Review-5 finding 2 (fidelity): sanitizing a *real* promoted Mermaid diagram
 /// must keep the diagram — the allowlist must not strip the shape vocabulary the
 /// renderer emits. Folds a `mermaid` fence through the render-tree path (whose

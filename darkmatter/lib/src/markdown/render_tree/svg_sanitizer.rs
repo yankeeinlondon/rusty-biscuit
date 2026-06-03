@@ -5,7 +5,9 @@
 //! through [`define_as_raw_html`], which never escapes its input. That makes the
 //! SVG an injection surface: a future renderer path — or an unescaped graph
 //! label — could carry `<script>`, an `on*` event handler, an external
-//! `xlink:href`, or a `<foreignObject>` wrapping arbitrary HTML. [`sanitize_svg`]
+//! `xlink:href`, a `<foreignObject>` wrapping arbitrary HTML, or CSS
+//! (`<style>`, `style="…"`, `filter="…"`) that fetches an external resource.
+//! [`sanitize_svg`]
 //! is the safety net at that boundary: it re-parses the SVG and re-emits only an
 //! allowlisted element/attribute subset, so the emitted markup stays safe
 //! independently of the upstream renderer or its string overrides.
@@ -59,8 +61,11 @@ const ALLOWED_ELEMENTS: &[&str] = &[
 /// Dropped: every non-allowlisted element (with its subtree), every `on*`
 /// event-handler attribute, and any `href` / `xlink:href` that is not a local
 /// `#…` fragment (which blocks `javascript:`, `data:`, and external/SSRF
-/// references — a sanitized static SVG carries no live links). XML
-/// declarations, doctypes, processing instructions, and comments are dropped.
+/// references — a sanitized static SVG carries no live links). Any attribute
+/// value or `<style>` block whose CSS carries `@import` or a non-local
+/// `url(...)` is dropped too, blocking external stylesheet/filter/image
+/// fetches. XML declarations, doctypes, processing instructions, and comments
+/// are dropped.
 ///
 /// ## Returns
 ///
@@ -72,10 +77,11 @@ const ALLOWED_ELEMENTS: &[&str] = &[
 ///
 /// Because sanitization is parse-based, a payload that tries to break framing
 /// (`</text><script>…`, `]]><script>…`) is re-tokenized: the injected
-/// `<script>` becomes its own element and is dropped. `<style>` CSS text is
-/// preserved for diagram fidelity; the residual surface is CSS `url()` /
-/// `@import` fetches, which cannot execute script and which the controlled
-/// renderer does not emit.
+/// `<script>` becomes its own element and is dropped. `<style>` CSS is kept
+/// for diagram fidelity but validated as a unit: a block carrying `@import` or
+/// a non-local `url(...)` is dropped wholesale. The same CSS check runs on
+/// every attribute value, so `style` / `filter` / `fill` cannot smuggle an
+/// external `url(...)` either — only local `url(#fragment)` references survive.
 pub fn sanitize_svg(svg: &str) -> Option<String> {
     let mut reader = Reader::from_str(svg);
     let mut writer = Writer::new(Vec::new());
@@ -85,7 +91,12 @@ pub fn sanitize_svg(svg: &str) -> Option<String> {
     loop {
         match reader.read_event_into(&mut buf).ok()? {
             Event::Start(e) => {
-                if is_allowed_element(e.name().as_ref()) {
+                if local_name_lower(e.name().as_ref()) == b"style" {
+                    // `<style>` is allowlisted for diagram fidelity, but its CSS
+                    // is an external-reference surface (`@import`, `url(...)`).
+                    // Validate the whole block and drop it wholesale when unsafe.
+                    sanitize_style_element(&mut reader, &mut writer, &e)?;
+                } else if is_allowed_element(e.name().as_ref()) {
                     writer.write_event(Event::Start(sanitize_start(&e))).ok()?;
                 } else {
                     // Drop the disallowed element and its entire subtree. This
@@ -154,7 +165,8 @@ fn is_allowed_element(name: &[u8]) -> bool {
 }
 
 /// Returns `true` when `attr` is safe to re-emit: not an `on*` event handler,
-/// and — for `href` / `xlink:href` — only a local `#…` fragment reference.
+/// for `href` / `xlink:href` only a local `#…` fragment, and — for any other
+/// attribute — no CSS that fetches an external resource.
 fn attribute_is_safe(attr: &Attribute) -> bool {
     let local = local_name_lower(attr.key.as_ref());
     if local.starts_with(b"on") {
@@ -163,7 +175,89 @@ fn attribute_is_safe(attr: &Attribute) -> bool {
     if local == b"href" {
         return href_is_local_fragment(&attr.value);
     }
+    // `style`, `filter`, `fill`, `clip-path`, `mask`, … can carry a CSS
+    // `url(...)` or `@import` that fetches off-document. Allow only local
+    // `#…` fragment targets; reject the attribute otherwise.
+    match attr.unescape_value() {
+        Ok(value) => css_is_safe(&value),
+        Err(_) => false,
+    }
+}
+
+/// Returns `true` when CSS text loads no external resource: it has no
+/// `@import`, and every `url(...)` target is a local `#…` fragment.
+///
+/// External `url(https://…)`, `url(//…)`, `url(data:…)`, and `@import` are the
+/// SVG/CSS surfaces that fetch off-document; a presentation-only sanitized SVG
+/// must carry none. Local `url(#gradient)` references stay — they point inside
+/// the same document, so gradient/clip/marker fills survive.
+fn css_is_safe(css: &str) -> bool {
+    let lower = css.to_ascii_lowercase();
+    if lower.contains("@import") {
+        return false;
+    }
+    for (idx, _) in lower.match_indices("url(") {
+        let rest = lower[idx + "url(".len()..].trim_start();
+        let rest = rest
+            .strip_prefix('"')
+            .or_else(|| rest.strip_prefix('\''))
+            .unwrap_or(rest)
+            .trim_start();
+        if !rest.starts_with('#') {
+            return false;
+        }
+    }
     true
+}
+
+/// Re-emits a `<style>` element only when its CSS references no external
+/// resource ([`css_is_safe`]); otherwise drops the whole block.
+///
+/// The inner text is written with its original escaping preserved — CSS may
+/// contain `>` child combinators that must not be entity-mangled — so the
+/// captured `Text`/`CData` events are re-emitted verbatim rather than
+/// round-tripped through unescape/escape.
+///
+/// ## Returns
+///
+/// `None` on malformed input (an unterminated `<style>`), so the caller fails
+/// closed exactly as for any other parse error.
+fn sanitize_style_element(
+    reader: &mut Reader<&[u8]>,
+    writer: &mut Writer<Vec<u8>>,
+    start: &BytesStart,
+) -> Option<()> {
+    let mut css = String::new();
+    let mut inner: Vec<Event<'static>> = Vec::new();
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf).ok()? {
+            Event::Text(t) => {
+                // Scan the raw (still-escaped) bytes: entity-encoding a `url(`
+                // target only makes the `#…` locality check fail, which fails
+                // closed. The original event is re-emitted verbatim below.
+                css.push_str(&String::from_utf8_lossy(&t));
+                inner.push(Event::Text(t).into_owned());
+            }
+            Event::CData(c) => {
+                css.push_str(&String::from_utf8_lossy(&c));
+                inner.push(Event::CData(c).into_owned());
+            }
+            Event::End(e) if local_name_lower(e.name().as_ref()) == b"style" => break,
+            // A `<style>` should not wrap child elements; drop anything else.
+            Event::Eof => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+    if css_is_safe(&css) {
+        writer.write_event(Event::Start(sanitize_start(start))).ok()?;
+        for ev in inner {
+            writer.write_event(ev).ok()?;
+        }
+        writer.write_event(Event::End(start.to_end())).ok()?;
+    }
+    Some(())
 }
 
 /// Returns `true` only when `value` (ignoring leading ASCII whitespace) begins
@@ -249,6 +343,59 @@ mod tests {
         let out = sanitize_svg(svg).expect("well-formed");
         assert!(!out.to_ascii_lowercase().contains("script"), "cased script kept: {out}");
         assert!(!out.contains("alert(1)"), "script body kept: {out}");
+    }
+
+    #[test]
+    fn drops_style_block_with_import() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>@import url(https://attacker.example/x.css);</style><rect/></svg>"#;
+        let out = sanitize_svg(svg).expect("well-formed");
+        assert!(!out.contains("@import"), "@import kept: {out}");
+        assert!(!out.contains("attacker.example"), "external host kept: {out}");
+        assert!(!out.contains("<style"), "unsafe style block kept: {out}");
+        assert!(out.contains("<rect"), "safe sibling dropped: {out}");
+    }
+
+    #[test]
+    fn drops_style_block_with_external_url() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>rect { fill: url(https://attacker.example/p.svg#x) }</style><rect/></svg>"#;
+        let out = sanitize_svg(svg).expect("well-formed");
+        assert!(!out.contains("attacker.example"), "external url kept: {out}");
+        assert!(!out.contains("<style"), "unsafe style block kept: {out}");
+    }
+
+    #[test]
+    fn keeps_style_block_with_local_fragment_url() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>rect { fill: url(#grad) }</style><rect/></svg>"#;
+        let out = sanitize_svg(svg).expect("well-formed");
+        assert!(out.contains("<style"), "benign style block dropped: {out}");
+        assert!(out.contains("url(#grad)"), "local fragment url dropped: {out}");
+    }
+
+    #[test]
+    fn drops_style_attribute_with_external_url() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:url(https://attacker.example/p.svg#x)" width="1"/></svg>"#;
+        let out = sanitize_svg(svg).expect("well-formed");
+        assert!(!out.contains("attacker.example"), "external url in style attr kept: {out}");
+        assert!(!out.contains("style="), "unsafe style attr kept: {out}");
+        // The element itself and its safe attribute survive.
+        assert!(out.contains("<rect"), "rect element dropped: {out}");
+        assert!(out.contains(r#"width="1""#), "safe attr dropped: {out}");
+    }
+
+    #[test]
+    fn drops_filter_attribute_with_external_url() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect filter="url(https://attacker.example/filter.svg#f)" width="1"/></svg>"#;
+        let out = sanitize_svg(svg).expect("well-formed");
+        assert!(!out.contains("attacker.example"), "external filter url kept: {out}");
+        assert!(!out.contains("filter="), "unsafe filter attr kept: {out}");
+        assert!(out.contains("<rect"), "rect element dropped: {out}");
+    }
+
+    #[test]
+    fn keeps_filter_attribute_with_local_fragment() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg"><rect filter="url(#f)" width="1"/></svg>"##;
+        let out = sanitize_svg(svg).expect("well-formed");
+        assert!(out.contains(r##"filter="url(#f)""##), "local fragment filter dropped: {out}");
     }
 
     #[test]
