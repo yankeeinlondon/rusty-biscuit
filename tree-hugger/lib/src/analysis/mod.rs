@@ -98,7 +98,7 @@ fn parse_pass(tree_file: &TreeFile) -> Result<FileSymbolIndex, TreeHuggerError> 
         })
         .collect::<Vec<_>>();
 
-    let diagnostics: Vec<Diagnostic> = tree_file.diagnostics();
+    let diagnostics: Vec<Diagnostic> = tree_file.try_diagnostics()?;
 
     Ok(FileSymbolIndex {
         schema_version: crate::shared::SchemaVersion::V2_0,

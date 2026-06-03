@@ -914,7 +914,7 @@ fn test_prelude_flag_with_real_prelude_file() {
         .to_path_buf();
     let bt_lib = repo_root.join("biscuit-terminal/lib");
 
-    let mut cmd = Command::cargo_bin("hug").unwrap();
+    let mut cmd = hug_cmd();
     cmd.current_dir(&bt_lib)
         .args(["symbols", "src/terminal.rs", "--prelude", "--plain"])
         .assert()
@@ -927,7 +927,7 @@ fn test_prelude_flag_with_real_prelude_file() {
 fn test_symbols_prelude_reports_direct_prelude_exports() {
     let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prelude_pkg");
 
-    let mut cmd = Command::cargo_bin("hug").unwrap();
+    let mut cmd = hug_cmd();
     cmd.current_dir(&fixture_pkg)
         .args(["symbols", "--prelude", "--plain"])
         .assert()
@@ -947,7 +947,7 @@ fn test_symbols_prelude_reports_direct_prelude_exports() {
 fn test_symbols_prelude_comments_show_resolved_doc_comments() {
     let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prelude_pkg");
 
-    let mut cmd = Command::cargo_bin("hug").unwrap();
+    let mut cmd = hug_cmd();
     cmd.current_dir(&fixture_pkg)
         .args(["symbols", "--prelude", "--plain", "--comments"])
         .assert()
@@ -970,7 +970,7 @@ fn test_functions_prelude_from_package_area_root_discovers_child_package_prelude
         .to_path_buf();
     let package_area_root = repo_root.join("biscuit-terminal");
 
-    let mut cmd = Command::cargo_bin("hug").unwrap();
+    let mut cmd = hug_cmd();
     cmd.current_dir(&package_area_root)
         .args(["functions", "--prelude", "--plain"])
         .assert()
@@ -1000,4 +1000,92 @@ fn test_exported_flag_classes() {
         .success()
         .stdout(predicate::str::contains("--exported"))
         .stdout(predicate::str::contains("--prelude"));
+}
+
+#[test]
+fn test_language_override_parses_extensionless_file() {
+    // A forced language should parse an explicitly named file even when its
+    // extension does not map to that language (here, no extension at all).
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("myscript");
+    std::fs::write(&path, "pub fn collect_widgets() {}\n").unwrap();
+
+    hug_cmd()
+        .args([
+            "symbols",
+            path.to_str().unwrap(),
+            "--language",
+            "rust",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("collect_widgets"));
+}
+
+#[test]
+fn test_language_override_parses_bare_extensionless_file_from_cwd() {
+    // Regression: a bare, slashless, extensionless token run from the file's own
+    // directory must still resolve as an explicit file under `--language`.
+    // Previously it was misclassified as a symbol glob and returned NoSourceFiles.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("myscript"), "pub fn collect_widgets() {}\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["symbols", "myscript", "--language", "rust", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("collect_widgets"));
+}
+
+#[test]
+fn test_language_override_explicit_file_respects_exclude_files() {
+    // Regression: `--exclude-files` must apply to explicitly resolved files, not
+    // only to directory/glob scans.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("alpha"), "pub fn alpha_fn() {}\n").unwrap();
+    std::fs::write(dir.path().join("beta"), "pub fn beta_fn() {}\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "symbols",
+            "alpha",
+            "beta",
+            "--language",
+            "rust",
+            "--exclude-files",
+            "beta",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("alpha_fn"))
+        .stdout(predicate::str::contains("beta_fn").not());
+}
+
+#[test]
+fn test_language_override_parses_tsx_as_typescript() {
+    // Forcing TypeScript on a .tsx file must use the TSX grammar so JSX parses
+    // and symbols are still extracted through the CLI path.
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("component.tsx");
+    std::fs::write(
+        &path,
+        "export function AppRoot() {\n  return <div>hi</div>;\n}\n",
+    )
+    .unwrap();
+
+    hug_cmd()
+        .args([
+            "symbols",
+            path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("AppRoot"));
 }

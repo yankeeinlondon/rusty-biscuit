@@ -1,6 +1,6 @@
 ---
 name: tree-hugger
-description: Expert knowledge for multi-language symbol extraction using Tree-sitter. Use when working with tree-hugger-lib or tree-hugger-cli (hug), extracting symbols/imports/exports, implementing lint diagnostics, adding new language support, or writing tree-sitter queries.
+description: Expert knowledge for multi-language symbol extraction using Tree-sitter. Use when working with tree-hugger-lib or tree-hugger-cli (hug), extracting symbols/imports/exports, implementing lint diagnostics, adding new language support, writing tree-sitter queries, or troubleshooting the underlying tree-sitter runtime (grammar versions, ABI mismatches, query debugging).
 ---
 
 ## Purpose
@@ -53,6 +53,7 @@ Function, Method, Type, Class, Interface, Enum, Trait, Module, Namespace, Variab
 
 ## Key Architecture
 
+- **Runtime**: Built on the tree-sitter Rust runtime (`tree-sitter = "0.26.3"`) plus one `tree-sitter-<lang>` grammar crate per language, all at independent versions — see [Tree-sitter Internals](./tree-sitter-internals.md)
 - **Query vendoring**: Uses nvim-treesitter `locals.scm` in `lib/queries/vendor/<lang>/`
 - **Custom queries**: `lint.scm`, `references.scm`, `comments.scm` per language
 - **Capture naming**: `@local.definition.<kind>` for symbols, `@diagnostic.<rule-id>` for lint
@@ -64,8 +65,9 @@ Function, Method, Type, Class, Interface, Enum, Trait, Module, Namespace, Variab
 ## Detailed Documentation
 
 - [API Reference](./api-reference.md) - Complete type definitions and methods
-- [Query System](./query-system.md) - How tree-sitter queries work and how to extend them
+- [Query System](./query-system.md) - Tree Hugger's `.scm` queries, capture conventions, and how to extend them
 - [Diagnostics](./diagnostics.md) - Lint rules, ignore directives, dead code detection
+- [Tree-sitter Internals](./tree-sitter-internals.md) - The underlying runtime: Parser/Tree/Node API, query mechanics, AST debugging, and grammar version/ABI compatibility
 
 ## Testing Requirements
 

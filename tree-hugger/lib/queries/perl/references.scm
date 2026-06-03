@@ -10,12 +10,10 @@
 ; Hash variable references
 (hash_variable) @reference
 
-; Bareword identifiers (function names, etc.)
-(bareword) @reference
+; Bareword function names in calls
+(call_expression_with_bareword
+  function_name: (identifier) @reference)
 
 ; Package-qualified identifiers
-(package_variable) @reference
-
-; Subroutine calls
-(function_call
-  (bareword) @reference)
+(package_name
+  (identifier) @reference)

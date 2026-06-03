@@ -516,6 +516,15 @@ pub struct ComposeOptions {
     /// cache.
     pub(crate) remote_read_config: RemoteReadConfig,
 
+    // ── Schema validation ──────────────────────────────────────────
+    /// When `true`, the always-on schema validation stage is skipped
+    /// entirely. Used by internal non-terminal passes (e.g. shell-command
+    /// discovery) that strip `FrontmatterShellExpansion` to avoid executing
+    /// commands but where validating still-literal `$(...)` values would
+    /// wrongly report them as final schema violations. The terminal compose
+    /// pass validates the resolved frontmatter. Default: `false`.
+    pub(crate) skip_schema_validation: bool,
+
     // ── Link normalization ────────────────────────────────────────
     /// Environment variables that may be used as path-prefix abstractions
     /// during the Finalization stage's Link Normalization operation.
@@ -651,6 +660,7 @@ impl ComposeOptions {
             env_path_whitelist: Vec::new(),
             baseline_schema: None,
             remote_read_config: RemoteReadConfig::default(),
+            skip_schema_validation: false,
         }
     }
 

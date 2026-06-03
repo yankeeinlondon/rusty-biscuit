@@ -163,6 +163,33 @@ impl ProgrammingLanguage {
         }
     }
 
+    /// Returns the tree-sitter grammar and a stable grammar identifier for this
+    /// language given a path, preferring an extension-specific grammar when the
+    /// path's extension maps to this same language.
+    ///
+    /// This keeps grammar selection correct when a language is forced: forcing
+    /// `TypeScript` on a `.tsx` file still selects the TSX grammar (id `"tsx"`)
+    /// rather than the plain TypeScript grammar. When the extension maps to a
+    /// different language (or is absent), the forced language's default grammar
+    /// is used and the identifier is the language's query name.
+    ///
+    /// ## Returns
+    /// Returns the grammar to parse and query with, and a cache identifier that
+    /// is unique per grammar variant across all languages.
+    pub fn grammar_for_path(&self, path: &Path) -> (Language, &'static str) {
+        let extension = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase());
+
+        // TSX is the only grammar that diverges from its language's default.
+        if *self == Self::TypeScript && extension.as_deref() == Some("tsx") {
+            return (tree_sitter_typescript::LANGUAGE_TSX.into(), "tsx");
+        }
+
+        (self.tree_sitter_language(), self.query_name())
+    }
+
     /// Detects the language and tree-sitter grammar for a file.
     pub fn detect(path: &Path) -> Option<(Self, Language)> {
         let extension = path.extension()?.to_str()?;
