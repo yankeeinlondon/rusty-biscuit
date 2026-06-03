@@ -8,10 +8,9 @@ use crate::shared::{
 
 /// Metadata for a single lint or semantic rule.
 ///
-/// Rule metadata is stored in structured files next to lint queries and
-/// validated at load time. It includes enough information for consumers to
-/// understand rule identity, category, confidence, source, and effective
-/// severity.
+/// Rule metadata is registered by the built-in registry and validated at
+/// startup. It includes enough information for consumers to understand rule
+/// identity, category, confidence, source, and effective severity.
 #[derive(Debug, Clone)]
 pub struct RuleMetadata {
     /// Unique rule identifier (e.g., "unwrap-call", "undefined-symbol").
