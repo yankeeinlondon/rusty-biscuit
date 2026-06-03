@@ -703,6 +703,18 @@ impl Writer<'_> {
     /// result is used verbatim. A `None` result (or no hook) falls back to the
     /// built-in plain `<pre><code>` rendering, with the language carried as a
     /// `language-<lang>` class on the `<code>` element.
+    ///
+    /// ## Mermaid promotion
+    ///
+    /// Mermaid code blocks are promoted based on [`BrowserRenderOptions::graphics_mode`]
+    /// and [`BrowserRenderOptions::mermaid_mode`]:
+    ///
+    /// | `graphics_mode` | `mermaid_mode`   | Result                                          |
+    /// |-----------------|------------------|-------------------------------------------------|
+    /// | `Off`           | any              | Plain `<pre><code>` (no promotion)              |
+    /// | `Vector`/`Rich` | `Code`           | Plain `<pre><code class="language-mermaid">`   |
+    /// | `Vector`/`Rich` | `Interactive`    | `<pre class="mermaid">` with escaped source    |
+    /// | `Vector`/`Rich` | `StaticSvg`      | Delegates to [`CodeRenderer`] hook; falls back  |
     fn render_code_block(
         &self,
         node: &RenderNode,
@@ -710,11 +722,68 @@ impl Writer<'_> {
         meta: Option<&str>,
         value: &str,
     ) -> BrowserFragment<Ready> {
+        use crate::tree::{BrowserMermaidMode, GraphicsMode};
+
+        let is_mermaid = lang
+            .map(|l| l.eq_ignore_ascii_case("mermaid"))
+            .unwrap_or(false);
+
+        if is_mermaid && self.opts.graphics_mode != GraphicsMode::Off {
+            match self.opts.mermaid_mode {
+                BrowserMermaidMode::Interactive => {
+                    return self.render_mermaid_interactive(node, value);
+                }
+                BrowserMermaidMode::StaticSvg => {
+                    if let Some(renderer) = &self.opts.code_renderer
+                        && let Some(fragment) =
+                            renderer.render_browser_code(lang, value, meta, &node.attrs)
+                    {
+                        return fragment;
+                    }
+                    return self.render_plain_code_block(node, lang, value);
+                }
+                BrowserMermaidMode::Code => {
+                    return self.render_plain_code_block(node, lang, value);
+                }
+            }
+        }
+
         if let Some(renderer) = &self.opts.code_renderer
             && let Some(fragment) = renderer.render_browser_code(lang, value, meta, &node.attrs)
         {
             return fragment;
         }
+        self.render_plain_code_block(node, lang, value)
+    }
+
+    /// Renders a Mermaid code block as an interactive `<pre class="mermaid">`.
+    ///
+    /// The diagram source is escaped by the fragment renderer so it is safe
+    /// to embed directly. Node attributes (id, classes, layout, style) are
+    /// preserved and merged with the required `mermaid` class.
+    fn render_mermaid_interactive(
+        &self,
+        node: &RenderNode,
+        value: &str,
+    ) -> BrowserFragment<Ready> {
+        let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::Pre, "");
+        fragment = fragment.add_attribute(HtmlAttribute::Class(ClassDefinition::new("mermaid")));
+        for attr in node_attributes(&node.attrs, false) {
+            fragment = fragment.add_attribute(attr);
+        }
+        fragment
+            .add_child(ComposableNode::TextFragment(value.to_string()))
+            .finalize()
+    }
+
+    /// Renders a plain `<pre><code>` code block, used as the universal fallback
+    /// when promotion is disabled, unsupported, or fails.
+    fn render_plain_code_block(
+        &self,
+        node: &RenderNode,
+        lang: Option<&str>,
+        value: &str,
+    ) -> BrowserFragment<Ready> {
         let mut code = BrowserFragment::new().define_as_block_tag(BlockTag::Code, "");
         if let Some(lang) = lang.filter(|lang| !lang.is_empty()) {
             code = code.add_attribute(HtmlAttribute::Class(ClassDefinition::new(format!(
@@ -1364,8 +1433,10 @@ mod tests {
     }
 
     fn html_with_graphics_mode(node: &RenderNode, mode: crate::tree::GraphicsMode) -> String {
-        let mut opts = BrowserRenderOptions::default();
-        opts.graphics_mode = mode;
+        let opts = BrowserRenderOptions {
+            graphics_mode: mode,
+            ..BrowserRenderOptions::default()
+        };
         render_browser_node(node, &opts).expect("render").output.render()
     }
 
@@ -1500,6 +1571,188 @@ mod tests {
 
         let inline = RenderNode::inline_code("x < y");
         assert_eq!(html(&inline), "<code>x &lt; y</code>");
+    }
+
+    #[test]
+    fn mermaid_off_mode_renders_as_plain_code_block() {
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD; A to B");
+        let opts = BrowserRenderOptions {
+            graphics_mode: crate::tree::GraphicsMode::Off,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains(r#"<pre><code class="language-mermaid">"#),
+            "expected plain code block under Off mode, got: {out}"
+        );
+        assert!(out.contains("graph TD"), "source must survive: {out}");
+    }
+
+    #[test]
+    fn mermaid_code_mode_renders_as_plain_code_block() {
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD; A to B");
+        let opts = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::Code,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains(r#"<pre><code class="language-mermaid">"#),
+            "expected plain code block under Code mode, got: {out}"
+        );
+        assert!(out.contains("graph TD"), "source must survive: {out}");
+    }
+
+    #[test]
+    fn mermaid_interactive_mode_emits_pre_class_mermaid() {
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD; A to B");
+        let opts = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::Interactive,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains(r#"<pre class="mermaid">"#),
+            "expected interactive mermaid pre, got: {out}"
+        );
+        assert!(out.contains("graph TD"), "source must survive: {out}");
+    }
+
+    #[test]
+    fn mermaid_interactive_escapes_html_in_source() {
+        let block = RenderNode::code(
+            Some("mermaid".into()),
+            None,
+            "graph TD; A[script node] to B",
+        );
+        let opts = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::Interactive,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains("script node"),
+            "text must survive escaping: {out}"
+        );
+    }
+
+    #[test]
+    fn mermaid_static_svg_tries_code_renderer_then_fallback() {
+        use std::rc::Rc;
+
+        struct SvgCodeRenderer;
+        impl crate::tree::CodeRenderer for SvgCodeRenderer {
+            fn render_terminal_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &crate::tree::NodeAttrs,
+                _context: crate::color::TerminalCodeContext,
+            ) -> Option<String> {
+                None
+            }
+            fn render_browser_code(
+                &self,
+                lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &crate::tree::NodeAttrs,
+            ) -> Option<BrowserFragment<Ready>> {
+                if lang == Some("mermaid") {
+                    Some(
+                        BrowserFragment::new()
+                            .define_as_raw_html("<svg></svg>".to_string())
+                            .finalize(),
+                    )
+                } else {
+                    None
+                }
+            }
+        }
+
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD; A to B");
+        let opts = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::StaticSvg,
+            code_renderer: Some(Rc::new(SvgCodeRenderer)),
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains("<svg>"),
+            "expected SVG from code_renderer hook, got: {out}"
+        );
+
+        // Without the hook, falls back to plain code block.
+        let opts2 = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::StaticSvg,
+            ..BrowserRenderOptions::default()
+        };
+        let out2 = render_browser_node(&block, &opts2).unwrap().output.render();
+        assert!(
+            out2.contains(r#"<pre><code class="language-mermaid">"#),
+            "expected fallback code block, got: {out2}"
+        );
+    }
+
+    #[test]
+    fn non_mermaid_code_ignores_mermaid_mode() {
+        let block = RenderNode::code(Some("rust".into()), None, "let a = 1;");
+        let opts = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::Interactive,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains(r#"<pre><code class="language-rust">"#),
+            "non-mermaid code must not be affected by mermaid_mode, got: {out}"
+        );
+    }
+
+    #[test]
+    fn mermaid_preserves_node_attrs_in_interactive_mode() {
+        let mut block = RenderNode::code(Some("mermaid".into()), None, "graph TD");
+        block.attrs.id = Some("diagram-1".into());
+        let opts = BrowserRenderOptions {
+            mermaid_mode: crate::tree::BrowserMermaidMode::Interactive,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(out.contains(r#"id="diagram-1""#), "id must be preserved: {out}");
+        assert!(
+            out.contains(r#"class="mermaid""#),
+            "mermaid class must be present: {out}"
+        );
+    }
+
+    #[test]
+    fn mermaid_interactive_with_vector_graphics_mode() {
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD");
+        let opts = BrowserRenderOptions {
+            graphics_mode: crate::tree::GraphicsMode::Vector,
+            mermaid_mode: crate::tree::BrowserMermaidMode::Interactive,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains(r#"<pre class="mermaid">"#),
+            "interactive must work under Vector mode, got: {out}"
+        );
+    }
+
+    #[test]
+    fn mermaid_static_svg_with_off_graphics_mode_fallback() {
+        let block = RenderNode::code(Some("mermaid".into()), None, "graph TD");
+        let opts = BrowserRenderOptions {
+            graphics_mode: crate::tree::GraphicsMode::Off,
+            mermaid_mode: crate::tree::BrowserMermaidMode::StaticSvg,
+            ..BrowserRenderOptions::default()
+        };
+        let out = render_browser_node(&block, &opts).unwrap().output.render();
+        assert!(
+            out.contains(r#"<pre><code class="language-mermaid">"#),
+            "Off mode must suppress StaticSvg, got: {out}"
+        );
     }
 
     #[test]
