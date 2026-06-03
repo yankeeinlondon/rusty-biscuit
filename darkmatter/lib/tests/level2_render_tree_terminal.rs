@@ -148,6 +148,32 @@ fn render_tree_terminal_spanned_text_tier_to_tempfile(
     )
 }
 
+/// Like [`render_tree_terminal_spanned_to_tempfile`] but pins
+/// [`GraphicsMode::Vector`](renderable::tree::GraphicsMode::Vector) while
+/// keeping the optimistic terminal's (image-capable) capabilities. This proves
+/// the HR image tier is suppressed by **policy** at `Vector` even when the
+/// terminal *could* rasterize — finding 1 (review-1).
+fn render_tree_terminal_spanned_vector_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let doc = fold_spanned_doc(body, name);
+    let term = Terminal::new_optimistic(120);
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.graphics_mode = renderable::tree::GraphicsMode::Vector;
+    let opts = TerminalRenderOptions {
+        context,
+        strictness: RenderStrictness::Warn,
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+    };
+    let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered.output).unwrap();
+    (dir, path)
+}
+
 /// Folds `body` through the **span-aware** fold, asserting it folds cleanly.
 fn fold_spanned_doc(body: &str, name: &str) -> renderable::tree::Document {
     let source = SourceDescriptor::Virtual { name: name.into() };
@@ -208,6 +234,16 @@ fn run_in_pane_spanned_text_tier(
     name: &str,
 ) -> Option<(CapturedFrame, tempfile::TempDir)> {
     drive_pane(body, name, render_tree_terminal_spanned_text_tier_to_tempfile)
+}
+
+/// Drives the shared WezTerm pane with the **span-aware** fold at
+/// [`GraphicsMode::Vector`](renderable::tree::GraphicsMode::Vector) on an
+/// image-capable terminal, so the glyph form proves policy suppression.
+fn run_in_pane_spanned_vector(
+    body: &str,
+    name: &str,
+) -> Option<(CapturedFrame, tempfile::TempDir)> {
+    drive_pane(body, name, render_tree_terminal_spanned_vector_to_tempfile)
 }
 
 /// Shared pane driver — the fold choice is decided by the caller-supplied
@@ -593,6 +629,37 @@ fn level2_tree_hr_attributes_render_styled_rule_in_real_terminal() {
     assert!(
         waves_rule_line.is_some(),
         "expected a styled waves rule line (a run of `≋` or `~`); plain:\n{}",
+        frame.plain
+    );
+}
+
+/// Finding 1 (review-1): `GraphicsMode::Vector` must suppress the HR image
+/// tier by **policy**, not capability. This renders the `style: waves` rule on
+/// an *image-capable* optimistic terminal (the same one that rasterizes at
+/// `Rich`) but with the policy pinned to `Vector`, and asserts the captured
+/// pane shows the waves **glyph** line — proving the rule degraded to text and
+/// emitted no image payload even though the terminal could have rasterized.
+#[test]
+#[serial(level2_terminal)]
+fn level2_tree_hr_vector_mode_renders_glyph_not_image() {
+    let body = "Lead paragraph.\n\n--- { style: waves }\n\nTrailing paragraph.\n";
+    let Some((frame, _dir)) = run_in_pane_spanned_vector(body, "hr_vector_mode") else {
+        return;
+    };
+
+    assert!(
+        !frame.plain.contains("style: waves"),
+        "raw HR markdown source leaked through; plain:\n{}",
+        frame.plain
+    );
+    let is_waves_glyph = |c: char| c == '\u{224B}' || c == '~';
+    let waves_rule_line = frame.plain.lines().find(|line| {
+        let trimmed = line.trim();
+        trimmed.chars().count() >= 10 && trimmed.chars().all(is_waves_glyph)
+    });
+    assert!(
+        waves_rule_line.is_some(),
+        "Vector mode must render the waves glyph (text tier), not an image; plain:\n{}",
         frame.plain
     );
 }

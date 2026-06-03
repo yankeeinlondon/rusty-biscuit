@@ -21,8 +21,8 @@ use biscuit_terminal::render_tree::{
 use biscuit_terminal::terminal::Terminal;
 use renderable::tree::{
     BrowserRenderOptions, Diagnostic, Document, GraphicsMode, MarkdownDialect, MarkdownRenderOptions,
-    RawHtmlPolicy, RenderStrictness, SourceDescriptor, render_browser_document,
-    render_markdown_document,
+    RawHtmlPolicy, RenderStrictness, SourceDescriptor, TerminalMermaidMode,
+    render_browser_document, render_markdown_document,
 };
 
 use super::code_renderer::TerminalCodeRenderer;
@@ -160,13 +160,19 @@ pub(crate) fn render_tree_markdown_dialect(
 /// Maps `mermaid_mode` to the render-tree [`BrowserMermaidMode`] so the
 /// tree browser path honors the same Mermaid opt-in contract as the legacy
 /// renderer.
+///
+/// Legacy `MermaidMode::Image` maps to [`BrowserMermaidMode::StaticSvg`]: the
+/// spec's promoted browser form is a pre-rendered static `<svg>`. The
+/// client-side mermaid.js path ([`BrowserMermaidMode::Interactive`]) is an
+/// orthogonal, default-off browser opt-in and is not reachable from the legacy
+/// enum.
 fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions {
     use renderable::tree::BrowserMermaidMode;
 
     let mermaid_mode = match opts.mermaid_mode {
         crate::markdown::output::terminal::MermaidMode::Off => BrowserMermaidMode::Code,
         crate::markdown::output::terminal::MermaidMode::Text => BrowserMermaidMode::Code,
-        crate::markdown::output::terminal::MermaidMode::Image => BrowserMermaidMode::Interactive,
+        crate::markdown::output::terminal::MermaidMode::Image => BrowserMermaidMode::StaticSvg,
     };
 
     BrowserRenderOptions {
@@ -225,8 +231,20 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
         }
     };
 
+    // Map the legacy Mermaid opt-in onto the terminal Mermaid promotion mode.
+    // `GraphicsMode` is only the ceiling: a fence is promoted to a raster image
+    // solely when the caller opted in via `MermaidMode::Image`. `Off` / `Text`
+    // keep Mermaid as code, preserving the public default.
+    let mermaid_mode = match opts.mermaid_mode {
+        crate::markdown::output::terminal::MermaidMode::Image => TerminalMermaidMode::Image,
+        crate::markdown::output::terminal::MermaidMode::Off
+        | crate::markdown::output::terminal::MermaidMode::Text => TerminalMermaidMode::Code,
+    };
+
     let mut context = TerminalRenderContext::from_terminal(&term);
     context.graphics_mode = graphics_mode;
+    context.mermaid_mode = mermaid_mode;
+    context.image_base_path = opts.base_path.clone();
     if opts.image_mode == crate::markdown::output::terminal::TerminalImageMode::Force {
         context.force_graphics = true;
     }
@@ -823,16 +841,17 @@ mod tests {
     }
 
     /// The HTML entry point must map `MermaidMode::Image` to
-    /// `BrowserMermaidMode::Interactive` so interactive Mermaid diagrams are
-    /// emitted when the legacy renderer would emit them.
+    /// `BrowserMermaidMode::StaticSvg`: the spec's promoted browser form is a
+    /// pre-rendered static `<svg>`, not the orthogonal interactive mermaid.js
+    /// path (which stays a separate, default-off browser opt-in).
     #[test]
-    fn browser_options_mapping_maps_mermaid_image_to_interactive() {
+    fn browser_options_mapping_maps_mermaid_image_to_static_svg() {
         use renderable::tree::BrowserMermaidMode;
 
         let mut opts = HtmlOptions::default();
         opts.mermaid_mode = crate::markdown::output::terminal::MermaidMode::Image;
         let browser_opts = browser_options_from_html_options(&opts);
-        assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::Interactive);
+        assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::StaticSvg);
     }
 
     /// The terminal entry point must map `TerminalImageMode::Never` to
@@ -869,5 +888,42 @@ mod tests {
         let term_opts = terminal_options_from_terminal_options(&opts);
         assert_eq!(term_opts.context.graphics_mode, GraphicsMode::Rich);
         assert!(term_opts.context.force_graphics);
+    }
+
+    /// `MermaidMode::Image` must opt the terminal context into Mermaid
+    /// promotion; the default (`Off`) must keep Mermaid as code so a fence is
+    /// not promoted just because `GraphicsMode` is `Rich`.
+    #[test]
+    fn terminal_options_mapping_maps_mermaid_opt_in() {
+        use renderable::tree::TerminalMermaidMode;
+
+        let mut image = TerminalOptions::default();
+        image.mermaid_mode = crate::markdown::output::terminal::MermaidMode::Image;
+        assert_eq!(
+            terminal_options_from_terminal_options(&image)
+                .context
+                .mermaid_mode,
+            TerminalMermaidMode::Image,
+        );
+
+        // Default opts: Mermaid stays code even though graphics defaults to Rich.
+        let default = terminal_options_from_terminal_options(&TerminalOptions::default());
+        assert_eq!(default.context.mermaid_mode, TerminalMermaidMode::Code);
+        assert_eq!(default.context.graphics_mode, GraphicsMode::Rich);
+    }
+
+    /// The terminal entry point must thread `TerminalOptions::base_path` into
+    /// the render context so relative image paths resolve at `Rich`.
+    #[test]
+    fn terminal_options_mapping_threads_image_base_path() {
+        use std::path::PathBuf;
+
+        let mut opts = TerminalOptions::default();
+        opts.base_path = Some(PathBuf::from("/docs/assets"));
+        let term_opts = terminal_options_from_terminal_options(&opts);
+        assert_eq!(
+            term_opts.context.image_base_path,
+            Some(PathBuf::from("/docs/assets")),
+        );
     }
 }
