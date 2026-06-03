@@ -71,6 +71,7 @@ description: A record of novel things learned about how to best perform commits 
 - In scripts that run `git add .`, use `git add . || exit 0` to prevent CI failure when there is nothing to commit.
 - In `zsh`, `$status` is a read-only special variable (alias of `$?`). When wrapping `git commit` in a retry loop, capture the exit code into a non-reserved name immediately after the command (e.g. `rc=$?`) — assigning to `status=$?` silently fails and breaks success/failure detection. Verify the result with `git show <hash>` rather than re-parsing captured stdout.
 - For complex commit messages with bullet points and special characters (like backticks or underscores), some agents prefer committing with a simple placeholder message first and then using `git commit --amend` (or passing the message via a temporary file) to avoid shell expansion and command-injection false positives in the `-m` argument.
+- **`git commit --amend` without `--only` also commits ALL staged files.** Like `git commit` without `--only`, `git commit --amend` replaces the current commit with whatever is currently staged, not just the files that were part of the original commit. To amend while preserving only some staged files, you must use `git commit --only --amend -m "message" -- <paths>` or stage files one-at-a-time sequentially before amending.
 
 ## Rust Idioms
 
