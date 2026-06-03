@@ -4,10 +4,11 @@
 //! consults; [`TerminalRenderOptions`] pairs that context with a
 //! [`RenderStrictness`] policy.
 
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use renderable::layout::Layout as RenderableLayout;
-use renderable::tree::{CodeRenderer, GraphicsMode, RenderStrictness};
+use renderable::tree::{CodeRenderer, GraphicsMode, RenderStrictness, TerminalMermaidMode};
 
 use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
 use crate::terminal::Terminal;
@@ -81,6 +82,16 @@ pub struct TerminalRenderContext {
     /// Whether to force graphics rendering even when the terminal
     /// capability detection suggests the feature is unavailable.
     pub force_graphics: bool,
+    /// Whether Mermaid code fences are promoted to diagrams.
+    ///
+    /// Orthogonal to [`graphics_mode`](Self::graphics_mode), which is the
+    /// fidelity ceiling: a Mermaid fence is promoted only when this opt-in is
+    /// [`TerminalMermaidMode::Image`] *and* the tier permits rasterization.
+    pub mermaid_mode: TerminalMermaidMode,
+    /// Base path for resolving relative image paths at
+    /// [`GraphicsMode::Rich`]. When `None`, the current working directory is
+    /// used (matching the legacy terminal image renderer).
+    pub image_base_path: Option<PathBuf>,
 }
 
 impl TerminalRenderContext {
@@ -107,6 +118,8 @@ impl TerminalRenderContext {
             active_layout: None,
             graphics_mode: GraphicsMode::default(),
             force_graphics: false,
+            mermaid_mode: TerminalMermaidMode::default(),
+            image_base_path: None,
         }
     }
 
@@ -320,6 +333,16 @@ mod tests {
         assert!(ctx.active_layout.is_none());
         assert_eq!(ctx.graphics_mode, GraphicsMode::Rich);
         assert!(!ctx.force_graphics);
+        assert_eq!(ctx.mermaid_mode, TerminalMermaidMode::Code);
+        assert!(ctx.image_base_path.is_none());
+    }
+
+    #[test]
+    fn from_terminal_keeps_mermaid_promotion_off_by_default() {
+        // Public default: a Mermaid fence stays a code block unless the caller
+        // opts in. `GraphicsMode::Rich` is only the ceiling, not a request.
+        let ctx = TerminalRenderContext::from_terminal(&Terminal::new_optimistic(80));
+        assert_eq!(ctx.mermaid_mode, TerminalMermaidMode::Code);
     }
 
     #[test]

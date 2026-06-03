@@ -35,6 +35,7 @@ use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
     ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HintNamespace, NodeKind,
     ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
+    TerminalMermaidMode,
 };
 use renderable::tree::{ValidationError, ValidationMode, validate};
 
@@ -43,6 +44,8 @@ use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyl
 use crate::components::mermaid::MermaidDiagram;
 use crate::components::prose::Prose;
 use crate::components::renderable::TerminalRenderable;
+use crate::components::terminal_image::TerminalImage;
+use crate::discovery::detection::ImageSupport;
 use crate::components::table::cell::pad_cell;
 use crate::components::table::table::{
     BG_RESET, FG_RESET, apply_vertical_padding, build_border, stripe_bg_escape, stripe_fg_escape,
@@ -57,6 +60,10 @@ use crate::utils::layout::{Alignment, WordWrap};
 
 use super::options::TerminalRenderOptions;
 use super::style;
+
+/// Maximum size of an inline terminal image at [`GraphicsMode::Rich`], matching
+/// the legacy terminal image renderer's 10 MiB ceiling.
+const MAX_TERMINAL_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 
 /// Renders a render-tree node to a terminal string.
 ///
@@ -414,24 +421,19 @@ impl Writer<'_> {
                 })
             }
             NodeKind::Code { lang, meta, value } => {
-                Ok(self.render_code_node(lang.as_deref(), value, meta.as_deref(), &node.attrs))
+                self.render_code_node(lang.as_deref(), value, meta.as_deref(), &node.attrs)
             }
             NodeKind::ThematicBreak => {
                 let rule = horizontal_rule_from_attrs(&node.attrs);
+                let term = self.effective_terminal();
+                // The terminal has no vector HR form, so `Vector` coincides with
+                // `Off` (Unicode / ASCII). Only `Rich` rasterizes to an image.
                 match self.opts.context.graphics_mode {
-                    renderable::tree::GraphicsMode::Off => {
-                        Ok(rule.render_text_tier(&self.opts.context.terminal))
-                    }
-                    renderable::tree::GraphicsMode::Vector
-                    | renderable::tree::GraphicsMode::Rich => {
-                        if let Some(image) =
-                            rule.render_image_tier(&self.opts.context.terminal)
-                        {
-                            Ok(image)
-                        } else {
-                            Ok(rule.render_text_tier(&self.opts.context.terminal))
-                        }
-                    }
+                    GraphicsMode::Off | GraphicsMode::Vector => Ok(rule.render_text_tier(&term)),
+                    GraphicsMode::Rich => match rule.render_image_tier(&term) {
+                        Some(image) => Ok(image),
+                        None => Ok(rule.render_text_tier(&term)),
+                    },
                 }
             }
             NodeKind::Table { align, children } => {
@@ -759,24 +761,15 @@ impl Writer<'_> {
                     Ok(format!("[{desc}]({url})"))
                 }
             }
-            NodeKind::Image { alt, .. } => {
-                match self.opts.context.graphics_mode {
-                    GraphicsMode::Off | GraphicsMode::Vector => {
-                        // Graphics disabled: render alt text fallback.
-                        Ok(format!("[{alt}]"))
-                    }
-                    GraphicsMode::Rich => {
-                        // Full graphics tier: attempt inline image rendering.
-                        // TODO: wire TerminalImage integration once the render
-                        // tree carries enough metadata for protocol dispatch.
-                        self.diagnostics.push(Diagnostic::lossy(
-                            "inline terminal images not yet implemented in tree renderer",
-                            Some(node.span.clone()),
-                        ));
-                        Ok(format!("[{alt}]"))
-                    }
+            NodeKind::Image { url, alt, .. } => match self.opts.context.graphics_mode {
+                // Off / Vector: alt-text fallback (no raster form).
+                GraphicsMode::Off | GraphicsMode::Vector => Ok(format!("[{alt}]")),
+                // Rich: attempt the inline image protocol, falling back to alt
+                // text when the source is out of contract or unrenderable.
+                GraphicsMode::Rich => {
+                    Ok(self.render_terminal_image(url, alt).unwrap_or_else(|| format!("[{alt}]")))
                 }
-            }
+            },
             NodeKind::FootnoteReference { identifier } => {
                 Ok(format!("[^{identifier}]"))
             }
@@ -1133,34 +1126,57 @@ impl Writer<'_> {
     ///
     /// ## Mermaid promotion
     ///
-    /// Mermaid code blocks are promoted to terminal images when
-    /// [`TerminalRenderContext::graphics_mode`] is [`GraphicsMode::Rich`]
-    /// and the terminal supports inline images. On failure or when the
-    /// graphics mode is lower, the block degrades through the code-render
-    /// hook and finally to the built-in plain fallback.
+    /// A `lang="mermaid"` block is promoted to a rasterized image only when the
+    /// Mermaid opt-in ([`TerminalRenderContext::mermaid_mode`] is
+    /// [`TerminalMermaidMode::Image`]) *and* the fidelity ceiling
+    /// ([`TerminalRenderContext::graphics_mode`] is [`GraphicsMode::Rich`]) both
+    /// permit it. [`GraphicsMode`] alone never promotes a fence — that keeps the
+    /// public default ("Mermaid stays code") intact. When promotion is not
+    /// requested the block degrades through the code-render hook and finally to
+    /// the built-in plain fallback.
+    ///
+    /// ## Errors
+    ///
+    /// Under [`RenderStrictness::Strict`] a failed Mermaid promotion returns
+    /// [`RenderError::LossyRejected`] rather than silently falling back; under
+    /// [`RenderStrictness::Warn`] it records a lossy diagnostic and falls back.
     fn render_code_node(
         &mut self,
         lang: Option<&str>,
         value: &str,
         meta: Option<&str>,
         attrs: &renderable::tree::NodeAttrs,
-    ) -> String {
-        use renderable::tree::GraphicsMode;
-
+    ) -> Result<String, RenderError> {
         let is_mermaid = lang
             .map(|l| l.eq_ignore_ascii_case("mermaid"))
             .unwrap_or(false);
 
-        if is_mermaid && self.opts.context.graphics_mode == GraphicsMode::Rich {
+        // Promotion is gated by the opt-in AND the ceiling: terminal Mermaid
+        // rasterizes only at `Rich`, and only when the caller opted in.
+        if is_mermaid
+            && self.opts.context.mermaid_mode == TerminalMermaidMode::Image
+            && self.opts.context.graphics_mode == GraphicsMode::Rich
+        {
+            let term = self.effective_terminal();
             let diagram = MermaidDiagram::new(value);
-            match diagram.try_render(&self.opts.context.terminal) {
-                Ok(result) => return result.output,
-                Err(e) => {
-                    self.diagnostics.push(Diagnostic::lossy(
-                        format!("Mermaid rasterization failed, falling back to code block: {e}"),
-                        None,
-                    ));
-                }
+            match diagram.try_render(&term) {
+                Ok(result) => return Ok(result.output),
+                Err(e) => match self.opts.strictness {
+                    RenderStrictness::Strict => {
+                        return Err(RenderError::LossyRejected {
+                            message: format!("Mermaid promotion failed: {e}"),
+                        });
+                    }
+                    RenderStrictness::Warn => {
+                        self.diagnostics.push(Diagnostic::lossy(
+                            format!(
+                                "Mermaid rasterization failed, falling back to code block: {e}"
+                            ),
+                            None,
+                        ));
+                    }
+                    RenderStrictness::Lossy => {}
+                },
             }
         }
 
@@ -1172,10 +1188,92 @@ impl Writer<'_> {
             );
             if let Some(rendered) = renderer.render_terminal_code(lang, value, meta, attrs, context)
             {
-                return rendered;
+                return Ok(rendered);
             }
         }
-        self.render_code(lang, value)
+        Ok(self.render_code(lang, value))
+    }
+
+    /// Returns the terminal capability snapshot the graphics paths consult,
+    /// applying the [`force_graphics`](TerminalRenderContext::force_graphics)
+    /// capability override.
+    ///
+    /// `TerminalImageMode::Force` (mapped to `force_graphics` at the darkmatter
+    /// entry point) attempts image-protocol output even when detection reports
+    /// no support: the returned terminal is marked as a TTY and, if it
+    /// advertises no image protocol, is upgraded to Kitty. This mirrors the
+    /// legacy terminal image renderer's force path so the policy is enforced at
+    /// the renderer boundary rather than dropped.
+    fn effective_terminal(&self) -> std::borrow::Cow<'_, crate::terminal::Terminal> {
+        use std::borrow::Cow;
+
+        if !self.opts.context.force_graphics {
+            return Cow::Borrowed(&self.opts.context.terminal);
+        }
+        let mut forced = self.opts.context.terminal.clone();
+        forced.is_tty = true;
+        if matches!(forced.image_support, ImageSupport::None) {
+            forced.image_support = ImageSupport::Kitty;
+        }
+        Cow::Owned(forced)
+    }
+
+    /// Renders a Markdown image to an inline terminal-image string at
+    /// [`GraphicsMode::Rich`], or returns `None` to signal the alt-text
+    /// fallback.
+    ///
+    /// Ports the legacy terminal image renderer's security contract: remote
+    /// URLs and absolute paths are rejected, a relative path resolves against
+    /// [`image_base_path`](TerminalRenderContext::image_base_path) (the current
+    /// working directory when unset) and must stay within it, and the file must
+    /// exist and be at most [`MAX_TERMINAL_IMAGE_BYTES`]. The capability
+    /// snapshot honors `force_graphics` via [`Self::effective_terminal`].
+    fn render_terminal_image(&self, url: &str, alt: &str) -> Option<String> {
+        // Remote URLs and absolute paths are out of contract — no fetch, no
+        // sandbox escape.
+        if url.starts_with("http://") || url.starts_with("https://") {
+            return None;
+        }
+        let rel = std::path::Path::new(url);
+        if rel.is_absolute() {
+            return None;
+        }
+
+        let base = self
+            .opts
+            .context
+            .image_base_path
+            .clone()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        let full_path = base.join(rel);
+
+        // Path-traversal guard: when both ends canonicalize, the resolved file
+        // must stay within the base directory.
+        if let Ok(canonical_base) = base.canonicalize()
+            && let Ok(canonical_full) = full_path.canonicalize()
+            && !canonical_full.starts_with(&canonical_base)
+        {
+            return None;
+        }
+        if !full_path.exists() {
+            return None;
+        }
+        if let Ok(metadata) = std::fs::metadata(&full_path)
+            && metadata.len() > MAX_TERMINAL_IMAGE_BYTES
+        {
+            return None;
+        }
+
+        let term = self.effective_terminal();
+        // Without graphics support (and without force) there is no image
+        // protocol to target — fall back to alt text.
+        if !term.is_tty || matches!(term.image_support, ImageSupport::None) {
+            return None;
+        }
+
+        let image = TerminalImage::new(&full_path).ok()?.with_alt_text(alt);
+        let output = image.render(&term);
+        (!output.is_empty()).then_some(output)
     }
 
     /// Renders a code block as a dim, indented panel.
@@ -2605,12 +2703,32 @@ mod render_tree_tests {
         assert!(out.diagnostics.len() >= 2);
     }
 
+    /// An image whose source is out of contract (here a relative path with no
+    /// matching file) degrades to its alt text. The default render context is
+    /// `Rich`, so this also proves the Rich-tier path falls back cleanly — and
+    /// silently, matching the legacy terminal image renderer's contract.
     #[test]
-    fn render_tree_image_renders_alt_text_with_diagnostic() {
+    fn render_tree_image_falls_back_to_alt_text() {
         let node = RenderNode::paragraph(vec![RenderNode::image("pic.png", None, "a cat")]);
         let out = render(&node);
         assert!(strip_escape_codes(&out.output).contains("[a cat]"));
-        assert!(out.diagnostics.iter().any(|d| d.message.contains("image")));
+    }
+
+    /// Finding 6 (review-1): at `Off`/`Vector` an image is always alt text;
+    /// only `Rich` attempts the image protocol. A non-image terminal at `Rich`
+    /// with a real file still degrades to alt text (no protocol to target).
+    #[test]
+    fn render_tree_image_alt_text_at_off_and_vector() {
+        let node = RenderNode::paragraph(vec![RenderNode::image("pic.png", None, "a cat")]);
+        for mode in [GraphicsMode::Off, GraphicsMode::Vector] {
+            let mut o = opts(RenderStrictness::Warn);
+            o.context.graphics_mode = mode;
+            let out = render_terminal_node(&node, &o).expect("render");
+            assert!(
+                strip_escape_codes(&out.output).contains("[a cat]"),
+                "{mode:?} must render alt text",
+            );
+        }
     }
 
     #[test]
@@ -3245,6 +3363,99 @@ mod render_tree_tests {
         assert!(
             out.contains("\x1b_G"),
             "GraphicsMode::Rich must use Kitty image tier when available: {out:?}"
+        );
+    }
+
+    /// Finding 1 (review-1): the terminal has no vector HR form, so
+    /// `GraphicsMode::Vector` must use the text tier — never rasterize — even on
+    /// a Kitty-capable TTY. Only `Rich` is allowed to emit image escapes.
+    #[test]
+    fn render_tree_thematic_break_vector_mode_uses_text_tier() {
+        use crate::discovery::detection::ImageSupport;
+        let mut hr = RenderNode::thematic_break();
+        let ns = HintNamespace("darkmatter.hr");
+        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+
+        let term = Terminal::builder()
+            .width(40)
+            .image_support(ImageSupport::Kitty)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = renderable::tree::GraphicsMode::Vector;
+
+        let out = render_terminal_node(&hr, &opts).expect("render hr").output;
+        assert!(
+            !out.contains("\x1b_G"),
+            "GraphicsMode::Vector must not rasterize the HR on the terminal: {out:?}"
+        );
+        assert!(
+            out.contains('\u{224B}') || out.contains('~'),
+            "expected waves text tier under Vector mode; got: {out:?}"
+        );
+    }
+
+    /// Finding 5 (review-1): `force_graphics` must be enforced at the renderer
+    /// boundary, not merely stored. On a terminal that advertises no image
+    /// support, forcing graphics upgrades the capability snapshot so the HR
+    /// image tier still fires at `Rich`.
+    #[test]
+    fn render_tree_thematic_break_force_graphics_rasterizes_on_unsupported_terminal() {
+        use crate::discovery::detection::ImageSupport;
+        let mut hr = RenderNode::thematic_break();
+        let ns = HintNamespace("darkmatter.hr");
+        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+
+        let term = Terminal::builder()
+            .width(40)
+            .image_support(ImageSupport::None)
+            .is_tty(false)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = renderable::tree::GraphicsMode::Rich;
+
+        // Without force: no image support → text tier (no Kitty escape).
+        let plain = render_terminal_node(&hr, &opts).expect("render hr").output;
+        assert!(
+            !plain.contains("\x1b_G"),
+            "no image support without force must use the text tier: {plain:?}"
+        );
+
+        // With force: capability snapshot is upgraded → image tier fires.
+        opts.context.force_graphics = true;
+        let forced = render_terminal_node(&hr, &opts).expect("render hr").output;
+        assert!(
+            forced.contains("\x1b_G"),
+            "force_graphics must enable the Kitty image tier on an unsupported terminal: {forced:?}"
+        );
+    }
+
+    /// Finding 7 (review-1): under `RenderStrictness::Strict`, a Mermaid
+    /// promotion that cannot complete must escalate to a `RenderError` rather
+    /// than silently degrading to a code block. A terminal with no image
+    /// support guarantees the promotion fails (no protocol to target, or no
+    /// rasterization deps) regardless of host capability.
+    #[test]
+    fn mermaid_promotion_failure_rejects_under_strict() {
+        use crate::discovery::detection::ImageSupport;
+        use renderable::tree::{GraphicsMode, TerminalMermaidMode};
+
+        let mermaid_node =
+            RenderNode::code(Some("mermaid".to_string()), None, "flowchart LR\n    A --> B");
+
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::None)
+            .is_tty(false)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Strict);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.mermaid_mode = TerminalMermaidMode::Image;
+
+        let result = render_terminal_node(&mermaid_node, &opts);
+        assert!(
+            matches!(result, Err(RenderError::LossyRejected { .. })),
+            "strict Mermaid promotion failure must reject; got {result:?}",
         );
     }
 
