@@ -20,7 +20,7 @@ use biscuit_terminal::render_tree::{
 };
 use biscuit_terminal::terminal::Terminal;
 use renderable::tree::{
-    BrowserRenderOptions, Diagnostic, Document, MarkdownDialect, MarkdownRenderOptions,
+    BrowserRenderOptions, Diagnostic, Document, GraphicsMode, MarkdownDialect, MarkdownRenderOptions,
     RawHtmlPolicy, RenderStrictness, SourceDescriptor, render_browser_document,
     render_markdown_document,
 };
@@ -154,14 +154,27 @@ pub(crate) fn render_tree_markdown_dialect(
 /// The [`TerminalCodeRenderer`] hook is wired in so fenced code blocks
 /// reproduce darkmatter's syntax-highlighted HTML (title block, line-number
 /// table, highlighted-line markup) rather than the render tree's plain
-/// `<pre><code>` fallback. Mermaid mode and HR CSS variables remain documented
-/// parity gaps; see `entry-point-shape.md`.
-fn browser_options_from_html_options(_opts: &HtmlOptions) -> BrowserRenderOptions {
+/// `<pre><code>` fallback. HR CSS variables remain documented parity gaps;
+/// see `entry-point-shape.md`.
+///
+/// Maps `mermaid_mode` to the render-tree [`BrowserMermaidMode`] so the
+/// tree browser path honors the same Mermaid opt-in contract as the legacy
+/// renderer.
+fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions {
+    use renderable::tree::BrowserMermaidMode;
+
+    let mermaid_mode = match opts.mermaid_mode {
+        crate::markdown::output::terminal::MermaidMode::Off => BrowserMermaidMode::Code,
+        crate::markdown::output::terminal::MermaidMode::Text => BrowserMermaidMode::Code,
+        crate::markdown::output::terminal::MermaidMode::Image => BrowserMermaidMode::Interactive,
+    };
+
     BrowserRenderOptions {
         strictness: RenderStrictness::Warn,
         raw_html: RawHtmlPolicy::Escape,
         page: None,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        mermaid_mode,
         ..Default::default()
     }
 }
@@ -195,8 +208,31 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     if let Some(depth) = opts.color_depth {
         term.color_depth = darkmatter_color_depth_to_terminal(depth);
     }
+
+    // Map legacy image_mode onto the graphics fidelity tier so the tree
+    // renderer honors the same opt-in / never / force contract as the legacy
+    // terminal renderer. Mermaid promotion and inline image rendering both
+    // key off this field.
+    let graphics_mode = match opts.image_mode {
+        crate::markdown::output::terminal::TerminalImageMode::Never => {
+            GraphicsMode::Off
+        }
+        crate::markdown::output::terminal::TerminalImageMode::Auto => {
+            GraphicsMode::Rich
+        }
+        crate::markdown::output::terminal::TerminalImageMode::Force => {
+            GraphicsMode::Rich
+        }
+    };
+
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.graphics_mode = graphics_mode;
+    if opts.image_mode == crate::markdown::output::terminal::TerminalImageMode::Force {
+        context.force_graphics = true;
+    }
+
     TerminalRenderOptions {
-        context: TerminalRenderContext::from_terminal(&term),
+        context,
         strictness: RenderStrictness::Warn,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
     }
@@ -771,5 +807,67 @@ mod tests {
             "ColorDepth::None must produce no ANSI color SGRs for a code block; raw:\n{:?}",
             result.output,
         );
+    }
+
+    /// The HTML entry point must map `MermaidMode::Off` to
+    /// `BrowserMermaidMode::Code` so the tree browser path honors the same
+    /// default as the legacy renderer.
+    #[test]
+    fn browser_options_mapping_maps_mermaid_off_to_code() {
+        use renderable::tree::BrowserMermaidMode;
+
+        let mut opts = HtmlOptions::default();
+        opts.mermaid_mode = crate::markdown::output::terminal::MermaidMode::Off;
+        let browser_opts = browser_options_from_html_options(&opts);
+        assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::Code);
+    }
+
+    /// The HTML entry point must map `MermaidMode::Image` to
+    /// `BrowserMermaidMode::Interactive` so interactive Mermaid diagrams are
+    /// emitted when the legacy renderer would emit them.
+    #[test]
+    fn browser_options_mapping_maps_mermaid_image_to_interactive() {
+        use renderable::tree::BrowserMermaidMode;
+
+        let mut opts = HtmlOptions::default();
+        opts.mermaid_mode = crate::markdown::output::terminal::MermaidMode::Image;
+        let browser_opts = browser_options_from_html_options(&opts);
+        assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::Interactive);
+    }
+
+    /// The terminal entry point must map `TerminalImageMode::Never` to
+    /// `GraphicsMode::Off` so the tree renderer suppresses both inline images
+    /// and Mermaid promotion.
+    #[test]
+    fn terminal_options_mapping_maps_never_to_off() {
+        let mut opts = TerminalOptions::default();
+        opts.image_mode = crate::markdown::output::terminal::TerminalImageMode::Never;
+        let term_opts = terminal_options_from_terminal_options(&opts);
+        assert_eq!(term_opts.context.graphics_mode, GraphicsMode::Off);
+        assert!(!term_opts.context.force_graphics);
+    }
+
+    /// The terminal entry point must map `TerminalImageMode::Auto` to
+    /// `GraphicsMode::Rich` so the tree renderer attempts Mermaid promotion
+    /// and inline image rendering when capabilities allow.
+    #[test]
+    fn terminal_options_mapping_maps_auto_to_rich() {
+        let mut opts = TerminalOptions::default();
+        opts.image_mode = crate::markdown::output::terminal::TerminalImageMode::Auto;
+        let term_opts = terminal_options_from_terminal_options(&opts);
+        assert_eq!(term_opts.context.graphics_mode, GraphicsMode::Rich);
+        assert!(!term_opts.context.force_graphics);
+    }
+
+    /// The terminal entry point must map `TerminalImageMode::Force` to
+    /// `GraphicsMode::Rich` with `force_graphics` set so the tree renderer
+    /// bypasses capability detection.
+    #[test]
+    fn terminal_options_mapping_maps_force_to_rich_with_force_flag() {
+        let mut opts = TerminalOptions::default();
+        opts.image_mode = crate::markdown::output::terminal::TerminalImageMode::Force;
+        let term_opts = terminal_options_from_terminal_options(&opts);
+        assert_eq!(term_opts.context.graphics_mode, GraphicsMode::Rich);
+        assert!(term_opts.context.force_graphics);
     }
 }

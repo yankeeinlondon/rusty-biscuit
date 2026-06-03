@@ -321,10 +321,16 @@ fn legacy_html(markdown: &str) -> String {
 /// line-number table, highlighted-line markup) instead of the render tree's
 /// plain `<pre><code>` fallback. [`RawHtmlPolicy::Allow`] keeps raw-HTML
 /// fixtures comparable to the legacy renderer (which passes raw HTML through).
+///
+/// Mirrors the entry point's `mermaid_mode` mapping so parity tests exercise
+/// the same browser Mermaid routing the production path uses.
 fn tree_html_options() -> BrowserRenderOptions {
+    use renderable::tree::BrowserMermaidMode;
+
     BrowserRenderOptions {
         raw_html: RawHtmlPolicy::Allow,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        mermaid_mode: BrowserMermaidMode::Code,
         ..BrowserRenderOptions::default()
     }
 }
@@ -353,11 +359,21 @@ fn legacy_terminal(markdown: &str) -> String {
 /// Closes review-10 finding 2: the parity harness must exercise the same
 /// code path the user-observable entry point uses, not the bare
 /// `TerminalRenderOptions::default()` (which sets `code_renderer: None`).
+///
+/// Mirrors the entry point's `image_mode` mapping (`Auto` → `Rich`) so
+/// parity tests exercise the same graphics tier the production path uses.
 fn tree_terminal_options() -> TerminalRenderOptions {
+    use renderable::tree::GraphicsMode;
+
     // Start from the same detected-terminal default the original parity
     // harness used (so hyperlink / color behavior is unchanged) and only add
     // the code-render hook on top.
-    TerminalRenderOptions::default().with_code_renderer(Rc::new(TerminalCodeRenderer::new()))
+    let mut opts =
+        TerminalRenderOptions::default().with_code_renderer(Rc::new(TerminalCodeRenderer::new()));
+    // The production entry point maps `TerminalImageMode::Auto` (the default
+    // in `TerminalOptions`) to `GraphicsMode::Rich`.
+    opts.context.graphics_mode = GraphicsMode::Rich;
+    opts
 }
 
 /// Renders fixture text to a terminal string via the render-tree renderer.

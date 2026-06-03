@@ -296,7 +296,12 @@ fn pinned_terminal_options(color: ColorDepth) -> TerminalOptions {
 /// plain-fence fallback (review-10 finding 2). The `large_code_block`
 /// fixture in particular would otherwise understate the tree path's real
 /// per-render cost.
+///
+/// Mirrors the production entry point's `image_mode` mapping: `Auto` →
+/// `GraphicsMode::Rich`.
 fn pinned_tree_terminal_options(color: ColorDepth) -> TerminalRenderOptions {
+    use renderable::tree::GraphicsMode;
+
     let mut term = Terminal::new_optimistic(120);
     term.color_depth = match color {
         ColorDepth::TrueColor => TerminalColorDepth::TrueColor,
@@ -304,8 +309,10 @@ fn pinned_tree_terminal_options(color: ColorDepth) -> TerminalRenderOptions {
         ColorDepth::Colors16 => TerminalColorDepth::Basic,
         ColorDepth::None => TerminalColorDepth::None,
     };
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.graphics_mode = GraphicsMode::Rich;
     TerminalRenderOptions {
-        context: TerminalRenderContext::from_terminal(&term),
+        context,
         strictness: RenderStrictness::Warn,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
     }
@@ -321,12 +328,18 @@ fn pinned_html_options() -> HtmlOptions {
 /// The [`TerminalCodeRenderer`] hook is wired in so the benchmarked tree HTML
 /// path matches the production `render_tree_html` entry point (syntax-
 /// highlighted code blocks) rather than the plain `<pre><code>` fallback.
+///
+/// Mirrors the production entry point's `mermaid_mode` mapping (`Off` →
+/// `BrowserMermaidMode::Code`).
 fn pinned_browser_options() -> BrowserRenderOptions {
+    use renderable::tree::BrowserMermaidMode;
+
     BrowserRenderOptions {
         strictness: RenderStrictness::Warn,
         raw_html: RawHtmlPolicy::Escape,
         page: None,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        mermaid_mode: BrowserMermaidMode::Code,
         ..Default::default()
     }
 }

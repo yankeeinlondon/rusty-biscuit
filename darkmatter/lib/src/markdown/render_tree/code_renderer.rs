@@ -6,6 +6,7 @@
 //! code-block path into that hook so render-tree output matches the bespoke
 //! [`YamlBlock`](crate::markdown::YamlBlock) (and Markdown code fence) renderer.
 
+use biscuit_terminal::components::mermaid::MermaidDiagram;
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::color::{
     ColorDepth as RenderableColorDepth, ColorMode as RenderableColorMode, TerminalCodeContext,
@@ -161,6 +162,24 @@ impl CodeRenderer for TerminalCodeRenderer {
         meta: Option<&str>,
         _attrs: &NodeAttrs,
     ) -> Option<BrowserFragment<Ready>> {
+        let is_mermaid = lang
+            .map(|l| l.eq_ignore_ascii_case("mermaid"))
+            .unwrap_or(false);
+
+        if is_mermaid {
+            let diagram = MermaidDiagram::new(value);
+            match diagram.render_to_svg() {
+                Ok(svg) => {
+                    return Some(
+                        BrowserFragment::new().define_as_raw_html(svg).finalize(),
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Mermaid SVG rendering failed, falling back to code block");
+                }
+            }
+        }
+
         let options = HtmlOptions::default();
         // Code blocks contrast against the page: resolve the theme *variant*
         // against the INVERTED color mode (a light code panel on a dark page,
@@ -350,5 +369,44 @@ mod tests {
             html.contains("highlighted"),
             "highlight directive must mark the highlighted line; got {html}",
         );
+    }
+
+    /// Mermaid code blocks on the browser path attempt SVG generation via
+    /// `biscuit_terminal::components::mermaid::MermaidDiagram::render_to_svg`.
+    /// On success the raw SVG is returned as a `BrowserFragment`; on failure
+    /// the hook falls back to a syntax-highlighted code block.
+    #[test]
+    fn browser_code_mermaid_attempts_svg_then_fallback() {
+        let renderer = TerminalCodeRenderer::new();
+
+        // The hook tries SVG first.
+        let fragment = renderer.render_browser_code(
+            Some("mermaid"),
+            "flowchart LR\n    A --> B",
+            None,
+            &NodeAttrs::default(),
+        );
+
+        match fragment {
+            Some(f) => {
+                let html = f.render();
+                if html.contains("<svg") {
+                    assert!(
+                        html.contains("</svg>"),
+                        "Mermaid SVG must be well-formed; got: {html}"
+                    );
+                } else {
+                    // Fallback to syntax-highlighted code block.
+                    assert!(
+                        html.contains("language-mermaid"),
+                        "Mermaid fallback must be a code block; got: {html}"
+                    );
+                }
+            }
+            None => {
+                // If the hook returns None (e.g. host lacks deps), the tree
+                // renderer's plain fallback runs — this is acceptable.
+            }
+        }
     }
 }
