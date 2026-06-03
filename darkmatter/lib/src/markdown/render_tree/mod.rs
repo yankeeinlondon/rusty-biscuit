@@ -74,6 +74,7 @@ pub mod fold;
 pub mod inventory;
 pub mod pipeline;
 pub mod source;
+pub mod svg_sanitizer;
 
 pub use code_renderer::TerminalCodeRenderer;
 pub use fold::{

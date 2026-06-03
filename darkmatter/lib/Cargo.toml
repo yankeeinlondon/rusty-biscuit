@@ -67,6 +67,11 @@ markdown = { version = "1.0.0-alpha.22", features = ["serde"] }
 html-escape = "0.2"
 similar = { version = "2.6", features = ["inline"] }
 
+# SVG sanitization for promoted Mermaid static <svg> before raw-HTML emission.
+# Pinned to the version `syntect`/`plist` already pull in so cargo unifies on a
+# single copy rather than compiling a second quick-xml.
+quick-xml = "0.39"
+
 # Terminal image rendering and mermaid diagrams (via biscuit-terminal)
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 
@@ -93,6 +98,9 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 biscuit-browser-harness = { path = "../../biscuit-browser-harness" }
 test-toolkit = { path = "../../tools/test-toolkit" }
 tempfile = "3"
+# Encodes the distinctive-fill probe image and decodes the screen capture in the
+# Level-2 terminal-image paint test (`level2_render_tree_terminal`).
+image = "0.25"
 # Used by the `html_to_png` example for direct visual inspection. The browser
 # *tests* go through biscuit-browser-harness; the example reaches for the
 # chromiumoxide screenshot API directly because the harness intentionally

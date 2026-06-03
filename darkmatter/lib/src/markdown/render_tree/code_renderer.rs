@@ -196,7 +196,13 @@ impl CodeRenderer for TerminalCodeRenderer {
         // to the render tree so strictness can reject or diagnose it, rather
         // than silently degrading to a code block here.
         let svg = MermaidDiagram::new(value).render_to_svg().ok()?;
-        Some(BrowserFragment::new().define_as_raw_html(svg).finalize())
+        // The SVG is emitted unescaped as raw HTML, so it must pass an explicit
+        // allowlist sanitizer first — the render tree must not depend on the
+        // upstream renderer (or any future string override) staying safe. A
+        // sanitizer that cannot parse the SVG returns `None`, which the renderer
+        // treats as a promotion failure rather than emitting unsafe markup.
+        let safe = super::svg_sanitizer::sanitize_svg(&svg)?;
+        Some(BrowserFragment::new().define_as_raw_html(safe).finalize())
     }
 }
 
