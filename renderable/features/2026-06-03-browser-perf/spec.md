@@ -197,6 +197,19 @@ Recorded in
 
 A checklist for the investigation, deliberately not pre-judged:
 
+- **Separate "added fidelity" from "structural overhead."** Some of the regression
+  is real work the tree path *should* do: `mark_dim_hr` now emits styled HR
+  `<svg>` (graphics-policy Vector tier) and `<mark>`, which legacy did not on the
+  tree path. But the 6 plain-CommonMark fixtures (prose/table/list/links/images)
+  emit equivalent HTML on both sides, so their 2–18× is overhead, not fidelity.
+  **Cheap first diagnostic:** compare legacy vs tree output **byte-length** per
+  fixture — equal size ⇒ pure overhead (same output, slower path); tree larger
+  ⇒ it emits extra markup (classes / `data-*` / provenance) that is heavier and
+  arguably higher-fidelity. This directly settles "was the bespoke renderer just
+  doing less / lower-fidelity work?" before any profiling.
+- For `large_table` (18×), check whether the tree table renderer does column
+  width / alignment **planning** that HTML auto-layout makes unnecessary —
+  wasted work rather than fidelity.
 - Re-capture the baseline on a quiescent host; confirm the ratios hold.
 - Use `render_pipeline_browser` (and a per-fixture variant if needed) to confirm
   the cost is in `render`, and break the render step down by node kind.
