@@ -8,6 +8,16 @@ license = "AGPL-3.0-only"
 name = "sniff"
 path = "src/main.rs"
 
+# Test-only helper rendered inside a real terminal by the Level 2 styling test.
+# Gated behind `test-fixtures` so it stays out of default builds and `cargo install`.
+[[bin]]
+name = "render_cicd_fixture"
+path = "src/bin/render_cicd_fixture.rs"
+required-features = ["test-fixtures"]
+
+[features]
+test-fixtures = []
+
 [dependencies]
 chrono = "0.4"
 clap = { version = "4", features = ["derive", "wrap_help"] }

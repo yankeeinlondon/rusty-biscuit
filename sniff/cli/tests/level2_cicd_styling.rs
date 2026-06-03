@@ -10,6 +10,12 @@
 //!
 //! Skip-clean: when no terminal harness is available the test prints a skip
 //! notice and passes, so GitHub-hosted CI (which lacks the tooling) stays green.
+//!
+//! Gated behind `test-fixtures`: the `render_cicd_fixture` helper binary this
+//! test spawns is only built with that feature, so the file compiles to nothing
+//! (and the missing `CARGO_BIN_EXE_*` env var never breaks `just test`) unless
+//! the feature is enabled. The `test-l2` recipe passes `--features test-fixtures`.
+#![cfg(feature = "test-fixtures")]
 
 use assert_cmd::cargo::cargo_bin;
 use biscuit_test_harness::TerminalHarness;
