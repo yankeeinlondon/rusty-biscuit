@@ -13,3 +13,5 @@ In addition it will use:
 - `tracing` and `tracing-subscriber` for spans, metrics, debugging
 
 ## Library
+
+We will use
