@@ -714,11 +714,14 @@ mod tests {
         }
     }
 
+    // Serialized against `structural_terminal_hint_fallback_emits_warn_once_then_debug`:
+    // both reset the process-global `WARNED_TYPES` cache, so concurrent execution lets
+    // one test's `clear()` race the other's warn→debug transition.
     #[test]
+    #[serial_test::serial(warned_types)]
     #[tracing_test::traced_test]
     fn warn_fallback_emits_warn_once_then_debug() {
-        // Clear the global warn-once state so this test does not depend on
-        // execution order relative to other tests in the suite.
+        // Clear the global warn-once state so this test starts from a known cache.
         reset_warned_types_for_test();
 
         let stub_type_name = std::any::type_name::<warn_once_stub::StubWarnOnceFallback>();
@@ -820,7 +823,10 @@ mod tests {
     /// thread a terminal hint (Compose, OrderedList, UnorderedList) would
     /// silently flatten a component that forgot to override
     /// `render_tree_node`.
+    // Serialized against `warn_fallback_emits_warn_once_then_debug`: see that test's note —
+    // both mutate the process-global `WARNED_TYPES` cache.
     #[test]
+    #[serial_test::serial(warned_types)]
     #[tracing_test::traced_test]
     fn structural_terminal_hint_fallback_emits_warn_once_then_debug() {
         reset_warned_types_for_test();

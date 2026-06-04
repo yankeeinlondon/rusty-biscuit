@@ -145,6 +145,16 @@ impl Run for ProseArgs {
     }
 }
 
+/// Wraps a Prose HTML fragment in the layout `<div>`.
+///
+/// The CLI is the **single source of layout** for `bt prose --html`:
+/// [`Prose::render_html_fragment`](biscuit_terminal::components::prose::Prose)
+/// deliberately emits a layout-free inline `<span class="prose">`, so this
+/// wrapper owns margins/alignment without double-applying them. This split is
+/// interim — see the doc note on `Prose::render_html_fragment` and
+/// `renderable/features/2026-06-04-style-based-alignment`: once layout lowers
+/// to CSS via the `renderable` style primitives, revisit whether the fragment
+/// should carry its own layout and this wrapper retire.
 fn render_html_with_layout(fragment: &str, layout: &LayoutArgs) -> String {
     let Some(style) = layout_css_style(layout) else {
         return fragment.to_string();

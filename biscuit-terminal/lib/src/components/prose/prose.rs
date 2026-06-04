@@ -3,8 +3,9 @@
 use std::any::Any;
 
 use renderable::browser::{BrowserRenderable, PageOptions};
-use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::browser::fragment::{BrowserFragment, ComposableNode, Ready};
 use renderable::html::HtmlPage;
+use renderable::html::tag::BlockTag;
 use renderable::markdown::MarkdownRenderable;
 use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
@@ -340,23 +341,53 @@ impl MarkdownRenderable for Prose {
 }
 
 impl BrowserRenderable for Prose {
-    /// Renders the prose as an HTML fragment via the canonical render tree.
+    /// Renders the prose as a layout-free inline `<span class="prose">` HTML
+    /// fragment.
+    ///
+    /// ## Interim layout contract (revisit with style-based-alignment)
+    ///
+    /// The fragment deliberately carries **no** layout (margins, alignment,
+    /// width): it wraps the styled inline children in a single
+    /// `<span class="prose">` and stops there. Layout is owned by the caller —
+    /// the `bt prose` CLI wraps this fragment in its own `<div style="…">` (see
+    /// `biscuit-terminal/cli/src/commands/prose.rs::render_html_with_layout`).
+    ///
+    /// This splits the contract on purpose. Routing the fragment through
+    /// [`TreeRenderable::render_tree`] folds Prose's `Layout` into the fragment
+    /// (`<div style="margin-…"><p>…</p></div>`), which then **double-applies**
+    /// the margin against the CLI's own wrapper. Keeping the fragment inline and
+    /// letting the CLI own layout is the resolution chosen on 2026-06-04 for
+    /// that double-margin defect.
+    ///
+    /// It is an interim choice. Once
+    /// `renderable/features/2026-06-04-style-based-alignment` moves layout onto
+    /// CSS-Box-Layout `renderable::style`/`Layout` primitives that lower to CSS,
+    /// the component-owns-its-layout model becomes viable again and this split
+    /// should be reconsidered (fragment carries its layout; CLI stops wrapping).
+    /// Until then, do not re-route this through `render_tree`.
     fn render_html_fragment(&self) -> BrowserFragment<Ready> {
-        let node = <Self as TreeRenderable>::render_tree(self);
+        // Render each projected node to its own HTML through the shared tree
+        // renderer, then concatenate the strings inside one `<span class="prose">`.
+        // Rendering per node (rather than wrapping the nodes in one inline Span
+        // tree) keeps a top-level block-level `Code` node valid — a fenced code
+        // block folds to `<pre><code>…</code></pre>` and only the final HTML
+        // string carries it inside the span, which the tree validator never sees.
         let opts = BrowserRenderOptions::default();
-        match render_browser_node(&node, &opts) {
-            Ok(rendered) => rendered.output,
-            Err(error) => {
-                tracing::error!(
+        let mut inner = String::new();
+        for child in self.to_render_nodes() {
+            match render_browser_node(&child, &opts) {
+                Ok(rendered) => inner.push_str(&rendered.output.render()),
+                Err(error) => tracing::error!(
                     component = "Prose",
                     error = %error,
-                    "render_browser_node failed; emitting empty fragment"
-                );
-                BrowserFragment::new()
-                    .define_as_text_fragment(String::new())
-                    .finalize()
+                    "render_browser_node failed; skipping node"
+                ),
             }
         }
+        BrowserFragment::new()
+            .define_as_block_tag(BlockTag::Span, "prose")
+            .add_child(ComposableNode::RawHtml(inner))
+            .finalize()
     }
 
     /// Wraps the HTML fragment in a complete [`HtmlPage`].
