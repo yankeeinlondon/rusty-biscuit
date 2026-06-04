@@ -31,7 +31,10 @@ description: A record of novel things learned about how to best perform commits 
   - `git commit -m "message" -- path1 path2` — commits ALL staged files (the paths are informational only)
 - Quote paths that contain spaces when passing them to `git commit`.
 - Be careful with renames. When files are staged as renamed (R100), `git commit --only` with only the new path can produce incomplete commits that record only the deletion of the old path, not the addition of the new path. To preserve a rename atomically, either commit without path-limiting (let git infer the paths) or include both old and new paths explicitly.
-  - **Recovery:** If a rename commit only recorded deletions (missing the new files), extract the file content from the index blobs directly and create a new commit. Use `git ls-files --stage` to find blob hashes, `git show <hash> > path` to restore content, then `git add` and `git commit` normally.
+  - **Recovery (rename commit only recorded deletions):** If a rename commit (R100) only recorded deletions of the old path (missing new file additions), the fix is:
+    1. `git reset --soft HEAD~1` — this brings the deletion commit's tree into the index, which combines with any staged additions to restore proper R100 rename entries
+    2. `git commit -m "message"` (no paths) — commit without path-limiting so git handles the rename atomically
+  - **Recovery (blob extraction fallback):** Use `git ls-files --stage` to find blob hashes, `git show <hash> > path` to restore content, then `git add` and `git commit` normally.
   - **Better approach for multi-agent workflows:** Avoid using `--only` with renamed files. Instead, have the orchestrator stage files one group at a time and have subagents commit sequentially, rather than pre-staging all groups and using concurrent `--only` commits.
 - `git commit --only -m "message" -- path` also works for a newly added file, as long as the file has already been staged.
 
