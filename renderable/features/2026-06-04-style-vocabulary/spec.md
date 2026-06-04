@@ -1,5 +1,6 @@
 ---
-status: ready for planning
+status: ready for planning and implementation
+reviewed: true
 date: 2026-06-04
 owner: ken
 parent: renderable/features/2026-06-04-css-box-architecture/spec.md
@@ -11,6 +12,14 @@ The root of the [CSS Box Architecture](../2026-06-04-css-box-architecture/spec.m
 the `renderable::layout` and `renderable::style` types every component,
 renderer, and `style:` frontmatter key resolves to. Every other sub-spec
 builds on the vocabulary fixed here.
+
+> **Reader note from inline review:** this spec intentionally changes
+> renderable's core vocabulary, not just darkmatter's internal `style:`
+> lowering. The public `style:` v1 frontmatter keys remain compatible; the
+> internal Rust type names, serde shape, docs, and skill guidance are allowed
+> to change where this spec says so. The reviewed design keeps the change
+> surgical by preserving field defaults, sparse attrs, and frontmatter input
+> compatibility while retiring the `Fill` abstraction completely.
 
 ## Background
 
@@ -66,6 +75,9 @@ concerns.
 - Define a **defaulting contract** under which an un-styled node is bit-
   identical to today, and a `style:`-styled node lowers to the same geometry
   and paint — expressed in the new primitives.
+- Preserve the serialized render-tree compatibility that matters in practice:
+  old `Layout` payloads without `padding` or `width` deserialize with the new
+  defaults, and new payloads use predictable snake_case enum tags.
 
 ## Non-Goals (deferred to sibling sub-specs)
 
@@ -76,6 +88,10 @@ concerns.
   `build_component_css` (→ *darkmatter-cutover*).
 - `min_width` (no `Page*` analog exists; speculative). The orthogonal design
   leaves room to add it later as a third independent field with no rework.
+- Public frontmatter key renames. `style:` v1 input compatibility is a parent
+  architecture contract; `fill`, `padding`, `margin`, `width`, `max-width`,
+  component names, and deprecated aliases continue to parse until a separate
+  darkmatter compatibility spec schedules their removal.
 
 ## The vocabulary
 
@@ -87,7 +103,7 @@ concerns.
 pub struct Layout {
     pub margin:    Edges,                        // transparent outer space
     pub padding:   Edges,                        // reserved inner space; PAINTED by Style.background
-    pub width:     Width,                        // how the box sizes itself
+    pub width:     Width,                        // content-box width
     pub max_width: Option<TargetValue<Length>>,  // orthogonal upper cap; None = uncapped
     pub alignment: Alignment,                    // placement within the parent's free width
     pub word_wrap: WordWrap,
@@ -107,6 +123,50 @@ pub enum Width {
 `Edges` is today's four-sided `TargetValue<Length>` box, **renamed from
 `Margin`** so it reads honestly for both fields. Constructors mirror today's:
 `Edges::{all,x,y}` plus `Edges::default()` (all `Length::Zero`).
+
+`Layout` remains **block-only**. Tree validation must continue rejecting
+layout attrs on inline nodes. `Style` may still attach to inline spans, but
+inline spans have no `padding` or block `width`; an inline `background` paints
+the inline content only. The "background paints content + padding" rule applies
+to block nodes that carry both `Layout` and `Style`.
+
+`width` is a **content-box width**, matching CSS's default `box-sizing:
+content-box`. Total horizontal occupancy is:
+
+```text
+margin-left + border-left + padding-left + used_width
+  + padding-right + border-right + margin-right
+```
+
+`Border` stays in `Style` because it is paint, but renderers must reserve the
+cells/pixels a drawn border consumes when folding a box. This spec does not add
+a separate `box_sizing` field; all future width math should preserve the
+content-box contract unless a later spec explicitly changes it.
+
+### Serialization contract
+
+`Layout`, `Edges`, and `Width` continue to derive serde. `Width` uses
+`#[serde(rename_all = "snake_case")]` so the variants serialize as `auto`,
+`fit_content`, and `fixed`. New `Layout` fields must be defaulted for backward
+deserialization:
+
+```rust
+#[serde(default)]
+pub padding: Edges,
+#[serde(default)]
+pub width: Width,
+```
+
+An older serialized tree containing only `margin`, `alignment`, `max_width`,
+and `word_wrap` must deserialize to `Layout { padding: Edges::default(), width:
+Width::Auto, ... }`. The type rename from `Margin` to `Edges` is an API rename,
+not a serialized field rename: the existing `margin` field remains named
+`margin`; the new field is named `padding`.
+
+No public `type Margin = Edges` compatibility alias should remain in
+`renderable` after this change. Keeping such an alias would preserve the old
+mental model and make the skill/docs drift harder to catch. Consumer compile
+fixes land in the same coordinated change instead.
 
 **Kept as-is** (the resolution machinery is sound): `Length`
 (`Zero|Ch|Percent|Css`), `TargetValue` (universal vs. per-target), `PerMode`
@@ -140,6 +200,11 @@ Background::pronounced()   // adaptive PerMode tint, strong
 // usage: Style { background: Some(Background::subtle()), ..Default::default() }
 ```
 
+`Background` is a constructor namespace, not a second stored style type. It
+should be implemented as a zero-sized helper (`pub struct Background;` or
+equivalent) with associated constructors so serialized `Style.background`
+continues to contain only `TargetValue<PerMode<Color>>`.
+
 > `PageBackground::Pronounced`'s **color-mode flip** (inverting the code theme
 > for contrast) was never part of `Fill`; it lives in darkmatter's page frame
 > and stays there (handled in *darkmatter-cutover*).
@@ -156,6 +221,15 @@ base = match width {
 };
 used_width = clamp(base, 0, min(available_width, max_width.unwrap_or(available_width)));
 ```
+
+Resolution is in target units after `TargetValue` has selected the active
+target. `Length::Percent` for `width` and `max_width` resolves against the
+parent content width available to this box, before margin/padding/border are
+added. Horizontal `Edges` percentages use that same parent content width.
+Vertical `Edges` percentages are accepted because the existing `Length` model
+accepts them on every side, but target renderers may degrade them target-
+specifically; this spec does not require terminal vertical percentage padding
+to synthesize fractional rows.
 
 `width` and `max_width` are **orthogonal and compose** (CSS `width` +
 `max-width`). This is the expressiveness gain over the flat `PageFill` enum,
@@ -178,8 +252,15 @@ which could state only one sizing fact at a time:
 | `PageFill::Explicit(n)` | `width: Fixed(n)` |
 | `Fill { band: Padded/Indented }` (band hugging text, gutter transparent) | `width: FitContent` + `alignment` + `Style.background` |
 | `Fill { intensity: Subtle/Pronounced }` | `Background::subtle()` / `pronounced()` |
-| `Fill { inset }` | `padding` (painted) or `margin` (transparent) |
+| `Fill { inset }` with `Full` / `Indented` symmetric band narrowing | `margin: Edges::x(n)` + `Style.background` when the inset should stay transparent, or `padding: Edges::x(n)` when the inset should be painted as an inner gutter |
+| `Fill { inset }` with `Padded` content-band offset | `width: FitContent` + `alignment` + `margin` or `padding`, depending on whether the offset was transparent or painted in the legacy caller |
 | `WidthUnit::Fixed(n)` / `Percent(p)` | `Length::ch(n)` / `Length::percent(p)` (already total) |
+
+The `Fill { inset }` rows are deliberately explicit because the old field was
+ambiguous: it sometimes meant "narrow the painted band" and sometimes acted
+like spacing around a content-sized band. Implementations must choose based on
+the call site's observed paint behavior, with characterization tests for each
+legacy caller that used a non-zero inset.
 
 ## Defaulting contract
 
@@ -211,6 +292,31 @@ defaults and **skips the styling pass entirely** — the direct replacement for
 the cheap path. (The renderer short-circuit itself lands in *renderer-folds*;
 this spec fixes the *contract* that absence ≡ default.)
 
+`Style::is_empty()` must also be updated for the new vocabulary: with `fill`
+deleted, `Style::default()` is empty when `color`, `background`, and `border`
+are `None` and `emphasis` is empty. A `Style` that only carries
+`Background::subtle()` / `pronounced()` is not empty.
+
+## Public compatibility and documentation impact
+
+This spec intentionally breaks Rust source references to
+`renderable::layout::Margin` and `renderable::style::{Fill, FillBand,
+FillIntensity}`. It does **not** break public darkmatter `style:` input. The
+implementation must keep parsing existing frontmatter and lower it into the
+new vocabulary until a later compatibility spec says otherwise.
+
+Because these types are documented in the local renderable skill and design
+docs, implementation must update at least:
+
+- `.claude/skills/renderable/layout.md`
+- `.claude/skills/renderable/style.md`
+- `renderable/docs/layout-and-style.md`
+- any READMEs that describe `Fill`, `Margin`, or the absence of padding
+
+That doc/skill update is part of the behavior change, not optional cleanup:
+after this spec lands, saying "Layout has no padding" or listing `Fill` as an
+active style field would be drift.
+
 ## Acceptance Criteria
 
 1. `renderable::layout::Layout` carries `margin`, `padding`, `width`,
@@ -229,11 +335,16 @@ this spec fixes the *contract* that absence ≡ default.)
    test pinning each field.
 6. `Layout` / `Style` / `Width` / `Edges` serde round-trip; `Layout::validate`
    covers `padding` and `width` (percent ranges, non-universal-unit rules).
+   Deserializing an old `Layout` payload without `padding` or `width` supplies
+   `Edges::default()` and `Width::Auto`.
 7. Because the type change ripples into the terminal renderer and darkmatter,
    the workspace still **compiles and its tests still run** at the end of this
    spec's implementation — consumer updates land in the same coordinated change
    (the detailed renderer/darkmatter behavior is *renderer-folds* /
    *darkmatter-cutover*, but nothing may be left non-compiling).
+8. The local renderable skill/docs no longer describe `Fill` as active, no
+   longer claim `Layout` lacks padding, and document the `Edges` / `Width`
+   serde/defaulting contract.
 
 ## Risks
 
@@ -251,6 +362,18 @@ this spec fixes the *contract* that absence ≡ default.)
 - **Adaptive-tint fidelity.** `Background::subtle()`/`pronounced()` must
   reproduce the former tints across color depths. Mitigation: pin the resolved
   RGB + degraded-palette values in unit tests, mirroring `fill_sgr`.
+- **Serialized tree compatibility.** Adding `padding` and `width` without
+  serde defaults would make older render-tree snapshots fail to deserialize.
+  Mitigation: require `#[serde(default)]` on both fields and add a test with
+  the old serialized `Layout` shape.
+
+## Open Questions
+
+No implementation-blocking open questions remain after inline review. The
+largest ambiguous point was whether to keep a Rust `Margin` alias during the
+transition; this spec chooses **no alias** because the rename is intended to
+correct the vocabulary, consumer compile-fixes are already required, and serde
+compatibility preserves the durable data contract.
 
 ## Related
 
