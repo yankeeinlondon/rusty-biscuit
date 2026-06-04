@@ -210,6 +210,36 @@ before tagging existed, the WezTerm cleanup sweeps untagged panes in the
 `biscuit-bg` workspace when that workspace grows past a conservative
 limit, or when `BISCUIT_TEST_HARNESS_SWEEP_LEGACY_WEZTERM=1` is set.
 
+### Apple Terminal: known gaps and invariants
+
+Terminal.app is GUI-automated via `osascript` and is the most fragile
+backend. Two known issues bite anyone editing `apple_terminal.rs`:
+
+1. **The pid tag does not survive.** Spawned windows are tagged with a
+   custom title (`biscuit-test-terminal-<pid>`), but an interactive shell
+   prompt overwrites the window title (zsh `precmd` / bash
+   `PROMPT_COMMAND`), so `cleanup_stale_apple_terminal_windows()` cannot
+   find leaked windows by title. Leaked Terminal windows therefore
+   accumulate across killed/timed-out runs. A title-independent tracking
+   mechanism (id registry file, or a process-list marker) is needed; until
+   then, reset with `killall Terminal` (and beware macOS "reopen windows on
+   relaunch", which can restore them).
+2. **`do script` reuses the idle front window.** `do script "cmd"` with no
+   target nondeterministically runs in the frontmost idle window instead of
+   creating a new one. A self-spawning test (`level2_apple_terminal_harness_lifecycle`)
+   could thereby capture and close the *shared* test window, breaking every
+   later test with `Can't get selected tab of window …`. **Fixed** (focus-free):
+   `spawn_shell` reports whether the window was genuinely new (id-diff) and
+   clears `owned` on reuse so `Drop` never closes a reused window; the
+   self-spawning lifecycle test skips when a shared broker window is present.
+
+Two **invariants** any spawn change must preserve: spawning must **never
+steal foreground focus** (no `activate` / `System Events keystroke`), and
+the harness must **never close a window it did not create** (track
+ownership by window-id diff, not by `id of front window`). Issue #1
+(title-overwrite orphan leaks) is still open. See
+`.claude/skills/rust-testing/apple-terminal-harness-pitfalls.md`.
+
 ## Environment prerequisites
 
 `available()` gates every harness. It returns `false` cleanly when the

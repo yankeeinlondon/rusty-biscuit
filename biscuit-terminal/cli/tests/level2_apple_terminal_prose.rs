@@ -339,6 +339,22 @@ fn level2_apple_terminal_harness_lifecycle() {
         "Terminal.app",
     );
 
+    // Skip under a shared broker window. This is the only Apple-Terminal
+    // test that spawns its *own* window (to exercise Drop cleanup), and
+    // Terminal's `do script` can reuse the idle frontmost window — i.e. the
+    // shared window — which this test would then close, breaking every
+    // sibling test that attaches to it. The Drop/cleanup semantics are
+    // exercised in the non-broker run (no shared window to corrupt), so
+    // skipping here is loss-free. See
+    // `.claude/skills/rust-testing/apple-terminal-harness-pitfalls.md`.
+    if std::env::var(biscuit_test_harness::apple_terminal::SHARED_WINDOW_ENV).is_ok() {
+        eprintln!(
+            "skipping: level2_apple_terminal_harness_lifecycle spawns its own window, which \
+             conflicts with the shared broker window (BISCUIT_SHARED_APPLE_TERMINAL_WINDOW_ID)"
+        );
+        return;
+    }
+
     // Snapshot the set of Terminal.app window ids *before* the harness
     // spawns. After the harness drops we check that no NEW window ids
     // remain — i.e. every window the harness created was cleaned up.

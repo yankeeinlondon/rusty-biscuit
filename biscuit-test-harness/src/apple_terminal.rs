@@ -454,13 +454,12 @@ impl TerminalHarness for AppleTerminalHarness {
         shell_cmd.push_str(" -l");
 
         // Snapshot the frontmost process *before* `do script` so we can
-        // restore focus after Terminal.app inevitably grabs it. The
-        // outer `try` blocks let the script proceed silently if System
-        // Events cannot resolve a frontmost process (e.g. login window)
-        // or if the previous app refuses an activate. We deliberately
-        // do NOT call `activate` on Terminal first — `do script` will
-        // create the window without it, and skipping `activate`
-        // shortens the focus flash.
+        // restore focus afterwards. The outer `try` blocks let the script
+        // proceed silently if System Events cannot resolve a frontmost
+        // process (e.g. login window). We deliberately do NOT call
+        // `activate` on Terminal — `do script` creates the window without
+        // it, so spawning is focus-free (it never steals foreground focus,
+        // a hard invariant: the harness runs while the developer works).
         //
         // The restore step uses `System Events` to re-frontmost the
         // captured process by *process name* rather than
@@ -471,32 +470,63 @@ impl TerminalHarness for AppleTerminalHarness {
         // installed `.app` bundle — LaunchServices then pops a
         // "Choose Application — Where is X?" dialog that blocks the
         // test until the developer dismisses it.
+        //
+        // ## Ownership guard (do-script window reuse)
+        //
+        // `do script` with no target window does NOT reliably create a new
+        // window: when an idle Terminal window is frontmost it *reuses* it,
+        // nondeterministically. We must never mistake a reused window for
+        // our own and close it on `Drop` — doing so destroys another
+        // harness's (e.g. the shared broker) window and breaks every later
+        // test. So we snapshot the window-id set before `do script` and
+        // report whether the resulting window id is genuinely new
+        // (`isNew`). The Rust side clears `owned` when it is not, so `Drop`
+        // leaves reused windows alone. This is the focus-free half of the
+        // fix; the conflicting self-spawning test
+        // (`level2_apple_terminal_harness_lifecycle`) additionally skips
+        // when a shared broker window is present.
         let script = format!(
             r#"set prevApp to ""
             try
                 tell application "System Events" to set prevApp to name of first process whose frontmost is true
             end try
+            set beforeIds to {{}}
             tell application "Terminal"
+                repeat with w in windows
+                    set end of beforeIds to (id of w)
+                end repeat
                 set newTab to do script "{cmd}"
                 delay 0.3
                 set winId to id of front window
                 try
-                    set custom title of front window to "{window_tag}"
+                    set custom title of (first window whose id is winId) to "{window_tag}"
                 end try
             end tell
+            set isNew to (beforeIds does not contain winId)
             if prevApp is not "" and prevApp is not "Terminal" then
                 try
                     tell application "System Events" to set frontmost of (first process whose name is prevApp) to true
                 end try
             end if
-            return winId as text"#,
+            return (winId as text) & tab & (isNew as text)"#,
             cmd = applescript_escape(&shell_cmd),
             window_tag = applescript_escape(&window_tag),
         );
         let stdout = Self::run_script(&script)?;
-        let id: i64 = stdout
+        let (id_str, is_new) = stdout.split_once('\t').unwrap_or((stdout.as_str(), "true"));
+        let id: i64 = id_str
+            .trim()
             .parse()
-            .map_err(|e| io::Error::other(format!("unparseable window id {stdout:?}: {e}")))?;
+            .map_err(|e| io::Error::other(format!("unparseable window id {id_str:?}: {e}")))?;
+        // `do script` reused a pre-existing window rather than creating one:
+        // it is not ours, so never close it on `Drop`.
+        if is_new.trim() != "true" {
+            self.owned = false;
+            eprintln!(
+                "warning: Terminal `do script` reused existing window {id} instead of creating \
+                 one; leaving it open (not taking ownership)"
+            );
+        }
         self.window_id = Some(id);
         self.window_tag = Some(window_tag);
 
