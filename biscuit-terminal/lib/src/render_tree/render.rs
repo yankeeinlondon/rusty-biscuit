@@ -370,8 +370,16 @@ impl Writer<'_> {
                 let effective = self.effective.clone();
                 let markup = self.render_inline(children, &effective)?;
                 if let Some(hints) = node.attrs.progress_hints() {
+                    // A progress bar is a single fixed-width glyph run; wrapping
+                    // it would split the bar, so it is emitted as-is.
                     let bar = render_progress_bar(&hints, &markup, self.opts.context.color_depth);
                     Ok(self.render_prose(&bar))
+                } else if self.opts.context.wrap_prose {
+                    // Top-level paragraphs wrap to the post-margin content width,
+                    // matching the legacy `for_terminal` renderer's line wrapping.
+                    // Off by default so component callers (which apply their own
+                    // post-render wrapping) are unaffected.
+                    Ok(self.wrap_prose(&markup))
                 } else {
                     Ok(self.render_prose(&markup))
                 }
@@ -401,6 +409,14 @@ impl Writer<'_> {
                         self.opts.context.available_width,
                     );
                     Ok(wrapped.join("\n"))
+                } else if let Some(prefix) = self.opts.context.blockquote_prefix.clone() {
+                    // The darkmatter document pipeline asks for its own quarter-
+                    // block bar (`▐   `) instead of the component's `│ ` border.
+                    // Children render at the reduced width so inner prose wraps
+                    // inside the bar, then each line is prefixed; nested quotes
+                    // recurse and prepend their own bar, matching the legacy
+                    // renderer's per-depth `"▐   ".repeat(depth)`.
+                    Ok(self.render_blockquote_with_prefix(children, &prefix)?)
                 } else {
                     let inner = self.render_blocks(children)?;
                     let quote = BlockQuote::from(inner.as_str());
@@ -654,6 +670,45 @@ impl Writer<'_> {
         result
     }
 
+    /// Renders an unstyled block quote with a caller-supplied left-border
+    /// `prefix` (the darkmatter `▐   ` bar) instead of the shared
+    /// [`BlockQuote`] component's `│ ` border.
+    ///
+    /// The children render at the width left after the prefix so inner prose
+    /// wraps inside the bar; each produced line is then prefixed with the bar
+    /// painted in the legacy gray foreground. Nested block quotes recurse
+    /// through the same path and prepend their own bar, reproducing the legacy
+    /// renderer's per-depth `"▐   ".repeat(depth)`.
+    fn render_blockquote_with_prefix(
+        &mut self,
+        children: &[RenderNode],
+        prefix: &str,
+    ) -> Result<String, RenderError> {
+        let prefix_width = visible_width(prefix);
+        let child_width = self
+            .opts
+            .context
+            .available_width
+            .saturating_sub(prefix_width)
+            .max(1);
+        let inner = self.render_blocks_in_width(children, child_width)?;
+
+        // Gray foreground for the bar, matching the legacy renderer's
+        // `\x1b[38;2;100;100;100m` quarter-block. The page-frame post-pass owns
+        // the subtle background band, so the bar itself only carries its fg.
+        let colored_prefix = format!("\x1b[38;2;100;100;100m{prefix}\x1b[39m");
+
+        let mut out = String::new();
+        for (idx, line) in inner.split('\n').enumerate() {
+            if idx > 0 {
+                out.push('\n');
+            }
+            out.push_str(&colored_prefix);
+            out.push_str(line);
+        }
+        Ok(out)
+    }
+
     /// Renders a sequence of inline nodes into terminal SGR output.
     ///
     /// Each inline node is lowered directly to ANSI escapes without an
@@ -751,25 +806,71 @@ impl Writer<'_> {
                 title: _,
                 children,
             } => {
-                let inner = self.render_inline(children, effective)?;
-                if url.is_empty() {
-                    Ok(inner)
-                } else if term.osc_link_support {
-                    Ok(format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, inner))
+                // A link may carry its own `Style` (e.g. a darkmatter
+                // `style.hyperlinks.*` color lowered onto the node). Its text
+                // appearance inherits from the enclosing `effective` and wraps
+                // the visible link text; the OSC8 escapes are added around the
+                // already-styled text so the color rides inside the hyperlink.
+                let link_effective = match node.attrs.style().filter(|s| !s.is_empty()) {
+                    Some(link_style) => link_style.inherited_from(effective),
+                    None => effective.clone(),
+                };
+                let inner = self.render_inline(children, &link_effective)?;
+                let styled = if link_effective == *effective {
+                    inner
                 } else {
-                    let desc = inner.replace(']', "\\]");
+                    let open = style::text_appearance_sgr(&link_effective, term);
+                    let close = format!(
+                        "{}{}",
+                        style::SGR_RESET,
+                        style::text_appearance_sgr(effective, term),
+                    );
+                    format!("{open}{inner}{close}")
+                };
+                if url.is_empty() {
+                    Ok(styled)
+                } else if term.osc_link_support {
+                    Ok(format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, styled))
+                } else {
+                    let desc = styled.replace(']', "\\]");
                     Ok(format!("[{desc}]({url})"))
                 }
             }
-            NodeKind::Image { url, alt, .. } => match self.opts.context.graphics_mode {
-                // Off / Vector: alt-text fallback (no raster form).
-                GraphicsMode::Off | GraphicsMode::Vector => Ok(format!("[{alt}]")),
-                // Rich: attempt the inline image protocol, falling back to alt
-                // text when the source is out of contract or unrenderable.
-                GraphicsMode::Rich => {
-                    Ok(self.render_terminal_image(url, alt).unwrap_or_else(|| format!("[{alt}]")))
+            NodeKind::Image { url, alt, .. } => {
+                // The alt-text fallback inherits the image node's own `Style`
+                // (e.g. a darkmatter `style.images.*` color lowered onto the
+                // node). A successfully rendered inline image is left unstyled —
+                // color has no meaning for a raster cell.
+                let fallback = || {
+                    let inner = format!("[{alt}]");
+                    match node.attrs.style().filter(|s| !s.is_empty()) {
+                        Some(img_style) => {
+                            let img_effective = img_style.inherited_from(effective);
+                            if img_effective == *effective {
+                                inner
+                            } else {
+                                let open = style::text_appearance_sgr(&img_effective, term);
+                                let close = format!(
+                                    "{}{}",
+                                    style::SGR_RESET,
+                                    style::text_appearance_sgr(effective, term),
+                                );
+                                format!("{open}{inner}{close}")
+                            }
+                        }
+                        None => inner,
+                    }
+                };
+                match self.opts.context.graphics_mode {
+                    // Off / Vector: alt-text fallback (no raster form).
+                    GraphicsMode::Off | GraphicsMode::Vector => Ok(fallback()),
+                    // Rich: attempt the inline image protocol, falling back to
+                    // alt text when the source is out of contract or unrenderable.
+                    GraphicsMode::Rich => {
+                        Ok(self.render_terminal_image(url, alt).unwrap_or_else(fallback))
+                    }
                 }
-            },
+            }
             NodeKind::FootnoteReference { identifier } => {
                 Ok(format!("[^{identifier}]"))
             }
@@ -819,6 +920,28 @@ impl Writer<'_> {
     /// SGR by [`Self::render_inline_node`].
     fn render_prose(&self, markup: &str) -> String {
         markup.to_string()
+    }
+
+    /// Word-wraps already-SGR-rendered inline `markup` to the post-margin
+    /// content width ([`available_width`](TerminalRenderContext::available_width)).
+    ///
+    /// Uses the SGR-aware [`wrap_lines`] primitive directly — the same one the
+    /// styled-blockquote and two-column paths use — so top-level paragraphs
+    /// flow onto extra rows instead of overrunning the content width, matching
+    /// the legacy `for_terminal` renderer's line wrapping.
+    ///
+    /// `wrap_lines` (rather than constructing a [`Prose`] and calling
+    /// `render_in_width`) is deliberate: `Prose::render` routes back through
+    /// [`render_terminal_node`], which re-enters this very paragraph path —
+    /// using `Prose` here would recurse infinitely.
+    fn wrap_prose(&self, markup: &str) -> String {
+        let width = self.opts.context.available_width;
+        if width == 0 {
+            return markup.to_string();
+        }
+        let lines = split_lines(markup);
+        let wrapped = wrap_lines(lines, &WordWrap::WrapProse(None, None), width);
+        wrapped.join("\n")
     }
 
     /// Renders a heading line from a depth and pre-rendered inline `markup`.
@@ -983,15 +1106,38 @@ impl Writer<'_> {
                 {
                     nested.push(self.render_tree_connector_list(nested_children, &continuation)?);
                 } else if is_inline_block(item_child) {
+                    // A connector-list item's paragraph carries a per-entry
+                    // `Style` (e.g. `FileSystem`'s `fs_entry_style`: red for a
+                    // highlight match, italic for a dotfile, cyan for a
+                    // symlink). Fold that style into the effective appearance so
+                    // the item label inherits its color / emphasis, then wrap
+                    // the rendered label with the matching SGR — without this
+                    // the projection's `Style` never reaches terminal output.
+                    let item_style = item_child.attrs.style().filter(|s| !s.is_empty());
+                    let render_effective = item_style
+                        .as_ref()
+                        .map(|s| s.inherited_from(&self.effective));
+                    let effective = render_effective.as_ref().unwrap_or(&self.effective).clone();
                     let markup = match &item_child.kind {
                         NodeKind::Paragraph { children } => {
-                            self.render_inline(children, &Style::default())?
+                            self.render_inline(children, &effective)?
                         }
-                        _ => {
-                            self.render_inline(std::slice::from_ref(item_child), &Style::default())?
-                        }
+                        _ => self.render_inline(std::slice::from_ref(item_child), &effective)?,
                     };
-                    label_parts.push(self.render_prose(&markup));
+                    let label = self.render_prose(&markup);
+                    let label = match item_style {
+                        Some(style) => {
+                            let open =
+                                style::text_appearance_sgr(&style, &self.opts.context.terminal);
+                            if open.is_empty() {
+                                label
+                            } else {
+                                format!("{open}{label}{}", style::SGR_RESET)
+                            }
+                        }
+                        None => label,
+                    };
+                    label_parts.push(label);
                 } else {
                     label_parts.push(self.render(item_child)?);
                 }
@@ -1185,7 +1331,9 @@ impl Writer<'_> {
                 self.opts.context.available_width,
                 (&self.opts.context.color_depth).into(),
                 (&self.opts.context.color_mode).into(),
-            );
+            )
+            .with_code_theme_name(self.opts.context.code_theme.clone())
+            .with_line_numbers(self.opts.context.line_numbers);
             if let Some(rendered) = renderer.render_terminal_code(lang, value, meta, attrs, context)
             {
                 return Ok(rendered);
@@ -1279,11 +1427,14 @@ impl Writer<'_> {
     /// Renders a code block as a dim, indented panel.
     ///
     /// Syntax highlighting is out of scope for this phase; the language tag
-    /// is shown as a header so the lossy projection is visible.
+    /// is shown as a header so the lossy projection is visible. Under
+    /// [`ColorDepth::None`] no SGR is emitted at all, honoring the no-color
+    /// contract (the legacy renderer suppresses every escape in that mode).
     fn render_code(&self, lang: Option<&str>, value: &str) -> String {
         let body = value.trim_end_matches('\n');
-        let dim_open = "\x1b[2m";
-        let dim_close = "\x1b[0m";
+        let no_color = self.opts.context.color_depth == ColorDepth::None;
+        let dim_open = if no_color { "" } else { "\x1b[2m" };
+        let dim_close = if no_color { "" } else { "\x1b[0m" };
         let header = lang
             .filter(|l| !l.is_empty())
             .map(|l| format!("{dim_open}```{l}{dim_close}\n"))

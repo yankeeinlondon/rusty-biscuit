@@ -92,6 +92,42 @@ pub struct TerminalRenderContext {
     /// [`GraphicsMode::Rich`]. When `None`, the current working directory is
     /// used (matching the legacy terminal image renderer).
     pub image_base_path: Option<PathBuf>,
+    /// Whether top-level paragraphs are word-wrapped to
+    /// [`available_width`](Self::available_width).
+    ///
+    /// Off by default: component callers (e.g. [`Prose`](crate::components::prose::Prose))
+    /// apply their own post-render wrapping, so the tree paragraph path must
+    /// emit unwrapped lines for them. The darkmatter Markdown document pipeline
+    /// turns this on so top-level prose flows to the content width, matching the
+    /// legacy `for_terminal` renderer's line wrapping.
+    pub wrap_prose: bool,
+    /// Optional code-theme name forwarded to the [`CodeRenderer`] hook via
+    /// [`TerminalCodeContext`](renderable::color::TerminalCodeContext).
+    ///
+    /// A plain string (e.g. `"github"`) so the renderer stays free of any
+    /// consumer-specific theme types. When `None`, the code renderer uses its
+    /// own default theme. The darkmatter terminal entry point sets this from
+    /// `TerminalOptions::code_theme` so a caller's `with_code_theme(...)`
+    /// reaches the highlighted code panel.
+    ///
+    /// [`CodeRenderer`]: renderable::tree::CodeRenderer
+    pub code_theme: Option<String>,
+    /// Whether fenced code blocks render a line-number gutter, forwarded to the
+    /// [`CodeRenderer`](renderable::tree::CodeRenderer) hook.
+    ///
+    /// Off by default. The darkmatter document pipeline sets this from
+    /// `TerminalOptions::include_line_numbers` so the page line-number toggle
+    /// reaches the highlighted code panel.
+    pub line_numbers: bool,
+    /// Optional left-border prefix for unstyled block quotes.
+    ///
+    /// When `None` (the default), an unstyled [`NodeKind::Block­Quote`](renderable::tree::NodeKind::BlockQuote)
+    /// renders through the shared [`BlockQuote`](crate::components::block_quote::BlockQuote)
+    /// component with its canonical `│ ` border. When set, each quoted line is
+    /// prefixed with this string instead, and nested quotes repeat it per level.
+    /// The darkmatter Markdown document pipeline sets `"▐   "` so block quotes
+    /// match the legacy `for_terminal` renderer's quarter-block bar.
+    pub blockquote_prefix: Option<String>,
 }
 
 impl TerminalRenderContext {
@@ -120,6 +156,10 @@ impl TerminalRenderContext {
             force_graphics: false,
             mermaid_mode: TerminalMermaidMode::default(),
             image_base_path: None,
+            wrap_prose: false,
+            code_theme: None,
+            line_numbers: false,
+            blockquote_prefix: None,
         }
     }
 
@@ -335,6 +375,10 @@ mod tests {
         assert!(!ctx.force_graphics);
         assert_eq!(ctx.mermaid_mode, TerminalMermaidMode::Code);
         assert!(ctx.image_base_path.is_none());
+        assert!(!ctx.wrap_prose);
+        assert!(ctx.code_theme.is_none());
+        assert!(!ctx.line_numbers);
+        assert!(ctx.blockquote_prefix.is_none());
     }
 
     #[test]
