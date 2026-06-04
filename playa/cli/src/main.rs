@@ -19,7 +19,7 @@ use playa::{AudioFileFormat, AudioPlayer, Codec, PLAYER_LOOKUP, Playa, SoundEffe
 use sniff::hardware::{AudioDeviceInfo, AudioDeviceKind, AudioDirection};
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
+use darkmatter::markdown::output::terminal::TerminalOptions;
 use darkmatter::testing::strip_ansi_codes;
 #[cfg(feature = "audio-ducking")]
 use playa::ducking::{DuckConfig, backend_name, create_backend};
@@ -1129,7 +1129,7 @@ fn escape_markdown_cell(value: &str) -> String {
 
 fn render_markdown(content: &str, missing_players: &[String]) {
     let markdown = Markdown::from(content.to_string());
-    match for_terminal(&markdown, TerminalOptions::default()) {
+    match markdown.as_terminal(TerminalOptions::default()) {
         Ok(rendered) => {
             let output = dim_missing_rows(&rendered, missing_players);
             print!("{}", output);
