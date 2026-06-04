@@ -237,8 +237,8 @@ pub trait TerminalHarness {
     }
 }
 
-/// Strips CSI / OSC / SGR / charset-designation escape sequences from
-/// `s`, returning a plain-text rendering of the visible glyphs.
+/// Strips CSI / OSC / APC-DCS-PM / SGR / charset-designation escape sequences
+/// from `s`, returning a plain-text rendering of the visible glyphs.
 ///
 /// Used by `CapturedFrame::from_raw` so test assertions can match on
 /// option labels without contending with embedded styling sequences.
@@ -280,6 +280,21 @@ pub fn strip_ansi(s: &str) -> String {
                         i += 1;
                         break;
                     }
+                }
+                continue;
+            }
+            // String-terminator sequences: APC (`ESC _`, Kitty graphics), DCS
+            // (`ESC P`), and PM (`ESC ^`) all run until ST (`ESC \`). Without
+            // this, a Kitty image's base64 payload leaks into the visible-width
+            // measurement (the payload has no other escape framing).
+            if matches!(next, b'_' | b'P' | b'^') {
+                i += 2;
+                while i < bytes.len() {
+                    if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                        i += 2;
+                        break;
+                    }
+                    i += 1;
                 }
                 continue;
             }
