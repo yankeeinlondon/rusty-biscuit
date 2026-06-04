@@ -273,6 +273,17 @@ make the CLI stop wrapping) that belongs to the Prose-collapse work, not to this
 cannot affect browser HTML. Left untouched and flagged here rather than
 enshrining a contract by editing the expected strings.
 
+> **Resolved 2026-06-04.** Decision: the CLI stays the single source of layout
+> and `Prose::render_html_fragment` was restored to a layout-free inline
+> `<span class="prose">` (it renders each projected node to HTML and concatenates
+> inside the span, so a top-level `Code` block still folds to `<pre><code>…`).
+> Both tests pass unchanged. This is an **interim** contract: when
+> [`../2026-06-04-style-based-alignment/spec.md`](../2026-06-04-style-based-alignment/spec.md)
+> moves layout onto CSS-Box `renderable` primitives, revisit whether the
+> fragment should carry its own layout and the CLI wrapper retire. The revisit
+> trigger is recorded in doc comments on `Prose::render_html_fragment` and the
+> CLI's `render_html_with_layout`.
+
 ### Validation (Phase 4)
 
 - `cargo test -p darkmatter --lib yaml_block` — 37 passed.
