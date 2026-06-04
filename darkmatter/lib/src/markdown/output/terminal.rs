@@ -832,6 +832,15 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> Alignment {
 /// using ANSI escape sequences for terminal display. Inline images are rendered
 /// via biscuit-terminal's protocol-aware `TerminalRenderable` trait (Kitty/iTerm2).
 ///
+/// This is the **legacy event-stream serializer**, retained as the comparison
+/// surface for `migration_parity` and focused parity tests. Production terminal
+/// rendering for the default-layout path routes through the render tree
+/// ([`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal)); this
+/// `for_terminal` entry point is no longer on that path. Its decorated sibling
+/// [`for_terminal_with_layout`] does remain production-reachable for decorated
+/// [`DarkmatterPage`](crate::layout::DarkmatterPage) layouts pending the
+/// decorated-layout terminal cutover.
+///
 /// ## Examples
 ///
 /// ```

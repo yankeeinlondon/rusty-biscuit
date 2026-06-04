@@ -46,7 +46,9 @@ use crate::markdown::block::{
 ///
 /// The builder is consuming (`self -> Self`) for ergonomic chaining. With no
 /// builder calls, [`DarkmatterPage::render`] is byte-for-byte equivalent to
-/// `for_terminal(&md, TerminalOptions::default())`.
+/// [`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal) with
+/// default options — both route through the render-tree terminal document
+/// renderer. (The decorated layout path still uses the legacy serializer.)
 ///
 /// ## Examples
 ///
@@ -72,7 +74,7 @@ pub struct DarkmatterPage {
     /// set one explicitly, so a page built from `Terminal::new_optimistic`
     /// renders with that terminal's reported depth regardless of the ambient
     /// environment. The zero-config path deliberately leaves this unset to
-    /// preserve byte-for-byte parity with `for_terminal(default)`.
+    /// preserve byte-for-byte parity with `Markdown::as_terminal(default)`.
     terminal_color_depth: ColorDepth,
     margin: PageMargin,
     padding: PagePadding,
@@ -793,7 +795,9 @@ impl DarkmatterPage {
     /// padding, background fill) when any layout setting is non-default.
     ///
     /// When all layout fields are at their defaults, this is byte-for-byte
-    /// equivalent to `for_terminal(&md, TerminalOptions::default())`.
+    /// equivalent to `Markdown::as_terminal(default)` — the zero-config path
+    /// routes through the render-tree terminal document renderer. Decorated
+    /// layouts still use the legacy serializer.
     ///
     /// ## Errors
     ///
@@ -844,8 +848,8 @@ impl DarkmatterPage {
         // different SGR in a headless env than in a truecolor terminal).
         // The zero-config path deliberately leaves this unset so the renderer
         // falls back to `ColorDepth::auto_detect`, preserving byte-for-byte
-        // parity with `for_terminal(&md, TerminalOptions::default())`. An
-        // explicit `with_color_depth` always wins.
+        // parity with `Markdown::as_terminal(default)`. An explicit
+        // `with_color_depth` always wins.
         if !self.is_default_layout() && options.color_depth.is_none() {
             options.color_depth = Some(self.terminal_color_depth);
         }
@@ -858,12 +862,12 @@ impl DarkmatterPage {
             options.code_theme = theme;
         }
 
-        // Delegate to the existing terminal renderer. When no layout builder
-        // has been called we must NOT thread a layout context — doing so leaks
-        // the page's captured terminal width into component width resolution
-        // and breaks byte-for-byte equivalence with
-        // `for_terminal(&md, TerminalOptions::default())`, which performs its
-        // own width auto-detection.
+        // Delegate to the terminal renderer. When no layout builder has been
+        // called we must NOT thread a layout context — doing so leaks the
+        // page's captured terminal width into component width resolution and
+        // breaks byte-for-byte equivalence with `Markdown::as_terminal(default)`
+        // (the zero-config tree path), which performs its own width
+        // auto-detection.
         let body = if self.is_default_layout() {
             md.as_terminal_with_layout(options, None)
         } else {
@@ -879,7 +883,8 @@ impl DarkmatterPage {
         // leading/trailing blank rows come *only* from the configured margins
         // (no constant document-tail offset) and no interior run of >=2 blank
         // lines survives. Runs only on the decorated path; the zero-config path
-        // returned above keeps byte-for-byte equivalence with `for_terminal`.
+        // returned above keeps byte-for-byte equivalence with
+        // `Markdown::as_terminal(default)`.
         let body = normalize_body_rhythm(&body);
 
         Ok(apply_row_decoration(&body, &ctx))
@@ -960,8 +965,8 @@ impl DarkmatterPage {
     /// Whether all layout fields are at their defaults.
     ///
     /// When `true`, downstream rendering can short-circuit row decoration and
-    /// emit byte-for-byte the same output as
-    /// `for_terminal(&md, TerminalOptions::default())`.
+    /// emit byte-for-byte the same output as `Markdown::as_terminal(default)`
+    /// (the zero-config render-tree terminal path).
     #[allow(dead_code)]
     pub(crate) fn is_default_layout(&self) -> bool {
         self.margin == PageMargin::ZERO
@@ -1846,12 +1851,11 @@ mod tests {
 
         let page_out = page.render(&md).unwrap();
         let direct_out =
-            crate::markdown::output::terminal::for_terminal(&md, TerminalOptions::default())
-                .unwrap();
+            md.as_terminal(TerminalOptions::default()).unwrap();
 
         assert_eq!(
             page_out, direct_out,
-            "zero-config DarkmatterPage::render must match for_terminal byte-for-byte"
+            "zero-config DarkmatterPage::render must match the default as_terminal render byte-for-byte"
         );
     }
 
@@ -1860,8 +1864,8 @@ mod tests {
         // Construct a DarkmatterPage from a Terminal whose captured width
         // differs from TerminalOptions::default() auto-detection. The page
         // must NOT leak that captured width into component width resolution;
-        // output must remain byte-for-byte identical to `for_terminal()` with
-        // default options. Without the `is_default_layout()` short-circuit in
+        // output must remain byte-for-byte identical to the default
+        // `as_terminal()` render. Without the `is_default_layout()` short-circuit in
         // `render`, image/list/blockquote/table/code component paths would
         // resolve widths against the captured Terminal width and diverge.
         for width in [40u32, 100, 200] {
@@ -1870,13 +1874,11 @@ mod tests {
             let md: Markdown = "# Heading\n\n- List item\n\n> Quoted prose\n\n```rust\nfn main() {}\n```\n\n| A | B |\n| - | - |\n| 1 | 2 |\n".into();
 
             let page_out = page.render(&md).unwrap();
-            let direct_out =
-                crate::markdown::output::terminal::for_terminal(&md, TerminalOptions::default())
-                    .unwrap();
+            let direct_out = md.as_terminal(TerminalOptions::default()).unwrap();
 
             assert_eq!(
                 page_out, direct_out,
-                "zero-config render with captured_width={width} must equal for_terminal default",
+                "zero-config render with captured_width={width} must equal the default as_terminal render",
             );
         }
     }
@@ -1889,12 +1891,11 @@ mod tests {
 
         let page_out = page.render(&md).unwrap();
         let direct_out =
-            crate::markdown::output::terminal::for_terminal(&md, TerminalOptions::default())
-                .unwrap();
+            md.as_terminal(TerminalOptions::default()).unwrap();
 
         assert_eq!(
             page_out, direct_out,
-            "zero-config render with list must match for_terminal"
+            "zero-config render with list must match the default as_terminal render"
         );
     }
 
@@ -1906,12 +1907,11 @@ mod tests {
 
         let page_out = page.render(&md).unwrap();
         let direct_out =
-            crate::markdown::output::terminal::for_terminal(&md, TerminalOptions::default())
-                .unwrap();
+            md.as_terminal(TerminalOptions::default()).unwrap();
 
         assert_eq!(
             page_out, direct_out,
-            "zero-config render with code block must match for_terminal"
+            "zero-config render with code block must match the default as_terminal render"
         );
     }
 
@@ -2328,10 +2328,12 @@ mod tests {
             !page_html.contains("<div class=\"darkmatter-page\""),
             "zero-config page should not add wrapper"
         );
-        // But should still contain the rendered markdown.
+        // But should still contain the rendered markdown. The render-tree
+        // browser path emits a heading slug `id`, so match the heading by its
+        // tag + text rather than pinning the legacy attribute-free `<h1>`.
         assert!(
-            page_html.contains("<h1>Hello World</h1>"),
-            "zero-config page should still render markdown"
+            page_html.contains("<h1 id=\"hello-world\">Hello World</h1>"),
+            "zero-config page should still render markdown; html={page_html}"
         );
     }
 
@@ -2425,9 +2427,10 @@ mod tests {
         // Browser output goes through the inherent method, not a
         // `BrowserRenderable` impl (decisions.md item 12A).
         let html = page.render_to_browser(&md).unwrap();
+        // The render-tree browser path emits a heading slug `id`.
         assert!(
-            html.contains("<h1>Browser</h1>"),
-            "render_to_browser should output markdown HTML content"
+            html.contains("<h1 id=\"browser\">Browser</h1>"),
+            "render_to_browser should output markdown HTML content; html={html}"
         );
         // Zero-config page should not add a wrapper div.
         assert!(
@@ -2489,19 +2492,26 @@ mod tests {
         assert!(matches!(err, PageRenderError::InvalidPercent(_)));
     }
 
+    /// A malformed code-block directive (an invalid highlight range) no longer
+    /// fails the browser render: after the `as_html` tree cutover, the render-
+    /// tree code renderer **degrades** a malformed directive to the default
+    /// meta (`TerminalCodeRenderer::build_code_meta`'s documented
+    /// `parse_code_info(...).unwrap_or_else(...)` contract) instead of
+    /// surfacing `MarkdownError::InvalidLineRange`. The legacy serializer
+    /// errored here; the tree path renders the code block ignoring the bad
+    /// directive. The `MarkdownError -> PageRenderError::Render` mapping in
+    /// `render_to_browser` is unchanged — this input simply no longer triggers
+    /// it.
     #[test]
-    fn render_error_produces_render_variant_from_browser_api() {
+    fn render_browser_degrades_malformed_code_directive() {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
-        // Invalid highlight range triggers MarkdownError::InvalidLineRange
-        // which is mapped to PageRenderError::Render in render_to_browser.
         let md: Markdown = "```rust highlight=1-2-3\nfn main() {}\n```\n".into();
 
-        let err = page.render_to_browser(&md).unwrap_err();
+        let html = page.render_to_browser(&md).expect("malformed directive degrades, not errors");
         assert!(
-            matches!(&err, PageRenderError::Render(msg) if msg.contains("Invalid line range")),
-            "expected Render variant with InvalidLineRange message, got: {:?}",
-            err
+            html.contains("code-block"),
+            "code block should still render despite the malformed directive; html={html}"
         );
     }
 
@@ -2531,12 +2541,11 @@ mod tests {
 
         let page_out = page.render(&md).unwrap();
         let direct_out =
-            crate::markdown::output::terminal::for_terminal(&md, TerminalOptions::default())
-                .unwrap();
+            md.as_terminal(TerminalOptions::default()).unwrap();
 
         assert_eq!(
             page_out, direct_out,
-            "zero-config render with blockquote must match for_terminal"
+            "zero-config render with blockquote must match the default as_terminal render"
         );
     }
 
@@ -2548,12 +2557,11 @@ mod tests {
 
         let page_out = page.render(&md).unwrap();
         let direct_out =
-            crate::markdown::output::terminal::for_terminal(&md, TerminalOptions::default())
-                .unwrap();
+            md.as_terminal(TerminalOptions::default()).unwrap();
 
         assert_eq!(
             page_out, direct_out,
-            "zero-config render with table must match for_terminal"
+            "zero-config render with table must match the default as_terminal render"
         );
     }
 
@@ -2565,12 +2573,11 @@ mod tests {
 
         let page_out = page.render(&md).unwrap();
         let direct_out =
-            crate::markdown::output::terminal::for_terminal(&md, TerminalOptions::default())
-                .unwrap();
+            md.as_terminal(TerminalOptions::default()).unwrap();
 
         assert_eq!(
             page_out, direct_out,
-            "zero-config render with horizontal rule must match for_terminal"
+            "zero-config render with horizontal rule must match the default as_terminal render"
         );
     }
 

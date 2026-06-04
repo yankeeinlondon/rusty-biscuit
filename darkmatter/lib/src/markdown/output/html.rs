@@ -668,6 +668,30 @@ fn escape_markdown_title(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Computes the `.code-block` panel background color (`#rrggbb`) for `options`,
+/// resolved exactly as [`generate_styles`] does.
+///
+/// Code blocks contrast against the page, so the code `ThemePair` resolves
+/// against the **inverted** color mode (`options.color_mode.inverted()`) — a
+/// dark page gets a light code panel and vice versa (Defect D). The render-tree
+/// browser entry point reuses this so its injected `.code-block` rule matches
+/// the legacy stylesheet's computed background, rather than re-deriving the
+/// theme/inversion math.
+pub(crate) fn code_block_background_hex(options: &HtmlOptions) -> String {
+    let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode.inverted());
+    let bg = highlighter
+        .theme()
+        .settings
+        .background
+        .unwrap_or(syntect::highlighting::Color {
+            r: 40,
+            g: 44,
+            b: 52,
+            a: 255,
+        });
+    format!("#{:02x}{:02x}{:02x}", bg.r, bg.g, bg.b)
+}
+
 /// Generates CSS styles for syntax highlighting.
 fn generate_styles(highlighter: &CodeHighlighter, _options: &HtmlOptions) -> String {
     let bg = highlighter

@@ -575,8 +575,15 @@ impl Markdown {
 
     /// Converts the markdown document to HTML with syntax highlighting.
     ///
-    /// This method renders the markdown content as HTML, applying syntax highlighting
-    /// to code blocks and prose elements based on the provided options.
+    /// Routes through the render-tree browser pipeline
+    /// ([`render_tree_html`](crate::markdown::render_tree::render_tree_html)):
+    /// the markdown folds to a [`Document`](renderable::tree::Document) and the
+    /// browser renderer streams the final HTML string. `style:` frontmatter
+    /// hyperlink / image color injection is reproduced by the entry point's
+    /// inline-style decoration, and fenced code blocks are syntax-highlighted
+    /// through the wired [`TerminalCodeRenderer`] hook. The legacy serializer
+    /// ([`as_html`](output::as_html)) stays compilable to drive the
+    /// `migration_parity` benchmark and focused parity comparisons.
     ///
     /// ## Examples
     ///
@@ -586,14 +593,16 @@ impl Markdown {
     ///
     /// let md = Markdown::new("# Hello\n\nWorld".to_string());
     /// let html = md.as_html(HtmlOptions::default()).unwrap();
-    /// assert!(html.contains("<h1>"));
+    /// assert!(html.contains("<h1"));
     /// ```
     ///
     /// ## Errors
     ///
-    /// Returns an error if theme loading fails or highlighting encounters issues.
+    /// Returns [`MarkdownError::RenderTree`](crate::markdown::MarkdownError::RenderTree)
+    /// when the render tree fails structural validation or a strict-mode
+    /// rejection occurs.
     pub fn as_html(&self, options: output::HtmlOptions) -> MarkdownResult<String> {
-        output::as_html(self, options)
+        Ok(render_tree::render_tree_html(self, &options)?.output)
     }
 
     /// Renders the markdown document as ANSI-styled terminal output.
@@ -616,19 +625,49 @@ impl Markdown {
     ///
     /// ## Errors
     ///
-    /// Returns an error if terminal rendering fails (e.g. theme loading issues).
+    /// Returns [`MarkdownError::RenderTree`](crate::markdown::MarkdownError::RenderTree)
+    /// when the render tree fails structural validation or a strict-mode
+    /// rejection occurs.
     pub fn as_terminal(&self, options: output::TerminalOptions) -> MarkdownResult<String> {
-        output::for_terminal(self, options)
+        self.as_terminal_with_layout(options, None)
     }
 
     /// Internal entry point that passes an optional page layout context through
-    /// to the terminal renderer so per-component alignment and fill are honoured.
+    /// to the renderer so per-component alignment and fill are honoured.
+    ///
+    /// With no layout context (the default-layout path that
+    /// [`DarkmatterPage::render`](crate::layout::DarkmatterPage::render) and
+    /// [`as_terminal`](Self::as_terminal) take), the document routes through the
+    /// render-tree terminal document renderer.
+    ///
+    /// The per-component layout path (`Some(ctx)`) still uses the legacy
+    /// terminal serializer. The tree-side decoration pass
+    /// ([`render_tree_terminal_with_layout`](render_tree::entrypoints::render_tree_terminal_with_layout))
+    /// already covers per-component alignment, fill, width caps, list-left
+    /// margins, colors, and line numbers, but three legacy decorated-layout
+    /// features remain unimplemented on the tree:
+    ///
+    /// 1. **Hyperlink label width / alignment / truncation** —
+    ///    `style.hyperlinks.{width,max-width,alignment}` pad / truncate the
+    ///    inline link label; the tree has no inline-label width layer.
+    /// 2. **Image fallback placeholder format + width / alignment** — legacy
+    ///    emits a `▉ IMAGE[alt]` block placeholder padded / aligned to
+    ///    `style.images.{width,alignment}`; the tree emits `[alt]` inline.
+    /// 3. **Right-aligned list-item body** — legacy lifts the marker to its own
+    ///    line and right-aligns the body block; the tree renders the item
+    ///    inline.
+    ///
+    /// Until those land on the tree, the decorated path stays on the legacy
+    /// renderer so the corresponding parity guards stay green.
     pub(crate) fn as_terminal_with_layout(
         &self,
         options: output::TerminalOptions,
         layout_ctx: Option<&crate::layout::LayoutContext>,
     ) -> MarkdownResult<String> {
-        output::terminal::for_terminal_with_layout(self, options, layout_ctx)
+        match layout_ctx {
+            None => Ok(render_tree::render_tree_terminal(self, &options)?.output),
+            Some(ctx) => output::terminal::for_terminal_with_layout(self, options, Some(ctx)),
+        }
     }
 
     /// Extracts a Table of Contents from the markdown document.

@@ -100,6 +100,18 @@ pub enum MarkdownError {
         reason: String,
     },
 
+    /// The render-tree document renderer rejected the document.
+    ///
+    /// Raised when [`Markdown::as_html`](crate::markdown::Markdown::as_html) or
+    /// [`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal) routes
+    /// through the render tree and the shared renderer returns a fatal
+    /// [`RenderError`](renderable::tree::RenderError) (structural validation
+    /// failure, or a strict-mode rejection). Non-fatal fold/render diagnostics
+    /// are not surfaced here — they stay on the tree pipeline's diagnostic
+    /// channel.
+    #[error("Render-tree error: {0}")]
+    RenderTree(#[from] renderable::tree::RenderError),
+
     /// Schema validation failed during compose.
     #[error("Schema validation failed for {path:?}: {summary}")]
     SchemaValidationFailed {
@@ -185,6 +197,7 @@ impl BlockError for MarkdownError {
             MarkdownError::InvalidLineRange(message) => blocks::invalid_line_range_block(message),
             MarkdownError::Serialization(source) => blocks::serialization_block(source),
             MarkdownError::Transform(message) => blocks::transform_block(message),
+            MarkdownError::RenderTree(source) => blocks::render_tree_block(&source.to_string()),
             MarkdownError::MalformedStoredHash { property, reason } => {
                 blocks::malformed_stored_hash_block(property, reason)
             }

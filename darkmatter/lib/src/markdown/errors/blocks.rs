@@ -144,6 +144,14 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
         .hint("Review the transform pipeline inputs and any configured rules.")
 }
 
+/// Build the [`StatusBlock`] for [`MarkdownError::RenderTree`].
+pub(crate) fn render_tree_block(message: &str) -> StatusBlock {
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "render failed"))
+        .body(message.to_string())
+        .hint("The document produced a render tree the target renderer rejected.")
+}
+
 /// Build the [`StatusBlock`] for [`MarkdownError::MalformedStoredHash`].
 pub(crate) fn malformed_stored_hash_block(property: &str, reason: &str) -> StatusBlock {
     let body = format!(
