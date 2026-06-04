@@ -1,10 +1,5 @@
 ---
 sequence: 
-    - name: "start"
-    - name: "api-detection"
-    - name: "auth-scraping"
-    - name: "change-detection"
-    - name: "library-detection"
     - name: "page-categories"
     - name: "main-content"
     - name: "metadata"
@@ -65,8 +60,6 @@ prompt: |-
     ::end-block
 last_updated: 2026-06-03
 ---
-Let me first find the existing Markdown document and understand its structure.Now let me look at the existing repo code for any existing types or conventions:Now let me look at some key research docs to inform the schema design, plus the README for context:Now I have a thorough understanding of the project context. Let me do research on the key schema standards to inform the design:I now have enough context to produce the first draft. Let me compose the full Markdown body:
-
 ## WebPage
 
 ### Schema
@@ -116,16 +109,96 @@ enum FetchMethod {
     BrowserRendered,
 }
 
-/// Whether the page requires authentication to access.
-enum AccessLevel {
-    /// Publicly accessible without credentials.
-    Public,
-    /// Requires a free account or registration.
-    RegistrationRequired,
-    /// Requires a paid subscription or specific tier.
-    Paywalled,
-    /// Access level could not be determined.
-    Unknown,
+/// Assessment of whether a page requires authentication.
+enum AuthRequirement {
+    /// No auth required; content is publicly accessible.
+    None,
+    /// Auth may be required; signals are ambiguous.
+    Possible,
+    /// Auth is required; strong signals detected (401, login redirect, etc.).
+    Required,
+    /// Auth is required and additional obstacles present (MFA, CAPTCHA, etc.).
+    RequiredWithChallenge,
+}
+
+/// A single signal contributing to auth requirement assessment.
+struct AuthSignal {
+    /// The type of signal observed.
+    signal_type: AuthSignalType,
+    /// Human-readable description of what was observed.
+    description: String,
+    /// How strongly this signal indicates auth is required (0.0 to 1.0).
+    confidence: f32,
+}
+
+/// Types of auth signals that can be detected.
+enum AuthSignalType {
+    /// HTTP 401 Unauthorized status code.
+    Status401,
+    /// HTTP 403 Forbidden status code.
+    Status403,
+    /// HTTP 407 Proxy Authentication Required.
+    Status407,
+    /// Redirect to a known login path.
+    LoginRedirect,
+    /// WWW-Authenticate or Proxy-Authenticate header present.
+    ChallengeHeader,
+    /// Login form detected in HTML (password input, username/email fields).
+    LoginForm,
+    /// Paywall or subscription gate text detected.
+    PaywallText,
+    /// CAPTCHA or anti-automation challenge detected.
+    AntiAutomation,
+    /// Cookie-based session detected with auth-related cookie names.
+    SessionCookie,
+    /// SSO/OAuth redirect to identity provider detected.
+    SsoRedirect,
+    /// CSRF token fields detected in forms.
+    CsrfToken,
+    /// JavaScript-rendered login wall (browser-only detection).
+    JsLoginWall,
+    /// Content differs between authenticated and anonymous requests.
+    ContentDifference,
+    /// Client-side redirect to login after page load.
+    ClientSideLoginRedirect,
+}
+
+/// HTTP authentication schemes from WWW-Authenticate headers.
+enum AuthScheme {
+    Basic,
+    Digest,
+    Bearer,
+    Negotiate,
+    Ntlm,
+    Other(String),
+}
+
+/// Auth detection from HTTP-level signals (no browser required).
+struct HttpAuthDetection {
+    /// Overall assessment of authentication requirements.
+    auth_required: AuthRequirement,
+    /// Signals that contributed to the assessment.
+    signals: Vec<AuthSignal>,
+    /// Detected auth schemes from WWW-Authenticate headers.
+    auth_schemes: Vec<AuthScheme>,
+}
+
+/// Full auth detection including browser-level signals.
+struct FullAuthDetection {
+    /// HTTP-level auth detection (always available).
+    http: HttpAuthDetection,
+    /// Whether a login form was detected in the rendered DOM.
+    login_form_detected: bool,
+    /// Whether CAPTCHA or anti-automation challenges were detected.
+    has_anti_automation: bool,
+    /// Whether the page appears to be behind a paywall or subscription gate.
+    paywall_detected: bool,
+    /// Whether the page content differs with and without cookies.
+    content_varies_by_auth: Option<bool>,
+    /// Browser-level auth signals (JS-rendered login walls, shadow DOM auth, etc.).
+    browser_signals: Vec<AuthSignal>,
+    /// Detected anti-automation/bot-defense providers (Cloudflare, etc.).
+    bot_defense_providers: Vec<String>,
 }
 
 /// Open Graph protocol metadata extracted from `og:*` meta tags.
@@ -308,8 +381,15 @@ struct SimpleWebPage {
     head_links: HeadLinks,
     /// The declared or inferred primary language (BCP 47 tag).
     language: Option<String>,
-    /// The page type inferred from metadata signals.
+    /// Auth requirement assessment from HTTP-level signals only.
+    auth_detection: HttpAuthDetection,
+    /// Detected page categories based on deterministic heuristics.
     page_type: Option<PageType>,
+    /// Libraries and frameworks detected from passive HTTP fingerprinting
+    /// (HTML markers, asset URL paths, headers, cookies, generator tags).
+    /// Includes results from Approach 1 (passive HTTP) and optionally
+    /// Approach 2 (asset graph analysis) if assets were fetched.
+    detected_libraries: Vec<DetectedLibrary>,
 }
 
 /// A fully analyzed web page with extracted content and deeper signals.
@@ -334,8 +414,8 @@ struct CompleteWebPage {
     primary_image: Option<PageImage>,
     /// Category or topic tags assigned by the publisher or inferred.
     categories: Vec<String>,
-    /// Whether the page appears to require authentication.
-    access_level: AccessLevel,
+    /// Full authentication assessment including browser-level signals.
+    auth_detection: FullAuthDetection,
     /// The publishing date, if detectable.
     date_published: Option<DateTime<Utc>>,
     /// The last-modified date, if detectable.
@@ -348,6 +428,11 @@ struct CompleteWebPage {
     network_requests: Vec<PageNetworkRequest>,
     /// API endpoints detected during page rendering, classified by category.
     detected_apis: Vec<DetectedApi>,
+    /// Complete library detection including browser-level inspection results.
+    /// Supersedes the simple variant's passive detection with additional evidence
+    /// from hydrated DOM inspection (JavaScript globals, runtime properties,
+    /// dynamically loaded chunks, and client-rendered CSS/component classes).
+    detected_libraries: Vec<DetectedLibrary>,
 }
 
 /// A network request observed during browser-rendered page analysis.
@@ -520,6 +605,85 @@ enum JsonType {
     Null,
 }
 
+/// Confidence level for a detection result.
+enum DetectionConfidence {
+    /// Multiple unique, non-overlapping signals present (e.g. `<astro-island>` plus `/_astro/` assets).
+    VeryHigh,
+    /// Strong signal with corroborating evidence (e.g. CDN path plus matching bundle string).
+    High,
+    /// Moderate evidence, likely correct but could be a different library in the same family.
+    MediumHigh,
+    /// Some evidence present, but the signal is not specific enough for certainty.
+    Medium,
+    /// Weak or generic signal, should not be used alone.
+    Low,
+}
+
+/// How a library or framework was detected.
+enum DetectionMethod {
+    /// Detected from raw HTTP response (HTML content, headers, cookies, asset URL paths).
+    PassiveHttp,
+    /// Detected by analyzing fetched JS/CSS assets, source maps, or bundle strings.
+    AssetAnalysis,
+    /// Detected by inspecting the hydrated browser DOM, JavaScript globals, or runtime properties.
+    BrowserInspection,
+}
+
+/// Category of a detected library, framework, or platform.
+enum LibraryCategory {
+    /// A frontend UI framework (React, Vue.js, Angular, Svelte, SolidJS, Qwik).
+    FrontendFramework,
+    /// A meta-framework built on a frontend framework (Next.js, Nuxt, SvelteKit, Astro, Remix, SolidStart, Qwik City).
+    MetaFramework,
+    /// A charting or data visualization library (Chart.js, D3.js, Highcharts, Plotly.js, Apache ECharts).
+    ChartingLibrary,
+    /// An animation or motion library (GSAP, Framer Motion, Anime.js, Lottie-web, AOS).
+    AnimationFramework,
+    /// An authentication or identity platform (Auth.js, Auth0, Clerk, Firebase Auth, Supabase Auth).
+    AuthFramework,
+    /// An e-commerce platform or storefront (Shopify, WooCommerce, Magento, Wix Stores, Squarespace Commerce).
+    EcommercePlatform,
+    /// A content management system (WordPress, Drupal, Joomla, Webflow, Contentful).
+    CmsPlatform,
+    /// A CSS framework or design system (Tailwind CSS, Bootstrap, Material UI, Bulma, UnoCSS).
+    CssFramework,
+    /// A library not fitting any other category.
+    Other(String),
+}
+
+/// A single piece of evidence contributing to library detection.
+struct LibrarySignature {
+    /// Human-readable description of what was observed.
+    description: String,
+    /// The raw value or pattern that matched.
+    matched_value: String,
+    /// How strongly this signature indicates the library (0.0 to 1.0).
+    confidence: f32,
+    /// How the signature was obtained.
+    method: DetectionMethod,
+}
+
+/// A detected library, framework, or platform with supporting evidence.
+///
+/// Represents a single technology identified on a page. Evidence is accumulated
+/// from multiple signatures which are scored and combined into an overall
+/// confidence level. The detection method indicates the most expensive
+/// technique required to produce this result.
+struct DetectedLibrary {
+    /// The detected library or framework name (e.g. "React", "Next.js", "Shopify").
+    name: String,
+    /// The library category.
+    category: LibraryCategory,
+    /// The detected version string, if identifiable from generator tags, globals, or bundle metadata.
+    version: Option<String>,
+    /// Overall confidence of the detection based on accumulated evidence.
+    confidence: DetectionConfidence,
+    /// All signatures that contributed to this detection.
+    evidence: Vec<LibrarySignature>,
+    /// The most expensive detection method required to produce this result.
+    detection_method: DetectionMethod,
+}
+
 /// A web page at varying levels of analysis depth.
 ///
 /// The `Simple` variant is cheap to produce (no rendering, no content extraction)
@@ -537,6 +701,14 @@ enum WebPage {
 ### Notes
 
 - **Simple vs Complete split**: The two-level design reflects Reaper's CLI options (`reaper <url>` vs `reaper <url> --deep`). Simple is fast and cheap; Complete requires rendering and content analysis.
+- **Auth detection is layered**: `HttpAuthDetection` on `SimpleWebPage` works from HTTP status codes (`401`, `403`, `407`), `WWW-Authenticate` challenge headers, redirect targets matching known login paths (`/login`, `/signin`, `/auth`, `/sso`), and static login-form markers in HTML (password inputs, CSRF fields). `FullAuthDetection` on `CompleteWebPage` adds browser-level signals: JavaScript-rendered login walls, shadow DOM auth widgets, anti-automation challenges, content comparison between authenticated and anonymous sessions, and client-side redirects after page load. This tiered approach ensures the fast path (`Simple`) can still detect most auth requirements without browser overhead.
+- **AuthRequirement has four levels**: `None`, `Possible`, `Required`, and `RequiredWithChallenge`. The `RequiredWithChallenge` state covers pages protected by CAPTCHA (Cloudflare Turnstile, reCAPTCHA, hCaptcha), MFA, or bot-management systems — these should be treated as **stop conditions**, not bypass targets, per the auth-scraping research's core recommendation.
+- **AuthSignal carries typed evidence**: Each signal has a `signal_type` enum for programmatic handling and a free-text `description` for diagnostic output. The `confidence` field (0.0–1.0) lets downstream consumers weight signals differently. Multiple signals can contribute to a single auth assessment, supporting the "layered check" approach from the auth-scraping research rather than a single status-code test.
+- **AuthScheme enumeration**: Parses `WWW-Authenticate` header values into typed schemes (Basic, Digest, Bearer, Negotiate, NTLM). The `www-authenticate` crate can handle this parsing. Basic auth is simple enough that `reqwest` may suffice (per the research), but having the enum supports richer diagnostics.
+- **Auth-scraping Rust crate fit**: For HTTP-level auth detection, `reqwest` with explicit redirect handling is the best fit. `www-authenticate` parses challenge headers. `scraper` detects login forms and CSRF tokens in static HTML. For browser-level auth detection, `chromiumoxide` or `thirtyfour` can observe post-load network requests, rendered DOM login walls, and anti-automation challenges. `cookie_store` + `reqwest_cookie_store` preserve session cookies for authenticated scraping flows. `keyring` stores credentials; `secrecy` wraps secrets in memory.
+- **Content comparison for soft auth detection**: The auth-scraping research emphasizes that many sites return `200 OK` but contain a login wall instead of the desired content ("soft auth"). `FullAuthDetection.content_varies_by_auth` captures whether comparing an anonymous request against one with stored cookies produces different content. This requires the scraper to maintain authenticated sessions and perform the comparison explicitly.
+- **Bot defense detection**: `FullAuthDetection.bot_defense_providers` records detected anti-automation systems (Cloudflare, Imperva, etc.). These are not auth requirements per se, but they block scraping and should be treated as stop conditions. The auth-scraping research recommends flagging rather than bypassing these systems.
+- **SSO/OAuth detection**: `AuthSignalType::SsoRedirect` captures cross-origin redirects to identity providers during page load. The auth-scraping research notes that these should not be scraped unless explicitly authorized — prefer `oauth2` or `openidconnect` crates for legitimate protocol-based access.
 - **Schema.org as `serde_json::Value`**: Schema.org JSON-LD is highly variable across sites. Using a loosely typed value with extracted `@type` strings avoids an enormous enum while still enabling downstream consumers to parse specific types.
 - **OpenGraph / TwitterCard / DublinCore as separate structs**: These are distinct vocabularies with different field sets. Keeping them separate avoids naming collisions (e.g. `title` means different things in OG vs DC) and makes it clear which standard each field came from.
 - **PageType enum**: Initial set is based on the most common Schema.org verticals and URL patterns. The `Other(String)` variant handles anything not in the closed set. This may expand as we encounter more categories.
@@ -557,6 +729,19 @@ enum WebPage {
     - Should `PageNetworkRequest` include request/response headers, or is that too verbose for the page-level struct? Headers might belong in a separate detailed network log.
     - Should we use CDP's `Fetch` domain for active interception alongside passive `Network` observation, or keep interception as a separate scrape mode?
     - Should captured response bodies be stored inline in `PageNetworkRequest` or kept in a separate body store keyed by request ID? Bounded storage is important to avoid unbounded memory use.
+    - Should `HttpAuthDetection` include the full redirect chain that triggered auth detection, or is `Vec<AuthSignal>` sufficient?
+    - Should `FullAuthDetection` track whether an authenticated session was actually _used_ during this scrape, so consumers know if auth data is fresh?
+    - Should auth signals carry a timestamp so that auth assessments can be aged out over time?
+- **Library detection is tiered across Simple/Complete**: The library-detection research identifies three detection approaches that map directly to the Simple/Complete split. `SimpleWebPage.detected_libraries` captures results from Approach 1 (passive HTTP fingerprinting: HTML markers, asset URL paths, headers, cookies, `<meta name="generator">` tags) and optionally Approach 2 (asset graph analysis: fetched JS/CSS contents, source maps, bundle strings). `CompleteWebPage.detected_libraries` adds Approach 3 (hydrated browser inspection: JavaScript globals like `window.Chart`, DOM expando keys like `__reactFiber$`, runtime properties like `window.__vue_app__`, dynamically loaded chunks, and client-rendered CSS classes). This tiered approach ensures the fast path can still identify most technologies — the research shows that high-confidence signatures like `/_next/static/`, `__NUXT_DATA__`, `<astro-island>`, `q:container`, `/wp-content/`, and `cdn.shopify.com` are all available from passive HTTP.
+- **DetectionConfidence matches research signal reliability**: The confidence levels in `DetectionConfidence` correspond to the confidence ratings used throughout the library-detection research. For example, `__NEXT_DATA__` script tags are "High" confidence for Next.js, `data-v-xxxx` attributes are "Medium-High" for Vue.js, and generic utility classes like `flex` or `grid` are at best "Low" confidence for Tailwind CSS. The weighted scoring model accumulates these per-signal confidences into an overall `DetectedLibrary.confidence`.
+- **LibraryCategory organizes the seven detection domains**: The library-detection research identifies seven categories of detectable technologies: frontend frameworks, charting libraries, animation frameworks, auth frameworks, e-commerce platforms, CMS platforms, and CSS frameworks. `LibraryCategory` mirrors these directly, with the addition of `MetaFramework` to distinguish base UI libraries (React, Vue, Svelte) from full-stack app frameworks built on top (Next.js, Nuxt, SvelteKit, Astro, Remix, SolidStart, Qwik City). This distinction matters because detecting React plus Next.js is more informative than just detecting React — it tells Reaper the page uses SSR, file-based routing, and a specific data-fetching pattern.
+- **LibrarySignature enables explainability**: Each `DetectedLibrary` carries its `evidence` as a list of `LibrarySignature` structs. This means Reaper can report exactly which signals contributed to a detection (e.g. "Next.js detected via: `/_next/static/` in HTML [High confidence, PassiveHttp], `__NEXT_DATA__` script tag [High confidence, PassiveHttp], `x-nextjs-cache` response header [Medium confidence, PassiveHttp]"). This aligns with the research's recommendation for Approach 2 (weighted signature scoring with explainable results).
+- **Ecosystem overlap handling**: The library-detection research emphasizes that many technologies co-occur (React + Next.js, Vue + Nuxt, Svelte + SvelteKit, WordPress + WooCommerce). Each is reported as a separate `DetectedLibrary` with its own `LibraryCategory`. The `MetaFramework` category helps consumers understand the relationship: when both a `FrontendFramework` and a `MetaFramework` are detected, the meta-framework is the more specific identification and should be preferred for technology stack characterization. The research recommends preferring specific frameworks over base libraries when both are detected.
+- **DetectionMethod maps to execution cost**: `DetectionMethod::PassiveHttp` is the cheapest (no extra network requests beyond the page fetch), `AssetAnalysis` requires fetching and parsing linked JS/CSS files and source maps, and `BrowserInspection` requires full headless browser rendering. The `detection_method` field on `DetectedLibrary` tells consumers the minimum execution cost required to reproduce this detection, which is useful for deciding whether a re-scan needs browser rendering or if passive HTTP would suffice.
+- **Passive detection coverage**: The library-detection research shows that many high-value technologies are detectable from passive HTTP alone: Next.js (`/_next/static/`, `__NEXT_DATA__`), Nuxt (`__NUXT_DATA__`), Astro (`<astro-island>`), Qwik (`q:container`), SvelteKit (`/_app/immutable/`), Shopify (`cdn.shopify.com`), WordPress (`/wp-content/`), and most CSS frameworks (Bootstrap, Bulma via CDN paths). This means `SimpleWebPage.detected_libraries` will be non-empty for the majority of sites, providing good technology coverage even without browser rendering.
+- **Browser-only detection targets**: Some technologies are only reliably detectable via browser inspection: React fiber properties (`__reactFiber$`), Vue `__vue_app__` global, SolidJS `window._$HY`, runtime globals for charting libraries (`window.Chart`, `window.Highcharts`, `window.Plotly`, `window.echarts`), animation libraries (`window.gsap`, `window.anime`, `window.lottie`, `window.AOS`), and auth SDKs (`window.Clerk`, `window.__REACT_DEVTOOLS_GLOBAL_HOOK__`). These require `CompleteWebPage` with browser rendering.
+- **Source maps as a detection channel**: The library-detection research notes that publicly available source maps are a valuable detection channel (Approach 2). When source maps are accessible, they expose unminified package names (e.g. `@angular/core`, `@sveltejs/kit`, `solid-js`, `@builder.io/qwik-city`), file paths, and sometimes version information. Source map fetching should be bounded and respectful — only fetch source maps for JS assets that are already being loaded, and limit the total number fetched per page.
+- **Overlap with existing auth/ecommerce detection**: The `LibraryCategory::AuthFramework` and `LibraryCategory::EcommercePlatform` categories complement the existing auth detection and API detection systems. When `DetectedLibrary` identifies Auth0, Clerk, or Firebase Auth on a page, this supports the `FullAuthDetection` assessment. When Shopify or WooCommerce is detected, it informs `SiteTechnology.cms` and guides the scraper toward known API patterns (e.g. `/cart.js` for Shopify, `/wp-json/wc/` for WooCommerce). These detections should be cross-referenced with auth signals and API patterns for a more complete picture.
 
 ## WebSite
 
@@ -648,9 +833,29 @@ struct SiteBranding {
 }
 
 /// Technical characteristics of a website's infrastructure.
+///
+/// Aggregated from per-page `DetectedLibrary` observations across multiple
+/// scraped pages on the site, as well as HTTP headers, meta generators,
+/// script/src patterns, and manifest contents.
 struct SiteTechnology {
     /// The detected CMS, if any.
     cms: CmsType,
+    /// Detected frontend UI frameworks (React, Vue.js, Angular, Svelte, SolidJS, Qwik).
+    frontend_frameworks: Vec<DetectedLibrary>,
+    /// Detected meta-frameworks (Next.js, Nuxt, SvelteKit, Astro, Remix, SolidStart, Qwik City).
+    meta_frameworks: Vec<DetectedLibrary>,
+    /// Detected CSS frameworks and design systems (Tailwind CSS, Bootstrap, Material UI, Bulma, UnoCSS).
+    css_frameworks: Vec<DetectedLibrary>,
+    /// Detected charting libraries (Chart.js, D3.js, Highcharts, Plotly.js, Apache ECharts).
+    charting_libraries: Vec<DetectedLibrary>,
+    /// Detected animation frameworks (GSAP, Framer Motion, Anime.js, Lottie-web, AOS).
+    animation_frameworks: Vec<DetectedLibrary>,
+    /// Detected auth frameworks and identity platforms (Auth.js, Auth0, Clerk, Firebase Auth, Supabase Auth).
+    auth_frameworks: Vec<DetectedLibrary>,
+    /// Detected e-commerce platforms (Shopify, WooCommerce, Magento, Wix Stores, Squarespace Commerce).
+    ecommerce_platforms: Vec<DetectedLibrary>,
+    /// All detected libraries aggregated across all scraped pages, regardless of category.
+    all_libraries: Vec<DetectedLibrary>,
     /// The detected web framework or server technology, e.g. "Next.js", "Nginx".
     frameworks: Vec<String>,
     /// The analytics providers detected (Google Analytics, Plausible, etc.).
@@ -730,6 +935,36 @@ struct FeedInfo {
     title: Option<String>,
 }
 
+/// Site-level authentication and access profile.
+///
+/// Aggregated from per-page auth detection results across the site.
+/// Characterizes the site's overall auth posture: whether it uses SSO,
+/// paywalls, bot defenses, and which URL patterns require authentication.
+struct SiteAuthProfile {
+    /// Overall auth requirement for the site.
+    auth_requirement: AuthRequirement,
+    /// Whether the site uses SSO/OAuth for login.
+    uses_sso: bool,
+    /// Detected SSO/OAuth providers (e.g. "Google", "Okta", "Auth0", "Azure AD").
+    sso_providers: Vec<String>,
+    /// Whether the site has a paywall or subscription model.
+    has_paywall: bool,
+    /// Whether the site uses CAPTCHA or bot management systems.
+    has_bot_defense: bool,
+    /// Detected bot defense providers (e.g. "Cloudflare", "Imperva", "Akamai").
+    bot_defense_providers: Vec<String>,
+    /// Whether Reaper has a stored, valid session for the site.
+    session_available: bool,
+    /// URL patterns that require authentication (glob patterns).
+    auth_required_patterns: Vec<String>,
+    /// Login page URL, if discoverable.
+    login_url: Option<Url>,
+    /// Whether the site requires cookie consent before showing full content.
+    requires_cookie_consent: bool,
+    /// The detected cookie consent framework (e.g. "OneTrust", "Cookiebot").
+    consent_framework: Option<String>,
+}
+
 /// Macro-level metadata about an entire website.
 ///
 /// Aggregates information that spans the whole site rather than individual
@@ -756,6 +991,8 @@ struct WebSite {
     page_type_patterns: Vec<PageTypePattern>,
     /// API endpoint patterns discovered across scraped pages on this site.
     api_patterns: Vec<SiteApiPattern>,
+    /// Site-level authentication and access profile.
+    auth_profile: SiteAuthProfile,
     /// The primary language of the site (BCP 47 tag).
     language: Option<String>,
     /// Geographic regions the site targets.
@@ -776,9 +1013,14 @@ struct WebSite {
 - **url_glob scoping**: A single glob on `base_url` lets users scope what "the site" means — e.g. only `/en/**` for the English subset, or everything under `docs.example.com/**`.
 - **CmsType enum**: Initial set covers the most common CMS platforms. The `Other(String)` and `Unknown` variants handle everything else. This will grow as detection improves.
 - **SiteAlias**: Websites often have multiple entry points (www vs non-www, HTTP vs HTTPS, mobile subdomains, alternate TLDs). Explicit alias tracking avoids re-scraping the same content under different URLs.
-- **SiteTechnology**: Detection is based on HTTP headers, meta generators, script/src patterns, and manifest contents. The `extra` Vec catches everything not covered by named fields.
-- **SiteApiPattern for discovered APIs**: Aggregated from per-page `DetectedApi` observations across multiple scraped pages. When Reaper detects that many product pages on a Shopify site call `/api/v1/products/{id}`, this becomes a `SiteApiPattern` with `source_page_patterns: ["/products/*"]` and `is_data_source: true`. This enables two scraping strategies for the same site: render pages, or call the discovered API directly. The `is_data_source` flag indicates whether the API returns data that supplements or replaces what is in the rendered HTML.
-- **API detection vs page rendering tradeoff**: Some sites (SPAs, headless CMS frontends) render almost no meaningful content in the initial HTML — all data comes from API calls. In those cases, `SiteApiPattern` with `is_data_source = true` is the more efficient scraping path. Sites with server-rendered content may still benefit from API detection for structured data extraction (e.g. getting product pricing as JSON instead of parsing HTML).
+- **SiteTechnology expanded with categorized library detection**: The library-detection research identifies seven categories of detectable technologies (frontend frameworks, charting libraries, animation frameworks, auth frameworks, e-commerce platforms, CMS platforms, and CSS frameworks), plus a useful distinction between base UI frameworks and meta-frameworks. `SiteTechnology` now stores `DetectedLibrary` results in categorized fields (`frontend_frameworks`, `meta_frameworks`, `css_frameworks`, `charting_libraries`, `animation_frameworks`, `auth_frameworks`, `ecommerce_platforms`) alongside a flat `all_libraries` aggregation. These are populated by merging per-page `DetectedLibrary` results across all scraped pages on the site, deduplicating by library name and taking the highest-confidence observation.
+- **CmsType aligns with library-detection research**: The research identifies WordPress, Drupal, Joomla, Webflow, and Contentful as the top 5 CMS platforms. The existing `CmsType` enum already includes most of these (WordPress, Drupal, Joomla, Squarespace, Wix, Shopify, Ghost). Squarespace and Wix are borderline CMS/platform — they are listed in the e-commerce section of the research but also function as hosted CMS platforms. The current enum is a reasonable superset. Contentful (headless CMS) should be considered for addition if we encounter sites that expose Contentful SDK signatures (`cdn.contentful.com`, `contentful.js`).
+- **Meta-framework detection is high-value**: The library-detection research shows that meta-frameworks (Next.js, Nuxt, SvelteKit, Astro, Remix, SolidStart, Qwik City) have very distinctive signatures that are almost always available from passive HTTP. For example, Next.js has `/_next/static/` and `__NEXT_DATA__`, Nuxt has `__NUXT_DATA__`, Astro has `<astro-island>`, Qwik has `q:container`. Knowing the meta-framework tells Reaper a great deal about the site's rendering strategy (SSR vs SSG vs CSR), routing approach, and data-fetching patterns — which directly informs scraping strategy. SPA-only meta-frameworks (client-rendered Remix, SolidStart) may require browser rendering for content extraction, while SSR frameworks (Next.js, Nuxt, Astro) typically serve meaningful content in the initial HTML response.
+- **Rendering strategy inference from library detection**: When `meta_frameworks` contains Astro or SvelteKit (which can do static/SSG rendering), `SimpleWebPage` is likely sufficient for content extraction. When it contains Next.js with `__NEXT_DATA__`, the SSR payload is available in the static HTML. When only a base `FrontendFramework` is detected (e.g. React without Next.js), the page is likely a client-rendered SPA and `CompleteWebPage` with browser rendering may be needed for meaningful content extraction. This inference can guide the scraper's decision to skip or escalate rendering.
+- **E-commerce platform detection guides API discovery**: The library-detection research provides specific signatures for Shopify (`cdn.shopify.com`, `/cart.js`, `/products/*.js`), WooCommerce (`wp-content/plugins/woocommerce`, `wc-ajax`), Magento (`/static/frontend/`, `Magento_`), Wix (`wixstores`, `WixStores`), and Squarespace (`static1.squarespace.com`, `squarespace-commerce`). When one of these is detected, the scraper can proactively probe known API endpoints (e.g. Shopify's `/products/{handle}.js`, WooCommerce's `/wp-json/wc/v3/`) and populate `SiteApiPattern` with known-good endpoints, even before observing them via CDP network monitoring. This is a major optimization for e-commerce sites.
+- **Auth framework detection enriches SiteAuthProfile**: When `SiteTechnology.auth_frameworks` detects Auth0 (`*.auth0.com`, `auth0-spa-js`), Clerk (`clerk-js`, `window.Clerk`), Firebase Auth (`firebase-auth.js`, `firebaseConfig`), or Supabase Auth (`@supabase/supabase-js`), this information should cross-populate `SiteAuthProfile.sso_providers`. The library-detection research notes that Auth0 domains are detectable from HTTP redirects and HTML, Clerk from script tags and cookies, Firebase from config objects in HTML/JS, and Supabase from client initialization patterns. These are all HTTP-level signals, meaning even `SimpleWebPage` can contribute to auth framework detection.
+- **CSS framework detection for rendering strategy**: Detecting Tailwind CSS (dense utility classes, `tailwindcss` in source maps), Bootstrap (`bootstrap.min.css` CDN paths), Material UI (`@mui/material`, `MuiButton-root` classes), or UnoCSS (`unocss`, `__uno.css` in source maps) helps understand the site's visual architecture. More importantly, CSS framework detection helps the scraper distinguish between hand-authored classes and framework-generated classes when analyzing page structure for content extraction. For example, Tailwind utility classes (`flex`, `text-sm`, `bg-blue-500`) should be stripped when extracting semantic content, while custom class names may indicate meaningful section boundaries.
+- **Library detection across pages enables site-level patterns**: A single page may only reveal part of the technology stack (e.g. a blog page shows WordPress but not WooCommerce; a product page shows Shopify but not Chart.js). By aggregating `DetectedLibrary` results across all scraped pages, `SiteTechnology` builds a complete picture. The research notes that some technologies are only visible on specific page types: charting libraries on dashboard pages, animation frameworks on landing pages, and auth frameworks on account/profile pages.
 - **Open questions**:
 
     - Should `page_type_patterns` support regex in addition to globs?
@@ -788,6 +1030,9 @@ struct WebSite {
     - Should crawl rate / politeness settings live here or in a separate crawl configuration struct?
     - Should `api_patterns` include authentication requirements observed during detection (e.g. "requires session cookie" vs "requires API key header")?
     - Should `SiteApiPattern` track rate-limiting signals (HTTP 429 responses, `Retry-After` headers) observed during scraping?
+    - Should `SiteAuthProfile` include an `auth_strategies` field listing recommended strategies for the site (e.g. "session-cookie", "oauth2-authorization-code", "basic-auth")?
+    - Should `auth_required_patterns` support priority/ordering so more specific patterns take precedence?
+    - Should `session_available` carry a timestamp of when the session was last validated?
 
 ## Company
 
@@ -922,6 +1167,8 @@ struct Company {
 - **employee_count and annual_revenue as strings**: These are often ranges ("1,000-5,000"), estimates, or currency-denominated. Using strings preserves the source representation. A more structured approach could use `Range<u64>` and a `Currency` enum in a future pass.
 - **CompanyIdentifiers**: External IDs are the primary way to de-duplicate and cross-reference companies across data sources. The `extra` HashMap handles any registry not covered by the named fields.
 - **API detection relevance**: When Reaper detects API calls on a company's website, the `DetectedApi` and `SiteApiPattern` types may reveal the company's technology choices (e.g. GraphQL API suggests a modern frontend stack, Shopify Storefront API suggests the company uses Shopify). The `SiteTechnology` struct on `WebSite` already captures detected frameworks; API patterns provide a complementary signal. Company data may also be enriched by following `sameAs` links in Schema.org JSON-LD (e.g. Wikidata Q-numbers, LinkedIn company pages, Crunchbase URLs) which are exposed as network requests during page rendering.
+- **Auth considerations**: Company information on public about pages, imprint/legal pages, and press pages is typically accessible without authentication. However, some B2B platforms (wholesale portals, partner dashboards, industry directories) require authentication to access company directory pages. The `HttpAuthDetection` and `FullAuthDetection` types on the parent `WebPage` identify when company data was fetched behind auth. Company data scraped behind authentication should be tagged with the auth state so consumers understand the provenance. The `SiteAuthProfile` on `WebSite` helps the scraper decide whether to attempt fetching company-specific pages or skip them when operating anonymously.
+- **Library detection relevance for company data**: The library-detection research reveals that many company about-pages and press-pages are built on detectable CMS platforms. When WordPress or Drupal is detected, company pages likely follow standard URL patterns (e.g. `/about/`, `/company/`, `/press/`) and contain structured data in standard CMS fields. When Webflow is detected (`webflow.js`, `data-wf-page`), the site uses a visual builder with generated static assets — company information will be in the static HTML but may lack structured Schema.org data. When a headless CMS like Contentful is detected (`cdn.contentful.com`), company data is likely fetched via API calls and rendered client-side, meaning `CompleteWebPage` with browser rendering may be needed to extract it. The `meta_frameworks` detection also informs extraction strategy: Next.js/Nuxt about-pages typically include structured data in `__NEXT_DATA__`/`__NUXT_DATA__` payloads, which can be parsed without full content extraction.
 - **Open questions**:
 
     - Should `headquarters` be a `Place` struct reference instead of a free-text string?
@@ -1038,6 +1285,8 @@ struct Person {
 - **PersonIdentifiers**: External IDs are critical for deduplication. Two Person records with different names but the same ORCID or Wikidata ID are the same individual.
 - **location as free-text string**: Person locations are often imprecise ("San Francisco Bay Area", "London, UK"). Using a string avoids over-structuring data that is inherently fuzzy. A `Place` reference could be used when more precision is available.
 - **API detection relevance**: Person profile pages on platforms like LinkedIn, GitHub, or Twitter/X load profile data via API calls. The `DetectedApi` types from browser network monitoring can capture structured person data (name, title, company, location) that may be more complete than what is visible in the rendered HTML. Schema.org `Person` JSON-LD on personal homepages and author pages is another rich source for populating `Person` fields.
+- **Auth considerations**: Person data on public team pages and author bylines is typically accessible without authentication. However, profile pages on social platforms (LinkedIn, Facebook) and enterprise directories are increasingly behind auth walls. The auth-scraping research notes that these sites often use SSO, OAuth, and JavaScript-rendered login walls. `FullAuthDetection.browser_signals` captures JS-rendered login walls that raw HTTP would miss. The scraper should use `AuthDetection` to identify when person data required authentication and tag the extraction accordingly. For social platforms, prefer official APIs (LinkedIn API, GitHub API) over page scraping when available, as recommended by the auth-scraping research's core recommendation to prefer official APIs.
+- **Library detection relevance for person data**: The library-detection research shows that personal profile pages, author pages, and team pages are built on diverse technology stacks. When a `FrontendFramework` like React is detected without a meta-framework, the team page is likely a client-rendered SPA where person data is loaded via API calls rather than embedded in the HTML — requiring `CompleteWebPage` for extraction. When Auth0, Clerk, or Firebase Auth is detected (`auth_frameworks` in `SiteTechnology`), the site uses a modern identity platform and person profile pages are likely behind authentication. When charting libraries are detected alongside person data (e.g. a data scientist's portfolio page with D3.js or Plotly.js visualizations), the `DetectedApi` entries may reveal the data endpoints that the person's projects consume. Author pages on WordPress sites (detected via `/wp-content/` signatures) typically include person metadata in Schema.org `Person` JSON-LD or in the WordPress REST API at `/wp-json/wp/v2/users/{id}`.
 - **Open questions**:
 
     - Should `location` be an `Option<EntityRef>` pointing to a `Place` entity?
@@ -1241,6 +1490,11 @@ struct Product {
 - **extra_attributes HashMap**: Product pages contain a huge variety of attributes (wattage, thread count, battery capacity, etc.) that can't be anticipated in typed fields. The HashMap captures them without schema explosion.
 - **API-driven product data**: Many e-commerce sites (Shopify, Magento, WooCommerce) load product data via XHR/Fetch API calls rather than embedding it in the initial HTML. When `CompleteWebPage` captures these API calls via CDP network monitoring, the `DetectedApi` entries may contain product pricing, availability, variants, and reviews as structured JSON. The `Product` struct should be populatable from either HTML parsing or API response analysis — the api-detection research shows that response body shapes for product APIs often include fields like `id`, `title`, `variants[].price`, `available`, and `images[]` that map directly to `Product` fields. Using the API path is more reliable than HTML parsing for SPA-based stores.
 - **Product data from Schema.org + API fusion**: Some product pages include Schema.org JSON-LD with basic product info in the static HTML, then load detailed pricing and availability via API. The `Product` struct should support merging data from both sources, with API-sourced data taking precedence for volatile fields (price, availability, inventory count).
+- **Auth and paywall considerations**: Product data on public e-commerce pages is typically accessible. However, B2B wholesale portals, members-only stores (Costco, Sam's Club), and platforms with dynamic pricing (airlines, hotels) require authentication. The `FullAuthDetection` on the parent `WebPage` signals when product data was fetched behind auth. Additionally, anti-bot defenses (Cloudflare Turnstile, reCAPTCHA) are common on large e-commerce sites and should be treated as stop conditions. The auth-scraping research recommends: (1) honor rate limits, (2) use backoff and retry budgets, (3) identify the client clearly, (4) cache aggressively, (5) prefer batch/export/API endpoints. When a product page's `FullAuthDetection.has_anti_automation` is true, the scraper should avoid aggressive re-scraping and consider the site's `SiteApiPattern` for a direct API path instead.
+- **CSRF and form tokens for cart actions**: The auth-scraping research notes that mutation forms (add to cart, wishlist) often require per-request CSRF tokens. If Reaper needs to interact with product forms beyond passive scraping, it must load the form page first, parse hidden token fields, and submit exactly the fields the server expects. This is only relevant for active scraping, not passive observation.
+- **E-commerce platform detection from library-detection research**: The library-detection research provides highly specific signatures for the top 5 e-commerce platforms that directly inform `Product` extraction strategy. **Shopify** (`cdn.shopify.com`, `Shopify.theme`, `window.Shopify`, `/cart.js`, `/products/*.js`, `_shopify_*` cookies): Product data is available via the Storefront API, and product JSON is accessible at `/products/{handle}.js` without authentication. Schema.org Product JSON-LD is typically present in the initial HTML. **WooCommerce** (`wp-content/plugins/woocommerce`, `wc-cart-fragments`, `wc-ajax`): Built on WordPress, so WordPress REST API and WooCommerce REST API are available. Product data may be in Schema.org JSON-LD or in `/wp-json/wc/v3/products/{id}`. **Magento** (`/static/frontend/`, `Magento_`, `mage/`, `requirejs-config.js`, `mage-cache-storage` cookie): Uses RequireJS module loading. Product data is typically in Schema.org JSON-LD and may also be accessible via the Magento REST API. **Wix Stores** (`wixstores`, `WixStores`, `static.parastorage.com`): Client-rendered with data fetched via Wix internal APIs — `CompleteWebPage` is usually needed. **Squarespace Commerce** (`static1.squarespace.com`, `Y.Squarespace`, `/commerce/`): Product data available via Squarespace JSON API endpoints and Schema.org JSON-LD.
+- **Rendering strategy based on detected platform**: When Shopify is detected, `SimpleWebPage` is often sufficient because Shopify product pages include comprehensive Schema.org JSON-LD in the initial HTML. When Wix Stores is detected, browser rendering is required because product data is loaded dynamically via internal APIs. When WooCommerce is detected, the WordPress REST API provides a structured alternative to HTML scraping. These platform-specific strategies should be encoded as scraping hints derived from `SiteTechnology.ecommerce_platforms` detections.
+- **Animation framework detection for product pages**: The library-detection research identifies animation frameworks (GSAP, Framer Motion, Anime.js, Lottie-web, AOS) that are common on product landing pages and e-commerce product detail pages. When these are detected, the product page likely uses rich media (360-degree views, animated product demos, interactive galleries) that may not be captured by static HTML extraction. The `CompleteWebPage` with browser rendering would capture the fully rendered state, but the underlying product data (pricing, availability, specs) is usually available from Schema.org JSON-LD or API calls regardless of animation usage.
 - **Open questions**:
 
     - Should `brand` and `manufacturer` be `EntityRef` to `Company`?
@@ -1249,6 +1503,8 @@ struct Product {
     - How should we model product bundles or kits?
     - Should `Product` include a `data_source` field indicating whether fields were populated from HTML, Schema.org, detected API, or a combination?
     - Should product APIs discovered via `DetectedApi` (e.g. `/api/products/{id}`) be tracked on the `Product` itself so that future scrapes can hit the API directly?
+    - Should `Product` include an `auth_required` flag indicating whether the product page required authentication to access?
+    - Should price observations from authenticated sessions be tagged differently from anonymous sessions (e.g. "member price" vs "public price")?
 
 ## Place
 
@@ -1381,6 +1637,8 @@ struct Place {
 - **PostalAddress.formatted**: Even when we can parse into components, preserving the original formatted address is valuable — parsing may lose information (building names, care-of lines).
 - **OpeningHours**: Modeled per-day with open/close times. This covers most cases but doesn't handle split shifts (e.g. closed 12-1 for lunch) — that could be modeled as two `OpeningHours` entries for the same day.
 - **API detection relevance**: Many local business and store locator pages (e.g. restaurant chains, retail stores) load location data from API endpoints (often `/api/stores`, `/api/locations`, or similar). The `DetectedApi` types can capture these API calls which return structured `Place` data (coordinates, addresses, hours) as JSON. This is particularly valuable for business directory sites where the API returns cleaner data than the rendered HTML. The api-detection research's body shape detection can infer the `GeoCoordinates` and `PostalAddress` structures directly from the JSON response shapes.
+- **Auth considerations**: Place data on public store locators and contact pages is typically accessible without authentication. However, some business directories (Yelp behind login walls), enterprise facility management portals, and gated community sites require authentication for structured access. The auth-scraping research notes that detected API endpoints for store locators (e.g. `/api/stores`) are often unauthenticated but may have rate limits. The `SiteAuthProfile.auth_required_patterns` can identify URL patterns that need auth. The `FullAuthDetection` on the parent page signals when place data required authentication.
+- **Library detection relevance for place data**: The library-detection research identifies several technologies commonly used on store locator and local business pages. When charting/map libraries (D3.js for geographic visualizations) are detected alongside place data, the page likely renders interactive maps. When a CSS framework like Bootstrap is detected (`bootstrap.min.css`, `container`, `row`, `col-*` classes), place data may be in structured card layouts with consistent class names that aid extraction. When a CMS like WordPress is detected, place data on store locator pages is often populated via the WordPress REST API or a store locator plugin with its own API endpoints (e.g. `/wp-json/wpsl/v1/locations`). E-commerce platform detection (Shopify, WooCommerce, Magento) is also relevant: these platforms often include physical store location pages with structured Schema.org `LocalBusiness` or `Store` JSON-LD data that maps directly to `Place` fields. When animation frameworks like GSAP or AOS are detected on location pages, the page likely features interactive elements (animated maps, hover effects on store cards) but the underlying place data is still available from structured data or API calls.
 - **Open questions**:
 
     - Should `contained_by` use an `EntityRef` instead of `Box<Place>` to avoid deep nesting and duplication?
@@ -1389,3 +1647,4 @@ struct Place {
     - Should the `timezone` field use `chrono_tz::Tz` instead of a string?
     - How should we represent a place that has moved or changed boundaries over time?
     - Should `Place` include a reference to the API endpoint that provided the location data (when sourced from a detected API)?
+    - Should `Place` track whether the source page required authentication to access this location data?
