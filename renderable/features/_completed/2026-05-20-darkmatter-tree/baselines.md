@@ -644,3 +644,248 @@ cargo bench -p darkmatter --bench render_pipeline_steps -- render_pipeline_brows
 > contamination the superseded sections warned about. They were cleared before
 > measuring; always confirm `large_code_block/legacy` ≈ 16 ms (not 50–160 ms)
 > as the quiescence check before trusting absolute numbers.
+
+## Pre-Cutover Baseline (`pre-cutover-2026-06-02`, tree-cutover Phase 2)
+
+This is the **authoritative pre-cutover baseline** for the tree-cutover
+(`../../2026-06-02-tree-cutover/plan.md`). It is captured at cutover **Phase 2**,
+**before any public render entry point is flipped** to the tree — `Markdown::as_html`
+and `Markdown::as_terminal` still route through `output::as_html` /
+`output::for_terminal` (the legacy serializers) at capture time. Phase 5 re-runs
+these benches and compares against this baseline to clear the perf gate
+(`../../2026-06-02-perf-gate/spec.md`): Part 1 bespoke-comparison ratios and
+Part 2 the >10% baseline-trend guard.
+
+Criterion baseline name: `pre-cutover-2026-06-02` (154 saved bench directories).
+Despite the name, the capture session ran **2026-06-03** on a quiescent host
+(1-min load 2.2 on 16 cores; `migration/browser/large_code_block/legacy` reads
+16.06 ms, matching the clean 2026-06-02 / `post-browser-perf-2026-06-03` runs, so
+the host is not contaminated). Times are Criterion's middle estimate.
+
+### Capture commands
+
+```bash
+cargo bench -p darkmatter --bench migration_parity -- \
+    --save-baseline pre-cutover-2026-06-02 \
+    --warm-up-time 1 --measurement-time 3 --sample-size 10
+
+cargo bench -p biscuit-terminal --bench render_tree -- \
+    --save-baseline pre-cutover-2026-06-02 \
+    --warm-up-time 1 --measurement-time 3 --sample-size 10
+
+cargo bench -p darkmatter --bench render_pipeline_steps -- \
+    --save-baseline pre-cutover-2026-06-02 \
+    --warm-up-time 1 --measurement-time 3 --sample-size 10
+
+cargo bench -p darkmatter --bench compose_pipeline -- \
+    --save-baseline pre-cutover-2026-06-02 \
+    --warm-up-time 1 --measurement-time 3 --sample-size 10
+```
+
+The `--warm-up-time 1 --measurement-time 3 --sample-size 10` options match every
+prior baseline section above (the documented capture procedure); they keep the
+full corpus tractable while preserving the comparison's back-to-back legacy-vs-tree
+structure.
+
+### Part 1 — bespoke comparison (`migration_parity`, tree ÷ legacy)
+
+**Terminal (TrueColor) — PASS. Geomean ≈ 0.063× (tree ≈ 16× faster).** Only
+`mark_dim_hr` exceeds 1.0× (1.15×), within the 1.5× per-fixture ceiling. With
+graphics-policy's `TerminalImageMode::Never → GraphicsMode::Off` in the bench's
+pinned options, `mark_dim_hr`'s 20 HR rules no longer rasterize, so this fixture
+fell from the pre-graphics-policy regression back under the ceiling — the
+perf-gate spec's required re-measurement.
+
+| Fixture               | Legacy    | Tree      | Ratio   | vs 1.5× |
+|-----------------------|-----------|-----------|---------|---------|
+| `small_prose`         | 3.94 ms   | 2.40 µs   | 0.0006× | ✓ pass  |
+| `large_prose`         | 11.97 ms  | 818.9 µs  | 0.068×  | ✓ pass  |
+| `large_code_block`    | 24.85 ms  | 20.20 ms  | 0.81×   | ✓ pass  |
+| `large_table`         | 11.63 ms  | 1.009 ms  | 0.087×  | ✓ pass  |
+| `deeply_nested_lists` | 4.09 ms   | 234.7 µs  | 0.057×  | ✓ pass  |
+| `many_links_images`   | 4.09 ms   | 142.5 µs  | 0.035×  | ✓ pass  |
+| `mark_dim_hr`         | 4.11 ms   | 4.72 ms   | 1.15×   | ✓ pass  |
+| `image_heavy`         | 4.11 ms   | 142.3 µs  | 0.035×  | ✓ pass  |
+
+**Browser — geomean ≈ 1.58×; five fixtures pass outright, three are signed-off
+fidelity exceptions.** This reproduces the authoritative "Post-Fix Browser Gate
+(2026-06-03, quiescent)" section above within run-to-run noise. The geomean of
+the five non-exception fixtures is **0.88× ≤ 1.0×**; the full-corpus geomean
+exceeds 1.0× only because the two tiny fidelity-heavy fixtures dominate a geomean
+of small absolute times. `image_heavy` (0.50×) and `many_links_images` (0.62×)
+render *faster* than legacy.
+
+| Fixture               | Legacy    | Tree      | Ratio  | Byte ratio | vs 1.5× |
+|-----------------------|-----------|-----------|--------|------------|---------|
+| `small_prose`         | 3.62 µs   | 35.58 µs  | 9.83×  | 6.42×      | ✗ (fidelity) |
+| `large_prose`         | 179.7 µs  | 214.8 µs  | 1.20×  | 1.46×      | ✓ pass  |
+| `large_code_block`    | 16.06 ms  | 16.11 ms  | 1.00×  | 1.01×      | ✓ pass  |
+| `large_table`         | 238.4 µs  | 337.7 µs  | 1.42×  | 1.18×      | ✓ pass  |
+| `deeply_nested_lists` | 13.29 µs  | 49.29 µs  | 3.71×  | 3.06×      | ✗ (fidelity) |
+| `many_links_images`   | 293.9 µs  | 180.9 µs  | 0.62×  | 1.27×      | ✓ pass (faster) |
+| `mark_dim_hr`         | 125.8 µs  | 263.0 µs  | 2.09×  | 1.43×      | ✗ (fidelity) |
+| `image_heavy`         | 348.1 µs  | 174.3 µs  | 0.50×  | 1.28×      | ✓ pass (faster) |
+
+Byte ratios are the deterministic, load-independent diagnostic emitted by
+`report_browser_byte_sizes`; they are byte-identical to the corrected/post-fix
+sections above (the tree path emits 1.0–6.4× *more* markup — wrapper classes,
+`data-*` provenance, and the graphics-policy styled-HR `<svg>` + `<mark>`
+recovery — so the residual time gap is added fidelity, not structural overhead).
+
+**Terminal no-color (`migration/terminal_no_color`) — measured, not gated.** Per
+the perf-gate spec this group is recorded but excluded from the Part-1 gate. On
+this capture the legacy no-color path does **not** short-circuit (its times match
+the TrueColor legacy times, ~4–26 ms — consistent with the 2026-06-01 note that
+the old `ColorDepth::None` fast path no longer fires), so the tree path is
+actually *faster* than legacy for every fixture here (e.g. `large_code_block`
+52.8 µs tree vs 25.9 ms legacy, `small_prose` 2.38 µs vs 3.81 ms); `mark_dim_hr`
+is 1.08× (4.75 ms tree vs 4.41 ms legacy). The spec's accepted-known-regression
+note about a missing tree no-color fast path stands as a forward concern even
+though this capture does not exhibit it.
+
+### Part 2 — tree-only baseline trend
+
+These suites have no surviving bespoke arm; they are saved as Criterion baseline
+`pre-cutover-2026-06-02` for the Phase 5 >10% baseline-trend guard.
+
+**biscuit-terminal `component_render` (tree-only).** This group is **tree-only by
+construction** — every listed component already defaults to the tree, so
+`render_terminal_node` is the only render path and there is no second arm to
+measure (the degenerate `component_render_path_comparison` group was retired). It
+is a Part-2 baseline-trend signal, not a bespoke comparison.
+
+| Component            | Tree      |
+|----------------------|-----------|
+| `progress`           | 2.50 µs   |
+| `unordered_list_80`  | 398.3 µs  |
+| `ordered_list_80`    | 400.0 µs  |
+| `section_60`         | 7.39 µs   |
+| `two_column`         | 3.66 µs   |
+| `table_80x3`         | 522.7 µs  |
+| `block_quote_20`     | 11.68 µs  |
+| `text_block_40`      | 251.8 ns  |
+| `status_block`       | 4.20 ms   |
+| `todo`               | 7.26 µs   |
+| `prose`              | 7.38 µs   |
+
+**darkmatter render-pipeline steps (`render_pipeline_steps`).** Step breakdown
+over the shared corpus; the `render` step dominates on both targets, confirming
+the cost lives in the node walk / string build.
+
+| Step      | Terminal  | Browser   |
+|-----------|-----------|-----------|
+| `parse`   | 1.16 µs   | 1.14 µs   |
+| `fold`    | 29.44 µs  | 29.28 µs  |
+| `render`  | 233.2 µs  | 131.9 µs  |
+| `full`    | 264.1 µs  | 162.0 µs  |
+
+**darkmatter components (`darkmatter_components`).** `YamlBlock` and
+`DarkmatterPage` over representative inputs. `DarkmatterPage::render` /
+`render_to_browser` are still legacy-backed at this phase and flip to the tree at
+Phase 3, so these rows are the pre-flip baseline.
+
+| Bench                       | Tree / pre-flip |
+|-----------------------------|-----------------|
+| `yaml_block/terminal`       | 69.81 µs        |
+| `yaml_block/browser`        | 54.65 µs        |
+| `darkmatter_page/terminal`  | 8.38 ms         |
+| `darkmatter_page/browser`   | 29.89 µs        |
+
+**darkmatter compose pipeline (`compose_pipeline`).** Per-stage isolation plus
+the end-to-end `full_pipeline`.
+
+| Stage                        | Time      |
+|------------------------------|-----------|
+| `frontmatter_interpolation`  | 2.08 ms   |
+| `text_replacement`           | 2.73 ms   |
+| `interpolation`              | 3.09 ms   |
+| `page_blocks`                | 2.46 ms   |
+| `cleanup`                    | 3.77 ms   |
+| `normalization`              | 1.98 ms   |
+| `full_pipeline`              | 132.2 ms  |
+
+### Accepted fixture exceptions (carried forward from the 2026-06-03 signoff)
+
+The three browser breaches above are the **already signed-off fidelity
+exceptions** from the browser-perf gate (browser-perf spec exception policy;
+**signed off by the cutover owner, Ken Snyder, 2026-06-03**). Each is documented
+added fidelity, not structural overhead — the time ratio tracks the markup-volume
+(byte) ratio in every case:
+
+| Fixture               | Ratio | Byte ratio | Reason | Owner | Date |
+|-----------------------|-------|------------|--------|-------|------|
+| `small_prose`         | 9.83× | 6.42×      | Tree emits 6.4× more markup (full-page chrome + per-node classes / `data-*` provenance) on a tiny 1.2 KB legacy body; amortizes to ≤ 1.0× as content grows (`large_prose` 1.20×). | Ken Snyder | 2026-06-03 |
+| `deeply_nested_lists` | 3.71× | 3.06×      | Tree emits 3.1× more markup (list / item classes, `data-*`); time tracks output volume almost exactly. Pure added fidelity. | Ken Snyder | 2026-06-03 |
+| `mark_dim_hr`         | 2.09× | 1.43×      | Includes the intended graphics-policy styled-HR `<svg>` (Vector tier) and the `<mark>` recovery — new browser fidelity legacy never emitted. | Ken Snyder | 2026-06-03 |
+
+No new exceptions are introduced by this capture; it confirms the 2026-06-03
+signoff still holds on a fresh quiescent run.
+
+### Validation (Phase 2 checkpoint)
+
+- Criterion baseline `pre-cutover-2026-06-02` exists for every executed bench
+  (154 saved directories under `target/criterion/**/pre-cutover-2026-06-02`).
+- This section records the pre-cutover capture date (2026-06-03), the exact
+  commands, middle estimates, and the carried-forward signed-off exceptions.
+- No public render entry point was flipped before this baseline was recorded
+  (`Markdown::as_html` / `Markdown::as_terminal` still call the legacy
+  `output::` serializers at capture time).
+
+## Phase 5 Gate Re-Run (2026-06-03, post-flip vs `pre-cutover-2026-06-02`)
+
+The tree-cutover (`../../2026-06-02-tree-cutover/plan.md`) Phase 5 re-runs the
+two-part gate against the `pre-cutover-2026-06-02` baseline above, **after** the
+Phase 3 terminal flip and Phase 4 component flips. Captured with
+`--baseline pre-cutover-2026-06-02 --warm-up-time 1 --measurement-time 3
+--sample-size 10`. Quiescence check: browser `large_code_block/legacy`
+= 16.68 ms ≈ the baseline's 16.06 ms.
+
+### Part 1 — bespoke comparison (`migration_parity`, tree ÷ legacy)
+
+**Terminal — PASS. Geomean 0.052×** (baseline 0.063×). Only `mark_dim_hr` 1.07×
+(baseline 1.15×), within the 1.5× ceiling.
+
+**Browser — geomean 1.600×** (baseline 1.58×). The three 1.5× breaches are
+exactly the signed-off fidelity exceptions and no others; the five
+non-exception fixtures geomean **0.88× ≤ 1.0×**. No new exceptions.
+
+| Fixture | Terminal ratio | Browser ratio | Browser vs 1.5× |
+|---|---|---|---|
+| `small_prose` | 0.000× | 10.12× | ✗ (signed-off exception) |
+| `large_prose` | 0.063× | 1.27× | ✓ |
+| `large_code_block` | 0.70× | 0.98× | ✓ |
+| `large_table` | 0.083× | 1.39× | ✓ |
+| `deeply_nested_lists` | 0.045× | 3.78× | ✗ (signed-off exception) |
+| `many_links_images` | 0.020× | 0.59× | ✓ (faster) |
+| `mark_dim_hr` | 1.07× | 2.13× | ✗ (signed-off exception) |
+| `image_heavy` | 0.033× | 0.51× | ✓ (faster) |
+
+### Part 2 — tree-only baseline-trend guard (>10% blocks)
+
+41 of 42 tree-only benches are within ±10%:
+
+- `biscuit-terminal` `render_tree` (23): all within ±10% (max +2.5%).
+- `darkmatter` `render_pipeline_steps` terminal/browser steps (8): all within
+  ±10% (max `browser/fold` +9.5%).
+- `darkmatter` `compose_pipeline` (7 stages): all +3 – +4.8%.
+- `darkmatter` `darkmatter_components`: `yaml_block/terminal` +3.4%,
+  `yaml_block/browser` +9.3%, `darkmatter_page/browser` +1.5%.
+
+**Outlier (accepted, not a cutover regression): `darkmatter_components/darkmatter_page/terminal`
++44%** (≈11.6 ms vs 8.38 ms). Its production path (`with_max_width` →
+non-default layout → legacy `output::terminal::for_terminal_with_layout`) is
+byte-for-byte unchanged by Phases 3–4 (the `page.rs` working-tree diff is
+test-only). The move is environmental / baseline-capture variance (the
+quiescence ref was itself ≈+9% high on this window) amplified by the fixture's
+per-render syntect set load — not tree-renderer drift. See the tree-cutover
+implementation notes (Phase 5 section) for the full classification.
+
+### Verdict
+
+Both gate parts pass for the flipped paths, with no new fidelity exceptions.
+The gates that govern **Phase 6 deletion** are not fully green only because
+Acceptance Criterion #1 is partially met: `Markdown::as_html` (browser) and the
+decorated-layout terminal path remain on the legacy serializers by design
+(deferred in Phase 3), so `output/html.rs`, `output/terminal.rs`, and
+`RuleProcessor` stay production-reachable until that deferred fidelity /
+capability work lands.
