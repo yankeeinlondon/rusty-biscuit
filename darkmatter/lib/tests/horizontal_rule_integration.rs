@@ -1,9 +1,12 @@
 #[cfg(test)]
 mod tests {
+    use biscuit_terminal::terminal::Terminal;
+    use darkmatter::layout::DarkmatterPage;
     use darkmatter::markdown::{
         Markdown,
         output::{ColorDepth, TerminalImageMode, TerminalOptions},
     };
+    use darkmatter::style::{HrStyleOverrides, apply_hr_style, from_frontmatter};
 
     fn terminal_text_options() -> TerminalOptions {
         let mut options = TerminalOptions::default();
@@ -517,6 +520,90 @@ mod tests {
         assert!(
             output.contains("\x1b_G"),
             "TerminalImageMode::Force must emit Kitty image escapes for HR: {output:?}"
+        );
+    }
+
+    // ================================================================
+    // Review-4 finding 1: page-level HR defaults must reach bare `---`
+    // rules through the DarkmatterPage render path, restoring assertions
+    // removed during the tree cutover. These exercise the full
+    // frontmatter → page → render-tree path the CLI render pipeline uses
+    // (`from_frontmatter` migrates the deprecated top-level `hr:` block into
+    // `style.hr.*`; `apply_hr_style` projects it onto the page; the page
+    // threads it through `hr_defaults` to the tree entry points).
+    // ================================================================
+
+    /// Parses `md`'s style frontmatter (migrating the deprecated top-level
+    /// `hr:` alias into `style.hr.*`) and applies it onto a default page.
+    fn page_with_frontmatter_hr(md: &Markdown) -> DarkmatterPage {
+        let (style, _warnings) =
+            from_frontmatter(md.frontmatter()).expect("parse style frontmatter");
+        let term = Terminal::new_optimistic(80);
+        apply_hr_style(DarkmatterPage::new(&term), &style, HrStyleOverrides::default())
+            .expect("apply hr style")
+    }
+
+    #[test]
+    fn bare_rule_uses_style_hr_frontmatter_defaults_in_html() {
+        // `style.hr.*` defaults must style a bare `---` on the browser path.
+        let markdown =
+            "---\nstyle:\n  hr:\n    kind: waves\n    weight: thick\n    width: \"50%\"\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let html = page_with_frontmatter_hr(&md).render_to_browser(&md).unwrap();
+        assert!(
+            html.contains(r#"width="50%""#),
+            "frontmatter width must apply to the bare rule: {html}"
+        );
+        assert!(html.contains("--hr-weight: 8"), "thick default ⇒ 8px: {html}");
+        assert!(html.contains("<path"), "waves default ⇒ <path> svg: {html}");
+    }
+
+    #[test]
+    fn bare_rule_uses_deprecated_top_level_hr_frontmatter_in_html() {
+        // The deprecated top-level `hr:` block (with the legacy `style:` key)
+        // migrates into `style.hr.*` and still styles a bare `---`.
+        let markdown = "---\nhr:\n  style: waves\n  weight: thick\n  width: \"50%\"\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let html = page_with_frontmatter_hr(&md).render_to_browser(&md).unwrap();
+        assert!(html.contains(r#"width="50%""#), "{html}");
+        assert!(html.contains("--hr-weight: 8"), "{html}");
+        assert!(html.contains("<path"), "{html}");
+    }
+
+    #[test]
+    fn rule_attributes_override_frontmatter_defaults_partially_in_html() {
+        // Inline rule attributes win per-property; unset properties fall back
+        // to the `style.hr.*` defaults.
+        let markdown =
+            "---\nstyle:\n  hr:\n    kind: waves\n    weight: thick\n    width: \"80%\"\n---\n\n--- { width: \"25%\" }\n";
+        let md: Markdown = markdown.into();
+        let html = page_with_frontmatter_hr(&md).render_to_browser(&md).unwrap();
+        assert!(
+            html.contains(r#"width="25%""#),
+            "inline width must win over the frontmatter default: {html}"
+        );
+        assert!(
+            html.contains("--hr-weight: 8"),
+            "weight must fall back to the thick default: {html}"
+        );
+        assert!(
+            html.contains("<path"),
+            "kind must fall back to the waves default: {html}"
+        );
+    }
+
+    #[test]
+    fn bare_rule_uses_style_hr_frontmatter_defaults_in_terminal() {
+        // `style.hr.*` defaults must style a bare `---` on the terminal path.
+        let markdown = "---\nstyle:\n  hr:\n    kind: dots\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let page = page_with_frontmatter_hr(&md).with_image_mode(TerminalImageMode::Never);
+        let out = page.render(&md).unwrap();
+        // The default dashed rule uses `╌`/`-`; a dots default switches the
+        // glyph to `·` (or the ASCII `.` fallback).
+        assert!(
+            out.contains('·') || out.contains('.'),
+            "bare rule must adopt the `dots` frontmatter default: {out:?}"
         );
     }
 }
