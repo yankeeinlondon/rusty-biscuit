@@ -2292,10 +2292,13 @@ mod tests {
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
         let image_line = plain.lines().find(|l| l.contains("IMAGE")).unwrap_or("");
-        // "▉ IMAGE[alt text]\n" has visible width 17 (excluding \n), centered in 80 => (80-17)/2 = 31 spaces.
+        // The tree fold keeps the raw alt (`alt text|20`) rather than parsing
+        // the legacy `|20` width directive, so the placeholder is
+        // `▉ IMAGE[alt text|20]`; centered in 80 this leaves ~30 leading spaces.
+        let leading = image_line.chars().take_while(|c| *c == ' ').count();
         assert!(
-            image_line.starts_with("                               "),
-            "image placeholder should be centered, got: {:?}",
+            leading >= 28,
+            "image placeholder should be centered (>=28 leading spaces), got {leading}: {:?}",
             image_line
         );
     }
@@ -2492,26 +2495,26 @@ mod tests {
         assert!(matches!(err, PageRenderError::InvalidPercent(_)));
     }
 
-    /// A malformed code-block directive (an invalid highlight range) no longer
-    /// fails the browser render: after the `as_html` tree cutover, the render-
-    /// tree code renderer **degrades** a malformed directive to the default
-    /// meta (`TerminalCodeRenderer::build_code_meta`'s documented
-    /// `parse_code_info(...).unwrap_or_else(...)` contract) instead of
-    /// surfacing `MarkdownError::InvalidLineRange`. The legacy serializer
-    /// errored here; the tree path renders the code block ignoring the bad
-    /// directive. The `MarkdownError -> PageRenderError::Render` mapping in
-    /// `render_to_browser` is unchanged — this input simply no longer triggers
-    /// it.
+    /// A malformed code-block directive (an invalid highlight range) is a fatal
+    /// error on the browser render, matching the legacy `output::as_html`
+    /// contract (`parse_code_info(...)?`). The `as_html` cutover restores this
+    /// via the `validate_code_directives` preflight, which runs over the folded
+    /// tree before rendering and surfaces `MarkdownError::InvalidLineRange`; the
+    /// `MarkdownError -> PageRenderError::Render` mapping in `render_to_browser`
+    /// then propagates it. (The render-tree *terminal* path still degrades, also
+    /// matching legacy, which used `unwrap_or_default` there.)
     #[test]
-    fn render_browser_degrades_malformed_code_directive() {
+    fn render_browser_errors_on_malformed_code_directive() {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "```rust highlight=1-2-3\nfn main() {}\n```\n".into();
 
-        let html = page.render_to_browser(&md).expect("malformed directive degrades, not errors");
+        let err = page
+            .render_to_browser(&md)
+            .expect_err("malformed directive must fail the browser render");
         assert!(
-            html.contains("code-block"),
-            "code block should still render despite the malformed directive; html={html}"
+            matches!(err, PageRenderError::Render(_)),
+            "malformed directive must map to PageRenderError::Render; got {err:?}"
         );
     }
 

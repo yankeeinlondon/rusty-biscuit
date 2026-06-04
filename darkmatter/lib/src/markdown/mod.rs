@@ -602,7 +602,14 @@ impl Markdown {
     /// when the render tree fails structural validation or a strict-mode
     /// rejection occurs.
     pub fn as_html(&self, options: output::HtmlOptions) -> MarkdownResult<String> {
-        Ok(render_tree::render_tree_html(self, &options)?.output)
+        let (doc, fold_diagnostics) = render_tree::entrypoints::to_render_document(self);
+        // Restore the legacy `output::as_html` contract: a malformed fenced
+        // code-block directive (e.g. an invalid highlight range) is a fatal
+        // error on the browser path, not a silent degrade. The render-tree
+        // code renderer only degrades (matching the legacy *terminal* path), so
+        // this preflight runs over the same folded tree before rendering.
+        render_tree::entrypoints::validate_code_directives(&doc.root)?;
+        Ok(render_tree::entrypoints::render_tree_html_from_document(doc, fold_diagnostics, &options)?.output)
     }
 
     /// Renders the markdown document as ANSI-styled terminal output.
@@ -635,30 +642,16 @@ impl Markdown {
     /// Internal entry point that passes an optional page layout context through
     /// to the renderer so per-component alignment and fill are honoured.
     ///
+    /// Both branches route through the render-tree terminal document renderer.
     /// With no layout context (the default-layout path that
     /// [`DarkmatterPage::render`](crate::layout::DarkmatterPage::render) and
-    /// [`as_terminal`](Self::as_terminal) take), the document routes through the
-    /// render-tree terminal document renderer.
-    ///
-    /// The per-component layout path (`Some(ctx)`) still uses the legacy
-    /// terminal serializer. The tree-side decoration pass
+    /// [`as_terminal`](Self::as_terminal) take), the document folds and renders
+    /// directly. With a layout context (`Some(ctx)`), the tree-side decoration
+    /// pass
     /// ([`render_tree_terminal_with_layout`](render_tree::entrypoints::render_tree_terminal_with_layout))
-    /// already covers per-component alignment, fill, width caps, list-left
-    /// margins, colors, and line numbers, but three legacy decorated-layout
-    /// features remain unimplemented on the tree:
-    ///
-    /// 1. **Hyperlink label width / alignment / truncation** —
-    ///    `style.hyperlinks.{width,max-width,alignment}` pad / truncate the
-    ///    inline link label; the tree has no inline-label width layer.
-    /// 2. **Image fallback placeholder format + width / alignment** — legacy
-    ///    emits a `▉ IMAGE[alt]` block placeholder padded / aligned to
-    ///    `style.images.{width,alignment}`; the tree emits `[alt]` inline.
-    /// 3. **Right-aligned list-item body** — legacy lifts the marker to its own
-    ///    line and right-aligns the body block; the tree renders the item
-    ///    inline.
-    ///
-    /// Until those land on the tree, the decorated path stays on the legacy
-    /// renderer so the corresponding parity guards stay green.
+    /// projects per-component alignment, fill, width caps, list-left margins,
+    /// colors, line numbers, hyperlink-label and image-alt width/alignment, and
+    /// the right-aligned list-item body onto the tree before rendering.
     pub(crate) fn as_terminal_with_layout(
         &self,
         options: output::TerminalOptions,
@@ -666,7 +659,9 @@ impl Markdown {
     ) -> MarkdownResult<String> {
         match layout_ctx {
             None => Ok(render_tree::render_tree_terminal(self, &options)?.output),
-            Some(ctx) => output::terminal::for_terminal_with_layout(self, options, Some(ctx)),
+            Some(ctx) => {
+                Ok(render_tree::entrypoints::render_tree_terminal_with_layout(self, &options, ctx)?.output)
+            }
         }
     }
 
@@ -1019,6 +1014,75 @@ title: Test
         let md: Markdown = content.into();
         assert!(md.frontmatter().is_empty());
         assert_eq!(md.content(), "# Plain content");
+    }
+
+    /// `as_html` must surface a malformed code-block directive (an invalid
+    /// highlight range) as a fatal `MarkdownError::InvalidLineRange`, matching
+    /// the legacy `output::as_html` contract the tree cutover restored via the
+    /// `validate_code_directives` preflight (review-2 finding 3). A well-formed
+    /// directive must still render cleanly.
+    #[test]
+    fn as_html_errors_on_malformed_code_directive() {
+        let bad: Markdown = "```rust highlight=1-2-3\nfn main() {}\n```\n".into();
+        let err = bad
+            .as_html(output::HtmlOptions::default())
+            .expect_err("malformed highlight range must fail as_html");
+        assert!(
+            matches!(err, MarkdownError::InvalidLineRange(_)),
+            "expected MarkdownError::InvalidLineRange, got {err:?}"
+        );
+
+        let good: Markdown = "```rust highlight=2\nfn main() {}\n```\n".into();
+        let html = good
+            .as_html(output::HtmlOptions::default())
+            .expect("well-formed directive must render");
+        assert!(html.contains("main"));
+    }
+
+    /// A structured link directive must lower to real HTML attributes through
+    /// the tree-backed `as_html` (review-2 finding 2): `class`, `target`,
+    /// `data-prompt`, and `data-*` must survive, and the raw directive must not
+    /// leak as a `title="…"` attribute. No frontmatter hyperlink style is
+    /// configured, proving the lowering is unconditional.
+    #[test]
+    fn as_html_preserves_structured_link_metadata() {
+        let md: Markdown = r#"[Read docs](https://example.com "class='btn' target='_blank' prompt='Read docs' data-id='42'")"#.into();
+        let html = md
+            .as_html(output::HtmlOptions::default())
+            .expect("structured link must render");
+
+        assert!(html.contains(r#"href="https://example.com""#), "html={html}");
+        assert!(html.contains(r#"class="btn""#), "class lost; html={html}");
+        assert!(html.contains(r#"target="_blank""#), "target lost; html={html}");
+        assert!(
+            html.contains(r#"data-prompt="Read docs""#),
+            "prompt lost; html={html}"
+        );
+        assert!(html.contains(r#"data-id="42""#), "data-* lost; html={html}");
+        assert!(
+            !html.contains("title="),
+            "raw structured directive leaked as title; html={html}"
+        );
+        assert!(html.contains("Read docs"), "link text lost; html={html}");
+    }
+
+    /// A structured link carrying only a `style='…'` directive must lower to a
+    /// `style="…"` attribute even with no frontmatter hyperlink style — the
+    /// per-link inline CSS the tree path previously dropped when no frontmatter
+    /// style was set (review-2 finding 2).
+    #[test]
+    fn as_html_preserves_structured_link_inline_style() {
+        let md: Markdown =
+            r#"[Click here](https://example.com "class='btn' style='color:red'")"#.into();
+        let html = md
+            .as_html(output::HtmlOptions::default())
+            .expect("structured link must render");
+
+        assert!(html.contains(r#"class="btn""#), "class lost; html={html}");
+        assert!(
+            html.contains("style=") && html.contains("red"),
+            "inline style lost; html={html}"
+        );
     }
 
     #[test]
