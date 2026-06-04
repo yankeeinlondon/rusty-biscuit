@@ -58,7 +58,7 @@ use crate::discovery::detection::ColorDepth;
 use crate::utils::block_constraint::{split_lines, visible_width, wrap_lines};
 use crate::utils::layout::{Alignment, WordWrap};
 
-use super::options::TerminalRenderOptions;
+use super::options::{ImagePlaceholder, TerminalRenderOptions};
 use super::style;
 
 /// Maximum size of an inline terminal image at [`GraphicsMode::Rich`], matching
@@ -842,7 +842,10 @@ impl Writer<'_> {
                 // node). A successfully rendered inline image is left unstyled —
                 // color has no meaning for a raster cell.
                 let fallback = || {
-                    let inner = format!("[{alt}]");
+                    let inner = match self.opts.context.image_placeholder {
+                        ImagePlaceholder::Bracket => format!("[{alt}]"),
+                        ImagePlaceholder::Block => format!("▉ IMAGE[{alt}]"),
+                    };
                     match node.attrs.style().filter(|s| !s.is_empty()) {
                         Some(img_style) => {
                             let img_effective = img_style.inherited_from(effective);
@@ -1195,6 +1198,29 @@ impl Writer<'_> {
             },
         };
         let full_prefix = format!("{prefix}{check_marker}");
+
+        // A decorated right/center-aligned list item lifts its marker to its own
+        // line and left-pads the body block, matching the legacy
+        // `for_terminal_with_layout` model (the marker stays in the list's
+        // column; the body shifts as one block). Gated strictly on the
+        // `darkmatter.li` hint the decoration pass sets — the default path never
+        // sets it, so its inline rendering below is byte-unchanged.
+        if let Some(pad) = list_item_align_pad(node) {
+            // The marker keeps its trailing space and stays in the list's
+            // column (legacy emits `"- "` / `"1. "` on its own line).
+            let mut out = full_prefix.clone();
+            for child in item_children {
+                out.push('\n');
+                let body = match &child.kind {
+                    NodeKind::Paragraph { children } => {
+                        self.render_inline(children, &Style::default())?
+                    }
+                    _ => self.render(child)?,
+                };
+                out.push_str(&indent_block(&body, pad));
+            }
+            return Ok(out);
+        }
 
         let mut out = String::new();
         let mut prefix_used = false;
@@ -1909,6 +1935,21 @@ fn prefix_first_line(prefix: &str, body: &str) -> String {
         out.push_str(line);
     }
     out
+}
+
+/// The left pad (in cells) for a decorated non-left-aligned list item, or
+/// `None` for the default inline rendering.
+///
+/// Reads the `darkmatter.li` `pad` hint the darkmatter decoration pass sets for
+/// `Center` / `Right`-aligned lists; the pad is the precomputed left offset
+/// (`alignment_padding(Li, li_width)`). A missing or non-positive hint means the
+/// item renders inline (the default-path contract).
+fn list_item_align_pad(node: &RenderNode) -> Option<u32> {
+    let pad = node
+        .attrs
+        .get_hint(HintNamespace("darkmatter.li"), "pad")?
+        .as_u64()?;
+    (pad > 0).then_some(pad as u32)
 }
 
 /// Applies recognized semantic classes as direct SGR escapes.

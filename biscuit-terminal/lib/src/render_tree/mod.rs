@@ -38,6 +38,6 @@ pub(crate) mod style;
 
 pub use browser_adapter::BrowserTreeComponent;
 pub use component::TreeComponent;
-pub use options::{TerminalRenderContext, TerminalRenderOptions};
+pub use options::{ImagePlaceholder, TerminalRenderContext, TerminalRenderOptions};
 pub use projection::{ProjectionResult, TreeProjectionContext};
 pub use render::{render_terminal_document, render_terminal_node};

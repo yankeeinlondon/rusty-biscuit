@@ -10,6 +10,22 @@ use std::rc::Rc;
 use renderable::layout::Layout as RenderableLayout;
 use renderable::tree::{CodeRenderer, GraphicsMode, RenderStrictness, TerminalMermaidMode};
 
+/// How an image renders when no raster form is emitted (graphics off / vector,
+/// or a failed protocol render).
+///
+/// The default [`Bracket`](Self::Bracket) form (`[alt]`) is the generic
+/// renderable fallback. The darkmatter decorated document pipeline opts into
+/// [`Block`](Self::Block) (`▉ IMAGE[alt]`) to match its legacy
+/// `for_terminal_with_layout` placeholder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImagePlaceholder {
+    /// `[alt]` — the generic inline fallback.
+    #[default]
+    Bracket,
+    /// `▉ IMAGE[alt]` — the darkmatter legacy block placeholder.
+    Block,
+}
+
 use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
@@ -128,6 +144,12 @@ pub struct TerminalRenderContext {
     /// The darkmatter Markdown document pipeline sets `"▐   "` so block quotes
     /// match the legacy `for_terminal` renderer's quarter-block bar.
     pub blockquote_prefix: Option<String>,
+    /// How an image renders when no raster form is emitted.
+    ///
+    /// [`ImagePlaceholder::Bracket`] (the default) emits `[alt]`. The darkmatter
+    /// decorated document pipeline sets [`ImagePlaceholder::Block`] so the
+    /// fallback matches the legacy `▉ IMAGE[alt]` block placeholder.
+    pub image_placeholder: ImagePlaceholder,
 }
 
 impl TerminalRenderContext {
@@ -160,6 +182,7 @@ impl TerminalRenderContext {
             code_theme: None,
             line_numbers: false,
             blockquote_prefix: None,
+            image_placeholder: ImagePlaceholder::default(),
         }
     }
 
@@ -379,6 +402,7 @@ mod tests {
         assert!(ctx.code_theme.is_none());
         assert!(!ctx.line_numbers);
         assert!(ctx.blockquote_prefix.is_none());
+        assert_eq!(ctx.image_placeholder, ImagePlaceholder::Bracket);
     }
 
     #[test]
