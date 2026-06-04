@@ -1,5 +1,34 @@
 # Tree Cutover — Implementation Notes
 
+> **Status (post-deletion, 2026-06-03): cutover complete.** AC1 is **fully
+> met** — `Markdown::as_html`, `Markdown::as_terminal` (default *and* decorated
+> `Some(ctx)` layout), and `DarkmatterPage::render` / `render_to_browser` all
+> route through the render-tree renderers. The bespoke serializers
+> (`output::as_html`, `output::for_terminal`, `RuleProcessor`) **and their
+> validation surfaces** — the `migration_parity` bench and the
+> `render_tree_parity` integration test — have been **deleted**. The
+> `cargo bench --bench migration_parity` and `render_tree_parity` commands
+> referenced in the per-phase log below are therefore **no longer executable**;
+> they are retained only as a record of the migration.
+>
+> **Final validation path (post-deletion):**
+>
+> ```bash
+> # Behavior / parity — the tree renderers are the only render path.
+> cargo test -p darkmatter -p biscuit-terminal -p renderable
+> cargo test -p darkmatter --test horizontal_rule_integration
+> cargo test -p darkmatter --test render_tree_hr_snapshots
+>
+> # Perf — tree-only, baseline-tracked (no bespoke-vs-tree comparison remains).
+> cargo bench -p darkmatter   --bench render_pipeline_steps -- --baseline pre-cutover-2026-06-02
+> cargo bench -p biscuit-terminal --bench render_tree        -- --baseline pre-cutover-2026-06-02
+> cargo bench -p darkmatter   --bench compose_pipeline       -- --baseline pre-cutover-2026-06-02
+> ```
+>
+> The per-phase log below is **historical**: claims of "AC1 partial",
+> "decorated terminal still legacy", and "deletion blocked" describe in-progress
+> states that no longer hold.
+
 ## Phase 2 — Pre-Cutover Baselines (captured 2026-06-03)
 
 The authoritative pre-cutover performance baseline is recorded in
