@@ -30,13 +30,25 @@ IR state values:
 - `tree render only` means the old bespoke render path has been removed and
   rendering now goes through the IR renderer only.
 
-  > **FileSystem caveat.** `FileSystem` is the one component whose tree
-  > projection covers Browser and Markdown but whose **terminal** `render`
-  > still calls the bespoke directory-tree renderer. The connector geometry
-  > (`├──`, `└──`, `│`) is presentation, not document structure, and the
-  > tree path's terminal output is not yet at parity. Stage 3 deferred the
-  > terminal flip to Stage 4 pending connector-list `Style` lowering and
-  > icon-name spacing parity. See `stage3-spec.md` §S3-1c.
+  > **FileSystem caveat.** `FileSystem`'s tree projection covers Browser and
+  > Markdown, but its **terminal** `render` still calls the bespoke
+  > directory-tree renderer. Tree-cutover Phase 4 closed the connector-list
+  > `Style` lowering gap (per-item color/dim/italic/bold now reach the terminal
+  > tree path — see `render_tree_connector_list`), so styling is at parity. The
+  > terminal flip remains deferred for one remaining capability: the
+  > target-agnostic tree projection emits **Unicode** icon glyphs (`📂`/`📄`
+  > with a separating space), so it cannot reproduce the bespoke renderer's
+  > **Nerd Font** terminal icons (or its space-free Unicode layout) without a
+  > terminal-aware icon hook. Flipping today would drop Nerd Font icons — a
+  > fidelity regression the cutover forbids.
+  >
+  > `FileSystem` is **not a cutover blocker**: the darkmatter Markdown→tree
+  > document pipeline never renders it (it is a standalone directory-tree widget
+  > constructed directly by callers, in the same category as `FileTree` and
+  > `GraphExpression`). Under the
+  > [exemption criterion](../features/2026-06-02-non-structural/spec.md#the-criterion)
+  > it is exempt; the terminal flip is optional future migration. See
+  > `stage3-spec.md` §S3-1c (outcome iii).
 
 ## Two distinct tree cutovers
 
@@ -47,10 +59,13 @@ only the first; do not read it as a statement about the second.
    column).* Whether an individual component's own `render()` —
    `BlockQuote::render()`, `Table::render()`, etc. — routes through the tree
    renderer. Most `biscuit-terminal` components have cut over (`both avail,
-   tree renders`); a few still default to bespoke (`YamlBlock`, `FileSystem`'s
-   terminal path, and the `no changes` components). `Prose` has fully cut over
-   to `tree render only`: it parses its bracket-tag grammar directly into
-   `RenderNode` and renders through the shared tree renderers only.
+   tree renders`); `FileSystem`'s **terminal** path and the `no changes`
+   components still default to bespoke. `Prose` and darkmatter's `YamlBlock`
+   have fully cut over to `tree render only`: `Prose` parses its bracket-tag
+   grammar directly into `RenderNode`, and `YamlBlock::render` /
+   `render_html_fragment` fold its projected `Code` node through the shared
+   terminal and browser tree renderers (wired with darkmatter's
+   `TerminalCodeRenderer`).
 
 2. **The darkmatter Markdown *document* pipeline** *(NOT tracked here).* The
    whole-document Markdown serializers — `Markdown::as_html`,
@@ -145,7 +160,7 @@ fail with documented `StyleApplyError` variants.
 | TwoColumn       | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/two_column.rs`          | A responsive two-column layout that stacks vertically when narrow.                  |
 | DarkmatterPage  | Block  | ✅       | ✅      | ❌       | ❌   | no changes — exempt (page frame / render shell) | —             | `darkmatter/lib/src/layout/page.rs`                          | Page-level layout owning margins, padding, background, max-width, and alignment. Renders to terminal (`render`) and browser (`render_to_browser`), both legacy-backed pre-cutover. Wraps document output; not a document node. |
 | FileTree        | Block  | ✅       | ❌      | ❌       | ❌   | no changes — exempt (standalone viz tool) | —             | `darkmatter/lib/src/markdown/reference/file_tree/mod.rs`     | Visualizes a Markdown file's reference/transclusion dependency graph. A CLI/dev tool, terminal-only; not document content. |
-| YamlBlock       | Block  | ✅       | ✅      | ❌       | ✅   | both avail, old renders      | —             | `darkmatter/lib/src/markdown/yaml_block.rs`                  | Typed wrapper around validated YAML with code-block highlighting.                   |
+| YamlBlock       | Block  | ✅       | ✅      | ❌       | ✅   | tree render only             | —             | `darkmatter/lib/src/markdown/yaml_block.rs`                  | Typed wrapper around validated YAML with code-block highlighting.                   |
 
 > **Column reference**
 >
