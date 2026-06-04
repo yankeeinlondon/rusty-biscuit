@@ -103,11 +103,11 @@ is dead, then prunes the registry. Because the registry records the window id
 at spawn time, reaping works even after the login shell overwrites the custom
 title.
 
-The registry is append-only (atomic short writes on macOS) and its prune is
-guarded by a sidecar lock file so concurrent reapers do not corrupt it. A
-window-id reuse safety check (`looks_like_harness_window`) verifies the window
-still presents as an idle login shell before closing, so a recycled id now
-hosting real work is never closed.
+Registry mutations that can race with a rewrite are guarded by a sidecar lock
+file, so concurrent spawns, clean closes, and reapers do not drop each other's
+rows. A window-id reuse safety check (`looks_like_harness_window`) verifies the
+window still presents as an idle login shell before closing, so a recycled id
+now hosting real work is never closed.
 
 ### Layer 3 — opt-in legacy sweep
 
