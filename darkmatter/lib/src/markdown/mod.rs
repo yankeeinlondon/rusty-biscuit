@@ -581,9 +581,8 @@ impl Markdown {
     /// browser renderer streams the final HTML string. `style:` frontmatter
     /// hyperlink / image color injection is reproduced by the entry point's
     /// inline-style decoration, and fenced code blocks are syntax-highlighted
-    /// through the wired [`TerminalCodeRenderer`] hook. The legacy serializer
-    /// ([`as_html`](output::as_html)) stays compilable to drive the
-    /// `migration_parity` benchmark and focused parity comparisons.
+    /// through the wired [`TerminalCodeRenderer`] hook. This is the only HTML
+    /// render path; the legacy event-stream serializer has been deleted.
     ///
     /// ## Examples
     ///
@@ -1018,7 +1017,7 @@ title: Test
 
     /// `as_html` must surface a malformed code-block directive (an invalid
     /// highlight range) as a fatal `MarkdownError::InvalidLineRange`, matching
-    /// the legacy `output::as_html` contract the tree cutover restored via the
+    /// the fatal-directive browser contract the tree cutover restored via the
     /// `validate_code_directives` preflight (review-2 finding 3). A well-formed
     /// directive must still render cleanly.
     #[test]
@@ -1508,9 +1507,7 @@ title: Test
     #[test]
     fn test_dim_full_pipeline_terminal() {
         use crate::markdown::highlighting::{ColorMode, ThemePair};
-        use crate::markdown::output::terminal::{
-            ColorDepth, DimMode, TerminalOptions, for_terminal,
-        };
+        use crate::markdown::output::terminal::{ColorDepth, DimMode, TerminalOptions};
 
         let md: Markdown = "This is ⌄dimmed⌄ text.".into();
         let options = TerminalOptions {
@@ -1528,7 +1525,7 @@ title: Test
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
             hr_defaults: None,
         };
-        let output = for_terminal(&md, options).unwrap();
+        let output = md.as_terminal(options).unwrap();
 
         assert!(
             output.contains("\x1b[2m"),
@@ -1543,22 +1540,30 @@ title: Test
         );
     }
 
-    /// Full pipeline: Markdown source `⌄dim⌄` → HTML output contains literal `⌄dim⌄`.
+    /// Full pipeline: Markdown source `⌄dim⌄` → HTML lowers the dim span to a
+    /// styled `<span>` carrying the dimmed text (the `⌄` delimiters are
+    /// consumed, not echoed). This is the tree path's deliberate fidelity
+    /// improvement over the legacy literal-delimiter passthrough.
     #[test]
     fn test_dim_full_pipeline_html() {
-        use crate::markdown::output::{HtmlOptions, as_html};
+        use crate::markdown::output::HtmlOptions;
 
         let md: Markdown = "This is ⌄dimmed⌄ text.".into();
-        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        let html = md.as_html(HtmlOptions::default()).unwrap();
 
         assert!(
-            html.contains("⌄dimmed⌄"),
-            "HTML output should preserve ⌄ delimiters as literal, got: {}",
+            html.contains("dimmed"),
+            "HTML output should preserve the dimmed text, got: {}",
+            html
+        );
+        assert!(
+            !html.contains('⌄'),
+            "HTML output should consume the ⌄ delimiters, got: {}",
             html
         );
         assert!(
             !html.contains("<dim>"),
-            "HTML output should not contain <dim> tag"
+            "HTML output should not contain a <dim> tag"
         );
     }
 
@@ -1567,10 +1572,8 @@ title: Test
     #[test]
     fn test_dim_cross_format_consistency() {
         use crate::markdown::highlighting::{ColorMode, ThemePair};
-        use crate::markdown::output::terminal::{
-            ColorDepth, DimMode, TerminalOptions, for_terminal,
-        };
-        use crate::markdown::output::{HtmlOptions, as_html};
+        use crate::markdown::output::terminal::{ColorDepth, DimMode, TerminalOptions};
+        use crate::markdown::output::HtmlOptions;
         use crate::testing::strip_ansi_codes;
 
         let md: Markdown = "The ⌄dimmed text⌄ here.".into();
@@ -1591,11 +1594,11 @@ title: Test
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
             hr_defaults: None,
         };
-        let terminal_output = for_terminal(&md, terminal_options).unwrap();
+        let terminal_output = md.as_terminal(terminal_options).unwrap();
         let terminal_plain = strip_ansi_codes(&terminal_output);
 
         // HTML output
-        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        let html = md.as_html(HtmlOptions::default()).unwrap();
 
         // Both should contain the visible text "dimmed text"
         assert!(

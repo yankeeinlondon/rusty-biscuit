@@ -124,14 +124,6 @@ harness = false
 name = "render_pipeline"
 harness = false
 
-# DMTR-6 — side-by-side legacy vs render-tree benchmarks for every public
-# render target. Drives the parity-baseline measurement gate before any public
-# cutover; see
-# `renderable/features/2026-05-20-darkmatter-tree/benchmark-harness-shape.md`.
-[[bench]]
-name = "migration_parity"
-harness = false
-
 [[bench]]
 name = "prose_highlighter"
 harness = false

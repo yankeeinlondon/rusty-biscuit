@@ -49,18 +49,16 @@
 //!
 //! ## Intentionally deferred: `==mark==`/dim and HR-with-attributes
 //!
-//! Two darkmatter inline conveniences are **deliberately not folded** and are
-//! deferred to a follow-up feature: `==mark==` / dim inline styles and
-//! horizontal rules carrying an attribute block. These are produced by
-//! darkmatter's `InlineStyleProcessor` and `RuleProcessor`, which are iterator
-//! adapters bounded `where I: Iterator<Item = Event<'a>>`. They cannot consume
-//! the fold's `OffsetIter` (item `(Event, Range)`) and they destroy source byte
-//! ranges — splitting `Event::Text` and replacing whole paragraphs — so routing
-//! the fold through them would strip every node of its `SourceLocation`, a
-//! regression. Reconciling offset preservation with those processors needs a
-//! separate design decision; until then the fold reads the raw
-//! `pulldown-cmark` stream and `==mark==` text and bare `---` rules fold to
-//! ordinary `Text` / `ThematicBreak` nodes.
+//! This inventory predates the source-rewrite pipeline. Two darkmatter inline
+//! conveniences — `==mark==` / dim inline styles and horizontal rules carrying
+//! an attribute block — were originally deferred because the iterator-adapter
+//! approach (bounded `where I: Iterator<Item = Event<'a>>`) destroyed source
+//! byte ranges by splitting `Event::Text` and replacing whole paragraphs.
+//! That deferral is resolved: the source-rewrite inline-extension pipeline
+//! (`inline_extension` + `block_extension`, see `fold`) now folds these with
+//! offset preservation. The legacy `RuleProcessor` iterator adapter has been
+//! deleted; `==mark==`/dim lower to `Extended` nodes and HR-attribute
+//! paragraphs to `ThematicBreak` with `darkmatter.hr.*` hints.
 //!
 //! Note: `darkmatter` extracts YAML frontmatter itself (see
 //! `markdown::frontmatter`) *before* handing content to `pulldown-cmark`, so

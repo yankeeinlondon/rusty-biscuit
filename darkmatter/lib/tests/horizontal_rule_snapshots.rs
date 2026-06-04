@@ -2,7 +2,7 @@
 mod tests {
     use darkmatter::markdown::{
         Markdown,
-        output::{ColorDepth, TerminalImageMode, TerminalOptions, as_html, for_terminal},
+        output::{ColorDepth, TerminalImageMode, TerminalOptions},
     };
     use insta::assert_snapshot;
 
@@ -42,7 +42,7 @@ mod tests {
 
         for (name, markdown) in test_cases {
             let md: Markdown = markdown.into();
-            let result = for_terminal(&md, terminal_snapshot_options()).unwrap();
+            let result = md.as_terminal(terminal_snapshot_options()).unwrap();
             assert_snapshot!(format!("terminal_{}", name), result);
         }
     }
@@ -68,7 +68,7 @@ mod tests {
 
         for (name, markdown) in test_cases {
             let md: Markdown = markdown.into();
-            let result = as_html(&md, Default::default()).unwrap();
+            let result = md.as_html(Default::default()).unwrap();
             assert_snapshot!(format!("html_{}", name), result);
         }
     }
@@ -78,8 +78,8 @@ mod tests {
         let markdown = "# Horizontal Rule Examples\n\n## Basic Styles\n\n--- { style: dashes }\n\n*** { style: dots }\n\n___ { style: waves }\n\n## Alignment Options\n\n--- { style: waves, alignment: centered }\n\n*** { style: dots, alignment: left }\n\n___ { style: dashes, alignment: right }\n\n## Weight Variations\n\n--- { style: waves, weight: thin }\n\n*** { style: dots, weight: medium }\n\n___ { style: dashes, weight: thick }\n\n## Custom Attributes\n\n--- { style: waves, width: \"60%\", color: \"#ff0000\" }\n\n*** { style: dots, alignment: centered, weight: thick, width: \"80%\", color: \"green\" }\n";
 
         let md: Markdown = markdown.into();
-        let terminal_result = for_terminal(&md, terminal_snapshot_options()).unwrap();
-        let html_result = as_html(&md, Default::default()).unwrap();
+        let terminal_result = md.as_terminal(terminal_snapshot_options()).unwrap();
+        let html_result = md.as_html(Default::default()).unwrap();
 
         assert_snapshot!("terminal_complex_document", terminal_result);
         assert_snapshot!("html_complex_document", html_result);

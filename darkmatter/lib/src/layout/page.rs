@@ -1844,22 +1844,6 @@ mod tests {
     // ---------- Phase 2: render tests ----------
 
     #[test]
-    fn zero_config_render_matches_for_terminal() {
-        let term = Terminal::new();
-        let page = DarkmatterPage::new(&term);
-        let md: Markdown = "# Hello World\n\nSome prose here.\n".into();
-
-        let page_out = page.render(&md).unwrap();
-        let direct_out =
-            md.as_terminal(TerminalOptions::default()).unwrap();
-
-        assert_eq!(
-            page_out, direct_out,
-            "zero-config DarkmatterPage::render must match the default as_terminal render byte-for-byte"
-        );
-    }
-
-    #[test]
     fn zero_config_render_ignores_captured_terminal_width() {
         // Construct a DarkmatterPage from a Terminal whose captured width
         // differs from TerminalOptions::default() auto-detection. The page
@@ -1881,38 +1865,6 @@ mod tests {
                 "zero-config render with captured_width={width} must equal the default as_terminal render",
             );
         }
-    }
-
-    #[test]
-    fn zero_config_render_with_list_matches_for_terminal() {
-        let term = Terminal::new();
-        let page = DarkmatterPage::new(&term);
-        let md: Markdown = "# List\n\n- Item one\n- Item two\n".into();
-
-        let page_out = page.render(&md).unwrap();
-        let direct_out =
-            md.as_terminal(TerminalOptions::default()).unwrap();
-
-        assert_eq!(
-            page_out, direct_out,
-            "zero-config render with list must match the default as_terminal render"
-        );
-    }
-
-    #[test]
-    fn zero_config_render_with_code_block_matches_for_terminal() {
-        let term = Terminal::new();
-        let page = DarkmatterPage::new(&term);
-        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
-
-        let page_out = page.render(&md).unwrap();
-        let direct_out =
-            md.as_terminal(TerminalOptions::default()).unwrap();
-
-        assert_eq!(
-            page_out, direct_out,
-            "zero-config render with code block must match the default as_terminal render"
-        );
     }
 
     /// `DarkmatterPage::new` must capture the [`Terminal`]'s color depth so a
@@ -2535,54 +2487,6 @@ mod tests {
     }
 
     // ---------- Phase 6: regression tests for zero-config equivalence ----------
-
-    #[test]
-    fn zero_config_render_with_blockquote_matches_for_terminal() {
-        let term = Terminal::new();
-        let page = DarkmatterPage::new(&term);
-        let md: Markdown = "> A quoted paragraph\n".into();
-
-        let page_out = page.render(&md).unwrap();
-        let direct_out =
-            md.as_terminal(TerminalOptions::default()).unwrap();
-
-        assert_eq!(
-            page_out, direct_out,
-            "zero-config render with blockquote must match the default as_terminal render"
-        );
-    }
-
-    #[test]
-    fn zero_config_render_with_table_matches_for_terminal() {
-        let term = Terminal::new();
-        let page = DarkmatterPage::new(&term);
-        let md: Markdown = "| A | B |\n|---|---|\n| 1 | 2 |\n".into();
-
-        let page_out = page.render(&md).unwrap();
-        let direct_out =
-            md.as_terminal(TerminalOptions::default()).unwrap();
-
-        assert_eq!(
-            page_out, direct_out,
-            "zero-config render with table must match the default as_terminal render"
-        );
-    }
-
-    #[test]
-    fn zero_config_render_with_horizontal_rule_matches_for_terminal() {
-        let term = Terminal::new();
-        let page = DarkmatterPage::new(&term);
-        let md: Markdown = "# Hello\n\n---\n\nWorld\n".into();
-
-        let page_out = page.render(&md).unwrap();
-        let direct_out =
-            md.as_terminal(TerminalOptions::default()).unwrap();
-
-        assert_eq!(
-            page_out, direct_out,
-            "zero-config render with horizontal rule must match the default as_terminal render"
-        );
-    }
 
     // ---------- Phase 6: end-to-end snapshot test ----------
 

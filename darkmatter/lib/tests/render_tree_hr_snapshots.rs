@@ -3,13 +3,11 @@
 //! The block-extension lift (`renderable/features/2026-05-26-block-extension`)
 //! requires the render-tree pipeline to preserve byte-identical output for the
 //! existing HR-attribute fixtures, including the combined `mark_dim_hr`
-//! document. The sibling `horizontal_rule_snapshots.rs` only byte-locks the
-//! **legacy** renderers (`as_html` / `for_terminal`, which still run through
-//! `RuleProcessor`); the parity suite (`render_tree_parity.rs`) deliberately
-//! asserts only semantic invariants between the two pipelines because they are
-//! different renderers and byte-equality between them would be meaningless.
+//! document. The sibling `horizontal_rule_snapshots.rs` snapshots the public
+//! `Markdown::as_terminal` / `as_html` surface; this file pins the lower-level
+//! fold-then-render path directly.
 //!
-//! This file closes that gap: it pins the *tree* pipeline's own bytes
+//! This file pins the *tree* pipeline's own bytes
 //! (`fold_markdown_spanned_with_frontmatter` → `render_*_document`) for the HR
 //! fixtures so any drift in the lifted `BlockExtensionProcessor` path — a
 //! changed attribute parse, a dropped hint, an altered rule glyph — fails an

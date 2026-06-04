@@ -10,10 +10,8 @@
 //! path). [`render_tree_markdown`] / [`render_tree_markdown_dialect`] drive the
 //! parity test suite and benchmarks.
 //!
-//! The legacy event-stream serializers (`output::as_html`,
-//! `output::for_terminal`) stay compilable so the `migration_parity` benchmark
-//! and focused parity comparisons can still exercise both paths through the
-//! cutover validation phase. See
+//! The legacy event-stream serializers have been deleted; these tree entry
+//! points are the only render path. See
 //! `renderable/features/_completed/2026-05-20-darkmatter-tree/entry-point-shape.md`.
 //!
 //! Visibility: the document entry points the cutover flipped —
@@ -80,10 +78,10 @@ pub(crate) fn to_render_document(md: &Markdown) -> (Document, Vec<Diagnostic>) {
 /// [`TerminalCodeRenderer`] hook is wired so fenced code blocks are
 /// syntax-highlighted (with title / line-number / highlight directives),
 /// `mermaid_mode` maps to the render-tree Mermaid opt-in, and (when
-/// `include_styles` is set) the legacy `.code-block` panel stylesheet is
+/// `include_styles` is set) the `.code-block` panel stylesheet is
 /// injected through the page hook so fenced code retains its background. The
-/// legacy `hr_css_variables` `:root` injection has no tree-side equivalent and
-/// is dropped at this boundary.
+/// [`HtmlOptions::hr_css_variables`](crate::markdown::output::HtmlOptions::hr_css_variables)
+/// `:root` injection has no tree-side equivalent and is dropped at this boundary.
 ///
 /// `style:` frontmatter hyperlink / image color injection
 /// ([`HtmlOptions::hyperlink_style`](crate::markdown::output::HtmlOptions::hyperlink_style),
@@ -535,8 +533,8 @@ pub(crate) fn render_tree_terminal_with_layout(
     let (mut doc, fold_diagnostics) = to_render_document(md);
     super::decorate::decorate_document(&mut doc.root, ctx);
     let mut term_opts = terminal_options_from_terminal_options(options);
-    // Decorated-only: legacy `for_terminal_with_layout` emits `▉ IMAGE[alt]` for
-    // the non-graphics image fallback. The default path keeps `Bracket`.
+    // Decorated-only: the decorated layout path emits `▉ IMAGE[alt]` for the
+    // non-graphics image fallback. The default path keeps `Bracket`.
     term_opts.context.image_placeholder = ImagePlaceholder::Block;
     let rendered = render_terminal_document(&doc, &term_opts)?;
     Ok(PipelineResult::new(
@@ -589,12 +587,13 @@ pub fn render_tree_markdown_dialect(
 /// The [`TerminalCodeRenderer`] hook is wired in so fenced code blocks
 /// reproduce darkmatter's syntax-highlighted HTML (title block, line-number
 /// table, highlighted-line markup) rather than the render tree's plain
-/// `<pre><code>` fallback. The legacy `hr_css_variables` `:root` injection
-/// has no tree-side equivalent and is dropped at this boundary.
+/// `<pre><code>` fallback. The
+/// [`HtmlOptions::hr_css_variables`](crate::markdown::output::HtmlOptions::hr_css_variables)
+/// `:root` injection has no tree-side equivalent and is dropped at this boundary.
 ///
 /// When `opts.include_styles` is set, the page hook
 /// ([`BrowserRenderOptions::page`]) carries a [`renderable::stylesheet::Stylesheet`]
-/// with the legacy `.code-block` panel-background rule (see
+/// with the `.code-block` panel-background rule (see
 /// [`code_block_stylesheet`]). The render tree's full-page renderer emits the
 /// design-token `:root` stylesheet but no `.code-block` rule, so without this
 /// the syntax-highlighted `<div class="code-block">` would have no background.
@@ -636,15 +635,14 @@ fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions
     }
 }
 
-/// Builds the `.code-block` panel-background stylesheet the legacy
-/// `output::as_html` `<style>` block carries.
+/// Builds the `.code-block` panel-background stylesheet for the browser path.
 ///
 /// The background color resolves through
 /// [`code_block_background_hex`](crate::markdown::output::html::code_block_background_hex),
-/// which reuses the same `CodeHighlighter` / inverted-color-mode path as legacy
-/// `generate_styles` — so the tree-injected rule and the legacy stylesheet agree
-/// on the value (Defect D: code blocks invert their theme variant for page
-/// contrast). Only the load-bearing `.code-block` background rule is injected;
+/// which applies the same `CodeHighlighter` / inverted-color-mode path the code
+/// renderer uses, so the injected `.code-block` rule and the highlighted code
+/// markup agree on the value (Defect D: code blocks invert their theme variant
+/// for page contrast). Only the load-bearing `.code-block` background rule is injected;
 /// the remaining cosmetic rules (`.code-block-title`, gutter, `pre`/`code`, …)
 /// are emitted inline by the code-renderer hook's own markup.
 fn code_block_stylesheet(opts: &HtmlOptions) -> renderable::stylesheet::Stylesheet {

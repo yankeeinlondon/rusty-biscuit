@@ -34,8 +34,9 @@
 //! offset-aware block processor that sits between `pulldown-cmark` and the fold.
 //! See `renderable/features/2026-05-26-inline-span/spec.md`.
 //!
-//! The legacy non-spanned `InlineStyleProcessor` and `RuleProcessor` still back
-//! the public renderers and are unchanged.
+//! The non-spanned `InlineStyleProcessor` now backs only the
+//! `scan_inline_hr_warnings` strict-style preflight; the public renderers all
+//! route through this spanned fold.
 //!
 //! [`Tag`]: pulldown_cmark::Tag
 //!
