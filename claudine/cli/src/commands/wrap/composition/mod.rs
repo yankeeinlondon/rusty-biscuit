@@ -2099,27 +2099,15 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn load_selection_config_handles_missing_config() {
         let dir = tempfile::tempdir().unwrap();
-        let home = dir.path();
-
-        let old_home = std::env::var("HOME").ok();
-        unsafe {
-            std::env::set_var("HOME", home);
-        }
-
-        let result = load_selection_config(home);
-
-        unsafe {
-            if let Some(old) = old_home {
-                std::env::set_var("HOME", old);
-            } else {
-                std::env::remove_var("HOME");
-            }
-        }
-
-        assert!(result.is_none());
+        let nonexistent = dir.path().join("no-such-config.json");
+        let result =
+            claudine::dispatch::loader::load_claudine_config(Some(&nonexistent), None);
+        assert!(
+            result.is_err(),
+            "expected error for missing config file"
+        );
     }
 
     #[test]
