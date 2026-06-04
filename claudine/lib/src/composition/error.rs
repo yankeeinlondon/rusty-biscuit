@@ -42,6 +42,21 @@ pub enum CompositionError {
     #[error("failed to load Markdown: {0}")]
     MarkdownLoad(String),
 
+    /// The document's frontmatter (the YAML between the leading `---` markers)
+    /// is present but failed to parse.
+    ///
+    /// Distinct from [`Self::PromptPropertyMissing`]: the frontmatter block
+    /// exists but is malformed, so *no* properties — including `prompt` — could
+    /// be read. Surfacing this separately stops a YAML syntax error (e.g.
+    /// inconsistent block-scalar indentation) from masquerading as a missing
+    /// property.
+    ///
+    /// Carries the typed `MarkdownError` so the CLI's top-level walker renders
+    /// Darkmatter's rich frontmatter-parse block (file link, YAML location,
+    /// offending-line excerpt) instead of a flat string.
+    #[error("failed to parse frontmatter: {0}")]
+    FrontmatterParse(#[source] MarkdownError),
+
     /// Inline composition requires a `prompt` frontmatter property.
     #[error("frontmatter is missing a `prompt` property")]
     PromptPropertyMissing,
