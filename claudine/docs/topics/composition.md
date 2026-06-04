@@ -204,6 +204,48 @@ The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` 
 
 `--exclude <PROVIDER>` removes a provider from automatic selection (repeatable). Explicit flags (`--codex`, etc.) override exclusions.
 
+## Dry Run
+
+`--dry-run` runs the **full composition pipeline up to but not including provider launch**, then emits the composed result instead of sending it to an agentic CLI. It is available on `compose`, `inline-compose`, and `sequence`, and is the gate to use for CI rehearsal: the path it exercises is identical to a real run, minus the provider spawn.
+
+### Pipeline Scope
+
+Everything before launch runs normally:
+
+- Schema validation (including the interactive missing-property prompt under a TTY).
+- Shell commands in the document graph are **executed for real** — they produce actual side effects and their output is interpolated into the frontmatter and body.
+- Harness pre-checks (shell-command approval, writability) run normally.
+- Provider and model resolution run normally.
+
+The provider is **never launched**; for `inline-compose` the source file is therefore **never mutated** (`last_updated` is untouched).
+
+### Output Split
+
+Dry-run output follows Unix stream conventions so `claudine compose --dry-run doc.md > body.md` captures only the body:
+
+- **stdout** — the composed document body (the data product).
+- **stderr** — the finalized YAML frontmatter (syntax-highlighted) followed by a metadata table.
+
+The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set), **Agent** (the resolved provider, or `interactive` when selection is still pending), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), and **Area** (the focused monorepo area, only when inside a monorepo).
+
+`--quiet` and `--silent` have **no effect** in dry-run mode: the full output is always rendered.
+
+### Non-TTY Shell-Approval Gate
+
+In a TTY, an unapproved shell command triggers the same interactive approval prompt as a normal run. In a non-TTY environment (e.g. CI) there is no way to prompt, so the dry-run **fails fast**: it exits non-zero with
+
+```
+Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration.
+```
+
+This is the gate working correctly — if production would prompt, the dry-run fails. Bypass it with `--yolo` (auto-approve) or by pre-approving the command in configuration.
+
+### Sequence Dry Run
+
+`sequence --dry-run` exercises the whole sequence as one logical command. Each step is composed and rendered in order: all bodies are concatenated to **stdout**, while each step's frontmatter and metadata table go to **stderr**, separated by a `=== Document N of M ===` divider before every document after the first. A composition failure in any step renders the error to stderr and stops the sequence immediately (fail-fast), exiting non-zero without launching any provider.
+
+Any composition error (schema validation failure, missing file, denied shell command, writability failure) is rendered to **stderr** and exits the process non-zero, leaving stdout clean.
+
 ## Schema Validation
 
 Composition documents can declare a `$schema` in their frontmatter to constrain the property values that drive the prompt. Schema processing is anchored on Darkmatter's `SimplifiedSchema` and runs as a stage inside the existing `Resolve → Pre-Flight → Prepare → Select → Launch → Closure` pipeline — between override application and shell expansion. The wrapper layer translates Darkmatter's structural failures into typed claudine errors so users see actionable reports instead of a generic compose failure.

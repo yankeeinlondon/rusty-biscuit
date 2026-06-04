@@ -100,17 +100,17 @@ If an error occurs during composition, the error is rendered to **stderr** inste
 
 ## Acceptance Criteria
 
-- [ ] `claudine compose --dry-run doc.md` composes the document through the full pipeline but does not launch a provider
-- [ ] Shell commands referenced in the document are executed for real; their output is available for interpolation and expansion
-- [ ] The composed document body is written to stdout
-- [ ] The rendered frontmatter and metadata table are written to stderr
-- [ ] `claudine compose --dry-run --quiet doc.md` and `claudine compose --dry-run --silent doc.md` render the full dry-run output; `--quiet` and `--silent` have no effect in dry-run mode
-- [ ] Interactive approval prompts for unapproved shell commands appear exactly as in normal mode
-- [ ] In non-TTY mode, an unapproved shell command causes dry-run to exit non-zero with the error: "Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration."
-- [ ] Schema validation failures, missing files, and other composition errors are rendered to stderr and the process exits non-zero
-- [ ] The metadata table includes Document (with OSC8 link), Description, Agent, Model, YOLO, and Area (when in a monorepo) fields
-- [ ] `claudine sequence --dry-run` composes and renders all documents in the sequence
-- [ ] Each document in a sequence dry-run is separated by a section divider on stderr (e.g., `=== Document N of M ===`)
-- [ ] All composed document bodies from a sequence dry-run are concatenated to stdout in order
-- [ ] If any document in a sequence dry-run fails, the error is rendered to stderr and the sequence stops immediately
-- [ ] `claudine sequence --dry-run --quiet` and `claudine sequence --dry-run --silent` render the full dry-run output; `--quiet` and `--silent` have no effect in dry-run mode
+- [x] `claudine compose --dry-run doc.md` composes the document through the full pipeline but does not launch a provider — `compose_dry_run_body_only_on_stdout_metadata_on_stderr`, `compose_dry_run_perf_renders_report_without_agent_execution`
+- [x] Shell commands referenced in the document are executed for real; their output is available for interpolation and expansion — `compose_dry_run_yolo_bypasses_shell_gate` (body on stdout contains the executed command output), `level2_pty_dry_run_shell_approval_prompt_appears_and_allows`
+- [x] The composed document body is written to stdout — `compose_dry_run_body_only_on_stdout_metadata_on_stderr`
+- [x] The rendered frontmatter and metadata table are written to stderr — `compose_dry_run_body_only_on_stdout_metadata_on_stderr`
+- [x] `claudine compose --dry-run --quiet doc.md` and `claudine compose --dry-run --silent doc.md` render the full dry-run output; `--quiet` and `--silent` have no effect in dry-run mode — `compose_dry_run_quiet_and_silent_are_no_op`
+- [x] Interactive approval prompts for unapproved shell commands appear exactly as in normal mode — `level2_pty_dry_run_shell_approval_prompt_appears_and_allows` (L2 PTY: prompt fires under `--dry-run` and approving runs the command) and `level2_pty_dry_run_approval_prompt_matches_normal_mode` (L2 PTY: captures the rendered prompt region in both normal and `--dry-run` mode and asserts they are byte-identical)
+- [x] In non-TTY mode, an unapproved shell command causes dry-run to exit non-zero with the error: "Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration." — `compose_dry_run_non_tty_unapproved_shell_emits_gate_error`
+- [x] Schema validation failures, missing files, and other composition errors are rendered to stderr and the process exits non-zero — `compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout`, `inline_compose_dry_run_schema_error_to_stderr_with_clean_stdout`
+- [x] The metadata table includes Document (with OSC8 link), Description, Agent, Model, YOLO, and Area (when in a monorepo) fields — `dry_run.rs` unit tests (`table_shows_description_when_present`, `table_shows_area_when_present`, `agent_*`, `model_*`, `yolo_true_and_false`, `document_uses_name_when_set`/`..._path_when_name_absent`; the Document cell is built as a blue `<a href="file://…">` OSC8 link) + `compose_dry_run_body_only_on_stdout_metadata_on_stderr` (rows on stderr) + L2 real-terminal capture: `level2_dry_run_metadata_table_renders_styled_in_tmux` (tmux: blue Document, italic+dim Description, red `false` YOLO asserted from `frame.raw`) and `level2_dry_run_document_cell_renders_osc8_link_in_wezterm` (WezTerm: the Document cell emits a real OSC8 `file://` hyperlink)
+- [x] `claudine sequence --dry-run` composes and renders all documents in the sequence — `sequence_dry_run_concatenates_bodies_with_dividers`
+- [x] Each document in a sequence dry-run is separated by a section divider on stderr (e.g., `=== Document N of M ===`) — `sequence_dry_run_concatenates_bodies_with_dividers`
+- [x] All composed document bodies from a sequence dry-run are concatenated to stdout in order — `sequence_dry_run_concatenates_bodies_with_dividers`
+- [x] If any document in a sequence dry-run fails, the error is rendered to stderr and the sequence stops immediately — `sequence_dry_run_fail_fast_on_composition_error`
+- [x] `claudine sequence --dry-run --quiet` and `claudine sequence --dry-run --silent` render the full dry-run output; `--quiet` and `--silent` have no effect in dry-run mode — `sequence_dry_run_quiet_and_silent_are_no_op`
