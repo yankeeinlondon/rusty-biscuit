@@ -8,7 +8,7 @@ use std::fmt::Write;
 
 use biscuit_terminal::prelude::*;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::output::terminal::{TerminalOptions, write_terminal};
+use darkmatter::markdown::output::terminal::TerminalOptions;
 
 use sniff::remote::{
     CiCdInfo, DocumentCategory, DocumentRef, IssueInfo, PullRequestInfo, RemoteReport,
@@ -123,9 +123,9 @@ pub fn render_remote_text(report: &RemoteReport, readme_content: Option<&str>) -
     if let Some(content) = readme_content {
         writeln!(out).unwrap();
         let md: Markdown = content.into();
-        let mut buffer = Vec::new();
-        let _ = write_terminal(&mut buffer, &md, TerminalOptions::default());
-        out.push_str(&String::from_utf8_lossy(&buffer));
+        if let Ok(rendered) = md.as_terminal(TerminalOptions::default()) {
+            out.push_str(&rendered);
+        }
     }
 
     out
@@ -482,9 +482,9 @@ pub fn render_pull_requests_verbose(prs: &[PullRequestInfo]) -> String {
         {
             let preview: String = body.lines().take(10).collect::<Vec<_>>().join("\n");
             let md: Markdown = preview.into();
-            let mut buffer = Vec::new();
-            let _ = write_terminal(&mut buffer, &md, TerminalOptions::default());
-            out.push_str(&String::from_utf8_lossy(&buffer));
+            if let Ok(rendered) = md.as_terminal(TerminalOptions::default()) {
+                out.push_str(&rendered);
+            }
         }
     }
 
