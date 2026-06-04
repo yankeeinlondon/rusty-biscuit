@@ -1,9 +1,9 @@
 //! Step-broken render-pipeline benchmarks for the tree path (perf-gate Part 2).
 //!
 //! Each target's group isolates `parse` -> `fold` -> `render` and a `full`
-//! end-to-end run, so a regression points at the stage that moved. The
-//! bespoke-vs-tree comparison lives in `migration_parity.rs`; this file is
-//! tree-only and baseline-tracked. Run:
+//! end-to-end run, so a regression points at the stage that moved. The render
+//! tree is now the only render path (the bespoke serializers were deleted in
+//! the tree cutover), so this file is tree-only and baseline-tracked. Run:
 //!
 //! ```text
 //! cargo bench -p darkmatter --bench render_pipeline_steps
