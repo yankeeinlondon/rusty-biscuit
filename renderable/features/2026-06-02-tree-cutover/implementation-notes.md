@@ -4,9 +4,13 @@
 > met** — `Markdown::as_html`, `Markdown::as_terminal` (default *and* decorated
 > `Some(ctx)` layout), and `DarkmatterPage::render` / `render_to_browser` all
 > route through the render-tree renderers. The bespoke serializers
-> (`output::as_html`, `output::for_terminal`, `RuleProcessor`) **and their
-> validation surfaces** — the `migration_parity` bench and the
-> `render_tree_parity` integration test — have been **deleted**. The
+> (`output::as_html`, `output::for_terminal`) and the `RuleProcessor` iterator
+> adapter, **and their validation surfaces** — the `migration_parity` bench and
+> the `render_tree_parity` integration test — have been **deleted**. (The HR
+> *attribute parser* that co-located with `RuleProcessor` survives as the single
+> source of truth for `--- { … }` directives, consumed by the tree fold; it now
+> lives in `markdown/block/hr_parser.rs`, renamed 2026-06-04 from
+> `rule_processor.rs` once the adapter was gone.) The
 > `cargo bench --bench migration_parity` and `render_tree_parity` commands
 > referenced in the per-phase log below are therefore **no longer executable**;
 > they are retained only as a record of the migration.
@@ -377,6 +381,11 @@ legacy HTML/terminal serializers across `renderable` / `darkmatter` /
 
 ### Acceptance Criteria status (these gate Phase 6 deletion)
 
+> **⚠️ SUPERSEDED — historical, do not read as current state.** The "PARTIAL" /
+> "blocked" verdicts below describe the mid-cutover state on 2026-06-03. They no
+> longer hold: AC1 is **fully met** and the bespoke serializers are **deleted**.
+> See the status banner at the top of this file.
+
 - **AC1 — pipeline on the tree: PARTIAL.** `Markdown::as_terminal` (default
   layout) and the default-layout `DarkmatterPage::render` route through the tree
   (Phase 3). `Markdown::as_html` and the decorated-layout terminal path are
@@ -412,7 +421,14 @@ path are independent of that blocker.
   re-run against `pre-cutover-2026-06-02`; results recorded above and in
   `baselines.md` ("Phase 5 Gate Re-Run").
 
-## Phase 6 — Delete Bespoke Renderers — BLOCKED (2026-06-03)
+## Phase 6 — Delete Bespoke Renderers — BLOCKED (2026-06-03) — SUPERSEDED
+
+> **⚠️ SUPERSEDED — historical, do not read as current state.** This section
+> records why deletion was *temporarily* blocked mid-cutover. It was unblocked
+> the same day: the deferred browser-fidelity and decorated-layout terminal work
+> landed, and the bespoke serializers (`output::as_html`, `output::for_terminal`)
+> plus the `RuleProcessor` iterator adapter were **deleted**. All entry points now
+> route through the tree. See the status banner at the top of this file.
 
 **Phase 6 cannot be executed as written.** Its entire body is the deletion of
 the legacy renderers, but every deletion target is still production-reachable,
@@ -498,7 +514,14 @@ and that production default-layout terminal rendering routes through
 `for_terminal_with_layout(Some(ctx))` remains production-reachable — see
 Finding 3.
 
-### Finding 3 (High) — decorated `DarkmatterPage::render` on legacy → PARTIAL (flip still blocked)
+### Finding 3 (High) — decorated `DarkmatterPage::render` on legacy → PARTIAL (flip still blocked) — SUPERSEDED
+
+> **⚠️ SUPERSEDED — historical, do not read as current state.** The decorated
+> path flip was completed: `as_terminal_with_layout(Some(ctx))` now routes through
+> `render_tree::entrypoints::render_tree_terminal_with_layout` (the `decorate` pass
+> lowers per-component alignment/fill, hyperlink-label width, the `▉ IMAGE[alt]`
+> placeholder, and the right-aligned list-item body onto the tree). The legacy
+> decorated serializer is deleted. See the status banner at the top of this file.
 
 The decorated-layout terminal path (`as_terminal_with_layout(Some(ctx))`,
 reached by non-default `DarkmatterPage` layouts) remains on the legacy
