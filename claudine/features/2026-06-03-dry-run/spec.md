@@ -26,8 +26,6 @@ This makes `claudine compose --dry-run` suitable for CI gating and reliable rehe
     - The document's _compose_ body content has:
         - all interpolation, conditional blocks, shell expansions, etc. completed
 
-> ⚠️ **Warning**: Because `--dry-run` executes shell commands for real (required to produce accurate shell expansion), users must understand that file modifications, network requests, and other side effects from shell commands **will occur**. This is not a sandbox.
-
 ## Non-TTY Behavior
 
 In non-TTY environments (e.g., CI pipelines), interactive approval prompts cannot be displayed. When `--dry-run` encounters an unapproved shell command in non-TTY mode:
@@ -56,12 +54,9 @@ Dry-run output is split between `stdout` and `stderr` to follow Unix conventions
 
 This design makes `claudine compose --dry-run > output.md` capture only the composed body.
 
-### `--silent` mode
+### `--quiet` and `--silent` flags
 
-When `--silent` is passed alongside `--dry-run`:
-
-- Suppress all stderr output (frontmatter rendering, metadata table, and sequence section dividers)
-- Emit **only** the composed document body to stdout
+Both `--quiet` and `--silent` flags have **no effect** when `--dry-run` is active. The full dry-run output (composed body to stdout, frontmatter and metadata to stderr) is always rendered regardless of these flags.
 
 ## Sequence Behavior
 
@@ -107,10 +102,9 @@ If an error occurs during composition, the error is rendered to **stderr** inste
 
 - [ ] `claudine compose --dry-run doc.md` composes the document through the full pipeline but does not launch a provider
 - [ ] Shell commands referenced in the document are executed for real; their output is available for interpolation and expansion
-- [ ] A warning is displayed when any shell command is executed during a dry-run, informing the user that side effects are real
 - [ ] The composed document body is written to stdout
 - [ ] The rendered frontmatter and metadata table are written to stderr
-- [ ] `claudine compose --dry-run --silent doc.md` emits only the composed body to stdout and nothing to stderr
+- [ ] `claudine compose --dry-run --quiet doc.md` and `claudine compose --dry-run --silent doc.md` render the full dry-run output; `--quiet` and `--silent` have no effect in dry-run mode
 - [ ] Interactive approval prompts for unapproved shell commands appear exactly as in normal mode
 - [ ] In non-TTY mode, an unapproved shell command causes dry-run to exit non-zero with the error: "Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration."
 - [ ] Schema validation failures, missing files, and other composition errors are rendered to stderr and the process exits non-zero
@@ -119,4 +113,4 @@ If an error occurs during composition, the error is rendered to **stderr** inste
 - [ ] Each document in a sequence dry-run is separated by a section divider on stderr (e.g., `=== Document N of M ===`)
 - [ ] All composed document bodies from a sequence dry-run are concatenated to stdout in order
 - [ ] If any document in a sequence dry-run fails, the error is rendered to stderr and the sequence stops immediately
-- [ ] `claudine sequence --dry-run --silent` suppresses all stderr output (section dividers, frontmatter, and metadata tables)
+- [ ] `claudine sequence --dry-run --quiet` and `claudine sequence --dry-run --silent` render the full dry-run output; `--quiet` and `--silent` have no effect in dry-run mode
