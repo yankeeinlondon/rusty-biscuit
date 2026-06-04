@@ -530,15 +530,19 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Map the universal `--model <value>` to provider-specific flags/env.
     ///
     /// Returns `Some(warning)` if the provider doesn't support model selection.
-    /// Default implementation pushes `--model <value>`.
+    /// Default implementation pushes `--model <value>` for child-CLI delivery
+    /// and exports the generic `MODEL` env var that Claudine's wrapper contract
+    /// guarantees (consumed by composition templates, hook dispatch, and
+    /// reporting — independent of how the provider itself reads the model).
     fn apply_model(
         &self,
         args: &mut Vec<String>,
-        _env_overrides: &mut Vec<(String, String)>,
+        env_overrides: &mut Vec<(String, String)>,
         model: &str,
     ) -> Option<String> {
         args.push("--model".to_string());
         args.push(model.to_string());
+        env_overrides.push(("MODEL".to_string(), model.to_string()));
         None
     }
 
@@ -1625,6 +1629,39 @@ mod tests {
         .unwrap();
         let count = args.iter().filter(|a| *a == "--model").count();
         assert_eq!(count, 1, "should not duplicate --model flag");
+    }
+
+    // The generic `MODEL` env var is part of Claudine's wrapper contract
+    // (alongside AGENT/YOLO/OPERATION/PACKAGE/PACKAGE_AREA) and must be
+    // exported for every provider, not just OpenCode. Providers deliver the
+    // model to the child CLI through their own mechanism (argv flag,
+    // GOOSE_MODEL, ...), but the generic `MODEL` must always be present.
+    #[test]
+    fn default_apply_model_sets_generic_model_env() {
+        let p = profile(Provider::Claude);
+        let mut args: Vec<String> = Vec::new();
+        let mut env: Vec<(String, String)> = Vec::new();
+        p.apply_model(&mut args, &mut env, "claude-opus-4-8");
+        assert!(
+            env.contains(&("MODEL".to_string(), "claude-opus-4-8".to_string())),
+            "default apply_model must export the generic MODEL env var, got {env:?}"
+        );
+    }
+
+    #[test]
+    fn goose_apply_model_sets_generic_model_env_alongside_goose_model() {
+        let p = profile(Provider::Goose);
+        let mut args: Vec<String> = Vec::new();
+        let mut env: Vec<(String, String)> = Vec::new();
+        p.apply_model(&mut args, &mut env, "gpt-4o");
+        assert!(
+            env.contains(&("GOOSE_MODEL".to_string(), "gpt-4o".to_string())),
+            "goose must keep its provider-specific GOOSE_MODEL env, got {env:?}"
+        );
+        assert!(
+            env.contains(&("MODEL".to_string(), "gpt-4o".to_string())),
+            "goose must also export the generic MODEL env var, got {env:?}"
+        );
     }
 
     #[test]
