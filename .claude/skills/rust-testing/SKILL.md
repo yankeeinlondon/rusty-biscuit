@@ -4,7 +4,8 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-e7f18348fb6937ba
+hash: 1acc7c1c76b11142-d7f8b2f05e2513dc
+last_updated: 2026-06-04
 ---
 
 # Rust Testing — Rusty Biscuit Monorepo
@@ -191,7 +192,7 @@ Open the topic file when the task matches:
 | Topic | File |
 |-------|------|
 | L2 WezTerm capture gotchas (SGR collapsing, semicolon vs colon form) | `wezterm-harness-pitfalls.md` |
-| L2 Apple Terminal pitfalls (`do script` reuse, focus-steal, orphan leaks, plain-text capture) | `apple-terminal-harness-pitfalls.md` |
+| L2 Apple Terminal pitfalls (`do script` reuse, focus-steal, **resolved:** orphan leaks, plain-text capture) | `apple-terminal-harness-pitfalls.md` |
 | CLI output (channels, color modes, completions, snapshots) | `cli-output-testing.md` |
 | TUI rendering and event/reducer tests | `tui-testing.md` |
 | Browser tests (computed-style assertions) | `browser-testing.md` |

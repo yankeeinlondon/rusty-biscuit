@@ -218,12 +218,12 @@ backend. Two known issues bite anyone editing `apple_terminal.rs`:
 1. **The pid tag does not survive.** Spawned windows are tagged with a
    custom title (`biscuit-test-terminal-<pid>`), but an interactive shell
    prompt overwrites the window title (zsh `precmd` / bash
-   `PROMPT_COMMAND`), so `cleanup_stale_apple_terminal_windows()` cannot
-   find leaked windows by title. Leaked Terminal windows therefore
-   accumulate across killed/timed-out runs. A title-independent tracking
-   mechanism (id registry file, or a process-list marker) is needed; until
-   then, reset with `killall Terminal` (and beware macOS "reopen windows on
-   relaunch", which can restore them).
+   `PROMPT_COMMAND`), so the title-based reaper cannot find leaked windows.
+   **Fixed** by a title-independent window-id registry
+   (`${TMPDIR}/biscuit-test-terminal-registry.jsonl`): every owned spawn
+   records its window id, and the reaper closes registry windows whose
+   owner process is dead — regardless of title. The registry is pruned
+   after each reaper run.
 2. **`do script` reuses the idle front window.** `do script "cmd"` with no
    target nondeterministically runs in the frontmost idle window instead of
    creating a new one. A self-spawning test (`level2_apple_terminal_harness_lifecycle`)
@@ -236,8 +236,36 @@ backend. Two known issues bite anyone editing `apple_terminal.rs`:
 Two **invariants** any spawn change must preserve: spawning must **never
 steal foreground focus** (no `activate` / `System Events keystroke`), and
 the harness must **never close a window it did not create** (track
-ownership by window-id diff, not by `id of front window`). Issue #1
-(title-overwrite orphan leaks) is still open. See
+ownership by window-id diff, not by `id of front window`).
+
+#### Legacy sweep (opt-in)
+
+The registry cannot catch windows **restored by macOS** (new ids, not in the
+registry) or leaked by harness versions predating the registry. An opt-in
+legacy sweep is available:
+
+```bash
+BISCUIT_TEST_HARNESS_SWEEP_LEGACY_APPLE=1 cargo test …
+```
+
+When enabled, the reaper tests **every** open Terminal.app window against a
+strict idle-shell predicate (default 80×24 geometry, empty/"Terminal" title,
+only idle login-shell processes) and closes matching windows. This is
+**disabled by default** because an idle login-shell window can belong to a
+developer who actually uses Terminal.app. Enable only on CI or on machines
+where Terminal.app is not the interactive terminal.
+
+#### macOS window-restoration mitigation
+
+macOS "Reopen windows when reopening an app" can restore closed Terminal
+windows on the next launch with **new** window ids and fresh login shells,
+re-leaking them. To stop restoration globally:
+
+```bash
+defaults write com.apple.Terminal NSQuitAlwaysKeepsWindows -bool false
+```
+
+The harness does **not** mutate the developer's defaults. See
 `.claude/skills/rust-testing/apple-terminal-harness-pitfalls.md`.
 
 ## Environment prerequisites

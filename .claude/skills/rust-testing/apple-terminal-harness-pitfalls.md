@@ -85,24 +85,65 @@ focus**. Do not "improve" this by forcing a new window via `⌘N`/keystroke — 
 reintroduces focus-steal. (Orphan-leak *identification* — Pitfall 2 — is still
 open and tracked separately.)
 
-## Pitfall 2 — the orphan reaper can't see leaked windows
+## Pitfall 2 — resolved: orphan-window leaks (registry + opt-in sweep)
 
 `cleanup_stale_apple_terminal_windows()` finds harness windows by a custom title
 prefix (`biscuit-test-terminal-<pid>`). But an interactive **shell prompt
 overwrites the window title** via its own title escape sequences
 (zsh `precmd` / bash `PROMPT_COMMAND`). Leaked windows therefore show
-`title = "Terminal"`, the reaper never matches them, and they accumulate.
+`title = "Terminal"`, the title-based reaper never matches them, and they
+accumulate.
 
-Implications and best practices:
+### Implemented fix (Layer 1 — registry)
 
-- Leak identification must be **title-independent** (e.g. a tracked-id registry
-  file the reaper consumes, or matching on a marker env/arg visible in the tab's
-  process list) — titles are not load-bearing.
-- macOS "**reopen windows when reopening an app**" can *restore* windows after
-  `killall Terminal`, re-leaking them on next launch. Don't assume `killall`
-  fully resets state.
-- Drop is best-effort: timeouts/panics skip it. The reaper must run **at spawn
+The harness now maintains a title-independent window-id registry at
+`${TMPDIR}/biscuit-test-terminal-registry.jsonl`. Each owned spawn appends
+`{window_id, owner_pid, seq}`; the reaper closes registry entries whose owner
+is dead, then prunes the registry. Because the registry records the window id
+at spawn time, reaping works even after the login shell overwrites the custom
+title.
+
+The registry is append-only (atomic short writes on macOS) and its prune is
+guarded by a sidecar lock file so concurrent reapers do not corrupt it. A
+window-id reuse safety check (`looks_like_harness_window`) verifies the window
+still presents as an idle login shell before closing, so a recycled id now
+hosting real work is never closed.
+
+### Layer 3 — opt-in legacy sweep
+
+The registry cannot catch windows **restored by macOS** (new ids, not in the
+registry) or leaked by harness versions predating the registry. An opt-in
+legacy sweep tests every open Terminal.app window against a strict predicate
+and closes matches:
+
+```bash
+BISCUIT_TEST_HARNESS_SWEEP_LEGACY_APPLE=1 cargo test …
+```
+
+The predicate requires: not busy, only `login` / `<shell>` processes, default
+80×24 geometry, and an empty or `"Terminal"` title. This is **disabled by
+default** — an idle login-shell window can belong to a developer. Enable only
+on CI or on machines where Terminal.app is not the interactive terminal.
+
+### macOS window-restoration mitigation
+
+macOS "Reopen windows when reopening an app" can restore closed Terminal
+windows on the next launch with **new** window ids and fresh login shells,
+re-leaking them. To stop restoration globally:
+
+```bash
+defaults write com.apple.Terminal NSQuitAlwaysKeepsWindows -bool false
+```
+
+The harness does **not** mutate the developer's defaults.
+
+### Best practices
+
+- Drop is best-effort: timeouts/panics skip it. The reaper runs **at spawn
   time** so each run cleans the previous run's orphans.
+- Don't assume `killall Terminal` fully resets state — window restoration may
+  bring them back on the next launch.
+- Titles are not load-bearing for identification; rely on the registry.
 
 ## Pitfall 3 — capture is plain-text only
 
