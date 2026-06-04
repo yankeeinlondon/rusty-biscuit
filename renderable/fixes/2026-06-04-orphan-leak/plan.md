@@ -4,6 +4,43 @@ date: 2026-06-04
 owner: ken
 area: biscuit-test-harness
 parent: .claude/skills/rust-testing/apple-terminal-harness-pitfalls.md
+source_files_during_phase_1:
+  - biscuit-test-harness/src/apple_terminal.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - biscuit-test-harness/src/apple_terminal.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - biscuit-test-harness/src/apple_terminal.rs
+docs_updated_during_phase_4:
+  - biscuit-test-harness/README.md
+  - .claude/skills/rust-testing/apple-terminal-harness-pitfalls.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/rust-testing/apple-terminal-harness-pitfalls.md
+source_files_during_phase_5:
+  - biscuit-test-harness/src/apple_terminal.rs
+  - biscuit-test-harness/src/layout_invariants.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - biscuit-test-harness/README.md
+  - .claude/skills/rust-testing/apple-terminal-harness-pitfalls.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/rust-testing/SKILL.md
+packages:
+  - biscuit-test-harness
 ---
 
 # Fix: Apple Terminal orphan-window leaks (Pitfall 2)
@@ -158,6 +195,25 @@ registry) or leaked by harness versions predating the registry. Mirror WezTerm's
 - Prototype Option A; run the full apple-terminal L2 subset to prove no
   capability/rendering regression. If anything drifts, drop Layer 2 and rely on
   Layer 1.
+
+**Outcome (2026-06-04): Layer 2 dropped — relying on Layer 1.** Option A is the
+only viable path (Option B re-asserts the title but the login shell's `precmd`
+re-overwrites it on every prompt, so it cannot keep a title on an idle leaked
+window). Option A changes the spawned shell's startup environment (a
+no-global-rc shell such as `zsh -d` / `bash --norc --noprofile`, since the macOS
+title hook lives in `/etc/zshrc_Apple_Terminal`, sourced by `/etc/zshrc`). The
+plan's gate requires *proving* this introduces no `bt` capability-detection or
+image/color/prose rendering regression, and that proof is obtainable **only** by
+running the apple-terminal L2 subset — which opens real Terminal.app windows on
+the live desktop (Phase 5 broker territory) and risks the LaunchServices/focus
+dialogs the harness warns about. That characterization cannot be performed in a
+non-interactive session, so env-safety is unproven and, per the decision rule,
+Layer 2 does not land. No source code changed in this phase: the registry
+(Layer 1, Phases 1–2) already makes reaping title-independent, and the reaper's
+title pass is already documented as a backstop that is "harmless otherwise"
+(`apple_terminal.rs` `reap_titled_windows` / `cleanup_stale_apple_terminal_windows`
+docs). A future interactive session can revisit Option A under the broker harness
+(Phase 5) if the title-based backstop is later judged worth restoring.
 
 ### Phase 4 — Opt-in sweep + restoration docs
 - Implement `looks_like_harness_window` and the
