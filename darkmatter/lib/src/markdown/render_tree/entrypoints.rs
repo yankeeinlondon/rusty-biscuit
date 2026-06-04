@@ -127,6 +127,99 @@ fn set_hr_hint_if_absent(node: &mut RenderNode, key: &str, value: &str) {
     }
 }
 
+/// Seeds bare-rule HR defaults on `root` from the deprecated top-level `hr:`
+/// frontmatter when the caller supplied no explicit `hr_defaults` option.
+///
+/// Restores the direct-API fallback the deleted bespoke serializers performed
+/// (`options.hr_defaults.as_ref().or(hr_defaults_from_frontmatter(md).as_ref())`):
+/// the [`Markdown::as_html`](crate::markdown::Markdown::as_html) /
+/// [`as_terminal`](crate::markdown::Markdown::as_terminal) paths must honor a
+/// document's top-level `hr:` block even with `HtmlOptions::default()` /
+/// `TerminalOptions::default()`. Callers gate this on
+/// `options.hr_defaults.is_none()` so an explicit option (including a
+/// [`DarkmatterPage`](crate::layout::DarkmatterPage)'s `style.hr.*` projection)
+/// always wins outright, matching the legacy `.or()` precedence.
+pub(crate) fn apply_hr_frontmatter_fallback(root: &mut RenderNode, md: &Markdown) {
+    if let Some(fallback) = hr_defaults_from_frontmatter(md) {
+        apply_hr_defaults(root, &fallback);
+    }
+}
+
+/// Resolves the deprecated top-level `hr:` frontmatter block into a
+/// [`HorizontalRuleAttrs`] suitable for [`apply_hr_defaults`].
+///
+/// The frontmatter backing store is `serde_json::Value`, so a direct
+/// `get::<HorizontalRuleAttrs>("hr")` deserialize would fail fast on any
+/// non-string scalar (e.g. `hr: { width: 50 }`), dropping every sibling key. To
+/// match the attribute-block path's coercion (see `RuleProcessor`), this walks
+/// the `hr` mapping entry-by-entry and coerces numbers and bools to strings via
+/// [`json_scalar_as_string`]. The `style` key maps to
+/// [`legacy_style`](HorizontalRuleAttrs::legacy_style) so the deprecated alias
+/// resolves through the same `kind`-wins precedence the inline path uses.
+///
+/// ## Notes
+///
+/// - Non-mapping `hr` values (e.g. `hr: 42`) emit a `tracing::warn!` and return
+///   `None`.
+/// - Unknown keys emit a `tracing::warn!` and are dropped.
+/// - Non-scalar values (arrays, objects, `null`) for recognized keys emit a
+///   `tracing::warn!` and are skipped; remaining sibling keys still apply.
+fn hr_defaults_from_frontmatter(md: &Markdown) -> Option<HorizontalRuleAttrs> {
+    let value = md.frontmatter().as_map().get("hr")?;
+    let map = match value {
+        serde_json::Value::Object(map) => map,
+        other => {
+            tracing::warn!(
+                value = ?other,
+                "non-mapping `hr` frontmatter; using horizontal rule component defaults"
+            );
+            return None;
+        }
+    };
+
+    let mut attrs = HorizontalRuleAttrs::default();
+    for (key, entry) in map {
+        let Some(value) = json_scalar_as_string(entry) else {
+            tracing::warn!(
+                key = %key,
+                value = ?entry,
+                "non-scalar value in `hr` frontmatter; ignoring"
+            );
+            continue;
+        };
+
+        match key.as_str() {
+            "kind" => attrs.kind = Some(value),
+            "style" => attrs.legacy_style = Some(value),
+            "alignment" => attrs.alignment = Some(value),
+            "weight" => attrs.weight = Some(value),
+            "width" => attrs.width = Some(value),
+            "color" => attrs.color = Some(value),
+            other => {
+                tracing::warn!(
+                    key = %other,
+                    value = %value,
+                    "unknown horizontal rule attribute; ignoring"
+                );
+            }
+        }
+    }
+
+    Some(attrs)
+}
+
+/// Coerces a JSON scalar to a `String`, returning `None` for non-scalar shapes
+/// (arrays, objects, null) so [`hr_defaults_from_frontmatter`] agrees with the
+/// attribute-block path on which values are string-coercible.
+fn json_scalar_as_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
 /// Lowers [`HtmlOptions::hr_css_variables`](crate::markdown::output::HtmlOptions::hr_css_variables)
 /// to a sorted [`PageOptions::css_variables`](renderable::browser::PageOptions::css_variables)
 /// override list, or `None` when nothing safe remains.
@@ -165,7 +258,9 @@ fn hr_root_variables(
 /// `browser_options_from_html_options`), and
 /// [`HtmlOptions::hr_defaults`](crate::markdown::output::HtmlOptions::hr_defaults)
 /// fill the `darkmatter.hr.*` hints of bare `---` rules (see
-/// `apply_hr_defaults`).
+/// `apply_hr_defaults`). When that option is unset, the deprecated top-level
+/// `hr:` frontmatter supplies the defaults instead (see
+/// `apply_hr_frontmatter_fallback`).
 ///
 /// `style:` frontmatter hyperlink / image color injection
 /// ([`HtmlOptions::hyperlink_style`](crate::markdown::output::HtmlOptions::hyperlink_style),
@@ -188,7 +283,13 @@ fn hr_root_variables(
 /// [`render_browser_document_html`]. Non-fatal diagnostics are returned in the
 /// [`PipelineResult`] without being demoted to errors.
 pub fn render_tree_html(md: &Markdown, options: &HtmlOptions) -> PipelineRenderResult<String> {
-    let (doc, fold_diagnostics) = to_render_document(md);
+    let (mut doc, fold_diagnostics) = to_render_document(md);
+    // Direct-API fallback: with no explicit `hr_defaults`, seed bare rules from
+    // the deprecated top-level `hr:` frontmatter. `render_tree_html_from_document`
+    // applies an explicit option, so the two paths stay mutually exclusive.
+    if options.hr_defaults.is_none() {
+        apply_hr_frontmatter_fallback(&mut doc.root, md);
+    }
     render_tree_html_from_document(doc, fold_diagnostics, options)
 }
 
@@ -570,6 +671,11 @@ fn apply_attribute_injections(mut html: String, injections: &[AttributeInjection
 /// `mermaid_mode` to the Mermaid promotion opt-in; see
 /// [`terminal_options_from_terminal_options`] for the full mapping.
 ///
+/// [`TerminalOptions::hr_defaults`](crate::markdown::output::TerminalOptions::hr_defaults)
+/// fill bare `---` rules; when it is unset, the deprecated top-level `hr:`
+/// frontmatter supplies the defaults instead (see
+/// `apply_hr_frontmatter_fallback`).
+///
 /// ## Errors
 ///
 /// Propagates any fatal [`RenderError`] from
@@ -581,6 +687,8 @@ pub fn render_tree_terminal(
     let (mut doc, fold_diagnostics) = to_render_document(md);
     if let Some(defaults) = options.hr_defaults.as_ref() {
         apply_hr_defaults(&mut doc.root, defaults);
+    } else {
+        apply_hr_frontmatter_fallback(&mut doc.root, md);
     }
     let term_opts = terminal_options_from_terminal_options(options);
     let rendered = render_terminal_document(&doc, &term_opts)?;
@@ -623,6 +731,8 @@ pub(crate) fn render_tree_terminal_with_layout(
     let (mut doc, fold_diagnostics) = to_render_document(md);
     if let Some(defaults) = options.hr_defaults.as_ref() {
         apply_hr_defaults(&mut doc.root, defaults);
+    } else {
+        apply_hr_frontmatter_fallback(&mut doc.root, md);
     }
     super::decorate::decorate_document(&mut doc.root, ctx);
     let mut term_opts = terminal_options_from_terminal_options(options);
@@ -1540,6 +1650,134 @@ mod tests {
         assert!(html.contains(r#"width="50%""#), "{html}");
         assert!(html.contains("--hr-color: red"), "{html}");
         assert!(html.contains("--hr-weight: 8"), "thick weight ⇒ 8px: {html}");
+    }
+
+    // ================================================================
+    // Review-5 finding: the direct `Markdown::as_html` / `as_terminal`
+    // paths must restore the deleted bespoke serializers' fallback —
+    // when no explicit `hr_defaults` option is supplied, the deprecated
+    // top-level `hr:` frontmatter seeds bare-rule defaults. These pin the
+    // `hr_defaults_from_frontmatter` coercion contract and the
+    // entry-point wiring that consumes it.
+    // ================================================================
+
+    fn md_with_hr_frontmatter(value: serde_json::Value) -> Markdown {
+        let mut fm = crate::markdown::Frontmatter::new();
+        fm.as_map_mut().insert("hr".to_string(), value);
+        Markdown::with_frontmatter(fm, "---\n".to_string())
+    }
+
+    #[test]
+    fn hr_defaults_from_frontmatter_numeric_width_preserves_siblings() {
+        let md = md_with_hr_frontmatter(serde_json::json!({
+            "style": "dots",
+            "width": 20,
+            "color": "red",
+        }));
+        let attrs = hr_defaults_from_frontmatter(&md).expect("expected Some attrs");
+        assert_eq!(attrs.legacy_style.as_deref(), Some("dots"));
+        assert_eq!(
+            attrs.width.as_deref(),
+            Some("20"),
+            "numeric width must be coerced to string"
+        );
+        assert_eq!(attrs.color.as_deref(), Some("red"));
+    }
+
+    #[test]
+    fn hr_defaults_from_frontmatter_bool_value_preserves_siblings() {
+        let md = md_with_hr_frontmatter(serde_json::json!({
+            "style": "waves",
+            "alignment": true,
+            "color": "blue",
+        }));
+        let attrs = hr_defaults_from_frontmatter(&md).expect("expected Some attrs");
+        // `true` coerces to the string "true" (not a recognized alignment),
+        // but its siblings still apply.
+        assert_eq!(attrs.legacy_style.as_deref(), Some("waves"));
+        assert_eq!(attrs.alignment.as_deref(), Some("true"));
+        assert_eq!(attrs.color.as_deref(), Some("blue"));
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn hr_defaults_from_frontmatter_non_mapping_warns_and_returns_none() {
+        let md = md_with_hr_frontmatter(serde_json::json!(42));
+        assert!(
+            hr_defaults_from_frontmatter(&md).is_none(),
+            "non-mapping hr value must yield None"
+        );
+        assert!(logs_contain("non-mapping"));
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn hr_defaults_from_frontmatter_unknown_key_warns_and_drops_it() {
+        let md = md_with_hr_frontmatter(serde_json::json!({
+            "style": "dashes",
+            "bogus": "value",
+        }));
+        let attrs = hr_defaults_from_frontmatter(&md).expect("expected Some attrs");
+        assert_eq!(attrs.legacy_style.as_deref(), Some("dashes"));
+        assert!(logs_contain("unknown horizontal rule attribute"));
+    }
+
+    #[test]
+    fn hr_defaults_from_frontmatter_missing_key_returns_none() {
+        let md = Markdown::with_frontmatter(crate::markdown::Frontmatter::new(), "---\n".to_string());
+        assert!(hr_defaults_from_frontmatter(&md).is_none());
+    }
+
+    /// A bare `---` rendered through `render_tree_terminal` with no explicit
+    /// `hr_defaults` must adopt the deprecated top-level `hr:` frontmatter —
+    /// the direct `Markdown::as_terminal` fallback.
+    #[test]
+    fn render_tree_terminal_falls_back_to_top_level_hr_frontmatter() {
+        let md: Markdown = "---\nhr:\n  style: dots\n---\n\n---\n".into();
+        let opts = TerminalOptions {
+            max_width: Some(40),
+            color_depth: Some(ColorDepth::None),
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
+            ..TerminalOptions::default()
+        };
+        let out = render_tree_terminal(&md, &opts).expect("terminal render").output;
+        assert!(
+            out.contains('·') || out.contains('.'),
+            "bare rule must adopt the `dots` frontmatter default; got:\n{out:?}",
+        );
+    }
+
+    /// A bare `---` rendered through `render_tree_html` with no explicit
+    /// `hr_defaults` must adopt the deprecated top-level `hr:` frontmatter —
+    /// the direct `Markdown::as_html` fallback.
+    #[test]
+    fn render_tree_html_falls_back_to_top_level_hr_frontmatter() {
+        let md: Markdown = "---\nhr:\n  style: waves\n  weight: thick\n  width: \"50%\"\n---\n\n---\n".into();
+        let html = render_tree_html(&md, &HtmlOptions::default())
+            .expect("html render")
+            .output;
+        assert!(html.contains(r#"width="50%""#), "{html}");
+        assert!(html.contains("--hr-weight: 8"), "thick weight ⇒ 8px: {html}");
+        assert!(html.contains("<path"), "waves ⇒ <path> svg: {html}");
+    }
+
+    /// An explicit `hr_defaults` option wins outright over the frontmatter
+    /// fallback, matching the legacy `.or()` precedence.
+    #[test]
+    fn render_tree_html_explicit_option_overrides_top_level_hr_frontmatter() {
+        let md: Markdown = "---\nhr:\n  style: waves\n  width: \"50%\"\n---\n\n---\n".into();
+        let opts = HtmlOptions {
+            hr_defaults: Some(HorizontalRuleAttrs {
+                width: Some("25%".into()),
+                ..HorizontalRuleAttrs::default()
+            }),
+            ..HtmlOptions::default()
+        };
+        let html = render_tree_html(&md, &opts).expect("html render").output;
+        assert!(
+            html.contains(r#"width="25%""#) && !html.contains(r#"width="50%""#),
+            "explicit option width must win over the frontmatter fallback: {html}",
+        );
     }
 
     /// `hr_css_variables` must emit a page-level `:root` declaration through

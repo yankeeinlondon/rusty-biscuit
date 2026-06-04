@@ -584,6 +584,11 @@ impl Markdown {
     /// through the wired [`TerminalCodeRenderer`] hook. This is the only HTML
     /// render path; the legacy event-stream serializer has been deleted.
     ///
+    /// When `options.hr_defaults` is unset, a document's deprecated top-level
+    /// `hr:` frontmatter still seeds bare-rule defaults — restoring the bespoke
+    /// serializer's direct-API fallback so `as_html(HtmlOptions::default())`
+    /// honors it without routing through a [`DarkmatterPage`](crate::layout::DarkmatterPage).
+    ///
     /// ## Examples
     ///
     /// ```
@@ -601,13 +606,21 @@ impl Markdown {
     /// when the render tree fails structural validation or a strict-mode
     /// rejection occurs.
     pub fn as_html(&self, options: output::HtmlOptions) -> MarkdownResult<String> {
-        let (doc, fold_diagnostics) = render_tree::entrypoints::to_render_document(self);
+        let (mut doc, fold_diagnostics) = render_tree::entrypoints::to_render_document(self);
         // Restore the legacy `output::as_html` contract: a malformed fenced
         // code-block directive (e.g. an invalid highlight range) is a fatal
         // error on the browser path, not a silent degrade. The render-tree
         // code renderer only degrades (matching the legacy *terminal* path), so
         // this preflight runs over the same folded tree before rendering.
         render_tree::entrypoints::validate_code_directives(&doc.root)?;
+        // Direct-API fallback: with no explicit `hr_defaults`, seed bare rules
+        // from the deprecated top-level `hr:` frontmatter, matching the deleted
+        // bespoke serializer. An explicit option (e.g. a `DarkmatterPage`
+        // `style.hr.*` projection) is applied by `render_tree_html_from_document`
+        // instead, so the branches stay mutually exclusive.
+        if options.hr_defaults.is_none() {
+            render_tree::entrypoints::apply_hr_frontmatter_fallback(&mut doc.root, self);
+        }
         Ok(render_tree::entrypoints::render_tree_html_from_document(doc, fold_diagnostics, &options)?.output)
     }
 
@@ -616,6 +629,10 @@ impl Markdown {
     /// Returns a string containing ANSI escape codes for syntax highlighting,
     /// styled headings, and formatted block elements including inline images
     /// (via Kitty/iTerm2 protocols through biscuit-terminal).
+    ///
+    /// When `options.hr_defaults` is unset, a document's deprecated top-level
+    /// `hr:` frontmatter still seeds bare-rule defaults — the direct-API
+    /// counterpart to the [`as_html`](Self::as_html) fallback.
     ///
     /// ## Examples
     ///
