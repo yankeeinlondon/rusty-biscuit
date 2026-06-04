@@ -1,7 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 751ea2392b8b3231-7d4b443fb0147706
+hash: 751ea2392b8b3231-ee5aa7ac1e8fcd73
+last_updated: 2026-06-03
 ---
 
 # darkmatter
@@ -64,11 +65,11 @@ CLI flags win over frontmatter field-by-field. For implementation details, read
 ## Common Entry Points
 
 ```rust
-use darkmatter::markdown::{Markdown, output::{TerminalOptions, write_terminal}};
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::output::TerminalOptions;
 
 let md: Markdown = "# Hello\n\nWorld".into();
-let mut stdout = std::io::stdout();
-write_terminal(&mut stdout, &md, TerminalOptions::default())?;
+print!("{}", md.as_terminal(TerminalOptions::default())?);
 ```
 
 ```rust
@@ -148,10 +149,12 @@ the `biscuit-terminal` skill for terminal tree rendering.
 
 ## Current Rendering Notes
 
-- Public `Markdown::as_html` and `for_terminal` still use the mature
-  `pulldown-cmark` event-stream renderers.
+- Public `Markdown::as_html` and `Markdown::as_terminal` (and
+  `DarkmatterPage::render`) route through the render-tree document renderers;
+  the legacy `pulldown-cmark` event-stream serializers and `RuleProcessor` have
+  been deleted (tree-cutover Phase 5).
 - `darkmatter::markdown::render_tree::fold_markdown_to_document` is the
-  experimental Markdown-to-`Document` bridge.
+  Markdown-to-`Document` bridge every public render path folds through.
 - `YamlBlock` projects to the render tree and uses shared code-block helpers
   for terminal and browser syntax highlighting.
 - Code-block themes resolve against the inverted page color mode for contrast;
