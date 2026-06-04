@@ -2755,6 +2755,111 @@ printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","nu
 #[cfg(unix)]
 #[test]
 #[serial_test::serial]
+fn inline_compose_final_response_converges_across_harness_and_non_harness_paths() {
+    // Convergence test: the same structured-stream inline-compose scenario must
+    // produce identical body content whether it runs through the harness loop
+    // (document has harness properties) or the non-harness path (no harness
+    // properties). Both must write ONLY the agent's final response into the
+    // body — never the interstitial narration.
+    //
+    // This test is the safety net for the "always-harness" unification effort
+    // (see claudine/features/2026-06-03-always-harness/spec.md). If it fails,
+    // the two execution paths have diverged.
+
+    // --- Shared stub: Claude stream-json that narrates, uses tools, then responds ---
+    let claude_stub = r##"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"conv-test","model":"claude-sonnet-4"}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Let me gather the required context."}]}}'
+printf '%s\n' '{"type":"tool_use","name":"read_file","input":{"path":"context.md"}}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Now I will compose the final output."}]}}'
+printf '%s\n' '{"type":"tool_use","name":"write_file","input":{"path":"output.md"}}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"# Converged Output\n\nOnly this paragraph should appear in the body."}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","num_turns":3,"duration_ms":80,"usage":{"input_tokens":5,"output_tokens":50}}'
+"##;
+
+    // --- Helper: run inline-compose with given frontmatter, return body content ---
+    let run_with_frontmatter = |fm_extra: &str, label: &str| -> String {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        let fake_home = workspace.path().join("home");
+        fs::create_dir_all(&path_dir).unwrap();
+        fs::create_dir_all(&fake_home).unwrap();
+        seed_minimal_config(&fake_home);
+
+        let md_file = workspace.path().join(format!("doc-{label}.md"));
+        let frontmatter = format!(
+            "---\nprompt: Generate the document body.\n{fm_extra}---\nOriginal placeholder body.\n"
+        );
+        fs::write(&md_file, &frontmatter).unwrap();
+
+        // Create a trivial pre-check target for the harness variant.
+        fs::write(workspace.path().join("always-exists.txt"), "ok").unwrap();
+
+        write_executable(&path_dir.join("claude"), claude_stub);
+
+        cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", &fake_home)
+            .env("PATH", &path_dir)
+            .args(["inline-compose", "--claude", md_file.to_str().unwrap()])
+            .current_dir(workspace.path())
+            .assert()
+            .success();
+
+        let doc = fs::read_to_string(&md_file).unwrap();
+        // Extract body: everything after the closing ---\n of frontmatter.
+        doc.split_once("\n---\n")
+            .map(|(_, body)| body.to_string())
+            .unwrap_or(doc)
+    };
+
+    // --- Non-harness path: no harness properties ---
+    let non_harness_body = run_with_frontmatter("", "bare");
+
+    // --- Harness path: trivial pre-check that always passes ---
+    let harness_body = run_with_frontmatter(
+        "pre_checks:\n  file_exists: \"always-exists.txt\"\n",
+        "harness",
+    );
+
+    // Both paths must produce the same body.
+    assert_eq!(
+        non_harness_body.trim(),
+        harness_body.trim(),
+        "non-harness body and harness body must be identical;\n  non-harness: {:?}\n  harness:     {:?}",
+        non_harness_body.trim(),
+        harness_body.trim(),
+    );
+
+    // Both must contain only the final response.
+    let expected = "# Converged Output\n\nOnly this paragraph should appear in the body.";
+    assert_eq!(
+        non_harness_body.trim(),
+        expected,
+        "non-harness body must be the final response only"
+    );
+    assert_eq!(
+        harness_body.trim(),
+        expected,
+        "harness body must be the final response only"
+    );
+
+    // Neither must contain narration.
+    for (body, label) in [&non_harness_body, &harness_body].iter().zip(["non-harness", "harness"]) {
+        assert!(
+            !body.contains("Let me gather the required context."),
+            "{label}: first narration leaked into body"
+        );
+        assert!(
+            !body.contains("Now I will compose the final output."),
+            "{label}: second narration leaked into body"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
 fn inline_compose_file_changed_post_check_sees_closure_artifact() {
     // Verifies that file-state post_checks like `file_changed` evaluate
     // AFTER inline closure has rewritten the document, not before.
