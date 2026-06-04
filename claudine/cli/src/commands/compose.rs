@@ -491,6 +491,7 @@ fn run_compose_inner(
         // Engine polls this during rate-limit pause sleeps so Ctrl+C
         // surfaces as `LoopInterrupted` instead of waiting out the timer.
         interrupt_check: Some(crate::output::user_interrupt_observed),
+        pause_reset_margin: claudine::composition::resolve_pause_reset_margin_from_env(),
     };
 
     let file_for_loop = file.clone();
@@ -730,7 +731,16 @@ fn run_inline_compose_inner(
             source
         }
         Err(e) => {
-            if let Some(ref t) = term {
+            // Only a genuine reference-resolution failure means the file was
+            // not found. A file that resolved but failed to load/parse (e.g.
+            // malformed frontmatter) must not be reported as "no match" — its
+            // own typed error already names the file and the cause.
+            if let Some(ref t) = term
+                && matches!(
+                    e,
+                    CompositionError::FileNotFound(_) | CompositionError::InvalidReference(_)
+                )
+            {
                 claudine::harness::report::report_source_file(&file, std::path::Path::new(""), t);
             }
             return Err(e.into());
@@ -878,6 +888,7 @@ fn run_inline_compose_inner(
         // Engine polls this during rate-limit pause sleeps so Ctrl+C
         // surfaces as `LoopInterrupted` instead of waiting out the timer.
         interrupt_check: Some(crate::output::user_interrupt_observed),
+        pause_reset_margin: claudine::composition::resolve_pause_reset_margin_from_env(),
     };
 
     let file_for_loop = file.clone();
@@ -1448,10 +1459,10 @@ pub(crate) fn parse_composition_positionals(
 
 /// Return a stable type name for a `serde_json::Value`.
 ///
-/// Used by `inline-compose` to construct
+/// Used by `inline-compose` (and the sequence orchestrator) to construct
 /// [`CompositionError::PromptPropertyWrongType`] when the frontmatter
 /// `prompt` value is present but not a string.
-fn json_type_name(value: &serde_json::Value) -> &'static str {
+pub(crate) fn json_type_name(value: &serde_json::Value) -> &'static str {
     match value {
         serde_json::Value::Null => "null",
         serde_json::Value::Bool(_) => "boolean",

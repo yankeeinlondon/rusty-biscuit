@@ -43,6 +43,7 @@ pub use lifecycle::{
 };
 pub use loop_config::{
     resolve_fail_fast_from_env, resolve_loop_config, resolve_max_iterations_from_env,
+    resolve_pause_reset_margin_from_env,
 };
 pub use loop_engine::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
