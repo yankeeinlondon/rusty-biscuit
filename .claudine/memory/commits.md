@@ -44,6 +44,7 @@ description: A record of novel things learned about how to best perform commits 
 
 ## Multi-Agent Workflow
 
+- **Verify all staged files are assigned before dispatching.** After organizing into semantic groups, cross-check that every staged file appears in exactly one group's file list. A missed file will silently remain staged after all subagents finish, requiring a follow-up dispatch. Use `git status --short` after all subagents report completion to confirm a clean index.
 - Subagents may see a different staged set than the prompt implies. Always verify the actual index state before committing.
 - In a shared worktree, concurrent agents share the same index. `git reset HEAD` without paths resets the entire staged set for everyone.
 - **Orchestrator staging discipline:** When committing from the same worktree with multiple subagents, two strategies work:
