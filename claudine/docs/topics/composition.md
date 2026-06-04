@@ -116,6 +116,7 @@ Steps:
 5. **Select provider** — choose the agentic CLI
 6. **Execute** — run the provider session
 7. **Closure** — Claudine rewrites the file:
+   - The replacement body is the agent's **final response only** — the output text emitted after the agent's last tool call. Interstitial narration between tool calls (e.g. "Let me read the docs…") is dropped, so process commentary never leaks into the artifact. Providers that recover their final message post-hoc (e.g. Codex's `--output-last-message`) supply that message directly.
    - The provider returns replacement body content only (no frontmatter)
    - Original frontmatter properties are preserved byte-for-byte
    - If the provider modified an existing frontmatter property, Claudine reverts it to the original value and emits a warning
@@ -282,6 +283,8 @@ For every flavor (`compose`, `inline-compose`, `sequence`):
 7. Proceed to provider/model resolution only after validation succeeds.
 
 `inline-compose` keeps its existing `prompt` checks: a missing or non-string `prompt` still surfaces as `PromptPropertyMissing` / `PromptPropertyWrongType` before schema validation runs. The original `$schema` declaration is preserved byte-for-byte during the inline rewrite — interactive values collected for one run are never written back to the source file.
+
+Source loading (shared by all three commands) parses frontmatter strictly. A document whose `---` block contains malformed YAML — e.g. inconsistent block-scalar indentation — surfaces as a `FrontmatterParse` error that renders Darkmatter's rich frontmatter-parse block (file link, YAML location, offending-line excerpt), not as a misleading `PromptPropertyMissing`.
 
 `sequence` validates every step during Phase 1a, before any provider session starts. When multiple steps share the same missing property with the same shape and description, the user is prompted once and the answer is reused for later steps (unless the step overlay supplies a different value). Non-interactive failures are aggregated into a single `SequenceMissingProperties` error so the user can fix the entire sequence in one edit pass.
 
@@ -490,6 +493,15 @@ claudine sequence --fail-fast false @batch.md
 ### When to Use Sequence
 
 Use `claudine sequence` when you have a fixed list of items and need to compose the same template document against each item independently. Each step is a full one-shot composition run — with its own provider selection, harness evaluation, lifecycle notifications, and pre-flight shell approval. The sequence command is serial; steps do not run in parallel.
+
+### Compose vs Inline Steps
+
+A sequence runs each step as either a **compose** step or an **inline** step, decided once for the whole run by the same signal that splits the top-level `compose` and `inline-compose` commands: the presence of a `prompt` frontmatter property on the source document.
+
+- **No `prompt` property** — each step is a `compose` (chained-document) run: the composed **body** is sent as the agent prompt and no file is mutated.
+- **`prompt` property present** — each step is an `inline-compose` run: the composed **`prompt`** (with per-step `{{state}}` interpolation) is sent as the agent prompt, and the provider's output **replaces the document body** on disk, preserving the original frontmatter and bumping `last_updated` (see [Inline Composition](#inline-composition)).
+
+Because steps run serially and the body is written back after each one, an inline step's agent reads the body that the previous step wrote. A `prompt` property that is present but not a string is rejected up front with `PromptPropertyWrongType` — before any step launches — exactly as `inline-compose` does.
 
 ### Inline Sequence Definition
 

@@ -2683,6 +2683,78 @@ fn inline_compose_preserves_frontmatter() {
 #[cfg(unix)]
 #[test]
 #[serial_test::serial]
+fn inline_compose_writes_only_final_response_not_narration() {
+    // Regression: with a structured provider that narrates between tool
+    // calls, inline-compose must write ONLY the agent's final response (the
+    // output text after the last tool call) into the document body. The
+    // interstitial "Let me read…/Now let me write…" narration must never
+    // leak into the artifact.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    let md_file = workspace.path().join("doc.md");
+    fs::write(
+        &md_file,
+        "---\nprompt: Generate the document body.\n---\nOriginal placeholder body.\n",
+    )
+    .unwrap();
+
+    // Claude stream-json stub: narrate, call a tool, narrate again, call a
+    // second tool, then emit the FINAL response. Each narration block is a
+    // separate text-only assistant message, so without the fix all of them
+    // accumulate into `assistant_text` and leak into the body.
+    write_executable(
+        &path_dir.join("claude"),
+        r##"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"claude-final","model":"claude-sonnet-4"}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Let me read the research documents first."}]}}'
+printf '%s\n' '{"type":"tool_use","name":"read_file","input":{"path":"research.md"}}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Now let me write the document."}]}}'
+printf '%s\n' '{"type":"tool_use","name":"write_file","input":{"path":"doc.md"}}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"# Final Document\n\nThis is the only content that belongs in the body."}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","num_turns":3,"duration_ms":100,"usage":{"input_tokens":3,"output_tokens":60}}'
+"##,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["inline-compose", "--claude", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let final_doc = fs::read_to_string(&md_file).unwrap();
+    assert!(
+        final_doc.contains("This is the only content that belongs in the body."),
+        "the final response should be written to the body; doc:\n{final_doc}"
+    );
+    assert!(
+        !final_doc.contains("Let me read the research documents first."),
+        "first narration block leaked into the body; doc:\n{final_doc}"
+    );
+    assert!(
+        !final_doc.contains("Now let me write the document."),
+        "second narration block leaked into the body; doc:\n{final_doc}"
+    );
+    assert!(
+        !final_doc.contains("Original placeholder body."),
+        "the original body should have been replaced; doc:\n{final_doc}"
+    );
+    // Frontmatter is preserved through the inline rewrite.
+    assert!(
+        final_doc.contains("prompt: Generate the document body."),
+        "original frontmatter should be preserved; doc:\n{final_doc}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
 fn inline_compose_file_changed_post_check_sees_closure_artifact() {
     // Verifies that file-state post_checks like `file_changed` evaluate
     // AFTER inline closure has rewritten the document, not before.
@@ -5687,15 +5759,21 @@ fn compose_sigint_during_prep_exits_130_with_notice() {
     )
     .unwrap();
 
-    // Fake `opencode models` sleeps for 10s so prep is slow enough to
-    // interrupt, and so a regression to the uncancellable blocking path
-    // would clearly exceed the 4s interrupt-to-exit budget below (it would
-    // have to wait ~9s for the sleep to finish). The `opencode` provider
-    // binary itself never runs.
+    // Fake `opencode models` touches a readiness marker, then sleeps for
+    // 10s so prep is slow enough to interrupt, and so a regression to the
+    // uncancellable blocking path would clearly exceed the 4s
+    // interrupt-to-exit budget below (it would have to wait ~9s for the
+    // sleep to finish). The marker is the test's synchronization barrier:
+    // it is written only once the model-validation refresh has reached the
+    // `opencode models` subprocess, which happens *after* the SIGINT handler
+    // is installed at the top of `compose`. The `opencode` provider binary
+    // itself never runs.
+    let ready_marker = workspace.path().join("opencode-models-started");
     write_executable(
         &path_dir.join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
+  : > "$CLAUDINE_READY_MARKER"
   /bin/sleep 10
   printf '%s\n' '["test-model"]'
   exit 0
@@ -5709,6 +5787,7 @@ exit 0
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_READY_MARKER", &ready_marker)
         .args([
             "compose",
             "--opencode",
@@ -5722,13 +5801,20 @@ exit 0
 
     let pid = child.id() as i32;
 
-    // Wait until the child has entered prep and reached the slow
-    // `opencode models` call before delivering SIGINT. The fake binary
-    // sleeps for 5s, so a 1s wait lands comfortably inside that window
-    // even when parallel test contention slows wrapper startup — a
-    // 300ms wait was prone to firing SIGINT before the signal handler
-    // and cancellable refresh were both wired up.
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    // Poll for the readiness marker rather than sleeping a fixed interval:
+    // the marker proves the child reached the cancellable `opencode models`
+    // refresh, which is strictly after the SIGINT handler is installed. A
+    // fixed sleep was flaky under full-suite contention — slow wrapper
+    // startup could push handler installation past the deadline, so SIGINT
+    // hit the default disposition (exit 130 but no clean notice).
+    let marker_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !ready_marker.exists() {
+        assert!(
+            std::time::Instant::now() < marker_deadline,
+            "child never reached the opencode models refresh within 30s"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     let interrupt_sent_at = std::time::Instant::now();
     unsafe {
         libc::kill(pid, libc::SIGINT);
@@ -5746,9 +5832,9 @@ exit 0
 
     // Bounded interrupt latency: the cancellable refresh path returns
     // within ~50 ms of the interrupt poll under normal conditions. The
-    // fake `opencode models` sleeps for 5s — anywhere near that means
+    // fake `opencode models` sleeps for 10s — anywhere near that means
     // we've regressed to the uncancellable `refresh_provider_blocking`
-    // path. A 4-second ceiling sits comfortably below the 5s blocking
+    // path. A 4-second ceiling sits comfortably below the 10s blocking
     // floor while leaving headroom for OS scheduling under contention.
     assert!(
         interrupt_to_exit < std::time::Duration::from_secs(4),

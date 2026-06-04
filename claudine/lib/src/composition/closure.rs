@@ -777,4 +777,62 @@ mod tests {
         assert!(written.contains("last_updated: 2026-04-02\n"));
         assert!(written.contains("Updated body\n"));
     }
+
+    #[test]
+    fn apply_closure_writes_dirty_body_for_downstream_cleanup() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_body_hash: original_markdown.hash_body(false),
+        };
+
+        let dirty_body = "# Generated\nNo blank line before paragraph\n";
+        apply_inline_closure(&plan, dirty_body, &file, "2026-04-02", None).unwrap();
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        // apply_inline_closure writes the raw body — cleanup is the caller's job.
+        // Verify the dirty body IS present so the downstream cleanup test is meaningful.
+        assert!(
+            written.contains("# Generated\nNo blank line before paragraph\n"),
+            "raw replacement body must be on disk for downstream cleanup; got:\n{written}"
+        );
+        // Now simulate the cleanup step that callers (inline_guards, try_inline_closure) perform
+        let (fm_prefix, body) = split_frontmatter(&written);
+        let cleaned = darkmatter::markdown::cleanup::cleanup_content(body);
+        assert_ne!(
+            cleaned, body,
+            "cleanup_content must transform the dirty body"
+        );
+        assert!(
+            cleaned.contains("# Generated\n\nNo blank line before paragraph"),
+            "cleaned body must insert blank line between header and paragraph; got:\n{cleaned}"
+        );
+        let _ = fm_prefix;
+    }
+
+    fn split_frontmatter(text: &str) -> (&str, &str) {
+        let mut lines = text.split_inclusive('\n');
+        let first = match lines.next() {
+            Some(l) => l,
+            None => return ("", text),
+        };
+        if first.trim_end_matches(['\r', '\n']) != "---" {
+            return ("", text);
+        }
+        let mut offset = first.len();
+        for line in lines {
+            offset += line.len();
+            if line.trim_end_matches(['\r', '\n']) == "---" {
+                return (&text[..offset], &text[offset..]);
+            }
+        }
+        ("", text)
+    }
 }
