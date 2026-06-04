@@ -50,9 +50,13 @@
 #![allow(dead_code)]
 
 use std::env;
+use std::fs::{self, OpenOptions};
 use std::io;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Once;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use super::{
@@ -62,6 +66,230 @@ use super::{
 
 const WINDOW_TITLE_PREFIX: &str = "biscuit-test-terminal-";
 static CLEANUP_ONCE: Once = Once::new();
+
+/// Basename of the title-independent window-id registry.
+///
+/// One JSONL row per harness-created window lives under `${TMPDIR:-/tmp}`
+/// so the reaper can identify leaked windows by id even after the login
+/// shell overwrites their `custom title` (Pitfall 2, Layer 1).
+const REGISTRY_FILE_NAME: &str = "biscuit-test-terminal-registry.jsonl";
+
+/// Basename of the sidecar lock guarding the registry read-modify-write.
+///
+/// Held only for the duration of a prune so two concurrent reapers cannot
+/// race on the rewrite. A crashed reaper's lock is reclaimed once it is
+/// older than [`REGISTRY_LOCK_STALE`] (Pitfall 2, Layer 1).
+const REGISTRY_LOCK_FILE_NAME: &str = "biscuit-test-terminal-registry.lock";
+
+/// A registry lock older than this is presumed abandoned by a crashed
+/// reaper and may be stolen. Generous relative to a prune's sub-second
+/// cost so we never steal a lock a live reaper still holds.
+const REGISTRY_LOCK_STALE: Duration = Duration::from_secs(30);
+
+/// One window the harness created, recorded so a later process can reap
+/// it after the owning test exits — independent of the window's title.
+///
+/// `seq` is a per-process monotonic counter that disambiguates rows when
+/// `owner_pid` collides after pid reuse; it carries no Terminal meaning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RegistryEntry {
+    pub window_id: i64,
+    pub owner_pid: u32,
+    pub seq: u64,
+}
+
+impl RegistryEntry {
+    /// Serializes to a single-line JSON object (no trailing newline).
+    fn to_json_line(self) -> String {
+        serde_json::json!({
+            "window_id": self.window_id,
+            "owner_pid": self.owner_pid,
+            "seq": self.seq,
+        })
+        .to_string()
+    }
+
+    /// Parses one registry line, returning `None` for blank or malformed
+    /// rows so a single corrupt append never poisons the whole file.
+    fn from_json_line(line: &str) -> Option<Self> {
+        let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+        Some(Self {
+            window_id: value.get("window_id")?.as_i64()?,
+            owner_pid: u32::try_from(value.get("owner_pid")?.as_u64()?).ok()?,
+            seq: value.get("seq")?.as_u64()?,
+        })
+    }
+}
+
+/// Directory holding the registry and its lock: `${TMPDIR:-/tmp}`.
+fn registry_dir() -> PathBuf {
+    env::var_os("TMPDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+}
+
+/// Path to the on-disk window registry: `${TMPDIR:-/tmp}/{REGISTRY_FILE_NAME}`.
+fn registry_path() -> PathBuf {
+    registry_dir().join(REGISTRY_FILE_NAME)
+}
+
+/// Path to the registry's sidecar lock file.
+fn registry_lock_path() -> PathBuf {
+    registry_dir().join(REGISTRY_LOCK_FILE_NAME)
+}
+
+/// Next per-process registry sequence number.
+fn next_registry_seq() -> u64 {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Records `window_id` in the registry as owned by the current process.
+///
+/// Call only for windows the harness genuinely created (`owned == true`):
+/// registering a reused window we don't own would later authorize the
+/// reaper to close it. Best-effort — registry I/O never fails a spawn.
+fn register_window(window_id: i64) {
+    let entry = RegistryEntry {
+        window_id,
+        owner_pid: current_process_id(),
+        seq: next_registry_seq(),
+    };
+    append_registry_entry(&registry_path(), entry);
+}
+
+/// Removes every row for `window_id` from the registry (best-effort).
+///
+/// Called on the clean close path so the common case leaves no residue;
+/// orphaned rows from killed runs are pruned by the reaper instead.
+fn unregister_window(window_id: i64) {
+    remove_registry_entry(&registry_path(), window_id);
+}
+
+/// Appends one row to `path` using a single `O_APPEND` write.
+///
+/// `O_APPEND` writes of a short record are atomic on macOS, so concurrent
+/// spawns across processes interleave whole lines rather than clobbering
+/// each other. Errors are swallowed: registry upkeep must not fail a spawn.
+fn append_registry_entry(path: &Path, entry: RegistryEntry) {
+    let mut line = entry.to_json_line();
+    line.push('\n');
+    let _ = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(line.as_bytes()));
+}
+
+/// Reads and parses every well-formed row from `path`.
+///
+/// A missing file yields an empty vector; malformed lines are skipped.
+fn read_registry(path: &Path) -> Vec<RegistryEntry> {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    contents
+        .lines()
+        .filter_map(RegistryEntry::from_json_line)
+        .collect()
+}
+
+/// Rewrites `path` dropping every row whose `window_id` matches, while
+/// preserving rows for other windows. Best-effort: a read or write error
+/// leaves the file untouched.
+fn remove_registry_entry(path: &Path, window_id: i64) {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return;
+    };
+    let mut out = String::with_capacity(contents.len());
+    for line in contents.lines() {
+        let drop = RegistryEntry::from_json_line(line).is_some_and(|e| e.window_id == window_id);
+        if drop || line.trim().is_empty() {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    let _ = fs::write(path, out);
+}
+
+/// Best-effort exclusive lock around the registry read-modify-write.
+///
+/// Created with `O_CREAT|O_EXCL` so only one holder wins; the file is
+/// removed on [`Drop`]. A lock left behind by a crashed reaper is stolen
+/// once it ages past [`REGISTRY_LOCK_STALE`].
+struct RegistryLock {
+    path: PathBuf,
+}
+
+impl RegistryLock {
+    /// Tries to take the lock at `path`.
+    ///
+    /// Returns `None` when another reaper holds a fresh lock — the caller
+    /// then skips the prune (best-effort). A stale lock is reclaimed.
+    fn acquire(path: &Path) -> Option<Self> {
+        match OpenOptions::new().create_new(true).write(true).open(path) {
+            Ok(_) => Some(Self { path: path.to_path_buf() }),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                if !lock_is_stale(path) {
+                    return None;
+                }
+                // Reclaim a lock abandoned by a crashed reaper.
+                let _ = fs::remove_file(path);
+                OpenOptions::new()
+                    .create_new(true)
+                    .write(true)
+                    .open(path)
+                    .ok()
+                    .map(|_| Self { path: path.to_path_buf() })
+            }
+            Err(_) => None,
+        }
+    }
+}
+
+impl Drop for RegistryLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+/// Whether the lock at `path` is old enough to presume abandoned. A file
+/// whose mtime cannot be read is treated as *not* stale so we never steal
+/// a lock we cannot reason about.
+fn lock_is_stale(path: &Path) -> bool {
+    fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|mtime| mtime.elapsed().ok())
+        .is_some_and(|age| age >= REGISTRY_LOCK_STALE)
+}
+
+/// Window ids that should be closed: those whose owning test process is
+/// gone (and is not us). Pure so the dead-owner policy is unit-testable
+/// without shelling out.
+fn reap_candidates(entries: &[RegistryEntry], me: u32, alive: impl Fn(u32) -> bool) -> Vec<i64> {
+    entries
+        .iter()
+        .filter(|entry| entry.owner_pid != me && !alive(entry.owner_pid))
+        .map(|entry| entry.window_id)
+        .collect()
+}
+
+/// Registry rows worth keeping after a prune: the owning process is still
+/// alive **and** the window still exists. Pure for the same reason as
+/// [`reap_candidates`].
+fn entries_to_keep(
+    entries: &[RegistryEntry],
+    existing_window_ids: &[i64],
+    alive: impl Fn(u32) -> bool,
+) -> Vec<RegistryEntry> {
+    entries
+        .iter()
+        .copied()
+        .filter(|entry| alive(entry.owner_pid) && existing_window_ids.contains(&entry.window_id))
+        .collect()
+}
 
 /// Harness that drives Terminal.app via `osascript`.
 ///
@@ -232,6 +460,9 @@ impl AppleTerminalHarness {
     fn close_window(&mut self) {
         self.window_tag = None;
         if let Some(id) = self.window_id.take() {
+            // Drop our registry row first so the clean close path leaves
+            // no residue for the reaper to reconcile.
+            unregister_window(id);
             let script = format!(
                 "tell application \"Terminal\" to close (every window whose id is {id}) saving no",
             );
@@ -301,14 +532,75 @@ impl AppleTerminalHarness {
 /// [`AppleTerminalHarness`] instances whose owning test process no longer
 /// exists.
 ///
-/// Windows created by current harness versions are tagged with a custom title
-/// of `biscuit-test-terminal-<pid>-<seq>`. Cleanup only closes tagged windows
-/// whose `<pid>` is dead, leaving interactive Terminal.app windows and active
-/// concurrent test runs alone.
+/// Runs two independent passes, both safe with a developer's own windows
+/// open:
+///
+/// 1. **Registry pass (primary).** Reads the title-independent window-id
+///    registry and closes every recorded window whose owning process is
+///    dead — but only when the window *still looks like an idle harness
+///    login shell* ([`looks_like_harness_window`]), so a window id that
+///    Terminal recycled to host real work is never closed. The registry is
+///    then pruned under a lock. This is what catches windows whose
+///    `custom title` was overwritten by the login shell (Pitfall 2).
+/// 2. **Title pass (secondary).** The legacy scan for windows still
+///    carrying a `biscuit-test-terminal-<pid>-<seq>` custom title with a
+///    dead `<pid>`. Cheap, and a useful backstop if Layer 2 (title
+///    survival) lands; harmless otherwise.
 pub fn cleanup_stale_apple_terminal_windows() {
     if !AppleTerminalHarness::available() {
         return;
     }
+    reap_registered_windows();
+    reap_titled_windows();
+    sweep_legacy_apple_terminal_windows();
+}
+
+/// Registry pass: close dead-owner windows that still look idle, then
+/// prune the registry. See [`cleanup_stale_apple_terminal_windows`].
+fn reap_registered_windows() {
+    let path = registry_path();
+    let entries = read_registry(&path);
+    if entries.is_empty() {
+        return;
+    }
+    let me = current_process_id();
+    for window_id in reap_candidates(&entries, me, process_is_alive) {
+        // Window-id reuse guard: only close a recorded id that still
+        // presents as an idle login shell. A recycled id now running real
+        // work fails the predicate and is left untouched.
+        if looks_like_harness_window(window_id) {
+            close_window_by_id(window_id);
+        }
+    }
+    prune_registry(&path);
+}
+
+/// Rewrites the registry keeping only rows whose window still exists and
+/// whose owner is still alive, under a sidecar lock so concurrent reapers
+/// cannot corrupt it. Best-effort: a lock-contention or osascript failure
+/// skips the rewrite rather than risk dropping live rows.
+fn prune_registry(path: &Path) {
+    let Some(existing) = existing_window_ids() else {
+        // Couldn't enumerate windows; dropping rows now could lose live
+        // ones. Leave the registry for the next reaper.
+        return;
+    };
+    let Some(_lock) = RegistryLock::acquire(&registry_lock_path()) else {
+        return;
+    };
+    // Re-read under the lock so we rewrite against the current contents.
+    let kept = entries_to_keep(&read_registry(path), &existing, process_is_alive);
+    let mut out = String::with_capacity(kept.len() * 48);
+    for entry in kept {
+        out.push_str(&entry.to_json_line());
+        out.push('\n');
+    }
+    let _ = fs::write(path, out);
+}
+
+/// Title pass: close windows whose `custom title` still carries a
+/// dead owner's `biscuit-test-terminal-<pid>-<seq>` tag.
+fn reap_titled_windows() {
     let script = format!(
         r#"set out to ""
         tell application "Terminal"
@@ -340,14 +632,98 @@ pub fn cleanup_stale_apple_terminal_windows() {
         if pid == current_process_id() || process_is_alive(pid) {
             continue;
         }
-        let close = format!(
-            "tell application \"Terminal\" to close (every window whose id is {id}) saving no",
-        );
-        let mut cmd = Command::new("osascript");
-        cmd.args(["-e", &close])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
+        close_window_by_id(id);
+    }
+}
+
+/// Returns the ids of every currently open Terminal.app window, or `None`
+/// when the enumeration script fails (so callers can distinguish "no
+/// windows" from "couldn't ask").
+fn existing_window_ids() -> Option<Vec<i64>> {
+    let script = r#"set out to ""
+        tell application "Terminal"
+            repeat with w in windows
+                set out to out & ((id of w) as text) & linefeed
+            end repeat
+        end tell
+        return out"#;
+    let stdout = AppleTerminalHarness::run_script(script).ok()?;
+    Some(
+        stdout
+            .lines()
+            .filter_map(|line| line.trim().parse::<i64>().ok())
+            .collect(),
+    )
+}
+
+/// Whether the window with `window_id` still presents as an idle harness
+/// login shell: it exists, no tab is `busy`, every tab process is the
+/// login shell itself (no foreground program), geometry is the default
+/// 80×24, and the title is empty or the generic "Terminal".
+///
+/// Gates every registry-driven close so a window id that Terminal recycled
+/// to host real work — or one a developer is actively using — is never
+/// closed. Any osascript failure is treated as "not a harness window"
+/// (returns `false`), erring toward leaving windows open.
+///
+/// This predicate is also used by the opt-in legacy sweep
+/// ([`sweep_legacy_apple_terminal_windows`]), so it intentionally narrows
+/// the match to windows that are very unlikely to belong to a developer.
+fn looks_like_harness_window(window_id: i64) -> bool {
+    let shell = super::detect_shell();
+    let script = format!(
+        r#"tell application "Terminal"
+            set matches to (every window whose id is {id})
+            if (count of matches) is 0 then return "missing"
+            set w to item 1 of matches
+            repeat with t in tabs of w
+                if busy of t is true then return "busy"
+                repeat with p in (processes of t)
+                    set pname to (p as text)
+                    if pname is not "login" and pname is not "{shell}" and pname is not "-{shell}" then return "busy"
+                end repeat
+                set cols to number of columns of t
+                set rows to number of rows of t
+                if cols is not 80 or rows is not 24 then return "geometry"
+            end repeat
+            set ttitle to custom title of w
+            if ttitle is not "" and ttitle is not "Terminal" then return "title"
+        end tell
+        return "idle""#,
+        id = window_id,
+        shell = shell,
+    );
+    matches!(AppleTerminalHarness::run_script(&script).as_deref(), Ok("idle"))
+}
+
+/// Opt-in legacy sweep for Terminal.app windows that are not in the
+/// registry (e.g. restored by macOS with new ids, or leaked by pre-registry
+/// harness versions).
+///
+/// This is **disabled by default** because Terminal.app has no workspace
+/// isolation — an idle login-shell window can belong to a developer who
+/// actually uses Terminal.app. Enable only on CI or on machines where
+/// Terminal.app is not the interactive terminal:
+///
+/// ```bash
+/// BISCUIT_TEST_HARNESS_SWEEP_LEGACY_APPLE=1 cargo test …
+/// ```
+///
+/// When enabled, every open Terminal.app window is tested with
+/// [`looks_like_harness_window`]; matching windows are closed. The predicate
+/// requires default geometry (80×24), an empty/"Terminal" title, and only
+/// idle login-shell processes — a very narrow match.
+fn sweep_legacy_apple_terminal_windows() {
+    if env::var("BISCUIT_TEST_HARNESS_SWEEP_LEGACY_APPLE").as_deref() != Ok("1") {
+        return;
+    }
+    let Some(ids) = existing_window_ids() else {
+        return;
+    };
+    for id in ids {
+        if looks_like_harness_window(id) {
+            close_window_by_id(id);
+        }
     }
 }
 
@@ -529,6 +905,13 @@ impl TerminalHarness for AppleTerminalHarness {
         }
         self.window_id = Some(id);
         self.window_tag = Some(window_tag);
+
+        // Record only windows we genuinely created. A reused window
+        // (`owned == false`) belongs to another harness; registering it
+        // would later authorize the reaper to close someone else's window.
+        if self.owned {
+            register_window(id);
+        }
 
         // Poll for the shell prompt instead of sleeping a fixed
         // 800 ms — `wait_for_prompt` returns early once `$`/`#`/`%`
@@ -764,6 +1147,183 @@ mod tests {
     }
 
     #[test]
+    fn registry_entry_json_round_trips() {
+        let entry = RegistryEntry {
+            window_id: 4_815_162_342,
+            owner_pid: 90_210,
+            seq: 7,
+        };
+        let parsed = RegistryEntry::from_json_line(&entry.to_json_line());
+        assert_eq!(parsed, Some(entry));
+    }
+
+    #[test]
+    fn registry_from_json_line_rejects_malformed() {
+        assert_eq!(RegistryEntry::from_json_line(""), None);
+        assert_eq!(RegistryEntry::from_json_line("   "), None);
+        assert_eq!(RegistryEntry::from_json_line("not json"), None);
+        // Missing `seq` field.
+        assert_eq!(
+            RegistryEntry::from_json_line(r#"{"window_id":1,"owner_pid":2}"#),
+            None
+        );
+    }
+
+    #[test]
+    fn registry_path_uses_tmpdir_or_tmp() {
+        let path = registry_path();
+        assert!(path.ends_with(REGISTRY_FILE_NAME));
+        assert!(path.is_absolute());
+    }
+
+    #[test]
+    fn append_then_read_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(REGISTRY_FILE_NAME);
+        let entries = [
+            RegistryEntry { window_id: 10, owner_pid: 1, seq: 0 },
+            RegistryEntry { window_id: 20, owner_pid: 1, seq: 1 },
+            RegistryEntry { window_id: 30, owner_pid: 2, seq: 2 },
+        ];
+        for entry in entries {
+            append_registry_entry(&path, entry);
+        }
+        assert_eq!(read_registry(&path), entries.to_vec());
+    }
+
+    #[test]
+    fn read_registry_missing_file_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(REGISTRY_FILE_NAME);
+        assert!(read_registry(&path).is_empty());
+    }
+
+    #[test]
+    fn read_registry_skips_malformed_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(REGISTRY_FILE_NAME);
+        let valid = RegistryEntry { window_id: 42, owner_pid: 7, seq: 0 };
+        let mut content = String::new();
+        content.push_str("garbage line\n");
+        content.push_str(&valid.to_json_line());
+        content.push('\n');
+        content.push('\n');
+        content.push_str(r#"{"window_id":99}"#);
+        content.push('\n');
+        std::fs::write(&path, content).unwrap();
+        assert_eq!(read_registry(&path), vec![valid]);
+    }
+
+    #[test]
+    fn remove_registry_entry_drops_only_matching_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(REGISTRY_FILE_NAME);
+        let keep_a = RegistryEntry { window_id: 10, owner_pid: 1, seq: 0 };
+        let drop_it = RegistryEntry { window_id: 20, owner_pid: 1, seq: 1 };
+        let keep_b = RegistryEntry { window_id: 30, owner_pid: 2, seq: 2 };
+        for entry in [keep_a, drop_it, keep_b] {
+            append_registry_entry(&path, entry);
+        }
+        remove_registry_entry(&path, 20);
+        assert_eq!(read_registry(&path), vec![keep_a, keep_b]);
+    }
+
+    #[test]
+    fn remove_registry_entry_missing_file_is_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(REGISTRY_FILE_NAME);
+        // Must not create the file or panic.
+        remove_registry_entry(&path, 1);
+        assert!(!path.exists());
+    }
+
+    /// Concurrent appends from many threads must each land as a whole,
+    /// well-formed line — no interleaving or lost rows.
+    #[test]
+    fn concurrent_appends_preserve_every_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(REGISTRY_FILE_NAME);
+        const THREADS: i64 = 16;
+        const PER_THREAD: i64 = 25;
+        std::thread::scope(|scope| {
+            for thread_idx in 0..THREADS {
+                let path = path.clone();
+                scope.spawn(move || {
+                    for n in 0..PER_THREAD {
+                        let window_id = thread_idx * PER_THREAD + n;
+                        append_registry_entry(
+                            &path,
+                            RegistryEntry {
+                                window_id,
+                                owner_pid: thread_idx as u32,
+                                seq: n as u64,
+                            },
+                        );
+                    }
+                });
+            }
+        });
+        let entries = read_registry(&path);
+        assert_eq!(entries.len() as i64, THREADS * PER_THREAD);
+        let mut ids: Vec<i64> = entries.iter().map(|e| e.window_id).collect();
+        ids.sort_unstable();
+        let expected: Vec<i64> = (0..THREADS * PER_THREAD).collect();
+        assert_eq!(ids, expected);
+    }
+
+    #[test]
+    fn reap_candidates_selects_dead_owners_excluding_self() {
+        let me = 100;
+        let entries = [
+            RegistryEntry { window_id: 1, owner_pid: me, seq: 0 }, // self → skip
+            RegistryEntry { window_id: 2, owner_pid: 200, seq: 1 }, // dead → reap
+            RegistryEntry { window_id: 3, owner_pid: 300, seq: 2 }, // alive → skip
+            RegistryEntry { window_id: 4, owner_pid: 400, seq: 3 }, // dead → reap
+        ];
+        let alive = |pid: u32| pid == me || pid == 300;
+        assert_eq!(reap_candidates(&entries, me, alive), vec![2, 4]);
+    }
+
+    #[test]
+    fn entries_to_keep_requires_alive_owner_and_live_window() {
+        let entries = [
+            RegistryEntry { window_id: 10, owner_pid: 1, seq: 0 }, // alive + exists → keep
+            RegistryEntry { window_id: 20, owner_pid: 2, seq: 1 }, // dead owner → drop
+            RegistryEntry { window_id: 30, owner_pid: 1, seq: 2 }, // alive but window gone → drop
+        ];
+        let existing = [10, 99];
+        let alive = |pid: u32| pid == 1;
+        assert_eq!(
+            entries_to_keep(&entries, &existing, alive),
+            vec![entries[0]],
+        );
+    }
+
+    #[test]
+    fn registry_lock_is_exclusive_then_released_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(REGISTRY_LOCK_FILE_NAME);
+
+        let lock = RegistryLock::acquire(&path).expect("first acquire succeeds");
+        assert!(path.exists());
+        // A second acquire while the fresh lock is held must fail.
+        assert!(RegistryLock::acquire(&path).is_none());
+
+        drop(lock);
+        assert!(!path.exists(), "drop removes the lock file");
+        // Now it can be re-acquired.
+        assert!(RegistryLock::acquire(&path).is_some());
+    }
+
+    #[test]
+    fn fresh_lock_is_not_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(REGISTRY_LOCK_FILE_NAME);
+        std::fs::write(&path, b"").unwrap();
+        assert!(!lock_is_stale(&path));
+    }
+
+    #[test]
     fn unique_window_tag_includes_harness_prefix_and_pid() {
         let tag = unique_window_tag();
         assert!(tag.starts_with(WINDOW_TITLE_PREFIX));
@@ -873,5 +1433,60 @@ mod tests {
             }
         }
         assert!(!avail, "expected CI=1 to disable AppleTerminalHarness");
+    }
+
+    /// Phase-5 static verification: the spawn AppleScript must never call
+    /// `activate` or emit a `keystroke` — both would steal foreground focus
+    /// from the developer. The harness is focus-free by design: `do script`
+    /// creates the window without activation, and focus is restored to the
+    /// previous frontmost process via `set frontmost … to true` (not
+    /// `activate`). This test encodes that invariant so a future edit cannot
+    /// accidentally regress it.
+    #[test]
+    fn spawn_script_is_focus_free() {
+        let src = include_str!("apple_terminal.rs");
+        // Scan raw string literals that contain AppleScript, stopping before
+        // this test function so the assertion text itself is not scanned.
+        let mut in_raw = false;
+        let mut raw_delim = String::new();
+        let mut is_terminal_script = false;
+        let mut violations = Vec::new();
+        for (i, line) in src.lines().enumerate() {
+            // Stop before we reach this test — avoids self-scanning the
+            // assertion text below.
+            if line.contains("fn spawn_script_is_focus_free") {
+                break;
+            }
+            if !in_raw {
+                if let Some(pos) = line.find("r\"") {
+                    let after_r = &line[pos + 2..];
+                    let hashes = after_r.chars().take_while(|c| *c == '#').count();
+                    raw_delim = format!("\"{}", "#".repeat(hashes));
+                    in_raw = true;
+                    is_terminal_script = false;
+                }
+            } else {
+                if line.contains(&raw_delim) {
+                    in_raw = false;
+                } else {
+                    if line.contains("tell application \"Terminal\"") {
+                        is_terminal_script = true;
+                    }
+                    if is_terminal_script {
+                        if line.contains("activate") {
+                            violations.push(format!("line {}: contains 'activate'", i + 1));
+                        }
+                        if line.contains("keystroke") {
+                            violations.push(format!("line {}: contains 'keystroke'", i + 1));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "spawn script violates focus-free invariant:\n{}",
+            violations.join("\n")
+        );
     }
 }
