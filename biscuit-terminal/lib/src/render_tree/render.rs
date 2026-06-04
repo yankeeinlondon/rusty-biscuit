@@ -1787,7 +1787,9 @@ fn horizontal_rule_from_attrs(attrs: &renderable::tree::NodeAttrs) -> Horizontal
     if let Some(alignment) = hint_str("alignment") {
         rule = match alignment.as_str() {
             "full" => rule.alignment(RuleAlignment::Full),
-            "centered" => rule.alignment(RuleAlignment::Centered),
+            // `center` is the `style.hr` schema-canonical spelling (projected by
+            // page-level HR defaults); `centered` is the inline-attribute alias.
+            "center" | "centered" => rule.alignment(RuleAlignment::Centered),
             "left" => rule.alignment(RuleAlignment::Left),
             "right" => rule.alignment(RuleAlignment::Right),
             _ => rule,
@@ -3637,6 +3639,28 @@ mod render_tree_tests {
             !out.contains('\u{2500}'),
             "default dashed rule glyph leaked despite waves hint: {out:?}"
         );
+    }
+
+    /// `horizontal_rule_from_attrs` must accept both the `style.hr`
+    /// schema-canonical `center` (projected by page-level HR defaults) and the
+    /// inline-attribute alias `centered`, mapping both to
+    /// [`RuleAlignment::Centered`]. Without the `center` arm a page-default
+    /// centered rule would silently fall back to `Full`.
+    #[test]
+    fn horizontal_rule_from_attrs_accepts_center_and_centered() {
+        use renderable::tree::HintNamespace;
+
+        let ns = HintNamespace("darkmatter.hr");
+        for alignment in ["center", "centered"] {
+            let mut attrs = renderable::tree::NodeAttrs::default();
+            attrs.set_hint(ns, "alignment", serde_json::json!(alignment));
+            let rule = horizontal_rule_from_attrs(&attrs);
+            assert_eq!(
+                *rule.rule_alignment(),
+                RuleAlignment::Centered,
+                "{alignment:?} must map to RuleAlignment::Centered",
+            );
+        }
     }
 
     /// A `NodeKind::ThematicBreak` with no hints must still render through
