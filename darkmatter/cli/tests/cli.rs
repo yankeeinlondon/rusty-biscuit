@@ -94,7 +94,7 @@ fn test_output_html() {
         .assert()
         .success()
         .stdout(predicate::str::contains("<style>"))
-        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
 }
 
 #[test]
@@ -380,7 +380,7 @@ fn test_render_explicit_with_output() {
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
 }
 
 // =============================================================================
@@ -415,7 +415,7 @@ fn test_compose_output_html() {
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
 }
 
 #[test]

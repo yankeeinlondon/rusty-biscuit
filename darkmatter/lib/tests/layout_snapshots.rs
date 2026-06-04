@@ -3,6 +3,11 @@
 //! These tests capture the full terminal output for the worked example described
 //! in `darkmatter/features/2026-05-08-darkmatter-layout/spec.md`.
 
+// `DarkmatterPage::use_alignment` only accepts the deprecated `PageAlignment`;
+// exercising the builder here legitimately references it, matching the
+// `#![allow(deprecated)]` on the `layout` source modules.
+#![allow(deprecated)]
+
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::layout::{DarkmatterPage, PageAlignment, PageBackground, PageComponent};
 use darkmatter::markdown::Markdown;
