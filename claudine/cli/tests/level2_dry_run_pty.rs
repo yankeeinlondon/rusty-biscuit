@@ -23,7 +23,15 @@
 //!
 //! Gating: `#![cfg(unix)]`, `require_level!(Level::L2, pty_available(), ...)`
 //! so the test skips cleanly without a PTY and panics under
-//! `BISCUIT_TEST_LEVEL_REQUIRED=2`.
+//! `BISCUIT_TEST_LEVEL_REQUIRED=2`. PTY suites are classified L2 across this
+//! crate (see the sibling `level2_*_pty.rs` files) because they require a real
+//! `/dev/ptmx` resource.
+//!
+//! These tests inject bytes into a raw pseudo-terminal and read the child's
+//! output back; they prove the *handler* fires and renders identically in both
+//! modes. The emulator-level complement —
+//! `level2_dry_run_approval_capture.rs` — drives the same prompt through a real
+//! terminal (`tmux`) and compares the surface the emulator actually displayed.
 //!
 //! Run via the canonical recipe:
 //!
