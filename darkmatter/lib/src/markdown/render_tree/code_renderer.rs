@@ -15,7 +15,7 @@ use renderable::tree::{CodeRenderer, NodeAttrs};
 
 use crate::markdown::{
     dsl::{CodeBlockMeta, parse_code_info},
-    highlighting::{CodeHighlighter, ColorMode},
+    highlighting::{CodeHighlighter, ColorMode, ThemePair},
     output::code_block::{render_html_code_block, render_terminal_code_block},
     output::html::HtmlOptions,
     output::terminal::{TerminalOptions, format_header_row},
@@ -94,11 +94,25 @@ impl CodeRenderer for TerminalCodeRenderer {
         }
 
         let hints = attrs.code_hints();
+        // Resolve the requested code theme from the context's carried name
+        // (set by the darkmatter terminal entry point from
+        // `TerminalOptions::code_theme`), falling back to the default theme
+        // when the caller pinned none.
+        // Forward the page line-number toggle so the body renders its gutter.
+        let options = TerminalOptions {
+            include_line_numbers: context.line_numbers(),
+            ..TerminalOptions::default()
+        };
+        let code_theme = match context.code_theme_name() {
+            Some(name) => ThemePair::from_str_or_default(name),
+            None => options.code_theme,
+        };
         // Code blocks contrast against the page: resolve the theme *variant*
-        // against the INVERTED terminal mode (see `ColorMode::inverted`).
-        let options = TerminalOptions::default();
+        // against the INVERTED terminal mode (see `ColorMode::inverted`). The
+        // mode comes from the context, which the entry point threads from the
+        // caller's requested `color_mode`.
         let highlighter = CodeHighlighter::new(
-            options.code_theme,
+            code_theme,
             map_color_mode(context.color_mode()).inverted(),
         );
         // Header/body contrast keys off the resolved theme background, not the
@@ -220,6 +234,77 @@ mod tests {
             highlight: true,
         });
         attrs
+    }
+
+    /// A pinned `code_theme_name` on the context must reach the highlighter so
+    /// two different themes produce different terminal code panels. Without the
+    /// theme-name carrier the hook always painted the default theme, dropping a
+    /// caller's `with_code_theme(...)`.
+    #[test]
+    fn terminal_code_honors_pinned_theme_name() {
+        let renderer = TerminalCodeRenderer::new();
+        let code = "fn demo() -> usize { 42 }";
+
+        let github = renderer
+            .render_terminal_code(
+                Some("rust"),
+                code,
+                None,
+                &NodeAttrs::default(),
+                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark)
+                    .with_code_theme_name(Some("github".into())),
+            )
+            .expect("github render");
+        let dracula = renderer
+            .render_terminal_code(
+                Some("rust"),
+                code,
+                None,
+                &NodeAttrs::default(),
+                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark)
+                    .with_code_theme_name(Some("dracula".into())),
+            )
+            .expect("dracula render");
+
+        assert_ne!(
+            github, dracula,
+            "distinct pinned code themes must produce distinct highlighted output",
+        );
+    }
+
+    /// A pinned `color_mode` must reach the highlighter: the same theme resolves
+    /// a different concrete variant for Light vs Dark (github is a paired
+    /// theme), so the rendered panels must differ.
+    #[test]
+    fn terminal_code_honors_pinned_color_mode() {
+        let renderer = TerminalCodeRenderer::new();
+        let code = "fn demo() -> usize { 42 }";
+
+        let dark = renderer
+            .render_terminal_code(
+                Some("rust"),
+                code,
+                None,
+                &NodeAttrs::default(),
+                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark)
+                    .with_code_theme_name(Some("github".into())),
+            )
+            .expect("dark render");
+        let light = renderer
+            .render_terminal_code(
+                Some("rust"),
+                code,
+                None,
+                &NodeAttrs::default(),
+                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Light)
+                    .with_code_theme_name(Some("github".into())),
+            )
+            .expect("light render");
+
+        assert_ne!(
+            dark, light,
+            "the requested color mode must reach the highlighter (github is a paired theme)",
+        );
     }
 
     #[test]

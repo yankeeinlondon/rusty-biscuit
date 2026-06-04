@@ -58,18 +58,14 @@
 
 pub(crate) mod block_extension;
 pub mod code_renderer;
+pub(crate) mod decorate;
 // The inline source rewriter backs `fold_markdown_spanned_with_frontmatter`.
 // A few `pub(crate)` helpers on its result types (e.g. `InlineRewrite::
 // was_rewritten`) are exercised only by the module's own unit tests, so the
 // lib-side dead-code lint stays silenced.
 #[allow(dead_code)]
 pub(crate) mod inline_extension;
-// `entrypoints` exposes `pub(crate)` adapter functions that are exercised by
-// integration tests, benches, and the parity harness — none of which live in
-// the lib crate. Silence the lib-side dead-code warnings until the public
-// cutover wires the adapter into `Markdown::as_html` / `for_terminal`.
-#[allow(dead_code)]
-pub(crate) mod entrypoints;
+pub mod entrypoints;
 pub mod fold;
 pub mod inventory;
 pub mod pipeline;
@@ -83,14 +79,14 @@ pub use fold::{
 };
 pub use pipeline::{PipelineRenderResult, PipelineResult};
 
-// Internal experimental entry points (DMTR-1). These are `pub(crate)` so
-// parity tests and benchmarks inside `darkmatter` can drive the tree path
-// without exposing it to downstream callers. The public `Markdown::as_html`,
-// `Markdown::as_terminal`, and `for_terminal` continue to use the legacy
-// renderers until cutover; see
-// `renderable/features/2026-05-20-darkmatter-tree/entry-point-shape.md`.
-#[allow(unused_imports)]
-pub(crate) use entrypoints::{
+// The render-tree entry points are the in-crate adapter boundary the public
+// `Markdown` / `DarkmatterPage` renderers route through: `render_tree_html`
+// backs `Markdown::as_html`, `render_tree_terminal` backs `Markdown::as_terminal`
+// / the default-layout `DarkmatterPage::render` path, and the markdown variants
+// serve round-trip callers and the parity suite. `to_render_document` stays
+// `pub(crate)`: it exposes the raw fold and is an internal helper.
+pub use entrypoints::{
     render_tree_html, render_tree_markdown, render_tree_markdown_dialect, render_tree_terminal,
-    to_render_document,
 };
+#[allow(unused_imports)]
+pub(crate) use entrypoints::to_render_document;

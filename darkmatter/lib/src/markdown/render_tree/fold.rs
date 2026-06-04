@@ -709,7 +709,19 @@ fn build_container(kind: ContainerKind, children: Vec<RenderNode>) -> RenderNode
         }
         ContainerKind::BlockQuote => RenderNode::block_quote(children),
         ContainerKind::CodeBlock { lang, meta } => {
-            RenderNode::code(lang, meta, code_text(&children))
+            let mut node = RenderNode::code(lang.clone(), meta, code_text(&children));
+            // Request a code-block header row so the terminal tree path emits
+            // the same right-aligned language pill the legacy terminal renderer
+            // produces for every fenced block (parity with
+            // `output::terminal::emit_highlighted_code_block`). The browser code
+            // hook ignores this hint, so HTML output is unaffected; the plain
+            // (no-`CodeRenderer`) tree fallback ignores it too.
+            node.attrs.set_code_hints(&renderable::tree::CodeRenderHints {
+                header_row: true,
+                language_label: lang,
+                highlight: true,
+            });
+            node
         }
         ContainerKind::List { ordered, start } => RenderNode::list(ordered, start, children),
         ContainerKind::Item { checked } => RenderNode::list_item(checked, children),
