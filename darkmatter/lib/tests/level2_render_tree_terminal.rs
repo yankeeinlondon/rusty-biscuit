@@ -47,7 +47,7 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
-use darkmatter::markdown::output::ColorDepth;
+use darkmatter::markdown::output::{ColorDepth, TerminalOptions};
 use darkmatter::markdown::render_tree::{
     TerminalCodeRenderer, fold_markdown_spanned_with_frontmatter, fold_markdown_to_document,
 };
@@ -1267,4 +1267,108 @@ fn level2_tree_rich_image_node_paints_distinctive_pixels() {
          capture ({non_black} non-black). The image protocol bytes were emitted but the \
          terminal did not render the decoded image.",
     );
+}
+
+// ---------------------------------------------------------------------------
+// Public post-cutover entry-point Level 2 coverage (review-1 finding 7)
+//
+// Every other test in this file drives the lower-level `render_terminal_document`
+// directly, or the decorated `DarkmatterPage::render` (legacy) path. None drove
+// the PUBLIC, post-flip terminal entry points users actually call —
+// `Markdown::as_terminal` and zero-config `DarkmatterPage::render` — through a
+// real terminal. Those entry points map options and wire the code renderer at an
+// adapter boundary the direct-renderer tests bypass; these two tests close that
+// integration gap by capturing the public output in a real WezTerm pane.
+// ---------------------------------------------------------------------------
+
+/// Renders `body` through the public [`Markdown::as_terminal`] entry point
+/// (post-cutover: the render-tree terminal document renderer), pinning width +
+/// TrueColor so the capture is deterministic, and writes the bytes to a temp
+/// file.
+fn render_public_as_terminal_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let md: Markdown = body.into();
+    let mut opts = TerminalOptions::default();
+    opts.max_width = Some(120);
+    opts.color_depth = Some(ColorDepth::TrueColor);
+    let rendered = md.as_terminal(opts).expect("public Markdown::as_terminal render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered).unwrap();
+    (dir, path)
+}
+
+/// Renders `body` through zero-config [`DarkmatterPage::render`] (no builder
+/// calls → the default-layout tree path) and writes the bytes to a temp file.
+fn render_zero_config_page_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let term = Terminal::new_optimistic(120);
+    let md: Markdown = body.into();
+    let rendered = DarkmatterPage::new(&term)
+        .render(&md)
+        .expect("zero-config DarkmatterPage::render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered).unwrap();
+    (dir, path)
+}
+
+/// Finding 7: the public `Markdown::as_terminal` entry must survive a real
+/// terminal — heading, prose, fenced-code body + language header, and SGR
+/// styling all reach the pane through the post-cutover tree path.
+#[test]
+#[serial(level2_terminal)]
+fn level2_public_as_terminal_entry_renders_in_real_terminal() {
+    let body = "# Public Entry\n\nBody paragraph via the public API.\n\n\
+                ```rust\nfn demo() {}\n```\n";
+    let Some((frame, _dir)) = drive_pane(body, "public_as_terminal", render_public_as_terminal_to_tempfile)
+    else {
+        return;
+    };
+
+    for token in &["Public Entry", "Body paragraph via the public API.", "demo"] {
+        assert!(
+            frame.plain.contains(token),
+            "public as_terminal token {token:?} missing from real-terminal capture. plain:\n{}",
+            frame.plain
+        );
+    }
+    // The cutover emits a language-label header pill for every fenced block.
+    assert!(
+        frame.plain.to_lowercase().contains("rust"),
+        "fenced-code language header missing from public as_terminal capture. plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        frame.raw.contains("\u{1b}["),
+        "expected SGR styling in the public as_terminal capture. raw:\n{}",
+        frame.raw
+    );
+}
+
+/// Finding 7: zero-config `DarkmatterPage::render` (the other public post-flip
+/// entry) must likewise survive a real terminal through the default-layout tree
+/// path.
+#[test]
+#[serial(level2_terminal)]
+fn level2_zero_config_page_render_renders_in_real_terminal() {
+    let body = "# Zero Config Page\n\nNo builder calls means the default-layout tree path.\n";
+    let Some((frame, _dir)) = drive_pane(body, "zero_config_page", render_zero_config_page_to_tempfile)
+    else {
+        return;
+    };
+
+    for token in &["Zero Config Page", "No builder calls means the default-layout tree path."] {
+        assert!(
+            frame.plain.contains(token),
+            "zero-config page token {token:?} missing from real-terminal capture. plain:\n{}",
+            frame.plain
+        );
+    }
 }
