@@ -223,7 +223,8 @@ backend. Two known issues bite anyone editing `apple_terminal.rs`:
    (`${TMPDIR}/biscuit-test-terminal-registry.jsonl`): every owned spawn
    records its window id, and the reaper closes registry windows whose
    owner process is dead — regardless of title. The registry is pruned
-   after each reaper run.
+   after each reaper run, and mutations that can race with a rewrite use a
+   sidecar lock.
 2. **`do script` reuses the idle front window.** `do script "cmd"` with no
    target nondeterministically runs in the frontmost idle window instead of
    creating a new one. A self-spawning test (`level2_apple_terminal_harness_lifecycle`)

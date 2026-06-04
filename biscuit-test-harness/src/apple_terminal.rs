@@ -76,9 +76,9 @@ const REGISTRY_FILE_NAME: &str = "biscuit-test-terminal-registry.jsonl";
 
 /// Basename of the sidecar lock guarding the registry read-modify-write.
 ///
-/// Held only for the duration of a prune so two concurrent reapers cannot
-/// race on the rewrite. A crashed reaper's lock is reclaimed once it is
-/// older than [`REGISTRY_LOCK_STALE`] (Pitfall 2, Layer 1).
+/// Held for registry mutations that can race with a rewrite. A crashed
+/// process's lock is reclaimed once it is older than
+/// [`REGISTRY_LOCK_STALE`] (Pitfall 2, Layer 1).
 const REGISTRY_LOCK_FILE_NAME: &str = "biscuit-test-terminal-registry.lock";
 
 /// A registry lock older than this is presumed abandoned by a crashed
@@ -133,9 +133,9 @@ fn registry_path() -> PathBuf {
     registry_dir().join(REGISTRY_FILE_NAME)
 }
 
-/// Path to the registry's sidecar lock file.
-fn registry_lock_path() -> PathBuf {
-    registry_dir().join(REGISTRY_LOCK_FILE_NAME)
+/// Sidecar lock path for a specific registry file.
+fn registry_lock_path_for(path: &Path) -> PathBuf {
+    path.with_file_name(REGISTRY_LOCK_FILE_NAME)
 }
 
 /// Next per-process registry sequence number.
@@ -166,12 +166,15 @@ fn unregister_window(window_id: i64) {
     remove_registry_entry(&registry_path(), window_id);
 }
 
-/// Appends one row to `path` using a single `O_APPEND` write.
+/// Appends one row to `path` while holding the registry sidecar lock.
 ///
-/// `O_APPEND` writes of a short record are atomic on macOS, so concurrent
-/// spawns across processes interleave whole lines rather than clobbering
-/// each other. Errors are swallowed: registry upkeep must not fail a spawn.
+/// The file is still opened with `O_APPEND`, but the lock is what prevents
+/// concurrent registry rewrites from dropping a freshly appended row. Errors
+/// are swallowed: registry upkeep must not fail a spawn.
 fn append_registry_entry(path: &Path, entry: RegistryEntry) {
+    let Some(_lock) = RegistryLock::acquire_with_retry(&registry_lock_path_for(path)) else {
+        return;
+    };
     let mut line = entry.to_json_line();
     line.push('\n');
     let _ = OpenOptions::new()
@@ -198,6 +201,9 @@ fn read_registry(path: &Path) -> Vec<RegistryEntry> {
 /// preserving rows for other windows. Best-effort: a read or write error
 /// leaves the file untouched.
 fn remove_registry_entry(path: &Path, window_id: i64) {
+    let Some(_lock) = RegistryLock::acquire_with_retry(&registry_lock_path_for(path)) else {
+        return;
+    };
     let Ok(contents) = fs::read_to_string(path) else {
         return;
     };
@@ -245,6 +251,23 @@ impl RegistryLock {
             }
             Err(_) => None,
         }
+    }
+
+    /// Tries briefly to take the lock at `path`.
+    ///
+    /// Spawn/drop cleanup is best-effort, but the lock is normally held
+    /// for only one small file rewrite. A short retry avoids dropping a
+    /// registry update during ordinary contention.
+    fn acquire_with_retry(path: &Path) -> Option<Self> {
+        for attempt in 0..100 {
+            if let Some(lock) = Self::acquire(path) {
+                return Some(lock);
+            }
+            if attempt < 99 {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+        None
     }
 }
 
@@ -585,7 +608,7 @@ fn prune_registry(path: &Path) {
         // ones. Leave the registry for the next reaper.
         return;
     };
-    let Some(_lock) = RegistryLock::acquire(&registry_lock_path()) else {
+    let Some(_lock) = RegistryLock::acquire(&registry_lock_path_for(path)) else {
         return;
     };
     // Re-read under the lock so we rewrite against the current contents.
