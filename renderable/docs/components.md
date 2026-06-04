@@ -67,48 +67,58 @@ only the first; do not read it as a statement about the second.
    terminal and browser tree renderers (wired with darkmatter's
    `TerminalCodeRenderer`).
 
-2. **The darkmatter Markdown *document* pipeline** *(NOT tracked here).* The
-   whole-document Markdown serializers — `Markdown::as_html`,
-   `Markdown::for_terminal`, and `DarkmatterPage::render` — still run the
-   **legacy event-stream renderers** (`output/html.rs`, `output/terminal.rs`,
-   `RuleProcessor`). `DarkmatterPage::render` is pinned byte-for-byte to
-   `for_terminal(default)`. The render-tree document entry points
+2. **The darkmatter Markdown *document* pipeline** *(NOT tracked here —
+   complete).* The whole-document renderers — `Markdown::as_html`,
+   `Markdown::as_terminal`, and `DarkmatterPage::render` /
+   `render_to_browser` — route through the render-tree document entry points
    (`render_tree_html` / `render_tree_terminal` / `render_tree_markdown` in
-   `darkmatter/lib/src/markdown/render_tree/entrypoints.rs`) are `pub(crate)`
-   and reached only from tests. This is the path the `migration_parity`
-   benchmark and the `2026-05-26-inline-span` / `2026-05-26-block-extension`
-   specs target; its public cutover has **not** happened.
+   `darkmatter/lib/src/markdown/render_tree/entrypoints.rs`, all now `pub`).
+   The legacy event-stream serializers (`output::as_html`,
+   `output::for_terminal`) and the `RuleProcessor` iterator adapter were
+   **deleted** in the 2026-06-02 tree cutover (see
+   [`renderable/features/2026-06-02-tree-cutover/`](../features/2026-06-02-tree-cutover/)).
+   This cutover is independent of the per-component paths in item 1: the
+   document pipeline folds Markdown into `RenderNode`s and renders the tree
+   directly — it never calls a component's `render()` — so a component
+   retaining a bespoke `render()` does not affect it.
 
 ## Removing the bespoke renderers
 
-The bespoke render paths (component-level *and* the darkmatter Markdown
-document serializers) may only be removed once **all** of the following hold:
+There are two bespoke surfaces, on independent schedules.
+
+**Document serializers — removed.** The darkmatter Markdown document
+serializers (`output::as_html`, `output::for_terminal`) and the `RuleProcessor`
+iterator adapter were **deleted** in the 2026-06-02 tree cutover. Removal was
+gated on all of the following, which the cutover cleared:
 
 1. **Darkmatter render pipeline is on the tree.** `Markdown::as_html`,
-   `Markdown::for_terminal`, and `DarkmatterPage::render` route through the
-   render-tree document renderers (cutover #2 above).
-2. **Every component the darkmatter document pipeline renders is `tree render
-   only`.** Components the document pipeline does not render — terminal-only
+   `Markdown::as_terminal`, and `DarkmatterPage::render` /
+   `render_to_browser` route through the render-tree document renderers
+   (item 2 above). *(Met.)*
+2. **Every component the darkmatter document pipeline renders is reachable on
+   the tree.** Components the document pipeline does not render — terminal-only
    presentation primitives, standalone graphics/viz widgets, node-kind
    builder/helpers, and the page frame — are exempt, enumerated with
    justification in the
    [Exemption Register](../features/2026-06-02-non-structural/spec.md#exemption-register)
-   of the Non-Structural Component Exemptions spec.
-   Exempt components retain their native render path and do not block bespoke
-   deletion.
+   of the Non-Structural Component Exemptions spec. Exempt components retain
+   their native render path. *(Met — the document pipeline renders entirely
+   through the tree.)*
 3. **No functional or fidelity regressions** versus the bespoke
    implementation. Output parity (or a deliberate, documented improvement such
-   as the `<mark>` recovery) is required on every target.
-4. **The overall performance trend is toward faster.** The net trend line
-   across the corpus must improve; mild, localized regressions in specific
-   areas are acceptable so long as the general direction is faster. Known
-   regressions to resolve or consciously accept before cutover #2 include the
-   browser/HTML path (2–11× slower than legacy on several fixtures, worst on
-   table-heavy input) and the `mark_dim_hr` terminal regression (unconditional
-   HR PNG rasterization, owned by the graphics-policy spec).
+   as the `<mark>` recovery) was required on every target. *(Met.)*
+4. **The overall performance trend is toward faster.** *(Met — the
+   pre-cutover browser/HTML and `mark_dim_hr` terminal regressions were
+   resolved or consciously accepted before deletion.)*
 
-Until conditions 1 and 2 both hold, the legacy serializers and the remaining
-bespoke component paths are load-bearing and must stay.
+**Per-component `render()` paths — partial.** The bespoke `render()` methods on
+the `both avail, tree renders` rows (and `FileSystem`'s terminal path) are still
+present. They are **not** blocked by the document cutover: they serve direct
+component callers — the [`bt`](../../biscuit-terminal/docs/cli.md) CLI,
+biscuit-terminal library users — that construct a component and call `render()`
+without going through the darkmatter document pipeline. These migrate
+component-by-component (the **IR State** column tracks the progress). Exempt
+components keep their native render path permanently.
 
 ## Darkmatter `style:` frontmatter coverage
 
@@ -158,7 +168,7 @@ fail with documented `StyleApplyError` variants.
 | TextBlock       | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/text_block.rs`          | A uniformly styled block of text (colors, weight, italic, underline).               |
 | Todo            | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/todo.rs`                | A GFM-style task item with terminal-adaptive checkbox glyphs.                       |
 | TwoColumn       | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/two_column.rs`          | A responsive two-column layout that stacks vertically when narrow.                  |
-| DarkmatterPage  | Block  | ✅       | ✅      | ❌       | ❌   | no changes — exempt (page frame / render shell) | —             | `darkmatter/lib/src/layout/page.rs`                          | Page-level layout owning margins, padding, background, max-width, and alignment. Renders to terminal (`render`) and browser (`render_to_browser`), both legacy-backed pre-cutover. Wraps document output; not a document node. |
+| DarkmatterPage  | Block  | ✅       | ✅      | ❌       | ❌   | no changes — exempt (page frame / render shell) | —             | `darkmatter/lib/src/layout/page.rs`                          | Page-level layout owning margins, padding, background, max-width, and alignment. Renders to terminal (`render`) and browser (`render_to_browser`), both now routing through the render-tree document renderers (via `Markdown::as_terminal_with_layout` / `render_tree_html`). Wraps document output; not a document node. |
 | FileTree        | Block  | ✅       | ❌      | ❌       | ❌   | no changes — exempt (standalone viz tool) | —             | `darkmatter/lib/src/markdown/reference/file_tree/mod.rs`     | Visualizes a Markdown file's reference/transclusion dependency graph. A CLI/dev tool, terminal-only; not document content. |
 | YamlBlock       | Block  | ✅       | ✅      | ❌       | ✅   | tree render only             | —             | `darkmatter/lib/src/markdown/yaml_block.rs`                  | Typed wrapper around validated YAML with code-block highlighting.                   |
 

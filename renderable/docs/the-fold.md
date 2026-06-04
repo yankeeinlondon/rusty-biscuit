@@ -1,6 +1,20 @@
 # The Fold and Darkmatter Rendering
 
-**Status:** design note, assuming renderable Stage 3 is complete.
+**Status:** design note — **the migration it proposes has been implemented**
+(2026-06-02 tree cutover).
+
+> **Implemented.** This was the forward-looking design note for moving
+> Darkmatter's Markdown rendering onto the render tree. That move is **done**:
+> `Markdown::as_html` / `Markdown::as_terminal` and `DarkmatterPage::render` /
+> `render_to_browser` fold to a `Document` and render through the tree, the
+> custom inline-style and HR processors are span-aware in the fold, and the
+> legacy event-stream serializers (`output::as_html`, `output::for_terminal`)
+> plus the `RuleProcessor` adapter were deleted. The **"Challenges That Remain"**
+> and **"Recommended Migration Path"** sections describe the pre-cutover plan and
+> now read as history; the compose pipeline (transclusion, interpolation, …) is
+> the one part that genuinely remains a pre-fold source transformation. See
+> [`renderable/features/2026-06-02-tree-cutover/`](../features/2026-06-02-tree-cutover/),
+> [`tree-rendering.md`](./tree-rendering.md), and [`components.md`](./components.md).
 
 This document describes how Darkmatter's Markdown compose and rendering
 pipelines can move onto the render-tree architecture without losing the things
@@ -12,10 +26,9 @@ The short version:
 
 - Keep `pulldown-cmark` as the parser.
 - Treat the fold as the Markdown-source-to-`Document` bridge.
-- Let the tree renderers own Markdown, MarkdownPlus, Browser, and Terminal
-  lowering once the fold has feature parity.
-- Keep the existing event-stream renderers until parity and performance
-  evidence justify switching public entry points.
+- The tree renderers own Markdown, MarkdownPlus, Browser, and Terminal lowering
+  for the public document path — this happened once the fold reached parity.
+- The event-stream serializers that path replaced have since been deleted.
 - Do not expect `TerminalRenderable`, `MarkdownRenderable`, and
   `BrowserRenderable` components to be the main mechanism for rendering parsed
   Markdown. They will mostly coexist with the fold, while sharing the same
@@ -32,11 +45,12 @@ then emits Markdown text. This pipeline is largely a source transformation
 pipeline. It currently works before rendering and should keep doing so for the
 public CLI path until a tree-native transformation story is proven.
 
-The rendering pipeline takes Markdown text and emits a target format. Today,
-the public `Markdown::as_html` and `for_terminal` paths are hand-written
-`pulldown-cmark` event-to-string serializers. They parse, wrap the parser with
-Darkmatter processors such as `InlineStyleProcessor` and `RuleProcessor`, and
-stream target output directly.
+The rendering pipeline takes Markdown text and emits a target format. The public
+`Markdown::as_html` and `Markdown::as_terminal` paths fold the parsed document
+into a `Document` and render it through the tree renderers. (Before the
+2026-06-02 cutover they were hand-written `pulldown-cmark` event-to-string
+serializers wrapping Darkmatter's `InlineStyleProcessor` / `RuleProcessor`; those
+serializers have been deleted.)
 
 The fold is the new middle layer:
 
@@ -138,6 +152,13 @@ browser, and Markdown tree renderers will be used for parsed documents.
 
 ### Custom Darkmatter processors still need span-aware integration
 
+> **✅ Resolved (2026-06-02 cutover).** The span-aware fold
+> (`fold_markdown_spanned_with_frontmatter`) carries `==mark==`, dim, and
+> HR-attribute constructs through with source offsets preserved. The
+> offset-discarding `RuleProcessor` iterator adapter was deleted; `block::hr_parser`
+> remains as the attribute-parsing helper the fold calls. The remainder of this
+> section is the original analysis of the gap.
+
 The largest feature gap is still Darkmatter's custom event processors:
 
 - `InlineStyleProcessor` for mark and dim inline styles
@@ -155,8 +176,8 @@ synthetic ranges when a text event splits into several inline nodes. This is
 more invasive than duplicating the grammar inside the fold, but it avoids two
 implementations of Darkmatter's custom inline syntax.
 
-Until that lands, the tree path cannot claim full parity with `as_html` or
-`for_terminal`.
+That work landed in the 2026-06-02 cutover (see the Resolved note above), and
+the tree path replaced `as_html` / `for_terminal` outright.
 
 ### Parser options must become a single deliberate contract
 
@@ -338,6 +359,11 @@ should leverage the capabilities made available by component work, not route
 ordinary Markdown rendering through component trait objects.
 
 ## Recommended Migration Path
+
+> **Executed — historical.** This six-step plan was carried out by the
+> 2026-06-02 tree cutover (the document path was flipped to the tree, the
+> processors made span-aware, and the legacy serializers deleted). The steps
+> below read as the original plan, not pending work.
 
 ### 1. Keep public rendering on the current paths while closing fold parity
 

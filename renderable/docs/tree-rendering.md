@@ -8,6 +8,20 @@ and a roadmap for adopting it.
 It is a status-and-direction document. It is deliberately honest about what has
 been *proven* versus what has only been *wired up*.
 
+> **Status update — darkmatter document cutover complete (2026-06-02).** This
+> document was written mid-migration. The darkmatter Markdown *document*
+> pipeline has since fully cut over: `Markdown::as_html`, `Markdown::as_terminal`,
+> and `DarkmatterPage::render` / `render_to_browser` now route through the
+> render-tree document entry points (`render_tree_html` / `render_tree_terminal`
+> / `render_tree_markdown` in `darkmatter/.../render_tree/entrypoints.rs`, all
+> `pub`), and the legacy event-stream serializers (`output::as_html`,
+> `output::for_terminal`) plus the `RuleProcessor` iterator adapter have been
+> **deleted**. Span-aware folding of `==mark==`, dim, and HR-with-attributes
+> landed with it. §2, §4, and §5 below have been updated to match; see
+> [`renderable/features/2026-06-02-tree-cutover/`](../features/2026-06-02-tree-cutover/)
+> and [`components.md`](./components.md). The **per-component** `render()` cutover
+> (§3) is a separate track and remains partly in progress.
+
 ## 1. The tree-rendering architecture
 
 The render tree is a **canonical, owned, target-agnostic representation** of a
@@ -91,30 +105,33 @@ Every renderer follows the same shape:
 `biscuit-terminal` provides `TreeComponent<T: TreeRenderable>`, which wraps a
 `TreeRenderable` and supplies an (infallible) `TerminalRenderable` impl by
 calling `render_tree()` then `render_terminal_node`. It is the bridge that lets
-a tree-producing component render to the terminal. It currently bridges **only**
-the terminal target.
+a tree-producing component render to the terminal. A sibling
+`BrowserTreeComponent<T>` (`render_tree::browser_adapter`) provides the same
+bridge for the Browser target via `BrowserRenderable`.
 
-## 2. The existing darkmatter rendering path
+## 2. The darkmatter rendering path (now on the tree)
 
-This path is **unchanged** by the render-tree work and is still the public,
-shipping behavior.
+The darkmatter document pipeline routes through the render tree:
 
-- `Markdown::as_html(HtmlOptions)` and `for_terminal(&Markdown, TerminalOptions)`
-  are hand-written **`pulldown-cmark` event → string** serializers. Each walks
-  the event stream itself and emits the target string directly.
-- The source text is parsed independently for each pipeline. A third path,
-  `as_ast` (built on the alpha `markdown` crate, producing MDAST), exists but is
-  a dead end — a tree is produced and handed back, but nothing renders from it.
-- The parser is built with `markdown_parse_options()`
-  (`ENABLE_TABLES | ENABLE_STRIKETHROUGH`) and wrapped by darkmatter's
-  `InlineStyleProcessor` (custom `==mark==` / dim inline styles) and
-  `RuleProcessor` (horizontal rules with attributes).
+- `Markdown::as_html(HtmlOptions)` and `Markdown::as_terminal(TerminalOptions)`
+  fold the parsed document into a `Document` and lower it through the
+  render-tree browser / terminal renderers (`render_tree_html_from_document` /
+  `render_tree_terminal`). The hand-written **`pulldown-cmark` event → string**
+  serializers they used to call (`output::as_html`, `output::for_terminal`) have
+  been **deleted**.
+- `as_ast` (built on the `markdown` crate, producing MDAST) still exists as an
+  independent structural-export feature; it is not part of the render path and
+  nothing renders from its MDAST.
+- The parser is built with darkmatter's shared parse options and the
+  **span-aware** fold (`fold_markdown_spanned_with_frontmatter`), which preserves
+  the custom `==mark==` / dim inline styles and `--- { … }` HR-attribute
+  directives (parsed via `block::hr_parser`) along with their source offsets.
+  The old offset-discarding `RuleProcessor` iterator adapter is gone; `hr_parser`
+  survives as the attribute-parsing helper the fold calls.
 - `compose/` transformations (transclusion, interpolation, TOC linking) are
-  implemented as string preprocessing and stream-mutating iterator adapters.
-
-The new fold (`fold_markdown_to_document`) is an **additional, parallel,
-experimental** path. It does not touch `as_html` / `for_terminal` / `compose`,
-and nothing public routes through it yet.
+  **still** implemented as string preprocessing and stream-mutating iterator
+  adapters that run before the fold; moving them onto the tree is future work
+  (see §5).
 
 ## 3. The structural-component rendering path
 
@@ -202,12 +219,16 @@ input:
 - **Golden round trips** (`render_tree_roundtrip.rs`) — 11 real Markdown
   fixtures folded, structurally asserted, rendered back through the Markdown
   renderer, and snapshotted; plus a serialized `Document` JSON-surface snapshot.
-- **Parity gates** (`render_tree_parity.rs`) — the new pipeline
-  (`fold → render_browser/terminal_document`) is run against real input **and
-  compared, on semantic invariants, to the legacy `as_html` / `for_terminal`
-  output**. This is the strongest evidence the new renderers are faithful.
+- **Parity gates** *(historical)* — during the migration, `render_tree_parity.rs`
+  ran the fold pipeline against real input and compared it, on semantic
+  invariants, to the legacy `as_html` / `for_terminal` output. That test and the
+  `migration_parity` bench were **deleted** at cutover, since the tree is now the
+  only render path; behavior is covered by the fold / round-trip / snapshot
+  suites and the per-target integration tests
+  (`horizontal_rule_integration.rs`, `render_tree_hr_snapshots.rs`) instead.
 - **Benchmarks** — fold + render stress benchmarks in both `darkmatter` and
-  `biscuit-terminal`.
+  `biscuit-terminal` (tree-only, baseline-tracked; the bespoke-vs-tree
+  comparison benches are gone).
 
 Flow A is genuinely proven at the test level, not theoretical.
 
@@ -259,16 +280,10 @@ flipped to the tree.
   still degrade to an ANSI-stripped text fallback under `Warn` / `Lossy`.
   The fallback now logs with `TerminalRenderable::type_name` so the missing
   projection is observable.
-- **`as_html` and `for_terminal` still run legacy code.** The darkmatter
-  side of Flow A is parity-tested but not yet repointed at the tree.
 - **Lossy projection fidelity is characterized, not eliminated.** Text
   extraction from a `Prose` component remains lossy (styling flattened);
   the parity tests assert content survives and document styling loss
   as accepted.
-- **Deferred fold coverage.** Custom darkmatter inline styles (`==mark==`, dim)
-  and horizontal-rule attributes are not folded yet, because darkmatter's
-  `InlineStyleProcessor` / `RuleProcessor` discard source offsets; reconciling
-  that with span-carrying nodes is an open design decision.
 
 ## 5. Roadmap for integration
 
@@ -322,23 +337,31 @@ for the full plan. The completed work:
 
 ### darkmatter migration
 
-6. **Resolve the deferred fold work** — decide how the offset-destroying
-   `InlineStyleProcessor` / `RuleProcessor` reconcile with span-carrying nodes,
-   then fold `==mark==`, dim, and HR-with-attributes.
-7. **Expand the parity fixtures** until the tree pipeline reaches accepted
-   parity with `as_html` / `for_terminal` across the real darkmatter corpus
-   (the Phase 11 harness already surfaces mismatches — e.g. legacy
-   `for_terminal` silently drops raw block HTML).
-8. **Migrate the public render paths** behind the parity gate: re-point
-   `as_html` at `fold → render_browser_document` and `for_terminal` at
-   `fold → render_terminal_document`. Watch the existing render/compose
-   benchmarks — the owned tree is a heavier cost profile than the streaming
-   serializers.
+Steps 6–8 are **done** (2026-06-02 tree cutover):
+
+6. ✅ **Deferred fold work resolved.** The span-aware fold
+   (`fold_markdown_spanned_with_frontmatter`) folds `==mark==`, dim, and
+   HR-with-attributes with source offsets preserved; the offset-destroying
+   `RuleProcessor` adapter was removed and `block::hr_parser` survives as the
+   attribute-parsing helper.
+7. ✅ **Parity reached, then the harness retired.** The tree pipeline reached
+   accepted parity with the legacy serializers across the corpus (including the
+   raw-block-HTML the legacy `for_terminal` silently dropped); the parity harness
+   and `migration_parity` bench were deleted once the tree became the only path.
+8. ✅ **Public render paths migrated.** `as_html` routes through
+   `render_tree_html_from_document` and `as_terminal` through
+   `render_tree_terminal`; `DarkmatterPage::render` / `render_to_browser` route
+   through the same entry points. The bespoke serializers are deleted.
+
+Still open:
+
 9. **Re-home `compose/`** transformations (transclusion, interpolation, TOC
    linking) as composable tree-rewrite passes; the node model already reserves
-   the hooks (`SourceSpan` provenance, `NodeAttrs`, `DocumentMetadata`).
-10. **Retire or adapt `as_ast`** — either drop the dead MDAST path or implement
-    a dedicated `Document → MDAST JSON` adapter if external consumers need it.
+   the hooks (`SourceSpan` provenance, `NodeAttrs`, `DocumentMetadata`). These
+   still run as pre-fold source transformations today.
+10. **Retire or adapt `as_ast`** — either drop the MDAST path or implement a
+    dedicated `Document → MDAST JSON` adapter if external consumers need it. It
+    remains an independent, non-rendering export today.
 
 ### Guiding principle
 
