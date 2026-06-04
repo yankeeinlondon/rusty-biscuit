@@ -18,18 +18,12 @@
 // the bespoke layout types coexist with `renderable::layout` (matching
 // `layout/context.rs`).
 #![allow(deprecated)]
-// This pass is the ready-but-not-yet-active decorated terminal route: the
-// `Some(ctx)` path in `Markdown::as_terminal_with_layout` still uses the legacy
-// serializer until the three remaining decorated-layout features (hyperlink
-// label width, image `▉ IMAGE[]` placeholder, right-aligned li body) land on
-// the tree. The pass is exercised by `render_tree_terminal_with_layout`'s tests.
-#![allow(dead_code)]
 
 use renderable::layout::{Alignment, Length, Margin, TargetValue};
 use renderable::style::{PerMode, Style};
-use renderable::tree::{NodeKind, RenderNode};
+use renderable::tree::{HintNamespace, NodeKind, RenderNode};
 
-use crate::layout::{LayoutContext, PageComponent};
+use crate::layout::{LayoutContext, PageAlignment, PageComponent};
 use crate::style::StyleColor;
 
 /// Walks `root`, decorating every node that maps to a [`PageComponent`].
@@ -61,14 +55,18 @@ fn decorate_node(node: &mut RenderNode, ctx: &LayoutContext) {
     if let Some(component) = component_for(&node.kind) {
         apply_component_layout(node, ctx, component);
         apply_component_color(node, ctx, component);
-    } else if is_lone_image_paragraph(node) {
+        if matches!(node.kind, NodeKind::ListItem { .. }) {
+            apply_list_item_alignment(node, ctx);
+        }
+    } else if let Some(alt) = lone_image_alt(node) {
         // A paragraph whose only content is an image is the block-level image
         // the legacy renderer aligns / fills / colors. The `Image` node itself
         // is inline (the renderer ignores its `Layout`), so the Images
         // component layout is lifted onto the wrapping paragraph instead.
-        apply_component_layout(node, ctx, PageComponent::Images);
+        apply_lone_image_layout(node, ctx, &alt);
     }
     apply_inline_color(node, ctx);
+    apply_inline_label_layout(node, ctx);
 
     if let Some(children) = node.children_mut() {
         for child in children {
@@ -77,22 +75,27 @@ fn decorate_node(node: &mut RenderNode, ctx: &LayoutContext) {
     }
 }
 
-/// Whether `node` is a paragraph whose only meaningful child is an image.
-fn is_lone_image_paragraph(node: &RenderNode) -> bool {
+/// Returns the alt text of the single image when `node` is a paragraph whose
+/// only meaningful child is one image, else `None`.
+fn lone_image_alt(node: &RenderNode) -> Option<String> {
     let NodeKind::Paragraph { children } = &node.kind else {
-        return false;
+        return None;
     };
     let mut images = 0;
+    let mut alt = String::new();
     for child in children {
         match &child.kind {
-            NodeKind::Image { .. } => images += 1,
+            NodeKind::Image { alt: a, .. } => {
+                images += 1;
+                alt = a.clone();
+            }
             // Allow surrounding whitespace-only text / breaks.
             NodeKind::Text { value } if value.trim().is_empty() => {}
             NodeKind::SoftBreak | NodeKind::HardBreak => {}
-            _ => return false,
+            _ => return None,
         }
     }
-    images == 1
+    (images == 1).then_some(alt)
 }
 
 /// Maps a [`NodeKind`] to the [`PageComponent`] whose layout settings govern it.
@@ -177,6 +180,50 @@ fn apply_component_layout(node: &mut RenderNode, ctx: &LayoutContext, component:
     node.attrs.set_layout(&layout);
 }
 
+/// Lifts the Images-component layout onto a lone-image paragraph.
+///
+/// Mirrors legacy `apply_component_layout(PageComponent::Images)`: for `Pad` /
+/// `Indent` fills the left offset is the side padding; for `Full` / `Max` /
+/// `Explicit` with a non-Left alignment the offset is computed against the
+/// **rendered placeholder width** (`▉ IMAGE[{alt}]`), not the fill width — legacy
+/// centers / right-aligns the placeholder text itself. The `Image` node is
+/// inline (the renderer ignores its `Layout`), so the offset is baked into the
+/// wrapping paragraph's left margin.
+fn apply_lone_image_layout(node: &mut RenderNode, ctx: &LayoutContext, alt: &str) {
+    use crate::layout::{PageAlignment, PageFill};
+    use biscuit_terminal::utils::UnicodeWidthStr;
+
+    let component = PageComponent::Images;
+    let left = match ctx.component_fill(component) {
+        PageFill::Pad(_) | PageFill::Indent(_) => ctx
+            .component_side_padding(component)
+            .map(|(l, _)| l)
+            .unwrap_or(0),
+        PageFill::Full | PageFill::Max(_) | PageFill::Explicit(_) => {
+            if ctx.component_alignment(component) == PageAlignment::Left {
+                0
+            } else {
+                // `▉ IMAGE[{alt}]` — the placeholder's visible width is what the
+                // legacy renderer aligns against.
+                let placeholder = format!("▉ IMAGE[{alt}]");
+                let visible = UnicodeWidthStr::width(placeholder.as_str()) as u16;
+                ctx.alignment_padding(component, visible)
+            }
+        }
+    };
+
+    if left == 0 {
+        return;
+    }
+    let mut layout = node.attrs.layout().unwrap_or_default();
+    layout.margin = Margin {
+        left: cells(left),
+        ..layout.margin
+    };
+    layout.alignment = Alignment::Left;
+    node.attrs.set_layout(&layout);
+}
+
 /// Computes the left offset for a Code / Table / Image component, mirroring the
 /// legacy `apply_component_layout`: `Pad` / `Indent` use the side padding's left,
 /// otherwise the alignment offset against the rendered `width`.
@@ -244,6 +291,108 @@ fn apply_inline_color(node: &mut RenderNode, ctx: &LayoutContext) {
         }
         _ => {}
     }
+}
+
+/// Applies hyperlink-label and image-alt width/alignment/truncation to inline
+/// link / image nodes, mirroring legacy `for_terminal_with_layout`.
+///
+/// - **Link.** When the effective `style.hyperlinks.*` [`CommonStyle`] sets
+///   `width` or `max-width`, the link's accumulated plain label is padded /
+///   truncated / aligned via
+///   [`apply_inline_text_layout`](crate::style::bespoke::apply_inline_text_layout)
+///   and the link's children are replaced with a single text node carrying the
+///   transformed label. Legacy padded the accumulated plain `current_link_text`,
+///   so flattening to plain text matches; the renderer still wraps the padded
+///   label in the OSC8 sequence. Alignment-only styles are a no-op on the label
+///   (legacy padded only when a width was set).
+/// - **Image.** When the local `style.images.local-style` sets `width` or
+///   `max-width`, the image node's `alt` is transformed the same way. The
+///   block-level Images alignment / fill is handled separately by
+///   [`apply_lone_image_layout`].
+fn apply_inline_label_layout(node: &mut RenderNode, ctx: &LayoutContext) {
+    match &node.kind {
+        NodeKind::Link { url, .. } => {
+            let is_local = is_local_link(url);
+            let Some(common) = ctx.effective_hyperlink_style(is_local) else {
+                return;
+            };
+            if common.width.is_none() && common.max_width.is_none() {
+                return;
+            }
+            let label = inline_plain_text(node);
+            let transformed = crate::style::bespoke::apply_inline_text_layout(
+                &label,
+                Some(&common),
+                ctx.effective_width,
+            );
+            if let NodeKind::Link { children, .. } = &mut node.kind {
+                *children = vec![RenderNode::text(transformed)];
+            }
+        }
+        NodeKind::Image { url, alt, .. } => {
+            if !crate::style::bespoke::is_local_image(url) {
+                return;
+            }
+            let Some(common) = ctx.local_image_style.as_ref() else {
+                return;
+            };
+            if common.width.is_none() && common.max_width.is_none() {
+                return;
+            }
+            let transformed = crate::style::bespoke::apply_inline_text_layout(
+                alt,
+                Some(common),
+                ctx.effective_width,
+            );
+            if let NodeKind::Image { alt, .. } = &mut node.kind {
+                *alt = transformed;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Collects the visible plain text of an inline node's children (link label),
+/// ignoring styling. Matches legacy's accumulated `current_link_text`.
+fn inline_plain_text(node: &RenderNode) -> String {
+    fn walk(node: &RenderNode, out: &mut String) {
+        if let NodeKind::Text { value } = &node.kind {
+            out.push_str(value);
+        }
+        for child in node.children() {
+            walk(child, out);
+        }
+    }
+    let mut out = String::new();
+    for child in node.children() {
+        walk(child, &mut out);
+    }
+    out
+}
+
+/// Sets the `darkmatter.li` alignment hint on a `Center` / `Right`-aligned list
+/// item so the shared renderer lifts the marker onto its own line and left-pads
+/// the body block.
+///
+/// The pad is the resolved left offset
+/// ([`alignment_padding`](LayoutContext::alignment_padding) of the `Li`
+/// component width), precomputed here so the renderer stays free of darkmatter's
+/// page-layout types. `Left`-aligned lists (the default) set no hint, so the
+/// renderer keeps its inline rendering byte-for-byte.
+fn apply_list_item_alignment(node: &mut RenderNode, ctx: &LayoutContext) {
+    let alignment = ctx.component_alignment(PageComponent::Li);
+    let label = match alignment {
+        PageAlignment::Left => return,
+        PageAlignment::Center => "center",
+        PageAlignment::Right => "right",
+    };
+    let li_width = ctx
+        .resolve_component_width(PageComponent::Li)
+        .unwrap_or(ctx.effective_width);
+    let pad = ctx.alignment_padding(PageComponent::Li, li_width);
+    let ns = HintNamespace("darkmatter.li");
+    node.attrs.set_hint(ns, "alignment", serde_json::json!(label));
+    node.attrs.set_hint(ns, "pad", serde_json::json!(pad));
 }
 
 /// Whether a link URL targets a local file (heuristic shared with legacy).
