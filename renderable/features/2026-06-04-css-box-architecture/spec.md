@@ -98,7 +98,7 @@ compiling, but the pieces interlock.
 | [`2026-06-04-style-vocabulary`](../2026-06-04-style-vocabulary/spec.md) | **Layout/Style vocabulary** — the CSS box model; geometry vs. paint; delete `Fill`; `padding` / `width` / `fit-content`; the defaulting contract. | **designed; ready for planning** |
 | [`2026-06-04-tree-attrs`](../2026-06-04-tree-attrs/spec.md) | **Tree attrs & inheritance** — typed sparse `NodeAttrs` (no per-node JSON round-trip), one canonical inheritance resolver, and a deterministic structural-invariant performance *gate*. | **designed; ready for planning** |
 | [`2026-06-04-renderer-folds`](../2026-06-04-renderer-folds/spec.md) | **One fold per target** — terminal + browser learn to paint the padding box, honor `fit-content`, and lower `padding`/`width`/`border`/`background`; provides the lowering that lets *darkmatter-cutover* retire `build_component_css`. | **designed; ready for planning** |
-| `2026-06-04-darkmatter-cutover` *(planned)* | **darkmatter cutover** — `style:` lowers directly to `Layout`/`Style` attrs; delete `Page*`, `LayoutContext`, the bespoke CSS, and every `#![allow(deprecated)]`. *Absorbs the original "style-based-alignment" work.* | to brainstorm |
+| [`2026-06-04-darkmatter-cutover`](../2026-06-04-darkmatter-cutover/spec.md) | **darkmatter cutover** — `style:` lowers directly to `Layout`/`Style` attrs; delete `Page*`, the per-component `LayoutContext` math, the bespoke CSS, and every `#![allow(deprecated)]`. *Absorbs the original "style-based-alignment" work.* | **designed; ready for planning** |
 
 ## Sequencing contract
 
