@@ -85,6 +85,21 @@ Level 2 terminal coverage is appropriate for the rendered glyph/width behavior.
 Current strongest verification for this direct-API requirement is none, so this
 remains a production blocker.
 
+**Resolution (2026-06-03).** The bespoke serializer's frontmatter fallback is
+restored on the tree path. A `hr_defaults_from_frontmatter` helper (with the
+original scalar-coercion / sibling-preservation / warn-on-unknown-key contract)
+was reinstated in `render_tree/entrypoints.rs`, and the direct entry points
+(`Markdown::as_html`, the standalone `render_tree_html`, `render_tree_terminal`,
+and `render_tree_terminal_with_layout`) now seed bare-rule defaults from the
+deprecated top-level `hr:` block whenever `options.hr_defaults` is unset. The
+`is_none()` guard preserves the legacy `.or()` precedence, so an explicit option
+(including a `DarkmatterPage` `style.hr.*` projection) still wins outright and
+the page path is unchanged. Level 1 coverage was restored: direct `Markdown::as_*`
+integration tests for bare-rule defaults, partial inline-attribute override,
+numeric/bool scalar sibling preservation, and blockquote-contained bare rules
+(`horizontal_rule_integration.rs`), plus entrypoint unit tests for the coercion
+contract, the fallback wiring, and explicit-option precedence.
+
 ## Requirement Status
 
 | Requirement | Status | Strongest relevant verification |
@@ -94,7 +109,7 @@ remains a production blocker.
 | Delete bespoke darkmatter serializers / `RuleProcessor` | Implemented | Level 1 mechanical/API inspection |
 | Page-projected `style.hr.*` defaults for `DarkmatterPage` | Implemented | Level 1 integration tests; browser/Level 2 coverage still useful for visual fidelity |
 | `HtmlOptions::hr_css_variables` override contract | Implemented | Level 1 entrypoint tests; browser computed coverage still useful for CSS application |
-| Direct deprecated top-level `hr:` defaults for `Markdown::as_html` / `as_terminal` | Broken | No current coverage after removed direct-path assertions |
+| Direct deprecated top-level `hr:` defaults for `Markdown::as_html` / `as_terminal` | Implemented | Level 1 direct-API integration tests (`horizontal_rule_integration.rs` `direct_as_*`) plus entrypoint unit tests for the `hr_defaults_from_frontmatter` coercion contract and fallback wiring |
 
 ## Notes
 
