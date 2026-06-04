@@ -278,6 +278,19 @@ Run a serial sequence of composition steps declared in a single document. Shared
 claudine sequence @research.md topic="async traits"
 ```
 
+### `--dry-run`
+
+Runs the full composition pipeline **up to but not including provider launch**, then emits the composed result instead of sending it to a provider. Available on all three commands; suitable for CI rehearsal because it exercises the identical path minus the spawn.
+
+- Schema validation, shell-command execution (real side effects), and harness pre-checks all run normally.
+- The provider is never launched; `inline-compose --dry-run` therefore **does not mutate** the source file.
+- **stdout** = composed body; **stderr** = highlighted YAML frontmatter + a metadata table (Document as a blue OSC8 link, Description, Agent, Model, YOLO, and Area when inside a monorepo). So `compose --dry-run doc.md > body.md` captures only the body.
+- `--quiet` / `--silent` have **no effect** under `--dry-run`.
+- **Non-TTY shell gate:** an unapproved shell command in a non-TTY environment exits non-zero with `Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration.` In a TTY the normal interactive approval prompt fires. Bypass with `--yolo`.
+- **`sequence --dry-run`** concatenates all step bodies to stdout in order, prints each step's metadata to stderr separated by a `=== Document N of M ===` divider (before every document after the first), and fails fast on the first composition error.
+
+See [Composition — Dry Run](../../../claudine/docs/topics/composition.md#dry-run) for the full reference.
+
 **Positional Arguments:**
 - Exactly one file reference (supports `@` magic paths)
 - Zero or more `key=value` setters (overrides frontmatter)
