@@ -72,9 +72,8 @@ enum State<'a> {
         /// Buffered `(Event, Range)` pairs from inside the paragraph.
         buffer: Vec<(Event<'a>, Range<usize>)>,
         /// `true` while every buffered event is `Event::Text`. Any other
-        /// inline event flips this to `false`, mirroring the legacy
-        /// `paragraph_is_simple` flag from
-        /// [`crate::markdown::block::RuleProcessor`].
+        /// inline event flips this to `false`, mirroring the `paragraph_is_simple`
+        /// flag from the now-deleted legacy `RuleProcessor` iterator adapter.
         simple: bool,
     },
 }

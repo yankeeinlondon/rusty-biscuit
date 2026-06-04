@@ -151,7 +151,7 @@ pub(crate) fn apply_hr_frontmatter_fallback(root: &mut RenderNode, md: &Markdown
 /// The frontmatter backing store is `serde_json::Value`, so a direct
 /// `get::<HorizontalRuleAttrs>("hr")` deserialize would fail fast on any
 /// non-string scalar (e.g. `hr: { width: 50 }`), dropping every sibling key. To
-/// match the attribute-block path's coercion (see `RuleProcessor`), this walks
+/// match the attribute-block path's coercion (see `block::hr_parser`), this walks
 /// the `hr` mapping entry-by-entry and coerces numbers and bools to strings via
 /// [`json_scalar_as_string`]. The `style` key maps to
 /// [`legacy_style`](HorizontalRuleAttrs::legacy_style) so the deprecated alias
