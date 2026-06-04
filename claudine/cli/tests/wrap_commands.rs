@@ -2233,6 +2233,119 @@ fn compose_preflight_error_includes_source_provenance() {
     );
 }
 
+/// Non-TTY dry-run gate: an unapproved `::shell` command (no approval
+/// handler, no whitelist) makes `compose --dry-run` exit non-zero with the
+/// exact spec message naming the offending command. This is the CI gate
+/// "working correctly".
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_non_tty_unapproved_shell_emits_gate_error() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("template.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: dry-run gate\n---\n::shell echo dryrun-needs-approval\n",
+    )
+    .unwrap();
+
+    // Provider stub so target resolution succeeds before preflight aborts.
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "compose",
+            "--goose",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+    // The prose renderer hard-wraps the styled error block inside a box, so
+    // drop the box-border glyphs and collapse whitespace runs before matching
+    // the spec message (semantic check, not byte-for-byte — wrapping width is
+    // terminal-dependent).
+    let collapsed = plain
+        .replace('┃', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert!(
+        collapsed.contains(
+            "Cannot dry-run: shell command 'echo dryrun-needs-approval' requires interactive \
+             approval."
+        ),
+        "expected the dry-run gate message naming the command; stderr was:\n{plain}"
+    );
+    assert!(
+        collapsed.contains("--yolo"),
+        "gate message should point at --yolo; stderr was:\n{plain}"
+    );
+    assert!(
+        !plain.contains("provider should not run"),
+        "provider must not execute when the dry-run gate fires; stderr was:\n{plain}"
+    );
+}
+
+/// `--dry-run --yolo` auto-approves shell commands so the gate is bypassed:
+/// the command runs for real and its output is interpolated into the body
+/// that lands on stdout.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_yolo_bypasses_shell_gate() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("template.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: yolo bypass\n---\n::shell echo yolo-marker\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "compose",
+            "--goose",
+            "--dry-run",
+            "--yolo",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    let plain = strip_ansi(&stdout);
+
+    assert!(
+        plain.contains("yolo-marker"),
+        "composed body on stdout should contain the executed command output; stdout was:\n{plain}"
+    );
+}
+
 /// When the prompt file lives outside any git repo, `CompositionPrepContext`
 /// must fall back to the ambient CWD to load `selection_config`. Without this
 /// fallback non-TTY resolution loses the favorite-agent and model overrides
@@ -2677,6 +2790,68 @@ fn inline_compose_preserves_frontmatter() {
     assert!(
         plain.contains("Preserved original frontmatter"),
         "should report Claudine-managed frontmatter preservation; stderr was: {plain}"
+    );
+}
+
+/// Phase 4 dry-run: `inline-compose --dry-run` runs the full composition
+/// pipeline up to (but not including) provider launch, leaves the source
+/// file byte-identical (no write-back, `last_updated` untouched), and prints
+/// the composed prompt — what *would* be sent — to stdout.
+#[cfg(unix)]
+#[test]
+fn inline_compose_dry_run_leaves_file_unchanged_and_prints_prompt() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    let original =
+        "---\nprompt: Generate the documentation\nlast_updated: 2026-01-01\n---\nOriginal body\n";
+    fs::write(&md_file, original).unwrap();
+
+    // Provider binary writes a sentinel file when it runs; under --dry-run it
+    // must never launch, so the sentinel must be absent afterwards.
+    let sentinel = workspace.path().join("provider-ran.flag");
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\ntouch '{}'\nprintf 'New body from agent\\n'\nexit 0\n",
+            sentinel.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "inline-compose",
+            "--goose",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Source file is byte-identical: no write-back, `last_updated` untouched.
+    let final_content = fs::read_to_string(&md_file).unwrap();
+    assert_eq!(
+        final_content, original,
+        "inline-compose --dry-run must not mutate the source file"
+    );
+
+    // Provider never launched.
+    assert!(
+        !sentinel.exists(),
+        "provider must not execute under inline-compose --dry-run"
+    );
+
+    // Composed prompt (what would be sent) is on stdout.
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    assert!(
+        strip_ansi(&stdout).contains("Generate the documentation"),
+        "stdout should carry the composed prompt; stdout was:\n{stdout}"
     );
 }
 
@@ -4308,6 +4483,438 @@ fn sequence_composition_dry_run_for_every_provider() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — sequence dry-run (dividers, concatenation, fail-fast)
+// ---------------------------------------------------------------------------
+
+/// `claudine sequence --dry-run` over a multi-step sequence:
+/// - each step's composed body is concatenated to **stdout** in order,
+/// - a `=== Document N of M ===` divider precedes documents 2..M on
+///   **stderr** (none before the first document),
+/// - no provider is ever launched (sentinel absent).
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_concatenates_bodies_with_dividers() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // Provider stub writes a sentinel; under --dry-run it must never run.
+    let sentinel = workspace.path().join("provider-ran.flag");
+    write_executable(
+        &path_dir.join("goose"),
+        &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", sentinel.display()),
+    );
+
+    // Three-step sequence; every step composes the same document body, so the
+    // body marker appears once per step on stdout.
+    let compose_file = workspace.path().join("compose.md");
+    fs::write(
+        &compose_file,
+        "---\nsequence:\n  - step_one\n  - step_two\n  - step_three\n---\nSEQUENCE_BODY_XYZZY\n",
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "compose.md", "--goose", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "sequence dry-run should succeed; stderr was:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+    // All three composed bodies are concatenated to stdout in order.
+    assert_eq!(
+        stdout.matches("SEQUENCE_BODY_XYZZY").count(),
+        3,
+        "stdout should contain all three composed bodies; stdout was:\n{stdout}"
+    );
+
+    // Dividers precede documents 2 and 3, but never the first document.
+    assert!(
+        stderr.contains("=== Document 2 of 3 ==="),
+        "stderr should carry a divider before document 2; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("=== Document 3 of 3 ==="),
+        "stderr should carry a divider before document 3; stderr was:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("=== Document 1 of 3 ==="),
+        "no divider should precede the first document; stderr was:\n{stderr}"
+    );
+
+    // No provider launched.
+    assert!(
+        !sentinel.exists(),
+        "provider must not execute under sequence --dry-run"
+    );
+}
+
+/// `--quiet` and `--silent` have no effect on sequence dry-run output: the
+/// concatenated bodies and the between-document dividers render regardless.
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_quiet_and_silent_are_no_op() {
+    for flag in ["--quiet", "--silent"] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        seed_minimal_config(workspace.path());
+
+        write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+        let compose_file = workspace.path().join("compose.md");
+        fs::write(
+            &compose_file,
+            "---\nsequence:\n  - step_one\n  - step_two\n---\nSEQUENCE_BODY_XYZZY\n",
+        )
+        .unwrap();
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", augmented_path(&path_dir))
+            .current_dir(workspace.path())
+            .args(["sequence", "compose.md", "--goose", "--dry-run", flag])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "sequence dry-run {flag} should succeed; stderr was:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+        assert_eq!(
+            stdout.matches("SEQUENCE_BODY_XYZZY").count(),
+            2,
+            "{flag} must not suppress the composed bodies; stdout was:\n{stdout}"
+        );
+        assert!(
+            stderr.contains("=== Document 2 of 2 ==="),
+            "{flag} must not suppress the dry-run divider; stderr was:\n{stderr}"
+        );
+    }
+}
+
+/// Fail-fast: a composition error (here, a `$schema`-required property the
+/// sequence frontmatter does not satisfy) renders to **stderr** and stops the
+/// sequence with a non-zero exit, before any provider launches.
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_fail_fast_on_composition_error() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let sentinel = workspace.path().join("provider-ran.flag");
+    write_executable(
+        &path_dir.join("goose"),
+        &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", sentinel.display()),
+    );
+
+    let compose_file = workspace.path().join("compose.md");
+    fs::write(
+        &compose_file,
+        "---\n$schema:\n  topic: 'string(required)'\nsequence:\n  - step_one\n  - step_two\n---\nPlan for {{topic}}.\n",
+    )
+    .unwrap();
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["sequence", "compose.md", "--goose", "--dry-run"])
+        .assert()
+        .failure();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(
+        stderr.to_lowercase().contains("missing properties"),
+        "composition error should surface a missing-properties report on stderr; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("topic"),
+        "error should name the unsatisfied `topic` property; stderr was:\n{stderr}"
+    );
+    assert!(
+        !sentinel.exists(),
+        "provider must not launch when sequence dry-run fails composition"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 — cross-cutting hardening (stdout/stderr discipline, error
+// surfaces, quiet/silent matrix)
+// ---------------------------------------------------------------------------
+
+/// Data/status discipline: under `compose --dry-run` the composed body is the
+/// *only* thing on **stdout**; the finalized frontmatter and the metadata
+/// table land on **stderr**. Verifies the two streams never cross.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_body_only_on_stdout_metadata_on_stderr() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("doc.md");
+    fs::write(
+        &md_file,
+        "---\nname: disc-doc\ndescription: a discipline doc\nagent: goose\n---\nBODY_MARKER_QQQ\n",
+    )
+    .unwrap();
+
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--dry-run", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+    // stdout: body only — the composed body, none of the metadata-table
+    // labels or frontmatter that belong on stderr.
+    assert!(
+        stdout.contains("BODY_MARKER_QQQ"),
+        "stdout should carry the composed body; stdout was:\n{stdout}"
+    );
+    for leak in ["YOLO", "Document", "Field", "Agent", "name:"] {
+        assert!(
+            !stdout.contains(leak),
+            "stdout must not contain the `{leak}` metadata leaked from stderr; stdout was:\n{stdout}"
+        );
+    }
+
+    // stderr: frontmatter (YAML) + the metadata table.
+    assert!(
+        stderr.contains("name:") && stderr.contains("description:"),
+        "stderr should carry the highlighted frontmatter; stderr was:\n{stderr}"
+    );
+    for label in ["Document", "Agent", "Model", "YOLO"] {
+        assert!(
+            stderr.contains(label),
+            "stderr should carry the `{label}` metadata-table row; stderr was:\n{stderr}"
+        );
+    }
+}
+
+/// `--quiet` and `--silent` have no effect on `compose --dry-run` output:
+/// the body still lands on stdout and the full metadata block on stderr.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_quiet_and_silent_are_no_op() {
+    for flag in ["--quiet", "--silent"] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        seed_minimal_config(workspace.path());
+
+        let md_file = workspace.path().join("doc.md");
+        fs::write(
+            &md_file,
+            "---\nname: qs-doc\nagent: goose\n---\nBODY_MARKER_QQQ\n",
+        )
+        .unwrap();
+
+        write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", augmented_path(&path_dir))
+            .args([
+                "compose",
+                "--goose",
+                "--dry-run",
+                flag,
+                md_file.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "compose dry-run {flag} should succeed; stderr was:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+        assert!(
+            stdout.contains("BODY_MARKER_QQQ"),
+            "{flag} must not suppress the composed body on stdout; stdout was:\n{stdout}"
+        );
+        assert!(
+            stderr.contains("YOLO") && stderr.contains("name:"),
+            "{flag} must not suppress the dry-run metadata on stderr; stderr was:\n{stderr}"
+        );
+    }
+}
+
+/// `--quiet` and `--silent` have no effect on `inline-compose --dry-run`
+/// output: the composed prompt still lands on stdout, the metadata on stderr,
+/// and the source file is left byte-identical.
+#[cfg(unix)]
+#[test]
+fn inline_compose_dry_run_quiet_and_silent_are_no_op() {
+    for flag in ["--quiet", "--silent"] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        seed_minimal_config(workspace.path());
+
+        let md_file = workspace.path().join("doc.md");
+        let original = "---\nprompt: PROMPT_MARKER_QQQ\nagent: goose\n---\nOriginal body\n";
+        fs::write(&md_file, original).unwrap();
+
+        write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", augmented_path(&path_dir))
+            .args([
+                "inline-compose",
+                "--goose",
+                "--dry-run",
+                flag,
+                md_file.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "inline-compose dry-run {flag} should succeed; stderr was:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+
+        assert!(
+            stdout.contains("PROMPT_MARKER_QQQ"),
+            "{flag} must not suppress the composed prompt on stdout; stdout was:\n{stdout}"
+        );
+        assert_eq!(
+            fs::read_to_string(&md_file).unwrap(),
+            original,
+            "{flag} inline-compose --dry-run must not mutate the source file"
+        );
+    }
+}
+
+/// Error surface (compose): a missing source file under `--dry-run` renders
+/// the error to **stderr**, exits **non-zero**, and leaves stdout clean.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--dry-run", "does-not-exist.md"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "missing-file dry-run must exit non-zero"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "stdout must stay clean on error; stdout was:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains("does-not-exist.md"),
+        "error naming the missing file must appear on stderr; stderr was:\n{stderr}"
+    );
+}
+
+/// Error surface (inline-compose): an unsatisfied `$schema` required property
+/// under `--dry-run` renders to **stderr**, exits **non-zero**, leaves stdout
+/// clean, and never mutates the source file.
+#[cfg(unix)]
+#[test]
+fn inline_compose_dry_run_schema_error_to_stderr_with_clean_stdout() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("doc.md");
+    let original =
+        "---\n$schema:\n  topic: 'string(required)'\nprompt: Plan {{topic}}\nagent: goose\n---\nOriginal body\n";
+    fs::write(&md_file, original).unwrap();
+
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "inline-compose",
+            "--goose",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "schema-error dry-run must exit non-zero"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "stdout must stay clean on error; stdout was:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.to_lowercase().contains("missing properties") && stderr.contains("topic"),
+        "missing-properties error naming `topic` must appear on stderr; stderr was:\n{stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(&md_file).unwrap(),
+        original,
+        "inline-compose --dry-run must not mutate the source file on error"
+    );
 }
 
 // ---------------------------------------------------------------------------
