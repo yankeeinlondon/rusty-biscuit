@@ -559,11 +559,25 @@ pub(crate) fn execute_harness_attempt(
             Some(&section_stream),
         );
 
+        let effective_response = {
+            let details = summary_details.lock().unwrap();
+            if prompt_mode == HarnessPromptMode::Inline {
+                let fr = details.final_response.trim();
+                if fr.is_empty() {
+                    summary.assistant_text.clone()
+                } else {
+                    details.final_response.clone()
+                }
+            } else {
+                summary.assistant_text.clone()
+            }
+        };
+
         (
             summary.exit_code,
             termination,
             summary.session_id.clone(),
-            summary.assistant_text.clone(),
+            effective_response,
             summary.stderr_text.clone(),
             perf,
         )
