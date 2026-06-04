@@ -96,7 +96,7 @@ compiling, but the pieces interlock.
 | Sub-spec | Area | Status |
 |---|---|---|
 | [`2026-06-04-style-vocabulary`](../2026-06-04-style-vocabulary/spec.md) | **Layout/Style vocabulary** — the CSS box model; geometry vs. paint; delete `Fill`; `padding` / `width` / `fit-content`; the defaulting contract. | **designed; ready for planning** |
-| `2026-06-04-tree-attrs` *(planned)* | **Tree attrs & inheritance** — `NodeAttrs` sparse storage, inheritance semantics, and the performance benchmark *gate* (a CI budget set now while the corpus is small). | to brainstorm |
+| [`2026-06-04-tree-attrs`](../2026-06-04-tree-attrs/spec.md) | **Tree attrs & inheritance** — typed sparse `NodeAttrs` (no per-node JSON round-trip), one canonical inheritance resolver, and a deterministic structural-invariant performance *gate*. | **designed; ready for planning** |
 | `2026-06-04-renderer-folds` *(planned)* | **One fold per target** — terminal + browser learn to paint the padding box, honor `fit-content`, and lower `padding`/`width`/`border`/`background`; every bespoke side path (incl. `build_component_css`) is retired. | to brainstorm |
 | `2026-06-04-darkmatter-cutover` *(planned)* | **darkmatter cutover** — `style:` lowers directly to `Layout`/`Style` attrs; delete `Page*`, `LayoutContext`, the bespoke CSS, and every `#![allow(deprecated)]`. *Absorbs the original "style-based-alignment" work.* | to brainstorm |
 
@@ -123,10 +123,12 @@ spec so planning tools preserve the order.
 
 1. **Policy is resolved exactly once, at tree-build time, into attrs.** No
    render-time re-derivation; no side-channel keyed by component.
-2. **Performance is a tested gate, not a hope.** The existing
-   `render_tree_parity` / `migration_parity` benches become a *budget* with a
-   CI threshold, set now while the tree is small, so feature growth cannot
-   silently erode it.
+2. **Performance is a tested gate, not a hope.** The gate is a *deterministic
+   structural-invariant test* — folding a styled corpus must do zero per-node
+   JSON round-trips and zero per-node key allocations on the hot path — chosen
+   over a flaky timing budget. The `render_tree_parity` / `migration_parity` /
+   `render_tree` Criterion benches are kept for *trend* visibility, not as the
+   gate. (Designed in [`tree-attrs`](../2026-06-04-tree-attrs/spec.md).)
 3. **Fewer, orthogonal primitives.** Properties compose (CSS-style) rather than
    bundling into flat one-of enums; this keeps lowering branch-free.
 4. **Parity is a reference, not a contract.** Snapshot diffs are expected;
