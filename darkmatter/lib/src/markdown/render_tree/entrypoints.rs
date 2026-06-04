@@ -37,13 +37,18 @@ use renderable::tree::{
     render_browser_document_html, render_markdown_document,
 };
 
-use renderable::tree::{NodeKind, RenderNode};
+use renderable::tree::{HintNamespace, NodeKind, RenderNode};
 
 use super::code_renderer::TerminalCodeRenderer;
 use super::fold::fold_markdown_spanned_with_frontmatter;
 use super::pipeline::{PipelineRenderResult, PipelineResult};
 use crate::markdown::Markdown;
+use crate::markdown::inline::HorizontalRuleAttrs;
 use crate::markdown::output::{ColorDepth, HtmlOptions, TerminalOptions};
+
+/// The hint namespace darkmatter HR-attribute paragraphs (and projected
+/// page-level HR defaults) carry on a [`NodeKind::ThematicBreak`].
+const HR_HINT_NS: HintNamespace = HintNamespace("darkmatter.hr");
 
 /// Folds a [`Markdown`] into a canonical [`Document`], wiring darkmatter's
 /// already extracted frontmatter into [`renderable::tree::DocumentMetadata`].
@@ -71,6 +76,81 @@ pub(crate) fn to_render_document(md: &Markdown) -> (Document, Vec<Diagnostic>) {
     fold_markdown_spanned_with_frontmatter(source, md)
 }
 
+/// Fills missing `darkmatter.hr.*` hints on every [`NodeKind::ThematicBreak`]
+/// in the tree from `defaults`, reproducing the legacy bare-rule default
+/// contract on the tree path.
+///
+/// A bare `---` folds to a hint-less `ThematicBreak`; an attribute rule
+/// (`--- { style: waves }`) folds to one already carrying explicit
+/// `darkmatter.hr.*` hints. The legacy renderers applied `style.hr.*` (and the
+/// deprecated top-level `hr:` alias) as the *default* HR style, with any inline
+/// attribute winning per-property. This pass mirrors that precedence: a hint is
+/// set only when the node does not already carry it, so an inline attribute is
+/// never overridden by a page-level default.
+///
+/// `defaults` is the [`HorizontalRuleAttrs`] a
+/// [`DarkmatterPage`](crate::layout::DarkmatterPage) projects from `style.hr.*`
+/// (`HtmlOptions::hr_defaults` / `TerminalOptions::hr_defaults`); its `kind`
+/// resolves through the deprecated `legacy_style` alias the same way
+/// [`lower_hr_attrs_to_node`](super::fold) does.
+fn apply_hr_defaults(node: &mut RenderNode, defaults: &HorizontalRuleAttrs) {
+    if matches!(node.kind, NodeKind::ThematicBreak) {
+        if let Some(kind) = defaults.kind.as_ref().or(defaults.legacy_style.as_ref()) {
+            set_hr_hint_if_absent(node, "kind", kind);
+        }
+        if let Some(alignment) = defaults.alignment.as_ref() {
+            set_hr_hint_if_absent(node, "alignment", alignment);
+        }
+        if let Some(weight) = defaults.weight.as_ref() {
+            set_hr_hint_if_absent(node, "weight", weight);
+        }
+        if let Some(width) = defaults.width.as_ref() {
+            set_hr_hint_if_absent(node, "width", width);
+        }
+        if let Some(color) = defaults.color.as_ref() {
+            set_hr_hint_if_absent(node, "color", color);
+        }
+    }
+
+    if let Some(children) = node.children_mut() {
+        for child in children {
+            apply_hr_defaults(child, defaults);
+        }
+    }
+}
+
+/// Sets `darkmatter.hr.<key>` on `node` to `value` only when the node does not
+/// already carry that hint — so inline rule attributes win over page defaults.
+fn set_hr_hint_if_absent(node: &mut RenderNode, key: &str, value: &str) {
+    if node.attrs.get_hint(HR_HINT_NS, key).is_none() {
+        node.attrs.set_hint(HR_HINT_NS, key, serde_json::json!(value));
+    }
+}
+
+/// Lowers [`HtmlOptions::hr_css_variables`](crate::markdown::output::HtmlOptions::hr_css_variables)
+/// to a sorted [`PageOptions::css_variables`](renderable::browser::PageOptions::css_variables)
+/// override list, or `None` when nothing safe remains.
+///
+/// Mirrors the legacy `generate_hr_root_block`: keys are passed without the
+/// `--` prefix (the page renderer adds it), sorted for deterministic output,
+/// and any entry whose key or value contains `<` or a newline is skipped so it
+/// cannot break out of the emitted `<style>` element.
+fn hr_root_variables(
+    vars: &std::collections::HashMap<String, String>,
+) -> Option<Vec<(String, String)>> {
+    let is_safe = |s: &str| !s.contains('<') && !s.contains('\n');
+    let mut entries: Vec<(String, String)> = vars
+        .iter()
+        .filter(|(key, value)| is_safe(key) && is_safe(value))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    if entries.is_empty() {
+        return None;
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    Some(entries)
+}
+
 /// Renders a [`Markdown`] to HTML via the render-tree pipeline.
 ///
 /// Maps [`HtmlOptions`] to [`BrowserRenderOptions`] narrowly: raw HTML
@@ -79,9 +159,13 @@ pub(crate) fn to_render_document(md: &Markdown) -> (Document, Vec<Diagnostic>) {
 /// syntax-highlighted (with title / line-number / highlight directives),
 /// `mermaid_mode` maps to the render-tree Mermaid opt-in, and (when
 /// `include_styles` is set) the `.code-block` panel stylesheet is
-/// injected through the page hook so fenced code retains its background. The
+/// injected through the page hook so fenced code retains its background.
 /// [`HtmlOptions::hr_css_variables`](crate::markdown::output::HtmlOptions::hr_css_variables)
-/// `:root` injection has no tree-side equivalent and is dropped at this boundary.
+/// are lowered to page-level `:root` overrides (see
+/// `browser_options_from_html_options`), and
+/// [`HtmlOptions::hr_defaults`](crate::markdown::output::HtmlOptions::hr_defaults)
+/// fill the `darkmatter.hr.*` hints of bare `---` rules (see
+/// `apply_hr_defaults`).
 ///
 /// `style:` frontmatter hyperlink / image color injection
 /// ([`HtmlOptions::hyperlink_style`](crate::markdown::output::HtmlOptions::hyperlink_style),
@@ -119,6 +203,9 @@ pub(crate) fn render_tree_html_from_document(
     fold_diagnostics: Vec<Diagnostic>,
     options: &HtmlOptions,
 ) -> PipelineRenderResult<String> {
+    if let Some(defaults) = options.hr_defaults.as_ref() {
+        apply_hr_defaults(&mut doc.root, defaults);
+    }
     let injections = inject_link_image_attributes(&mut doc.root, options);
     let browser_opts = browser_options_from_html_options(options);
     let rendered = render_browser_document_html(&doc, &browser_opts)?;
@@ -491,7 +578,10 @@ pub fn render_tree_terminal(
     md: &Markdown,
     options: &TerminalOptions,
 ) -> PipelineRenderResult<String> {
-    let (doc, fold_diagnostics) = to_render_document(md);
+    let (mut doc, fold_diagnostics) = to_render_document(md);
+    if let Some(defaults) = options.hr_defaults.as_ref() {
+        apply_hr_defaults(&mut doc.root, defaults);
+    }
     let term_opts = terminal_options_from_terminal_options(options);
     let rendered = render_terminal_document(&doc, &term_opts)?;
     Ok(PipelineResult::new(
@@ -531,6 +621,9 @@ pub(crate) fn render_tree_terminal_with_layout(
     ctx: &crate::layout::LayoutContext,
 ) -> PipelineRenderResult<String> {
     let (mut doc, fold_diagnostics) = to_render_document(md);
+    if let Some(defaults) = options.hr_defaults.as_ref() {
+        apply_hr_defaults(&mut doc.root, defaults);
+    }
     super::decorate::decorate_document(&mut doc.root, ctx);
     let mut term_opts = terminal_options_from_terminal_options(options);
     // Decorated-only: the decorated layout path emits `▉ IMAGE[alt]` for the
@@ -587,9 +680,17 @@ pub fn render_tree_markdown_dialect(
 /// The [`TerminalCodeRenderer`] hook is wired in so fenced code blocks
 /// reproduce darkmatter's syntax-highlighted HTML (title block, line-number
 /// table, highlighted-line markup) rather than the render tree's plain
-/// `<pre><code>` fallback. The
+/// `<pre><code>` fallback.
+///
 /// [`HtmlOptions::hr_css_variables`](crate::markdown::output::HtmlOptions::hr_css_variables)
-/// `:root` injection has no tree-side equivalent and is dropped at this boundary.
+/// are lowered (via [`hr_root_variables`]) onto
+/// [`PageOptions::css_variables`](renderable::browser::PageOptions::css_variables),
+/// which the page renderer emits as `--{key}: {value};` declarations in its
+/// `:root` block. The HR SVG keeps its literal `var(--hr-*, fallback)`
+/// expressions, so the declared values resolve against them in the browser —
+/// reproducing the legacy `:root` override contract. A page is built whenever
+/// either the code-block stylesheet or an HR override applies, so the override
+/// still takes effect when `include_styles` is unset.
 ///
 /// When `opts.include_styles` is set, the page hook
 /// ([`BrowserRenderOptions::page`]) carries a [`renderable::stylesheet::Stylesheet`]
@@ -620,8 +721,11 @@ fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions
         crate::markdown::output::terminal::MermaidMode::Image => BrowserMermaidMode::StaticSvg,
     };
 
-    let page = opts.include_styles.then(|| PageOptions {
-        stylesheet: Some(code_block_stylesheet(opts)),
+    let stylesheet = opts.include_styles.then(|| code_block_stylesheet(opts));
+    let css_variables = hr_root_variables(&opts.hr_css_variables);
+    let page = (stylesheet.is_some() || css_variables.is_some()).then(|| PageOptions {
+        stylesheet,
+        css_variables,
         ..PageOptions::default()
     });
 
@@ -1260,6 +1364,219 @@ mod tests {
     fn browser_options_mapping_defaults_raw_html_to_escape() {
         let opts = browser_options_from_html_options(&HtmlOptions::default());
         assert_eq!(opts.raw_html, RawHtmlPolicy::Escape);
+    }
+
+    // -----------------------------------------------------------------------
+    // Review-4 finding 1: page-level HR defaults (`hr_defaults`) and the
+    // `hr_css_variables` `:root` override must be consumed by the tree entry
+    // points, not silently dropped at the adapter boundary.
+    // -----------------------------------------------------------------------
+
+    /// `apply_hr_defaults` fills a bare `ThematicBreak`'s missing
+    /// `darkmatter.hr.*` hints from the defaults but never overrides a hint the
+    /// node already carries (inline attributes win per-property).
+    #[test]
+    fn apply_hr_defaults_fills_only_absent_hints() {
+        let defaults = HorizontalRuleAttrs {
+            kind: Some("waves".into()),
+            weight: Some("thick".into()),
+            color: Some("red".into()),
+            width: Some("80%".into()),
+            ..HorizontalRuleAttrs::default()
+        };
+
+        // Bare rule: every hint is filled from defaults.
+        let mut bare = RenderNode::thematic_break();
+        apply_hr_defaults(&mut bare, &defaults);
+        assert_eq!(
+            bare.attrs.get_hint(HR_HINT_NS, "kind"),
+            Some(&serde_json::json!("waves")),
+        );
+        assert_eq!(
+            bare.attrs.get_hint(HR_HINT_NS, "weight"),
+            Some(&serde_json::json!("thick")),
+        );
+        assert_eq!(
+            bare.attrs.get_hint(HR_HINT_NS, "color"),
+            Some(&serde_json::json!("red")),
+        );
+        assert_eq!(
+            bare.attrs.get_hint(HR_HINT_NS, "width"),
+            Some(&serde_json::json!("80%")),
+        );
+
+        // Explicit hint wins; absent hints still fill from defaults.
+        let mut attributed = RenderNode::thematic_break();
+        attributed
+            .attrs
+            .set_hint(HR_HINT_NS, "color", serde_json::json!("blue"));
+        apply_hr_defaults(&mut attributed, &defaults);
+        assert_eq!(
+            attributed.attrs.get_hint(HR_HINT_NS, "color"),
+            Some(&serde_json::json!("blue")),
+            "inline color must win over the page default",
+        );
+        assert_eq!(
+            attributed.attrs.get_hint(HR_HINT_NS, "kind"),
+            Some(&serde_json::json!("waves")),
+            "an absent hint must still fill from the default",
+        );
+    }
+
+    /// `kind` resolves through the deprecated `legacy_style` alias, matching
+    /// `lower_hr_attrs_to_node`.
+    #[test]
+    fn apply_hr_defaults_kind_falls_back_to_legacy_style() {
+        let defaults = HorizontalRuleAttrs {
+            legacy_style: Some("dots".into()),
+            ..HorizontalRuleAttrs::default()
+        };
+        let mut bare = RenderNode::thematic_break();
+        apply_hr_defaults(&mut bare, &defaults);
+        assert_eq!(
+            bare.attrs.get_hint(HR_HINT_NS, "kind"),
+            Some(&serde_json::json!("dots")),
+        );
+    }
+
+    /// `hr_root_variables` sorts keys for deterministic output and drops any
+    /// entry whose key or value could break out of the `<style>` element.
+    #[test]
+    fn hr_root_variables_sorts_and_filters_unsafe_entries() {
+        use std::collections::HashMap;
+
+        let mut vars = HashMap::new();
+        vars.insert("hr-width".to_string(), "42%".to_string());
+        vars.insert("hr-color".to_string(), "red".to_string());
+        vars.insert("hr-evil".to_string(), "</style>".to_string());
+
+        let out = hr_root_variables(&vars).expect("safe entries remain");
+        assert_eq!(
+            out,
+            vec![
+                ("hr-color".to_string(), "red".to_string()),
+                ("hr-width".to_string(), "42%".to_string()),
+            ],
+            "entries must be key-sorted and the `<`-bearing value dropped",
+        );
+
+        assert!(
+            hr_root_variables(&HashMap::new()).is_none(),
+            "an empty map emits no override list",
+        );
+    }
+
+    /// `hr_css_variables` must be lowered onto the page `css_variables` channel
+    /// even when `include_styles` is unset, so the `:root` HR override still
+    /// reaches the browser (the legacy contract emitted it regardless of
+    /// `include_styles`).
+    #[test]
+    fn browser_options_mapping_lowers_hr_css_variables_without_styles() {
+        use std::collections::HashMap;
+
+        let mut vars = HashMap::new();
+        vars.insert("hr-width".to_string(), "42%".to_string());
+        let opts = HtmlOptions {
+            include_styles: false,
+            hr_css_variables: vars,
+            ..HtmlOptions::default()
+        };
+        let browser = browser_options_from_html_options(&opts);
+        let page = browser
+            .page
+            .expect("a page must be built to carry the HR override");
+        assert!(
+            page.stylesheet.is_none(),
+            "no code-block stylesheet is injected when include_styles is false",
+        );
+        assert_eq!(
+            page.css_variables,
+            Some(vec![("hr-width".to_string(), "42%".to_string())]),
+        );
+    }
+
+    /// A bare `---` rendered through `render_tree_terminal` must adopt the
+    /// `hr_defaults` kind — proving the terminal entry point consumes the
+    /// page-level HR default.
+    #[test]
+    fn render_tree_terminal_applies_hr_defaults_to_bare_rule() {
+        let md: Markdown = "---\n".into();
+        let opts = TerminalOptions {
+            max_width: Some(40),
+            color_depth: Some(ColorDepth::None),
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
+            hr_defaults: Some(HorizontalRuleAttrs {
+                kind: Some("dots".into()),
+                ..HorizontalRuleAttrs::default()
+            }),
+            ..TerminalOptions::default()
+        };
+        let out = render_tree_terminal(&md, &opts).expect("terminal render").output;
+        // The default dashed rule uses `╌`/`-`; a dots default switches the
+        // glyph to `·` (or the ASCII `.` fallback).
+        assert!(
+            out.contains('·') || out.contains('.'),
+            "bare rule must adopt the `dots` HR default; got:\n{out:?}",
+        );
+    }
+
+    /// A bare `---` rendered through `render_tree_html` must adopt the
+    /// `hr_defaults` width / color / weight — proving the HTML entry point
+    /// consumes the page-level HR default.
+    #[test]
+    fn render_tree_html_applies_hr_defaults_to_bare_rule() {
+        let md: Markdown = "---\n".into();
+        let opts = HtmlOptions {
+            hr_defaults: Some(HorizontalRuleAttrs {
+                kind: Some("waves".into()),
+                weight: Some("thick".into()),
+                color: Some("red".into()),
+                width: Some("50%".into()),
+                ..HorizontalRuleAttrs::default()
+            }),
+            ..HtmlOptions::default()
+        };
+        let html = render_tree_html(&md, &opts).expect("html render").output;
+        assert!(html.contains(r#"width="50%""#), "{html}");
+        assert!(html.contains("--hr-color: red"), "{html}");
+        assert!(html.contains("--hr-weight: 8"), "thick weight ⇒ 8px: {html}");
+    }
+
+    /// `hr_css_variables` must emit a page-level `:root` declaration through
+    /// `render_tree_html` (the page-declares-variables contract). The HR SVG
+    /// keeps its literal `var(--hr-color, …)` / `var(--hr-weight, …)`
+    /// expressions, so the declared override resolves against them in the
+    /// browser.
+    #[test]
+    fn render_tree_html_emits_hr_css_variable_root_override() {
+        let md: Markdown = "--- { style: dashes }\n".into();
+
+        // Without overrides: the :root block carries no `--hr-width: 42%`.
+        let default_html = render_tree_html(&md, &HtmlOptions::default())
+            .expect("html render")
+            .output;
+        assert!(
+            !default_html.contains("--hr-width: 42%"),
+            "default render must not declare the override value: {default_html}",
+        );
+
+        // With an override: the :root block declares `--hr-width: 42%` and the
+        // SVG keeps its literal `var(--hr-*, …)` expressions.
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("hr-width".to_string(), "42%".to_string());
+        let opts = HtmlOptions {
+            hr_css_variables: vars,
+            ..HtmlOptions::default()
+        };
+        let html = render_tree_html(&md, &opts).expect("html render").output;
+        assert!(
+            html.contains(":root{") && html.contains("--hr-width: 42%"),
+            "override must emit a :root declaration --hr-width: 42%: {html}",
+        );
+        assert!(
+            html.contains("var(--hr-color,") && html.contains("var(--hr-weight,"),
+            "SVG must keep its literal var(--hr-*, …) expressions: {html}",
+        );
     }
 
     /// Review-10 finding 2: the terminal entry point must wire darkmatter's
