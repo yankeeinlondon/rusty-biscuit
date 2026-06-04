@@ -1,9 +1,10 @@
 ---
-status: ready for planning
+status: ready for planning and implementation
 date: 2026-06-04
 owner: ken
 parent: renderable/features/2026-06-04-css-box-architecture/spec.md
 depends-on: renderable/features/2026-06-04-style-vocabulary/spec.md
+reviewed: true
 ---
 
 # Tree Attrs — Typed Sparse Node Attributes, Inheritance, and the Perf Gate
@@ -52,13 +53,20 @@ size and how many attrs each renderer reads.
 
 `Style::inherited_from` (text-appearance inheritance), the `Layout`/`Style`
 types from style-vocabulary, and the `data` bag *as an escape hatch for genuine
-extension* are all kept. The bag stops being the storage for first-class
-attributes.
+extension* are all kept. The bag stops being the storage for
+`renderable`-owned first-class attributes.
+
+Reader note from review: this is an intended change to the original render-tree
+contract. `NodeAttrs::data` stays available for package-local extension
+namespaces such as `darkmatter.hr` and `darkmatter.li`; the clean break applies
+to renderable's own layout/style/list/table/code/widget hints. Extension hints
+may remain JSON-backed until a later spec promotes them into shared typed attrs.
 
 ## Goals
 
 - Replace JSON-bag storage of all 13 typed attributes with **typed fields** on
-  `NodeAttrs`, so hot reads are `O(1)` with no allocation, clone, or serde.
+  `NodeAttrs`, so renderer hot reads are `O(1)` borrowed field reads with no
+  allocation, `serde_json::Value` clone, or serde deserialize.
 - Keep the **common node small**: `Layout`/`Style` and the rare per-component
   hint groups are boxed; an unstyled node is a few null pointers.
 - Provide **one canonical inheritance resolver** that every renderer threads,
@@ -77,6 +85,9 @@ attributes.
   This spec provides the shared inheritance resolver; *darkmatter-cutover*
   switches darkmatter onto it.
 - Any change to the `Layout`/`Style` field set (owned by style-vocabulary).
+- Promotion of darkmatter-only extension namespaces (`darkmatter.hr`,
+  `darkmatter.li`) into typed renderable attributes. This spec preserves those
+  namespaced `data` entries and keeps their current renderer behavior.
 
 ## The design
 
@@ -111,6 +122,8 @@ pub struct NodeAttrs {
 
 /// Per-component render hints. Only nodes of the matching kind carry one, so
 /// the box is paid only where used.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind", content = "value")]
 pub enum ComponentHints {
     List(ListRenderHints),
     Code(CodeRenderHints),
@@ -136,15 +149,38 @@ The existing accessor *surface* (`layout()`, `set_layout()`, `list_hints()`,
 accessor becomes a direct typed field read/write instead of a serde round-trip.
 `set_hint`/`get_hint`/`remove_hint` remain only for `data` extension use.
 
+All hint structs carried by typed fields must derive or manually implement
+`Serialize` and `Deserialize`, using the existing compact token formats where
+they are already part of the documented shape (`SequenceJoin`,
+`ListMarkerPolicy`, `TaskState`, `ColumnConditional`, `ColumnWidthKind`). This
+is a compile-time requirement of moving them out of `serde_json::Value`.
+
+Because the historical accessors return owned values, the first implementation
+may continue returning clones from the boxed typed fields to avoid a broad API
+change. Add borrowed accessors (`layout_ref`, `style_ref`, and `*_hints_ref`
+where useful to renderer hot paths) in the same change, and switch renderers to
+the borrowed forms so the fold pays neither serde nor unnecessary typed clones.
+
 ### 2. Serialization — clean break, sparse on the wire
 
 Typed fields use `#[serde(default)]` + `skip_serializing_if` so a node
 serializes only the attributes it actually carries, and an absent field
 deserializes to its default. **No migration** of the old
-`data: {"renderable.layout.layout": …}` shape is provided: no render trees are
-persisted, no consumer reads the namespace keys directly, and the in-process
-`render_tree_roundtrip` test re-passes on the new typed shape. (If a future need
-for durable trees appears, a one-version migration is its own task.)
+`data: {"renderable.layout.layout": …}` shape is provided.
+
+Design decision: this is a deliberate breaking change to the debug/inspection
+JSON shape of `RenderNode`, not a durable-format migration. The render-tree docs
+say the tree is serde-serializable for persistence or inspection, but the repo
+does not currently promise cross-version compatibility for the serialized tree.
+Document this explicitly in the tree docs while updating examples and fixtures:
+serialization is supported for same-version persistence/inspection, and durable
+cross-version tree archives need their own versioned format before compatibility
+is promised.
+
+Mitigation: add a test that deserializes the new sparse typed shape and rejects
+stale renderable-owned hint keys in `data` during validation. Do not silently
+merge stale `renderable.*` data into typed fields; that would keep the old
+storage path alive and make the perf gate ambiguous.
 
 ### 3. One canonical inheritance resolver
 
@@ -177,14 +213,16 @@ onto this resolver; this spec lands the resolver and moves
 
 The enforced gate is a `#[test]`, not a timing budget (CI timing is noisy and
 lets real regressions through). Behind a test-only instrumentation hook, the
-hint round-trip path (`set_hint`/`get_hint` and any `serde_json` call) and the
-key-String allocation are counted. The test:
+hint round-trip path (`set_hint`/`get_hint`/`remove_hint`) and the
+`format!("{ns}.{key}")` key allocation inside those methods are counted.
+Typed accessors must not call those methods for renderable-owned first-class
+attrs. The test:
 
 1. builds a representative styled corpus (block + inline + a table + a list +
-   code + nested inheritance),
+   code + nested inheritance + darkmatter extension hints),
 2. folds it once per target,
 3. asserts the hint-round-trip count and per-node key-allocation count are
-   **zero** for the fold.
+   **zero for renderable-owned first-class attrs** during the fold.
 
 Because the typed fields make the hot accessors incapable of touching serde,
 the invariant is largely type-enforced; the test guards against a future change
@@ -192,6 +230,11 @@ that re-routes a first-class attribute back through `data`. Criterion benches
 (`biscuit-terminal/lib/benches/render_tree.rs`,
 `darkmatter/lib/benches/render_tree.rs`, `renderable/benches/render.rs`) are
 kept for trend visibility only.
+
+Extension-hint lookups remain allowed during this spec. The corpus should
+include an HR and the decorated list-item alignment hint so the assertion can
+distinguish extension lookups from accidental renderable-owned attr lookups
+rather than requiring a false global zero for all `NodeAttrs::data` access.
 
 ### 5. Absence ≡ default short-circuit
 
@@ -206,27 +249,39 @@ contract with no per-node cost.
 1. `NodeAttrs` carries typed `layout: Option<Box<Layout>>`,
    `style: Option<Box<Style>>`, `sequence_join`, `list_marker_policy`, and
    `component: Option<Box<ComponentHints>>`; `data` holds no first-class
-   attribute. `rg 'set_hint\(HintNamespace::(LAYOUT|STYLE|LIST|TABLE|CODE'` finds
-   no first-class attribute writes outside `data`-extension tests.
+   renderable-owned attribute. `rg 'set_hint\(HintNamespace::(LAYOUT|STYLE|LIST|TABLE|CODE|TERMINAL|WIDGET_'`
+   finds no renderable-owned first-class attribute writes outside
+   `data`-extension and stale-input validation tests.
 2. The 13 former accessors (`layout`, `style`, `sequence_join`,
    `list_marker_policy`, `list_hints`, `code_hints`, `progress_hints`,
    `columns_hints`, `task_hints`, `table_column_hints`, `table_cell_hints`,
    `table_terminal_hints`, `table_title`) read/write typed fields and perform
    **no** `serde_json` call. A unit test asserts each round-trips through the
    typed field, not the bag.
-3. `NodeAttrs` serializes sparsely (`skip_serializing_if`) and deserializes
-   old-but-typed payloads via `#[serde(default)]`; the `render_tree_roundtrip`
-   test passes.
+3. `NodeAttrs` serializes sparsely (`skip_serializing_if`) with the existing
+   `camelCase` field convention, and deserializes typed payloads via
+   `#[serde(default)]`; the `render_tree_roundtrip` test passes. The docs state
+   that this JSON shape is same-version serde output, not a promised
+   cross-version durable format. Stale renderable-owned hint keys left in
+   `data` are validation errors, not migration inputs.
 4. A single `renderable` inheritance resolver exists and is the only inheritance
    implementation in `biscuit-terminal`'s terminal fold (the per-renderer
    push-down is gone there). darkmatter's switch is *darkmatter-cutover*.
 5. The performance-gate test exists, folds the corpus per target, and asserts
-   zero hint round-trips and zero per-node key allocations during the fold.
+   zero renderable-owned hint round-trips and zero renderable-owned per-node key
+   allocations during the fold, while permitting explicitly namespaced
+   extension hints.
 6. The whole workspace **compiles and its tests run**: the storage change's
    call-site fixes land in this coordinated change.
 7. Local renderable skill/docs describe the typed `NodeAttrs`, the
    `ComponentHints` grouping, the inheritance resolver, and the perf-gate
    invariant; no doc claims attributes are stored as JSON in `data`.
+8. Validation is updated to validate typed fields directly instead of reading
+   renderable-owned hint keys from `data`. Tests preserve the existing
+   kind-placement rules: layout on inline nodes warns, style is allowed on
+   block nodes and inline `Span`, sequence-join is `Root`-only, list marker
+   policy is `List`-only, task hints are `ListItem`-only, and table title is
+   `Table`-only.
 
 ## Risks
 
@@ -247,6 +302,15 @@ contract with no per-node cost.
 - **Gate instrumentation leaking into release.** The counting hook must be
   test-only. Mitigation: gate it behind `#[cfg(test)]` / a test-only feature so
   release builds carry no counter.
+- **Serde shape confusion.** The tree remains serde-serializable, but this
+  change intentionally removes compatibility with the old renderable-owned
+  hint keys. Mitigation: update docs and fixtures in the same change and call
+  out that durable cross-version tree archives are not supported by this spec.
+- **Owned accessor clones.** Preserving accessor names/signatures avoids a
+  call-site explosion, but returning owned values from typed fields can still
+  clone `Layout`, `Style`, and hint groups. Mitigation: keep the compatibility
+  accessors, add borrowed accessors for renderer folds, and use the borrowed
+  forms in hot paths.
 
 ## Related
 
