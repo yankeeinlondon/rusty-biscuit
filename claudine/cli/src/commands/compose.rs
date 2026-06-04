@@ -456,10 +456,14 @@ fn run_compose_inner(
     let shared_approval_cache =
         std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
 
-    let approval_options = super::wrap::build_harness_shell_options_with_cache(
-        &source.resolved_path,
-        prep_context.source_repo_root.as_deref(),
-        Some(std::sync::Arc::clone(&shared_approval_cache)),
+    let approval_options = super::wrap::apply_composition_shell_overrides(
+        super::wrap::build_harness_shell_options_with_cache(
+            &source.resolved_path,
+            prep_context.source_repo_root.as_deref(),
+            Some(std::sync::Arc::clone(&shared_approval_cache)),
+        ),
+        shared.dry_run,
+        shared.yolo,
     );
 
     let preflight = {
@@ -494,8 +498,11 @@ fn run_compose_inner(
         pause_reset_margin: claudine::composition::resolve_pause_reset_margin_from_env(),
     };
 
+    // `--dry-run` bypasses the iteration engine entirely: a single
+    // composition + single render (Decision 4). Loop detection is skipped so
+    // a doc with `loop:` frontmatter renders once rather than iterating.
     let file_for_loop = file.clone();
-    if let Some(loop_result) =
+    if !shared.dry_run && let Some(loop_result) =
         run_loop_with_overrides(&source, set_overrides.as_ref(), loop_options, |ctx| {
             let prepared = {
                 let _span = info_span!("compose_prep.prepare_direct").entered();
@@ -853,10 +860,14 @@ fn run_inline_compose_inner(
     let shared_approval_cache =
         std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
 
-    let approval_options = super::wrap::build_harness_shell_options_with_cache(
-        &source.resolved_path,
-        prep_context.source_repo_root.as_deref(),
-        Some(std::sync::Arc::clone(&shared_approval_cache)),
+    let approval_options = super::wrap::apply_composition_shell_overrides(
+        super::wrap::build_harness_shell_options_with_cache(
+            &source.resolved_path,
+            prep_context.source_repo_root.as_deref(),
+            Some(std::sync::Arc::clone(&shared_approval_cache)),
+        ),
+        shared.dry_run,
+        shared.yolo,
     );
 
     let preflight = {
@@ -891,8 +902,14 @@ fn run_inline_compose_inner(
         pause_reset_margin: claudine::composition::resolve_pause_reset_margin_from_env(),
     };
 
+    // `--dry-run` bypasses the iteration engine entirely: a single
+    // composition + single render (Decision 4). Loop detection is skipped so
+    // a doc with `loop:` frontmatter renders once rather than iterating. The
+    // single-render path (below) reaches the post-preflight dry-run seam,
+    // which returns before the provider launches — so the source file is
+    // never mutated (Decision 2).
     let file_for_loop = file.clone();
-    if let Some(loop_result) =
+    if !shared.dry_run && let Some(loop_result) =
         run_loop_with_overrides(&source, set_overrides.as_ref(), loop_options, |ctx| {
             let prepared = {
                 let _span = info_span!("compose_prep.prepare_inline").entered();

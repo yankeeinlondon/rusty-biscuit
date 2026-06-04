@@ -36,7 +36,7 @@ use super::live_semantic_sink::LiveSemanticSink;
 use super::profile::{self, WrapperProfile};
 use super::{
     HarnessPromptMode, HarnessPromptState, StreamSummaryContext, StructuredCodexOutput,
-    StructuredSummaryDetails, WrapperHarnessPermissionProbe,
+    StructuredSummaryDetails, WrapperHarnessPermissionProbe, apply_composition_shell_overrides,
     build_harness_shell_options_with_cache, emit_stream_summary_with_context, format_summary_prose,
     format_verbose_summary_details_prose, materialized_harness_prompt_from_prepared,
     resolve_binary_path_direct, run_harness_loop, structured_verbosity, switch_process_cwd,
@@ -44,6 +44,7 @@ use super::{
 };
 use crate::log;
 
+pub(crate) mod dry_run;
 pub(crate) mod inline_guards;
 pub(crate) mod legacy_goose;
 pub(crate) mod prep_context;
@@ -1298,8 +1299,6 @@ pub(crate) fn execute_composition_request_inner(
         super::profile::validate_argv_flags_before_separator(profile.binary(), &child_args);
     }
 
-    let sp_display_lines = super::system_prompt::describe_effective(&effective_sp);
-
     record_substage(
         &mut perf_collector,
         &mut last_checkpoint,
@@ -1310,38 +1309,10 @@ pub(crate) fn execute_composition_request_inner(
         collector.mark_env_setup_complete();
     }
 
-    // --dry-run: print what would be executed and exit
-    if request.dry_run {
-        crate::output::log_dry_run(
-            profile,
-            &binary_path,
-            &child_args,
-            request.repo,
-            &env_plan,
-            None,
-            child_cwd,
-            &term,
-            sp_display_lines.as_deref(),
-        );
-        if let Some(collector) = perf_collector.as_mut() {
-            collector.set_dry_run();
-        }
-        let outcome = SingleCompositionOutcome {
-            exit_code: 0,
-            provider,
-            agent_perf: None,
-            // Dry-run never produces a per-iteration summary.
-            iteration_signals: None,
-        };
-        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
-        // The perf report is always emitted to stderr when requested.
-        if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
-        }
-        return Ok(outcome);
-    }
+    // --dry-run no longer exits here. The seam now sits *after* the harness
+    // preflight block below, so harness shell-approval + writability
+    // pre-checks participate in the dry-run gate before the composed output
+    // is rendered. See the `request.dry_run` early-return after preflight.
 
     switch_process_cwd(child_cwd)?;
 
@@ -1366,10 +1337,14 @@ pub(crate) fn execute_composition_request_inner(
     let harness_enabled =
         claudine::harness::has_harness_properties(&request.prepared.effective_frontmatter);
 
-    let shell_options = build_harness_shell_options_with_cache(
-        &request.prepared.resolved_path,
-        effective_repo_root,
-        request.shared_approval_cache.clone(),
+    let shell_options = apply_composition_shell_overrides(
+        build_harness_shell_options_with_cache(
+            &request.prepared.resolved_path,
+            effective_repo_root,
+            request.shared_approval_cache.clone(),
+        ),
+        request.dry_run,
+        request.yolo,
     );
 
     // --- Lifecycle notification setup ---
@@ -1467,6 +1442,41 @@ pub(crate) fn execute_composition_request_inner(
             guard.emit_blocked_or_failure();
             eyre!("{reason}")
         })?;
+    }
+
+    // --dry-run seam: the full composition pipeline (compose, real shell
+    // expansion, shell approval, harness pre-checks) has now run. Stop here —
+    // before any provider launches — and emit the composed artifacts:
+    //   - the composed body → stdout (the data product; pipeable/redirectable)
+    //   - the finalized frontmatter (highlighted YAML) → stderr
+    //   - a metadata table → stderr (after the frontmatter)
+    // `--quiet` / `--silent` do not suppress this render: the dry-run output
+    // *is* the command's purpose.
+    if request.dry_run {
+        let render = dry_run::DryRunRender::from_request(&request);
+
+        crate::log::data(&render.body);
+        crate::log::message(&dry_run::render_frontmatter(&render.frontmatter));
+        crate::log::message(&dry_run::render_metadata_table(&render, &term));
+
+        if let Some(collector) = perf_collector.as_mut() {
+            collector.set_dry_run();
+        }
+        let outcome = SingleCompositionOutcome {
+            exit_code: 0,
+            provider,
+            agent_perf: None,
+            // Dry-run never produces a per-iteration summary.
+            iteration_signals: None,
+        };
+        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+        // The perf report is always emitted to stderr when requested.
+        if let Some(collector) = perf_collector {
+            let total = total_start.elapsed();
+            let report = collector.into_report(total);
+            eprint!("{}", crate::perf::render_perf_report(&report));
+        }
+        return Ok(outcome);
     }
 
     // Emit a single preflight-complete indicator for direct compose and

@@ -5,6 +5,7 @@ use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
@@ -390,6 +391,22 @@ pub(crate) fn execute_sequence(
             break;
         }
         let step = &plan.steps[step_index];
+
+        // Dry-run: separate each document's rendered metadata block with a
+        // divider on stderr. The per-document render (frontmatter + table →
+        // stderr, body → stdout) happens inside
+        // `execute_composition_request_inner`; the divider sits *between*
+        // documents, so it precedes docs 2..M. `--quiet` / `--silent` have
+        // no effect on dry-run output, so this emits unconditionally.
+        if shared.dry_run && step_index > 0 {
+            let divider = Prose::new(format!(
+                "<dim>=== Document {} of {} ===</dim>",
+                step_index + 1,
+                total_steps
+            ))
+            .render(&log::terminal());
+            log::message(&divider);
+        }
 
         let _step_span = info_span!(
             "sequence_step",
