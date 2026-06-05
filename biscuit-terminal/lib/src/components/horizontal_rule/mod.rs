@@ -2633,9 +2633,9 @@ mod tests {
     fn test_render_to_browser_percent_margin() {
         use crate::utils::layout::Layout;
         let layout = Layout {
-            margin: crate::utils::layout::Margin {
+            margin: crate::utils::layout::Edges {
                 top: TargetValue::universal(Length::percent(2.0).unwrap()),
-                ..crate::utils::layout::Margin::default()
+                ..crate::utils::layout::Edges::default()
             },
             ..Layout::default()
         };
@@ -2877,7 +2877,7 @@ mod tests {
         fn parity_with_custom_margins() {
             let rule = HorizontalRule::new()
                 .with_layout(crate::utils::layout::Layout {
-                    margin: crate::utils::layout::Margin {
+                    margin: crate::utils::layout::Edges {
                         top: renderable::layout::TargetValue::universal(
                             renderable::layout::Length::ch(2),
                         ),

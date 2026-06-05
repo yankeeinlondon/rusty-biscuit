@@ -24,7 +24,7 @@ use crate::{
     terminal::Terminal,
     utils::{
         color::Color,
-        layout::{Layout, Length, Margin, TargetValue},
+        layout::{Layout, Length, Edges, TargetValue},
         wrap_policy::WordWrap,
     },
 };
@@ -87,9 +87,9 @@ impl StatusBlock {
             border_color: None,
             border: DEFAULT_BORDER.to_string(),
             layout: Layout {
-                margin: Margin {
+                margin: Edges {
                     right: TargetValue::universal(Length::ch(5)),
-                    ..Margin::default()
+                    ..Edges::default()
                 },
                 word_wrap: WordWrap::WrapProse(Some(8), None),
                 ..Layout::default()

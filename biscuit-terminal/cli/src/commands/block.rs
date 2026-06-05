@@ -4,32 +4,20 @@ use crate::commands::{CliContext, Run};
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use clap::Args as ClapArgs;
 use renderable::layout::{Length, TargetValue};
-use renderable::style::{
-    Border, BorderSides, Fill, FillBand, FillIntensity, PerMode, Style, TextEmphasis,
-};
+use renderable::style::{Background, Border, BorderSides, PerMode, Style, TextEmphasis};
 use renderable::tree::{RenderNode, RenderStrictness};
 
 const BLOCK_EXAMPLE: &str = "Release candidate passed";
-const BLOCK_EXAMPLE_CMD: &str = r#"bt block "Release candidate passed" --fg green --bold --border left --fill subtle --fill-band indented"#;
+const BLOCK_EXAMPLE_CMD: &str =
+    r#"bt block "Release candidate passed" --fg green --bold --border left --fill subtle"#;
 
-/// The fill intensity selected by `--fill`.
+/// The adaptive background tint selected by `--fill`.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum FillArg {
     /// A faint tint.
     Subtle,
-    /// A strong, clearly visible band.
+    /// A strong, clearly visible tint.
     Pronounced,
-}
-
-/// The band a `--fill` paints across the available width.
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum FillBandArg {
-    /// Paint the full available width.
-    Full,
-    /// Paint the content band only.
-    Padded,
-    /// Paint an indented band, inset from both edges.
-    Indented,
 }
 
 /// Which sides a `--border` is drawn on.
@@ -82,17 +70,9 @@ pub struct BlockArgs {
     #[arg(long)]
     pub strike: bool,
 
-    /// Paint a background fill band behind the text.
+    /// Paint an adaptive background tint behind the text.
     #[arg(long, value_enum)]
     pub fill: Option<FillArg>,
-
-    /// The band painted by `--fill`.
-    #[arg(long = "fill-band", value_enum, default_value = "full")]
-    pub fill_band: FillBandArg,
-
-    /// Inset, in columns, applied to the fill band.
-    #[arg(long)]
-    pub inset: Option<u32>,
 
     /// Draw a border around the block.
     #[arg(long, value_enum)]
@@ -130,20 +110,9 @@ impl BlockArgs {
         };
 
         if let Some(fill) = self.fill {
-            let intensity = match fill {
-                FillArg::Subtle => FillIntensity::Subtle,
-                FillArg::Pronounced => FillIntensity::Pronounced,
-            };
-            let band = match self.fill_band {
-                FillBandArg::Full => FillBand::Full,
-                FillBandArg::Padded => FillBand::Padded,
-                FillBandArg::Indented => FillBand::Indented,
-            };
-            style.fill = Some(Fill {
-                color: None,
-                intensity,
-                band,
-                inset: self.inset.map(|n| TargetValue::universal(Length::ch(n))),
+            style.background = Some(match fill {
+                FillArg::Subtle => Background::subtle(),
+                FillArg::Pronounced => Background::pronounced(),
             });
         }
 
@@ -213,7 +182,6 @@ impl Run for BlockArgs {
             style_args.bold = true;
             style_args.border.get_or_insert(BorderArg::Left);
             style_args.fill.get_or_insert(FillArg::Subtle);
-            style_args.fill_band = FillBandArg::Indented;
         }
         let style = style_args.build_style()?;
 

@@ -4190,12 +4190,12 @@ mod tests {
 
     #[test]
     fn test_filesystem_builder_layout() {
-        use crate::utils::layout::{Layout, Length, Margin, TargetValue};
+        use crate::utils::layout::{Layout, Length, Edges, TargetValue};
 
         let custom_layout = Layout {
-            margin: Margin {
+            margin: Edges {
                 left: TargetValue::universal(Length::ch(4)),
-                ..Margin::default()
+                ..Edges::default()
             },
             ..Layout::default()
         };

@@ -3225,12 +3225,12 @@ mod render_tree_tests {
 
     #[test]
     fn render_tree_max_width_with_margins() {
-        use renderable::layout::{Layout, Length, Margin, TargetValue};
+        use renderable::layout::{Layout, Length, Edges, TargetValue};
 
         let term = Terminal::new_optimistic(80);
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hello")]);
         para.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(4)),
+            margin: Edges::x(Length::ch(4)),
             max_width: Some(TargetValue::universal(Length::ch(20))),
             ..Layout::default()
         });
@@ -3250,7 +3250,7 @@ mod render_tree_tests {
 
     #[test]
     fn render_tree_nested_layout_composition_under_max_width() {
-        use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue};
+        use renderable::layout::{Alignment, Layout, Length, Edges, TargetValue};
 
         let term = Terminal::new_optimistic(80);
 
@@ -3261,7 +3261,7 @@ mod render_tree_tests {
                 "content",
             )])]);
         block.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             max_width: Some(TargetValue::universal(Length::ch(30))),
             alignment: Alignment::Right,
             ..Layout::default()
@@ -3455,10 +3455,10 @@ mod render_tree_tests {
 
     #[test]
     fn render_tree_inline_span_emphasis_does_not_leak_box_layers() {
-        use renderable::style::{Border, BorderSides, Fill, Style, TextEmphasis};
+        use renderable::style::{Border, BorderSides, Style, TextEmphasis};
 
-        // Border and fill are box-painting layers with no inline meaning: a
-        // `Span` declaring them must not draw box-drawing glyphs inline.
+        // Border is a box-painting layer with no inline meaning: a `Span`
+        // declaring it must not draw box-drawing glyphs inline.
         let mut span = RenderNode::span(vec![], vec![RenderNode::text("word")]);
         span.attrs.set_style(&Style {
             emphasis: TextEmphasis {
@@ -3469,7 +3469,6 @@ mod render_tree_tests {
                 sides: BorderSides::All,
                 ..Border::default()
             }),
-            fill: Some(Fill::default()),
             ..Style::default()
         });
         let para = RenderNode::paragraph(vec![RenderNode::text("x "), span]);

@@ -10,18 +10,16 @@
 //! - **Emphasis** — reuses [`TextEmphasis::sgr_ops`] for the non-underline
 //!   layers and degrades the underline variant against the terminal's
 //!   [`UnderlineSupport`](crate::discovery::detection::UnderlineSupport).
-//! - **Box painting** — [`Border`] emits box-drawing characters and [`Fill`]
-//!   paints a background band — the full available width, the content band,
-//!   or an inset band — honoring [`Fill::inset`].
+//! - **Box painting** — [`Border`] emits box-drawing characters around the
+//!   content.
 //!
 //! A component never hand-writes ANSI; it declares a [`Style`] and the
 //! renderer lowers it here.
 
-use renderable::color::{BasicColor, Color, ColorMode as RenderColorMode, RgbColor};
+use renderable::color::{Color, ColorMode as RenderColorMode};
 use renderable::layout::{Length, TargetValue};
 use renderable::style::{
-    Border, BorderLineStyle, BorderSides, BorderWeight, Fill, FillBand, FillIntensity, PerMode,
-    Style, UnderlineStyle,
+    Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style, UnderlineStyle,
 };
 use renderable::target::RenderTarget;
 
@@ -36,20 +34,21 @@ pub(crate) const SGR_RESET: &str = "\x1b[0m";
 /// Applies a node's [`Style`] to already-rendered terminal `content`.
 ///
 /// The text-appearance layers (`color`, `background`, `emphasis`) wrap each
-/// line; [`Fill`] paints a background band; [`Border`] draws a box around the
-/// result. `available_width` is the width the `content` was rendered within
-/// (already reduced by any border overhead — see
-/// [`border_horizontal_overhead`]).
+/// line; [`Border`] draws a box around the result. `available_width` is the
+/// width the `content` was rendered within (already reduced by any border
+/// overhead — see [`border_horizontal_overhead`]); it is retained for the
+/// padding-box painting restored in *renderer-folds* and is not consulted by
+/// the current text layers.
 pub(crate) fn apply_style(
     content: &str,
     style: &Style,
     term: &Terminal,
-    available_width: u32,
+    _available_width: u32,
 ) -> String {
     let depth = &term.color_depth;
     let mode: RenderColorMode = (&term.color_mode).into();
 
-    let painted = paint_text(content, style, depth, mode, term, available_width);
+    let painted = paint_text(content, style, depth, mode, term);
     match &style.border {
         Some(border) => render_border(&painted, border, depth, mode),
         None => painted,
@@ -70,14 +69,17 @@ pub(crate) fn border_horizontal_overhead(style: &Style) -> u32 {
     u32::from(left) * 2 + u32::from(right) * 2
 }
 
-/// Wraps each line of `content` with the text-appearance and fill layers.
+/// Wraps each line of `content` with the text-appearance layers.
+///
+/// The background is the explicit [`Style::background`] color; the former
+/// per-component fill band is intentionally not reproduced here — it returns
+/// via `padding` + `background` in *renderer-folds*.
 fn paint_text(
     content: &str,
     style: &Style,
     depth: &ColorDepth,
     mode: RenderColorMode,
     term: &Terminal,
-    available_width: u32,
 ) -> String {
     // The opening SGR run: emphasis first, then foreground and background so a
     // single `\x1b[0m` at the end of the line clears the whole run.
@@ -85,58 +87,29 @@ fn paint_text(
     if let Some(fg) = style.color.as_ref().and_then(|c| resolve_color(c, mode)) {
         open.push_str(&color_sgr(fg, depth, false).unwrap_or_default());
     }
-
-    // The background is the explicit `background` color when set, otherwise a
-    // non-transparent `fill` contributes one. Both lower to a background SGR.
-    let fill = style
-        .fill
-        .as_ref()
-        .filter(|f| f.intensity != FillIntensity::Transparent);
-    let background = style
+    if let Some(bg) = style
         .background
         .as_ref()
         .and_then(|c| resolve_color(c, mode))
         .and_then(|c| color_sgr(c, depth, true))
-        .or_else(|| fill.and_then(|f| fill_sgr(f, depth, mode)));
-    if let Some(bg) = &background {
-        open.push_str(bg);
+    {
+        open.push_str(&bg);
     }
 
-    // The painted band: a `Fill` selects how much of the available width is
-    // painted and where it starts (see [`fill_band`]); without a fill only
-    // the content itself is painted.
-    let widest = content.split('\n').map(visible_width).max().unwrap_or(0);
-    let (band_offset, band_width) = match fill {
-        Some(f) => fill_band(f, available_width, widest),
-        None => (0, 0),
-    };
-
-    if open.is_empty() && band_width == 0 {
+    if open.is_empty() {
         return content.to_string();
     }
-
     let mut out = String::new();
     for (idx, line) in content.split('\n').enumerate() {
         if idx > 0 {
             out.push('\n');
         }
-        if band_offset > 0 {
-            // The inset columns sit outside the painted band.
-            out.push_str(&" ".repeat(band_offset as usize));
+        if line.is_empty() {
+            continue;
         }
-        let pad = band_width.saturating_sub(visible_width(line));
-        let body = if pad > 0 {
-            format!("{line}{}", " ".repeat(pad as usize))
-        } else {
-            line.to_string()
-        };
-        if body.is_empty() || open.is_empty() {
-            out.push_str(&body);
-        } else {
-            out.push_str(&open);
-            out.push_str(&body);
-            out.push_str(SGR_RESET);
-        }
+        out.push_str(&open);
+        out.push_str(line);
+        out.push_str(SGR_RESET);
     }
     out
 }
@@ -144,9 +117,9 @@ fn paint_text(
 /// The opening SGR run for a [`Style`]'s text-appearance layers.
 ///
 /// Emphasis, then foreground, then background — the same order
-/// [`paint_text`] opens its run in. [`Border`] and [`Fill`] are box-painting
-/// layers with no place in an inline run and are excluded. The result is
-/// empty when the style declares no text appearance.
+/// [`paint_text`] opens its run in. [`Border`] is a box-painting layer with no
+/// place in an inline run and is excluded. The result is empty when the style
+/// declares no text appearance.
 ///
 /// Used by the inline renderer to apply a [`Span`](renderable::tree::NodeKind::Span)'s
 /// declared [`Style`]; pair it with [`SGR_RESET`] to close the run.
@@ -293,89 +266,6 @@ fn rgb_and_fallback(color: Color) -> Option<((u8, u8, u8), renderable::color::Ba
         | Color::DefaultBackground
         | Color::Reset => None,
     }
-}
-
-/// The default indent, in terminal columns, for a [`FillBand::Indented`]
-/// band that carries no explicit [`Fill::inset`].
-const DEFAULT_INDENT: u32 = 4;
-
-/// Resolves a [`Fill`]'s [`inset`](Fill::inset) to terminal columns.
-///
-/// `Ch` is a column count; `Percent` is taken against `available_width`;
-/// `Zero`, a missing inset, and the non-universal `Css` unit yield `0`.
-fn resolve_inset_columns(fill: &Fill, available_width: u32) -> u32 {
-    let Some(length) = fill
-        .inset
-        .as_ref()
-        .and_then(|tv| tv.resolve(RenderTarget::Terminal))
-    else {
-        return 0;
-    };
-    match length {
-        Length::Zero | Length::Css(_) => 0,
-        Length::Ch(n) => *n,
-        Length::Percent(pct) => ((available_width as f32) * (pct / 100.0)).round() as u32,
-    }
-}
-
-/// The leading unpainted columns and painted width of a [`Fill`]'s band.
-///
-/// - [`FillBand::Full`] paints the whole available width; an explicit
-///   [`inset`](Fill::inset) narrows it symmetrically.
-/// - [`FillBand::Padded`] paints just the content band, leaving the
-///   surrounding padding unpainted; an inset offsets that band.
-/// - [`FillBand::Indented`] insets the band from both edges — by the explicit
-///   [`inset`](Fill::inset), or [`DEFAULT_INDENT`] when none is set.
-///
-/// The painted width is never narrower than `widest` (the content), so an
-/// inset can never clip the text it sits behind.
-fn fill_band(fill: &Fill, available_width: u32, widest: u32) -> (u32, u32) {
-    let inset = resolve_inset_columns(fill, available_width);
-    match fill.band {
-        FillBand::Full => {
-            let width = available_width
-                .saturating_sub(inset.saturating_mul(2))
-                .max(widest);
-            (inset, width)
-        }
-        FillBand::Padded => (inset, widest),
-        FillBand::Indented => {
-            let indent = if fill.inset.is_some() {
-                inset
-            } else {
-                DEFAULT_INDENT
-            };
-            let width = available_width
-                .saturating_sub(indent.saturating_mul(2))
-                .max(widest);
-            (indent, width)
-        }
-    }
-}
-
-/// The background SGR escape contributed by a [`Fill`].
-///
-/// An explicit fill color is degraded to `depth`; without one, a default tint
-/// is chosen for the background mode, deepened for [`FillIntensity::Pronounced`].
-/// Both the explicit and implicit-tint paths route through [`color_sgr`], so
-/// the tint honors the terminal's [`ColorDepth`] — truecolor terminals get the
-/// 24-bit escape, lesser terminals get the degraded fallback, and a terminal
-/// with no color support yields `None`.
-fn fill_sgr(fill: &Fill, depth: &ColorDepth, mode: RenderColorMode) -> Option<String> {
-    if let Some(color) = fill.color.as_ref().and_then(|c| resolve_color(c, mode)) {
-        return color_sgr(color, depth, true);
-    }
-    // The implicit tint as an RGB triple plus a basic-palette fallback, so the
-    // degradation path is the same one authored colors take.
-    let tint = match (mode, fill.intensity) {
-        (RenderColorMode::Light, FillIntensity::Pronounced) => {
-            RgbColor::new(215, 215, 220, BasicColor::White)
-        }
-        (RenderColorMode::Light, _) => RgbColor::new(235, 235, 238, BasicColor::White),
-        (_, FillIntensity::Pronounced) => RgbColor::new(50, 50, 56, BasicColor::Black),
-        (_, _) => RgbColor::new(30, 30, 34, BasicColor::Black),
-    };
-    color_sgr(Color::Rgb(tint), depth, true)
 }
 
 /// Resolves a [`BorderSides`] to `(top, right, bottom, left)` booleans.
@@ -723,141 +613,6 @@ mod tests {
         };
         let out = apply_style("x", &style, &truecolor_term(), 5);
         assert!(out.contains("\x1b[44m"), "got {out:?}");
-    }
-
-    #[test]
-    fn implicit_fill_tint_degrades_with_color_depth() {
-        // The implicit (color-less) fill tint must honor `ColorDepth` rather
-        // than emitting a truecolor escape unconditionally.
-        let style = Style {
-            fill: Some(Fill {
-                intensity: FillIntensity::Subtle,
-                band: renderable::style::FillBand::Full,
-                ..Fill::default()
-            }),
-            ..Style::default()
-        };
-
-        let mut truecolor = truecolor_term();
-        truecolor.color_depth = ColorDepth::TrueColor;
-        assert!(
-            apply_style("hi", &style, &truecolor, 10).contains("\x1b[48;2;"),
-            "truecolor terminal should get a 24-bit fill escape"
-        );
-
-        let mut enhanced = truecolor_term();
-        enhanced.color_depth = ColorDepth::Enhanced;
-        let out = apply_style("hi", &style, &enhanced, 10);
-        assert!(
-            out.contains("\x1b[48;5;") && !out.contains("\x1b[48;2;"),
-            "256-color terminal should get a color-cube fill escape, got {out:?}"
-        );
-
-        let mut basic = truecolor_term();
-        basic.color_depth = ColorDepth::Basic;
-        let out = apply_style("hi", &style, &basic, 10);
-        assert!(
-            !out.contains("\x1b[48;2;") && !out.contains("\x1b[48;5;"),
-            "16-color terminal should not get a truecolor or 256 fill escape, got {out:?}"
-        );
-
-        let mut none = truecolor_term();
-        none.color_depth = ColorDepth::None;
-        let out = apply_style("hi", &style, &none, 10);
-        assert!(
-            !out.contains("\x1b[48;"),
-            "a terminal with no color support must emit no fill escape, got {out:?}"
-        );
-    }
-
-    #[test]
-    fn fill_paints_a_background_band() {
-        let style = Style {
-            fill: Some(Fill {
-                intensity: FillIntensity::Subtle,
-                band: renderable::style::FillBand::Full,
-                ..Fill::default()
-            }),
-            ..Style::default()
-        };
-        let out = apply_style("hi", &style, &truecolor_term(), 10);
-        // The band pads the two-column content out to the available width.
-        assert!(out.contains("\x1b[48;2;"), "got {out:?}");
-        assert!(visible_width(out.split('\n').next().unwrap()) >= 10);
-    }
-
-    #[test]
-    fn fill_band_padded_paints_only_the_content_width() {
-        let style = Style {
-            fill: Some(Fill {
-                intensity: FillIntensity::Subtle,
-                band: FillBand::Padded,
-                ..Fill::default()
-            }),
-            ..Style::default()
-        };
-        let out = apply_style("hi", &style, &truecolor_term(), 20);
-        let first = out.split('\n').next().unwrap();
-        // No leading inset; the band is the two-column content, not 20.
-        assert!(!first.starts_with(' '), "got {first:?}");
-        assert_eq!(visible_width(first), 2, "got {first:?}");
-    }
-
-    #[test]
-    fn fill_band_indented_insets_from_both_edges() {
-        let style = Style {
-            fill: Some(Fill {
-                intensity: FillIntensity::Subtle,
-                band: FillBand::Indented,
-                ..Fill::default()
-            }),
-            ..Style::default()
-        };
-        let out = apply_style("hi", &style, &truecolor_term(), 20);
-        let first = out.split('\n').next().unwrap();
-        // `DEFAULT_INDENT` (4) leading unpainted columns, then a band inset
-        // from both edges: 20 - 2*4 = 12.
-        assert!(first.starts_with("    "), "got {first:?}");
-        assert!(!first.starts_with("     "), "got {first:?}");
-        assert_eq!(visible_width(first), DEFAULT_INDENT + 12, "got {first:?}");
-    }
-
-    #[test]
-    fn fill_inset_offsets_and_narrows_a_full_band() {
-        let style = Style {
-            fill: Some(Fill {
-                intensity: FillIntensity::Subtle,
-                band: FillBand::Full,
-                inset: Some(TargetValue::universal(Length::ch(3))),
-                ..Fill::default()
-            }),
-            ..Style::default()
-        };
-        let out = apply_style("hi", &style, &truecolor_term(), 20);
-        let first = out.split('\n').next().unwrap();
-        // 3 leading inset columns; the band narrows to 20 - 2*3 = 14.
-        assert!(first.starts_with("   "), "got {first:?}");
-        assert!(!first.starts_with("    "), "got {first:?}");
-        assert_eq!(visible_width(first), 3 + 14, "got {first:?}");
-    }
-
-    #[test]
-    fn fill_band_indented_explicit_inset_overrides_the_default() {
-        let style = Style {
-            fill: Some(Fill {
-                intensity: FillIntensity::Subtle,
-                band: FillBand::Indented,
-                inset: Some(TargetValue::universal(Length::ch(2))),
-                ..Fill::default()
-            }),
-            ..Style::default()
-        };
-        let out = apply_style("hi", &style, &truecolor_term(), 20);
-        let first = out.split('\n').next().unwrap();
-        assert!(
-            first.starts_with("  ") && !first.starts_with("   "),
-            "got {first:?}"
-        );
     }
 
     #[test]
