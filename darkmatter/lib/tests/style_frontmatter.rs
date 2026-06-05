@@ -351,10 +351,7 @@ fn code_theme_cli_override_skips_frontmatter_in_bespoke_apply() {
     let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
 
     let page = page_with_width(80);
-    let overrides = BespokeStyleOverrides {
-        code_theme: true,
-        ..BespokeStyleOverrides::default()
-    };
+    let overrides = BespokeStyleOverrides { code_theme: true };
     let page = apply_bespoke_style(page, &style, overrides, None).expect("apply_bespoke_style");
 
     assert!(
