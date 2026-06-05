@@ -601,7 +601,11 @@ fn resolve_live_target_with_tty(
 /// and the no-TTY abort body (via [`agent_state_breakdown`] /
 /// [`invalid_agent_message`]) so the three surfaces cannot drift. Returns
 /// Prose **markup**; callers render it with their own terminal.
-fn agent_prompt_message(
+///
+/// The `sequence` orchestrator reuses this before its review screen so an
+/// invalid-scalar or zero-installed-list sequence shows the same pre-prompt
+/// message direct compose shows and the dry-run table predicts.
+pub(crate) fn agent_prompt_message(
     state: &AgentResolutionState,
     source_path: &std::path::Path,
 ) -> Option<String> {
@@ -632,9 +636,11 @@ fn picker_scope_for_state(state: &AgentResolutionState) -> Option<&[Provider]> {
 /// Build the picker plan for a prompting state, applying the per-state scope.
 ///
 /// Pure (no I/O): the live path and L1 tests both go through here so the
-/// scope contract is verifiable without a TTY.
+/// scope contract is verifiable without a TTY. The `sequence` review screen
+/// reuses this so its picker narrows `ListMultipleInstalled` to the same
+/// installed-from-list subset the direct compose picker offers.
 #[allow(clippy::result_large_err)]
-fn scoped_picker_plan_for_state(
+pub(crate) fn scoped_picker_plan_for_state(
     state: &AgentResolutionState,
     hints: &claudine::composition::EffectiveSelectionHints,
     snapshot: &claudine::composition::InstalledProviderSnapshot,
