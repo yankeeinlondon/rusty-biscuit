@@ -536,6 +536,8 @@ mod tests {
     // ── scalar coercion: number ─────────────────────────────────────────
 
     #[test]
+    // `3.14` is decimal-coercion test data, not an approximation of π.
+    #[allow(clippy::approx_constant)]
     fn string_to_number_integer_and_decimal() {
         assert_eq!(coerce_to_number(&json!("42")), Some(json!(42)));
         assert_eq!(coerce_to_number(&json!("-7")), Some(json!(-7)));
@@ -544,6 +546,8 @@ mod tests {
     }
 
     #[test]
+    // `3.14` is decimal-coercion test data, not an approximation of π.
+    #[allow(clippy::approx_constant)]
     fn decimal_string_against_integer_field_still_produces_float() {
         // The engine just produces the number; the integer check runs later.
         assert_eq!(coerce_to_number(&json!("3.14")), Some(json!(3.14)));
@@ -564,6 +568,8 @@ mod tests {
     }
 
     #[test]
+    // `3.14` is decimal-coercion test data, not an approximation of π.
+    #[allow(clippy::approx_constant)]
     fn large_integral_strings_match_serde_json_number_model() {
         // Coercion mirrors serde_json's number parsing: `i64::MAX` stays i64,
         // `i64::MAX + 1` becomes u64 (rather than being rejected), and the
@@ -582,6 +588,8 @@ mod tests {
     // ── scalar coercion: string ─────────────────────────────────────────
 
     #[test]
+    // `3.14` is float-to-string test data, not an approximation of π.
+    #[allow(clippy::approx_constant)]
     fn number_and_boolean_to_string() {
         assert_eq!(coerce_to_string(&json!(42)), Some(json!("42")));
         assert_eq!(coerce_to_string(&json!(3.14)), Some(json!("3.14")));
