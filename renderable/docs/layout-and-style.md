@@ -60,36 +60,65 @@ returns the named entry, and a `MarkdownPlus` lookup **falls back to the
 `Markdown` entry** — the one place the four `RenderTarget` variants
 (`Markdown`, `MarkdownPlus`, `Browser`, `Terminal`) are not independent.
 
-### `Margin`, `Alignment`, `Layout`
+### `Edges`, `Width`, `Alignment`, `Layout`
 
-`Margin` is a four-sided box (`top`/`right`/`bottom`/`left`), each side a
-`TargetValue<Length>`; constructors `all` / `x` / `y`. `Alignment` is
-`Left` (default) / `Center` / `Right`. `Layout` ties them together:
+`Edges` is a four-sided box (`top`/`right`/`bottom`/`left`), each side a
+`TargetValue<Length>`; constructors `all` / `x` / `y`. It is used for **both**
+`margin` and `padding` (renamed from the former `Margin` struct, which had no
+`type Margin = Edges` alias left behind). `Width` is the content-box sizing
+mode — `Auto` (default) / `FitContent` / `Fixed(TargetValue<Length>)`.
+`Alignment` is `Left` (default) / `Center` / `Right`. `Layout` ties them into
+the full CSS box model:
 
 ```rust
 pub struct Layout {
-    pub margin: Margin,
+    pub margin: Edges,                       // transparent outer space
+    pub padding: Edges,                      // reserved inner space; PAINTED by Style.background
+    pub width: Width,                        // content-box width mode
+    pub max_width: Option<TargetValue<Length>>,  // orthogonal upper cap
     pub alignment: Alignment,
-    pub max_width: Option<TargetValue<Length>>,
     pub word_wrap: WordWrap,
 }
 ```
 
-`Layout` describes a **block-level** component's relationship to its parent
-only. Appearance (background, fill, color) is deliberately *not* here — that is
-a `Style` concern (see §6).
+`Layout` describes a **block-level** component's CSS box only. Paint is
+deliberately *not* here — color, `background`, and `border` are `Style`
+concerns (see §6). The painted inner gutter that the deleted `Fill` once
+expressed is now `padding` (geometry, here) + `Style.background` (paint). Total
+horizontal occupancy is `margin + border + padding + used_width`, matching CSS
+`box-sizing: content-box`; renderers must reserve the cells a drawn border
+consumes.
 
-`Layout::default()` is zero margins, `Alignment::Left`, no `max_width`, and
-`WordWrap::None`. The `Default` impl is hand-written: `word_wrap` is explicitly
-`WordWrap::None`, **not** `WordWrap::default()` (which is a wrapping policy).
-Deriving `Default` here was the original implementation and caused a
-crate-wide regression — every `Prose` silently began wrapping — so the
-hand-written impl is load-bearing, not incidental.
+`width` and `max_width` are orthogonal and compose (CSS `width` + `max-width`):
+`Auto` + an 80ch cap, or `FitContent` + a 100ch cap, are both expressible — the
+expressiveness gain over the deprecated flat `PageFill`, which could state only
+one sizing fact at a time.
+
+`Layout::default()` is zero margins, zero padding, `Width::Auto`,
+`Alignment::Left`, no `max_width`, and `WordWrap::None`. The `Default` impl is
+hand-written: `word_wrap` is explicitly `WordWrap::None`, **not**
+`WordWrap::default()` (which is a wrapping policy). Deriving `Default` here was
+the original implementation and caused a crate-wide regression — every `Prose`
+silently began wrapping — so the hand-written impl is load-bearing, not
+incidental. `Layout::default()` + `Style::default()` is bit-identical to a node
+with no layout/style config; a node carrying *neither* attr renders identically
+and skips the styling pass (absence is the cheap default).
+
+### Serialization contract
+
+`Layout`, `Edges`, and `Width` derive serde. `Width` is
+`#[serde(rename_all = "snake_case")]` → `"auto"` / `"fit_content"` / `"fixed"`.
+The new `padding` and `width` fields are `#[serde(default)]`, so an older
+serialized tree carrying only `margin` / `alignment` / `max_width` /
+`word_wrap` deserializes to `Layout { padding: Edges::default(), width:
+Width::Auto, .. }`. The `Margin → Edges` change is an API rename, not a field
+rename: the `margin` field stays named `margin`; the new field is `padding`.
 
 ### Validation — `LayoutError`
 
-`Layout::validate()`, `Margin::validate()`, and `TargetValue::validate()`
-return the first `LayoutError`:
+`Layout::validate()` (covering `margin`, `padding`, `width`, and `max_width`),
+`Edges::validate()`, `Width::validate()`, and `TargetValue::validate()` return
+the first `LayoutError`:
 
 - `InvalidPercent` — a percentage outside `0.0..=100.0`, or non-finite.
 - `NonUniversalUnit` — a `Length::Css` in a `Universal` branch.
@@ -204,19 +233,29 @@ sits*, `Style` decides *what the box looks like*. A component declares a
 ```rust
 pub struct Style {
     pub color: Option<TargetValue<PerMode<Color>>>,
-    pub background: Option<TargetValue<PerMode<Color>>>,
+    pub background: Option<TargetValue<PerMode<Color>>>,  // paints content + padding box
     pub emphasis: TextEmphasis,
     pub border: Option<Border>,
-    pub fill: Option<Fill>,
 }
 ```
 
-- **`color` / `background`** — foreground and box background color.
+- **`color` / `background`** — foreground and box background color. Per CSS,
+  `background` paints the content box *and* the `Layout.padding` box (out to the
+  border edge), but not the margin.
 - **`emphasis`** — the shared `TextEmphasis` leaf (bold, dim, italic,
-  underline, strikethrough, blink), also reused by `Prose`.
+  underline, strikethrough, blink, inverse), also reused by `Prose`.
 - **`border`** — `Border { color, weight, line_style, sides, radius }`.
-- **`fill`** — `Fill { color, intensity, band, inset }`: painted-band
-  behavior, deliberately distinct from `background`.
+
+The former `fill` field and the whole fill abstraction (its intensity and band
+knobs) are **deleted**. The only thing fill offered beyond the box model was the
+implicit adaptive tint of its subtle / pronounced intensities; that survives as
+the `Background` constructor namespace — `Background::subtle()` / `pronounced()`
+return the `TargetValue<PerMode<Color>>` value `background` already holds
+(`Background` is zero-sized and never stored). The painted bands fill drew are
+now expressed structurally: a painted gutter is `Layout.padding` + `background`,
+a band hugging the text is `Layout.width: FitContent` + `alignment` +
+`background`. `Style::is_empty()` treats a `Style` carrying only
+`Background::subtle()` / `pronounced()` as non-empty.
 
 `PerMode<T>` (`Universal` / `Adaptive { light, dark }`) is the light/dark
 adaptation wrapper, composed with `TargetValue` for color-bearing fields as
@@ -231,7 +270,7 @@ adaptation wrapper, composed with `TargetValue` for color-bearing fields as
 
 Inheritance is **limited**: only the text-appearance fields — `color` and
 `emphasis` — cascade through tree traversal (`Style::inherited_from`). The
-box-painting fields — `background`, `border`, `fill` — never inherit and stay
+box-painting fields — `background` and `border` — never inherit and stay
 explicit on the node that paints them.
 
 ### Per-target consumption
@@ -248,9 +287,12 @@ explicit on the node that paints them.
   dashed / dotted line style, per-side selection, and **rounded corners** via
   `Border::radius` (any non-zero radius selects the light-arc corner set; a
   heavy or double border has no arc variant and keeps square corners).
-- `fill` paints a background band: `FillBand::Full` (the available width),
-  `Padded` (the content band), or `Indented` (inset from both edges).
-  `Fill::inset` adds leading unpainted columns and narrows the band.
+> Terminal/browser painting of the `padding` box, `Width::FitContent` band
+> sizing (`content_widest_line`), and `Background` tints is deferred to the
+> *renderer-folds* sub-spec. This vocabulary change fixes the types; the
+> renderers that lower `padding` / `width` land separately. Until then the
+> terminal `fit-content` realization must reproduce the former `Fill::Padded` /
+> `Indented` band sizing.
 
 > **Code blocks are outside this `Style` primitive.** Syntax-highlighted code
 > panels are driven by darkmatter's `ThemePair` + `ColorMode`, not `Style`. As a
@@ -276,9 +318,9 @@ layers to CSS during fragment emission:
   selectors and the per-mode color), `opacity:0.6`, and a small CSS
   keyframe animation respectively.
 
-`border` and `fill` lowering to CSS is **not yet wired** — the helper
-explicitly leaves those two layers for a follow-up. The terminal target
-remains the only consumer of border glyphs and fill bands today.
+`border` lowering to CSS is **not yet wired** — the helper explicitly leaves
+that layer for a follow-up. The terminal target remains the only consumer of
+border glyphs today.
 
 **Markdown** ignores `Style` entirely — Markdown body output is byte-identical
 whether or not a node carries a style, with no diagnostic.
@@ -332,11 +374,11 @@ Known gaps:
 - **Browser `Style` lowering is partial.** Color, background, emphasis
   (the `<strong>` / `<em>` / `<s>` wrappers for inline, the equivalent
   CSS for block), underline variants, dim, and blink are wired. The
-  box-painting layers — `border` and `fill` — are intentionally **not**
-  lowered yet (`style_css_declarations` documents the gap explicitly).
-  Adding them requires defining the CSS semantics for the typed
-  `Border` weight / line-style / radius matrix and the `Fill` band /
-  inset model.
+  box-painting `border` layer is intentionally **not** lowered yet
+  (`style_css_declarations` documents the gap explicitly). Adding it requires
+  defining the CSS semantics for the typed `Border` weight / line-style /
+  radius matrix. Lowering `padding` and `Width` (the box-model replacement for
+  the deleted `Fill` band) is *renderer-folds* work.
 - **`render_border` width mismatch.** The terminal border's top/bottom rule is
   two columns narrower than the content row — the interior padding spaces are
   not counted in the rule width. It affects square and rounded borders alike
@@ -358,7 +400,7 @@ The page-layout value types — `PageMargin`, `PagePadding`, `PageFill`,
 They remain `pub` (the darkmatter CLI builds them from flags) and carry
 conversion bridges:
 
-- `From<PageMargin>` / `From<PagePadding>` → `renderable::layout::Margin`
+- `From<PageMargin>` / `From<PagePadding>` → `renderable::layout::Edges`
 - `From<PageAlignment>` → `renderable::layout::Alignment`
 - `TryFrom<WidthUnit>` → `Length`, and `TryFrom<PageFill>` →
   `Option<TargetValue<Length>>` for the width-cap meaning, with a separate
