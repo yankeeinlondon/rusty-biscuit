@@ -922,3 +922,321 @@ fn level2_pty_sequence_status_report_honors_setter_supplied_required() {
         let _ = read_for(&mut session, Duration::from_millis(200));
     }
 }
+
+// ============================================================================
+// `claudine sequence` agent-resolution pre-prompt (review-4 High finding)
+// ============================================================================
+//
+// A live sequence (no `--dry-run`, no explicit `--<provider>`) gates agent
+// resolution on `stderr` only — the prompting/status channel — exactly like
+// direct compose. On a terminal, a prompting state must emit the same styled
+// pre-prompt message direct compose shows *before* the review screen renders:
+//
+//   - a scalar invalid `agent`        -> the imperative `Invalid Agent:` line,
+//   - an all-uninstallable `agent` list -> the zero-installed-list breakdown.
+//
+// These drive `claudine sequence` (no provider flag) through a real PTY so the
+// message is observed before the review UI. A third test redirects stdout to a
+// file to prove the gate keys off `stderr`, not `stdout`: under the old
+// `stdin && stdout` gate, `sequence doc.md > out.md` wrongly aborted; under the
+// stderr gate it prompts.
+
+/// Build a `claudine sequence <file>` command with NO explicit provider flag,
+/// so the live agent-resolution gate runs. `PATH` is restricted to `bin_dir`
+/// alone (not [`augmented_path`]) so only the staged stub providers count as
+/// installed and the classified agent state is deterministic on any host.
+fn sequence_command_no_provider(
+    workspace_dir: &std::path::Path,
+    bin_dir: &std::path::Path,
+    md_file: &std::path::Path,
+) -> Command {
+    stage_default_config(workspace_dir);
+    let mut cmd = Command::new(cargo_bin!("claudine"));
+    cmd.args(["sequence", md_file.to_str().unwrap()]);
+    cmd.env("HOME", workspace_dir);
+    cmd.env("PATH", bin_dir);
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env_remove("NO_COLOR");
+    cmd.env_remove("CLAUDINE_PLAIN");
+    cmd.env_remove("CI");
+    cmd.current_dir(workspace_dir);
+    cmd
+}
+
+/// Stage a stub provider `slug` that records a launch by writing `marker_file`.
+/// The agent-resolution tests assert this marker never appears, proving the
+/// pre-prompt fires strictly before any provider session starts.
+fn stage_provider_launch_stub(
+    bin_dir: &std::path::Path,
+    slug: &str,
+    marker_file: &std::path::Path,
+) {
+    write_executable(
+        &bin_dir.join(slug),
+        &format!(
+            "#!/bin/sh\necho launched > {marker}\nexit 0\n",
+            marker = marker_file.display()
+        ),
+    );
+}
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_pty_sequence_invalid_agent_shows_preprompt_before_review() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let marker = workspace.path().join("launched.flag");
+    stage_provider_launch_stub(&bin_dir, "goose", &marker);
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "agent: not-real\n",
+            "sequence:\n",
+            "  - alpha\n",
+            "  - beta\n",
+            "---\n",
+            "Step {{state}}.\n",
+        ),
+    )
+    .unwrap();
+
+    let cmd = sequence_command_no_provider(workspace.path(), &bin_dir, &md_file);
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+    // The styled `Invalid Agent:` pre-prompt must render BEFORE the review
+    // table. Under the old code the TTY branch jumped straight into the
+    // review screen and never emitted this message.
+    let pre = wait_for_marker(&mut session, "Invalid Agent", Duration::from_secs(10));
+    let plain = common::strip_ansi(&pre);
+    assert!(
+        plain.contains("not-real"),
+        "the invalid hint must be named in the pre-prompt; transcript:\n{plain}"
+    );
+    assert!(
+        !marker.exists(),
+        "no provider may launch before the agent-resolution prompt is shown; \
+         transcript:\n{plain}"
+    );
+
+    // Cancel the review screen (Esc) so the child exits instead of blocking
+    // on the picker. Gate the keystroke on raw mode like the schema tests.
+    let _ = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+    session.write_all(b"\x1b").expect("send Esc to cancel review");
+    session.flush().ok();
+
+    let _ = read_for(&mut session, Duration::from_secs(5));
+    assert!(
+        !marker.exists(),
+        "a cancelled review must never launch a provider"
+    );
+}
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_pty_sequence_zero_installed_list_shows_preprompt_before_review() {
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let marker = workspace.path().join("launched.flag");
+    // A runnable provider must exist so the review picker has an option to
+    // choose from once the zero-installed-list breakdown is shown.
+    stage_provider_launch_stub(&bin_dir, "goose", &marker);
+
+    let md_file = workspace.path().join("seq.md");
+    // An all-invalid list resolves to zero installed providers regardless of
+    // host, mirroring the L1 `sequence_dry_run_zero_installed_list_*` fixture.
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "agent: [not-real, also-fake]\n",
+            "sequence:\n",
+            "  - alpha\n",
+            "  - beta\n",
+            "---\n",
+            "Step {{state}}.\n",
+        ),
+    )
+    .unwrap();
+
+    let cmd = sequence_command_no_provider(workspace.path(), &bin_dir, &md_file);
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+    // `installed/valid` is the single-token signature of the zero-installed
+    // breakdown; it must render before the review table.
+    let pre = wait_for_marker(&mut session, "installed/valid", Duration::from_secs(10));
+    let plain = common::strip_ansi(&pre);
+    assert!(
+        !plain.contains("Invalid Agent"),
+        "a list state must not render the single-invalid scalar message; \
+         transcript:\n{plain}"
+    );
+    assert!(
+        !marker.exists(),
+        "no provider may launch before the agent-resolution prompt is shown; \
+         transcript:\n{plain}"
+    );
+
+    let _ = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+    session.write_all(b"\x1b").expect("send Esc to cancel review");
+    session.flush().ok();
+
+    let _ = read_for(&mut session, Duration::from_secs(5));
+    assert!(
+        !marker.exists(),
+        "a cancelled review must never launch a provider"
+    );
+}
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
+    // The core gate fix: `sequence doc.md > out.md` keeps `stderr` on the
+    // terminal but redirects `stdout` to a file. The agent-resolution gate
+    // keys off `stderr` only, so the prompting state must reach the review
+    // screen (emitting the pre-prompt) rather than aborting with the no-TTY
+    // `agent resolution failed` error the old `stdin && stdout` gate produced.
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let marker = workspace.path().join("launched.flag");
+    stage_provider_launch_stub(&bin_dir, "goose", &marker);
+    stage_default_config(workspace.path());
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "agent: not-real\n",
+            "sequence:\n",
+            "  - alpha\n",
+            "---\n",
+            "Step {{state}}.\n",
+        ),
+    )
+    .unwrap();
+
+    let out_file = workspace.path().join("out.md");
+    let claudine_bin = cargo_bin!("claudine");
+
+    // Drive through `/bin/sh -c` so the shell, not expectrl, owns the `>`
+    // redirect: the child claudine inherits stderr+stdin from the PTY but
+    // stdout points at `out.md`.
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg("-c").arg(format!(
+        "'{}' sequence '{}' > '{}'",
+        claudine_bin.display(),
+        md_file.display(),
+        out_file.display(),
+    ));
+    cmd.env("HOME", workspace.path());
+    cmd.env("PATH", &bin_dir);
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env_remove("NO_COLOR");
+    cmd.env_remove("CLAUDINE_PLAIN");
+    cmd.env_remove("CI");
+    cmd.current_dir(workspace.path());
+
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+    // The pre-prompt is written to stderr (the PTY) even though stdout is
+    // redirected. Observing it proves the run reached the prompt path.
+    let pre = wait_for_marker(&mut session, "Invalid Agent", Duration::from_secs(10));
+    let plain = common::strip_ansi(&pre);
+    assert!(
+        !plain.contains("agent resolution failed"),
+        "stderr-gated resolution must NOT abort when only stdout is redirected; \
+         transcript:\n{plain}"
+    );
+    assert!(
+        !marker.exists(),
+        "no provider may launch before the agent-resolution prompt is shown; \
+         transcript:\n{plain}"
+    );
+
+    let _ = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+    session.write_all(b"\x1b").expect("send Esc to cancel review");
+    session.flush().ok();
+
+    let _ = read_for(&mut session, Duration::from_secs(5));
+    assert!(
+        !marker.exists(),
+        "a cancelled review must never launch a provider"
+    );
+}
+
+#[test]
+#[serial_test::serial(pty)]
+fn level2_pty_sequence_auto_selectable_skips_review_and_launches() {
+    // The review-5 High finding: auto-selectable states (`Selected` /
+    // `ListOneInstalled`) must bypass the review screen on a TTY, exactly like
+    // direct compose's `resolve_live_target_with_tty` returns before the picker.
+    // A one-installed-list hint (`agent: [goose, gemini]` with only `goose`
+    // staged) classifies as `ListOneInstalled`, so the provider must launch with
+    // no alternate-screen review UI and no keyboard input.
+    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+
+    let workspace = tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let marker = workspace.path().join("launched.flag");
+    stage_provider_launch_stub(&bin_dir, "goose", &marker);
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "agent: [goose, gemini]\n",
+            "sequence:\n",
+            "  - alpha\n",
+            "---\n",
+            "Auto-select body.\n",
+        ),
+    )
+    .unwrap();
+
+    let cmd = sequence_command_no_provider(workspace.path(), &bin_dir, &md_file);
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+    // Drain the PTY until the stub records a launch, accumulating the full raw
+    // transcript so the alternate-screen assertion below sees everything the
+    // review UI would have emitted. No keystroke is ever sent.
+    let stop = Instant::now() + Duration::from_secs(15);
+    let mut transcript = String::new();
+    while Instant::now() < stop {
+        if marker.exists() {
+            break;
+        }
+        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
+    }
+    // Drain a final window so any trailing alt-screen bytes are captured even
+    // if the marker landed before the picker would have rendered.
+    transcript.push_str(&read_for(&mut session, Duration::from_millis(300)));
+
+    assert!(
+        marker.exists(),
+        "an auto-selectable (one-installed-list) sequence must launch the \
+         provider without prompting; transcript:\n{}",
+        common::strip_ansi(&transcript)
+    );
+    assert!(
+        !transcript.contains(ALT_SCREEN_ENTER),
+        "auto-selectable states must bypass the review screen — the picker's \
+         alternate-screen enter must never appear; transcript:\n{}",
+        common::strip_ansi(&transcript)
+    );
+}

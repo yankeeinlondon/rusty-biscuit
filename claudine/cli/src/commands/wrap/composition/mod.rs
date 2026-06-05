@@ -601,7 +601,11 @@ fn resolve_live_target_with_tty(
 /// and the no-TTY abort body (via [`agent_state_breakdown`] /
 /// [`invalid_agent_message`]) so the three surfaces cannot drift. Returns
 /// Prose **markup**; callers render it with their own terminal.
-fn agent_prompt_message(
+///
+/// The `sequence` orchestrator reuses this before its review screen so an
+/// invalid-scalar or zero-installed-list sequence shows the same pre-prompt
+/// message direct compose shows and the dry-run table predicts.
+pub(crate) fn agent_prompt_message(
     state: &AgentResolutionState,
     source_path: &std::path::Path,
 ) -> Option<String> {
@@ -632,9 +636,11 @@ fn picker_scope_for_state(state: &AgentResolutionState) -> Option<&[Provider]> {
 /// Build the picker plan for a prompting state, applying the per-state scope.
 ///
 /// Pure (no I/O): the live path and L1 tests both go through here so the
-/// scope contract is verifiable without a TTY.
+/// scope contract is verifiable without a TTY. The `sequence` review screen
+/// reuses this so its picker narrows `ListMultipleInstalled` to the same
+/// installed-from-list subset the direct compose picker offers.
 #[allow(clippy::result_large_err)]
-fn scoped_picker_plan_for_state(
+pub(crate) fn scoped_picker_plan_for_state(
     state: &AgentResolutionState,
     hints: &claudine::composition::EffectiveSelectionHints,
     snapshot: &claudine::composition::InstalledProviderSnapshot,
@@ -781,7 +787,6 @@ pub(crate) fn execute_composition_request_inner(
     startup_timings: Option<crate::perf::StartupTimings>,
     perf_enabled: bool,
 ) -> Result<SingleCompositionOutcome> {
-    let total_start = std::time::Instant::now();
     let mut perf_collector = if perf_enabled {
         startup_timings.map(|timings| {
             crate::perf::CommandPerfCollector::new_with_composition(
@@ -793,7 +798,10 @@ pub(crate) fn execute_composition_request_inner(
     } else {
         None
     };
-    let mut last_checkpoint = total_start;
+    // Local checkpoint origin for the env-setup sub-stage chain only. The
+    // headline is the threaded wall-clock baseline sampled at report build,
+    // not this mid-flight timer (TM-1).
+    let mut last_checkpoint = std::time::Instant::now();
     /// Helper to record a named sub-stage timing and reset the checkpoint.
     fn record_substage(
         collector: &mut Option<crate::perf::CommandPerfCollector>,
@@ -839,9 +847,7 @@ pub(crate) fn execute_composition_request_inner(
             iteration_signals: None,
         };
         if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&collector.into_report());
         }
         return Ok(outcome);
     }
@@ -1684,9 +1690,7 @@ pub(crate) fn execute_composition_request_inner(
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&collector.into_report());
         }
         return Ok(outcome);
     }
@@ -1891,9 +1895,7 @@ pub(crate) fn execute_composition_request_inner(
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&collector.into_report());
         }
         Ok(outcome)
     } else {
@@ -1991,9 +1993,7 @@ pub(crate) fn execute_composition_request_inner(
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&collector.into_report());
         }
         Ok(outcome)
     }
