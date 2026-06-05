@@ -47,8 +47,9 @@ let text = curly_underline("error", &term);
 ## Prose Component
 
 The `Prose` struct allows styled text with bracketed tags and a Markdown subset.
-It renders Terminal, Browser, Markdown, and MarkdownPlus from a shared
-`ProseDocument` IR.
+It parses directly into the shared `renderable::tree::RenderNode` tree and
+renders Terminal, Browser, Markdown, and MarkdownPlus through the shared tree
+renderers — it carries no component-local IR.
 
 ```rust
 use biscuit_terminal::components::prose::Prose;

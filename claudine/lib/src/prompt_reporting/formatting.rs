@@ -30,7 +30,7 @@ pub(crate) fn prompt_body_width(term: &Terminal) -> u32 {
 /// lines at 1.
 pub fn render_markdown_for_terminal(text: &str, _term: &Terminal, max_width: u32) -> String {
     use darkmatter::markdown::Markdown;
-    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
+    use darkmatter::markdown::output::terminal::TerminalOptions;
 
     if text.trim().is_empty() {
         return String::new();
@@ -39,7 +39,7 @@ pub fn render_markdown_for_terminal(text: &str, _term: &Terminal, max_width: u32
     let md: Markdown = text.into();
     let mut options = TerminalOptions::default();
     options.max_width = Some(max_width.clamp(1, u16::MAX as u32) as u16);
-    let rendered = for_terminal(&md, options).unwrap_or_else(|_| text.to_string());
+    let rendered = md.as_terminal(options).unwrap_or_else(|_| text.to_string());
 
     // Cap consecutive blank lines at 1. darkmatter's `HorizontalRule`
     // writer emits `<rule>\n\n` and the following markdown paragraph adds

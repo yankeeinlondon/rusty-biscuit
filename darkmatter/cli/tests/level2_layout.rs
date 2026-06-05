@@ -2400,17 +2400,21 @@ fn level2_style_images_local_style_width_alignment_in_terminal() {
         return;
     };
 
-    // The fallback line is "▉ IMAGE[A]" (10 cells visible). Right-padded to
-    // 40 cells means 30 leading spaces. Look for that prefix on the fallback
-    // line.
+    // The tree path applies local image width/alignment to the alt text
+    // itself, so the placeholder is `▉ IMAGE[<pad>A]`.
     let fallback_line = frame
         .plain
         .lines()
-        .find(|l| l.contains("IMAGE[A]"))
+        .find(|l| l.contains("▉ IMAGE["))
         .unwrap_or_else(|| panic!("fallback line missing in plain capture:\n{}", frame.plain));
-    let leading_spaces = fallback_line.chars().take_while(|c| *c == ' ').count();
+    let inner = fallback_line
+        .split_once("▉ IMAGE[")
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map(|(inner, _)| inner)
+        .unwrap_or("");
+    let leading_spaces = inner.chars().take_while(|c| *c == ' ').count();
     assert!(
-        leading_spaces >= 28,
-        "expected >=28 leading spaces for right-aligned width:40 fallback, got {leading_spaces}: {fallback_line:?}"
+        leading_spaces >= 28 && inner.trim() == "A",
+        "expected right-aligned width:40 alt text inside fallback, got {leading_spaces} leading: {fallback_line:?}"
     );
 }

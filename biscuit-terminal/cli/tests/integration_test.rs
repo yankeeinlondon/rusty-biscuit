@@ -2083,17 +2083,15 @@ fn test_prose_styled_snapshot() {
 
 #[test]
 fn test_quote_snapshot() {
-    // `bt quote` is rendered through the canonical render-tree path, which
-    // emits truecolor SGR for the left border regardless of `NO_COLOR`
-    // — there is no NO_COLOR-aware downgrade in that path today (see the
-    // BlockQuote review notes). Asserting the styled snapshot is the
-    // honest contract; revisit if/when the tree renderer learns to honor
-    // NO_COLOR end to end.
+    // `bt quote` is rendered through the canonical render-tree path. In the
+    // non-TTY snapshot environment the border stays visible but color SGR is
+    // suppressed.
     let output = cargo_bin_cmd!("bt")
         .arg("quote")
         .arg("To be or not to be, that is the question.")
         .arg("--attribution")
         .arg("Shakespeare")
+        .env("NO_COLOR", "1")
         .output()
         .expect("Failed to execute command");
 

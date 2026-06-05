@@ -42,6 +42,21 @@ pub enum CompositionError {
     #[error("failed to load Markdown: {0}")]
     MarkdownLoad(String),
 
+    /// The document's frontmatter (the YAML between the leading `---` markers)
+    /// is present but failed to parse.
+    ///
+    /// Distinct from [`Self::PromptPropertyMissing`]: the frontmatter block
+    /// exists but is malformed, so *no* properties — including `prompt` — could
+    /// be read. Surfacing this separately stops a YAML syntax error (e.g.
+    /// inconsistent block-scalar indentation) from masquerading as a missing
+    /// property.
+    ///
+    /// Carries the typed `MarkdownError` so the CLI's top-level walker renders
+    /// Darkmatter's rich frontmatter-parse block (file link, YAML location,
+    /// offending-line excerpt) instead of a flat string.
+    #[error("failed to parse frontmatter: {0}")]
+    FrontmatterParse(#[source] MarkdownError),
+
     /// Inline composition requires a `prompt` frontmatter property.
     #[error("frontmatter is missing a `prompt` property")]
     PromptPropertyMissing,
@@ -83,6 +98,18 @@ pub enum CompositionError {
     /// The `agent` frontmatter hint does not match any known provider.
     #[error("agent hint `{0}` does not match any known provider")]
     AgentHintInvalid(String),
+
+    /// Agent resolution could not select a runnable provider in the current
+    /// session (non-TTY, or the user cancelled the interactive picker).
+    #[error("agent resolution failed for {source_path}: {state:?}")]
+    AgentResolutionFailed {
+        /// The prompt file whose `agent` hint could not be resolved.
+        source_path: PathBuf,
+        /// Classified state explaining why resolution failed.
+        state: super::types::AgentResolutionState,
+        /// Installed providers at the time of resolution (for diagnostic lists).
+        installed: Vec<Provider>,
+    },
 
     /// The `agent` frontmatter property is not a valid type.
     #[error("frontmatter `agent` must be a string or array of strings, got {0}")]
@@ -835,6 +862,21 @@ impl BlockError for CompositionError {
                          frontmatter.",
                     )
             }
+            CompositionError::AgentResolutionFailed {
+                source_path,
+                state,
+                installed,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = render_agent_resolution_failed_body(state, installed, &file_link);
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("CompositionError", "agent resolution failed"))
+                    .body(body)
+                    .hint(
+                        "Specify an installed provider with --claude, --codex, etc., run in an \
+                         interactive terminal, or correct the `agent` frontmatter property."
+                    )
+            }
             CompositionError::ComposedBodyEmpty {
                 source_path,
                 mode,
@@ -903,6 +945,49 @@ fn render_file_link(path: &std::path::Path) -> String {
         escape_prose_path(&abs_display),
         escape_prose_path(&label)
     )
+}
+
+/// Render the human-facing body for [`CompositionError::AgentResolutionFailed`].
+///
+/// The no-TTY abort body must be the **same** styled message the TTY path
+/// would show for the state, so it shares one source of truth with the
+/// dry-run table cell and the live TTY pre-prompt — see
+/// [`super::agent_message`]. The only state with a distinct (imperative)
+/// live message is [`AgentResolutionState::SingleInvalid`], which is built
+/// here from [`super::agent_message::invalid_agent_message`] plus the
+/// installed-agent list the TTY picker would offer.
+fn render_agent_resolution_failed_body(
+    state: &super::types::AgentResolutionState,
+    installed: &[Provider],
+    file_link: &str,
+) -> String {
+    use super::agent_message::{agent_state_breakdown, invalid_agent_message};
+    use super::types::AgentResolutionState;
+
+    match state {
+        AgentResolutionState::SingleInvalid { hint } => {
+            let mut body = invalid_agent_message(hint, file_link);
+            if installed.is_empty() {
+                body.push_str("\n\n<i><dim>(no agents are installed)</dim></i>");
+            } else {
+                for provider in installed {
+                    body.push_str(&format!("\n- {provider}"));
+                }
+            }
+            body
+        }
+        // Auto-selecting states never abort; keep a diagnostic if they
+        // somehow reach this path.
+        AgentResolutionState::ListOneInstalled { .. } => format!(
+            "Agent resolution unexpectedly aborted for {file_link} despite an auto-selectable suggestion."
+        ),
+        AgentResolutionState::Selected { provider } => format!(
+            "Agent resolution unexpectedly aborted for {file_link} when <b>{provider}</b> was already selected."
+        ),
+        // Every other prompting state aborts with the same breakdown the
+        // dry-run table predicts and the TTY path shows.
+        other => agent_state_breakdown(other),
+    }
 }
 
 fn render_sequence_missing_properties_block(
@@ -1296,6 +1381,81 @@ mod tests {
         };
         let rendered = err.to_string();
         assert!(rendered.contains("3 step(s)"), "got: {rendered}");
+    }
+
+    // -------------------------------------------------------------------------
+    // Agent-resolution no-TTY abort body parity with the dry-run / TTY message
+    // -------------------------------------------------------------------------
+
+    use super::super::agent_message::{agent_state_breakdown, invalid_agent_message};
+    use super::super::types::AgentResolutionState;
+
+    const FILE_LINK: &str = "<a href=\"file:///doc.md\">doc.md</a>";
+
+    #[test]
+    fn no_tty_no_agent_body_matches_canonical_breakdown() {
+        let state = AgentResolutionState::NoAgent;
+        let body = render_agent_resolution_failed_body(&state, &[], FILE_LINK);
+        assert_eq!(body, agent_state_breakdown(&state));
+    }
+
+    #[test]
+    fn no_tty_not_installed_body_matches_canonical_breakdown() {
+        let state = AgentResolutionState::SingleNotInstalled {
+            provider: Provider::Gemini,
+        };
+        let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
+        assert_eq!(body, agent_state_breakdown(&state));
+    }
+
+    #[test]
+    fn no_tty_list_multiple_body_matches_canonical_breakdown() {
+        // Regression: the old body used "the interactive picker would ask …",
+        // which drifted from the dry-run cell wording.
+        let state = AgentResolutionState::ListMultipleInstalled {
+            installed: vec![Provider::Claude, Provider::Codex],
+            not_installed: vec![Provider::Gemini],
+            invalid: vec!["bad".into()],
+        };
+        let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
+        assert_eq!(body, agent_state_breakdown(&state));
+        assert!(
+            body.contains("choose interactively between suggested Agents"),
+            "got: {body}"
+        );
+        assert!(!body.contains("the interactive picker would ask"), "got: {body}");
+    }
+
+    #[test]
+    fn no_tty_zero_installed_body_matches_canonical_breakdown() {
+        // Regression: the old body appended "the current session is not
+        // interactive", which the TTY/dry-run message never showed.
+        let state = AgentResolutionState::ZeroInstalledList {
+            not_installed: vec![Provider::Gemini],
+            invalid: vec!["bad".into()],
+        };
+        let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
+        assert_eq!(body, agent_state_breakdown(&state));
+        assert!(!body.contains("not interactive"), "got: {body}");
+    }
+
+    #[test]
+    fn no_tty_single_invalid_body_is_imperative_message_plus_installed_list() {
+        let state = AgentResolutionState::SingleInvalid {
+            hint: "nope".into(),
+        };
+        let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
+        assert!(body.starts_with(&invalid_agent_message("nope", FILE_LINK)), "got: {body}");
+        assert!(body.contains(&format!("- {}", Provider::Claude)), "got: {body}");
+    }
+
+    #[test]
+    fn no_tty_single_invalid_body_notes_no_agents_when_none_installed() {
+        let state = AgentResolutionState::SingleInvalid {
+            hint: "nope".into(),
+        };
+        let body = render_agent_resolution_failed_body(&state, &[], FILE_LINK);
+        assert!(body.contains("no agents are installed"), "got: {body}");
     }
 
     #[test]

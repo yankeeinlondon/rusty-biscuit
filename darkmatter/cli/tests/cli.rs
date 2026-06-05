@@ -171,7 +171,7 @@ fn test_output_html() {
         .assert()
         .success()
         .stdout(predicate::str::contains("<style>"))
-        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
 }
 
 #[test]
@@ -457,7 +457,7 @@ fn test_render_explicit_with_output() {
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
 }
 
 // =============================================================================
@@ -744,7 +744,7 @@ fn test_compose_output_html() {
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
 }
 
 #[test]
@@ -2243,16 +2243,28 @@ fn test_get_no_frontmatter_returns_empty_string() {
 /// YAML line in the rendered StatusBlock.
 #[test]
 fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
+    use darkmatter::testing::strip_ansi_codes;
+
     let yaml = "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n";
 
-    md_cmd()
+    let output = md_cmd()
         .args(["get", "-", "phases"])
         .write_stdin(yaml)
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("MarkdownError"))
-        .stderr(predicate::str::contains("frontmatter parse failed"))
-        .stderr(predicate::str::contains("'@' magic lookup emits results"));
+        .output()
+        .expect("md get should run");
+
+    assert!(!output.status.success(), "expected a failure exit status");
+
+    // The offending YAML line is syntax-highlighted, so its characters are
+    // interleaved with SGR escapes in the raw stderr; strip ANSI before
+    // asserting on the visible text.
+    let stderr = strip_ansi_codes(&String::from_utf8_lossy(&output.stderr));
+    assert!(stderr.contains("MarkdownError"), "stderr: {stderr}");
+    assert!(stderr.contains("frontmatter parse failed"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("'@' magic lookup emits results"),
+        "offending line must be shown. stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -3816,6 +3828,7 @@ fn layout_combined_margin_padding_bg() {
 
 use biscuit_terminal::terminal::Terminal;
 use clap::Parser;
+#[allow(deprecated)]
 use darkmatter::layout::{DarkmatterPage, PageAlignment, PageComponent, PageFill, WidthUnit};
 use darkmatter_cli::Cli;
 use darkmatter_cli::output::apply_cli_layout_flags;
@@ -3833,6 +3846,7 @@ fn resolved_page(args: &[&str]) -> DarkmatterPage {
 }
 
 #[test]
+#[allow(deprecated)]
 fn layout_resolved_margin_shorthand_then_top_override() {
     // `-m 2 --mt 0`: shorthand sets all sides to 2, then --mt clears just the
     // top. The reviewer specifically called this out: precedence checks
@@ -3846,6 +3860,7 @@ fn layout_resolved_margin_shorthand_then_top_override() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn layout_resolved_margin_axis_then_side() {
     // `-m 4 --mx 2 --mt 1`: shorthand 4 everywhere, then horizontal axis to 2,
     // then top to 1.
@@ -3858,6 +3873,7 @@ fn layout_resolved_margin_axis_then_side() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn layout_resolved_padding_axis_then_side() {
     let page = resolved_page(&["fixture.md", "--padding", "4", "--px", "2", "--pt", "1"]);
     let p = page.padding();
@@ -3868,6 +3884,7 @@ fn layout_resolved_padding_axis_then_side() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn layout_resolved_fill_global_then_component_specific() {
     // `--fill max=40 --fill-code-blocks max=30`: global fill applies to all
     // components, then code-block-specific fill overrides only that one.
@@ -3899,6 +3916,7 @@ fn layout_resolved_fill_global_then_component_specific() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn layout_resolved_alignment_global_then_component_specific() {
     let page = resolved_page(&[
         "fixture.md",
@@ -3928,12 +3946,12 @@ fn layout_resolved_alignment_global_then_component_specific() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn layout_resolved_align_lists_does_not_write_deprecated_lists_slot() {
     // `--align-lists` must broadcast to Ul/Ol/Li only; the deprecated
     // PageComponent::Lists must remain unset so first-party CLI paths cannot
     // resurrect the legacy broadcast.
     let page = resolved_page(&["fixture.md", "--align-lists", "right"]);
-    #[allow(deprecated)]
     let lists_align = page.alignment_for(PageComponent::Lists);
     assert_eq!(
         lists_align,
@@ -3943,9 +3961,9 @@ fn layout_resolved_align_lists_does_not_write_deprecated_lists_slot() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn layout_resolved_fill_lists_does_not_write_deprecated_lists_slot() {
     let page = resolved_page(&["fixture.md", "--fill-lists", "max=40"]);
-    #[allow(deprecated)]
     let lists_fill = page.fill_for(PageComponent::Lists);
     assert_eq!(
         lists_fill,
@@ -3955,6 +3973,7 @@ fn layout_resolved_fill_lists_does_not_write_deprecated_lists_slot() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn layout_resolved_align_lists_broadcast_then_granular_override() {
     // `--align-lists right --align-ul left`: broadcast sets all three list
     // components to Right, then the granular flag overrides only Ul.
@@ -3983,6 +4002,7 @@ fn layout_resolved_align_lists_broadcast_then_granular_override() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn layout_resolved_fill_lists_broadcast_then_granular_override() {
     // `--fill-lists max=40 --fill-ol max=30`: broadcast sets all three list
     // components to Max(40), then the granular flag overrides only Ol.
@@ -4038,6 +4058,7 @@ fn layout_parsed_line_numbers_flag_values() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn layout_resolved_mt_alone_does_not_set_other_sides() {
     // `--mt 3` alone must leave other edges at default (0); no implicit
     // bleed from shorthand.
@@ -4284,6 +4305,7 @@ fn style_non_strict_renders_with_unknown_key() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn style_cli_margin_overrides_frontmatter() {
     // Spec test #2: CLI flag overrides frontmatter. The fixture has
     // `left-margin: 2ch`; `--ml 7` claims that field via
@@ -4404,6 +4426,7 @@ fn component_overrides_component_specific_fill_claims_one_bucket() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn frontmatter_table_alignment_reaches_page_when_no_cli_flag() {
     let raw = "---\n\
 style:\n\
@@ -4419,6 +4442,7 @@ style:\n\
 }
 
 #[test]
+#[allow(deprecated)]
 fn cli_align_tables_overrides_frontmatter_table_alignment() {
     // Plan ask: `--align-tables right` overriding frontmatter
     // `style.table.alignment: left`. The CLI flag wins.
@@ -4436,6 +4460,7 @@ style:\n\
 }
 
 #[test]
+#[allow(deprecated)]
 fn cli_global_fill_overrides_frontmatter_table_max_width() {
     // Plan ask: `--fill max=60` overriding frontmatter
     // `style.table.max-width: 50%` for all components.
@@ -4453,6 +4478,7 @@ style:\n\
 }
 
 #[test]
+#[allow(deprecated)]
 fn frontmatter_table_max_width_reaches_page_when_no_cli_flag() {
     let raw = "---\n\
 style:\n\
@@ -4468,6 +4494,7 @@ style:\n\
 }
 
 #[test]
+#[allow(deprecated)]
 fn frontmatter_images_alignment_and_fill_reach_page() {
     let raw = "---\n\
 style:\n\
@@ -4487,6 +4514,7 @@ style:\n\
 }
 
 #[test]
+#[allow(deprecated)]
 fn frontmatter_block_quote_max_width_reaches_page() {
     let raw = "---\n\
 style:\n\
@@ -4732,6 +4760,7 @@ fn no_style_frontmatter_leaves_cli_layout_state_intact() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn style_prop_fixture_resolves_to_expected_table_layout() {
     // Phase 5 acceptance: the canonical `style-prop.md` fixture must produce
     // a page where the table is right-aligned and capped at 50% max-width via
@@ -4752,6 +4781,7 @@ fn style_prop_fixture_resolves_to_expected_table_layout() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn style_prop_fixture_resolves_to_expected_page_margins() {
     // Phase 5 acceptance: page-level margins from the fixture survive the
     // full CLI -> page-style -> component-style pipeline.
@@ -4766,6 +4796,7 @@ fn style_prop_fixture_resolves_to_expected_page_margins() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn block_quote_max_width_caps_terminal_render_wrap_width() {
     // Phase 5 acceptance: `style.block-quote.max-width` reaches the page and
     // caps visible wrap width when the terminal renders a top-level

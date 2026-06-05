@@ -64,7 +64,7 @@ Bare and attribute-block rules inside blockquotes are supported:
 > --- { kind: waves }
 ```
 
-The resulting `HorizontalRule` event stays wrapped by the surrounding blockquote tags — it is not promoted to document level. Page-level `style.hr` frontmatter defaults apply inside blockquotes just as they do at the top level.
+The resulting `ThematicBreak` node stays nested under the surrounding blockquote — it is not promoted to document level. Page-level `style.hr` frontmatter defaults apply inside blockquotes just as they do at the top level.
 
 ## Supported Attributes
 
@@ -143,7 +143,7 @@ Use strict mode in CI to catch deprecated syntax early.
 
 ## Parsing
 
-The `RuleProcessor` iterator adapter intercepts paragraph events that contain a single text node matching the horizontal-rule pattern (`--- { ... }`). Standard `Event::Rule` events from pulldown-cmark (bare `---` without an attribute block) are handled separately in the renderers.
+The span-aware render-tree fold (`markdown/render_tree/block_extension.rs`) rewrites paragraphs that contain a single text node matching the horizontal-rule pattern (`--- { ... }`) into a `ThematicBreak` node carrying `darkmatter.hr.*` hints, parsing the attribute block through `block::hr_parser`. Standard `Event::Rule` events from pulldown-cmark (bare `---` without an attribute block) fold to a hint-less `ThematicBreak`.
 
 ### Parsing Rules
 
@@ -162,7 +162,7 @@ Terminal rendering uses progressive enhancement across three tiers:
 | 2    | No image support, UTF-8 locale         | Unicode glyphs (e.g., `≋` for waves)                           |
 | 3    | No image support, no UTF-8             | ASCII fallback                                                 |
 
-The `write_horizontal_rule` helper in `darkmatter/lib/src/markdown/output/terminal.rs` respects the rule's layout margins. A default-layout rule produces a single trailing blank line to match the surrounding markdown rhythm.
+The render-tree terminal renderer folds the `ThematicBreak` node (and its `darkmatter.hr.*` hints) into output via biscuit-terminal's `HorizontalRule` component, respecting the rule's layout margins. A default-layout rule produces a single trailing blank line to match the surrounding markdown rhythm.
 
 ## Rendering to the Browser
 
@@ -172,7 +172,7 @@ Browser output is an inline SVG with CSS custom properties for styling:
 - `--hr-color` — stroke/fill color
 - `--hr-width` — rule width
 
-The `HtmlOptions.hr_css_variables` map can substitute concrete values for these variables per-instance via `BrowserRenderable::render_to_browser_with_inline_variables`. When the map is empty (the default), the SVG retains its `var(--hr-*, …)` expressions so page-level CSS or downstream code can control the appearance.
+The `HtmlOptions.hr_css_variables` map is lowered to a page-level `:root` declaration (sorted, with unsafe `<`/newline-bearing entries dropped) so the declared override resolves against the SVG's `var(--hr-*, …)` expressions in the browser. When the map is empty (the default), no `:root` override is emitted and the SVG retains its `var(--hr-*, …)` expressions so page-level CSS or downstream code can control the appearance.
 
 ## Validation
 
@@ -185,9 +185,9 @@ The `HtmlOptions.hr_css_variables` map can substitute concrete values for these 
 
 | File | Purpose |
 |------|---------|
-| `darkmatter/lib/src/markdown/inline/types.rs` | `HorizontalRuleAttrs` struct and `InlineEvent::HorizontalRule` variant |
-| `darkmatter/lib/src/markdown/block/rule_processor.rs` | `RuleProcessor` — parses attribute blocks from markdown |
-| `darkmatter/lib/src/markdown/block/hr_builder.rs` | `build_rule_with_defaults`, `hr_defaults_from_frontmatter` — shared builder |
-| `darkmatter/lib/src/markdown/output/terminal.rs` | Terminal rendering via `write_horizontal_rule` |
-| `darkmatter/lib/src/markdown/output/html.rs` | Browser rendering via `render_rule_browser` |
-| `biscuit-terminal` | `HorizontalRule` component (`Renderable` + `BrowserRenderable`) |
+| `darkmatter/lib/src/markdown/inline/types.rs` | `HorizontalRuleAttrs` — the parsed HR attribute struct (lowered onto the `darkmatter.hr.*` tree hints) |
+| `darkmatter/lib/src/markdown/block/hr_parser.rs` | HR attribute-block parser (`try_parse_hr_attrs`, `parse_hr_attribute_block`, `scan_inline_hr_warnings`) — single source of truth for `--- { … }` directives |
+| `darkmatter/lib/src/markdown/block/hr_builder.rs` | Maps the `style.hr` schema enums to the canonical strings the render-tree `darkmatter.hr.*` hints carry |
+| `darkmatter/lib/src/markdown/render_tree/block_extension.rs` | Span-aware fold of `---` / attribute rules into `ThematicBreak` nodes carrying `darkmatter.hr.*` hints |
+| `darkmatter/lib/src/markdown/render_tree/entrypoints.rs` | Applies page (`style.hr.*`) and deprecated top-level `hr:` defaults to bare rules (`apply_hr_defaults`, `apply_hr_frontmatter_fallback`) before tree rendering |
+| `biscuit-terminal` | `HorizontalRule` component; the render-tree terminal / browser renderers fold the `ThematicBreak` hints into output |

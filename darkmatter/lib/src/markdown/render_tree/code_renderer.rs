@@ -6,6 +6,7 @@
 //! code-block path into that hook so render-tree output matches the bespoke
 //! [`YamlBlock`](crate::markdown::YamlBlock) (and Markdown code fence) renderer.
 
+use biscuit_terminal::components::mermaid::MermaidDiagram;
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::color::{
     ColorDepth as RenderableColorDepth, ColorMode as RenderableColorMode, TerminalCodeContext,
@@ -14,7 +15,7 @@ use renderable::tree::{CodeRenderer, NodeAttrs};
 
 use crate::markdown::{
     dsl::{CodeBlockMeta, parse_code_info},
-    highlighting::{CodeHighlighter, ColorMode},
+    highlighting::{CodeHighlighter, ColorMode, ThemePair},
     output::code_block::{render_html_code_block, render_terminal_code_block},
     output::html::HtmlOptions,
     output::terminal::{TerminalOptions, format_header_row},
@@ -93,11 +94,25 @@ impl CodeRenderer for TerminalCodeRenderer {
         }
 
         let hints = attrs.code_hints();
+        // Resolve the requested code theme from the context's carried name
+        // (set by the darkmatter terminal entry point from
+        // `TerminalOptions::code_theme`), falling back to the default theme
+        // when the caller pinned none.
+        // Forward the page line-number toggle so the body renders its gutter.
+        let options = TerminalOptions {
+            include_line_numbers: context.line_numbers(),
+            ..TerminalOptions::default()
+        };
+        let code_theme = match context.code_theme_name() {
+            Some(name) => ThemePair::from_str_or_default(name),
+            None => options.code_theme,
+        };
         // Code blocks contrast against the page: resolve the theme *variant*
-        // against the INVERTED terminal mode (see `ColorMode::inverted`).
-        let options = TerminalOptions::default();
+        // against the INVERTED terminal mode (see `ColorMode::inverted`). The
+        // mode comes from the context, which the entry point threads from the
+        // caller's requested `color_mode`.
         let highlighter = CodeHighlighter::new(
-            options.code_theme,
+            code_theme,
             map_color_mode(context.color_mode()).inverted(),
         );
         // Header/body contrast keys off the resolved theme background, not the
@@ -161,6 +176,11 @@ impl CodeRenderer for TerminalCodeRenderer {
         meta: Option<&str>,
         _attrs: &NodeAttrs,
     ) -> Option<BrowserFragment<Ready>> {
+        // Mermaid is intentionally NOT handled here. The render tree routes
+        // `lang="mermaid"` to `render_browser_mermaid`, whose `None` return is
+        // an observable promotion failure the renderer can apply strictness to.
+        // Catching the SVG failure here and returning a code-block fragment
+        // would hide that failure behind `Some(_)` and bypass strictness.
         let options = HtmlOptions::default();
         // Code blocks contrast against the page: resolve the theme *variant*
         // against the INVERTED color mode (a light code panel on a dark page,
@@ -179,6 +199,25 @@ impl CodeRenderer for TerminalCodeRenderer {
             render_html_code_block(value, language, &code_meta, &highlighter, &options).ok()?;
         Some(BrowserFragment::new().define_as_raw_html(html).finalize())
     }
+
+    fn render_browser_mermaid(
+        &self,
+        value: &str,
+        _meta: Option<&str>,
+        _attrs: &NodeAttrs,
+    ) -> Option<BrowserFragment<Ready>> {
+        // `None` on failure is the contract: it surfaces the promotion failure
+        // to the render tree so strictness can reject or diagnose it, rather
+        // than silently degrading to a code block here.
+        let svg = MermaidDiagram::new(value).render_to_svg().ok()?;
+        // The SVG is emitted unescaped as raw HTML, so it must pass an explicit
+        // allowlist sanitizer first — the render tree must not depend on the
+        // upstream renderer (or any future string override) staying safe. A
+        // sanitizer that cannot parse the SVG returns `None`, which the renderer
+        // treats as a promotion failure rather than emitting unsafe markup.
+        let safe = super::svg_sanitizer::sanitize_svg(&svg)?;
+        Some(BrowserFragment::new().define_as_raw_html(safe).finalize())
+    }
 }
 
 #[cfg(test)]
@@ -195,6 +234,77 @@ mod tests {
             highlight: true,
         });
         attrs
+    }
+
+    /// A pinned `code_theme_name` on the context must reach the highlighter so
+    /// two different themes produce different terminal code panels. Without the
+    /// theme-name carrier the hook always painted the default theme, dropping a
+    /// caller's `with_code_theme(...)`.
+    #[test]
+    fn terminal_code_honors_pinned_theme_name() {
+        let renderer = TerminalCodeRenderer::new();
+        let code = "fn demo() -> usize { 42 }";
+
+        let github = renderer
+            .render_terminal_code(
+                Some("rust"),
+                code,
+                None,
+                &NodeAttrs::default(),
+                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark)
+                    .with_code_theme_name(Some("github".into())),
+            )
+            .expect("github render");
+        let dracula = renderer
+            .render_terminal_code(
+                Some("rust"),
+                code,
+                None,
+                &NodeAttrs::default(),
+                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark)
+                    .with_code_theme_name(Some("dracula".into())),
+            )
+            .expect("dracula render");
+
+        assert_ne!(
+            github, dracula,
+            "distinct pinned code themes must produce distinct highlighted output",
+        );
+    }
+
+    /// A pinned `color_mode` must reach the highlighter: the same theme resolves
+    /// a different concrete variant for Light vs Dark (github is a paired
+    /// theme), so the rendered panels must differ.
+    #[test]
+    fn terminal_code_honors_pinned_color_mode() {
+        let renderer = TerminalCodeRenderer::new();
+        let code = "fn demo() -> usize { 42 }";
+
+        let dark = renderer
+            .render_terminal_code(
+                Some("rust"),
+                code,
+                None,
+                &NodeAttrs::default(),
+                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark)
+                    .with_code_theme_name(Some("github".into())),
+            )
+            .expect("dark render");
+        let light = renderer
+            .render_terminal_code(
+                Some("rust"),
+                code,
+                None,
+                &NodeAttrs::default(),
+                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Light)
+                    .with_code_theme_name(Some("github".into())),
+            )
+            .expect("light render");
+
+        assert_ne!(
+            dark, light,
+            "the requested color mode must reach the highlighter (github is a paired theme)",
+        );
     }
 
     #[test]
@@ -349,6 +459,52 @@ mod tests {
         assert!(
             html.contains("highlighted"),
             "highlight directive must mark the highlighted line; got {html}",
+        );
+    }
+
+    /// Mermaid promotion lives in the dedicated `render_browser_mermaid` hook,
+    /// which returns `Some(svg)` on success and `None` on failure — the renderer
+    /// applies strictness to that `None`. `render_browser_code` must NOT special-
+    /// case mermaid; doing so would hide an SVG failure behind a code-block
+    /// fallback and bypass strictness (review-2 finding 2).
+    #[test]
+    fn browser_mermaid_returns_svg_or_none_never_silent_code_block() {
+        let renderer = TerminalCodeRenderer::new();
+
+        match renderer.render_browser_mermaid("flowchart LR\n    A --> B", None, &NodeAttrs::default())
+        {
+            Some(f) => {
+                let html = f.render();
+                assert!(
+                    html.contains("<svg") && html.contains("</svg>"),
+                    "successful promotion must be well-formed SVG; got: {html}"
+                );
+            }
+            None => {
+                // Host lacks the Mermaid toolchain: a `None` is the correct
+                // failure signal — the renderer degrades per strictness.
+            }
+        }
+    }
+
+    /// `render_browser_code` must treat `lang="mermaid"` as an ordinary code
+    /// block (no SVG promotion), so the only promotion path is the fallible
+    /// `render_browser_mermaid` hook.
+    #[test]
+    fn browser_code_does_not_promote_mermaid() {
+        let renderer = TerminalCodeRenderer::new();
+        let html = renderer
+            .render_browser_code(
+                Some("mermaid"),
+                "flowchart LR\n    A --> B",
+                None,
+                &NodeAttrs::default(),
+            )
+            .expect("renders a code block")
+            .render();
+        assert!(
+            !html.contains("<svg"),
+            "render_browser_code must not promote mermaid to SVG; got: {html}"
         );
     }
 }

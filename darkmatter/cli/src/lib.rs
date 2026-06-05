@@ -150,13 +150,13 @@
 //! See [`darkmatter::markdown`] for the core markdown processing API.
 //!
 //! ```rust,ignore
-//! use darkmatter::markdown::{Markdown, TerminalOptions, write_terminal};
+//! use darkmatter::markdown::Markdown;
+//! use darkmatter::markdown::output::TerminalOptions;
 //!
 //! let md: Markdown = "# Hello\n\nWorld".into();
 //! let options = TerminalOptions::default();
 //!
-//! let mut stdout = std::io::stdout();
-//! write_terminal(&mut stdout, &md, options)?;
+//! print!("{}", md.as_terminal(options)?);
 //! ```
 
 pub mod approval;

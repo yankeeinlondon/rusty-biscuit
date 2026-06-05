@@ -145,11 +145,18 @@ pub fn cleanup_stale_tmux_sessions() {
     if !out.status.success() {
         return;
     }
+    // Never reap the active shared session: the broker spawns it and exits,
+    // so its name carries a dead pid and would otherwise be a reap target,
+    // killing the session every attaching test depends on.
+    let shared = std::env::var(SHARED_SESSION_ENV).ok();
     let stdout = String::from_utf8_lossy(&out.stdout);
     for line in stdout.lines() {
         let Some(name) = line.split(':').next() else {
             continue;
         };
+        if shared.as_deref() == Some(name) {
+            continue;
+        }
         let Some(pid) = tmux_pid_from_session(name) else {
             continue;
         };

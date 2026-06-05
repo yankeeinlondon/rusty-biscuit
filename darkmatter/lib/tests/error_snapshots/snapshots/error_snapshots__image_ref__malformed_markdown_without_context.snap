@@ -1,6 +1,5 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/image_ref.rs
-assertion_line: 79
 expression: out
 ---
 ⤫ ImageRefError: malformed markdown image
@@ -8,4 +7,5 @@ expression: out
 ┃ 
 ┃ Image parsing failed here:
 ┃ 
+┃ ```md
 Use the pattern !alt with balanced brackets.

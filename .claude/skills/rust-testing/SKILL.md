@@ -1,11 +1,11 @@
 ---
 name: rust-testing
-description: |
+description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 8eaceadb34324bef-3ffcf7556a491d3d
-last_updated: 2026-06-01
+hash: 1acc7c1c76b11142-a4903f7320552e81
+last_updated: 2026-06-04
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -86,6 +86,24 @@ Every curated package area defines these 12 recipes:
 | `all`          | `sanity → lint → doctest → test → test-l2 → test-browser`.                                                                                                                                                                                                                                                                                   |
 
 Delegate to shared recipes in `just/devops.just` (e.g. `@just _test my-crate`).
+
+## Running L2 Tests (read before you run)
+
+`level2_*` tests spawn **real terminal windows / panes**. Run them **only** via
+`just test-l2`, never `cargo test` / `cargo nextest run -E 'test(/level2_/)'`
+directly. The recipe pre-spawns **one shared pane per backend** and runs nextest
+**`-j 1`**; bypassing it spawns windows in parallel, races on global GUI state,
+leaks windows on timeout/panic, and produces ambiguous `osascript`/PTY failures
+that look like — but are not — code regressions.
+
+- A wall of single-backend failures (e.g. every `*_in_wezterm`) usually means
+  that emulator is **absent/unscriptable here**, not that the renderer broke —
+  confirm the same test on an available backend (`_in_kitty`, `_apple_terminal`).
+- The Apple Terminal backend is GUI-automated and especially fragile (focus,
+  `do script` window reuse, orphan leaks). Before touching it or debugging an
+  `level2_apple_terminal_*` failure, read **`apple-terminal-harness-pitfalls.md`**.
+- Spawning must **never steal foreground focus** and must **never close a window
+  it did not create** — these are hard harness invariants.
 
 ## Nextest Filtersets
 
@@ -191,6 +209,7 @@ Open the topic file when the task matches:
 | Topic                                                                | File                                    |
 |----------------------------------------------------------------------|-----------------------------------------|
 | L2 WezTerm capture gotchas (SGR collapsing, semicolon vs colon form). For backend selection / harness API, load the `biscuit-test-harness` skill via the Skill tool. | `wezterm-harness-pitfalls.md`           |
+| L2 Apple Terminal pitfalls (`do script` reuse, focus-steal, **resolved:** orphan leaks, plain-text capture) | `apple-terminal-harness-pitfalls.md`    |
 | CLI output (channels, color modes, completions, snapshots)           | `cli-output-testing.md`                 |
 | TUI rendering and event/reducer tests                                | `tui-testing.md`                        |
 | Browser tests (computed-style assertions)                            | `browser-testing.md`                    |

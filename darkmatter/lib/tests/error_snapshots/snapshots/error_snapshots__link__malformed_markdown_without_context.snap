@@ -1,6 +1,5 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/link.rs
-assertion_line: 65
 expression: out
 ---
 ⤫ LinkError: malformed markdown link
@@ -8,4 +7,5 @@ expression: out
 ┃ 
 ┃ Link parsing failed here:
 ┃ 
+┃ ```md
 Use the pattern display with balanced brackets.

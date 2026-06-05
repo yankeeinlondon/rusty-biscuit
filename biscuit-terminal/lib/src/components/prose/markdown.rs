@@ -57,7 +57,7 @@ pub(super) const CODE_BLOCK_PLACEHOLDER_MARK: char = '\u{0002}';
 ///
 /// The body is opaque: no Prose markup is ever parsed from it. The token
 /// parser turns the matching placeholder straight into a
-/// [`ProseNode::CodeBlock`](super::ir::ProseNode::CodeBlock).
+/// `Code` render-tree node.
 #[derive(Debug, Clone)]
 pub(super) struct FencedCode {
     /// Language hint from the opening fence (may be empty).

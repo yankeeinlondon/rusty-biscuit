@@ -24,12 +24,19 @@
 //! frontmatter flows through [`renderable::tree::DocumentMetadata::frontmatter`]
 //! without re-parsing through `pulldown-cmark`'s metadata-block options (DMTR-4).
 //!
-//! A span-aware processor chain for `==mark==` / dim inline styles and
-//! horizontal-rule attribute paragraphs lives in [`span`]. It produces
-//! [`span::SpannedInlineEvent`]s with byte ranges so the fold can preserve
-//! every node's [`renderable::tree::SourceLocation`] when those Darkmatter
-//! constructs appear (DMTR-3). The legacy non-spanned `InlineStyleProcessor`
-//! and `RuleProcessor` still back the public renderers and are unchanged.
+//! `==mark==` / `⌄dim⌄` inline styles are handled by the source-layer rewriter
+//! in [`inline_extension`]: it turns those constructs into canonical
+//! GFM-strikethrough envelopes before parsing, and the fold's strikethrough
+//! dispatcher lowers each envelope to a [`renderable::tree::NodeKind::Extended`]
+//! node (`mark` / `dim`) while resolving every span back to the original source
+//! through the rewriter's provenance table. HR-attribute paragraphs are still
+//! lifted out of the event stream by the `block_extension` module, a dedicated
+//! offset-aware block processor that sits between `pulldown-cmark` and the fold.
+//! See `renderable/features/2026-05-26-inline-span/spec.md`.
+//!
+//! The non-spanned `InlineStyleProcessor` now backs only the
+//! `scan_inline_hr_warnings` strict-style preflight; the public renderers all
+//! route through this spanned fold.
 //!
 //! [`Tag`]: pulldown_cmark::Tag
 //!
@@ -50,18 +57,21 @@
 //! [`fold_markdown_to_document`] is the public entry point: it walks a
 //! `pulldown-cmark` event stream and builds a [`renderable::tree::Document`].
 
+pub(crate) mod block_extension;
 pub mod code_renderer;
-// `entrypoints` exposes `pub(crate)` adapter functions that are exercised by
-// integration tests, benches, and the parity harness — none of which live in
-// the lib crate. Silence the lib-side dead-code warnings until the public
-// cutover wires the adapter into `Markdown::as_html` / `for_terminal`.
+pub(crate) mod decorate;
+// The inline source rewriter backs `fold_markdown_spanned_with_frontmatter`.
+// A few `pub(crate)` helpers on its result types (e.g. `InlineRewrite::
+// was_rewritten`) are exercised only by the module's own unit tests, so the
+// lib-side dead-code lint stays silenced.
 #[allow(dead_code)]
-pub(crate) mod entrypoints;
+pub(crate) mod inline_extension;
+pub mod entrypoints;
 pub mod fold;
 pub mod inventory;
 pub mod pipeline;
 pub mod source;
-pub mod span;
+pub mod svg_sanitizer;
 
 pub use code_renderer::TerminalCodeRenderer;
 pub use fold::{
@@ -70,14 +80,14 @@ pub use fold::{
 };
 pub use pipeline::{PipelineRenderResult, PipelineResult};
 
-// Internal experimental entry points (DMTR-1). These are `pub(crate)` so
-// parity tests and benchmarks inside `darkmatter` can drive the tree path
-// without exposing it to downstream callers. The public `Markdown::as_html`,
-// `Markdown::as_terminal`, and `for_terminal` continue to use the legacy
-// renderers until cutover; see
-// `renderable/features/2026-05-20-darkmatter-tree/entry-point-shape.md`.
-#[allow(unused_imports)]
-pub(crate) use entrypoints::{
+// The render-tree entry points are the in-crate adapter boundary the public
+// `Markdown` / `DarkmatterPage` renderers route through: `render_tree_html`
+// backs `Markdown::as_html`, `render_tree_terminal` backs `Markdown::as_terminal`
+// / the default-layout `DarkmatterPage::render` path, and the markdown variants
+// serve round-trip callers and the parity suite. `to_render_document` stays
+// `pub(crate)`: it exposes the raw fold and is an internal helper.
+pub use entrypoints::{
     render_tree_html, render_tree_markdown, render_tree_markdown_dialect, render_tree_terminal,
-    to_render_document,
 };
+#[allow(unused_imports)]
+pub(crate) use entrypoints::to_render_document;

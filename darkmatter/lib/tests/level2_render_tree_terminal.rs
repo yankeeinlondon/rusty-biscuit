@@ -36,6 +36,7 @@
 //! right boundary, blank-line rhythm) — properties an in-process ANSI string
 //! cannot verify. See `run_page_in_pane` and the `level2_page_*` tests.
 
+use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::render_tree::{
     TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
 };
@@ -46,7 +47,7 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
-use darkmatter::markdown::output::ColorDepth;
+use darkmatter::markdown::output::{ColorDepth, TerminalOptions};
 use darkmatter::markdown::render_tree::{
     TerminalCodeRenderer, fold_markdown_spanned_with_frontmatter, fold_markdown_to_document,
 };
@@ -116,7 +117,7 @@ fn render_tree_terminal_to_tempfile(
         diags.is_empty(),
         "Level 2 fixture must fold without diagnostics: {diags:?}"
     );
-    write_doc_to_tempfile(doc, name)
+    write_doc_to_tempfile(doc, name, None)
 }
 
 /// Renders `body` through the render-tree terminal pipeline using the
@@ -128,6 +129,53 @@ fn render_tree_terminal_spanned_to_tempfile(
     body: &str,
     name: &str,
 ) -> (tempfile::TempDir, std::path::PathBuf) {
+    write_doc_to_tempfile(fold_spanned_doc(body, name), name, None)
+}
+
+/// Like [`render_tree_terminal_spanned_to_tempfile`] but renders at the
+/// **text tier** (`ImageSupport::None`). `HorizontalRule` emits an embedded
+/// image on an image-capable terminal, which the text-capture harness cannot
+/// observe; disabling images forces the glyph form so a styled rule (e.g. the
+/// `≋` waves glyph) is visible in the captured pane.
+fn render_tree_terminal_spanned_text_tier_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    write_doc_to_tempfile(
+        fold_spanned_doc(body, name),
+        name,
+        Some(ImageSupport::None),
+    )
+}
+
+/// Like [`render_tree_terminal_spanned_to_tempfile`] but pins
+/// [`GraphicsMode::Vector`](renderable::tree::GraphicsMode::Vector) while
+/// keeping the optimistic terminal's (image-capable) capabilities. This proves
+/// the HR image tier is suppressed by **policy** at `Vector` even when the
+/// terminal *could* rasterize — finding 1 (review-1).
+fn render_tree_terminal_spanned_vector_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let doc = fold_spanned_doc(body, name);
+    let term = Terminal::new_optimistic(120);
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.graphics_mode = renderable::tree::GraphicsMode::Vector;
+    let opts = TerminalRenderOptions {
+        context,
+        strictness: RenderStrictness::Warn,
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+    };
+    let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered.output).unwrap();
+    (dir, path)
+}
+
+/// Folds `body` through the **span-aware** fold, asserting it folds cleanly.
+fn fold_spanned_doc(body: &str, name: &str) -> renderable::tree::Document {
     let source = SourceDescriptor::Virtual { name: name.into() };
     let md: Markdown = body.into();
     let (doc, diags) = fold_markdown_spanned_with_frontmatter(source, &md);
@@ -135,17 +183,23 @@ fn render_tree_terminal_spanned_to_tempfile(
         diags.is_empty(),
         "Level 2 span-aware fixture must fold without diagnostics: {diags:?}"
     );
-    write_doc_to_tempfile(doc, name)
+    doc
 }
 
-/// Shared write-and-render path for both `render_tree_terminal_to_tempfile`
-/// and `render_tree_terminal_spanned_to_tempfile`. Pins a 120-wide
-/// optimistic terminal so the visible width is repeatable.
+/// Shared write-and-render path for the render-tree terminal fixtures. Pins a
+/// 120-wide optimistic terminal so the visible width is repeatable.
+/// `image_override` forces a specific [`ImageSupport`] tier (e.g.
+/// [`ImageSupport::None`] to make glyph-based components observable as text);
+/// `None` keeps the optimistic terminal's default capabilities.
 fn write_doc_to_tempfile(
     doc: renderable::tree::Document,
     name: &str,
+    image_override: Option<ImageSupport>,
 ) -> (tempfile::TempDir, std::path::PathBuf) {
-    let term = Terminal::new_optimistic(120);
+    let mut term = Terminal::new_optimistic(120);
+    if let Some(support) = image_override {
+        term.image_support = support;
+    }
     // Wire darkmatter's code renderer so fenced code blocks reproduce the
     // syntax-highlighted code-block path the production entry point uses,
     // not the render tree's plain-fence fallback (review-10 finding 2).
@@ -171,6 +225,25 @@ fn run_in_pane(body: &str, name: &str) -> Option<(CapturedFrame, tempfile::TempD
 /// Drives the shared WezTerm pane with the **span-aware** fold path.
 fn run_in_pane_spanned(body: &str, name: &str) -> Option<(CapturedFrame, tempfile::TempDir)> {
     drive_pane(body, name, render_tree_terminal_spanned_to_tempfile)
+}
+
+/// Drives the shared WezTerm pane with the **span-aware** fold at the text
+/// tier (images disabled) so glyph-based components render as observable text.
+fn run_in_pane_spanned_text_tier(
+    body: &str,
+    name: &str,
+) -> Option<(CapturedFrame, tempfile::TempDir)> {
+    drive_pane(body, name, render_tree_terminal_spanned_text_tier_to_tempfile)
+}
+
+/// Drives the shared WezTerm pane with the **span-aware** fold at
+/// [`GraphicsMode::Vector`](renderable::tree::GraphicsMode::Vector) on an
+/// image-capable terminal, so the glyph form proves policy suppression.
+fn run_in_pane_spanned_vector(
+    body: &str,
+    name: &str,
+) -> Option<(CapturedFrame, tempfile::TempDir)> {
+    drive_pane(body, name, render_tree_terminal_spanned_vector_to_tempfile)
 }
 
 /// Shared pane driver — the fold choice is decided by the caller-supplied
@@ -515,7 +588,10 @@ fn level2_tree_dim_renders_dim_sgr_in_real_terminal() {
 #[serial(level2_terminal)]
 fn level2_tree_hr_attributes_render_styled_rule_in_real_terminal() {
     let body = "Lead paragraph.\n\n--- { style: waves }\n\nTrailing paragraph.\n";
-    let Some((frame, _dir)) = run_in_pane_spanned(body, "hr_attributes_spanned") else {
+    // Render at the text tier: an image-capable terminal would emit the rule
+    // as an embedded image the text-capture harness cannot see, so the glyph
+    // form is forced to make the styled rule observable.
+    let Some((frame, _dir)) = run_in_pane_spanned_text_tier(body, "hr_attributes_spanned") else {
         return;
     };
 
@@ -535,20 +611,57 @@ fn level2_tree_hr_attributes_render_styled_rule_in_real_terminal() {
         frame.plain
     );
 
-    // The waves rule glyph is `≋` (U+224B) in Unicode-capable terminals or
-    // `~` in ASCII fallback. A plain (dashed) rule renders `─` (U+2500) or
-    // `-`, so either waves marker is sufficient to prove the renderer
-    // honored the `style: waves` hint instead of falling back to the
-    // default.
-    let has_waves_glyph = frame.plain.contains('\u{224B}') || frame.plain.contains('~');
+    // Isolate the rule line and require it to be a contiguous run of the
+    // waves glyph — `≋` (U+224B) in Unicode-capable terminals, `~` in ASCII
+    // fallback. A plain (dashed) rule renders `─` (U+2500) or `-`, so a line
+    // made entirely of waves glyphs proves the renderer honored `style: waves`
+    // (normalized to the `kind` hint) instead of falling back to the default.
+    //
+    // A bare `frame.plain.contains('~')` was a false-positive risk: a stray
+    // `~` anywhere in the pane (a shell prompt, a `~/path` cwd) satisfied it
+    // with no styled rule present. Matching a whole line of glyphs excludes
+    // those, and the length floor excludes a lone prompt tilde.
+    let is_waves_glyph = |c: char| c == '\u{224B}' || c == '~';
+    let waves_rule_line = frame.plain.lines().find(|line| {
+        let trimmed = line.trim();
+        trimmed.chars().count() >= 10 && trimmed.chars().all(is_waves_glyph)
+    });
     assert!(
-        has_waves_glyph,
-        "expected waves rule glyph (`≋` or `~`) in styled HR output; plain:\n{}",
+        waves_rule_line.is_some(),
+        "expected a styled waves rule line (a run of `≋` or `~`); plain:\n{}",
         frame.plain
     );
-    // Sanity: the plain dashed rule glyph must not dominate (the test would
-    // also pass if Tea-Time Unicode font missing forces all-`~` ASCII, so
-    // we only assert *positive* evidence of the waves style above).
+}
+
+/// Finding 1 (review-1): `GraphicsMode::Vector` must suppress the HR image
+/// tier by **policy**, not capability. This renders the `style: waves` rule on
+/// an *image-capable* optimistic terminal (the same one that rasterizes at
+/// `Rich`) but with the policy pinned to `Vector`, and asserts the captured
+/// pane shows the waves **glyph** line — proving the rule degraded to text and
+/// emitted no image payload even though the terminal could have rasterized.
+#[test]
+#[serial(level2_terminal)]
+fn level2_tree_hr_vector_mode_renders_glyph_not_image() {
+    let body = "Lead paragraph.\n\n--- { style: waves }\n\nTrailing paragraph.\n";
+    let Some((frame, _dir)) = run_in_pane_spanned_vector(body, "hr_vector_mode") else {
+        return;
+    };
+
+    assert!(
+        !frame.plain.contains("style: waves"),
+        "raw HR markdown source leaked through; plain:\n{}",
+        frame.plain
+    );
+    let is_waves_glyph = |c: char| c == '\u{224B}' || c == '~';
+    let waves_rule_line = frame.plain.lines().find(|line| {
+        let trimmed = line.trim();
+        trimmed.chars().count() >= 10 && trimmed.chars().all(is_waves_glyph)
+    });
+    assert!(
+        waves_rule_line.is_some(),
+        "Vector mode must render the waves glyph (text tier), not an image; plain:\n{}",
+        frame.plain
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -900,5 +1013,362 @@ fn level2_page_no_double_blank_rows_between_code_blocks() {
         } else {
             consecutive_blanks = 0;
         }
+    }
+}
+
+/// A valid 2×2 RGB PNG, embedded so the image-node Level-2 test needs no
+/// on-disk fixture or `image`-crate dependency.
+const TINY_PNG: &[u8] = &[
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0,
+    0, 0, 253, 212, 154, 115, 0, 0, 0, 16, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 0, 68, 12,
+    16, 10, 0, 31, 238, 3, 253, 139, 95, 20, 212, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+
+/// Review-3 finding 3: a `Rich` image node through the render-tree path is
+/// user-visible terminal graphics, but was only verified for the missing-file
+/// and `Off`/`Vector` alt-text fallbacks. This Level-2 test renders a real
+/// image node through `render_terminal_document` (the production tree path),
+/// confirms the iTerm2 image protocol bytes are emitted, then `cat`s them into
+/// a real WezTerm pane to confirm the terminal does not fall back to literal
+/// `[cat]` alt text.
+///
+/// ## Verification scope — protocol + anti-regression
+///
+/// This test deliberately verifies only two things via text capture:
+///
+/// 1. **Level 1 (in-process):** the production tree path emits the iTerm2
+///    image protocol (OSC 1337) at `Rich`, not the alt-text fallback.
+/// 2. **Level 2 (real terminal):** WezTerm consumes those bytes without
+///    surfacing the `[cat]` alt-text fallback in its text capture.
+///
+/// `wezterm cli get-text` strips image-protocol bytes, so the pane assertion is
+/// the **absence** of the alt-text fallback — which a malformed, ignored, or
+/// zero-visible image payload could also satisfy. Proof that the image is
+/// actually decoded and painted lives in
+/// [`level2_tree_rich_image_node_paints_distinctive_pixels`], which screen-
+/// captures the pane and samples the rendered pixels.
+#[test]
+#[serial(level2_terminal)]
+fn level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal() {
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
+    }
+
+    // Fixture image + rendered bytes share one temp dir so the relative
+    // `pic.png` resolves against `image_base_path` at render time.
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("pic.png"), TINY_PNG).unwrap();
+
+    let source = SourceDescriptor::Virtual {
+        name: "rich_image".into(),
+    };
+    let (doc, diags) = fold_markdown_to_document(source, "![cat](pic.png)\n");
+    assert!(diags.is_empty(), "image fixture must fold cleanly: {diags:?}");
+
+    // Rich tier on an iTerm2-capable TTY (WezTerm renders iTerm2 graphics).
+    let mut term = Terminal::new_optimistic(120);
+    term.image_support = ImageSupport::ITerm;
+    term.is_tty = true;
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.graphics_mode = renderable::tree::GraphicsMode::Rich;
+    context.image_base_path = Some(dir.path().to_path_buf());
+    let opts = TerminalRenderOptions {
+        context,
+        strictness: RenderStrictness::Warn,
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+    };
+    let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
+
+    // In-process proof the production tree path emitted the inline image
+    // protocol (iTerm2 OSC 1337), not the alt-text fallback.
+    assert!(
+        rendered.output.contains("\u{1b}]1337;File="),
+        "Rich image node must emit the iTerm2 image protocol; rendered bytes:\n{:?}",
+        rendered.output,
+    );
+    assert!(
+        !rendered.output.contains("[cat]"),
+        "successful image render must not emit the bracketed alt-text fallback",
+    );
+
+    let path = dir.path().join("rich_image.ansi");
+    fs::write(&path, rendered.output).unwrap();
+
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().unwrap();
+    run_with_sentinel(harness, "clear");
+    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+
+    // Anti-regression only: the real terminal must not surface the `[cat]`
+    // alt-text fallback. This does NOT prove the image was painted — the
+    // harness cannot inspect rendered pixels (see the verification-scope note
+    // on this fn). A dropped/ignored payload would also pass this assertion.
+    assert!(
+        !frame.plain.contains("[cat]"),
+        "real terminal showed the alt-text fallback instead of consuming the image. plain:\n{}",
+        frame.plain,
+    );
+}
+
+/// Encodes a `size`×`size` opaque PNG filled with a single RGB color.
+fn write_solid_png(path: &std::path::Path, size: u32, rgb: [u8; 3]) {
+    let img = image::RgbImage::from_pixel(size, size, image::Rgb(rgb));
+    img.save_with_format(path, image::ImageFormat::Png)
+        .expect("encode probe PNG");
+}
+
+/// Counts pixels in `png` that are near `target` RGB (per-channel within
+/// `tol`), and the total pixels that are not near-black. Returns
+/// `(near_target, non_black, total)`.
+fn classify_pixels(png: &[u8], target: [u8; 3], tol: i32) -> (u64, u64, u64) {
+    let img = image::load_from_memory(png).expect("decode screen capture");
+    let rgb = img.to_rgb8();
+    let mut near_target = 0u64;
+    let mut non_black = 0u64;
+    let total = (rgb.width() as u64) * (rgb.height() as u64);
+    for px in rgb.pixels() {
+        let [r, g, b] = px.0;
+        let near = (r as i32 - target[0] as i32).abs() <= tol
+            && (g as i32 - target[1] as i32).abs() <= tol
+            && (b as i32 - target[2] as i32).abs() <= tol;
+        if near {
+            near_target += 1;
+        }
+        if r > 30 || g > 30 || b > 30 {
+            non_black += 1;
+        }
+    }
+    (near_target, non_black, total)
+}
+
+/// Validates the pixel-classification pipeline used by
+/// [`level2_tree_rich_image_node_paints_distinctive_pixels`] without a terminal:
+/// a solid-magenta PNG must classify as (near-)all magenta and all non-black,
+/// while a solid-black PNG must register as near-zero non-black (the signature
+/// the paint test treats as "capture blocked → skip"). This guards the decode +
+/// threshold logic independently of the WezTerm/`screencapture` environment.
+#[test]
+fn pixel_classification_distinguishes_magenta_from_black() {
+    const MAGENTA: [u8; 3] = [255, 0, 255];
+    let dir = tempdir().unwrap();
+
+    let magenta_path = dir.path().join("m.png");
+    write_solid_png(&magenta_path, 64, MAGENTA);
+    let (near, non_black, total) = classify_pixels(&fs::read(&magenta_path).unwrap(), MAGENTA, 60);
+    assert_eq!(total, 64 * 64);
+    assert_eq!(near, total, "every magenta pixel must classify as near-target");
+    assert_eq!(non_black, total, "magenta is not black");
+
+    let black_path = dir.path().join("b.png");
+    write_solid_png(&black_path, 64, [0, 0, 0]);
+    let (near, non_black, _) = classify_pixels(&fs::read(&black_path).unwrap(), MAGENTA, 60);
+    assert_eq!(near, 0, "black has no magenta");
+    assert_eq!(non_black, 0, "black capture must read as blocked/empty");
+}
+
+/// Review-5 finding 3: the previous Level-2 image test proves only that the
+/// iTerm2 protocol bytes are emitted and that WezTerm does not surface the
+/// `[cat]` alt-text fallback — a dropped or malformed payload passes it too,
+/// because text capture strips graphics bytes. This test closes that gap with
+/// **pixel-readback**: it renders a `240×240` solid-magenta image through the
+/// production tree path, paints it into a real WezTerm pane, screen-captures the
+/// window via `screencapture`, and asserts the distinctive magenta is actually
+/// on screen. Magenta (`#ff00ff`) does not occur in terminal chrome, text, or
+/// the theme background, so its presence proves the image was decoded and
+/// painted — not merely that bytes were consumed.
+///
+/// ## Skips cleanly
+///
+/// Skips when WezTerm is unavailable (like the other Level-2 tests), when the
+/// harness cannot capture the window region (off macOS, or `screencapture`
+/// fails), or when the capture comes back essentially black — the signature of
+/// missing Screen Recording permission, which cannot be distinguished from a
+/// genuine paint failure and so must not hard-fail. Set
+/// `BISCUIT_TEST_LEVEL_REQUIRED=2` to enforce the WezTerm prerequisite; the
+/// pixel assertion still self-skips on a black capture.
+#[test]
+#[serial(level2_terminal)]
+fn level2_tree_rich_image_node_paints_distinctive_pixels() {
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
+    }
+
+    const MAGENTA: [u8; 3] = [255, 0, 255];
+
+    let dir = tempdir().unwrap();
+    let png_path = dir.path().join("probe.png");
+    write_solid_png(&png_path, 240, MAGENTA);
+
+    let source = SourceDescriptor::Virtual {
+        name: "rich_image_pixels".into(),
+    };
+    let (doc, diags) = fold_markdown_to_document(source, "![probe](probe.png)\n");
+    assert!(diags.is_empty(), "image fixture must fold cleanly: {diags:?}");
+
+    let mut term = Terminal::new_optimistic(120);
+    term.image_support = ImageSupport::ITerm;
+    term.is_tty = true;
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.graphics_mode = renderable::tree::GraphicsMode::Rich;
+    context.image_base_path = Some(dir.path().to_path_buf());
+    let opts = TerminalRenderOptions {
+        context,
+        strictness: RenderStrictness::Warn,
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+    };
+    let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
+    assert!(
+        rendered.output.contains("\u{1b}]1337;File="),
+        "Rich image node must emit the iTerm2 image protocol",
+    );
+
+    let path = dir.path().join("rich_image_pixels.ansi");
+    fs::write(&path, rendered.output).unwrap();
+
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().unwrap();
+    run_with_sentinel(harness, "clear");
+    let _ = run_with_sentinel(harness, &format!("cat {}", path.display()));
+
+    let Some(png) = harness.capture_window_png().expect("screen-capture call") else {
+        eprintln!(
+            "skipping pixel assertion: window-region capture unavailable (non-macOS or screencapture failed)"
+        );
+        return;
+    };
+
+    let (magenta, non_black, total) = classify_pixels(&png, MAGENTA, 60);
+    // A near-black capture means screen recording is blocked (no permission); we
+    // cannot tell that from a paint failure, so skip rather than hard-fail.
+    if non_black * 100 < total {
+        eprintln!(
+            "skipping pixel assertion: capture is essentially black ({non_black}/{total} non-black) \
+             — Screen Recording permission likely not granted to the parent terminal"
+        );
+        return;
+    }
+
+    // A real, non-black capture with no magenta means the image did not paint.
+    assert!(
+        magenta > 1000,
+        "Rich image node did not paint: only {magenta} magenta pixels in a {total}-pixel \
+         capture ({non_black} non-black). The image protocol bytes were emitted but the \
+         terminal did not render the decoded image.",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Public post-cutover entry-point Level 2 coverage (review-1 finding 7)
+//
+// Every other test in this file drives the lower-level `render_terminal_document`
+// directly, or the decorated `DarkmatterPage::render` (legacy) path. None drove
+// the PUBLIC, post-flip terminal entry points users actually call —
+// `Markdown::as_terminal` and zero-config `DarkmatterPage::render` — through a
+// real terminal. Those entry points map options and wire the code renderer at an
+// adapter boundary the direct-renderer tests bypass; these two tests close that
+// integration gap by capturing the public output in a real WezTerm pane.
+// ---------------------------------------------------------------------------
+
+/// Renders `body` through the public [`Markdown::as_terminal`] entry point
+/// (post-cutover: the render-tree terminal document renderer), pinning width +
+/// TrueColor so the capture is deterministic, and writes the bytes to a temp
+/// file.
+fn render_public_as_terminal_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let md: Markdown = body.into();
+    let mut opts = TerminalOptions::default();
+    opts.max_width = Some(120);
+    opts.color_depth = Some(ColorDepth::TrueColor);
+    let rendered = md.as_terminal(opts).expect("public Markdown::as_terminal render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered).unwrap();
+    (dir, path)
+}
+
+/// Renders `body` through zero-config [`DarkmatterPage::render`] (no builder
+/// calls → the default-layout tree path) and writes the bytes to a temp file.
+fn render_zero_config_page_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let term = Terminal::new_optimistic(120);
+    let md: Markdown = body.into();
+    let rendered = DarkmatterPage::new(&term)
+        .render(&md)
+        .expect("zero-config DarkmatterPage::render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered).unwrap();
+    (dir, path)
+}
+
+/// Finding 7: the public `Markdown::as_terminal` entry must survive a real
+/// terminal — heading, prose, fenced-code body + language header, and SGR
+/// styling all reach the pane through the post-cutover tree path.
+#[test]
+#[serial(level2_terminal)]
+fn level2_public_as_terminal_entry_renders_in_real_terminal() {
+    let body = "# Public Entry\n\nBody paragraph via the public API.\n\n\
+                ```rust\nfn demo() {}\n```\n";
+    let Some((frame, _dir)) = drive_pane(body, "public_as_terminal", render_public_as_terminal_to_tempfile)
+    else {
+        return;
+    };
+
+    for token in &["Public Entry", "Body paragraph via the public API.", "demo"] {
+        assert!(
+            frame.plain.contains(token),
+            "public as_terminal token {token:?} missing from real-terminal capture. plain:\n{}",
+            frame.plain
+        );
+    }
+    // The cutover emits a language-label header pill for every fenced block.
+    assert!(
+        frame.plain.to_lowercase().contains("rust"),
+        "fenced-code language header missing from public as_terminal capture. plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        frame.raw.contains("\u{1b}["),
+        "expected SGR styling in the public as_terminal capture. raw:\n{}",
+        frame.raw
+    );
+}
+
+/// Finding 7: zero-config `DarkmatterPage::render` (the other public post-flip
+/// entry) must likewise survive a real terminal through the default-layout tree
+/// path.
+#[test]
+#[serial(level2_terminal)]
+fn level2_zero_config_page_render_renders_in_real_terminal() {
+    let body = "# Zero Config Page\n\nNo builder calls means the default-layout tree path.\n";
+    let Some((frame, _dir)) = drive_pane(body, "zero_config_page", render_zero_config_page_to_tempfile)
+    else {
+        return;
+    };
+
+    for token in &["Zero Config Page", "No builder calls means the default-layout tree path."] {
+        assert!(
+            frame.plain.contains(token),
+            "zero-config page token {token:?} missing from real-terminal capture. plain:\n{}",
+            frame.plain
+        );
     }
 }

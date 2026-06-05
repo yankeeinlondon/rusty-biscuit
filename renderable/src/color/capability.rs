@@ -106,15 +106,20 @@ pub enum ColorMode {
 /// and passes it through.
 ///
 /// [`CodeRenderer`]: crate::tree::CodeRenderer
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalCodeContext {
     width: u32,
     color_depth: ColorDepth,
     color_mode: ColorMode,
+    code_theme_name: Option<String>,
+    line_numbers: bool,
 }
 
 impl TerminalCodeContext {
     /// Creates a new terminal code context.
+    ///
+    /// The optional code-theme name is left unset; use
+    /// [`with_code_theme_name`](Self::with_code_theme_name) to carry one.
     ///
     /// ## Arguments
     ///
@@ -128,7 +133,50 @@ impl TerminalCodeContext {
             width,
             color_depth,
             color_mode,
+            code_theme_name: None,
+            line_numbers: false,
         }
+    }
+
+    /// Sets whether the code block should render a line-number gutter.
+    ///
+    /// Off by default; a consumer (e.g. darkmatter's page line-number toggle)
+    /// turns it on so the [`CodeRenderer`] emits the gutter.
+    ///
+    /// [`CodeRenderer`]: crate::tree::CodeRenderer
+    #[inline]
+    #[must_use]
+    pub const fn with_line_numbers(mut self, line_numbers: bool) -> Self {
+        self.line_numbers = line_numbers;
+        self
+    }
+
+    /// Returns whether the code block should render a line-number gutter.
+    #[inline]
+    #[must_use]
+    pub const fn line_numbers(&self) -> bool {
+        self.line_numbers
+    }
+
+    /// Sets the optional code-theme name carried to the [`CodeRenderer`].
+    ///
+    /// This is a plain string (e.g. `"github"`, `"dracula"`) so `renderable`
+    /// stays free of any consumer-specific theme types. The consuming
+    /// [`CodeRenderer`] maps it back to its own theme representation.
+    ///
+    /// [`CodeRenderer`]: crate::tree::CodeRenderer
+    #[inline]
+    #[must_use]
+    pub fn with_code_theme_name(mut self, name: Option<String>) -> Self {
+        self.code_theme_name = name;
+        self
+    }
+
+    /// Returns the optional code-theme name, if a consumer set one.
+    #[inline]
+    #[must_use]
+    pub fn code_theme_name(&self) -> Option<&str> {
+        self.code_theme_name.as_deref()
     }
 
     /// Returns the available width in columns.

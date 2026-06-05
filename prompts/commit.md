@@ -4,6 +4,8 @@ timeout: 15m
 step_timeout: 8m
 show_system_prompt: false
 operation: commit
+agent: opencode
+model: minimax/MiniMax-M3
 ---
 # Commit Staged Files
 
@@ -19,8 +21,15 @@ operation: commit
 > 1. If the change appears to have no relationship to any particular package in the monorepo.
 > 2. If there are bunch of small changes which are all related to the same underlying event or cause and the changes do not touch any source code
 
-The valid operations we use include: fix, docs, chore, feat, refactor, style, perf, test, ci, style.
+The valid operations we use include: fix, docs, chore, feat, refactor, style, perf, test, ci, style, planning.
 
+> **Note:**
+> - when you detect that a directory of files with a "spec.md" are being **moved INTO** a directory containing `_completed` in the directory path:
+>     - mark the operation as "planning"
+>     - this movement indicates that the feature/fixture/review has now been completed; it is kept in git but moved out of the hotpath of actively planned items
+> - when you detect that a directory of files with a "spec.md" are being **moved OUT OF** a directory containing `_unscheduled` in the directory path:
+>     - mark the operation as "planning"
+>     - this indicates that a specification that had no immediacy before has been scheduled to be implemented very soon
 > **Note:** the action 'refactor' should be reserved for commits which have at least some source code files.
 
 ## Package in this Monorepo
@@ -63,7 +72,7 @@ The lessons learned are found in {{lessons_learned}}
 
 The following files have been staged for commit:
 
-::shell sniff repo staged-files -v --plain --on-error 'no staged files; nothing to do!'
+::shell sniff repo staged-files -v --plain --on-error '**No staged files**; nothing to do!' --no-error
 
 ## Task
 

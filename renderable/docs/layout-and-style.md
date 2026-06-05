@@ -180,10 +180,12 @@ Known gaps and loose ends:
   directly. The field is retained for API shape; remove it or wire a consumer.
 - **Terminal `max_width` is a silent no-op** (see §4) — consistent with the
   spec, but a Browser/Terminal asymmetry a reader would not expect.
-- **darkmatter's legacy `LayoutContext` pipeline is retained.** `DarkmatterPage`
-  now builds a `renderable::layout::Layout` (see §7), but the bespoke
-  `apply_row_decoration` `u16` margin pipeline still runs for paths not yet on
-  the tree renderer. It is correct but duplicative — a transitional state.
+- **darkmatter's `LayoutContext` page-frame pass is retained.** `DarkmatterPage`
+  now builds a `renderable::layout::Layout` (see §7) and the document body
+  renders through the tree terminal renderer, but `apply_row_decoration` still
+  runs as the page-frame **post-pass** that wraps the rendered body in page-level
+  margins, padding, and background. This is a complementary step (page frame vs.
+  body content), not a "not yet on the tree" fallback.
 - **Drift is recorded, not eliminated.** The `render_comparison` `KNOWN_DRIFT`
   ledgers carry the tree-vs-bespoke divergences. Some entries are the tree path
   being *more* correct than the legacy bespoke renderer (e.g. applying vertical
@@ -308,7 +310,8 @@ and `BlockQuote` projection. The rest reach it transitively: `bt list`,
 HTML output modes only) `bt dir` all invoke their component's
 `render` / `render_markdown` / `render_html_fragment`, which the Stage 2
 flip routed through the tree. `bt dir` terminal default remains the
-bespoke `FileSystem` renderer pending the Stage 3 decision. The
+bespoke `FileSystem` renderer — Stage 3 deferred that terminal flip
+(Nerd Font icon parity; see [`components.md`](./components.md)). The
 Level-2 real-terminal tests in
 `biscuit-terminal/cli/tests/level2_render_tree_style.rs` continue to
 back `bt block`, `bt progress`, and `bt table` specifically for

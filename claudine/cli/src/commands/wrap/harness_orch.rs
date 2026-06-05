@@ -145,6 +145,45 @@ pub(crate) fn build_harness_shell_options_with_cache(
     opts
 }
 
+/// Approval handler that auto-approves every command it is asked about.
+///
+/// Installed for composition preflight when `--yolo` is active so that
+/// unapproved shell commands clear the gate without prompting. Blacklisted
+/// commands are rejected upstream, before the handler is consulted, so YOLO
+/// never widens the blacklist.
+struct YoloApprovalHandler;
+
+impl darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler for YoloApprovalHandler {
+    fn approve(
+        &self,
+        _request: darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest,
+    ) -> Result<
+        darkmatter::markdown::compose::shell_expansion::ShellApprovalDecision,
+        darkmatter::markdown::compose::shell_expansion::ShellExpansionError,
+    > {
+        Ok(darkmatter::markdown::compose::shell_expansion::ShellApprovalDecision::AllowOnce)
+    }
+}
+
+/// Apply composition `--dry-run` / `--yolo` overrides to freshly built
+/// shell-approval options.
+///
+/// `dry_run` flips the non-TTY unapproved-command failure to the dry-run
+/// CI gate message. `yolo` installs an auto-approving handler so every
+/// (non-blacklisted) command clears preflight without prompting, matching
+/// the spec guidance that `--yolo` auto-approves all shell commands.
+pub(crate) fn apply_composition_shell_overrides(
+    mut opts: claudine::harness::ShellApprovalOptions,
+    dry_run: bool,
+    yolo: bool,
+) -> claudine::harness::ShellApprovalOptions {
+    opts.dry_run = dry_run;
+    if yolo {
+        opts.approval_handler = Some(Arc::new(YoloApprovalHandler));
+    }
+    opts
+}
+
 #[derive(Clone)]
 pub(crate) struct CachedHarnessLoopContext {
     pub(crate) source_path: PathBuf,
@@ -559,11 +598,25 @@ pub(crate) fn execute_harness_attempt(
             Some(&section_stream),
         );
 
+        let effective_response = {
+            let details = summary_details.lock().unwrap();
+            if prompt_mode == HarnessPromptMode::Inline {
+                let fr = details.final_response.trim();
+                if fr.is_empty() {
+                    summary.assistant_text.clone()
+                } else {
+                    details.final_response.clone()
+                }
+            } else {
+                summary.assistant_text.clone()
+            }
+        };
+
         (
             summary.exit_code,
             termination,
             summary.session_id.clone(),
-            summary.assistant_text.clone(),
+            effective_response,
             summary.stderr_text.clone(),
             perf,
         )

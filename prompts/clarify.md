@@ -1,4 +1,6 @@
 ---
+$schema:
+    doc: string(required)
 doc: "{{spec || design}}"
 interactive: true
 start:

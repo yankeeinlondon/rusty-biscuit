@@ -1,35 +1,54 @@
-//! Experimental tree-rendering entry points for darkmatter.
+//! Tree-rendering entry points for darkmatter.
 //!
-//! These functions are the **internal adapter boundary** between
-//! darkmatter's legacy public renderers and the render-tree pipeline shared
-//! with `biscuit-terminal` and `renderable`. They exist so the parity test
-//! suite and benchmarks can drive the tree path without touching the public
-//! `Markdown::as_html`, `Markdown::as_terminal`, or `for_terminal` APIs (which
-//! continue to use the legacy event-stream serializers until the cutover gate
-//! in `renderable/features/2026-05-20-darkmatter-tree/spec.md`).
+//! These functions are the **internal adapter boundary** between darkmatter's
+//! public `Markdown` renderers and the render-tree pipeline shared with
+//! `biscuit-terminal` and `renderable`. As of the tree cutover
+//! (`renderable/features/2026-06-02-tree-cutover/`), [`render_tree_html`] backs
+//! the public [`Markdown::as_html`](crate::markdown::Markdown::as_html) and
+//! [`render_tree_terminal`] backs [`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal)
+//! (and the default-layout [`DarkmatterPage::render`](crate::layout::DarkmatterPage::render)
+//! path). [`render_tree_markdown`] / [`render_tree_markdown_dialect`] drive the
+//! parity test suite and benchmarks.
 //!
-//! All entry points are `pub(crate)` — they intentionally live below the
-//! public API surface. See
-//! `renderable/features/2026-05-20-darkmatter-tree/entry-point-shape.md`.
+//! The legacy event-stream serializers have been deleted; these tree entry
+//! points are the only render path. See
+//! `renderable/features/_completed/2026-05-20-darkmatter-tree/entry-point-shape.md`.
+//!
+//! Visibility: the document entry points the cutover flipped —
+//! [`render_tree_html`], [`render_tree_terminal`], [`render_tree_markdown`], and
+//! [`render_tree_markdown_dialect`] — are `pub` and re-exported from
+//! [`render_tree`](super) so the public `Markdown` / `DarkmatterPage` renderers
+//! and the parity benches reach them. [`to_render_document`] and
+//! [`render_tree_terminal_with_layout`] (the decorated `Some(ctx)` route of
+//! [`Markdown::as_terminal_with_layout`](crate::markdown::Markdown::as_terminal_with_layout))
+//! stay `pub(crate)`: they expose the raw fold / decoration boundary used only
+//! inside the crate.
 
 use std::rc::Rc;
 
 use biscuit_terminal::discovery::detection::ColorDepth as TerminalColorDepth;
 use biscuit_terminal::render_tree::{
-    TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
+    ImagePlaceholder, TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
 };
 use biscuit_terminal::terminal::Terminal;
 use renderable::tree::{
-    BrowserRenderOptions, Diagnostic, Document, MarkdownDialect, MarkdownRenderOptions,
-    RawHtmlPolicy, RenderStrictness, SourceDescriptor, render_browser_document,
-    render_markdown_document,
+    BrowserRenderOptions, Diagnostic, Document, GraphicsMode, MarkdownDialect, MarkdownRenderOptions,
+    RawHtmlPolicy, RenderStrictness, SourceDescriptor, TerminalMermaidMode,
+    render_browser_document_html, render_markdown_document,
 };
+
+use renderable::tree::{HintNamespace, NodeKind, RenderNode};
 
 use super::code_renderer::TerminalCodeRenderer;
 use super::fold::fold_markdown_spanned_with_frontmatter;
 use super::pipeline::{PipelineRenderResult, PipelineResult};
 use crate::markdown::Markdown;
+use crate::markdown::inline::HorizontalRuleAttrs;
 use crate::markdown::output::{ColorDepth, HtmlOptions, TerminalOptions};
+
+/// The hint namespace darkmatter HR-attribute paragraphs (and projected
+/// page-level HR defaults) carry on a [`NodeKind::ThematicBreak`].
+const HR_HINT_NS: HintNamespace = HintNamespace("darkmatter.hr");
 
 /// Folds a [`Markdown`] into a canonical [`Document`], wiring darkmatter's
 /// already extracted frontmatter into [`renderable::tree::DocumentMetadata`].
@@ -40,7 +59,7 @@ use crate::markdown::output::{ColorDepth, HtmlOptions, TerminalOptions};
 /// constructs are visible to the every render-tree target. Without this the
 /// experimental entry points would silently lose those features even though
 /// the span-aware helper exists; see review-2 finding 1 in
-/// `renderable/features/2026-05-20-darkmatter-tree/`.
+/// `renderable/features/_completed/2026-05-20-darkmatter-tree/`.
 ///
 /// Frontmatter is **not** re-parsed by this layer — darkmatter strips it
 /// before the parser ever sees content (`Markdown::try_from(...)`), and the
@@ -57,52 +76,669 @@ pub(crate) fn to_render_document(md: &Markdown) -> (Document, Vec<Diagnostic>) {
     fold_markdown_spanned_with_frontmatter(source, md)
 }
 
+/// Fills missing `darkmatter.hr.*` hints on every [`NodeKind::ThematicBreak`]
+/// in the tree from `defaults`, reproducing the legacy bare-rule default
+/// contract on the tree path.
+///
+/// A bare `---` folds to a hint-less `ThematicBreak`; an attribute rule
+/// (`--- { style: waves }`) folds to one already carrying explicit
+/// `darkmatter.hr.*` hints. The legacy renderers applied `style.hr.*` (and the
+/// deprecated top-level `hr:` alias) as the *default* HR style, with any inline
+/// attribute winning per-property. This pass mirrors that precedence: a hint is
+/// set only when the node does not already carry it, so an inline attribute is
+/// never overridden by a page-level default.
+///
+/// `defaults` is the [`HorizontalRuleAttrs`] a
+/// [`DarkmatterPage`](crate::layout::DarkmatterPage) projects from `style.hr.*`
+/// (`HtmlOptions::hr_defaults` / `TerminalOptions::hr_defaults`); its `kind`
+/// resolves through the deprecated `legacy_style` alias the same way
+/// [`lower_hr_attrs_to_node`](super::fold) does.
+fn apply_hr_defaults(node: &mut RenderNode, defaults: &HorizontalRuleAttrs) {
+    if matches!(node.kind, NodeKind::ThematicBreak) {
+        if let Some(kind) = defaults.kind.as_ref().or(defaults.legacy_style.as_ref()) {
+            set_hr_hint_if_absent(node, "kind", kind);
+        }
+        if let Some(alignment) = defaults.alignment.as_ref() {
+            set_hr_hint_if_absent(node, "alignment", alignment);
+        }
+        if let Some(weight) = defaults.weight.as_ref() {
+            set_hr_hint_if_absent(node, "weight", weight);
+        }
+        if let Some(width) = defaults.width.as_ref() {
+            set_hr_hint_if_absent(node, "width", width);
+        }
+        if let Some(color) = defaults.color.as_ref() {
+            set_hr_hint_if_absent(node, "color", color);
+        }
+    }
+
+    if let Some(children) = node.children_mut() {
+        for child in children {
+            apply_hr_defaults(child, defaults);
+        }
+    }
+}
+
+/// Sets `darkmatter.hr.<key>` on `node` to `value` only when the node does not
+/// already carry that hint — so inline rule attributes win over page defaults.
+fn set_hr_hint_if_absent(node: &mut RenderNode, key: &str, value: &str) {
+    if node.attrs.get_hint(HR_HINT_NS, key).is_none() {
+        node.attrs.set_hint(HR_HINT_NS, key, serde_json::json!(value));
+    }
+}
+
+/// Seeds bare-rule HR defaults on `root` from the deprecated top-level `hr:`
+/// frontmatter when the caller supplied no explicit `hr_defaults` option.
+///
+/// Restores the direct-API fallback the deleted bespoke serializers performed
+/// (`options.hr_defaults.as_ref().or(hr_defaults_from_frontmatter(md).as_ref())`):
+/// the [`Markdown::as_html`](crate::markdown::Markdown::as_html) /
+/// [`as_terminal`](crate::markdown::Markdown::as_terminal) paths must honor a
+/// document's top-level `hr:` block even with `HtmlOptions::default()` /
+/// `TerminalOptions::default()`. Callers gate this on
+/// `options.hr_defaults.is_none()` so an explicit option (including a
+/// [`DarkmatterPage`](crate::layout::DarkmatterPage)'s `style.hr.*` projection)
+/// always wins outright, matching the legacy `.or()` precedence.
+pub(crate) fn apply_hr_frontmatter_fallback(root: &mut RenderNode, md: &Markdown) {
+    if let Some(fallback) = hr_defaults_from_frontmatter(md) {
+        apply_hr_defaults(root, &fallback);
+    }
+}
+
+/// Resolves the deprecated top-level `hr:` frontmatter block into a
+/// [`HorizontalRuleAttrs`] suitable for [`apply_hr_defaults`].
+///
+/// The frontmatter backing store is `serde_json::Value`, so a direct
+/// `get::<HorizontalRuleAttrs>("hr")` deserialize would fail fast on any
+/// non-string scalar (e.g. `hr: { width: 50 }`), dropping every sibling key. To
+/// match the attribute-block path's coercion (see `block::hr_parser`), this walks
+/// the `hr` mapping entry-by-entry and coerces numbers and bools to strings via
+/// [`json_scalar_as_string`]. The `style` key maps to
+/// [`legacy_style`](HorizontalRuleAttrs::legacy_style) so the deprecated alias
+/// resolves through the same `kind`-wins precedence the inline path uses.
+///
+/// ## Notes
+///
+/// - Non-mapping `hr` values (e.g. `hr: 42`) emit a `tracing::warn!` and return
+///   `None`.
+/// - Unknown keys emit a `tracing::warn!` and are dropped.
+/// - Non-scalar values (arrays, objects, `null`) for recognized keys emit a
+///   `tracing::warn!` and are skipped; remaining sibling keys still apply.
+fn hr_defaults_from_frontmatter(md: &Markdown) -> Option<HorizontalRuleAttrs> {
+    let value = md.frontmatter().as_map().get("hr")?;
+    let map = match value {
+        serde_json::Value::Object(map) => map,
+        other => {
+            tracing::warn!(
+                value = ?other,
+                "non-mapping `hr` frontmatter; using horizontal rule component defaults"
+            );
+            return None;
+        }
+    };
+
+    let mut attrs = HorizontalRuleAttrs::default();
+    for (key, entry) in map {
+        let Some(value) = json_scalar_as_string(entry) else {
+            tracing::warn!(
+                key = %key,
+                value = ?entry,
+                "non-scalar value in `hr` frontmatter; ignoring"
+            );
+            continue;
+        };
+
+        match key.as_str() {
+            "kind" => attrs.kind = Some(value),
+            "style" => attrs.legacy_style = Some(value),
+            "alignment" => attrs.alignment = Some(value),
+            "weight" => attrs.weight = Some(value),
+            "width" => attrs.width = Some(value),
+            "color" => attrs.color = Some(value),
+            other => {
+                tracing::warn!(
+                    key = %other,
+                    value = %value,
+                    "unknown horizontal rule attribute; ignoring"
+                );
+            }
+        }
+    }
+
+    Some(attrs)
+}
+
+/// Coerces a JSON scalar to a `String`, returning `None` for non-scalar shapes
+/// (arrays, objects, null) so [`hr_defaults_from_frontmatter`] agrees with the
+/// attribute-block path on which values are string-coercible.
+fn json_scalar_as_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+/// Lowers [`HtmlOptions::hr_css_variables`](crate::markdown::output::HtmlOptions::hr_css_variables)
+/// to a sorted [`PageOptions::css_variables`](renderable::browser::PageOptions::css_variables)
+/// override list, or `None` when nothing safe remains.
+///
+/// Mirrors the legacy `generate_hr_root_block`: keys are passed without the
+/// `--` prefix (the page renderer adds it), sorted for deterministic output,
+/// and any entry whose key or value contains `<` or a newline is skipped so it
+/// cannot break out of the emitted `<style>` element.
+fn hr_root_variables(
+    vars: &std::collections::HashMap<String, String>,
+) -> Option<Vec<(String, String)>> {
+    let is_safe = |s: &str| !s.contains('<') && !s.contains('\n');
+    let mut entries: Vec<(String, String)> = vars
+        .iter()
+        .filter(|(key, value)| is_safe(key) && is_safe(value))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    if entries.is_empty() {
+        return None;
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    Some(entries)
+}
+
 /// Renders a [`Markdown`] to HTML via the render-tree pipeline.
 ///
 /// Maps [`HtmlOptions`] to [`BrowserRenderOptions`] narrowly: raw HTML
-/// defaults to [`RawHtmlPolicy::Escape`] (the safe baseline), and the
+/// defaults to [`RawHtmlPolicy::Escape`] (the safe baseline), the
 /// [`TerminalCodeRenderer`] hook is wired so fenced code blocks are
-/// syntax-highlighted (with title / line-number / highlight directives).
-/// Mermaid mode and HR CSS variables remain **documented parity gaps** for
-/// the internal path until adapter hooks land. See `entry-point-shape.md`.
+/// syntax-highlighted (with title / line-number / highlight directives),
+/// `mermaid_mode` maps to the render-tree Mermaid opt-in, and (when
+/// `include_styles` is set) the `.code-block` panel stylesheet is
+/// injected through the page hook so fenced code retains its background.
+/// [`HtmlOptions::hr_css_variables`](crate::markdown::output::HtmlOptions::hr_css_variables)
+/// are lowered to page-level `:root` overrides (see
+/// `browser_options_from_html_options`), and
+/// [`HtmlOptions::hr_defaults`](crate::markdown::output::HtmlOptions::hr_defaults)
+/// fill the `darkmatter.hr.*` hints of bare `---` rules (see
+/// `apply_hr_defaults`). When that option is unset, the deprecated top-level
+/// `hr:` frontmatter supplies the defaults instead (see
+/// `apply_hr_frontmatter_fallback`).
+///
+/// `style:` frontmatter hyperlink / image color injection
+/// ([`HtmlOptions::hyperlink_style`](crate::markdown::output::HtmlOptions::hyperlink_style),
+/// `local_hyperlink_style`, `local_image_style`) is reproduced by
+/// [`inject_inline_styles`], which mutates the folded [`Document`] before render
+/// and rewrites the resulting `<a>` / `<img>` tags. See that function for the
+/// merge precedence. The render tree carries no inline-CSS layer on a link /
+/// image node, so the injection bridges the gap on the darkmatter side.
+///
+/// Uses the direct document-string renderer
+/// ([`render_browser_document_html`]) — the production browser path needs the
+/// complete final HTML string, so it streams straight into one buffer rather
+/// than building an intermediate [`HtmlPage`](renderable::html::HtmlPage) /
+/// [`BrowserFragment`](renderable::browser::BrowserFragment) tree and then
+/// serializing it. See `renderable/features/2026-06-03-browser-perf/spec.md`.
 ///
 /// ## Errors
 ///
 /// Propagates any fatal [`RenderError`] from
-/// [`render_browser_document`]. Non-fatal diagnostics are returned in the
+/// [`render_browser_document_html`]. Non-fatal diagnostics are returned in the
 /// [`PipelineResult`] without being demoted to errors.
-pub(crate) fn render_tree_html(
-    md: &Markdown,
+pub fn render_tree_html(md: &Markdown, options: &HtmlOptions) -> PipelineRenderResult<String> {
+    let (mut doc, fold_diagnostics) = to_render_document(md);
+    // Direct-API fallback: with no explicit `hr_defaults`, seed bare rules from
+    // the deprecated top-level `hr:` frontmatter. `render_tree_html_from_document`
+    // applies an explicit option, so the two paths stay mutually exclusive.
+    if options.hr_defaults.is_none() {
+        apply_hr_frontmatter_fallback(&mut doc.root, md);
+    }
+    render_tree_html_from_document(doc, fold_diagnostics, options)
+}
+
+/// Renders an already-folded [`Document`] to HTML via the render-tree pipeline.
+///
+/// Splits the post-fold half of [`render_tree_html`] out so [`Markdown::as_html`]
+/// can fold once, run [`validate_code_directives`] over the same tree (restoring
+/// the legacy fatal-directive contract — see that function), and render from the
+/// shared [`Document`] without a second fold.
+pub(crate) fn render_tree_html_from_document(
+    mut doc: Document,
+    fold_diagnostics: Vec<Diagnostic>,
     options: &HtmlOptions,
 ) -> PipelineRenderResult<String> {
-    let (doc, fold_diagnostics) = to_render_document(md);
+    if let Some(defaults) = options.hr_defaults.as_ref() {
+        apply_hr_defaults(&mut doc.root, defaults);
+    }
+    let injections = inject_link_image_attributes(&mut doc.root, options);
     let browser_opts = browser_options_from_html_options(options);
-    let rendered = render_browser_document(&doc, &browser_opts)?;
+    let rendered = render_browser_document_html(&doc, &browser_opts)?;
+    let output = apply_attribute_injections(rendered.output, &injections);
     Ok(PipelineResult::new(
-        rendered.output.render(),
+        output,
         fold_diagnostics,
         rendered.diagnostics,
     ))
+}
+
+/// Validates every fenced code block's DSL directive in a folded [`Document`],
+/// returning the first fatal parse error.
+///
+/// Restores the legacy `output::as_html` contract (`parse_code_info(...)?`): a
+/// malformed directive — e.g. an invalid highlight range like `highlight=1-2-3`
+/// — is a **hard error** on the browser path, not a silent degrade. The render
+/// tree's [`TerminalCodeRenderer`](super::code_renderer::TerminalCodeRenderer)
+/// degrades malformed directives to language-only metadata (matching the legacy
+/// *terminal* renderer, which used `unwrap_or_default`), so this preflight is
+/// the browser-only guard [`Markdown::as_html`] runs before rendering. The
+/// reconstructed info string matches
+/// [`build_code_meta`](super::code_renderer)'s so validation and rendering parse
+/// identical input.
+///
+/// ## Errors
+///
+/// Returns the [`MarkdownError`] (typically
+/// [`InvalidLineRange`](crate::markdown::MarkdownError::InvalidLineRange)) that
+/// [`parse_code_info`](crate::markdown::dsl::parse_code_info) raises for the
+/// first malformed directive, in document order.
+pub(crate) fn validate_code_directives(root: &RenderNode) -> Result<(), crate::markdown::MarkdownError> {
+    use crate::markdown::dsl::parse_code_info;
+
+    if let NodeKind::Code { lang, meta, .. } = &root.kind {
+        let lang = lang.as_deref().unwrap_or("");
+        let info = match meta.as_deref() {
+            Some(m) if !m.trim().is_empty() => format!("{lang} {m}"),
+            _ => lang.to_string(),
+        };
+        parse_code_info(&info)?;
+    }
+    for child in root.children() {
+        validate_code_directives(child)?;
+    }
+    Ok(())
+}
+
+/// One pending attribute injection: the sentinel class attached to a folded
+/// link / image node and the literal attribute fragment that must replace it in
+/// the rendered output.
+struct AttributeInjection {
+    /// The unique sentinel class written onto the node (and emitted as
+    /// `class="…"` by the browser writer).
+    sentinel: String,
+    /// The attribute fragment (e.g. `class="btn" style="…" target="_blank"`)
+    /// substituted for the node's emitted `class="<sentinel>"`. Free-form text
+    /// values are pre-escaped; the fragment is spliced verbatim into the
+    /// rendered HTML.
+    attributes: String,
+}
+
+/// Sentinel-class prefix for [`inject_link_image_attributes`]. Carries no
+/// semantic meaning; it exists only as a 1:1 post-render handle so the computed
+/// attribute fragment lands on the exact tag the node produced, independent of
+/// duplicate URLs.
+const ATTR_INJECTION_SENTINEL_PREFIX: &str = "__dm-attr-injection-";
+
+/// Lowers darkmatter's structured link directives and `style:` frontmatter
+/// link / image colors onto the folded tree, reproducing legacy
+/// `output::as_html`'s `<a>` / `<img>` attribute emission on the tree path.
+///
+/// The render tree carries no structured-link layer (`class` / `target` /
+/// `data-*` / `prompt`) and no inline-CSS layer on a [`NodeKind::Link`] /
+/// [`NodeKind::Image`] node, so darkmatter bridges the gap here: each decorated
+/// node gets a unique sentinel **class** (which the browser writer emits
+/// verbatim) and the computed attribute fragment is recorded;
+/// [`apply_attribute_injections`] then rewrites `class="<sentinel>"` to that
+/// fragment in the rendered string.
+///
+/// The **link** pass runs for every titled link so a structured directive
+/// (`[label](url "class='btn' target='_blank' prompt='…' data-x='y'")`) keeps
+/// its `class`, `style`, `target`, plain `title`, `data-prompt`, and `data-*`
+/// attributes even when no frontmatter hyperlink style is configured — this is
+/// the fidelity legacy emitted and review-2 finding 2 flagged the tree path for
+/// dropping. The **image** pass only applies the frontmatter `local_image_style`
+/// overlay and is skipped when none is set.
+///
+/// Merge precedence mirrors `output::html`:
+///
+/// - **Link.** `is_local = Link::is_file()`. Local links merge
+///   `local_hyperlink_style` over `hyperlink_style`; remote links use
+///   `hyperlink_style` only. The frontmatter overlay then fills only the
+///   properties the link's own inline CSS (`style='…'` in its title) does not
+///   already set — the per-link declaration wins.
+/// - **Image.** Only local images (`is_local_image`) receive
+///   `local_image_style`, again filling only properties the image's own inline
+///   CSS does not set. Remote images get no local style.
+///
+/// A link whose title parsed as a structured directive (`class='…'`,
+/// `style='…'`, …) also has that title cleared from the node so the browser
+/// writer does not leak it as a `title="…"` attribute, matching legacy
+/// structured-mode link output.
+///
+/// ## Returns
+///
+/// The pending injections, in attachment order. Empty when no link / image node
+/// needed any attribute — the caller then skips the post-render rewrite.
+fn inject_link_image_attributes(
+    root: &mut RenderNode,
+    options: &HtmlOptions,
+) -> Vec<AttributeInjection> {
+    let has_link_style =
+        options.hyperlink_style.is_some() || options.local_hyperlink_style.is_some();
+    let has_image_style = options.local_image_style.is_some();
+
+    let mut injections = Vec::new();
+    decorate_node(root, options, has_link_style, has_image_style, &mut injections);
+    injections
+}
+
+/// Recursively walks `node`, decorating link / image nodes per
+/// [`inject_link_image_attributes`].
+fn decorate_node(
+    node: &mut RenderNode,
+    options: &HtmlOptions,
+    has_link_style: bool,
+    has_image_style: bool,
+    injections: &mut Vec<AttributeInjection>,
+) {
+    match &node.kind {
+        // A plain link with no title and no frontmatter style can carry no
+        // structured attributes; skip parsing it (the common case).
+        NodeKind::Link { url, title, .. } if title.is_some() || has_link_style => {
+            if let Some((attributes, clear_title)) =
+                link_attributes(url, title.as_deref(), options, has_link_style)
+            {
+                attach_injection(node, attributes, injections);
+                if clear_title
+                    && let NodeKind::Link { title, .. } = &mut node.kind
+                {
+                    *title = None;
+                }
+            }
+        }
+        NodeKind::Image { url, title, .. } if has_image_style => {
+            if let Some(css) = image_inline_css(url, title.as_deref(), options) {
+                attach_injection(node, format!("style=\"{css}\""), injections);
+            }
+        }
+        _ => {}
+    }
+
+    if let Some(children) = node.children_mut() {
+        for child in children {
+            decorate_node(child, options, has_link_style, has_image_style, injections);
+        }
+    }
+}
+
+/// Records an injection for `attributes` and writes its sentinel class onto
+/// `node`.
+fn attach_injection(
+    node: &mut RenderNode,
+    attributes: String,
+    injections: &mut Vec<AttributeInjection>,
+) {
+    let sentinel = format!("{ATTR_INJECTION_SENTINEL_PREFIX}{}", injections.len());
+    node.attrs.classes.push(sentinel.clone());
+    injections.push(AttributeInjection {
+        sentinel,
+        attributes,
+    });
+}
+
+/// Computes the full `<a>` attribute fragment for a link, or `None` when nothing
+/// applies.
+///
+/// Returns `(attributes, clear_title)` where `attributes` is the escaped
+/// `class="…" style="…" target="…" title="…" data-prompt="…" data-x="…"`
+/// fragment legacy `output::as_html` emits, and `clear_title` is `true` when the
+/// link's title parsed as a structured directive (so the node's `title` must be
+/// cleared to avoid leaking the raw directive as a `title="…"` attribute).
+///
+/// The structured attributes (`class` / `target` / `title` / `data-*`) are
+/// emitted only when the title parsed as a directive; the merged `style` is
+/// emitted whenever a frontmatter overlay or a per-link `style='…'` applies. A
+/// plain title (a real tooltip) is left on the node so the browser writer emits
+/// it natively.
+fn link_attributes(
+    url: &str,
+    title: Option<&str>,
+    options: &HtmlOptions,
+    has_link_style: bool,
+) -> Option<(String, bool)> {
+    use crate::render::Link;
+
+    let link = Link::with_title_parsed("", url, title.unwrap_or("")).ok()?;
+
+    // A directive (`class='…' target='…' …`) always makes the parsed plain
+    // title differ from the raw title; a real tooltip parses back to itself.
+    let is_structured = title.is_some() && link.title_plain().as_deref() != title;
+
+    let frontmatter_css = if has_link_style {
+        let merged = if link.is_file() {
+            options
+                .local_hyperlink_style
+                .as_ref()
+                .map(|local| match options.hyperlink_style.as_ref() {
+                    Some(base) => crate::style::bespoke::merge_common_style(base, local),
+                    None => local.clone(),
+                })
+                .or_else(|| options.hyperlink_style.clone())
+        } else {
+            options.hyperlink_style.clone()
+        };
+        merged.and_then(|common| common.to_css_overlay())
+    } else {
+        None
+    };
+
+    let style = combine_inline_css(frontmatter_css.as_ref(), link.style());
+
+    if !is_structured && style.is_none() {
+        return None;
+    }
+
+    let mut attrs = String::new();
+    let mut push_attr = |fragment: &str| {
+        if !attrs.is_empty() {
+            attrs.push(' ');
+        }
+        attrs.push_str(fragment);
+    };
+
+    if is_structured
+        && let Some(class) = link.class()
+    {
+        push_attr(&format!("class=\"{}\"", html_escape::encode_text(class)));
+    }
+    // The merged CSS is already a normalized declaration string; legacy emits it
+    // unescaped and CSS carries no `<` / `>` / `&`, so it is spliced as-is.
+    if let Some(style) = &style {
+        push_attr(&format!("style=\"{style}\""));
+    }
+    if is_structured {
+        if let Some(target) = link.target_attr() {
+            push_attr(&format!(
+                "target=\"{}\"",
+                html_escape::encode_text(&target)
+            ));
+        }
+        if let Some(title_plain) = link.title_plain() {
+            push_attr(&format!(
+                "title=\"{}\"",
+                html_escape::encode_text(&title_plain)
+            ));
+        }
+        if let Some(prompt) = link.prompt() {
+            push_attr(&format!(
+                "data-prompt=\"{}\"",
+                html_escape::encode_text(prompt)
+            ));
+        }
+        for (key, value) in link.data() {
+            push_attr(&format!(
+                "data-{}=\"{}\"",
+                html_escape::encode_text(key),
+                html_escape::encode_text(value)
+            ));
+        }
+    }
+
+    if attrs.is_empty() {
+        return None;
+    }
+    Some((attrs, is_structured))
+}
+
+/// Computes the merged inline CSS for an image, or `None` when nothing applies.
+///
+/// Only local images receive the frontmatter `local_image_style`; remote images
+/// return `None`.
+fn image_inline_css(url: &str, title: Option<&str>, options: &HtmlOptions) -> Option<String> {
+    if !crate::style::bespoke::is_local_image(url) {
+        return None;
+    }
+    let local = options.local_image_style.as_ref()?;
+    let frontmatter_css = local.to_css_overlay()?;
+
+    // Reconstruct the image's own inline CSS the same way legacy does, so a
+    // per-image `style='…'` directive still wins over the frontmatter overlay.
+    let image_ref = build_image_ref(url, title);
+    let own_css = image_ref.as_ref().and_then(|i| i.style());
+
+    combine_inline_css(Some(&frontmatter_css), own_css)
+}
+
+/// Reconstructs a darkmatter [`ImageRef`](crate::render::ImageRef) from a folded
+/// image node's `url` / `title` so its own inline CSS can be recovered.
+fn build_image_ref(url: &str, title: Option<&str>) -> Option<crate::render::ImageRef> {
+    use crate::render::ImageRef;
+
+    let mut image_ref = ImageRef::new(url, "").ok()?;
+    if let Some(title) = title
+        && !title.trim().is_empty()
+    {
+        image_ref = image_ref.with_title(title);
+    }
+    Some(image_ref)
+}
+
+/// Merges a frontmatter CSS overlay under a node's own inline CSS.
+///
+/// The node's own per-property declarations win; the frontmatter overlay fills
+/// only the properties the node does not already set. Mirrors legacy
+/// `output::html::merge_css_style` (existing declarations come last and win).
+///
+/// Returns `None` when both inputs are absent, and a single-line declaration
+/// string (`prop: value; prop: value`) otherwise.
+fn combine_inline_css(
+    frontmatter: Option<&renderable::stylesheet::CssStyle>,
+    own: Option<&renderable::stylesheet::CssStyle>,
+) -> Option<String> {
+    let merged = match (frontmatter, own) {
+        (None, None) => return None,
+        (Some(fm), None) => fm.clone(),
+        (None, Some(own)) => own.clone(),
+        (Some(fm), Some(own)) => {
+            let combined = format!("{}\n{}", fm.to_css(), own.to_css());
+            renderable::stylesheet::CssStyle::try_from(combined.as_str()).unwrap_or_else(|_| fm.clone())
+        }
+    };
+    if merged.is_empty() {
+        return None;
+    }
+    // `CssStyle::to_css` is newline-joined; collapse to the single-line inline
+    // form the browser `style="…"` attribute expects.
+    Some(merged.to_css().replace('\n', " "))
+}
+
+/// Rewrites each `class="<sentinel>"` produced by
+/// [`inject_link_image_attributes`] into the node's computed attribute fragment
+/// in the rendered HTML.
+///
+/// Each sentinel is unique and appears exactly once, so a single literal
+/// replacement per injection is sufficient. The sentinels are pure ASCII and
+/// pass through the browser writer's attribute escaping unchanged.
+fn apply_attribute_injections(mut html: String, injections: &[AttributeInjection]) -> String {
+    for injection in injections {
+        let needle = format!("class=\"{}\"", injection.sentinel);
+        html = html.replacen(&needle, &injection.attributes, 1);
+    }
+    html
 }
 
 /// Renders a [`Markdown`] to a terminal string via the render-tree pipeline.
 ///
 /// Maps [`TerminalOptions`] to a [`TerminalRenderOptions`] built from a
 /// detected [`Terminal`] (respecting any pinned `max_width` /
-/// `color_depth`). Image and Mermaid handling stay deferred: the internal
-/// terminal renderer does not yet expose an image-renderer hook, so those
-/// modes are accepted parity gaps in the experimental phase.
+/// `color_depth`). `image_mode` maps to the graphics fidelity tier and
+/// `mermaid_mode` to the Mermaid promotion opt-in; see
+/// [`terminal_options_from_terminal_options`] for the full mapping.
+///
+/// [`TerminalOptions::hr_defaults`](crate::markdown::output::TerminalOptions::hr_defaults)
+/// fill bare `---` rules; when it is unset, the deprecated top-level `hr:`
+/// frontmatter supplies the defaults instead (see
+/// `apply_hr_frontmatter_fallback`).
 ///
 /// ## Errors
 ///
 /// Propagates any fatal [`RenderError`] from
 /// [`render_terminal_document`].
-pub(crate) fn render_tree_terminal(
+pub fn render_tree_terminal(
     md: &Markdown,
     options: &TerminalOptions,
 ) -> PipelineRenderResult<String> {
-    let (doc, fold_diagnostics) = to_render_document(md);
+    let (mut doc, fold_diagnostics) = to_render_document(md);
+    if let Some(defaults) = options.hr_defaults.as_ref() {
+        apply_hr_defaults(&mut doc.root, defaults);
+    } else {
+        apply_hr_frontmatter_fallback(&mut doc.root, md);
+    }
     let term_opts = terminal_options_from_terminal_options(options);
+    let rendered = render_terminal_document(&doc, &term_opts)?;
+    Ok(PipelineResult::new(
+        rendered.output,
+        fold_diagnostics,
+        rendered.diagnostics,
+    ))
+}
+
+/// Renders a [`Markdown`] to a terminal string via the render-tree pipeline,
+/// lowering a [`LayoutContext`](crate::layout::LayoutContext)'s per-component
+/// settings onto the folded tree first.
+///
+/// This is the decorated-layout counterpart to [`render_tree_terminal`]: a
+/// decoration pass walks the folded [`Document`] and, for every node that maps
+/// to a [`PageComponent`], sets the node's
+/// [`Layout`](renderable::layout::Layout) (alignment, width cap via margins) and
+/// [`Style`](renderable::style::Style) (foreground / background colors) from the
+/// resolved context. Page-level margins, padding, and background are applied by
+/// the [`DarkmatterPage`](crate::layout::DarkmatterPage) row-decoration
+/// post-pass and are intentionally **not** handled here.
+///
+/// Backs the decorated `Some(ctx)` route of
+/// [`Markdown::as_terminal_with_layout`](crate::markdown::Markdown::as_terminal_with_layout).
+/// The image fallback placeholder is switched to the legacy `▉ IMAGE[alt]`
+/// block form here (only the decorated path uses it; the default
+/// [`render_tree_terminal`] keeps the generic `[alt]`).
+///
+/// ## Errors
+///
+/// Propagates any fatal [`RenderError`] from [`render_terminal_document`], or a
+/// [`PageRenderError`](crate::layout::PageRenderError)-derived fold of a
+/// component width that cannot be resolved (mapped to a render error string).
+pub(crate) fn render_tree_terminal_with_layout(
+    md: &Markdown,
+    options: &TerminalOptions,
+    ctx: &crate::layout::LayoutContext,
+) -> PipelineRenderResult<String> {
+    let (mut doc, fold_diagnostics) = to_render_document(md);
+    if let Some(defaults) = options.hr_defaults.as_ref() {
+        apply_hr_defaults(&mut doc.root, defaults);
+    } else {
+        apply_hr_frontmatter_fallback(&mut doc.root, md);
+    }
+    super::decorate::decorate_document(&mut doc.root, ctx);
+    let mut term_opts = terminal_options_from_terminal_options(options);
+    // Decorated-only: the decorated layout path emits `▉ IMAGE[alt]` for the
+    // non-graphics image fallback. The default path keeps `Bracket`.
+    term_opts.context.image_placeholder = ImagePlaceholder::Block;
     let rendered = render_terminal_document(&doc, &term_opts)?;
     Ok(PipelineResult::new(
         rendered.output,
@@ -120,7 +756,7 @@ pub(crate) fn render_tree_terminal(
 ///
 /// Propagates any fatal [`RenderError`] from
 /// [`render_markdown_document`].
-pub(crate) fn render_tree_markdown(md: &Markdown) -> PipelineRenderResult<String> {
+pub fn render_tree_markdown(md: &Markdown) -> PipelineRenderResult<String> {
     render_tree_markdown_dialect(md, MarkdownDialect::Markdown)
 }
 
@@ -131,7 +767,7 @@ pub(crate) fn render_tree_markdown(md: &Markdown) -> PipelineRenderResult<String
 ///
 /// Propagates any fatal [`RenderError`] from
 /// [`render_markdown_document`].
-pub(crate) fn render_tree_markdown_dialect(
+pub fn render_tree_markdown_dialect(
     md: &Markdown,
     dialect: MarkdownDialect,
 ) -> PipelineRenderResult<String> {
@@ -154,15 +790,85 @@ pub(crate) fn render_tree_markdown_dialect(
 /// The [`TerminalCodeRenderer`] hook is wired in so fenced code blocks
 /// reproduce darkmatter's syntax-highlighted HTML (title block, line-number
 /// table, highlighted-line markup) rather than the render tree's plain
-/// `<pre><code>` fallback. Mermaid mode and HR CSS variables remain documented
-/// parity gaps; see `entry-point-shape.md`.
-fn browser_options_from_html_options(_opts: &HtmlOptions) -> BrowserRenderOptions {
+/// `<pre><code>` fallback.
+///
+/// [`HtmlOptions::hr_css_variables`](crate::markdown::output::HtmlOptions::hr_css_variables)
+/// are lowered (via [`hr_root_variables`]) onto
+/// [`PageOptions::css_variables`](renderable::browser::PageOptions::css_variables),
+/// which the page renderer emits as `--{key}: {value};` declarations in its
+/// `:root` block. The HR SVG keeps its literal `var(--hr-*, fallback)`
+/// expressions, so the declared values resolve against them in the browser —
+/// reproducing the legacy `:root` override contract. A page is built whenever
+/// either the code-block stylesheet or an HR override applies, so the override
+/// still takes effect when `include_styles` is unset.
+///
+/// When `opts.include_styles` is set, the page hook
+/// ([`BrowserRenderOptions::page`]) carries a [`renderable::stylesheet::Stylesheet`]
+/// with the `.code-block` panel-background rule (see
+/// [`code_block_stylesheet`]). The render tree's full-page renderer emits the
+/// design-token `:root` stylesheet but no `.code-block` rule, so without this
+/// the syntax-highlighted `<div class="code-block">` would have no background.
+/// The page's default stylesheet is empty (the `:root` tokens ride a separate
+/// `css_variables` channel), so supplying one via `page_options` augments
+/// rather than replaces the page styles.
+///
+/// Maps `mermaid_mode` to the render-tree [`BrowserMermaidMode`] so the
+/// tree browser path honors the same Mermaid opt-in contract as the legacy
+/// renderer.
+///
+/// Legacy `MermaidMode::Image` maps to [`BrowserMermaidMode::StaticSvg`]: the
+/// spec's promoted browser form is a pre-rendered static `<svg>`. The
+/// client-side mermaid.js path ([`BrowserMermaidMode::Interactive`]) is an
+/// orthogonal, default-off browser opt-in and is not reachable from the legacy
+/// enum.
+fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions {
+    use renderable::browser::PageOptions;
+    use renderable::tree::BrowserMermaidMode;
+
+    let mermaid_mode = match opts.mermaid_mode {
+        crate::markdown::output::terminal::MermaidMode::Off => BrowserMermaidMode::Code,
+        crate::markdown::output::terminal::MermaidMode::Text => BrowserMermaidMode::Code,
+        crate::markdown::output::terminal::MermaidMode::Image => BrowserMermaidMode::StaticSvg,
+    };
+
+    let stylesheet = opts.include_styles.then(|| code_block_stylesheet(opts));
+    let css_variables = hr_root_variables(&opts.hr_css_variables);
+    let page = (stylesheet.is_some() || css_variables.is_some()).then(|| PageOptions {
+        stylesheet,
+        css_variables,
+        ..PageOptions::default()
+    });
+
     BrowserRenderOptions {
         strictness: RenderStrictness::Warn,
         raw_html: RawHtmlPolicy::Escape,
-        page: None,
+        page,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        mermaid_mode,
+        ..Default::default()
     }
+}
+
+/// Builds the `.code-block` panel-background stylesheet for the browser path.
+///
+/// The background color resolves through
+/// [`code_block_background_hex`](crate::markdown::output::html::code_block_background_hex),
+/// which applies the same `CodeHighlighter` / inverted-color-mode path the code
+/// renderer uses, so the injected `.code-block` rule and the highlighted code
+/// markup agree on the value (Defect D: code blocks invert their theme variant
+/// for page contrast). Only the load-bearing `.code-block` background rule is injected;
+/// the remaining cosmetic rules (`.code-block-title`, gutter, `pre`/`code`, …)
+/// are emitted inline by the code-renderer hook's own markup.
+fn code_block_stylesheet(opts: &HtmlOptions) -> renderable::stylesheet::Stylesheet {
+    use renderable::stylesheet::{CssColor, CssColorProp, CssRule, CssStyle, Stylesheet};
+
+    let hex = crate::markdown::output::html::code_block_background_hex(opts);
+    let mut sheet = Stylesheet::new();
+    if let Ok(color) = CssColor::hex(&hex) {
+        let style = CssStyle::new().add(CssColorProp::BackgroundColor, color);
+        sheet.push(CssRule::new(".code-block", style));
+    }
+    sheet
 }
 
 /// Maps [`TerminalOptions`] to [`TerminalRenderOptions`].
@@ -171,8 +877,9 @@ fn browser_options_from_html_options(_opts: &HtmlOptions) -> BrowserRenderOption
 /// falls back to detection. `opts.color_depth`, when set, overrides the
 /// terminal's resolved color depth so callers can pin the tree renderer to
 /// `ColorDepth::None` (matching the legacy renderer's no-color contract)
-/// without depending on host capability detection. Image and Mermaid modes
-/// stay deferred — see `entry-point-shape.md` for the documented gaps.
+/// without depending on host capability detection. `image_mode` and
+/// `mermaid_mode` map onto the context's graphics tier and Mermaid promotion
+/// opt-in (see the inline mapping below).
 ///
 /// The [`TerminalCodeRenderer`] hook is always wired in so fenced code blocks
 /// reproduce darkmatter's syntax-highlighted code-block output (header row
@@ -194,8 +901,62 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     if let Some(depth) = opts.color_depth {
         term.color_depth = darkmatter_color_depth_to_terminal(depth);
     }
+    // Thread the requested color mode so the code renderer's contrast
+    // resolution (which inverts the mode for page contrast) sees the caller's
+    // mode rather than the detected/optimistic terminal default. Without this
+    // the highlighter always resolved against the terminal's own mode, dropping
+    // a caller's `with_color_mode(...)`.
+    term.color_mode = darkmatter_color_mode_to_terminal(opts.color_mode);
+
+    // Map legacy image_mode onto the graphics fidelity tier so the tree
+    // renderer honors the same opt-in / never / force contract as the legacy
+    // terminal renderer. Mermaid promotion and inline image rendering both
+    // key off this field.
+    let graphics_mode = match opts.image_mode {
+        crate::markdown::output::terminal::TerminalImageMode::Never => {
+            GraphicsMode::Off
+        }
+        crate::markdown::output::terminal::TerminalImageMode::Auto => {
+            GraphicsMode::Rich
+        }
+        crate::markdown::output::terminal::TerminalImageMode::Force => {
+            GraphicsMode::Rich
+        }
+    };
+
+    // Map the legacy Mermaid opt-in onto the terminal Mermaid promotion mode.
+    // `GraphicsMode` is only the ceiling: a fence is promoted to a raster image
+    // solely when the caller opted in via `MermaidMode::Image`. `Off` / `Text`
+    // keep Mermaid as code, preserving the public default.
+    let mermaid_mode = match opts.mermaid_mode {
+        crate::markdown::output::terminal::MermaidMode::Image => TerminalMermaidMode::Image,
+        crate::markdown::output::terminal::MermaidMode::Off
+        | crate::markdown::output::terminal::MermaidMode::Text => TerminalMermaidMode::Code,
+    };
+
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.graphics_mode = graphics_mode;
+    context.mermaid_mode = mermaid_mode;
+    context.image_base_path = opts.base_path.clone();
+    // The darkmatter document pipeline wraps top-level prose to the content
+    // width, matching the legacy `for_terminal` renderer.
+    context.wrap_prose = true;
+    // Carry the requested code theme as its canonical kebab name so the code
+    // renderer hook resolves the same `ThemePair` a `with_code_theme(...)`
+    // caller asked for, rather than always painting the default theme.
+    context.code_theme = Some(opts.code_theme.kebab_name().to_string());
+    // Forward the page line-number toggle so fenced code blocks render their
+    // gutter, matching the legacy renderer's `include_line_numbers`.
+    context.line_numbers = opts.include_line_numbers;
+    // Block quotes use the legacy quarter-block bar (`▐   `, 4 cols) rather
+    // than the shared component's `│ ` border, matching `for_terminal`.
+    context.blockquote_prefix = Some("▐   ".to_string());
+    if opts.image_mode == crate::markdown::output::terminal::TerminalImageMode::Force {
+        context.force_graphics = true;
+    }
+
     TerminalRenderOptions {
-        context: TerminalRenderContext::from_terminal(&term),
+        context,
         strictness: RenderStrictness::Warn,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
     }
@@ -213,6 +974,19 @@ fn darkmatter_color_depth_to_terminal(depth: ColorDepth) -> TerminalColorDepth {
         ColorDepth::Colors256 => TerminalColorDepth::Enhanced,
         ColorDepth::Colors16 => TerminalColorDepth::Basic,
         ColorDepth::None => TerminalColorDepth::None,
+    }
+}
+
+/// Maps darkmatter's highlighting [`ColorMode`](crate::markdown::highlighting::ColorMode)
+/// onto biscuit-terminal's [`ColorMode`](biscuit_terminal::discovery::detection::ColorMode).
+fn darkmatter_color_mode_to_terminal(
+    mode: crate::markdown::highlighting::ColorMode,
+) -> biscuit_terminal::discovery::detection::ColorMode {
+    use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
+    use crate::markdown::highlighting::ColorMode as DmColorMode;
+    match mode {
+        DmColorMode::Light => TermColorMode::Light,
+        DmColorMode::Dark => TermColorMode::Dark,
     }
 }
 
@@ -354,16 +1128,14 @@ mod tests {
     // through the lower-level `fold_markdown_spanned_with_frontmatter` helper.
     // -----------------------------------------------------------------------
 
-    /// `to_render_document` must produce a `Span` carrying class `"mark"` for
-    /// `==highlighted==`, proving the entry point uses the span-aware fold.
+    /// `to_render_document` must produce an `Extended { token: "mark" }` node
+    /// for `==highlighted==`, proving the entry point uses the span-aware fold.
     #[test]
     fn to_render_document_uses_span_aware_fold_for_mark() {
         use renderable::tree::NodeKind;
 
         fn has_mark(node: &renderable::tree::RenderNode) -> bool {
-            if matches!(node.kind, NodeKind::Span { .. })
-                && node.attrs.classes.iter().any(|c| c == "mark")
-            {
+            if matches!(&node.kind, NodeKind::Extended { token, .. } if token == "mark") {
                 return true;
             }
             node.children().iter().any(has_mark)
@@ -377,21 +1149,18 @@ mod tests {
         );
         assert!(
             has_mark(&doc.root),
-            "to_render_document must surface a `mark` Span — entry point did not use the span-aware fold",
+            "to_render_document must surface a `mark` Extended node — entry point did not use the span-aware fold",
         );
     }
 
-    /// `to_render_document` must produce a `Span` whose
-    /// `Style.emphasis.dim` is set for `⌄dimmed⌄` — the design's required
-    /// shape for dim per `span-aware-processor-design.md`.
+    /// `to_render_document` must produce an `Extended { token: "dim" }` node
+    /// for `⌄dimmed⌄`, proving the entry point uses the span-aware fold.
     #[test]
     fn to_render_document_uses_span_aware_fold_for_dim() {
         use renderable::tree::NodeKind;
 
         fn has_dim(node: &renderable::tree::RenderNode) -> bool {
-            if matches!(node.kind, NodeKind::Span { .. })
-                && node.attrs.style().is_some_and(|s| s.emphasis.dim)
-            {
+            if matches!(&node.kind, NodeKind::Extended { token, .. } if token == "dim") {
                 return true;
             }
             node.children().iter().any(has_dim)
@@ -402,7 +1171,7 @@ mod tests {
         assert!(diags.is_empty(), "dim fixture must fold cleanly: {diags:?}");
         assert!(
             has_dim(&doc.root),
-            "to_render_document must surface a dim Span carrying Style.emphasis.dim",
+            "to_render_document must surface a `dim` Extended node",
         );
     }
 
@@ -436,8 +1205,8 @@ mod tests {
     }
 
     /// The terminal entry point must keep the mark text and surface ANSI
-    /// styling — proving the span-aware fold's `Span(class=mark)` reaches the
-    /// terminal renderer through `render_tree_terminal`.
+    /// styling — proving the span-aware fold's `Extended { token: "mark" }`
+    /// reaches the terminal renderer through `render_tree_terminal`.
     #[test]
     fn render_tree_terminal_preserves_mark_text() {
         let md: Markdown = "before ==highlighted== after\n".into();
@@ -452,8 +1221,8 @@ mod tests {
         );
     }
 
-    /// The HTML entry point must keep the mark text inside a `<mark>` or
-    /// classed span — proving the span-aware fold's `Span(class=mark)` reaches
+    /// The HTML entry point must keep the mark text inside a `<mark>` element
+    /// — proving the span-aware fold's `Extended { token: "mark" }` reaches
     /// the browser renderer through `render_tree_html`.
     #[test]
     fn render_tree_html_preserves_mark_text() {
@@ -707,6 +1476,347 @@ mod tests {
         assert_eq!(opts.raw_html, RawHtmlPolicy::Escape);
     }
 
+    // -----------------------------------------------------------------------
+    // Review-4 finding 1: page-level HR defaults (`hr_defaults`) and the
+    // `hr_css_variables` `:root` override must be consumed by the tree entry
+    // points, not silently dropped at the adapter boundary.
+    // -----------------------------------------------------------------------
+
+    /// `apply_hr_defaults` fills a bare `ThematicBreak`'s missing
+    /// `darkmatter.hr.*` hints from the defaults but never overrides a hint the
+    /// node already carries (inline attributes win per-property).
+    #[test]
+    fn apply_hr_defaults_fills_only_absent_hints() {
+        let defaults = HorizontalRuleAttrs {
+            kind: Some("waves".into()),
+            weight: Some("thick".into()),
+            color: Some("red".into()),
+            width: Some("80%".into()),
+            ..HorizontalRuleAttrs::default()
+        };
+
+        // Bare rule: every hint is filled from defaults.
+        let mut bare = RenderNode::thematic_break();
+        apply_hr_defaults(&mut bare, &defaults);
+        assert_eq!(
+            bare.attrs.get_hint(HR_HINT_NS, "kind"),
+            Some(&serde_json::json!("waves")),
+        );
+        assert_eq!(
+            bare.attrs.get_hint(HR_HINT_NS, "weight"),
+            Some(&serde_json::json!("thick")),
+        );
+        assert_eq!(
+            bare.attrs.get_hint(HR_HINT_NS, "color"),
+            Some(&serde_json::json!("red")),
+        );
+        assert_eq!(
+            bare.attrs.get_hint(HR_HINT_NS, "width"),
+            Some(&serde_json::json!("80%")),
+        );
+
+        // Explicit hint wins; absent hints still fill from defaults.
+        let mut attributed = RenderNode::thematic_break();
+        attributed
+            .attrs
+            .set_hint(HR_HINT_NS, "color", serde_json::json!("blue"));
+        apply_hr_defaults(&mut attributed, &defaults);
+        assert_eq!(
+            attributed.attrs.get_hint(HR_HINT_NS, "color"),
+            Some(&serde_json::json!("blue")),
+            "inline color must win over the page default",
+        );
+        assert_eq!(
+            attributed.attrs.get_hint(HR_HINT_NS, "kind"),
+            Some(&serde_json::json!("waves")),
+            "an absent hint must still fill from the default",
+        );
+    }
+
+    /// `kind` resolves through the deprecated `legacy_style` alias, matching
+    /// `lower_hr_attrs_to_node`.
+    #[test]
+    fn apply_hr_defaults_kind_falls_back_to_legacy_style() {
+        let defaults = HorizontalRuleAttrs {
+            legacy_style: Some("dots".into()),
+            ..HorizontalRuleAttrs::default()
+        };
+        let mut bare = RenderNode::thematic_break();
+        apply_hr_defaults(&mut bare, &defaults);
+        assert_eq!(
+            bare.attrs.get_hint(HR_HINT_NS, "kind"),
+            Some(&serde_json::json!("dots")),
+        );
+    }
+
+    /// `hr_root_variables` sorts keys for deterministic output and drops any
+    /// entry whose key or value could break out of the `<style>` element.
+    #[test]
+    fn hr_root_variables_sorts_and_filters_unsafe_entries() {
+        use std::collections::HashMap;
+
+        let mut vars = HashMap::new();
+        vars.insert("hr-width".to_string(), "42%".to_string());
+        vars.insert("hr-color".to_string(), "red".to_string());
+        vars.insert("hr-evil".to_string(), "</style>".to_string());
+
+        let out = hr_root_variables(&vars).expect("safe entries remain");
+        assert_eq!(
+            out,
+            vec![
+                ("hr-color".to_string(), "red".to_string()),
+                ("hr-width".to_string(), "42%".to_string()),
+            ],
+            "entries must be key-sorted and the `<`-bearing value dropped",
+        );
+
+        assert!(
+            hr_root_variables(&HashMap::new()).is_none(),
+            "an empty map emits no override list",
+        );
+    }
+
+    /// `hr_css_variables` must be lowered onto the page `css_variables` channel
+    /// even when `include_styles` is unset, so the `:root` HR override still
+    /// reaches the browser (the legacy contract emitted it regardless of
+    /// `include_styles`).
+    #[test]
+    fn browser_options_mapping_lowers_hr_css_variables_without_styles() {
+        use std::collections::HashMap;
+
+        let mut vars = HashMap::new();
+        vars.insert("hr-width".to_string(), "42%".to_string());
+        let opts = HtmlOptions {
+            include_styles: false,
+            hr_css_variables: vars,
+            ..HtmlOptions::default()
+        };
+        let browser = browser_options_from_html_options(&opts);
+        let page = browser
+            .page
+            .expect("a page must be built to carry the HR override");
+        assert!(
+            page.stylesheet.is_none(),
+            "no code-block stylesheet is injected when include_styles is false",
+        );
+        assert_eq!(
+            page.css_variables,
+            Some(vec![("hr-width".to_string(), "42%".to_string())]),
+        );
+    }
+
+    /// A bare `---` rendered through `render_tree_terminal` must adopt the
+    /// `hr_defaults` kind — proving the terminal entry point consumes the
+    /// page-level HR default.
+    #[test]
+    fn render_tree_terminal_applies_hr_defaults_to_bare_rule() {
+        let md: Markdown = "---\n".into();
+        let opts = TerminalOptions {
+            max_width: Some(40),
+            color_depth: Some(ColorDepth::None),
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
+            hr_defaults: Some(HorizontalRuleAttrs {
+                kind: Some("dots".into()),
+                ..HorizontalRuleAttrs::default()
+            }),
+            ..TerminalOptions::default()
+        };
+        let out = render_tree_terminal(&md, &opts).expect("terminal render").output;
+        // The default dashed rule uses `╌`/`-`; a dots default switches the
+        // glyph to `·` (or the ASCII `.` fallback).
+        assert!(
+            out.contains('·') || out.contains('.'),
+            "bare rule must adopt the `dots` HR default; got:\n{out:?}",
+        );
+    }
+
+    /// A bare `---` rendered through `render_tree_html` must adopt the
+    /// `hr_defaults` width / color / weight — proving the HTML entry point
+    /// consumes the page-level HR default.
+    #[test]
+    fn render_tree_html_applies_hr_defaults_to_bare_rule() {
+        let md: Markdown = "---\n".into();
+        let opts = HtmlOptions {
+            hr_defaults: Some(HorizontalRuleAttrs {
+                kind: Some("waves".into()),
+                weight: Some("thick".into()),
+                color: Some("red".into()),
+                width: Some("50%".into()),
+                ..HorizontalRuleAttrs::default()
+            }),
+            ..HtmlOptions::default()
+        };
+        let html = render_tree_html(&md, &opts).expect("html render").output;
+        assert!(html.contains(r#"width="50%""#), "{html}");
+        assert!(html.contains("--hr-color: red"), "{html}");
+        assert!(html.contains("--hr-weight: 8"), "thick weight ⇒ 8px: {html}");
+    }
+
+    // ================================================================
+    // Review-5 finding: the direct `Markdown::as_html` / `as_terminal`
+    // paths must restore the deleted bespoke serializers' fallback —
+    // when no explicit `hr_defaults` option is supplied, the deprecated
+    // top-level `hr:` frontmatter seeds bare-rule defaults. These pin the
+    // `hr_defaults_from_frontmatter` coercion contract and the
+    // entry-point wiring that consumes it.
+    // ================================================================
+
+    fn md_with_hr_frontmatter(value: serde_json::Value) -> Markdown {
+        let mut fm = crate::markdown::Frontmatter::new();
+        fm.as_map_mut().insert("hr".to_string(), value);
+        Markdown::with_frontmatter(fm, "---\n".to_string())
+    }
+
+    #[test]
+    fn hr_defaults_from_frontmatter_numeric_width_preserves_siblings() {
+        let md = md_with_hr_frontmatter(serde_json::json!({
+            "style": "dots",
+            "width": 20,
+            "color": "red",
+        }));
+        let attrs = hr_defaults_from_frontmatter(&md).expect("expected Some attrs");
+        assert_eq!(attrs.legacy_style.as_deref(), Some("dots"));
+        assert_eq!(
+            attrs.width.as_deref(),
+            Some("20"),
+            "numeric width must be coerced to string"
+        );
+        assert_eq!(attrs.color.as_deref(), Some("red"));
+    }
+
+    #[test]
+    fn hr_defaults_from_frontmatter_bool_value_preserves_siblings() {
+        let md = md_with_hr_frontmatter(serde_json::json!({
+            "style": "waves",
+            "alignment": true,
+            "color": "blue",
+        }));
+        let attrs = hr_defaults_from_frontmatter(&md).expect("expected Some attrs");
+        // `true` coerces to the string "true" (not a recognized alignment),
+        // but its siblings still apply.
+        assert_eq!(attrs.legacy_style.as_deref(), Some("waves"));
+        assert_eq!(attrs.alignment.as_deref(), Some("true"));
+        assert_eq!(attrs.color.as_deref(), Some("blue"));
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn hr_defaults_from_frontmatter_non_mapping_warns_and_returns_none() {
+        let md = md_with_hr_frontmatter(serde_json::json!(42));
+        assert!(
+            hr_defaults_from_frontmatter(&md).is_none(),
+            "non-mapping hr value must yield None"
+        );
+        assert!(logs_contain("non-mapping"));
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn hr_defaults_from_frontmatter_unknown_key_warns_and_drops_it() {
+        let md = md_with_hr_frontmatter(serde_json::json!({
+            "style": "dashes",
+            "bogus": "value",
+        }));
+        let attrs = hr_defaults_from_frontmatter(&md).expect("expected Some attrs");
+        assert_eq!(attrs.legacy_style.as_deref(), Some("dashes"));
+        assert!(logs_contain("unknown horizontal rule attribute"));
+    }
+
+    #[test]
+    fn hr_defaults_from_frontmatter_missing_key_returns_none() {
+        let md = Markdown::with_frontmatter(crate::markdown::Frontmatter::new(), "---\n".to_string());
+        assert!(hr_defaults_from_frontmatter(&md).is_none());
+    }
+
+    /// A bare `---` rendered through `render_tree_terminal` with no explicit
+    /// `hr_defaults` must adopt the deprecated top-level `hr:` frontmatter —
+    /// the direct `Markdown::as_terminal` fallback.
+    #[test]
+    fn render_tree_terminal_falls_back_to_top_level_hr_frontmatter() {
+        let md: Markdown = "---\nhr:\n  style: dots\n---\n\n---\n".into();
+        let opts = TerminalOptions {
+            max_width: Some(40),
+            color_depth: Some(ColorDepth::None),
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
+            ..TerminalOptions::default()
+        };
+        let out = render_tree_terminal(&md, &opts).expect("terminal render").output;
+        assert!(
+            out.contains('·') || out.contains('.'),
+            "bare rule must adopt the `dots` frontmatter default; got:\n{out:?}",
+        );
+    }
+
+    /// A bare `---` rendered through `render_tree_html` with no explicit
+    /// `hr_defaults` must adopt the deprecated top-level `hr:` frontmatter —
+    /// the direct `Markdown::as_html` fallback.
+    #[test]
+    fn render_tree_html_falls_back_to_top_level_hr_frontmatter() {
+        let md: Markdown = "---\nhr:\n  style: waves\n  weight: thick\n  width: \"50%\"\n---\n\n---\n".into();
+        let html = render_tree_html(&md, &HtmlOptions::default())
+            .expect("html render")
+            .output;
+        assert!(html.contains(r#"width="50%""#), "{html}");
+        assert!(html.contains("--hr-weight: 8"), "thick weight ⇒ 8px: {html}");
+        assert!(html.contains("<path"), "waves ⇒ <path> svg: {html}");
+    }
+
+    /// An explicit `hr_defaults` option wins outright over the frontmatter
+    /// fallback, matching the legacy `.or()` precedence.
+    #[test]
+    fn render_tree_html_explicit_option_overrides_top_level_hr_frontmatter() {
+        let md: Markdown = "---\nhr:\n  style: waves\n  width: \"50%\"\n---\n\n---\n".into();
+        let opts = HtmlOptions {
+            hr_defaults: Some(HorizontalRuleAttrs {
+                width: Some("25%".into()),
+                ..HorizontalRuleAttrs::default()
+            }),
+            ..HtmlOptions::default()
+        };
+        let html = render_tree_html(&md, &opts).expect("html render").output;
+        assert!(
+            html.contains(r#"width="25%""#) && !html.contains(r#"width="50%""#),
+            "explicit option width must win over the frontmatter fallback: {html}",
+        );
+    }
+
+    /// `hr_css_variables` must emit a page-level `:root` declaration through
+    /// `render_tree_html` (the page-declares-variables contract). The HR SVG
+    /// keeps its literal `var(--hr-color, …)` / `var(--hr-weight, …)`
+    /// expressions, so the declared override resolves against them in the
+    /// browser.
+    #[test]
+    fn render_tree_html_emits_hr_css_variable_root_override() {
+        let md: Markdown = "--- { style: dashes }\n".into();
+
+        // Without overrides: the :root block carries no `--hr-width: 42%`.
+        let default_html = render_tree_html(&md, &HtmlOptions::default())
+            .expect("html render")
+            .output;
+        assert!(
+            !default_html.contains("--hr-width: 42%"),
+            "default render must not declare the override value: {default_html}",
+        );
+
+        // With an override: the :root block declares `--hr-width: 42%` and the
+        // SVG keeps its literal `var(--hr-*, …)` expressions.
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("hr-width".to_string(), "42%".to_string());
+        let opts = HtmlOptions {
+            hr_css_variables: vars,
+            ..HtmlOptions::default()
+        };
+        let html = render_tree_html(&md, &opts).expect("html render").output;
+        assert!(
+            html.contains(":root{") && html.contains("--hr-width: 42%"),
+            "override must emit a :root declaration --hr-width: 42%: {html}",
+        );
+        assert!(
+            html.contains("var(--hr-color,") && html.contains("var(--hr-weight,"),
+            "SVG must keep its literal var(--hr-*, …) expressions: {html}",
+        );
+    }
+
     /// Review-10 finding 2: the terminal entry point must wire darkmatter's
     /// [`TerminalCodeRenderer`] so fenced code blocks are syntax-highlighted
     /// (darkmatter's code path) rather than rendered through the render tree's
@@ -774,6 +1884,495 @@ mod tests {
             !contains_color_sgr(&result.output),
             "ColorDepth::None must produce no ANSI color SGRs for a code block; raw:\n{:?}",
             result.output,
+        );
+    }
+
+    /// The HTML entry point must map `MermaidMode::Off` to
+    /// `BrowserMermaidMode::Code` so the tree browser path honors the same
+    /// default as the legacy renderer.
+    #[test]
+    fn browser_options_mapping_maps_mermaid_off_to_code() {
+        use renderable::tree::BrowserMermaidMode;
+
+        let opts = HtmlOptions {
+            mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
+            ..Default::default()
+        };
+        let browser_opts = browser_options_from_html_options(&opts);
+        assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::Code);
+    }
+
+    /// The HTML entry point must map `MermaidMode::Image` to
+    /// `BrowserMermaidMode::StaticSvg`: the spec's promoted browser form is a
+    /// pre-rendered static `<svg>`, not the orthogonal interactive mermaid.js
+    /// path (which stays a separate, default-off browser opt-in).
+    #[test]
+    fn browser_options_mapping_maps_mermaid_image_to_static_svg() {
+        use renderable::tree::BrowserMermaidMode;
+
+        let opts = HtmlOptions {
+            mermaid_mode: crate::markdown::output::terminal::MermaidMode::Image,
+            ..Default::default()
+        };
+        let browser_opts = browser_options_from_html_options(&opts);
+        assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::StaticSvg);
+    }
+
+    /// Review-3 finding 1: a `lang="mermaid"` fence carrying code-block DSL
+    /// (`title` / `line-numbering` / `highlight`) that is NOT promoted —
+    /// `MermaidMode::Off` maps to `BrowserMermaidMode::Code` — must still render
+    /// the full darkmatter code-block presentation through the wired
+    /// `render_browser_code` hook, not collapse to a bare `<pre><code>` that
+    /// drops the metadata. This is the spec's lossless-fallback contract,
+    /// exercised end-to-end with the real darkmatter code renderer.
+    #[test]
+    fn render_tree_html_mermaid_off_preserves_code_block_metadata() {
+        let md: Markdown =
+            "```mermaid title=\"Flow\" line-numbering=true highlight=2\nflowchart LR\n    A --> B\n```\n"
+                .into();
+        let opts = HtmlOptions {
+            mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
+            ..HtmlOptions::default()
+        };
+
+        let result = render_tree_html(&md, &opts).expect("html render");
+        let out = &result.output;
+
+        assert!(
+            out.contains("code-block-title") && out.contains("Flow"),
+            "non-promoted mermaid must keep its title block; raw output:\n{out}",
+        );
+        assert!(
+            out.contains("code-table") && out.contains("ln-gutter"),
+            "non-promoted mermaid must keep its line-number table; raw output:\n{out}",
+        );
+        assert!(
+            out.contains("highlighted"),
+            "non-promoted mermaid must keep its highlighted-line markup; raw output:\n{out}",
+        );
+        assert!(
+            !out.contains("<svg"),
+            "MermaidMode::Off must not promote to SVG; raw output:\n{out}",
+        );
+    }
+
+    /// The terminal entry point must map `TerminalImageMode::Never` to
+    /// `GraphicsMode::Off` so the tree renderer suppresses both inline images
+    /// and Mermaid promotion.
+    #[test]
+    fn terminal_options_mapping_maps_never_to_off() {
+        let opts = TerminalOptions {
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
+            ..Default::default()
+        };
+        let term_opts = terminal_options_from_terminal_options(&opts);
+        assert_eq!(term_opts.context.graphics_mode, GraphicsMode::Off);
+        assert!(!term_opts.context.force_graphics);
+    }
+
+    /// The terminal entry point must map `TerminalImageMode::Auto` to
+    /// `GraphicsMode::Rich` so the tree renderer attempts Mermaid promotion
+    /// and inline image rendering when capabilities allow.
+    #[test]
+    fn terminal_options_mapping_maps_auto_to_rich() {
+        let opts = TerminalOptions {
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Auto,
+            ..Default::default()
+        };
+        let term_opts = terminal_options_from_terminal_options(&opts);
+        assert_eq!(term_opts.context.graphics_mode, GraphicsMode::Rich);
+        assert!(!term_opts.context.force_graphics);
+    }
+
+    /// The terminal entry point must map `TerminalImageMode::Force` to
+    /// `GraphicsMode::Rich` with `force_graphics` set so the tree renderer
+    /// bypasses capability detection.
+    #[test]
+    fn terminal_options_mapping_maps_force_to_rich_with_force_flag() {
+        let opts = TerminalOptions {
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Force,
+            ..Default::default()
+        };
+        let term_opts = terminal_options_from_terminal_options(&opts);
+        assert_eq!(term_opts.context.graphics_mode, GraphicsMode::Rich);
+        assert!(term_opts.context.force_graphics);
+    }
+
+    /// `MermaidMode::Image` must opt the terminal context into Mermaid
+    /// promotion; the default (`Off`) must keep Mermaid as code so a fence is
+    /// not promoted just because `GraphicsMode` is `Rich`.
+    #[test]
+    fn terminal_options_mapping_maps_mermaid_opt_in() {
+        use renderable::tree::TerminalMermaidMode;
+
+        let image = TerminalOptions {
+            mermaid_mode: crate::markdown::output::terminal::MermaidMode::Image,
+            ..Default::default()
+        };
+        assert_eq!(
+            terminal_options_from_terminal_options(&image)
+                .context
+                .mermaid_mode,
+            TerminalMermaidMode::Image,
+        );
+
+        // Default opts: Mermaid stays code even though graphics defaults to Rich.
+        let default = terminal_options_from_terminal_options(&TerminalOptions::default());
+        assert_eq!(default.context.mermaid_mode, TerminalMermaidMode::Code);
+        assert_eq!(default.context.graphics_mode, GraphicsMode::Rich);
+    }
+
+    /// The terminal entry point must carry `TerminalOptions::code_theme` into
+    /// the render context as its canonical kebab name so the code-renderer hook
+    /// resolves the same `ThemePair` the caller pinned.
+    #[test]
+    fn terminal_options_mapping_threads_code_theme_name() {
+        use crate::markdown::highlighting::ThemePair;
+
+        let opts = TerminalOptions {
+            code_theme: ThemePair::Dracula,
+            ..Default::default()
+        };
+        let term_opts = terminal_options_from_terminal_options(&opts);
+        assert_eq!(
+            term_opts.context.code_theme.as_deref(),
+            Some("dracula"),
+            "code_theme must thread into the context as its kebab name",
+        );
+    }
+
+    /// The terminal entry point must thread `TerminalOptions::color_mode` onto
+    /// the terminal so the code-renderer hook's contrast resolution sees the
+    /// caller's mode rather than the optimistic terminal default.
+    #[test]
+    fn terminal_options_mapping_threads_color_mode() {
+        use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
+        use crate::markdown::highlighting::ColorMode as DmColorMode;
+
+        let mut opts = TerminalOptions {
+            color_mode: DmColorMode::Light,
+            ..Default::default()
+        };
+        let term_opts = terminal_options_from_terminal_options(&opts);
+        assert!(matches!(
+            term_opts.context.terminal.color_mode,
+            TermColorMode::Light
+        ));
+
+        opts.color_mode = DmColorMode::Dark;
+        let term_opts = terminal_options_from_terminal_options(&opts);
+        assert!(matches!(
+            term_opts.context.terminal.color_mode,
+            TermColorMode::Dark
+        ));
+    }
+
+    /// The terminal entry point must thread `TerminalOptions::base_path` into
+    /// the render context so relative image paths resolve at `Rich`.
+    #[test]
+    fn terminal_options_mapping_threads_image_base_path() {
+        use std::path::PathBuf;
+
+        let opts = TerminalOptions {
+            base_path: Some(PathBuf::from("/docs/assets")),
+            ..Default::default()
+        };
+        let term_opts = terminal_options_from_terminal_options(&opts);
+        assert_eq!(
+            term_opts.context.image_base_path,
+            Some(PathBuf::from("/docs/assets")),
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Decorated-layout tree path (`render_tree_terminal_with_layout`).
+    //
+    // The decoration pass + entry point back the active `Some(ctx)` route of
+    // `Markdown::as_terminal_with_layout`. These tests pin per-component
+    // coverage and the three formerly-legacy features (hyperlink label width,
+    // `▉ IMAGE[alt]` placeholder, right-aligned list-item body).
+    // -----------------------------------------------------------------------
+
+    #[allow(deprecated)]
+    fn layout_ctx_with_blockquote_indent() -> crate::layout::LayoutContext {
+        use crate::layout::{
+            LayoutContext, PageBackground, PageComponent, PageFill, PageMargin, PagePadding,
+            WidthUnit,
+        };
+        use std::collections::HashMap;
+
+        let mut fills = HashMap::new();
+        fills.insert(
+            PageComponent::BlockQuotes,
+            PageFill::Indent(WidthUnit::Fixed(10)),
+        );
+
+        LayoutContext::from_page(
+            80,
+            PageMargin::ZERO,
+            PagePadding::ZERO,
+            PageBackground::Transparent,
+            None,
+            &biscuit_terminal::discovery::detection::ColorMode::Dark,
+            crate::markdown::highlighting::ColorMode::Dark,
+            HashMap::new(),
+            fills,
+            HashMap::new(),
+            None,
+            None,
+            HashMap::new(),
+            HashMap::new(),
+            None,
+            None,
+            None,
+        )
+        .expect("layout context")
+    }
+
+    /// The decorated entry point caps a block quote to its `Indent` fill width
+    /// through the tree: at 80 cols with `Indent(10)` the bar-prefixed lines
+    /// must stay within 70 visible columns and wrap onto multiple lines.
+    #[test]
+    fn render_tree_terminal_with_layout_caps_blockquote_indent() {
+        fn strip(s: &str) -> String {
+            let mut out = String::new();
+            let mut esc = false;
+            for c in s.chars() {
+                if esc {
+                    if c.is_ascii_alphabetic() {
+                        esc = false;
+                    }
+                    continue;
+                }
+                if c == '\u{1b}' {
+                    esc = true;
+                    continue;
+                }
+                out.push(c);
+            }
+            out
+        }
+
+        let md: Markdown = "> This is a fairly long quoted paragraph that should be forced to wrap onto a second visible line once the Indent(10) fill caps the blockquote width below the page width.\n".into();
+        let opts = TerminalOptions {
+            max_width: Some(80),
+            color_depth: Some(ColorDepth::TrueColor),
+            ..Default::default()
+        };
+
+        let ctx = layout_ctx_with_blockquote_indent();
+        let out = render_tree_terminal_with_layout(&md, &opts, &ctx)
+            .expect("decorated render")
+            .output;
+        let plain = strip(&out);
+
+        let bar_lines: Vec<&str> = plain.lines().filter(|l| l.contains('▐')).collect();
+        assert!(
+            bar_lines.len() >= 2,
+            "blockquote must wrap under Indent(10); got:\n{plain}",
+        );
+        let max_len = bar_lines
+            .iter()
+            .map(|l| l.trim_end().chars().count())
+            .max()
+            .unwrap_or(0);
+        assert!(
+            max_len <= 70,
+            "blockquote lines must be capped to 70 cols by Indent(10); got max={max_len}:\n{plain}",
+        );
+    }
+
+    /// Strips ANSI escape sequences for byte-level assertions on rendered text.
+    fn strip_ansi(s: &str) -> String {
+        let mut out = String::new();
+        let mut esc = false;
+        for c in s.chars() {
+            if esc {
+                if c.is_ascii_alphabetic() {
+                    esc = false;
+                }
+                continue;
+            }
+            if c == '\u{1b}' {
+                esc = true;
+                continue;
+            }
+            out.push(c);
+        }
+        out
+    }
+
+    /// Builds a decorated `LayoutContext` from the three style buckets and the
+    /// component alignment map the formerly-legacy features key off.
+    #[allow(deprecated)]
+    fn decorated_ctx(
+        alignments: std::collections::HashMap<crate::layout::PageComponent, crate::layout::PageAlignment>,
+        fills: std::collections::HashMap<crate::layout::PageComponent, crate::layout::PageFill>,
+        hyperlink_style: Option<crate::style::schema::CommonStyle>,
+        local_image_style: Option<crate::style::schema::CommonStyle>,
+    ) -> crate::layout::LayoutContext {
+        use crate::layout::{LayoutContext, PageBackground, PageMargin, PagePadding};
+        use std::collections::HashMap;
+
+        LayoutContext::from_page(
+            80,
+            PageMargin::ZERO,
+            PagePadding::ZERO,
+            PageBackground::Transparent,
+            None,
+            &biscuit_terminal::discovery::detection::ColorMode::Dark,
+            crate::markdown::highlighting::ColorMode::Dark,
+            alignments,
+            fills,
+            HashMap::new(),
+            None,
+            None,
+            HashMap::new(),
+            HashMap::new(),
+            hyperlink_style,
+            None,
+            local_image_style,
+        )
+        .expect("layout context")
+    }
+
+    /// Feature 1: a `style.hyperlinks.width` pads / truncates the inline link
+    /// label through the decorated tree path.
+    #[test]
+    fn render_tree_terminal_with_layout_pads_hyperlink_label() {
+        use crate::style::schema::CommonStyle;
+        use renderable::layout::Length;
+        use std::collections::HashMap;
+
+        let hyperlink_style = CommonStyle {
+            width: Some(Length::ch(20)),
+            ..CommonStyle::default()
+        };
+        let ctx = decorated_ctx(HashMap::new(), HashMap::new(), Some(hyperlink_style), None);
+
+        let md: Markdown = "[go](https://example.com)\n".into();
+        let opts = TerminalOptions {
+            max_width: Some(80),
+            color_depth: Some(ColorDepth::None),
+            ..Default::default()
+        };
+
+        let out = render_tree_terminal_with_layout(&md, &opts, &ctx)
+            .expect("decorated render")
+            .output;
+        // `width: 20ch` left-pads "go" to exactly 20 cells (trailing spaces).
+        // The OSC8 hyperlink envelope is not stripped by `strip_ansi`, so assert
+        // on the raw output's padded run (which rides inside the OSC8 sequence).
+        assert!(
+            out.contains("go                  "),
+            "hyperlink label must pad to 20 cells; got:\n{out:?}",
+        );
+    }
+
+    /// Feature 1 (truncation): a label wider than `max-width` is truncated with
+    /// an ellipsis through the decorated tree path.
+    #[test]
+    fn render_tree_terminal_with_layout_truncates_hyperlink_label() {
+        use crate::style::schema::CommonStyle;
+        use renderable::layout::Length;
+        use std::collections::HashMap;
+
+        let hyperlink_style = CommonStyle {
+            max_width: Some(Length::ch(5)),
+            ..CommonStyle::default()
+        };
+        let ctx = decorated_ctx(HashMap::new(), HashMap::new(), Some(hyperlink_style), None);
+
+        let md: Markdown = "[a very long label](https://example.com)\n".into();
+        let opts = TerminalOptions {
+            max_width: Some(80),
+            color_depth: Some(ColorDepth::None),
+            ..Default::default()
+        };
+
+        let out = render_tree_terminal_with_layout(&md, &opts, &ctx)
+            .expect("decorated render")
+            .output;
+        let plain = strip_ansi(&out);
+        assert!(
+            plain.contains('…'),
+            "over-wide label must truncate with an ellipsis; got:\n{plain:?}",
+        );
+        assert!(
+            !plain.contains("very long"),
+            "truncated label must not keep the full text; got:\n{plain:?}",
+        );
+    }
+
+    /// Feature 2: a local image renders the `▉ IMAGE[alt]` block placeholder
+    /// through the decorated tree path (graphics off so no raster is attempted).
+    #[test]
+    fn render_tree_terminal_with_layout_emits_image_block_placeholder() {
+        use std::collections::HashMap;
+
+        let ctx = decorated_ctx(HashMap::new(), HashMap::new(), None, None);
+
+        let md: Markdown = "![a diagram](diagram.png)\n".into();
+        let opts = TerminalOptions {
+            max_width: Some(80),
+            color_depth: Some(ColorDepth::None),
+            // Suppress raster so the fallback placeholder path runs deterministically.
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
+            ..Default::default()
+        };
+
+        let out = render_tree_terminal_with_layout(&md, &opts, &ctx)
+            .expect("decorated render")
+            .output;
+        let plain = strip_ansi(&out);
+        assert!(
+            plain.contains("▉ IMAGE[a diagram]"),
+            "local image must render the `▉ IMAGE[...]` block placeholder; got:\n{plain:?}",
+        );
+    }
+
+    /// Feature 3: a right-aligned list lifts the marker onto its own line and
+    /// right-aligns the body block through the decorated tree path.
+    #[test]
+    #[allow(deprecated)]
+    fn render_tree_terminal_with_layout_right_aligns_list_item_body() {
+        use crate::layout::{PageAlignment, PageComponent, PageFill, WidthUnit};
+        use std::collections::HashMap;
+
+        let mut alignments = HashMap::new();
+        alignments.insert(PageComponent::Li, PageAlignment::Right);
+        // Cap the Li body so there is surplus to right-align into.
+        let mut fills = HashMap::new();
+        fills.insert(PageComponent::Li, PageFill::Max(WidthUnit::Fixed(20)));
+
+        let ctx = decorated_ctx(alignments, fills, None, None);
+
+        let md: Markdown = "- item body\n".into();
+        let opts = TerminalOptions {
+            max_width: Some(80),
+            color_depth: Some(ColorDepth::None),
+            ..Default::default()
+        };
+
+        let out = render_tree_terminal_with_layout(&md, &opts, &ctx)
+            .expect("decorated render")
+            .output;
+        let plain = strip_ansi(&out);
+        let lines: Vec<&str> = plain.lines().collect();
+        // The marker is on its own line; the body is on a later, left-padded line.
+        let marker_line = lines
+            .iter()
+            .position(|l| l.trim() == "-")
+            .expect("marker must be lifted onto its own line");
+        let body_line = lines
+            .iter()
+            .skip(marker_line + 1)
+            .find(|l| l.contains("item body"))
+            .expect("body must follow the lifted marker");
+        let lead = body_line.len() - body_line.trim_start().len();
+        assert!(
+            lead > 0,
+            "right-aligned list body must be left-padded; got:\n{plain:?}",
         );
     }
 }

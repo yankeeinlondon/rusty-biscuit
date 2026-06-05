@@ -30,6 +30,17 @@ pub fn resolve_max_iterations_from_env() -> Option<usize> {
         .and_then(|v| v.parse().ok())
 }
 
+/// Read the rate-limit pause reset-margin override from env.
+///
+/// Checks `CLAUDINE_PAUSE_RESET_MARGIN`, parsed with the shared timeout
+/// grammar (e.g. `5s`, `2m`, `0.5s`). Invalid values are ignored so the
+/// engine falls back to its built-in margin. Primarily a test knob to keep
+/// pause-policy coverage fast; also lets operators tune skew tolerance.
+pub fn resolve_pause_reset_margin_from_env() -> Option<std::time::Duration> {
+    let raw = std::env::var("CLAUDINE_PAUSE_RESET_MARGIN").ok()?;
+    crate::harness::parse_timeout(&raw, std::path::Path::new("<CLAUDINE_PAUSE_RESET_MARGIN>")).ok()
+}
+
 /// Detect and parse a loop configuration from resolved composition frontmatter.
 ///
 /// Returns `Ok(None)` when the document has no `loop` key.

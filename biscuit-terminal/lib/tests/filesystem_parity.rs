@@ -324,14 +324,12 @@ fn fixture_depth_limit_records_divergence() {
 /// Highlight precedence: `highlight_red("TODO")` makes a directory red and
 /// strips the bold/blue treatment that directories normally receive.
 ///
-/// **Observed gap (Stage 3a.3):** Bespoke emits `\x1b[31m` for the
-/// `TODO-dir` entry. The tree path emits **no** SGR for it because
-/// `render_tree_connector_list` ignores the per-item paragraph `Style`. The
-/// tree projection's `fs_entry_style` correctly sets red and suppresses
-/// bold (verified by the in-mod `render_tree_highlight_red_wins_over_*`
-/// test), but that `Style` never reaches the terminal output.
+/// Both paths now emit `\x1b[31m` for the `TODO-dir` entry. The connector-list
+/// terminal renderer applies the per-item paragraph `Style` projected by
+/// `fs_entry_style` (tree-cutover Phase 4 connector-list `Style` lowering), so
+/// the styling divergence recorded in Stage 3a.3 is closed.
 #[test]
-fn fixture_highlight_precedence_records_divergence() {
+fn fixture_highlight_precedence_styling_matches() {
     let dir = make_highlight_fixture();
     let mut fs = FileSystem::new(dir.path())
         .expect("FileSystem::new")
@@ -346,16 +344,14 @@ fn fixture_highlight_precedence_records_divergence() {
     let red_in_bespoke = bespoke.contains("\x1b[31m") || bespoke.contains(";31m");
     let red_in_tree = via_tree.contains("\x1b[31m") || via_tree.contains(";31m");
 
-    // Pin the present-day asymmetry as evidence for the §3a.3 decision.
     assert!(
         red_in_bespoke,
         "bespoke must emit highlight red: {bespoke:?}"
     );
     assert!(
-        !red_in_tree,
-        "GAP: tree path does NOT emit highlight red — \
-         render_tree_connector_list drops the per-item paragraph Style. \
-         tree={via_tree:?}"
+        red_in_tree,
+        "tree path must emit highlight red now that the connector list applies \
+         the per-item paragraph Style: {via_tree:?}"
     );
 
     assert!(strip_ansi(&bespoke).contains("TODO-dir"));
@@ -393,15 +389,11 @@ fn fixture_metric_annotations_records_divergence() {
 /// Dotfile italic: `italicize_dot_files(true)` should make `.env` italic in
 /// both renderers.
 ///
-/// **Observed gap (Stage 3a.3):** Bespoke emits `\x1b[3m` for `.env`. The
-/// tree path emits no SGR at all (`└── 📄 .env`) — this fixture is the
-/// canonical proof that `render_tree_connector_list` ignores the per-item
-/// paragraph `Style`. The projection sets `emphasis.italic = true` (see
-/// the in-mod `render_tree_dotfiles_are_italic_when_configured` test), but
-/// the connector-list renderer calls `render_inline(children,
-/// &Style::default())` — discarding the paragraph's style attribute.
+/// Both paths now emit `\x1b[3m` for `.env`. The connector-list terminal
+/// renderer applies the per-item paragraph `Style` (tree-cutover Phase 4), so
+/// the styling divergence recorded in Stage 3a.3 is closed.
 #[test]
-fn fixture_dotfile_italic_records_divergence() {
+fn fixture_dotfile_italic_styling_matches() {
     let dir = make_dotfile_fixture();
     let mut fs = FileSystem::new(dir.path())
         .expect("FileSystem::new")
@@ -421,10 +413,9 @@ fn fixture_dotfile_italic_records_divergence() {
         "bespoke must emit italic SGR: {bespoke:?}"
     );
     assert!(
-        !italic_in_tree,
-        "GAP: tree path does NOT emit italic — \
-         render_tree_connector_list discards the per-item paragraph Style. \
-         tree={via_tree:?}"
+        italic_in_tree,
+        "tree path must emit italic now that the connector list applies the \
+         per-item paragraph Style: {via_tree:?}"
     );
 
     assert!(strip_ansi(&bespoke).contains(".env"));
@@ -434,13 +425,12 @@ fn fixture_dotfile_italic_records_divergence() {
 /// Symlink styling: cyan (`\x1b[36m`) on the entry. Skipped on platforms
 /// where symlink creation is not possible without elevation.
 ///
-/// **Observed gap (Stage 3a.3):** This sandbox's scanner currently records
-/// the symlink as a regular `File` (no `is_symlink` flag) — neither the
-/// bespoke nor the tree path emits cyan. When the scanner correctly marks
-/// the symlink, bespoke will emit `\x1b[36m` while the tree path will
-/// continue to emit no SGR until `render_tree_connector_list` is fixed.
+/// When the scanner marks the symlink, both paths now emit `\x1b[36m`: the
+/// connector-list terminal renderer applies the per-item paragraph `Style`
+/// (tree-cutover Phase 4), so the styling divergence recorded in Stage 3a.3 is
+/// closed.
 #[test]
-fn fixture_symlink_styling_records_divergence() {
+fn fixture_symlink_styling_matches() {
     let Some(dir) = make_symlink_fixture() else {
         eprintln!("skipping: symlink creation unsupported on this platform");
         return;
@@ -459,13 +449,12 @@ fn fixture_symlink_styling_records_divergence() {
     let cyan_in_tree = via_tree.contains("\x1b[36m") || via_tree.contains(";36m");
 
     if cyan_in_bespoke {
-        // Scanner marked the symlink; tree path's failure to emit cyan is
-        // the same connector-styling gap as the dotfile fixture.
+        // Scanner marked the symlink; the tree path now emits cyan too because
+        // the connector list applies the per-item Style.
         assert!(
-            !cyan_in_tree,
-            "GAP: tree path does NOT emit cyan — \
-             render_tree_connector_list discards the per-item Style. \
-             tree={via_tree:?}"
+            cyan_in_tree,
+            "tree path must emit cyan now that the connector list applies the \
+             per-item Style: {via_tree:?}"
         );
     } else {
         // Scanner did not mark the symlink (some platforms / fs combos);

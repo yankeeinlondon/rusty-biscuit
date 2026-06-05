@@ -7,8 +7,10 @@
 //!
 //! The corpus is generated deterministically in-process so inputs stay
 //! frozen across runs. Every document packs each benchmarked feature:
-//! frontmatter variables, `{{ }}` interpolation, nested `::block` regions,
-//! deliberately messy tables/spacing, and skewed heading levels. The corpus
+//! frontmatter variables, frontmatter values that themselves carry `{{ }}`
+//! references, a frontmatter `replace` map, body `{{ }}` interpolation,
+//! nested `::block` regions, deliberately messy tables/spacing, and skewed
+//! heading levels. The corpus
 //! contains no shell directives and no transclusion directives — those
 //! stages are out of scope (non-deterministic / require on-disk fixtures).
 //!
@@ -37,6 +39,7 @@ fn build_document(index: usize) -> String {
          author: Author {author}\n\
          count: {index}\n\
          published: {published}\n\
+         slug: post-{{{{count}}}}-by-{{{{author}}}}\n\
          nested:\n  \
          email: user{index}@example.com\n  \
          rank: {rank}\n\
@@ -44,6 +47,9 @@ fn build_document(index: usize) -> String {
          - rust\n  \
          - markdown\n  \
          - bench\n\
+         replace:\n  \
+         entry: record\n  \
+         table: grid\n\
          ---\n\
          # {{{{title}}}}\n\n\
          Written by {{{{author}}}} — entry number {{{{count}}}}.\n\n\
@@ -95,7 +101,14 @@ fn bench_compose_pipeline(c: &mut Criterion) {
     group.throughput(Throughput::Elements(CORPUS_SIZE as u64));
     group.sample_size(20);
 
+    // Only the pure (no-I/O) stages are benched. Shell/transclusion stages
+    // need subprocess/filesystem access and are deliberately excluded.
     let stages = [
+        (
+            "frontmatter_interpolation",
+            ComposeOperation::FrontmatterInterpolation,
+        ),
+        ("text_replacement", ComposeOperation::TextReplacement),
         ("interpolation", ComposeOperation::Interpolation),
         ("page_blocks", ComposeOperation::PageBlocks),
         ("cleanup", ComposeOperation::Cleanup),

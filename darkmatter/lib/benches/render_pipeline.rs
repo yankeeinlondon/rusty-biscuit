@@ -4,8 +4,8 @@
 //! `change:` delta points at the specific mode that moved:
 //!
 //! - `parse` — building a [`Markdown`] from raw source (frontmatter parse).
-//! - `terminal` — ANSI rendering via [`for_terminal`].
-//! - `html` — HTML rendering via [`as_html`].
+//! - `terminal` — ANSI rendering via [`Markdown::as_terminal`].
+//! - `html` — HTML rendering via [`Markdown::as_html`].
 //! - `highlight` — terminal rendering of a code-block-heavy corpus, isolating
 //!   `syntect` syntax-highlighting cost.
 //!
@@ -23,7 +23,7 @@
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::output::{HtmlOptions, TerminalOptions, as_html, for_terminal};
+use darkmatter::markdown::output::{HtmlOptions, TerminalOptions};
 use std::hint::black_box;
 
 const CORPUS_SIZE: usize = 30;
@@ -106,7 +106,8 @@ fn bench_render_pipeline(c: &mut Criterion) {
     group.bench_function("terminal", |b| {
         b.iter(|| {
             for md in &corpus {
-                let output = for_terminal(black_box(md), terminal_options.clone())
+                let output = black_box(md)
+                    .as_terminal(terminal_options.clone())
                     .expect("terminal render must not fault");
                 black_box(output);
             }
@@ -116,7 +117,8 @@ fn bench_render_pipeline(c: &mut Criterion) {
     group.bench_function("html", |b| {
         b.iter(|| {
             for md in &corpus {
-                let output = as_html(black_box(md), HtmlOptions::default())
+                let output = black_box(md)
+                    .as_html(HtmlOptions::default())
                     .expect("html render must not fault");
                 black_box(output);
             }
@@ -127,7 +129,8 @@ fn bench_render_pipeline(c: &mut Criterion) {
     group.bench_function("highlight", |b| {
         b.iter(|| {
             for md in &code_corpus {
-                let output = for_terminal(black_box(md), terminal_options.clone())
+                let output = black_box(md)
+                    .as_terminal(terminal_options.clone())
                     .expect("highlight render must not fault");
                 black_box(output);
             }

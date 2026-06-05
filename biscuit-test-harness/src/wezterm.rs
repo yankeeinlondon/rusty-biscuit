@@ -298,6 +298,37 @@ impl WezTermHarness {
     /// the same broken behaviour as before. We surface this as an
     /// `io::Error` so the failure mode is explicit.
     pub fn focus_spawned_pane(&self) -> io::Result<Option<(i32, i32)>> {
+        match self.raise_and_window_bounds()? {
+            Some((x, y, w, h)) => {
+                let click_x = x + w / 2;
+                let click_y = y + h / 2;
+                eprintln!(
+                    "[focus_spawned_pane] WezTerm window pos=({x},{y}) size=({w},{h}) → click target ({click_x},{click_y})"
+                );
+                std::thread::sleep(Duration::from_millis(200));
+                Ok(Some((click_x, click_y)))
+            }
+            None => {
+                std::thread::sleep(Duration::from_millis(400));
+                Ok(None)
+            }
+        }
+    }
+
+    /// Raises the spawned pane's WezTerm window to the front and returns its
+    /// screen bounds as `(x, y, width, height)` in points.
+    ///
+    /// Stamps the pane with a unique title, activates the pane, then (macOS
+    /// only) raises the owning window via System Events and reads its position
+    /// and size. Returns `Ok(None)` off macOS, or when the window position
+    /// could not be resolved.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when the `wezterm cli` title/activate calls fail, or
+    /// when the System Events AXRaise call fails (e.g. missing Accessibility
+    /// permission for the parent terminal app).
+    fn raise_and_window_bounds(&self) -> io::Result<Option<(i32, i32, i32, i32)>> {
         let id = self.pane_id();
         let title = self.unique_window_title();
 
@@ -387,18 +418,74 @@ impl WezTermHarness {
                 .filter_map(|s| s.parse().ok())
                 .collect();
             if parts.len() == 4 {
-                let (x, y, w, h) = (parts[0], parts[1], parts[2], parts[3]);
-                let click_x = x + w / 2;
-                let click_y = y + h / 2;
-                eprintln!(
-                    "[focus_spawned_pane] WezTerm window pos=({x},{y}) size=({w},{h}) → click target ({click_x},{click_y})"
-                );
-                std::thread::sleep(Duration::from_millis(200));
-                return Ok(Some((click_x, click_y)));
+                return Ok(Some((parts[0], parts[1], parts[2], parts[3])));
             }
         }
 
-        std::thread::sleep(Duration::from_millis(400));
+        Ok(None)
+    }
+
+    /// Raises the spawned pane's window and screen-captures it to PNG bytes via
+    /// macOS `screencapture -R`.
+    ///
+    /// Intended for the Level-2 terminal-image test, where text capture cannot
+    /// prove an inline image was painted: the caller samples the returned pixels
+    /// for the distinctive fill color it rendered.
+    ///
+    /// ## Returns
+    ///
+    /// `Ok(Some(png_bytes))` on a successful capture, or `Ok(None)` when
+    /// window-region capture is unavailable — off macOS, when the window bounds
+    /// cannot be resolved, or when `screencapture` fails. A `None` is a signal
+    /// to skip pixel assertions cleanly, mirroring the rest of the harness.
+    ///
+    /// ## Notes
+    ///
+    /// macOS only. Requires Screen Recording permission for the parent process;
+    /// without it `screencapture` yields a black frame. The caller distinguishes
+    /// that (a near-black capture) from a genuine paint failure and skips on it.
+    #[cfg(target_os = "macos")]
+    pub fn capture_window_png(&self) -> io::Result<Option<Vec<u8>>> {
+        // A raise/bounds failure (window not matched, Accessibility permission
+        // not granted) is a reason to skip the pixel assertion, not to fail —
+        // degrade it to `None` rather than propagating the error.
+        let Ok(Some((x, y, w, h))) = self.raise_and_window_bounds() else {
+            return Ok(None);
+        };
+        if w <= 0 || h <= 0 {
+            return Ok(None);
+        }
+        // Let the compositor settle after the raise before grabbing pixels.
+        std::thread::sleep(Duration::from_millis(300));
+
+        let tmp = env::temp_dir().join(format!("biscuit-wezcap-{}.png", self.pane_id()));
+        let mut cmd = Command::new("screencapture");
+        cmd.args(["-x", "-o"])
+            .arg(format!("-R{x},{y},{w},{h}"))
+            .arg(&tmp)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
+        if !out.status.success() {
+            return Ok(None);
+        }
+        match std::fs::read(&tmp) {
+            Ok(bytes) => {
+                let _ = std::fs::remove_file(&tmp);
+                if bytes.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(bytes))
+                }
+            }
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Non-macOS stub: window-region screen capture is unsupported, so callers
+    /// skip the pixel assertion. See the macOS implementation for details.
+    #[cfg(not(target_os = "macos"))]
+    pub fn capture_window_png(&self) -> io::Result<Option<Vec<u8>>> {
         Ok(None)
     }
 }

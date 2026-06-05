@@ -151,6 +151,18 @@ impl HtmlPage {
     /// Identity is [`LinkTag::dedup_key`] — `(rel, href)`. Page-level
     /// links are seen first and win ordering ties.
     pub fn collect_dedup_links(&self) -> Vec<&LinkTag> {
+        self.collect_dedup_links_from(&self.all_fragments())
+    }
+
+    /// [`collect_dedup_links`](HtmlPage::collect_dedup_links) over an
+    /// already-collected fragment list, so [`render_head`](HtmlPage::render_head)
+    /// can share one [`all_fragments`](HtmlPage::all_fragments) traversal across
+    /// the link, metadata, and stylesheet rollups instead of walking the
+    /// fragment tree once per rollup.
+    fn collect_dedup_links_from<'a>(
+        &'a self,
+        all_fragments: &[&'a BrowserFragment<Ready>],
+    ) -> Vec<&'a LinkTag> {
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
         for link in &self.links {
@@ -158,7 +170,7 @@ impl HtmlPage {
                 out.push(link);
             }
         }
-        for fragment in self.all_fragments() {
+        for fragment in all_fragments {
             for link in fragment.dependency_links() {
                 if seen.insert(link.dedup_key()) {
                     out.push(link);
@@ -183,16 +195,20 @@ impl HtmlPage {
         out
     }
 
-    /// Builds the effective metadata map.
+    /// Builds the effective metadata map over an already-collected fragment
+    /// list — see [`collect_dedup_links_from`](HtmlPage::collect_dedup_links_from).
     ///
     /// Component metadata is collected in document order with **first-write
     /// wins** semantics — when two components set the same key, the
     /// earlier-positioned component's value is kept. Page-level metadata is
-    /// applied last and **overwrites** any component value, so the page
-    /// always wins on key conflict (decisions.md item 8).
-    fn merged_metadata(&self) -> HashMap<MicrodataKey, String> {
+    /// applied last and **overwrites** any component value, so the page always
+    /// wins on key conflict (decisions.md item 8).
+    fn merged_metadata_from(
+        &self,
+        all_fragments: &[&BrowserFragment<Ready>],
+    ) -> HashMap<MicrodataKey, String> {
         let mut merged = HashMap::new();
-        for fragment in self.all_fragments() {
+        for fragment in all_fragments {
             for (key, value) in fragment.metadata() {
                 merged.entry(*key).or_insert_with(|| value.clone());
             }
@@ -229,10 +245,16 @@ impl HtmlPage {
     /// then each fragment's component default stylesheet in
     /// fragment-registration order.
     pub fn stylesheet(&self) -> String {
+        self.stylesheet_from(&self.all_fragments())
+    }
+
+    /// [`stylesheet`](HtmlPage::stylesheet) over an already-collected fragment
+    /// list — see [`collect_dedup_links_from`](HtmlPage::collect_dedup_links_from).
+    fn stylesheet_from(&self, all_fragments: &[&BrowserFragment<Ready>]) -> String {
         let mut out = String::new();
         out.push_str(&self.render_root_block());
         out.push_str(&render_stylesheet(&self.stylesheet));
-        for fragment in self.all_fragments() {
+        for fragment in all_fragments {
             if let Some(component_sheet) = fragment.stylesheet() {
                 out.push_str(&render_stylesheet(&component_sheet.as_stylesheet()));
             }
@@ -248,23 +270,46 @@ impl HtmlPage {
 
     /// Renders the page to a complete HTML string. Pure — no I/O.
     pub fn render(&self) -> String {
+        let head = self.render_head(self.first_h1_text().as_deref());
+        let body: String = self.fragments.iter().map(|f| f.render()).collect();
+        format!("<!DOCTYPE html><html><head>{head}</head><body>{body}</body></html>")
+    }
+
+    /// Builds the page `<head>` contents (everything between `<head>` and
+    /// `</head>`), in the fixed order: charset, viewport, title, microdata
+    /// meta tags, deduped links, stylesheet, script blocks.
+    ///
+    /// `fallback_title` supplies the `<title>` when no `Title` microdata key is
+    /// present; [`render`](HtmlPage::render) passes [`first_h1_text`] so the
+    /// title falls back to the first `<h1>`. The direct render-tree document
+    /// renderer ([`render_browser_document_html`]) computes the equivalent
+    /// first-`<h1>` text from the node tree and passes it here so the two paths
+    /// emit byte-identical heads.
+    ///
+    /// [`first_h1_text`]: HtmlPage::first_h1_text
+    /// [`render_browser_document_html`]: crate::tree::render::render_browser_document_html
+    pub(crate) fn render_head(&self, fallback_title: Option<&str>) -> String {
+        // Collect the fragment tree once and share it across the metadata,
+        // link, and stylesheet rollups below — each of those used to walk the
+        // whole fragment tree independently.
+        let all_fragments = self.all_fragments();
         let mut head = String::new();
         // 1. charset — always first.
         head.push_str(r#"<meta charset="utf-8">"#);
         // 2. viewport.
         head.push_str(r#"<meta name="viewport" content="width=device-width, initial-scale=1">"#);
-        // 3. title — from the Title microdata key, else first <h1>, else empty.
+        // 3. title — from the Title microdata key, else the fallback, else empty.
         // Metadata is the page/component merge so a nested component's
         // title or description is not lost.
-        let metadata = self.merged_metadata();
+        let metadata = self.merged_metadata_from(&all_fragments);
         let title = metadata
             .get(&MicrodataKey::Title)
-            .cloned()
-            .or_else(|| self.first_h1_text())
+            .map(String::as_str)
+            .or(fallback_title)
             .unwrap_or_default();
         head.push_str(&format!(
             "<title>{}</title>",
-            crate::browser::utils::escape_text(&title)
+            crate::browser::utils::escape_text(title)
         ));
         // 4. other microdata-driven meta tags.
         for (key, value) in &metadata {
@@ -278,7 +323,7 @@ impl HtmlPage {
             }
         }
         // 5. link tags — deduped, page-level first.
-        for link in self.collect_dedup_links() {
+        for link in self.collect_dedup_links_from(&all_fragments) {
             head.push_str(&link.render());
         }
         // 6. stylesheet — external <link> or inline <style>.
@@ -288,7 +333,7 @@ impl HtmlPage {
                 crate::browser::utils::escape_attribute(&path.as_path().display().to_string())
             )),
             None => {
-                let css = self.stylesheet();
+                let css = self.stylesheet_from(&all_fragments);
                 if !css.is_empty() {
                     head.push_str(&format!("<style>{css}</style>"));
                 }
@@ -307,8 +352,7 @@ impl HtmlPage {
                 }
             }
         }
-        let body: String = self.fragments.iter().map(|f| f.render()).collect();
-        format!("<!DOCTYPE html><html><head>{head}</head><body>{body}</body></html>")
+        head
     }
 
     /// Renders the page-level `:root { … }` block. Starts from the

@@ -28,7 +28,7 @@ pub(crate) fn render_assistant_markdown_with_options(
     options: Option<&darkmatter::markdown::output::terminal::TerminalOptions>,
 ) -> String {
     use darkmatter::markdown::Markdown;
-    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
+    use darkmatter::markdown::output::terminal::TerminalOptions;
 
     let owned;
     let opts = match options {
@@ -40,7 +40,7 @@ pub(crate) fn render_assistant_markdown_with_options(
     };
 
     let md = Markdown::new(text.trim());
-    match for_terminal(&md, opts.clone()) {
+    match md.as_terminal(opts.clone()) {
         Ok(rendered) => rendered,
         Err(_) => render_assistant_text(text, term),
     }

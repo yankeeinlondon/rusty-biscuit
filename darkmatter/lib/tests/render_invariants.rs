@@ -252,7 +252,13 @@ fn render_md(
         .with_margin_right(scenario.mr)
         .with_margin_top(scenario.mt)
         .with_margin_bottom(scenario.mb)
-        .with_code_theme("dracula");
+        .with_code_theme("dracula")
+        // This matrix asserts layout invariants (containment, vertical rhythm),
+        // not graphics fidelity. Post tree-cutover the decorated path rasters HRs
+        // at `Rich`, which renders as a blank-measuring image line; pin `Never`
+        // so HRs take the text tier (the layout-relevant form the matrix is
+        // built around, matching the former legacy decorated path).
+        .with_image_mode(TerminalImageMode::Never);
     if let Some(mode) = mermaid {
         page = page.with_mermaid_mode(mode);
     }

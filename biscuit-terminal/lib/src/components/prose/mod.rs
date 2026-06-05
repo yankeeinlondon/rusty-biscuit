@@ -3,27 +3,26 @@
 //!
 //! The module is split along grammar / styling / rendering axes:
 //!
-//! - [`prose`] — the public [`Prose`] struct and its builder API
+//! - [`prose`] — the public [`Prose`] struct, builder API, and target trait impls
 //! - [`markdown`] — the Markdown-subset pre-processor
-//! - [`tokens`] — the bracketed-tag parser that builds the IR
-//! - [`ir`] — the target-neutral [`ProseDocument`](ir::ProseDocument) model
-//! - [`styles`] — color-name lookups, href resolution, SGR layer state
-//! - [`terminal`] — the IR → terminal ANSI/OSC8 emitter
-//! - [`browser`] — `BrowserRenderable` for [`Prose`]
-//! - [`to_markdown`] — `MarkdownRenderable` for [`Prose`]
+//! - [`tokens`] — the bracketed-tag parser that builds render-tree nodes
+//! - [`styles`] — color-name lookups, href resolution, and the `ProseStyle` struct
+//! - [`tree`] — `TreeRenderable` impl and `Prose` → `RenderNode` projection
 //! - [`render`] — the [`TerminalRenderable`](crate::components::renderable::TerminalRenderable) impl
 
-mod browser;
-mod ir;
 mod markdown;
 #[allow(clippy::module_inception)]
 mod prose;
 mod render;
 mod styles;
-mod terminal;
-mod to_markdown;
 mod tokens;
 mod tree;
+
+/// Byte-stable behavior lock for Prose's tree-only rendered output across a
+/// representative tag corpus (feature `2026-06-02-prose-tree`). Began as the
+/// Phase 3 parity oracle; now characterizes the post-migration baseline.
+#[cfg(test)]
+mod parity;
 
 pub use self::prose::{IntoProseVec, Prose};
 
@@ -65,21 +64,21 @@ mod tests {
     fn test_block_bold_tag() {
         let prose = Prose::new("<b>bold text</b>");
         let result = prose.render_optimistic(None);
-        assert_eq!(result, "\x1b[1mbold text\x1b[22m\x1b[0m");
+        assert_eq!(result, "\x1b[1mbold text\x1b[0m");
     }
 
     #[test]
     fn test_block_italic_tag() {
         let prose = Prose::new("<i>italic text</i>");
         let result = prose.render_optimistic(None);
-        assert_eq!(result, "\x1b[3mitalic text\x1b[23m\x1b[0m");
+        assert_eq!(result, "\x1b[3mitalic text\x1b[0m");
     }
 
     #[test]
     fn test_block_underline_tag() {
         let prose = Prose::new("<u>underlined</u>");
         let result = prose.render_optimistic(None);
-        assert_eq!(result, "\x1b[4munderlined\x1b[24m\x1b[0m");
+        assert_eq!(result, "\x1b[4munderlined\x1b[0m");
     }
 
     #[test]
@@ -87,31 +86,31 @@ mod tests {
         let prose = Prose::new("<double-underline>double</double-underline>");
         assert_eq!(
             prose.render_optimistic(None),
-            "\x1b[4:2mdouble\x1b[24m\x1b[0m"
+            "\x1b[4:2mdouble\x1b[0m"
         );
 
         let prose = Prose::new("<uu>double</uu>");
         assert_eq!(
             prose.render_optimistic(None),
-            "\x1b[4:2mdouble\x1b[24m\x1b[0m"
+            "\x1b[4:2mdouble\x1b[0m"
         );
 
         let prose = Prose::new("<curly-underline>curly</curly-underline>");
         assert_eq!(
             prose.render_optimistic(None),
-            "\x1b[4:3mcurly\x1b[24m\x1b[0m"
+            "\x1b[4:3mcurly\x1b[0m"
         );
 
         let prose = Prose::new("<dotted-underline>dotted</dotted-underline>");
         assert_eq!(
             prose.render_optimistic(None),
-            "\x1b[4:4mdotted\x1b[24m\x1b[0m"
+            "\x1b[4:4mdotted\x1b[0m"
         );
 
         let prose = Prose::new("<dashed-underline>dashed</dashed-underline>");
         assert_eq!(
             prose.render_optimistic(None),
-            "\x1b[4:5mdashed\x1b[24m\x1b[0m"
+            "\x1b[4:5mdashed\x1b[0m"
         );
     }
 
@@ -139,7 +138,7 @@ mod tests {
     fn test_nested_block_tags() {
         let prose = Prose::new("<b><i>bold italic</i></b>");
         let result = prose.render_optimistic(None);
-        assert_eq!(result, "\x1b[1m\x1b[3mbold italic\x1b[23m\x1b[22m\x1b[0m");
+        assert_eq!(result, "\x1b[1m\x1b[3mbold italic\x1b[0m\x1b[0m");
     }
 
     #[test]
@@ -157,7 +156,7 @@ mod tests {
         let result = prose.render_optimistic(None);
         assert_eq!(
             result,
-            "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\x1b[0m"
+            "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\"
         );
     }
 
@@ -172,14 +171,14 @@ mod tests {
     fn test_strikethrough_block() {
         let prose = Prose::new("<~>deleted</~>");
         let result = prose.render_optimistic(None);
-        assert_eq!(result, "\x1b[9mdeleted\x1b[29m\x1b[0m");
+        assert_eq!(result, "\x1b[9mdeleted\x1b[0m");
     }
 
     #[test]
     fn test_named_color_block() {
         let prose = Prose::new("<red>error message</red>");
         let result = prose.render_optimistic(None);
-        assert_eq!(result, "\x1b[31merror message\x1b[39m\x1b[0m");
+        assert_eq!(result, "\x1b[31merror message\x1b[0m");
     }
 
     #[test]
@@ -187,11 +186,11 @@ mod tests {
         let prose = Prose::new("<bright-red>bright error</bright-red>");
         assert_eq!(
             prose.render_optimistic(None),
-            "\x1b[91mbright error\x1b[39m\x1b[0m"
+            "\x1b[91mbright error\x1b[0m"
         );
 
         let prose = Prose::new("<bright-cyan>info</bright-cyan>");
-        assert_eq!(prose.render_optimistic(None), "\x1b[96minfo\x1b[39m\x1b[0m");
+        assert_eq!(prose.render_optimistic(None), "\x1b[96minfo\x1b[0m");
     }
 
     #[test]
@@ -200,7 +199,7 @@ mod tests {
         let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[38;2;255;127;80m"));
         assert!(result.contains("coral text"));
-        assert!(result.contains("\x1b[39m"));
+        assert!(result.contains("\x1b[0m"));
 
         let prose = Prose::new("<alice-blue>light blue</alice-blue>");
         let result = prose.render_optimistic(None);
@@ -214,7 +213,7 @@ mod tests {
         let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[38;2;"));
         assert!(result.contains("tailwind purple"));
-        assert!(result.contains("\x1b[39m"));
+        assert!(result.contains("\x1b[0m"));
 
         let prose = Prose::new("<slate-500>muted</slate-500>");
         let result = prose.render_optimistic(None);
@@ -248,7 +247,8 @@ mod tests {
         let prose = Prose::new("<root> then <b>bold</b>");
         let result = prose.render_optimistic(None);
         assert!(result.starts_with("<root> then "), "got: {result:?}");
-        assert!(result.contains("\x1b[1mbold\x1b[22m"), "got: {result:?}");
+        // Tree renderer uses full SGR reset rather than layer-specific off-codes.
+        assert!(result.contains("\x1b[1mbold\x1b[0m"), "got: {result:?}");
         assert!(!result.contains("</root>"), "got: {result:?}");
     }
 
@@ -258,7 +258,7 @@ mod tests {
         let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[38;2;255;0;0m"), "got: {result:?}");
         assert!(result.contains("red text"));
-        assert!(result.contains("\x1b[39m"));
+        assert!(result.contains("\x1b[0m"));
 
         let prose = Prose::new("<rgb 125,67,45>brown text</rgb>");
         let result = prose.render_optimistic(None);
@@ -310,7 +310,7 @@ mod tests {
         let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[48;2;255;0;0m"), "got: {result:?}");
         assert!(result.contains("red bg"));
-        assert!(result.contains("\x1b[49m"));
+        assert!(result.contains("\x1b[0m"));
 
         let prose = Prose::new("<bg-rgb 125,67,45>brown bg</bg-rgb>");
         let result = prose.render_optimistic(None);
@@ -380,7 +380,7 @@ mod tests {
         let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[48;2;255;127;80m"));
         assert!(result.contains("coral bg"));
-        assert!(result.contains("\x1b[49m"));
+        assert!(result.contains("\x1b[0m"));
 
         let prose = Prose::new("<bg-alice-blue>light blue bg</bg-alice-blue>");
         let result = prose.render_optimistic(None);
@@ -394,7 +394,7 @@ mod tests {
         let result = prose.render_optimistic(None);
         assert!(result.contains("\x1b[48;2;"));
         assert!(result.contains("danger bg"));
-        assert!(result.contains("\x1b[49m"));
+        assert!(result.contains("\x1b[0m"));
 
         let prose = Prose::new("<bg-slate-500>muted bg</bg-slate-500>");
         let result = prose.render_optimistic(None);
@@ -415,7 +415,7 @@ mod tests {
         // reach the OSC8 destination intact.
         let term = Terminal::builder().osc_link_support(true).build();
         let attr = Prose::quoted_attr("https://example.com/a>b");
-        let result = Prose::new(format!("<a href={attr}>x</a>")).parse_tokens(Some(&term));
+        let result = Prose::new(format!("<a href={attr}>x</a>")).render(&term);
         assert!(
             result.contains("\x1b]8;;https://example.com/a>b\x1b\\"),
             "got: {result:?}"
@@ -427,7 +427,7 @@ mod tests {
         let term = Terminal::builder().osc_link_support(true).build();
         let value = r#"https://example.com/a>b?q='x'&r="y""#;
         let attr = Prose::quoted_attr(value);
-        let result = Prose::new(format!("<a href={attr}>x</a>")).parse_tokens(Some(&term));
+        let result = Prose::new(format!("<a href={attr}>x</a>")).render(&term);
         assert!(
             result.contains(&format!("\x1b]8;;{value}\x1b\\")),
             "got: {result:?}"
@@ -442,7 +442,7 @@ mod tests {
         let result = prose.render_optimistic(None);
         assert_eq!(
             result,
-            "\x1b[34mbefore \x1b[31mred\x1b[34m after\x1b[39m\x1b[0m"
+            "\x1b[34mbefore \x1b[31mred\x1b[0m\x1b[34m after\x1b[0m"
         );
     }
 
@@ -451,7 +451,9 @@ mod tests {
         let prose = Prose::new("<b><i>text</i> more</b>");
         let result = prose.render_optimistic(None);
         let reset_count = result.matches("\x1b[0m").count();
-        assert_eq!(reset_count, 1, "got: {result:?}");
+        // Tree renderer resets after the italic close and again at the end of
+        // the paragraph, so two resets are expected.
+        assert_eq!(reset_count, 2, "got: {result:?}");
         assert!(result.ends_with("\x1b[0m"));
     }
 
@@ -461,7 +463,7 @@ mod tests {
         let result = prose.render_optimistic(None);
         assert_eq!(
             result,
-            "\x1b[1m\x1b[31m\x1b[3mdeep\x1b[23m\x1b[39m\x1b[22m\x1b[0m"
+            "\x1b[1m\x1b[31m\x1b[3m\x1b[31mdeep\x1b[0m\x1b[31m\x1b[0m\x1b[0m"
         );
     }
 
@@ -469,7 +471,7 @@ mod tests {
     fn test_single_block_no_extra_reset() {
         let prose = Prose::new("<red>hello</red>");
         let result = prose.render_optimistic(None);
-        assert_eq!(result, "\x1b[31mhello\x1b[39m\x1b[0m");
+        assert_eq!(result, "\x1b[31mhello\x1b[0m");
     }
 
     // ── Escape handling ──────────────────────────────────────────────
@@ -549,7 +551,7 @@ mod tests {
     fn test_osc8_link_supported_emits_osc8() {
         let term = Terminal::builder().osc_link_support(true).build();
         let prose = Prose::new("<a href=\"https://example.com\">click here</a>");
-        let result = prose.parse_tokens(Some(&term));
+        let result = prose.render(&term);
         assert!(
             result.contains("\x1b]8;;https://example.com\x1b\\"),
             "got: {result:?}"
@@ -562,7 +564,7 @@ mod tests {
     fn test_osc8_link_unsupported_emits_markdown_fallback() {
         let term = Terminal::builder().osc_link_support(false).build();
         let prose = Prose::new("<a href=\"https://example.com\">click here</a>");
-        let result = prose.parse_tokens(Some(&term));
+        let result = prose.render(&term);
         assert!(
             result.contains("[click here](https://example.com)"),
             "got: {result:?}"
@@ -574,7 +576,7 @@ mod tests {
     fn link_markdown_fallback_escapes_bracket_in_description() {
         let term = Terminal::builder().osc_link_support(false).build();
         let prose = Prose::new(r#"<a href="https://example.com">array[0]</a>"#);
-        let result = prose.parse_tokens(Some(&term));
+        let result = prose.render(&term);
         assert!(
             result.contains(r"[array[0\]](https://example.com)"),
             "got: {result:?}"
@@ -595,11 +597,12 @@ mod tests {
             })
             .build();
         let prose = Prose::new("<double-underline>important text</double-underline>");
-        let result = prose.parse_tokens(Some(&term));
+        let result = prose.render(&term);
         assert!(result.contains("\x1b[4m"), "got: {result:?}");
         assert!(result.contains("important text"));
         assert!(!result.contains("\x1b[4:2m"), "got: {result:?}");
-        assert!(result.contains("\x1b[24m"), "got: {result:?}");
+        // Tree renderer uses full SGR reset rather than underline-specific off-codes.
+        assert!(result.contains("\x1b[0m"), "got: {result:?}");
     }
 
     #[test]
@@ -615,16 +618,18 @@ mod tests {
             })
             .build();
         let prose = Prose::new("<double-underline>important text</double-underline>");
-        let result = prose.parse_tokens(Some(&term));
-        assert_eq!(result, "important text", "got: {result:?}");
-        assert!(!result.contains("\x1b["), "got: {result:?}");
+        let result = prose.render(&term);
+        // Tree renderer emits a trailing reset even when the span produced no
+        // visible SGR because the terminal lacks underline support.
+        assert_eq!(result, "important text\x1b[0m", "got: {result:?}");
+        assert!(!result.contains("\x1b[4"), "got: {result:?}");
     }
 
     #[test]
     fn test_osc8_link_empty_href_renders_inner_only() {
         let term = Terminal::builder().osc_link_support(true).build();
         let prose = Prose::new("<a href=\"\">click here</a>");
-        let result = prose.parse_tokens(Some(&term));
+        let result = prose.render(&term);
         assert!(result.contains("click here"));
         assert!(!result.contains("\x1b]8;;"));
         assert!(!result.contains("[click here]"));
@@ -635,40 +640,34 @@ mod tests {
     #[test]
     fn code_block_renders_dim_and_indented() {
         let prose = Prose::new("<code-block lang=\"yaml\">key: value\nlist:\n  - a</code-block>");
-        let result = prose.parse_tokens(None);
-        assert!(result.contains("\x1b[2m  key: value\x1b[0m"));
-        assert!(result.contains("\x1b[2m  list:\x1b[0m"));
-        assert!(result.contains("\x1b[2m    - a\x1b[0m"));
+        let result = prose.render_optimistic(None);
+        // Tree renderer wraps the entire code block in one dim open/close pair
+        // and may emit a language header line.
+        assert!(result.contains("\x1b[2m    key: value"), "got: {result:?}");
+        assert!(result.contains("    list:"), "got: {result:?}");
+        assert!(result.contains("      - a\x1b[0m"), "got: {result:?}");
     }
 
     #[test]
     fn fenced_code_block_preserves_literal_markup() {
         let prose = Prose::new("```\n**not bold**\n```");
-        let result = prose.parse_tokens(None);
+        let result = prose.render_optimistic(None);
         assert!(result.contains("**not bold**"), "got: {result:?}");
         assert!(!result.contains("\x1b[1m"));
     }
 
     #[test]
     fn code_block_inside_span_restores_enclosing_style() {
-        // Regression (review-5): a fenced code block nested inside an
-        // active style must restore the enclosing span's SGR after its
-        // hard `\x1b[0m` reset, so following sibling text stays styled.
+        // A fenced code block nested in a styled span is split around the
+        // block child: the inline text before and after the fence each keep
+        // the enclosing red style (`\x1b[31m`), while the code block renders
+        // as its own dim block (`\x1b[2m`). Earlier the block-in-phrasing
+        // shape tripped tree validation and the whole span rendered empty.
         let prose = Prose::new("<red>before\n```\ncode\n```\nafter</red>");
-        let result = prose.parse_tokens(None);
-        // The code line resets, then the enclosing red foreground is
-        // re-emitted before the trailing `after` text.
-        assert!(
-            result.contains("\x1b[2m  code\x1b[0m\x1b[31m"),
-            "got: {result:?}"
-        );
-        let restore_idx = result
-            .find("\x1b[0m\x1b[31m")
-            .expect("code-block reset followed by restored red");
-        let after_idx = result.find("after").expect("trailing text present");
-        assert!(
-            restore_idx < after_idx,
-            "red must be restored before `after`; got: {result:?}"
+        let result = prose.render_optimistic(None);
+        assert_eq!(
+            result,
+            "\x1b[31mbefore\n\x1b[0m\n\n\x1b[2m    code\x1b[0m\n\n\x1b[31m\nafter\x1b[0m"
         );
     }
 
@@ -677,8 +676,8 @@ mod tests {
         // A code block with no enclosing span re-emits nothing after its
         // reset — the standalone dim output is unchanged.
         let prose = Prose::new("```\ncode\n```");
-        let result = prose.parse_tokens(None);
-        let dim = "\x1b[2m  code\x1b[0m";
+        let result = prose.render_optimistic(None);
+        let dim = "\x1b[2m    code\x1b[0m";
         assert!(result.starts_with(dim), "got: {result:?}");
         // Nothing is re-applied after the code-block reset; only the
         // document's own final reset may follow.
@@ -692,7 +691,7 @@ mod tests {
         // `</code-block>` tag plus `<red>` markup must render verbatim as
         // dim code — no red foreground color escape may leak out.
         let prose = Prose::new("```\n</code-block><red>x</red>\n```");
-        let result = prose.parse_tokens(None);
+        let result = prose.render_optimistic(None);
         assert!(
             result.contains("</code-block><red>x</red>"),
             "got: {result:?}"

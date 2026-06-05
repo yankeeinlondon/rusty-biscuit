@@ -228,6 +228,7 @@ pub fn italics_support() -> bool {
                 | "Hyper"
                 | "Tabby"
                 | "Rio"
+                | "ghostty"
         );
         if dominated {
             return true;

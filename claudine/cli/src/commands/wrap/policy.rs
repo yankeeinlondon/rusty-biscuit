@@ -131,6 +131,14 @@ impl StructuredCodexOutput {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct StructuredSummaryDetails {
     pub(crate) tool_names: Vec<String>,
+    /// The agent's **final response** — output text emitted after the last
+    /// tool call. Accumulated from `OutputText` semantic events and reset
+    /// whenever a `ToolCall` is observed, so interstitial narration between
+    /// tool calls (e.g. "Let me read the docs…") is dropped and only the
+    /// closing turn survives. `inline-compose` writes this (not the
+    /// full accumulated `assistant_text`) into the document body so process
+    /// narration never leaks into the artifact.
+    pub(crate) final_response: String,
 }
 
 impl StructuredSummaryDetails {
@@ -138,6 +146,18 @@ impl StructuredSummaryDetails {
         if !tool_name.is_empty() && !self.tool_names.iter().any(|name| name == tool_name) {
             self.tool_names.push(tool_name.to_string());
         }
+    }
+
+    /// Append a streamed `OutputText` chunk to the in-progress final response.
+    pub(crate) fn push_final_response(&mut self, text: &str) {
+        self.final_response.push_str(text);
+    }
+
+    /// Discard any accumulated final-response text because a new tool call
+    /// began — anything said before the last tool call is process narration,
+    /// not the agent's closing answer.
+    pub(crate) fn reset_final_response(&mut self) {
+        self.final_response.clear();
     }
 }
 
