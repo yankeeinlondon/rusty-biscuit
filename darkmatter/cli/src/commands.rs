@@ -2450,6 +2450,7 @@ mod tests {
                     calls: 1,
                 },
             ],
+            ..Default::default()
         };
 
         let rendered = format_compose_perf_report(&cli_perf, Some(&compose_perf));
