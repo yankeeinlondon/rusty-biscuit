@@ -14,11 +14,12 @@ pub use crate::wrap_policy::WordWrap;
 
 use serde::{Deserialize, Serialize};
 
-/// A block-level component's relationship to its parent: margins, alignment
-/// within the parent, max-width, and content wrapping.
+/// A block-level component's CSS box: margins, padding, content-box width,
+/// max-width, alignment within the parent, and content wrapping.
 ///
-/// Inline components carry no `Layout`. Appearance (background, fill) is a
-/// `Style` concern and is not represented here.
+/// Inline components carry no `Layout`. Appearance (background, border) is a
+/// `Style` concern and is not represented here; `padding` is reserved here but
+/// painted by `Style.background`.
 ///
 /// ## Serialized shape
 ///
@@ -103,6 +104,20 @@ mod tests {
         assert_eq!(layout.margin, Edges::default());
         assert_eq!(layout.alignment, Alignment::Left);
         assert!(layout.max_width.is_none());
+    }
+
+    #[test]
+    fn default_layout_pins_every_field() {
+        // The defaulting contract: each field reproduces today's un-styled
+        // node. `word_wrap` is hand-written to `WordWrap::None`, NOT
+        // `WordWrap::default()`, so it is pinned explicitly here.
+        let layout = Layout::default();
+        assert_eq!(layout.margin, Edges::default());
+        assert_eq!(layout.padding, Edges::default());
+        assert_eq!(layout.width, Width::Auto);
+        assert_eq!(layout.max_width, None);
+        assert_eq!(layout.alignment, Alignment::Left);
+        assert_eq!(layout.word_wrap, WordWrap::None);
     }
 
     #[test]

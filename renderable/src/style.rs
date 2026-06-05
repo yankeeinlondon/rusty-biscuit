@@ -359,7 +359,7 @@ pub struct Border {
 pub struct Background;
 
 impl Background {
-    /// A faint adaptive tint (former `FillIntensity::Subtle`):
+    /// A faint adaptive tint (the former subtle fill tint):
     /// `rgb(235,235,238)` on light, `rgb(30,30,34)` on dark.
     pub fn subtle() -> TargetValue<PerMode<Color>> {
         use crate::color::{BasicColor, RgbColor};
@@ -369,7 +369,7 @@ impl Background {
         ))
     }
 
-    /// A strong adaptive tint (former `FillIntensity::Pronounced`):
+    /// A strong adaptive tint (the former pronounced fill tint):
     /// `rgb(215,215,220)` on light, `rgb(50,50,56)` on dark.
     pub fn pronounced() -> TargetValue<PerMode<Color>> {
         use crate::color::{BasicColor, RgbColor};
@@ -713,6 +713,17 @@ mod tests {
     #[test]
     fn style_default_is_empty() {
         assert!(Style::default().is_empty());
+    }
+
+    #[test]
+    fn default_style_pins_every_field() {
+        // The defaulting contract: an un-styled node paints nothing. Pinned
+        // field-by-field rather than only through `is_empty()`.
+        let style = Style::default();
+        assert_eq!(style.color, None);
+        assert_eq!(style.background, None);
+        assert!(style.emphasis.is_empty());
+        assert_eq!(style.border, None);
     }
 
     #[test]
