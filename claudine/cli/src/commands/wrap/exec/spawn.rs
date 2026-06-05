@@ -694,7 +694,8 @@ pub(crate) fn run_child_stream_semantic(
         };
         let reasoning_cb: ReasoningCallback = Box::new(|_chunk: &str| {});
 
-        let mut parser: Box<dyn SemanticStreamParser> = build_parser(output_cb, reasoning_cb);
+        let mut parser: Box<dyn SemanticStreamParser> =
+            build_parser(output_cb, reasoning_cb, Some(captured_pid));
         let mut fallback_mode = false;
         let mut stream_capture = stream_capture_owned;
 

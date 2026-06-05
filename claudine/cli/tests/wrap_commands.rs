@@ -1660,6 +1660,27 @@ exit 0
         agent_pid.is_some(),
         "summary event must include agent_pid after successful spawn; got: {summary_line}"
     );
+
+    // Review-1 Finding 1: live per-event records (not just the lifecycle
+    // summary) must carry agent_pid once the child has spawned. These are the
+    // synthetic `stream_semantic_event` rows the sink logs for every event.
+    let semantic_line = log_contents
+        .lines()
+        .find(|line| line.contains("\"synthetic_kind\":\"stream_semantic_event\""))
+        .expect("at least one live semantic event should be logged");
+    let semantic: serde_json::Value = serde_json::from_str(semantic_line).unwrap();
+    assert!(
+        semantic.get("agent_pid").and_then(|v| v.as_u64()).is_some(),
+        "live semantic event must include agent_pid after spawn; got: {semantic_line}"
+    );
+    assert!(
+        semantic
+            .get("env")
+            .and_then(|e| e.get("claudine_pid"))
+            .and_then(|v| v.as_u64())
+            .is_some(),
+        "live semantic event must include env.claudine_pid; got: {semantic_line}"
+    );
 }
 
 #[cfg(unix)]

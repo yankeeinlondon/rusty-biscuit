@@ -216,9 +216,10 @@ pub(crate) fn build_structured_plumbing(
 
         let stdout_sink = ObservedSemanticSink::new(shared, stdout_seen);
         let build_parser: super::exec::SemanticParserBuilder =
-            Box::new(move |output_cb, _reasoning_cb| {
+            Box::new(move |output_cb, _reasoning_cb, agent_pid| {
                 if let Ok(mut inner) = live_sink_inner.lock() {
                     inner.set_output_text_sink(output_cb);
+                    inner.set_agent_pid(agent_pid);
                 }
                 claudine::stream::create_semantic_parser(provider, stdout_sink, parser_config)
             });
@@ -239,17 +240,19 @@ pub(crate) fn build_structured_plumbing(
 
         let stdout_sink = shared;
         let build_parser: super::exec::SemanticParserBuilder =
-            Box::new(move |output_cb, _reasoning_cb| {
+            Box::new(move |output_cb, _reasoning_cb, agent_pid| {
                 if let Ok(mut inner) = live_sink_inner.lock() {
                     inner.set_output_text_sink(output_cb);
+                    inner.set_agent_pid(agent_pid);
                 }
                 claudine::stream::create_semantic_parser(provider, stdout_sink, parser_config)
             });
         (build_parser, stderr_bridge)
     } else {
         let build_parser: super::exec::SemanticParserBuilder =
-            Box::new(move |output_cb, _reasoning_cb| {
-                let sink = sink.with_output_text_sink(output_cb);
+            Box::new(move |output_cb, _reasoning_cb, agent_pid| {
+                let mut sink = sink.with_output_text_sink(output_cb);
+                sink.set_agent_pid(agent_pid);
                 claudine::stream::create_semantic_parser(provider, sink, parser_config)
             });
         (build_parser, None)

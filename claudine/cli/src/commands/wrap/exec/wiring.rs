@@ -663,7 +663,8 @@ pub(crate) fn run_kimi_wire_session(
                 }
             });
             let reasoning_cb: ReasoningCallback = Box::new(|_chunk: &str| {});
-            let mut parser: Box<dyn SemanticStreamParser> = build_parser(output_cb, reasoning_cb);
+            let mut parser: Box<dyn SemanticStreamParser> =
+                build_parser(output_cb, reasoning_cb, Some(captured_pid));
 
             for line in reader.lines() {
                 let Ok(line) = line else { break };

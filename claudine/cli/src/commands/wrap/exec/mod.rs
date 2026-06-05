@@ -362,11 +362,16 @@ pub(crate) type ReasoningCallback = Box<dyn FnMut(&str) + Send + 'static>;
 /// reasoning directly through its section-aware stderr emitter. The second
 /// parameter is retained for signature compatibility.
 ///
+/// The trailing `Option<u32>` is the immediate child PID captured after a
+/// successful spawn (invoked from the reader thread, so the PID is already
+/// known). Builders stamp it onto their sink so live records carry
+/// `EventMeta.agent_pid`.
+///
 /// [`SemanticEvent::OutputText`]: claudine::stream::semantic::SemanticEvent::OutputText
 /// [`SemanticEvent::Reasoning`]: claudine::stream::semantic::SemanticEvent::Reasoning
 /// [`LiveSemanticSink`]: super::live_semantic_sink::LiveSemanticSink
 pub(crate) type SemanticParserBuilder = Box<
-    dyn FnOnce(OutputTextCallback, ReasoningCallback) -> Box<dyn SemanticStreamParser>
+    dyn FnOnce(OutputTextCallback, ReasoningCallback, Option<u32>) -> Box<dyn SemanticStreamParser>
         + Send
         + 'static,
 >;
