@@ -5,6 +5,9 @@ use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use biscuit_terminal::components::horizontal_rule::{
+    HorizontalRule, RuleAlignment, RuleStyle, RuleWeight,
+};
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
@@ -276,8 +279,9 @@ pub(crate) fn execute_sequence(
             failures,
         }
         .into());
-    } else if is_tty && explicit_provider.is_none() {
-        // TTY review screen
+    } else if !shared.dry_run && is_tty && explicit_provider.is_none() {
+        // TTY review screen. Skipped under --dry-run so the dry-run seam
+        // never invokes an interactive picker.
         match super::selection_ui::review_sequence(drafts, &catalog) {
             Ok(targets) => targets,
             Err(e) => {
@@ -393,19 +397,18 @@ pub(crate) fn execute_sequence(
         let step = &plan.steps[step_index];
 
         // Dry-run: separate each document's rendered metadata block with a
-        // divider on stderr. The per-document render (frontmatter + table →
-        // stderr, body → stdout) happens inside
-        // `execute_composition_request_inner`; the divider sits *between*
+        // full-width horizontal rule on stderr. The per-document render
+        // (frontmatter + table → stderr, body → stdout) happens inside
+        // `execute_composition_request_inner`; the rule sits *between*
         // documents, so it precedes docs 2..M. `--quiet` / `--silent` have
         // no effect on dry-run output, so this emits unconditionally.
         if shared.dry_run && step_index > 0 {
-            let divider = Prose::new(format!(
-                "<dim>=== Document {} of {} ===</dim>",
-                step_index + 1,
-                total_steps
-            ))
-            .render(&log::terminal());
-            log::message(&divider);
+            let hr = HorizontalRule::new()
+                .style(RuleStyle::Dashes)
+                .alignment(RuleAlignment::Full)
+                .weight(RuleWeight::Medium)
+                .render(&log::terminal());
+            log::message(&hr);
         }
 
         let _step_span = info_span!(

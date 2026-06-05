@@ -421,15 +421,16 @@ fn run_compose_inner(
             &raw_hints,
             shared.explicit_provider(),
             shared.model.as_deref(),
+            shared.dry_run,
+            &source.resolved_path,
         )?
     };
 
     let mut env_overrides: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
-    super::wrap::composition::install_agent_env_for_composition(
-        &resolved_target,
-        &mut env_overrides,
-    );
+    if let Some(ref target) = resolved_target {
+        super::wrap::composition::install_agent_env_for_composition(target, &mut env_overrides);
+    }
 
     // ── Pre-flight shell approval ────────────────────────────────────
     //
@@ -528,7 +529,7 @@ fn run_compose_inner(
                 mode: CompositionMode::ChainedDocument,
                 file_ref: file_for_loop.clone(),
                 prepared,
-                resolved_target: Some(resolved_target.clone()),
+                resolved_target: resolved_target.clone(),
                 explicit_provider: shared.explicit_provider(),
                 excluded: shared.excluded(),
                 yolo: shared.yolo,
@@ -635,7 +636,7 @@ fn run_compose_inner(
         mode: CompositionMode::ChainedDocument,
         file_ref: file,
         prepared,
-        resolved_target: Some(resolved_target),
+        resolved_target,
         explicit_provider: shared.explicit_provider(),
         excluded: shared.excluded(),
         yolo: shared.yolo,
@@ -829,15 +830,16 @@ fn run_inline_compose_inner(
             &raw_hints,
             shared.explicit_provider(),
             shared.model.as_deref(),
+            shared.dry_run,
+            &source.resolved_path,
         )?
     };
 
     let mut env_overrides: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
-    super::wrap::composition::install_agent_env_for_composition(
-        &resolved_target,
-        &mut env_overrides,
-    );
+    if let Some(ref target) = resolved_target {
+        super::wrap::composition::install_agent_env_for_composition(target, &mut env_overrides);
+    }
 
     // ── Pre-flight shell approval ────────────────────────────────────
     //
@@ -935,7 +937,7 @@ fn run_inline_compose_inner(
                 mode: CompositionMode::InlineFrontmatterPrompt,
                 file_ref: file_for_loop.clone(),
                 prepared,
-                resolved_target: Some(resolved_target.clone()),
+                resolved_target: resolved_target.clone(),
                 explicit_provider: shared.explicit_provider(),
                 excluded: shared.excluded(),
                 yolo: shared.yolo,
@@ -1041,7 +1043,7 @@ fn run_inline_compose_inner(
         mode: CompositionMode::InlineFrontmatterPrompt,
         file_ref: file,
         prepared,
-        resolved_target: Some(resolved_target),
+        resolved_target,
         explicit_provider: shared.explicit_provider(),
         excluded: shared.excluded(),
         yolo: shared.yolo,
