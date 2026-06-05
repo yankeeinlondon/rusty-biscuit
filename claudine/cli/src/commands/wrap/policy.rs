@@ -273,8 +273,14 @@ pub(crate) struct StreamSummaryContext<'a> {
     pub(crate) verbose: bool,
     pub(crate) details: &'a StructuredSummaryDetails,
     pub(crate) section_stream: Option<&'a super::section::SectionStream>,
+    /// Immediate child PID captured by the wrapper after a successful
+    /// spawn. `None` for failed-spawn paths or paths that never spawn a
+    /// provider child. Threaded through to the synthetic summary event
+    /// so `EventMeta.agent_pid` carries the spawned child PID.
+    pub(crate) agent_pid: Option<u32>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_stream_summary(
     summary: &claudine::stream::summary::StreamExecutionSummary,
     profile: &dyn super::profile::WrapperProfile,
@@ -283,6 +289,7 @@ pub(crate) fn emit_stream_summary(
     verbose: bool,
     details: &StructuredSummaryDetails,
     section_stream: Option<&super::section::SectionStream>,
+    agent_pid: Option<u32>,
 ) {
     emit_stream_summary_inner(
         StreamSummaryContext {
@@ -293,6 +300,7 @@ pub(crate) fn emit_stream_summary(
             verbose,
             details,
             section_stream,
+            agent_pid,
         },
         None,
     );
@@ -317,6 +325,7 @@ fn emit_stream_summary_inner(
         verbose,
         details,
         section_stream,
+        agent_pid,
     } = ctx;
     let primary_markup = if verbosity == Verbosity::Silent {
         None
@@ -378,6 +387,7 @@ fn emit_stream_summary_inner(
             protocol,
             env_context,
             context_extra,
+            agent_pid,
         );
         if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
             tracing::warn!("Failed to write stream summary event: {e}");

@@ -208,6 +208,10 @@ pub(crate) struct CompositionStreamResult {
     section_stream: super::section::SectionStream,
     /// Child-process telemetry for perf reporting.
     telemetry: exec::ProcessTelemetry,
+    /// Immediate child PID captured by the spawn operation, threaded
+    /// through to the synthetic summary event so `EventMeta.agent_pid`
+    /// carries the spawned child PID.
+    agent_pid: Option<u32>,
 }
 
 /// Mode-specific inputs for [`execute_without_harness`].
@@ -1097,6 +1101,7 @@ pub(crate) fn execute_composition_request_inner(
         needs_repo_shadow_home,
         needs_mcp_shadow_home || needs_repo_shadow_home,
         launch_workspace.clone(),
+        perf_enabled,
     )?;
 
     // -- Operation env override -----------------------------------------------
@@ -1115,7 +1120,20 @@ pub(crate) fn execute_composition_request_inner(
             .insert(key.clone().into(), value.clone().into());
     }
 
-    record_substage(&mut perf_collector, &mut last_checkpoint, "child env build");
+    // `child env build` carries a measured breakdown (env sanitize / shadow
+    // home sync → repo root detect) so the substage's cost — dominated by the
+    // sniff git walk under `--repo` — is itemized rather than opaque. The
+    // children are `Breakdown`, so they do not enter the substage's
+    // reconciliation (TR-1).
+    if let Some(c) = perf_collector.as_mut() {
+        let elapsed = last_checkpoint.elapsed();
+        c.mark_substage_with_children(
+            "child env build",
+            elapsed,
+            std::mem::take(&mut env_plan.perf_substages),
+        );
+        last_checkpoint = std::time::Instant::now();
+    }
 
     let mut effective_prompt = request.prepared.prompt.clone();
     let mut mcp_extra_args = Vec::new();
@@ -1195,9 +1213,10 @@ pub(crate) fn execute_composition_request_inner(
         if let Some(injector) = injector_for_provider(provider) {
             if !session.servers.is_empty() {
                 if needs_mcp_shadow_home && env_plan.shadow_home_path.is_none() {
-                    let (shadow_env, shadow_path) = super::repo_home::build_repo_home_env(
+                    let (shadow_env, shadow_path, _) = super::repo_home::build_repo_home_env(
                         provider,
                         env_plan.child_cwd.as_path(),
+                        false,
                         false,
                     )?;
                     for (key, value) in shadow_env {
@@ -2108,6 +2127,7 @@ fn execute_without_harness(
                     dispatch_context,
                     Some(&result.section_stream),
                     false,
+                    result.agent_pid,
                 );
             } else {
                 summary::emit_minimal_composition_summary(
@@ -2116,6 +2136,7 @@ fn execute_without_harness(
                     profile,
                     env_context,
                     dispatch_context,
+                    None,
                 );
             }
             Ok(agent_exit)

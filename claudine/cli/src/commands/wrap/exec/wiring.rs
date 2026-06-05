@@ -604,8 +604,9 @@ pub(crate) fn run_kimi_wire_session(
     }
 
     let mut child = command.spawn()?;
+    let captured_pid = child.id();
     *child_spawned = true;
-    Span::current().record("child_pid", tracing::field::display(child.id()));
+    Span::current().record("child_pid", tracing::field::display(captured_pid));
 
     let stdin = child
         .stdin
@@ -793,6 +794,7 @@ pub(crate) fn run_kimi_wire_session(
             total_elapsed,
             first_response_latency: None,
         },
+        agent_pid: Some(captured_pid),
     })
 }
 

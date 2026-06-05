@@ -53,6 +53,22 @@ pub(crate) struct ProcessResult<T> {
     pub(crate) data: T,
     pub(crate) termination: claudine::harness::ProcessTermination,
     pub(crate) telemetry: ProcessTelemetry,
+    /// Immediate child PID returned by `std::process::Command::spawn()`,
+    /// captured immediately after a successful spawn. `None` only appears
+    /// in fabricated results (e.g. parse-failure fallbacks) — a real
+    /// spawn either produces `Some(child.id())` here or returns `Err`
+    /// before `ProcessResult` is constructed.
+    ///
+    /// Per-attempt by construction: every call to a spawn function
+    /// returns a fresh `ProcessResult`, so harness retries and
+    /// composition iterations never inherit a stale PID from a prior
+    /// attempt.
+    //
+    // Read in Phase 3 by the dispatch / stream-summary / reporting
+    // surfaces; flagged here so the Phase 2 capture-only change does
+    // not trip `-D warnings`.
+    #[allow(dead_code)]
+    pub(crate) agent_pid: Option<u32>,
 }
 
 /// Renders streamed assistant text as Markdown, flushing at block boundaries.

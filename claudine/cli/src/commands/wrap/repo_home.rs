@@ -172,17 +172,38 @@ pub fn needs_shadow_home(provider: Provider, cwd: &Path, repo_only: bool) -> boo
             && codex_repo_prompts_source(&resolve_repo_root(cwd)).is_some()
 }
 
+/// Measured breakdown of [`build_repo_home_env`], for `--perf`.
+///
+/// `total` is the whole shadow-HOME materialization; `repo_root_detect` is the
+/// sniff git walk (`resolve_repo_root`) that dominates it — under `--repo` this
+/// is the single most expensive operation in `child env build`. Only produced
+/// when the caller passes `perf = true`.
+#[derive(Debug, Clone, Copy)]
+pub struct RepoHomeTimings {
+    pub total: std::time::Duration,
+    pub repo_root_detect: std::time::Duration,
+}
+
+#[allow(clippy::type_complexity)]
 pub fn build_repo_home_env(
     provider: Provider,
     cwd: &Path,
     repo_only: bool,
-) -> Result<(HashMap<OsString, OsString>, Option<PathBuf>)> {
+    perf: bool,
+) -> Result<(
+    HashMap<OsString, OsString>,
+    Option<PathBuf>,
+    Option<RepoHomeTimings>,
+)> {
+    let total_start = perf.then(std::time::Instant::now);
     let manager = RepoHomeManager::new(provider);
     let user_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
     let shadow_home = manager.ensure_shadow_home()?;
     manager.sync_shadow_home(repo_only)?;
 
+    let repo_root_start = perf.then(std::time::Instant::now);
     let repo_root = resolve_repo_root(cwd);
+    let repo_root_detect = repo_root_start.map(|t| t.elapsed());
     materialize_repo_scoped_resources(
         provider,
         &shadow_home,
@@ -201,7 +222,12 @@ pub fn build_repo_home_env(
     materialize_root_level_state(provider, &user_home, &shadow_home_root)?;
     env.insert(OsString::from("HOME"), OsString::from(shadow_home_root));
 
-    Ok((env, Some(shadow_home)))
+    let timings = total_start.map(|t| RepoHomeTimings {
+        total: t.elapsed(),
+        repo_root_detect: repo_root_detect.unwrap_or_default(),
+    });
+
+    Ok((env, Some(shadow_home), timings))
 }
 
 fn materialize_repo_scoped_resources(

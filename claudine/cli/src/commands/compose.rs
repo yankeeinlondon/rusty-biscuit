@@ -333,10 +333,7 @@ fn record_prep_substage(
     started: std::time::Instant,
 ) {
     if enabled {
-        out.push(crate::perf::SubstageTiming {
-            name,
-            elapsed: started.elapsed(),
-        });
+        out.push(crate::perf::SubstageTiming::new(name, started.elapsed()));
     }
 }
 

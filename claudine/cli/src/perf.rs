@@ -37,10 +37,30 @@ pub(crate) struct CliOverheadReport {
 }
 
 /// A single named sub-stage timing within environment setup.
+///
+/// `children` itemize where a substage's own measured time went — currently
+/// only `child env build`, which carries `env sanitize` and `shadow home sync`
+/// (and, under that, the `repo root detect` that dominates it). They render as
+/// `Breakdown` nodes nested under the substage, so the substage keeps its
+/// authoritative `Structural` total and the children stay out of reconciliation
+/// (TR-1): a slow child can never make the substage exceed the `environment
+/// setup` window it carves.
 #[derive(Debug, Clone)]
 pub(crate) struct SubstageTiming {
     pub name: &'static str,
     pub elapsed: Duration,
+    pub children: Vec<SubstageTiming>,
+}
+
+impl SubstageTiming {
+    /// A leaf substage timing with no breakdown — the common case.
+    pub fn new(name: &'static str, elapsed: Duration) -> Self {
+        Self {
+            name,
+            elapsed,
+            children: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -232,6 +252,18 @@ pub(crate) enum CompositionPlacement {
     UnderEnvSetup,
 }
 
+/// Project a substage's nested breakdown into a `Breakdown` [`PerfNode`]
+/// subtree, recursively. Every node is `Breakdown` so the whole subtree
+/// itemizes its `Structural` ancestor without entering reconciliation (TR-1).
+fn substage_breakdown_node(s: &SubstageTiming) -> PerfNode {
+    PerfNode::branch(
+        s.name,
+        s.elapsed,
+        NodeRole::Breakdown,
+        s.children.iter().map(substage_breakdown_node).collect(),
+    )
+}
+
 /// Assemble the [`PerfNode`] tree for a built [`CommandPerfReport`] (TM-2).
 ///
 /// The root `Performance` node carries true wall-clock; its `Structural`
@@ -301,10 +333,22 @@ fn build_perf_tree(report: &CommandPerfReport, placement: CompositionPlacement) 
     // collector starts the window, and the window closes after the last
     // substage reset), so Σ substages ≤ env_setup and the remainder absorbs the
     // µs head/tail gap.
+    // Each substage is a `Structural` carve of the env-setup window; its
+    // `children` subtree (only `child env build` carries any) itemizes where
+    // that substage's time went and nests as `Breakdown` at every depth so it is
+    // displayed and percentaged without entering the substage's reconciliation
+    // (TR-1).
     let env_children: Vec<PerfNode> = cli
         .substages
         .iter()
-        .map(|s| PerfNode::leaf(s.name, s.elapsed, NodeRole::Structural))
+        .map(|s| {
+            PerfNode::branch(
+                s.name,
+                s.elapsed,
+                NodeRole::Structural,
+                s.children.iter().map(substage_breakdown_node).collect(),
+            )
+        })
         .collect();
     let mut env_setup_node = PerfNode::branch(
         "environment setup",
@@ -706,7 +750,7 @@ impl SequencePerfAccumulator {
     /// Record a named sub-stage timing.
     #[allow(dead_code)]
     pub fn mark_substage(&mut self, name: &'static str, elapsed: Duration) {
-        self.substages.push(SubstageTiming { name, elapsed });
+        self.substages.push(SubstageTiming::new(name, elapsed));
     }
 
     /// Append a step's performance data.
@@ -898,7 +942,25 @@ impl CommandPerfCollector {
 
     /// Record a named sub-stage timing.
     pub fn mark_substage(&mut self, name: &'static str, elapsed: Duration) {
-        self.substages.push(SubstageTiming { name, elapsed });
+        self.substages.push(SubstageTiming::new(name, elapsed));
+    }
+
+    /// Record a named sub-stage timing carrying a `Breakdown` of where its own
+    /// measured time went (e.g. `child env build` → `shadow home sync` → `repo
+    /// root detect`). The children are projected as nested `Breakdown` nodes, so
+    /// they itemize the substage without entering reconciliation (TR-1).
+    #[allow(dead_code)]
+    pub fn mark_substage_with_children(
+        &mut self,
+        name: &'static str,
+        elapsed: Duration,
+        children: Vec<SubstageTiming>,
+    ) {
+        self.substages.push(SubstageTiming {
+            name,
+            elapsed,
+            children,
+        });
     }
 
     /// Set the agent execution perf.
@@ -1250,34 +1312,13 @@ mod tests {
                 prep_phase: Duration::from_millis(50),
                 environment_setup: Duration::from_millis(312),
                 substages: vec![
-                    SubstageTiming {
-                        name: "target resolution",
-                        elapsed: Duration::from_millis(100),
-                    },
-                    SubstageTiming {
-                        name: "header env plan",
-                        elapsed: Duration::from_millis(50),
-                    },
-                    SubstageTiming {
-                        name: "child env build",
-                        elapsed: Duration::from_millis(80),
-                    },
-                    SubstageTiming {
-                        name: "mcp composition",
-                        elapsed: Duration::ZERO,
-                    },
-                    SubstageTiming {
-                        name: "argv assembly",
-                        elapsed: Duration::from_millis(30),
-                    },
-                    SubstageTiming {
-                        name: "system prompt",
-                        elapsed: Duration::from_millis(40),
-                    },
-                    SubstageTiming {
-                        name: "stream + prompt delivery",
-                        elapsed: Duration::from_millis(12),
-                    },
+                    SubstageTiming::new("target resolution", Duration::from_millis(100)),
+                    SubstageTiming::new("header env plan", Duration::from_millis(50)),
+                    SubstageTiming::new("child env build", Duration::from_millis(80)),
+                    SubstageTiming::new("mcp composition", Duration::ZERO),
+                    SubstageTiming::new("argv assembly", Duration::from_millis(30)),
+                    SubstageTiming::new("system prompt", Duration::from_millis(40)),
+                    SubstageTiming::new("stream + prompt delivery", Duration::from_millis(12)),
                 ],
                 prep_substages: vec![],
             },
@@ -1715,20 +1756,11 @@ mod tests {
                 prep_phase: Duration::from_millis(1500),
                 environment_setup: Duration::from_millis(65),
                 substages: vec![
-                    SubstageTiming {
-                        name: "target resolution",
-                        elapsed: Duration::from_micros(45),
-                    },
-                    SubstageTiming {
-                        name: "system prompt",
-                        elapsed: Duration::from_millis(60),
-                    },
-                    SubstageTiming {
-                        // Longest label in the tree — exercises the shared
-                        // label column and the label/value gutter.
-                        name: "stream + prompt delivery",
-                        elapsed: Duration::from_micros(19),
-                    },
+                    SubstageTiming::new("target resolution", Duration::from_micros(45)),
+                    SubstageTiming::new("system prompt", Duration::from_millis(60)),
+                    // Longest label in the tree — exercises the shared label
+                    // column and the label/value gutter.
+                    SubstageTiming::new("stream + prompt delivery", Duration::from_micros(19)),
                 ],
                 prep_substages: vec![],
             },
@@ -1911,14 +1943,8 @@ mod tests {
             Duration::from_millis(500),
             Duration::from_millis(100),
             vec![
-                SubstageTiming {
-                    name: "target resolution",
-                    elapsed: Duration::from_millis(30),
-                },
-                SubstageTiming {
-                    name: "system prompt",
-                    elapsed: Duration::from_millis(40),
-                },
+                SubstageTiming::new("target resolution", Duration::from_millis(30)),
+                SubstageTiming::new("system prompt", Duration::from_millis(40)),
             ],
             Some(compose_report()),
             Some(AgentExecutionPerf {
@@ -2189,10 +2215,7 @@ mod tests {
             Duration::from_millis(20),
             Duration::ZERO,
             Duration::from_millis(150),
-            vec![SubstageTiming {
-                name: "system prompt",
-                elapsed: Duration::from_millis(64),
-            }],
+            vec![SubstageTiming::new("system prompt", Duration::from_millis(64))],
             None,
             Some(AgentExecutionPerf {
                 launches: 1,
@@ -2501,18 +2524,9 @@ mod tests {
             Duration::ZERO,
             Duration::from_millis(100),
             vec![
-                SubstageTiming {
-                    name: "target resolution",
-                    elapsed: Duration::from_millis(30),
-                },
-                SubstageTiming {
-                    name: "mcp composition",
-                    elapsed: Duration::ZERO,
-                },
-                SubstageTiming {
-                    name: "system prompt",
-                    elapsed: Duration::from_millis(60),
-                },
+                SubstageTiming::new("target resolution", Duration::from_millis(30)),
+                SubstageTiming::new("mcp composition", Duration::ZERO),
+                SubstageTiming::new("system prompt", Duration::from_millis(60)),
             ],
             None,
             None,
@@ -2537,6 +2551,58 @@ mod tests {
     }
 
     #[test]
+    fn perf_tree_child_env_build_breakdown_nests_without_breaking_reconciliation() {
+        // `child env build` carries a nested breakdown (env sanitize / shadow
+        // home sync → repo root detect). The substage stays Structural and
+        // reconciles against `environment setup`; its whole breakdown subtree is
+        // Breakdown at every depth, so a near-100% `repo root detect` child can
+        // never make the substage exceed its parent (TR-1).
+        let substages = vec![
+            SubstageTiming::new("target resolution", Duration::from_millis(2)),
+            SubstageTiming {
+                name: "child env build",
+                elapsed: Duration::from_millis(700),
+                children: vec![
+                    SubstageTiming::new("env sanitize", Duration::from_micros(300)),
+                    SubstageTiming {
+                        name: "shadow home sync",
+                        elapsed: Duration::from_millis(699),
+                        children: vec![SubstageTiming::new(
+                            "repo root detect",
+                            Duration::from_millis(698),
+                        )],
+                    },
+                ],
+            },
+        ];
+        let report = perf_report(
+            Duration::from_secs(1),
+            Duration::from_millis(10),
+            Duration::ZERO,
+            Duration::from_millis(710),
+            substages,
+            None,
+            None,
+        );
+
+        let tree = build_perf_tree(&report, CompositionPlacement::UnderPrep);
+        assert!(
+            tree_reconciles(&tree, Duration::from_millis(1)),
+            "child env build breakdown must not break TR-1"
+        );
+
+        let env = child(&tree, "environment setup").unwrap();
+        let ceb = child(env, "child env build").unwrap();
+        assert_eq!(ceb.role, NodeRole::Structural);
+
+        let shadow = child(ceb, "shadow home sync").unwrap();
+        assert_eq!(shadow.role, NodeRole::Breakdown);
+        let detect = child(shadow, "repo root detect").unwrap();
+        assert_eq!(detect.role, NodeRole::Breakdown);
+        assert_eq!(detect.total, Duration::from_millis(698));
+    }
+
+    #[test]
     fn perf_tree_prep_named_children_reconcile() {
         // P-5a: named prep work units are Structural children carving the prep
         // window. `shell approval` is the dominant leaf (the un-metered shell
@@ -2557,22 +2623,10 @@ mod tests {
             None,
         );
         report.cli.prep_substages = vec![
-            SubstageTiming {
-                name: "frontmatter load",
-                elapsed: Duration::from_millis(3),
-            },
-            SubstageTiming {
-                name: "schema validation",
-                elapsed: Duration::from_millis(2),
-            },
-            SubstageTiming {
-                name: "prep context",
-                elapsed: Duration::from_millis(8),
-            },
-            SubstageTiming {
-                name: "shell approval",
-                elapsed: Duration::from_millis(1600),
-            },
+            SubstageTiming::new("frontmatter load", Duration::from_millis(3)),
+            SubstageTiming::new("schema validation", Duration::from_millis(2)),
+            SubstageTiming::new("prep context", Duration::from_millis(8)),
+            SubstageTiming::new("shell approval", Duration::from_millis(1600)),
         ];
 
         let tree = build_perf_tree(&report, CompositionPlacement::UnderPrep);

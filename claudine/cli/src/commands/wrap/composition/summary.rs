@@ -34,6 +34,7 @@ pub(crate) fn emit_composition_summary(
     dispatch_context: &HashMap<String, serde_json::Value>,
     section_stream: Option<&crate::commands::wrap::section::SectionStream>,
     defer_section_separator: bool,
+    agent_pid: Option<u32>,
 ) {
     if defer_section_separator {
         use biscuit_terminal::components::prose::Prose;
@@ -60,6 +61,7 @@ pub(crate) fn emit_composition_summary(
                 protocol,
                 env_context,
                 Some(dispatch_context),
+                agent_pid,
             );
             if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
                 tracing::warn!("Failed to write stream summary event: {e}");
@@ -75,6 +77,7 @@ pub(crate) fn emit_composition_summary(
                 verbose,
                 details,
                 section_stream,
+                agent_pid,
             },
             dispatch_context,
         );
@@ -94,6 +97,7 @@ pub(crate) fn emit_minimal_composition_summary(
     profile: &dyn WrapperProfile,
     env_context: &EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
+    agent_pid: Option<u32>,
 ) {
     let summary = StreamExecutionSummary {
         provider,
@@ -112,5 +116,6 @@ pub(crate) fn emit_minimal_composition_summary(
         dispatch_context,
         None,
         true,
+        agent_pid,
     );
 }
