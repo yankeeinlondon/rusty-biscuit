@@ -4,7 +4,6 @@ $schema:
     total_phases: number(required)
     plan: file(required)
 phase: 1
-total_phases: 0
 dir: "$(dirname '{{plan}}')"
 area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
