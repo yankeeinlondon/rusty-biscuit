@@ -13,13 +13,21 @@
 
 use std::path::{Path, PathBuf};
 
+use biscuit_terminal::components::horizontal_rule::{
+    HorizontalRule, RuleAlignment, RuleStyle, RuleWeight,
+};
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::terminal::Terminal;
-use claudine::composition::CompositionExecutionRequest;
+use biscuit_terminal::utils::layout::{Length, TargetValue};
+use claudine::composition::{
+    AgentResolutionState, CompositionExecutionRequest, classify_agent_resolution,
+};
 use claudine::provider::Provider;
-use darkmatter::markdown::highlighting::highlight_yaml_lines;
+use darkmatter::markdown::highlighting::{
+    ColorMode as DmColorMode, ThemePair, detect_prose_theme, highlight_yaml_lines_with_theme,
+};
 use serde_json::Value;
 
 use crate::table_utils::base_table;
@@ -37,9 +45,9 @@ pub(crate) struct DryRunRender {
     pub name: Option<String>,
     /// Frontmatter `description`, when set and non-empty.
     pub description: Option<String>,
-    /// Resolved provider/agent, or `None` when selection is still
-    /// interactive (no agent identified yet).
-    pub agent: Option<Provider>,
+    /// Classified agent-resolution state used by both the dry-run table
+    /// and the live execution gate.
+    pub agent: AgentResolutionState,
     /// Resolved model, or `None` to use the provider default.
     pub model: Option<String>,
     /// Whether YOLO / auto-approval mode is active.
@@ -65,7 +73,15 @@ impl DryRunRender {
         let frontmatter = request.prepared.effective_frontmatter.clone();
         let name = string_field(&frontmatter, "name");
         let description = string_field(&frontmatter, "description");
-        let agent = request.resolved_target.as_ref().map(|t| t.provider);
+        let agent = if let Some(target) = &request.resolved_target {
+            AgentResolutionState::Selected {
+                provider: target.provider,
+            }
+        } else if let Some(snapshot) = &request.installed_snapshot {
+            classify_agent_resolution(&request.prepared.selection_hints, snapshot)
+        } else {
+            AgentResolutionState::NoAgent
+        };
         let model = request
             .resolved_target
             .as_ref()
@@ -100,14 +116,44 @@ fn string_field(value: &Value, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Render a full-width horizontal rule.
+pub(crate) fn render_hr(term: &Terminal) -> String {
+    HorizontalRule::new()
+        .style(RuleStyle::Dashes)
+        .alignment(RuleAlignment::Full)
+        .weight(RuleWeight::Medium)
+        .render(term)
+}
+
+/// Render the `Frontmatter (resolved):` heading.
+pub(crate) fn render_frontmatter_heading(term: &Terminal) -> String {
+    Prose::new("<b>Frontmatter</b> (<i>resolved</i>):").render(term)
+}
+
 /// Render the finalized frontmatter as syntax-highlighted YAML.
 ///
 /// The JSON `Value` is converted to YAML through `biscuit-file`'s
 /// `serde_yaml_ng` re-export, then highlighted with darkmatter's YAML
-/// highlighter. Output targets stderr.
-pub(crate) fn render_frontmatter(frontmatter: &Value) -> String {
+/// highlighter using the **inverse** theme so the code block stands out
+/// from the terminal background. Each line receives a `1ch` left margin.
+/// Output targets stderr.
+pub(crate) fn render_frontmatter(frontmatter: &Value, term: &Terminal) -> String {
     let yaml = frontmatter_to_yaml(frontmatter);
-    highlight_yaml_lines(yaml.trim_end()).join("\n")
+    let theme_pair = detect_prose_theme();
+    // Invert the terminal's detected color mode so code blocks contrast
+    // against the page (dark terminal → light code theme, and vice versa).
+    let color_mode = match term.color_mode() {
+        biscuit_terminal::discovery::detection::ColorMode::Light => DmColorMode::Dark,
+        _ => DmColorMode::Light,
+    };
+    let highlighted =
+        highlight_yaml_lines_with_theme(yaml.trim_end(), theme_pair, color_mode);
+    // 1ch left margin on every line.
+    highlighted
+        .into_iter()
+        .map(|line| format!(" {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Convert a frontmatter JSON `Value` to a YAML string.
@@ -130,19 +176,115 @@ fn relative_or_abs(path: &Path) -> String {
     path.display().to_string()
 }
 
+/// Render the classified `agent` resolution state into a multi-line cell.
+///
+/// All content stays inside the single `Agent` table row; the table
+/// component is responsible for preserving embedded newlines and bullet
+/// indentation.
+fn render_agent_cell(state: &AgentResolutionState, term: &Terminal) -> String {
+    match state {
+        AgentResolutionState::NoAgent => Prose::new(
+            "- CLI caller didn't specify the Agent\n\
+             - the Markdown document didn't suggest any Agents in <inverse>agent</inverse> Frontmatter property\n\
+             - the caller will be interactively asked to choose an agent when <i>composing</i> called without the <green>--dry-run</green> flag; otherwise the run aborts with the same message",
+        )
+        .render(term),
+        AgentResolutionState::Selected { provider } => {
+            Prose::new(provider.to_string()).render(term)
+        }
+        AgentResolutionState::SingleInvalid { hint } => Prose::new(format!(
+            "<red><b>Invalid Agent</b></red>(<dim>{hint}</dim>) <i>defined in Markdown's <inverse>agent</inverse> Frontmatter! Caller will be prompted to choose a valid Agent when run interactively; otherwise the run aborts with the same message.</i>"
+        ))
+        .render(term),
+        AgentResolutionState::SingleNotInstalled { provider } => Prose::new(format!(
+            "<yellow><b>Agent Not Installed:</b></yellow>(<dim>{provider}</dim>) <i>the Markdown document's <inverse>agent</inverse> specifies an Agent platform which is not installed on this host. When run interactively, caller will be asked to choose an Agent; otherwise the run aborts with the same message.</i>"
+        ))
+        .render(term),
+        AgentResolutionState::ListMultipleInstalled {
+            installed,
+            not_installed,
+            invalid,
+        } => {
+            let mut body = String::from(
+                "<green>✓</green> caller will be asked to choose interactively between suggested Agents:\n",
+            );
+            for provider in installed {
+                body.push_str(&format!("- {provider}\n"));
+            }
+            for provider in not_installed {
+                body.push_str(&format!("- <dim>{provider}</dim>\n"));
+            }
+            if !invalid.is_empty() {
+                body.push_str(
+                    "\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:\n",
+                );
+                for hint in invalid {
+                    body.push_str(&format!("- {hint}\n"));
+                }
+            }
+            Prose::new(body).render(term)
+        }
+        AgentResolutionState::ListOneInstalled {
+            selected,
+            invalid,
+            ..
+        } => {
+            let mut body = format!(
+                "<green>✓</green> the <b>{selected}</b> will be used without the need for interactive prompting\n\
+                 the Markdown document suggested multiple agent's but only <b>{selected}</b> is installed on this host"
+            );
+            if !invalid.is_empty() {
+                body.push_str(
+                    "\n\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:\n",
+                );
+                for hint in invalid {
+                    body.push_str(&format!("- {hint}\n"));
+                }
+            }
+            Prose::new(body).render(term)
+        }
+        AgentResolutionState::ZeroInstalledList {
+            not_installed,
+            invalid,
+        } => {
+            let mut body = String::from(
+                "None of the suggested agents are installed/valid; caller will choose from all installed agents when run interactively; otherwise the run aborts with the same message:\n",
+            );
+            for provider in not_installed {
+                body.push_str(&format!("- <dim>{provider}</dim>\n"));
+            }
+            if !invalid.is_empty() {
+                body.push_str(
+                    "\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:\n",
+                );
+                for hint in invalid {
+                    body.push_str(&format!("- {hint}\n"));
+                }
+            }
+            Prose::new(body).render(term)
+        }
+    }
+}
+
 /// Render the dry-run metadata table to a terminal string.
 ///
 /// Rows, in order: Document (blue OSC8 link), Description (only when set),
 /// Agent, Model, YOLO, Area (only inside a monorepo). Output targets stderr.
+/// The table has a `1ch` top margin to separate it from the YAML block above.
 pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> String {
     let mut table = base_table(vec![TableColumn::new("Field"), TableColumn::new("Value")]);
+    table.layout_mut().margin.top = TargetValue::universal(Length::ch(1));
 
-    // Document: frontmatter `name` if set, else the relative path; rendered
+    // Document: frontmatter `name` if set, else the file name; rendered
     // in blue as an OSC8 hyperlink to the document.
-    let document_label = render
-        .name
-        .clone()
-        .unwrap_or_else(|| relative_or_abs(&render.document_path));
+    let document_label = render.name.clone().unwrap_or_else(|| {
+        render
+            .document_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| relative_or_abs(&render.document_path))
+    });
     let href = format!("file://{}", render.document_path.display());
     let document_cell =
         Prose::new(format!("<blue><a href=\"{href}\">{document_label}</a></blue>")).render(term);
@@ -154,11 +296,8 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
         table.add_row(vec!["Description".into(), cell.into()]);
     }
 
-    // Agent: resolved provider, else an interactive placeholder.
-    let agent_cell = match render.agent {
-        Some(provider) => Prose::new(provider.to_string()).render(term),
-        None => Prose::new("<i><yellow>interactive</yellow></i>").render(term),
-    };
+    // Agent: classified resolution state rendered as a multi-line cell.
+    let agent_cell = render_agent_cell(&render.agent, term);
     table.add_row(vec!["Agent".into(), agent_cell.into()]);
 
     // Model: resolved model, else a default placeholder.
@@ -194,7 +333,7 @@ mod tests {
     fn render_with(
         name: Option<&str>,
         description: Option<&str>,
-        agent: Option<Provider>,
+        agent: AgentResolutionState,
         model: Option<&str>,
         yolo: bool,
         area: Option<&str>,
@@ -219,16 +358,30 @@ mod tests {
         strip_escape_codes(render_metadata_table(render, &term))
     }
 
+    /// Plain (escape-stripped) render of just the agent cell, without table
+    /// borders or word-wrap, so multi-line assertions are stable.
+    fn plain_agent_cell(state: &AgentResolutionState) -> String {
+        let term = Terminal::default();
+        strip_escape_codes(render_agent_cell(state, &term))
+    }
+
     #[test]
     fn table_omits_description_when_absent() {
-        let render = render_with(Some("doc"), None, None, None, false, None);
+        let render = render_with(Some("doc"), None, AgentResolutionState::NoAgent, None, false, None);
         let plain = plain_table(&render);
         assert!(!plain.contains("Description"));
     }
 
     #[test]
     fn table_shows_description_when_present() {
-        let render = render_with(Some("doc"), Some("a helpful doc"), None, None, false, None);
+        let render = render_with(
+            Some("doc"),
+            Some("a helpful doc"),
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            None,
+        );
         let plain = plain_table(&render);
         assert!(plain.contains("Description"));
         assert!(plain.contains("a helpful doc"));
@@ -236,14 +389,28 @@ mod tests {
 
     #[test]
     fn table_omits_area_when_absent() {
-        let render = render_with(Some("doc"), None, None, None, false, None);
+        let render = render_with(
+            Some("doc"),
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            None,
+        );
         let plain = plain_table(&render);
         assert!(!plain.contains("Area"));
     }
 
     #[test]
     fn table_shows_area_when_present() {
-        let render = render_with(Some("doc"), None, None, None, false, Some("claudine"));
+        let render = render_with(
+            Some("doc"),
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            Some("claudine"),
+        );
         let plain = plain_table(&render);
         assert!(plain.contains("Area"));
         assert!(plain.contains("claudine"));
@@ -251,14 +418,23 @@ mod tests {
 
     #[test]
     fn agent_falls_back_to_interactive() {
-        let render = render_with(Some("doc"), None, None, None, false, None);
+        let render = render_with(Some("doc"), None, AgentResolutionState::NoAgent, None, false, None);
         let plain = plain_table(&render);
         assert!(plain.contains("interactive"));
     }
 
     #[test]
     fn agent_shows_resolved_provider() {
-        let render = render_with(Some("doc"), None, Some(Provider::Claude), None, false, None);
+        let render = render_with(
+            Some("doc"),
+            None,
+            AgentResolutionState::Selected {
+                provider: Provider::Claude,
+            },
+            None,
+            false,
+            None,
+        );
         let plain = plain_table(&render);
         assert!(plain.contains(&Provider::Claude.to_string()));
         assert!(!plain.contains("interactive"));
@@ -266,14 +442,28 @@ mod tests {
 
     #[test]
     fn model_falls_back_to_default() {
-        let render = render_with(Some("doc"), None, None, None, false, None);
+        let render = render_with(
+            Some("doc"),
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            None,
+        );
         let plain = plain_table(&render);
         assert!(plain.contains("default"));
     }
 
     #[test]
     fn model_shows_resolved_model() {
-        let render = render_with(Some("doc"), None, None, Some("opus-4.8"), false, None);
+        let render = render_with(
+            Some("doc"),
+            None,
+            AgentResolutionState::NoAgent,
+            Some("opus-4.8"),
+            false,
+            None,
+        );
         let plain = plain_table(&render);
         assert!(plain.contains("opus-4.8"));
         assert!(!plain.contains("default"));
@@ -281,22 +471,50 @@ mod tests {
 
     #[test]
     fn yolo_true_and_false() {
-        let yes = plain_table(&render_with(Some("doc"), None, None, None, true, None));
+        let yes = plain_table(&render_with(
+            Some("doc"),
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            true,
+            None,
+        ));
         assert!(yes.contains("true"));
-        let no = plain_table(&render_with(Some("doc"), None, None, None, false, None));
+        let no = plain_table(&render_with(
+            Some("doc"),
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            None,
+        ));
         assert!(no.contains("false"));
     }
 
     #[test]
     fn document_uses_name_when_set() {
-        let render = render_with(Some("My Document"), None, None, None, false, None);
+        let render = render_with(
+            Some("My Document"),
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            None,
+        );
         let plain = plain_table(&render);
         assert!(plain.contains("My Document"));
     }
 
     #[test]
     fn document_uses_path_when_name_absent() {
-        let render = render_with(None, None, None, None, false, None);
+        let render = render_with(
+            None,
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            None,
+        );
         let plain = plain_table(&render);
         // No `name` ⇒ the document label is derived from the path.
         assert!(plain.contains("doc.md"));
@@ -305,10 +523,44 @@ mod tests {
     #[test]
     fn frontmatter_renders_yaml_for_keys() {
         let fm = json!({ "name": "demo", "agent": "claude" });
-        let plain = strip_escape_codes(render_frontmatter(&fm));
+        let term = Terminal::default();
+        let plain = strip_escape_codes(render_frontmatter(&fm, &term));
         assert!(plain.contains("name:"));
         assert!(plain.contains("demo"));
         assert!(plain.contains("agent:"));
+    }
+
+    #[test]
+    fn frontmatter_has_one_ch_left_margin() {
+        let fm = json!({ "key": "value" });
+        let term = Terminal::default();
+        let plain = strip_escape_codes(render_frontmatter(&fm, &term));
+        // Every non-empty line should start with a single space (the 1ch margin).
+        for line in plain.lines() {
+            if !line.trim().is_empty() {
+                assert!(
+                    line.starts_with(' '),
+                    "line should have 1ch left margin: {line:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn frontmatter_heading_contains_bold_and_italic() {
+        let term = Terminal::default();
+        let rendered = render_frontmatter_heading(&term);
+        let plain = strip_escape_codes(&rendered);
+        assert!(plain.contains("Frontmatter"), "heading should contain 'Frontmatter': {plain}");
+        assert!(plain.contains("resolved"), "heading should contain 'resolved': {plain}");
+    }
+
+    #[test]
+    fn hr_renders_non_empty() {
+        let term = Terminal::default();
+        let rendered = render_hr(&term);
+        let plain = strip_escape_codes(&rendered);
+        assert!(!plain.trim().is_empty(), "horizontal rule should not be empty");
     }
 
     #[test]
@@ -322,5 +574,247 @@ mod tests {
         let parsed: Value =
             biscuit_file::serde_yaml_ng::from_str(&yaml).expect("yaml round-trip parses");
         assert_eq!(parsed, original);
+    }
+
+    // -- Agent-resolution state rendering (Phase 4) --------------------------
+
+    #[test]
+    fn agent_no_agent_renders_unordered_list() {
+        let plain = plain_agent_cell(&AgentResolutionState::NoAgent);
+        assert!(plain.contains("didn't specify the Agent"));
+        assert!(plain.contains("didn't suggest any Agents"));
+        assert!(plain.contains("interactive"));
+    }
+
+    #[test]
+    fn agent_selected_renders_provider_name() {
+        let plain = plain_agent_cell(&AgentResolutionState::Selected {
+            provider: Provider::Codex,
+        });
+        assert!(plain.contains(&Provider::Codex.to_string()));
+        assert!(!plain.contains("Invalid Agent"));
+        assert!(!plain.contains("interactive"));
+    }
+
+    #[test]
+    fn agent_single_invalid_renders_error_and_explanation() {
+        let plain = plain_agent_cell(&AgentResolutionState::SingleInvalid {
+            hint: "unknown-provider".into(),
+        });
+        assert!(plain.contains("Invalid Agent"));
+        assert!(plain.contains("unknown-provider"));
+        assert!(plain.contains("Frontmatter"));
+    }
+
+    #[test]
+    fn agent_single_not_installed_renders_warning_and_explanation() {
+        let plain = plain_agent_cell(&AgentResolutionState::SingleNotInstalled {
+            provider: Provider::Gemini,
+        });
+        assert!(plain.contains("Agent Not Installed"));
+        assert!(plain.contains(&Provider::Gemini.to_string()));
+        assert!(plain.contains("not installed on this host"));
+    }
+
+    #[test]
+    fn agent_list_multiple_installed_renders_choice_header_and_list() {
+        let plain = plain_agent_cell(&AgentResolutionState::ListMultipleInstalled {
+            installed: vec![Provider::Claude, Provider::Codex],
+            not_installed: vec![Provider::Gemini],
+            invalid: vec![],
+        });
+        assert!(plain.contains("choose interactively between suggested Agents"));
+        assert!(plain.contains(&Provider::Claude.to_string()));
+        assert!(plain.contains(&Provider::Codex.to_string()));
+        assert!(plain.contains(&Provider::Gemini.to_string()));
+    }
+
+    #[test]
+    fn agent_list_multiple_installed_dimms_not_installed() {
+        // Semantic test: the plain text contains the not-installed provider;
+        // L2 tests assert the actual dim SGR.
+        let plain = plain_agent_cell(&AgentResolutionState::ListMultipleInstalled {
+            installed: vec![Provider::Claude],
+            not_installed: vec![Provider::Gemini],
+            invalid: vec![],
+        });
+        assert!(plain.contains(&Provider::Gemini.to_string()));
+    }
+
+    #[test]
+    fn agent_list_multiple_installed_shows_invalid_suggestions() {
+        let plain = plain_agent_cell(&AgentResolutionState::ListMultipleInstalled {
+            installed: vec![Provider::Claude],
+            not_installed: vec![],
+            invalid: vec!["bad-agent".into()],
+        });
+        assert!(plain.contains("NOT"));
+        assert!(plain.contains("valid Agents"));
+        assert!(plain.contains("bad-agent"));
+    }
+
+    #[test]
+    fn agent_list_one_installed_renders_auto_select_header() {
+        let plain = plain_agent_cell(&AgentResolutionState::ListOneInstalled {
+            selected: Provider::Claude,
+            not_installed: vec![Provider::Gemini],
+            invalid: vec![],
+        });
+        assert!(plain.contains(&Provider::Claude.to_string()));
+        assert!(plain.contains("without the need for interactive prompting"));
+        assert!(plain.contains("only"));
+        assert!(plain.contains("is installed on this host"));
+    }
+
+    #[test]
+    fn agent_list_one_installed_with_invalid_shows_invalid_list() {
+        let plain = plain_agent_cell(&AgentResolutionState::ListOneInstalled {
+            selected: Provider::Claude,
+            not_installed: vec![],
+            invalid: vec!["bad-agent".into(), "worse-agent".into()],
+        });
+        assert!(plain.contains("NOT"));
+        assert!(plain.contains("valid Agents"));
+        assert!(plain.contains("bad-agent"));
+        assert!(plain.contains("worse-agent"));
+    }
+
+    #[test]
+    fn agent_zero_installed_list_renders_header_and_dimmed_suggestions() {
+        let plain = plain_agent_cell(&AgentResolutionState::ZeroInstalledList {
+            not_installed: vec![Provider::Gemini, Provider::Goose],
+            invalid: vec![],
+        });
+        assert!(plain.contains("None of the suggested agents are installed/valid"));
+        assert!(plain.contains(&Provider::Gemini.to_string()));
+        assert!(plain.contains(&Provider::Goose.to_string()));
+    }
+
+    #[test]
+    fn agent_zero_installed_list_with_invalid_shows_invalid_list() {
+        let plain = plain_agent_cell(&AgentResolutionState::ZeroInstalledList {
+            not_installed: vec![Provider::Gemini],
+            invalid: vec!["bad-agent".into()],
+        });
+        assert!(plain.contains("None of the suggested agents are installed/valid"));
+        assert!(plain.contains(&Provider::Gemini.to_string()));
+        assert!(plain.contains("NOT"));
+        assert!(plain.contains("valid Agents"));
+        assert!(plain.contains("bad-agent"));
+    }
+
+    #[test]
+    fn agent_cell_preserves_single_table_row() {
+        // Every agent state must keep its breakdown inside the single Agent
+        // value cell; no extra metadata rows are added.
+        let render = render_with(
+            Some("doc"),
+            None,
+            AgentResolutionState::ListMultipleInstalled {
+                installed: vec![Provider::Claude, Provider::Codex],
+                not_installed: vec![Provider::Gemini],
+                invalid: vec!["bad".into()],
+            },
+            None,
+            false,
+            None,
+        );
+        let plain = plain_table(&render);
+        // Count lines that contain the Agent row label after stripping table
+        // border characters. There should be exactly one.
+        let agent_label_lines: Vec<&str> = plain
+            .lines()
+            .filter(|l| {
+                let cleaned: String = l.chars().filter(|&c| c != '│').collect();
+                cleaned.trim().starts_with("Agent")
+            })
+            .collect();
+        assert_eq!(
+            agent_label_lines.len(),
+            1,
+            "Agent label should appear exactly once (single row); plain:\n{plain}"
+        );
+    }
+
+    #[test]
+    fn agent_cell_multiline_preserves_table_alignment() {
+        // A multi-line Agent cell must keep the table's two-column alignment:
+        // every `│` separator appears at the same positions across all rows.
+        let render = render_with(
+            Some("doc"),
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            None,
+        );
+        let plain = plain_table(&render);
+        let lines: Vec<&str> = plain.lines().collect();
+
+        // Find the table region by its border characters.
+        let table_start = lines
+            .iter()
+            .position(|l| l.contains('┌'))
+            .expect("table top border should exist");
+        let table_end = lines
+            .iter()
+            .skip(table_start)
+            .position(|l| l.contains('└'))
+            .map(|i| table_start + i)
+            .expect("table bottom border should exist");
+
+        let mut expected_positions: Option<Vec<usize>> = None;
+        for line in &lines[table_start..=table_end] {
+            let positions: Vec<usize> = line
+                .char_indices()
+                .filter(|(_, c)| *c == '│')
+                .map(|(i, _)| i)
+                .collect();
+            if positions.len() >= 2 {
+                if let Some(ref expected) = expected_positions {
+                    assert_eq!(
+                        positions, *expected,
+                        "table column separators misaligned.\nline: {line:?}\nplain:\n{plain}"
+                    );
+                } else {
+                    expected_positions = Some(positions);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn table_preserves_one_ch_left_margin() {
+        // The table is rendered with `Margin::x(Length::ch(1))`, so every
+        // table line must start with a single space (the 1ch left offset).
+        let render = render_with(
+            Some("doc"),
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            None,
+        );
+        let plain = plain_table(&render);
+        let lines: Vec<&str> = plain.lines().collect();
+
+        let table_start = lines
+            .iter()
+            .position(|l| l.contains('┌'))
+            .expect("table top border should exist");
+        let table_end = lines
+            .iter()
+            .skip(table_start)
+            .position(|l| l.contains('└'))
+            .map(|i| table_start + i)
+            .expect("table bottom border should exist");
+
+        for line in &lines[table_start..=table_end] {
+            assert!(
+                line.starts_with(' '),
+                "every table line must have a 1ch left margin (start with space).\n\
+                 line: {line:?}\nplain:\n{plain}"
+            );
+        }
     }
 }
