@@ -57,10 +57,7 @@ fn capture_styled_quote<H: TerminalHarness>(harness: &mut H) -> CapturedFrame {
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    // A short settle so the bt output is committed to cells before capture.
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    harness.capture().expect("capture failed")
+    biscuit_test_harness::capture_settled(harness).expect("capture failed")
 }
 
 /// Returns the raw (escape-bearing) capture line for the rendered block
@@ -300,9 +297,7 @@ fn capture_bt<H: TerminalHarness>(harness: &mut H, cmd: &str) -> CapturedFrame {
     harness
         .send_command_with_env(cmd, &[("FORCE_COLOR", "1")])
         .expect("send_command_with_env failed");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    harness.capture().expect("capture failed")
+    biscuit_test_harness::capture_settled(harness).expect("capture failed")
 }
 
 /// Returns the raw (escape-bearing) capture line whose plain text contains
