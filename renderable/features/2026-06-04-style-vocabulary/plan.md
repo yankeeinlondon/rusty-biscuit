@@ -1,6 +1,17 @@
+---
+source_files_during_phase_1:
+  - renderable/src/layout/width.rs
+  - renderable/src/layout/mod.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - renderable
+---
+
 # Style Vocabulary Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan phase-by-phase. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Move `renderable`'s `Layout`/`Style` types to the CSS box model — add `padding` + a `width` mode (incl. `fit-content`) to `Layout`, make `background` the only paint, delete `Fill`, and rename `Margin → Edges` — keeping the whole workspace compiling.
 
@@ -34,7 +45,7 @@
 **Modified (docs — part of the behavior change, not optional):**
 - `.claude/skills/renderable/{layout.md,style.md,SKILL.md}`, `renderable/docs/layout-and-style.md`, any README mentioning `Fill`/`Margin`/"no padding".
 
-**Verification baseline (run once before Task 1):**
+**Verification baseline (run once before Phase 1):**
 
 - [ ] **Step 0: Confirm a green starting point**
 
@@ -46,7 +57,7 @@ Expected: test binaries compile.
 
 ---
 
-## Task 1: Add the `Width` enum (additive — nothing breaks)
+## Phase 1: Add the `Width` enum (additive — nothing breaks)
 
 **Files:**
 - Create: `renderable/src/layout/width.rs`
@@ -163,7 +174,7 @@ git commit -m "feat(renderable): add Width content-box sizing enum"
 
 ---
 
-## Task 2: Rename `Margin` → `Edges` (compiler-driven sweep)
+## Phase 2: Rename `Margin` → `Edges` (compiler-driven sweep)
 
 The type `renderable::layout::Margin` becomes `Edges`. The **field** `Layout.margin` keeps its name (serde stability). Unrelated `Margin` types in other crates (e.g. `ratatui::Margin`) are *not* touched — the compiler will only flag sites that referenced renderable's type.
 
@@ -215,7 +226,7 @@ In the `Layout` struct keep the field name `margin` but change its **type**:
 
 and in `impl Default for Layout`: `margin: Edges::default(),`.
 
-`renderable/src/prelude.rs`: change the `Margin` export to `Edges` (leave everything else; `Fill` handled in Task 4).
+`renderable/src/prelude.rs`: change the `Margin` export to `Edges` (leave everything else; `Fill` handled in Phase 4).
 
 - [ ] **Step 3: Update biscuit-terminal's re-export so downstream still resolves**
 
@@ -254,7 +265,7 @@ git commit -m "refactor(renderable): rename layout Margin type to Edges"
 
 ---
 
-## Task 3: Add `padding` + `width` to `Layout` (with serde back-compat)
+## Phase 3: Add `padding` + `width` to `Layout` (with serde back-compat)
 
 **Files:**
 - Modify: `renderable/src/layout/mod.rs` (`Layout` struct, `Default`, `validate`, tests)
@@ -415,7 +426,7 @@ git commit -m "feat(renderable): add padding and width to Layout with serde defa
 
 ---
 
-## Task 4: Delete `Fill`; add the `Background` adaptive-tint helper
+## Phase 4: Delete `Fill`; add the `Background` adaptive-tint helper
 
 **Files:**
 - Modify: `renderable/src/style.rs` (delete `Fill`/`FillBand`/`FillIntensity` + `Style.fill`; add `Background`; update `inherited_from`, doc/json examples, tests)
@@ -611,7 +622,7 @@ git commit -m "feat(renderable): delete Fill; add Background adaptive-tint helpe
 
 ---
 
-## Task 5: Update skills and docs (part of the behavior change)
+## Phase 5: Update skills and docs (part of the behavior change)
 
 **Files:**
 - Modify: `.claude/skills/renderable/layout.md`, `.claude/skills/renderable/style.md`, `.claude/skills/renderable/SKILL.md`
@@ -649,7 +660,7 @@ git commit -m "docs(renderable): document Edges, Layout padding/width, and Fill 
 
 ---
 
-## Task 6: Whole-workspace verification
+## Phase 6: Whole-workspace verification
 
 **Files:** none (verification only)
 
@@ -680,7 +691,7 @@ git commit -m "test(renderable): re-baseline snapshots for Fill removal (band ge
 
 ## Self-Review Notes (for the executor)
 
-- **Spec AC coverage:** AC1 (Task 3), AC2 (Task 2 + Task 6 grep), AC3 (Task 4 + Task 6 grep), AC4 (Task 4 Background tests), AC5 (Task 3 default tests + the existing `style_default_is_empty`), AC6 (Task 1 + Task 3 serde/validate tests), AC7 (every task ends on `cargo build --workspace` green), AC8 (Task 5).
-- **Order matters:** Task 2 (rename) precedes Task 3 (fields) so the new fields are typed `Edges`. Task 4 (Fill deletion) is last among the type changes because it has the widest consumer reach.
-- **`Background` naming:** it is `renderable::style::Background` with associated `subtle()` / `pronounced()` returning `TargetValue<PerMode<Color>>` — used consistently in Task 4's tests and impl.
+- **Spec AC coverage:** AC1 (Phase 3), AC2 (Phase 2 + Phase 6 grep), AC3 (Phase 4 + Phase 6 grep), AC4 (Phase 4 Background tests), AC5 (Phase 3 default tests + the existing `style_default_is_empty`), AC6 (Phase 1 + Phase 3 serde/validate tests), AC7 (every phase ends on `cargo build --workspace` green), AC8 (Phase 5).
+- **Order matters:** Phase 2 (rename) precedes Phase 3 (fields) so the new fields are typed `Edges`. Phase 4 (Fill deletion) is last among the type changes because it has the widest consumer reach.
+- **`Background` naming:** it is `renderable::style::Background` with associated `subtle()` / `pronounced()` returning `TargetValue<PerMode<Color>>` — used consistently in Phase 4's tests and impl.
 - **Do not** introduce a `type Margin = Edges` alias (spec "Open Questions": no alias).

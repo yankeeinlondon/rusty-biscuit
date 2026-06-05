@@ -1,6 +1,6 @@
 # Tree Attrs Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan phase-by-phase. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Convert `renderable::tree::NodeAttrs` from a JSON bag to **typed sparse fields** so render-tree reads cost no allocation/clone/serde, add one canonical inheritance resolver, and add a deterministic performance gate — keeping the workspace green.
 
@@ -35,7 +35,7 @@ Expected: clean build + test binaries compile.
 
 ---
 
-## Task 1: Add serde to the hint types (compact tokens preserved)
+## Phase 1: Add serde to the hint types (compact tokens preserved)
 
 The 13 hint types currently derive **no** serde (they were hand-serialized into the bag). Plain data structs get a derive; the token enums implement serde via their existing `to_token`/`from_token` so the wire form stays the documented compact tokens.
 
@@ -124,7 +124,7 @@ git commit -m "feat(renderable): add serde to render-tree hint types"
 
 ---
 
-## Task 2: Add typed `NodeAttrs` fields + `ComponentHints`; switch accessors
+## Phase 2: Add typed `NodeAttrs` fields + `ComponentHints`; switch accessors
 
 This is the storage switch. Add the typed fields and the `ComponentHints` grouping, then rewrite each accessor body to read/write the typed field instead of the bag, so there is **one** storage.
 
@@ -352,7 +352,7 @@ git commit -m "feat(renderable): store NodeAttrs layout/style/hints as typed spa
 
 ---
 
-## Task 3: Validate typed fields; reject stale `renderable.*` data keys
+## Phase 3: Validate typed fields; reject stale `renderable.*` data keys
 
 **Files:**
 - Modify: `renderable/src/tree/validate.rs`
@@ -423,7 +423,7 @@ git commit -m "feat(renderable): validate typed NodeAttrs; reject stale renderab
 
 ---
 
-## Task 4: Shared inheritance resolver; move the terminal fold onto it
+## Phase 4: Shared inheritance resolver; move the terminal fold onto it
 
 **Files:**
 - Create: `renderable/src/tree/inherit.rs`
@@ -547,7 +547,7 @@ git commit -m "feat(renderable): add shared InheritedStyle resolver; adopt in te
 
 ---
 
-## Task 5: Performance gate (structural invariant)
+## Phase 5: Performance gate (structural invariant)
 
 **Files:**
 - Modify: `renderable/src/tree/attrs.rs` (test-only counter hook)
@@ -609,7 +609,7 @@ Provide `styled_corpus_document()` building a small `Document` exercising layout
 Run: `cargo test -p renderable fold_does_zero`
 Expected: FIRST run may FAIL if any accessor still touches the bag — fix that accessor; then PASS.
 
-- [ ] **Step 4: Mirror the gate in the terminal/browser fold crates (optional in this task)**
+- [ ] **Step 4: Mirror the gate in the terminal/browser fold crates (optional in this phase)**
 
 Add the analogous `renderable_owned == 0` assertion in `biscuit-terminal` using the same corpus helper, so each target's fold is gated. (Markdown gate above is the minimum AC #5 requires; terminal/browser may follow in *renderer-folds*.)
 
@@ -622,7 +622,7 @@ git commit -m "test(renderable): structural perf gate — zero renderable-owned 
 
 ---
 
-## Task 6: Docs, skills, and serde-surface snapshots
+## Phase 6: Docs, skills, and serde-surface snapshots
 
 **Files:**
 - Modify: `.claude/skills/renderable/tree.md` (+ any `attrs`/`NodeAttrs` mention), `renderable/docs/layout-and-style.md` / tree docs
@@ -655,7 +655,7 @@ git commit -m "docs(renderable): document typed NodeAttrs, ComponentHints, inher
 
 ---
 
-## Task 7: Whole-workspace verification
+## Phase 7: Whole-workspace verification
 
 - [ ] **Step 1: Acceptance greps**
 
@@ -665,7 +665,7 @@ Expected: only `data`-extension/stale-input test code (no first-class writes).
 - [ ] **Step 2: Build + test the affected crates**
 
 Run: `cargo build --workspace && cargo test -p renderable -p biscuit-terminal -p darkmatter`
-Expected: PASS. Rendered-output snapshots unchanged; only JSON-surface snapshots were re-baselined in Task 6.
+Expected: PASS. Rendered-output snapshots unchanged; only JSON-surface snapshots were re-baselined in Phase 6.
 
 - [ ] **Step 3: Final commit (if needed)**
 
@@ -678,7 +678,7 @@ git commit -m "chore(renderable): finalize typed NodeAttrs migration"
 
 ## Self-Review Notes (for the executor)
 
-- **Spec AC coverage:** AC1 (Task 2 + Task 7 grep), AC2 (Task 2 typed accessors + tests), AC3 (Task 2 serde + Task 6 snapshots + Task 3 stale-key rejection), AC4 (Task 4 resolver + terminal adoption), AC5 (Task 5 gate), AC6 (every task ends on a build/test), AC7 (Task 6 docs), AC8 (Task 3 validation + placement rules).
+- **Spec AC coverage:** AC1 (Phase 2 + Phase 7 grep), AC2 (Phase 2 typed accessors + tests), AC3 (Phase 2 serde + Phase 6 snapshots + Phase 3 stale-key rejection), AC4 (Phase 4 resolver + terminal adoption), AC5 (Phase 5 gate), AC6 (every phase ends on a build/test), AC7 (Phase 6 docs), AC8 (Phase 3 validation + placement rules).
 - **Smaller-than-expected blast radius:** no `NodeAttrs { … }` literals exist outside `attrs.rs`, and accessor signatures are preserved, so dependents mostly recompile untouched.
-- **Type/name consistency:** `layout_ref`/`style_ref`/`*_hints_ref` borrowed accessors (Task 2) are what the terminal fold (Task 4) and gate corpus consume. `ComponentHints` variants and `TableHints.{columns,terminal,title}` are used identically in Task 2's accessors and tests.
-- **Do not** silently migrate stale `renderable.*` `data` keys into typed fields (spec §2): they are validation errors (Task 3), not inputs.
+- **Type/name consistency:** `layout_ref`/`style_ref`/`*_hints_ref` borrowed accessors (Phase 2) are what the terminal fold (Phase 4) and gate corpus consume. `ComponentHints` variants and `TableHints.{columns,terminal,title}` are used identically in Phase 2's accessors and tests.
+- **Do not** silently migrate stale `renderable.*` `data` keys into typed fields (spec §2): they are validation errors (Phase 3), not inputs.

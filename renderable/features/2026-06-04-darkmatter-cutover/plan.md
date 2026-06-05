@@ -1,6 +1,6 @@
 # darkmatter Cutover Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan phase-by-phase. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Lower darkmatter's `style:` frontmatter **directly** into `Layout`/`Style` node attrs, delete the deprecated `Page*` vocabulary, `build_component_css`, the per-component `LayoutContext` math, and every `#![allow(deprecated)]` — keeping a slim renderable-typed page frame.
 
@@ -32,7 +32,7 @@ Expected: clean; the renderable folds render `padding`/`width`/`border` (rendere
 
 ---
 
-## Task 1: Capture the parity reference (before any change)
+## Phase 1: Capture the parity reference (before any change)
 
 The deleted `LayoutContext` math moves to the fold; capture the current `style:` output first so intended diffs are visible and deliberate.
 
@@ -44,7 +44,7 @@ The deleted `LayoutContext` math moves to the fold; capture the current `style:`
 ```rust
 //! Pre-cutover reference output for representative `style:` per-component cases.
 //! These snapshots are the parity *reference* (not a byte contract) the cutover
-//! is diffed against; intended diffs are re-accepted with a note in Task 6.
+//! is diffed against; intended diffs are re-accepted with a note in Phase 6.
 use darkmatter::markdown::Markdown;
 // helper: render `md` with `style:` frontmatter to terminal and browser at width 80
 
@@ -75,7 +75,7 @@ git commit -m "test(darkmatter): capture pre-cutover style: parity reference"
 
 ---
 
-## Task 2: `ComponentPolicy` + lower `style:` directly (delete down-conversion)
+## Phase 2: `ComponentPolicy` + lower `style:` directly (delete down-conversion)
 
 **Files:**
 - Modify: `darkmatter/lib/src/style/apply.rs`
@@ -137,7 +137,7 @@ In `apply.rs`, rewrite `apply_page_style` / `apply_component_style` / `apply_lis
 
 Delete `map_alignment`, `lower_length_to_fill`, `lower_length_to_width_unit`, and the `Length→u16`/`WidthUnit` helpers that fed the deprecated builder.
 
-> Page-level `style.page.*` (margin/padding/background/max-width) feeds the **page frame** (Task 5), not a `ComponentPolicy`.
+> Page-level `style.page.*` (margin/padding/background/max-width) feeds the **page frame** (Phase 5), not a `ComponentPolicy`.
 
 - [ ] **Step 4: Run to verify pass**
 
@@ -147,7 +147,7 @@ Expected: PASS.
 - [ ] **Step 5: Build (deprecated builder setters now unused on the per-component path)**
 
 Run: `cargo build -p darkmatter 2>&1 | rg "deprecated|unused" | head`
-Expected: per-component `use_alignment`/`with_fill` calls are gone from `apply.rs`. Leave the deprecated *types* in place for now (deleted in Task 6); they just have no per-component callers.
+Expected: per-component `use_alignment`/`with_fill` calls are gone from `apply.rs`. Leave the deprecated *types* in place for now (deleted in Phase 6); they just have no per-component callers.
 
 - [ ] **Step 6: Commit**
 
@@ -158,7 +158,7 @@ git commit -m "feat(darkmatter): lower style: per-component policy directly to r
 
 ---
 
-## Task 3: `decorate.rs` writes attrs; drop `LayoutContext` per-component math
+## Phase 3: `decorate.rs` writes attrs; drop `LayoutContext` per-component math
 
 **Files:**
 - Modify: `darkmatter/lib/src/markdown/render_tree/decorate.rs`
@@ -186,7 +186,7 @@ Expected: FAIL (decorate still queries `LayoutContext`).
 
 In `decorate.rs`: keep `component_for(NodeKind) → PageComponent`; for each block look up its `ComponentPolicy` and write `policy.layout` (and `policy.style` if `Some`) onto the node via `set_layout`/`set_style`. Remove all calls to `resolve_component_width`, `alignment_padding`, `component_side_padding`, `component_fill`, `component_alignment`, and the inline `cells()` math — the renderer fold does it. Replace darkmatter's bespoke inheritance push-down with `renderable::tree::InheritedStyle`.
 
-In `context.rs`: delete `resolve_component_width`, `alignment_padding`, `component_side_padding`, `component_fill`, `component_alignment`, `list_left_margin`, the `alignments`/`fills`/`list_left_margins` fields, and `resolve_width_unit`. (Keep the page-frame fields for Task 5.)
+In `context.rs`: delete `resolve_component_width`, `alignment_padding`, `component_side_padding`, `component_fill`, `component_alignment`, `list_left_margin`, the `alignments`/`fills`/`list_left_margins` fields, and `resolve_width_unit`. (Keep the page-frame fields for Phase 5.)
 
 - [ ] **Step 4: Run to verify pass + diff against the reference**
 
@@ -194,7 +194,7 @@ Run: `cargo test -p darkmatter decorate_writes_component_layout`
 Expected: PASS.
 
 Run: `cargo test -p darkmatter --test cutover_reference`
-Expected: terminal snapshots may now differ (fold math vs the old `LayoutContext` math). Do **not** accept yet — inspect each diff; it should be the same layout intent. Real regressions are fixed here; intended diffs are accepted in Task 6.
+Expected: terminal snapshots may now differ (fold math vs the old `LayoutContext` math). Do **not** accept yet — inspect each diff; it should be the same layout intent. Real regressions are fixed here; intended diffs are accepted in Phase 6.
 
 - [ ] **Step 5: Commit**
 
@@ -205,7 +205,7 @@ git commit -m "feat(darkmatter): decorate writes component Layout/Style; delete 
 
 ---
 
-## Task 4: Delete `build_component_css` (browser uses the fold)
+## Phase 4: Delete `build_component_css` (browser uses the fold)
 
 **Files:**
 - Modify: `darkmatter/lib/src/layout/page.rs`
@@ -230,7 +230,7 @@ Expected: FAIL — `build_component_css` still emits `.darkmatter-page table {�
 
 - [ ] **Step 3: Delete the bespoke browser component CSS**
 
-In `page.rs` `render_to_browser`: stop calling `build_component_css`; the per-component nodes now carry `Layout`/`Style` lowered by the renderable browser fold. Delete `build_component_css`, `component_selectors`, `emit_component_css_rules`, `emit_component_color_rules`, and `resolve_width_unit_for_browser`. Keep the `.darkmatter-page` wrapper `<div>` (page frame, Task 5).
+In `page.rs` `render_to_browser`: stop calling `build_component_css`; the per-component nodes now carry `Layout`/`Style` lowered by the renderable browser fold. Delete `build_component_css`, `component_selectors`, `emit_component_css_rules`, `emit_component_color_rules`, and `resolve_width_unit_for_browser`. Keep the `.darkmatter-page` wrapper `<div>` (page frame, Phase 5).
 
 - [ ] **Step 4: Run to verify pass**
 
@@ -246,7 +246,7 @@ git commit -m "feat(darkmatter): delete build_component_css; per-component brows
 
 ---
 
-## Task 5: Slim, renderable-typed page frame
+## Phase 5: Slim, renderable-typed page frame
 
 **Files:**
 - Modify: `darkmatter/lib/src/layout/page.rs` (page-frame fields + `apply_row_decoration` + wrapper)
@@ -282,7 +282,7 @@ Expected: FAIL — page-frame fields still `PageMargin`/`PagePadding`.
 
 In `page.rs`: change `DarkmatterPage`'s page-frame fields to `Edges` (margin/padding), `Option<TargetValue<Length>>` (max-width), and a `Background`/`PageBackground` knob; the granular builder setters (`with_margin_left`, …) now write `Edges` cells. `apply_row_decoration` (terminal) and the wrapper `<div>` styles read these renderable values (resolve to cells/CSS directly). `rebuild_layout` exports the page-frame `Layout` from these fields.
 
-In `context.rs`: `LayoutContext` keeps only page-frame residue — `effective_width`, `background_color`, `render_color_mode` (the `PageBackground::Pronounced` flip), `terminal_width`. Drop everything per-component (already removed in Task 3). Update `from_page` to take only page-frame inputs.
+In `context.rs`: `LayoutContext` keeps only page-frame residue — `effective_width`, `background_color`, `render_color_mode` (the `PageBackground::Pronounced` flip), `terminal_width`. Drop everything per-component (already removed in Phase 3). Update `from_page` to take only page-frame inputs.
 
 - [ ] **Step 4: Run to verify pass**
 
@@ -298,7 +298,7 @@ git commit -m "feat(darkmatter): slim page frame on renderable types; LayoutCont
 
 ---
 
-## Task 6: Delete the deprecated vocabulary + every `#![allow(deprecated)]`
+## Phase 6: Delete the deprecated vocabulary + every `#![allow(deprecated)]`
 
 **Files:**
 - Modify: `darkmatter/lib/src/layout/types.rs`, `mod.rs`, `page.rs`, `context.rs`, `cli.rs`, `darkmatter/lib/tests/{layout_snapshots,style_frontmatter}.rs`
@@ -342,7 +342,7 @@ git commit -m "refactor(darkmatter): delete deprecated Page* vocabulary and all 
 
 ---
 
-## Task 7: Docs + final verification
+## Phase 7: Docs + final verification
 
 **Files:**
 - Modify: `darkmatter/lib/src/layout/mod.rs` (the "Migration deferral (Spec A)" section), `.claude/skills/darkmatter/*` (deferral note), `darkmatter/docs/rendering/style.md`
@@ -363,7 +363,7 @@ Expected: no stale claims (the deferral note now reads as done).
 - [ ] **Step 3: Whole-crate verification**
 
 Run: `cargo build -p darkmatter -p biscuit-terminal -p renderable && cargo test -p darkmatter`
-Expected: clean build, suites green (with the Task 6 re-baselined references).
+Expected: clean build, suites green (with the Phase 6 re-baselined references).
 
 Run the tree-attrs perf gate to confirm darkmatter's fold still does zero renderable-owned hint round-trips:
 Run: `cargo test -p renderable fold_does_zero`
@@ -380,7 +380,7 @@ git commit -m "docs(darkmatter): mark Migration deferral done; document direct s
 
 ## Self-Review Notes (for the executor)
 
-- **Spec AC coverage:** AC1 (Task 6 grep), AC2 (Task 6), AC3 (Task 4 + Task 3 + Task 6 grep), AC4 (Task 2), AC5 (Task 6 step 4 — same input, unchanged strict-style), AC6 (Tasks 1/3/6 reference snapshots), AC7 (Task 5 page frame + pronounced guard), AC8 (Task 7).
-- **Order is load-bearing:** build the new path (Tasks 2–5) and prove parity before deleting the old types and allows (Task 6). The reference snapshots (Task 1) make every intended diff visible.
-- **Parity is a reference:** the `LayoutContext` math moving into the fold will shift some cells/CSS; re-baseline those deliberately (Task 6 step 4), don't force byte equality.
+- **Spec AC coverage:** AC1 (Phase 6 grep), AC2 (Phase 6), AC3 (Phase 4 + Phase 3 + Phase 6 grep), AC4 (Phase 2), AC5 (Phase 6 step 4 — same input, unchanged strict-style), AC6 (Phases 1/3/6 reference snapshots), AC7 (Phase 5 page frame + pronounced guard), AC8 (Phase 7).
+- **Order is load-bearing:** build the new path (Phases 2–5) and prove parity before deleting the old types and allows (Phase 6). The reference snapshots (Phase 1) make every intended diff visible.
+- **Parity is a reference:** the `LayoutContext` math moving into the fold will shift some cells/CSS; re-baseline those deliberately (Phase 6 step 4), don't force byte equality.
 - **Keep:** `DarkmatterPage`, `PageComponent` (minus `Lists`), `PageBackground`, `StyleColor`, and the sub-spec-#7 bespoke knobs (`page.stylesheet`/`meta`/`code.theme`, hyperlink/image local-style) — none are deprecated layout types.
