@@ -3,7 +3,7 @@
 //! When `ComposeOptions::perf_enabled` is `true`, a `PerfCollector`
 //! records per-stage timings. When disabled, all methods are no-ops.
 
-use super::types::{ComposePerfMetric, ComposePerfReport, ComposeStage};
+use super::types::{ComposePerfMetric, ComposePerfReport, ComposeStage, ShellCommandSpan};
 use std::time::{Duration, Instant};
 
 /// Metric kinds corresponding to compose pipeline stages.
@@ -87,6 +87,10 @@ pub(crate) struct PerfCollector {
     start: Option<Instant>,
     /// Fixed-size array indexed by `PerfMetricKind` ordinal.
     durations: [(Duration, usize); 17],
+    /// Per-`::shell`-directive spans (DM-3). Empty when disabled.
+    shell_spans: Vec<ShellCommandSpan>,
+    /// Per-group context-capture timings (DM-4). Empty when disabled.
+    capture_timings: Vec<(String, Duration)>,
 }
 
 impl PerfCollector {
@@ -97,12 +101,30 @@ impl PerfCollector {
             enabled,
             start: if enabled { Some(Instant::now()) } else { None },
             durations: [(Duration::ZERO, 0); 17],
+            shell_spans: Vec::new(),
+            capture_timings: Vec::new(),
         }
     }
 
     /// Returns `true` if perf collection is active.
     pub(crate) fn is_enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// Records a per-`::shell`-directive span (DM-3). No-op when disabled.
+    pub(crate) fn record_shell_span(&mut self, span: ShellCommandSpan) {
+        if !self.enabled {
+            return;
+        }
+        self.shell_spans.push(span);
+    }
+
+    /// Sets the per-group context-capture timings (DM-4). No-op when disabled.
+    pub(crate) fn set_capture_timings(&mut self, timings: Vec<(String, Duration)>) {
+        if !self.enabled {
+            return;
+        }
+        self.capture_timings = timings;
     }
 
     /// Records a duration for the given metric kind.
@@ -153,7 +175,12 @@ impl PerfCollector {
             })
             .collect();
 
-        Some(ComposePerfReport { total, metrics })
+        Some(ComposePerfReport {
+            total,
+            metrics,
+            shell_spans: self.shell_spans,
+            capture_timings: self.capture_timings,
+        })
     }
 }
 
@@ -195,6 +222,37 @@ mod tests {
             .unwrap();
         assert_eq!(interp.elapsed, Duration::from_millis(10));
         assert_eq!(interp.calls, 1);
+    }
+
+    #[test]
+    fn records_shell_spans_and_capture_timings() {
+        let mut collector = PerfCollector::new(true);
+        collector.record_shell_span(ShellCommandSpan {
+            command_display: "echo hi".to_string(),
+            command_hash: "00000000deadbeef".to_string(),
+            elapsed: Duration::from_millis(12),
+        });
+        collector.set_capture_timings(vec![("git".to_string(), Duration::from_millis(7))]);
+
+        let report = collector.finish().unwrap();
+        assert_eq!(report.shell_spans.len(), 1);
+        assert_eq!(report.shell_spans[0].command_display, "echo hi");
+        assert_eq!(report.shell_spans[0].elapsed, Duration::from_millis(12));
+        assert_eq!(report.capture_timings.len(), 1);
+        assert_eq!(report.capture_timings[0].0, "git");
+        assert_eq!(report.capture_timings[0].1, Duration::from_millis(7));
+    }
+
+    #[test]
+    fn disabled_collector_drops_shell_spans_and_capture_timings() {
+        let mut collector = PerfCollector::new(false);
+        collector.record_shell_span(ShellCommandSpan {
+            command_display: "echo hi".to_string(),
+            command_hash: "0".to_string(),
+            elapsed: Duration::from_millis(1),
+        });
+        collector.set_capture_timings(vec![("git".to_string(), Duration::from_millis(1))]);
+        assert!(collector.finish().is_none());
     }
 
     #[test]

@@ -310,7 +310,6 @@ pub fn run_provider_wrapper(
         return Ok(());
     }
 
-    let wrapper_start = std::time::Instant::now();
     let mut perf_collector =
         startup_timings.map(|timings| crate::perf::CommandPerfCollector::new("Wrapper", timings));
 
@@ -331,9 +330,7 @@ pub fn run_provider_wrapper(
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.
     if let Some(collector) = perf_collector {
-        let total = wrapper_start.elapsed();
-        let report = collector.into_report(total);
-        eprint!("{}", crate::perf::render_perf_report(&report));
+        crate::perf::emit_report(&collector.into_report());
     }
 
     std::process::exit(code);

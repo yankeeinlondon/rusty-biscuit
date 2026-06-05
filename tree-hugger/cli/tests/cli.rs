@@ -1224,7 +1224,7 @@ fn test_lint_policy_selectors_affect_severity_and_exit_code() {
             "--plain",
             "lint",
             "--deny",
-            "category:suspicious",
+            "category:restriction",
             "probe.rs",
         ])
         .assert()
@@ -1232,12 +1232,16 @@ fn test_lint_policy_selectors_affect_severity_and_exit_code() {
         .stdout(predicate::str::contains("error"))
         .stdout(predicate::str::contains("[unwrap-call]"));
 
+    // `--allow` demotes severity but does not enable a default-off rule, so it
+    // must be paired with an enabling selector. `--allow` wins over `--warn`.
     hug_cmd()
         .current_dir(dir.path())
         .args([
             "--no-cache",
             "--plain",
             "lint",
+            "--warn",
+            "unwrap-call",
             "--allow",
             "unwrap-call",
             "probe.rs",
@@ -1246,6 +1250,88 @@ fn test_lint_policy_selectors_affect_severity_and_exit_code() {
         .success()
         .stdout(predicate::str::contains("info"))
         .stdout(predicate::str::contains("[unwrap-call]"));
+}
+
+#[test]
+fn test_lint_restriction_rules_off_by_default() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("probe.rs");
+    std::fs::write(&path, "fn main() {\n    Some(1).unwrap();\n}\n").unwrap();
+
+    // unwrap-call is a `restriction` rule: silent unless explicitly enabled.
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["--no-cache", "--plain", "lint", "probe.rs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[unwrap-call]").not());
+
+    // --strict escalates enabled warnings but must not enable a default-off rule.
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["--no-cache", "--plain", "lint", "--strict", "probe.rs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[unwrap-call]").not());
+}
+
+#[test]
+fn test_lint_scan_hides_clean_files_and_excludes_fixtures() {
+    let area = tempfile::TempDir::new().unwrap();
+    let root = area.path();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"scan-noise\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    // Clean file: must not appear at all during a multi-file scan.
+    std::fs::write(root.join("src/clean.rs"), "pub fn ok() {}\n").unwrap();
+    // Dirty file: dbg-macro is on by default, so this is the only file shown.
+    std::fs::write(root.join("src/dirty.rs"), "fn run() {\n    dbg!(1);\n}\n").unwrap();
+    // Fixture: an unused import that must be excluded from the default scan.
+    std::fs::create_dir_all(root.join("tests/fixtures")).unwrap();
+    std::fs::write(root.join("tests/fixtures/sample.rs"), "use std::io::Write;\n").unwrap();
+
+    hug_cmd()
+        .current_dir(root)
+        .args(["--no-cache", "--plain", "lint"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dirty.rs"))
+        .stdout(predicate::str::contains("[dbg-macro]"))
+        .stdout(predicate::str::contains("clean.rs").not())
+        .stdout(predicate::str::contains("(no diagnostics)").not())
+        .stdout(predicate::str::contains("fixtures").not());
+}
+
+#[test]
+fn test_lint_explicit_fixture_path_overrides_default_exclude() {
+    let area = tempfile::TempDir::new().unwrap();
+    let root = area.path();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"explicit-fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("tests/fixtures")).unwrap();
+    std::fs::write(root.join("tests/fixtures/sample.rs"), "use std::io::Write;\n").unwrap();
+
+    // Naming the fixture explicitly re-includes it despite the default exclude
+    // (`unused-import` is off by default, so opt in to get a visible signal).
+    hug_cmd()
+        .current_dir(root)
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--warn",
+            "unused-import",
+            "tests/fixtures/sample.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[unused-import]"));
 }
 
 #[test]
@@ -1276,8 +1362,8 @@ fn test_lint_list_rules_json_exposes_rule_metadata() {
         .find(|rule| rule["id"] == "unwrap-call")
         .unwrap();
 
-    assert_eq!(unwrap_rule["category"], "suspicious");
-    assert_eq!(unwrap_rule["enabled_by_default"], true);
+    assert_eq!(unwrap_rule["category"], "restriction");
+    assert_eq!(unwrap_rule["enabled_by_default"], false);
 }
 
 #[test]
@@ -1305,7 +1391,7 @@ fn test_lint_cache_separates_experimental_semantics_policy() {
 fn test_lint_cache_reuse_respects_policy_selector_changes() {
     // Policy is applied after the symbol cache is consulted, so reusing a cached
     // entry must not pin the earlier run's severity. First run warms the cache
-    // with the default `unwrap-call` warning; the second run reuses it under
+    // with a `--warn unwrap-call` warning; the second run reuses it under
     // `--deny` and must still escalate to an error and fail.
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("probe.rs");
@@ -1313,7 +1399,7 @@ fn test_lint_cache_reuse_respects_policy_selector_changes() {
 
     hug_cmd()
         .current_dir(dir.path())
-        .args(["--plain", "lint", "probe.rs"])
+        .args(["--plain", "lint", "--warn", "unwrap-call", "probe.rs"])
         .assert()
         .success()
         .stdout(predicate::str::contains("warning"))

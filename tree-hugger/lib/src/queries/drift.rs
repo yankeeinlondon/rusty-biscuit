@@ -23,10 +23,7 @@ pub struct DriftReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DriftItem {
     /// Upstream revision is newer than what we have recorded.
-    NewerUpstreamRevision {
-        recorded: String,
-        upstream: String,
-    },
+    NewerUpstreamRevision { recorded: String, upstream: String },
     /// The vendored file differs from upstream (content hash mismatch).
     ContentMismatch,
     /// The upstream path no longer exists.
@@ -38,23 +35,16 @@ pub enum DriftItem {
         actual: String,
     },
     /// A predicate is used that is not in the upstream query.
-    PredicateAdded {
-        predicate: String,
-    },
+    PredicateAdded { predicate: String },
     /// A predicate from upstream is missing in the vendored query.
-    PredicateRemoved {
-        predicate: String,
-    },
+    PredicateRemoved { predicate: String },
 }
 
 impl std::fmt::Display for DriftItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NewerUpstreamRevision { recorded, upstream } => {
-                write!(
-                    f,
-                    "upstream revision changed from {recorded} to {upstream}"
-                )
+                write!(f, "upstream revision changed from {recorded} to {upstream}")
             }
             Self::ContentMismatch => {
                 write!(f, "vendored content does not match upstream")
@@ -123,9 +113,7 @@ pub fn check_query_drift(
 }
 
 /// Checks all vendored queries for drift.
-pub fn check_all_drift(
-    current_upstream_revision: Option<&str>,
-) -> Vec<DriftReport> {
+pub fn check_all_drift(current_upstream_revision: Option<&str>) -> Vec<DriftReport> {
     let mut reports = Vec::new();
 
     for language in ProgrammingLanguage::all() {
@@ -159,9 +147,7 @@ pub fn summarize_drift(reports: &[DriftReport]) -> String {
     for report in actionable {
         summary.push_str(&format!(
             "  {} {} ({}):\n",
-            report.language,
-            report.kind,
-            report.provenance.upstream_path
+            report.language, report.kind, report.provenance.upstream_path
         ));
         for item in &report.items {
             summary.push_str(&format!("    - {item}\n"));
@@ -174,10 +160,7 @@ pub fn summarize_drift(reports: &[DriftReport]) -> String {
 /// Returns a map of expected upstream revision per source project.
 pub fn expected_upstream_revisions() -> HashMap<String, String> {
     let mut map = HashMap::new();
-    map.insert(
-        "nvim-treesitter".to_string(),
-        "0.10.4".to_string(),
-    );
+    map.insert("nvim-treesitter".to_string(), "0.10.4".to_string());
     map
 }
 
@@ -187,16 +170,10 @@ mod tests {
 
     #[test]
     fn no_drift_when_revision_matches() {
-        let report = check_query_drift(
-            ProgrammingLanguage::Rust,
-            QueryKind::Locals,
-            Some("0.10.4"),
-        );
+        let report =
+            check_query_drift(ProgrammingLanguage::Rust, QueryKind::Locals, Some("0.10.4"));
         // When revision matches, there should be no actionable drift
-        assert!(
-            report.is_some(),
-            "report should exist for a vendored query"
-        );
+        assert!(report.is_some(), "report should exist for a vendored query");
         assert!(
             !report.unwrap().actionable,
             "should not be actionable when revision matches"
@@ -205,28 +182,23 @@ mod tests {
 
     #[test]
     fn drift_when_revision_differs() {
-        let report = check_query_drift(
-            ProgrammingLanguage::Rust,
-            QueryKind::Locals,
-            Some("0.11.0"),
-        );
+        let report =
+            check_query_drift(ProgrammingLanguage::Rust, QueryKind::Locals, Some("0.11.0"));
         assert!(report.is_some());
         let report = report.unwrap();
         assert!(report.actionable);
-        assert!(report
-            .items
-            .iter()
-            .any(|i| matches!(i, DriftItem::NewerUpstreamRevision { .. })));
+        assert!(
+            report
+                .items
+                .iter()
+                .any(|i| matches!(i, DriftItem::NewerUpstreamRevision { .. }))
+        );
     }
 
     #[test]
     fn original_queries_have_no_drift() {
         // Lint queries are original, not vendored
-        let report = check_query_drift(
-            ProgrammingLanguage::Rust,
-            QueryKind::Lint,
-            Some("0.11.0"),
-        );
+        let report = check_query_drift(ProgrammingLanguage::Rust, QueryKind::Lint, Some("0.11.0"));
         assert!(report.is_none());
     }
 

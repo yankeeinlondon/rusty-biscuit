@@ -66,7 +66,7 @@ Function, Method, Type, Class, Interface, Enum, Trait, Module, Namespace, Variab
 - **Query caching**: Global `OnceLock<QueryCache>` for thread-safe caching
 - **Builtin database**: Per-language builtin lists to avoid false positive undefined-symbol/undefined-module errors
 - **Schema v2**: `shared/schema_v2` with facet-based `SymbolRecord` and staged `FileSymbolIndex`
-- **CLI filters**: `hug <subcommand> <filter...>` with all-files default scan for symbol commands
+- **CLI filters**: `hug <subcommand> <filter...>` with all-files default scan for symbol commands. A pathless scan honors `.gitignore` and skips test-data dirs by default (`**/fixtures/**`, `**/__fixtures__/**`, `**/snapshots/**`, `**/testdata/**`); an explicit path/glob re-includes a targeted file. `lint` scans hide clean files (single-file lint still shows `(no diagnostics)`).
 
 ## Detailed Documentation
 
@@ -90,7 +90,9 @@ Built-in rules are registered in `RuleRegistry` with metadata:
 - Language support, default enablement, examples, caveats
 - `requires_experimental_semantics` gates low-confidence semantic rules
 
-Default-off pattern rules (`console-log`, `print-call`, `fmt-println`) detect debug artifacts. Enable with `--warn <rule>` or `--deny <rule>`.
+Default-off pattern rules are silent unless opted in with `--warn <rule>` or `--deny <rule>` (the registry's `enabled_by_default` flag is enforced by the CLI policy layer, `apply_lint_policy`):
+- Debug artifacts: `console-log`, `print-call`, `fmt-println`.
+- `restriction` category: `unwrap-call`, `expect-call` — valid, deliberate constructs, not anomalies. Enable per-rule or via `--deny category:restriction`. `--allow`/`--strict` never enable an off-by-default rule.
 
 Experimental rules (`undefined-symbol`, `unused-symbol`, `undefined-module`) are disabled by default. Enable with `TreeFile::experimental_semantics = true` or `--experimental-semantics` in the CLI.
 
