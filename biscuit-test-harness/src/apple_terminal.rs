@@ -573,9 +573,27 @@ pub fn cleanup_stale_apple_terminal_windows() {
     if !AppleTerminalHarness::available() {
         return;
     }
+    close_tabless_windows();
     reap_registered_windows();
     reap_titled_windows();
     sweep_legacy_apple_terminal_windows();
+}
+
+/// Closes Terminal.app windows that have no tabs.
+///
+/// A zero-tab window cannot contain user work or a harness shell, but Terminal's
+/// AppleScript `front window` lookup can still resolve to it. Leaving that stale
+/// object around makes later `do script` spawns record the wrong window id and
+/// fail at `selected tab`.
+fn close_tabless_windows() {
+    let script = r#"tell application "Terminal"
+            repeat with w in windows
+                try
+                    if (count of tabs of w) is 0 then close w saving no
+                end try
+            end repeat
+        end tell"#;
+    let _ = AppleTerminalHarness::run_script(script);
 }
 
 /// Registry pass: close dead-owner windows that still look idle, then
@@ -894,14 +912,26 @@ impl TerminalHarness for AppleTerminalHarness {
                 repeat with w in windows
                     set end of beforeIds to (id of w)
                 end repeat
-                set newTab to do script "{cmd}"
+                do script "{cmd}"
                 delay 0.3
-                set winId to id of front window
+                set afterIds to {{}}
+                repeat with w in windows
+                    set end of afterIds to (id of w)
+                end repeat
+                set newIds to {{}}
+                repeat with candidateId in afterIds
+                    if beforeIds does not contain candidateId then set end of newIds to candidateId
+                end repeat
+                if (count of newIds) is greater than 0 then
+                    set winId to item 1 of newIds
+                else
+                    set winId to id of front window
+                end if
                 try
                     set custom title of (first window whose id is winId) to "{window_tag}"
                 end try
             end tell
-            set isNew to (beforeIds does not contain winId)
+            set isNew to ((count of newIds) is greater than 0)
             if prevApp is not "" and prevApp is not "Terminal" then
                 try
                     tell application "System Events" to set frontmost of (first process whose name is prevApp) to true

@@ -383,11 +383,14 @@ pub fn cargo_bin_dir(bin_name: &str) -> Option<PathBuf> {
         }
     }
 
-    // Derive from the current test executable location:
-    // <target_dir>/<profile>/deps/<exe>  →  <target_dir>/<profile>
+    // Derive from the current executable location:
+    // - test binary: <target_dir>/<profile>/deps/<exe> → <target_dir>/<profile>
+    // - broker/bin:  <target_dir>/<profile>/<exe>      → <target_dir>/<profile>
     let exe = std::env::current_exe().ok()?;
-    let mut dir = exe.parent()?.to_path_buf(); // deps/
-    dir = dir.parent()?.to_path_buf(); // <profile>/
+    let mut dir = exe.parent()?.to_path_buf();
+    if dir.file_name().and_then(|n| n.to_str()) == Some("deps") {
+        dir = dir.parent()?.to_path_buf();
+    }
     let bin = dir.join(bin_name);
     if bin.exists() {
         return Some(dir);
