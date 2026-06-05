@@ -949,34 +949,24 @@ fn render_file_link(path: &std::path::Path) -> String {
 
 /// Render the human-facing body for [`CompositionError::AgentResolutionFailed`].
 ///
-/// The markup mirrors the dry-run `Agent` cell so the live no-TTY abort
-/// message is a faithful prediction of what the TTY path would show.
+/// The no-TTY abort body must be the **same** styled message the TTY path
+/// would show for the state, so it shares one source of truth with the
+/// dry-run table cell and the live TTY pre-prompt — see
+/// [`super::agent_message`]. The only state with a distinct (imperative)
+/// live message is [`AgentResolutionState::SingleInvalid`], which is built
+/// here from [`super::agent_message::invalid_agent_message`] plus the
+/// installed-agent list the TTY picker would offer.
 fn render_agent_resolution_failed_body(
     state: &super::types::AgentResolutionState,
     installed: &[Provider],
     file_link: &str,
 ) -> String {
+    use super::agent_message::{agent_state_breakdown, invalid_agent_message};
     use super::types::AgentResolutionState;
 
-    let mut body = String::new();
     match state {
-        AgentResolutionState::NoAgent => {
-            body.push_str(&format!(
-                "Could not determine which agent to use for {file_link}."
-            ));
-            body.push_str(
-                "\n\n- CLI caller didn't specify the Agent\n\
-                 - the Markdown document didn't suggest any Agents in \
-                   <inverse>agent</inverse> Frontmatter property\n\
-                 - the caller will be interactively asked to choose an agent \
-                   when run in a TTY; otherwise the run aborts with this message"
-            );
-        }
         AgentResolutionState::SingleInvalid { hint } => {
-            let escaped = escape_prose_path(hint);
-            body.push_str(&format!(
-                "<red><b>Invalid Agent:</b></red> the {file_link} references an invalid Agent provider <cyan>`{escaped}`</cyan>. Choose from the installed agents on this host:"
-            ));
+            let mut body = invalid_agent_message(hint, file_link);
             if installed.is_empty() {
                 body.push_str("\n\n<i><dim>(no agents are installed)</dim></i>");
             } else {
@@ -984,85 +974,20 @@ fn render_agent_resolution_failed_body(
                     body.push_str(&format!("\n- {provider}"));
                 }
             }
+            body
         }
-        AgentResolutionState::SingleNotInstalled { provider } => {
-            body.push_str(&format!(
-                "<yellow><b>Agent Not Installed:</b></yellow>(<dim>{provider}</dim>) \
-                 the Markdown document's <inverse>agent</inverse> specifies an Agent platform \
-                 which is not installed on this host. When run interactively, the caller will \
-                 be asked to choose an Agent; otherwise the run aborts with this message."
-            ));
-        }
-        AgentResolutionState::ListMultipleInstalled {
-            installed: suggested_installed,
-            not_installed,
-            invalid,
-        } => {
-            body.push_str(
-                "Multiple suggested agents are installed; the interactive picker would ask \
-                 the caller to choose one of the following:"
-            );
-            for provider in suggested_installed {
-                body.push_str(&format!("\n- {provider}"));
-            }
-            if !not_installed.is_empty() {
-                body.push_str(
-                    "\n\nThe following suggested agents are valid but <i><dim>not installed</dim></i>:"
-                );
-                for provider in not_installed {
-                    body.push_str(&format!("\n- <dim>{provider}</dim>"));
-                }
-            }
-            if !invalid.is_empty() {
-                body.push_str(
-                    "\n\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:"
-                );
-                for hint in invalid {
-                    body.push_str(&format!("\n- <cyan>`{}`</cyan>", escape_prose_path(hint)));
-                }
-            }
-            body.push_str(
-                "\n\n<i>Run interactively to choose, or pass an explicit provider flag.</i>"
-            );
-        }
-        AgentResolutionState::ListOneInstalled { .. } => {
-            // This state auto-selects silently and should never abort.
-            body.push_str(&format!(
-                "Agent resolution unexpectedly aborted for {file_link} despite an auto-selectable suggestion."
-            ));
-        }
-        AgentResolutionState::ZeroInstalledList {
-            not_installed,
-            invalid,
-        } => {
-            body.push_str(
-                "None of the suggested agents are installed/valid; the caller would choose \
-                 from all installed agents when run interactively, but the current session \
-                 is not interactive:"
-            );
-            if !not_installed.is_empty() {
-                body.push_str("\n\nSuggested-but-not-installed agents:");
-                for provider in not_installed {
-                    body.push_str(&format!("\n- <dim>{provider}</dim>"));
-                }
-            }
-            if !invalid.is_empty() {
-                body.push_str(
-                    "\n\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:"
-                );
-                for hint in invalid {
-                    body.push_str(&format!("\n- <cyan>`{}`</cyan>", escape_prose_path(hint)));
-                }
-            }
-        }
-        AgentResolutionState::Selected { provider } => {
-            body.push_str(&format!(
-                "Agent resolution unexpectedly aborted for {file_link} when <b>{provider}</b> \
-                 was already selected."
-            ));
-        }
+        // Auto-selecting states never abort; keep a diagnostic if they
+        // somehow reach this path.
+        AgentResolutionState::ListOneInstalled { .. } => format!(
+            "Agent resolution unexpectedly aborted for {file_link} despite an auto-selectable suggestion."
+        ),
+        AgentResolutionState::Selected { provider } => format!(
+            "Agent resolution unexpectedly aborted for {file_link} when <b>{provider}</b> was already selected."
+        ),
+        // Every other prompting state aborts with the same breakdown the
+        // dry-run table predicts and the TTY path shows.
+        other => agent_state_breakdown(other),
     }
-    body
 }
 
 fn render_sequence_missing_properties_block(
@@ -1456,6 +1381,81 @@ mod tests {
         };
         let rendered = err.to_string();
         assert!(rendered.contains("3 step(s)"), "got: {rendered}");
+    }
+
+    // -------------------------------------------------------------------------
+    // Agent-resolution no-TTY abort body parity with the dry-run / TTY message
+    // -------------------------------------------------------------------------
+
+    use super::super::agent_message::{agent_state_breakdown, invalid_agent_message};
+    use super::super::types::AgentResolutionState;
+
+    const FILE_LINK: &str = "<a href=\"file:///doc.md\">doc.md</a>";
+
+    #[test]
+    fn no_tty_no_agent_body_matches_canonical_breakdown() {
+        let state = AgentResolutionState::NoAgent;
+        let body = render_agent_resolution_failed_body(&state, &[], FILE_LINK);
+        assert_eq!(body, agent_state_breakdown(&state));
+    }
+
+    #[test]
+    fn no_tty_not_installed_body_matches_canonical_breakdown() {
+        let state = AgentResolutionState::SingleNotInstalled {
+            provider: Provider::Gemini,
+        };
+        let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
+        assert_eq!(body, agent_state_breakdown(&state));
+    }
+
+    #[test]
+    fn no_tty_list_multiple_body_matches_canonical_breakdown() {
+        // Regression: the old body used "the interactive picker would ask …",
+        // which drifted from the dry-run cell wording.
+        let state = AgentResolutionState::ListMultipleInstalled {
+            installed: vec![Provider::Claude, Provider::Codex],
+            not_installed: vec![Provider::Gemini],
+            invalid: vec!["bad".into()],
+        };
+        let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
+        assert_eq!(body, agent_state_breakdown(&state));
+        assert!(
+            body.contains("choose interactively between suggested Agents"),
+            "got: {body}"
+        );
+        assert!(!body.contains("the interactive picker would ask"), "got: {body}");
+    }
+
+    #[test]
+    fn no_tty_zero_installed_body_matches_canonical_breakdown() {
+        // Regression: the old body appended "the current session is not
+        // interactive", which the TTY/dry-run message never showed.
+        let state = AgentResolutionState::ZeroInstalledList {
+            not_installed: vec![Provider::Gemini],
+            invalid: vec!["bad".into()],
+        };
+        let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
+        assert_eq!(body, agent_state_breakdown(&state));
+        assert!(!body.contains("not interactive"), "got: {body}");
+    }
+
+    #[test]
+    fn no_tty_single_invalid_body_is_imperative_message_plus_installed_list() {
+        let state = AgentResolutionState::SingleInvalid {
+            hint: "nope".into(),
+        };
+        let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
+        assert!(body.starts_with(&invalid_agent_message("nope", FILE_LINK)), "got: {body}");
+        assert!(body.contains(&format!("- {}", Provider::Claude)), "got: {body}");
+    }
+
+    #[test]
+    fn no_tty_single_invalid_body_notes_no_agents_when_none_installed() {
+        let state = AgentResolutionState::SingleInvalid {
+            hint: "nope".into(),
+        };
+        let body = render_agent_resolution_failed_body(&state, &[], FILE_LINK);
+        assert!(body.contains("no agents are installed"), "got: {body}");
     }
 
     #[test]
