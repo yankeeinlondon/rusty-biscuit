@@ -12,7 +12,8 @@ the tree into concrete output.
 ## Core Types
 
 - **`RenderNode`** — a node with a `kind` (`NodeKind`), a `SourceSpan`, and
-  `NodeAttrs` (id / classes / `data` map).
+  `NodeAttrs` (`id` / `classes` plus typed sparse fields — see
+  [Render Hints](#render-hints)).
 - **`NodeKind`** — 27 block and inline variants: `Root`, `Heading`,
   `Section`, `Paragraph`, `BlockQuote`, `List`, `ListItem`, `Code`,
   `ThematicBreak`, `Table`, `TableRow`, `TableCell`, `FootnoteDefinition`,
@@ -87,33 +88,89 @@ converts `RenderableTerminalContent` into tree nodes:
 
 ## Render Hints
 
-Presentational hints ride on `NodeAttrs.data` under namespaced keys via
-`HintNamespace` (`LAYOUT`, `STYLE`, `LIST`, `TABLE`, `CODE`, `TERMINAL`,
-`WIDGET_PROGRESS`, `WIDGET_COLUMNS`). `NodeAttrs::set_hint` / `get_hint` /
-`remove_hint` are the low-level accessors; typed helper structs wrap them:
+First-class presentation lives in **typed sparse fields** on `NodeAttrs`, not in
+the `data` bag — so a renderer reads a hint with no serde round-trip, clone, or
+key formatting. The render-tree JSON these fields serialize to is **same-version**
+serde output (for debug, inspection, and persistence); it is *not* a promised
+cross-version durable format. The fields:
 
-- **`Layout`** — margins, alignment, max-width, word wrap. Stored via
-  `NodeAttrs::set_layout` / read with `NodeAttrs::layout`; permitted on
-  block-level nodes only. See `layout.md`.
-- **`Style`** — color, background, emphasis, border, fill. Stored via
-  `NodeAttrs::set_style` / read with `NodeAttrs::style`; permitted on block
-  nodes and inline `Span` nodes. `Style::inherited_from` cascades the text
-  appearance fields (`color`, `emphasis`) only. See `style.rs`.
-- **`ListRenderHints`** — bullet, hanging indent, child indent.
-- **`CodeRenderHints`** — header row, language label, highlight flag.
-- **`ProgressHints`** — value, bar width, glyphs, brackets.
-- **`ColumnsHints`** / **`ColumnWidthKind`** — gap, left width, `left_count`,
-  stack threshold (two-column layout, carried on a `BlockQuote` node).
-- **`ListMarkerPolicy`**, **`TaskHints`**, table title/caption hints, and
-  table-cell serialization rules — approved Stage 2/3 additions that let
-  filesystem trees, Todo states, and table metadata stay semantic instead of
-  baking terminal glyphs or Markdown delimiters into text.
-- **`TableColumnHints`** / **`TableCellHints`** / **`TableTerminalHints`** —
-  per-column width/conditional/drop metadata, per-cell typed value and
-  alignment, terminal striping and cursor preference.
+- **`layout: Option<Box<Layout>>`** — margins, alignment, max-width, word wrap.
+  Set via `NodeAttrs::set_layout`; read with `NodeAttrs::layout` (clone) or
+  `layout_ref` (borrowed, hot path). Permitted on block-level nodes only. See
+  `layout.md`.
+- **`style: Option<Box<Style>>`** — color, background, emphasis, border. Set via
+  `NodeAttrs::set_style`; read with `NodeAttrs::style` / `style_ref`. Permitted
+  on block nodes and inline `Span` nodes. `Style::inherited_from` cascades the
+  text-appearance fields (`color`, `emphasis`) only. See `style.md`.
+- **`sequence_join: Option<SequenceJoin>`** — child-sequence join policy
+  (`Root` nodes only).
+- **`list_marker_policy: ListMarkerPolicy`** — list marker presentation; the
+  default policy serializes to nothing.
+- **`component: Option<Box<ComponentHints>>`** — the per-kind hint group (below).
+- **`data: BTreeMap<String, serde_json::Value>`** — **extension namespaces only**
+  (`darkmatter.hr.*`, `darkmatter.li.*`). `set_hint` / `get_hint` /
+  `remove_hint` and the `HintNamespace` wrapper remain for package-local
+  extension data. Stale `renderable.*` keys in `data` are a **validation error**
+  (see [Validation](#diagnostics-and-validation)) — they are not migrated into
+  the typed fields.
 
-`HintNamespace` is a transparent `&'static str` wrapper, so other crates can
-define their own namespace roots.
+### `ComponentHints`
+
+A node carries at most one `ComponentHints`, matched to its `NodeKind`. Its
+variants wrap the per-component hint structs, so only nodes of the matching kind
+pay for the box:
+
+- **`List(ListRenderHints)`** — bullet, hanging indent, child indent.
+- **`Code(CodeRenderHints)`** — header row, language label, highlight flag.
+- **`Progress(ProgressHints)`** — value, bar width, glyphs, brackets, colors.
+- **`Columns(ColumnsHints)`** / **`ColumnWidthKind`** — gap, left width,
+  `left_count`, stack threshold (two-column layout, carried on a `BlockQuote`).
+- **`Task(TaskHints)`** / **`TaskState`** — richer Todo state that degrades to a
+  GFM checkbox in Markdown.
+- **`Table(TableHints)`** — grouped table hints: `columns` (a
+  `BTreeMap<usize, TableColumnHints>` keyed per column index), `terminal`
+  (`TableTerminalHints` striping / cursor preference), and `title`. The
+  per-column, terminal, and title setters are co-resident — setting one does not
+  clobber the others.
+- **`TableCell(TableCellHints)`** — per-cell typed value and alignment.
+
+The accessor names and signatures (`set_list_hints` / `list_hints`,
+`set_table_column_hints(i, …)` / `table_column_hints(i)`, etc.) are unchanged
+from the bag era — only their bodies switched to typed-field reads, plus
+`*_ref` borrowed variants (`list_hints_ref`, `code_hints_ref`, `style_ref`,
+`layout_ref`) for renderer hot paths.
+
+## Inheritance Resolver — `InheritedStyle`
+
+`InheritedStyle` is the single resolver every render fold threads to push
+text appearance down the tree, replacing each renderer's bespoke
+color/emphasis threading. The inheritance rule lives in exactly one place:
+
+```rust
+let root = InheritedStyle::root();
+// `enter` returns the child context to thread into this node's children plus
+// the full effective Style to apply to the node itself.
+let (child_ctx, effective) = root.enter(node.attrs.style_ref());
+```
+
+Only `Style::color` and `Style::emphasis` inherit; the box-painting fields
+(`background`, `border`) and geometry never do. The node's own box-painting is
+layered onto its `effective` style but is cleared from the `child_ctx` carried
+into descendants. `effective()` exposes the accumulated text appearance for a
+renderer that must merge a derived style (e.g. a heading's intrinsic emphasis)
+before folding a subtree. The terminal fold in `biscuit-terminal`
+(`render_tree::render`) threads an `InheritedStyle` rather than reconstructing
+the push-down by hand.
+
+## Performance Gate
+
+The typed fields exist so that **a fold round-trips zero renderable-owned hints
+through `data`**. A structural test gate enforces this: a `#[cfg(test)]`
+namespace-partitioned counter (`HINT_ACCESSES`) bumps on every `set_hint` /
+`get_hint` / `remove_hint`, and the gate folds a styled corpus and asserts the
+`renderable.*` slot stayed at zero (the extension slot is non-zero, proving the
+counter works). Any accessor that reaches back into the bag for a first-class
+hint fails the gate.
 
 ## CodeRenderer
 
@@ -144,7 +201,11 @@ pub trait CodeRenderer {
 - **`Rendered<T>`** — a render result carrying output plus diagnostics.
 - **`RenderStrictness`** — `Strict` / `Warn` / `Lossy`.
 - **`RenderError`** — a fatal render failure.
-- **`validate`** / **`ensure_valid`** — structural-invariant checks.
+- **`validate`** / **`ensure_valid`** — structural-invariant checks. These
+  enforce typed-field placement (`Layout` block-only, `sequence_join` Root-only,
+  `task_hints` ListItem-only, `table_title` Table-only) and reject any stale
+  `renderable.*` key left in `data` — first-class hints must be typed fields,
+  while other namespaces (`darkmatter.*`) are allowed.
 
 ## Tree Renderers
 

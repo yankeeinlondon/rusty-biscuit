@@ -155,8 +155,10 @@ inner gutter is `Layout.padding` + `background`; a band hugging the text is
 
 ## Carrying Style on the Render Tree
 
-`Style` is stored on a node via `NodeAttrs::set_style` (the `renderable.style`
-hint namespace) and recovered with `NodeAttrs::style`.
+`Style` is stored on a node as the typed `NodeAttrs::style` sparse field
+(`Option<Box<Style>>`) via `NodeAttrs::set_style`, and recovered with
+`NodeAttrs::style` (clone) or `NodeAttrs::style_ref` (borrowed, hot path) — no
+serde round-trip through the `data` bag.
 
 ```rust
 use renderable::style::Style;

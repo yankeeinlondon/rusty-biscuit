@@ -53,9 +53,13 @@ Three types form the model:
   - `span` carries provenance — which source the node came from, and an optional
     byte range, so diagnostics and future transforms can point back at the
     original text.
-  - `attrs` (`NodeAttrs`) carries identity (`id`), semantic `classes`,
-    namespaced extension `data`, and an optional block-level `Layout` and
-    `Style` (see [Layout and style](#layout-and-style-on-the-tree)).
+  - `attrs` (`NodeAttrs`) carries identity (`id`) and semantic `classes`
+    alongside **typed sparse fields** — `layout`, `style`, `sequence_join`,
+    `list_marker_policy`, and the per-kind `component` hint group (see
+    [Layout and style](#layout-and-style-on-the-tree)). Reads cost no serde
+    round-trip. The `data` map is reserved for package-local extension
+    namespaces (`darkmatter.*`); a stale `renderable.*` key in `data` is a
+    validation error.
 - **`NodeKind`** — the payload enum (~27 variants) covering document structure.
   Grouped by role:
   - *Block structure:* `Root`, `Section` (a heading grouped with its body),

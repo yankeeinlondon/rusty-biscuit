@@ -163,8 +163,10 @@ LayoutError::EmptyPerTarget         // empty PerTarget map
 
 ## Carrying Layout on the Render Tree
 
-`Layout` is stored on a node via `NodeAttrs::set_layout` and recovered with
-`NodeAttrs::layout`.
+`Layout` is stored on a node as the typed `NodeAttrs::layout` sparse field
+(`Option<Box<Layout>>`) via `NodeAttrs::set_layout`, and recovered with
+`NodeAttrs::layout` (clone) or `NodeAttrs::layout_ref` (borrowed, hot path) —
+no serde round-trip through the `data` bag.
 
 ```rust
 use renderable::layout::Layout;

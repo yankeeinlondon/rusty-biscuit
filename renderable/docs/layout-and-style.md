@@ -130,12 +130,14 @@ tree the renderers lower it as-is. See §5 for why this matters.
 
 ## 3. Layout on the render tree
 
-`Layout` rides on a block `RenderNode` via `NodeAttrs`, serialized as JSON
-under the layout hint namespace:
+`Layout` rides on a block `RenderNode` as the typed `NodeAttrs::layout` sparse
+field (`Option<Box<Layout>>`), not as a serialized `data`-bag entry — so a
+renderer reads it with no serde round-trip:
 
 ```rust
 node.attrs.set_layout(&layout);
-let recovered: Option<Layout> = node.attrs.layout();
+let recovered: Option<Layout> = node.attrs.layout();   // clone
+let borrowed: Option<&Layout> = node.attrs.layout_ref(); // hot path, no clone
 ```
 
 `TreeRenderable::tree_layout(&self) -> Option<Layout>` is the optional hook a
@@ -264,14 +266,19 @@ adaptation wrapper, composed with `TargetValue` for color-bearing fields as
 
 ### Style on the render tree
 
-`Style` rides on `NodeAttrs` under the `renderable.style` hint namespace, with
-`set_style` / `style` accessors mirroring `set_layout` / `layout`. Unlike
-`Layout`, `Style` may attach to block nodes **and** inline `Span` nodes.
+`Style` rides on `NodeAttrs` as the typed `style` sparse field
+(`Option<Box<Style>>`), with `set_style` / `style` / `style_ref` accessors
+mirroring `set_layout` / `layout` / `layout_ref`. Unlike `Layout`, `Style` may
+attach to block nodes **and** inline `Span` nodes.
 
 Inheritance is **limited**: only the text-appearance fields — `color` and
 `emphasis` — cascade through tree traversal (`Style::inherited_from`). The
 box-painting fields — `background` and `border` — never inherit and stay
-explicit on the node that paints them.
+explicit on the node that paints them. Every render fold threads this push-down
+through one shared resolver, `renderable::tree::InheritedStyle`: `enter` returns
+both the effective `Style` for the current node and the child context to thread
+into its descendants, so the inheritance rule lives in exactly one place rather
+than being re-implemented per renderer.
 
 ### Per-target consumption
 

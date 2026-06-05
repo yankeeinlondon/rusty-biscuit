@@ -1,3 +1,64 @@
+---
+source_files_during_phase_1:
+  - renderable/src/tree/attrs.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - renderable/src/tree/attrs.rs
+  - renderable/src/tree/mod.rs
+  - renderable/src/tree/validate.rs
+  - darkmatter/lib/tests/snapshots/render_tree_roundtrip__document_json_surface.snap
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - renderable/src/tree/validate.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - renderable/src/tree/inherit.rs
+  - renderable/src/tree/mod.rs
+  - biscuit-terminal/lib/src/render_tree/render.rs
+  - biscuit-terminal/lib/tests/table_parity.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - renderable/src/tree/attrs.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages_phase_5:
+  - renderable
+source_files_during_phase_6:
+  - darkmatter/lib/tests/snapshots/render_tree_roundtrip__document_json_surface.snap
+docs_updated_during_phase_6:
+  - renderable/docs/tree-rendering.md
+  - renderable/docs/layout-and-style.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/renderable/tree.md
+  - .claude/skills/renderable/style.md
+  - .claude/skills/renderable/layout.md
+packages_phase_6:
+  - renderable
+  - darkmatter
+source_files_during_phase_7: []
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+packages_phase_7:
+  - renderable
+  - biscuit-terminal
+  - darkmatter
+packages:
+  - renderable
+  - darkmatter
+  - biscuit-terminal
+---
+
 # Tree Attrs Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan phase-by-phase. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -42,7 +103,7 @@ The 13 hint types currently derive **no** serde (they were hand-serialized into 
 **Files:**
 - Modify: `renderable/src/tree/attrs.rs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to the `#[cfg(test)] mod tests` in `attrs.rs`:
 
@@ -75,12 +136,12 @@ Add to the `#[cfg(test)] mod tests` in `attrs.rs`:
 
 (Use the real default-constructible variants; adjust `SequenceJoin::Tight` to an actual variant name if it differs.)
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p renderable tree::attrs -- token_enums hint_structs`
 Expected: FAIL — `the trait \`Serialize\` is not implemented` / `Deserialize`.
 
-- [ ] **Step 3: Add serde to the plain data structs**
+- [x] **Step 3: Add serde to the plain data structs**
 
 Append `Serialize, Deserialize` to the derive lines of: `TaskHints`, `ListRenderHints`, `CodeRenderHints`, `ProgressHints`, `ColumnsHints`, `TableColumnHints`, `TableCellHints`, `TableTerminalHints`. Example:
 
@@ -89,7 +150,7 @@ Append `Serialize, Deserialize` to the derive lines of: `TaskHints`, `ListRender
 pub struct ListRenderHints { /* unchanged fields */ }
 ```
 
-- [ ] **Step 4: Implement serde for the token enums via their tokens**
+- [x] **Step 4: Implement serde for the token enums via their tokens**
 
 For each token enum (`SequenceJoin`, `ListMarkerPolicy`, `TaskState`, `ColumnConditional`, `ColumnWidthKind`), add manual impls that delegate to the existing `to_token`/`from_token` so the compact format is preserved:
 
@@ -110,7 +171,7 @@ impl<'de> serde::Deserialize<'de> for SequenceJoin {
 
 Repeat the pattern for the other four. (`to_token` returns `&'static str` for these; `ColumnConditional::to_token` returns `String` per attrs.rs — use it directly.)
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cargo test -p renderable tree::attrs`
 Expected: PASS.
@@ -132,7 +193,7 @@ This is the storage switch. Add the typed fields and the `ComponentHints` groupi
 - Modify: `renderable/src/tree/attrs.rs`
 - Modify: `renderable/src/tree/mod.rs` (re-export `ComponentHints`, `TableHints`)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `attrs.rs` tests:
 
@@ -175,12 +236,12 @@ Add to `attrs.rs` tests:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p renderable tree::attrs -- typed_layout table_column_hints default_node`
 Expected: FAIL — `no field \`layout\` on type \`NodeAttrs\`` (and `data` not empty, because accessors still write the bag).
 
-- [ ] **Step 3: Add `ComponentHints` + `TableHints`**
+- [x] **Step 3: Add `ComponentHints` + `TableHints`**
 
 In `attrs.rs` (above `NodeAttrs`):
 
@@ -209,7 +270,7 @@ pub enum ComponentHints {
 
 Re-export both from `renderable/src/tree/mod.rs`.
 
-- [ ] **Step 4: Add the typed fields to `NodeAttrs`**
+- [x] **Step 4: Add the typed fields to `NodeAttrs`**
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -243,7 +304,7 @@ impl ListMarkerPolicy {
 
 (Confirm `id`/`classes` keep their existing serde attrs; only add fields.)
 
-- [ ] **Step 5: Rewrite the accessor bodies to typed-field access**
+- [x] **Step 5: Rewrite the accessor bodies to typed-field access**
 
 Switch each accessor pair from `set_hint`/`get_hint` to the typed field. The `data` bag is no longer touched for `renderable.*` hints. Targets:
 
@@ -333,12 +394,12 @@ pub fn list_hints(&self) -> ListRenderHints {
 
 Apply the same shape to `code_hints`, `progress_hints`, `columns_hints`, `task_hints`, `table_cell_hints`, `table_terminal_hints` (the last two route through `table_hints_mut()` for terminal/title). Add `*_hints_ref` borrowed variants where a renderer reads them on the hot path (`list_hints_ref`, `code_hints_ref`, `style_ref`).
 
-- [ ] **Step 6: Run the renderable tests + existing accessor doctests**
+- [x] **Step 6: Run the renderable tests + existing accessor doctests**
 
 Run: `cargo test -p renderable tree::attrs`
 Expected: PASS — the new tests plus the existing accessor doctests/round-trip tests still pass against the typed storage.
 
-- [ ] **Step 7: Build the dependents (accessor signatures unchanged → should be clean)**
+- [x] **Step 7: Build the dependents (accessor signatures unchanged → should be clean)**
 
 Run: `cargo build -p biscuit-terminal -p darkmatter`
 Expected: clean (the accessor surface is identical; only bodies changed). Fix any stray direct `.data` reads of `renderable.*` keys the compiler/clippy surfaces by routing them through the typed accessor.
@@ -357,7 +418,7 @@ git commit -m "feat(renderable): store NodeAttrs layout/style/hints as typed spa
 **Files:**
 - Modify: `renderable/src/tree/validate.rs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `validate.rs` tests:
 
@@ -385,12 +446,12 @@ Add to `validate.rs` tests:
 
 (Use the existing test helpers in `validate.rs`; `single_paragraph_doc`/`root_mut` may need to match local helper names.)
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p renderable tree::validate -- stale_renderable darkmatter_extension`
 Expected: FAIL (no such validation yet).
 
-- [ ] **Step 3: Update validation**
+- [x] **Step 3: Update validation**
 
 In `validate.rs`:
 - Keep the placement rules (`sequence_join()` Root-only, `task_hints()` ListItem-only, `table_title()` Table-only) — they now read typed fields and need no change.
@@ -409,7 +470,7 @@ for key in node.attrs.data.keys() {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cargo test -p renderable tree::validate`
 Expected: PASS (new + existing placement tests).
@@ -430,7 +491,7 @@ git commit -m "feat(renderable): validate typed NodeAttrs; reject stale renderab
 - Modify: `renderable/src/tree/mod.rs` (module + re-export)
 - Modify: `biscuit-terminal/lib/src/render_tree/render.rs`
 
-- [ ] **Step 1: Write the failing resolver tests**
+- [x] **Step 1: Write the failing resolver tests**
 
 Create `renderable/src/tree/inherit.rs`:
 
@@ -470,12 +531,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `cargo test -p renderable tree::inherit`
 Expected: FAIL — `cannot find type InheritedStyle`.
 
-- [ ] **Step 3: Implement the resolver**
+- [x] **Step 3: Implement the resolver**
 
 Prepend to `inherit.rs`:
 
@@ -518,12 +579,12 @@ impl InheritedStyle {
 
 Wire `mod inherit; pub use inherit::InheritedStyle;` into `renderable/src/tree/mod.rs`.
 
-- [ ] **Step 4: Run resolver tests**
+- [x] **Step 4: Run resolver tests**
 
 Run: `cargo test -p renderable tree::inherit`
 Expected: PASS.
 
-- [ ] **Step 5: Move `biscuit-terminal`'s fold onto the resolver**
+- [x] **Step 5: Move `biscuit-terminal`'s fold onto the resolver**
 
 In `biscuit-terminal/lib/src/render_tree/render.rs`, replace the `Writer.effective: Style` field and its manual threading (`std::mem::take` + reconstructing `Style { color, emphasis, ..default }`) with an `InheritedStyle`:
 - `effective: Style` → `inherited: InheritedStyle` (init `InheritedStyle::root()`).
@@ -533,7 +594,7 @@ In `biscuit-terminal/lib/src/render_tree/render.rs`, replace the `Writer.effecti
 
 Keep behavior identical; the resolver encapsulates the same color+emphasis push-down.
 
-- [ ] **Step 6: Run terminal tests**
+- [x] **Step 6: Run terminal tests**
 
 Run: `cargo test -p biscuit-terminal render_tree`
 Expected: PASS. If an inheritance snapshot shifts, confirm it is identical text appearance (the resolver is behavior-preserving); a real diff is a bug to fix, not to re-baseline.
@@ -553,7 +614,7 @@ git commit -m "feat(renderable): add shared InheritedStyle resolver; adopt in te
 - Modify: `renderable/src/tree/attrs.rs` (test-only counter hook)
 - Create test: `renderable/tests/attrs_perf_gate.rs` (or a `#[cfg(test)]` module in `attrs.rs`)
 
-- [ ] **Step 1: Add the test-only counter hook**
+- [x] **Step 1: Add the test-only counter hook**
 
 In `attrs.rs`, behind `#[cfg(test)]`, add a thread-local that `set_hint`/`get_hint`/`remove_hint` bump, classified by namespace:
 
@@ -580,7 +641,7 @@ fn record_hint_access(ns: HintNamespace) {
 
 Add `#[cfg(test)] record_hint_access(ns);` at the top of `set_hint`, `get_hint`, and `remove_hint`.
 
-- [ ] **Step 2: Write the gate test**
+- [x] **Step 2: Write the gate test**
 
 ```rust
     #[test]
@@ -604,7 +665,7 @@ Add `#[cfg(test)] record_hint_access(ns);` at the top of `set_hint`, `get_hint`,
 
 Provide `styled_corpus_document()` building a small `Document` exercising layout, style (with inheritance), a list (marker policy + list hints), a table (column + title), a code block, and one `darkmatter.hr` extension hint, so the `_extension` count is non-zero (proving the counter works) while `renderable_owned` is zero.
 
-- [ ] **Step 3: Run to verify it fails, then passes**
+- [x] **Step 3: Run to verify it fails, then passes**
 
 Run: `cargo test -p renderable fold_does_zero`
 Expected: FIRST run may FAIL if any accessor still touches the bag — fix that accessor; then PASS.
@@ -628,21 +689,21 @@ git commit -m "test(renderable): structural perf gate — zero renderable-owned 
 - Modify: `.claude/skills/renderable/tree.md` (+ any `attrs`/`NodeAttrs` mention), `renderable/docs/layout-and-style.md` / tree docs
 - Re-accept: `darkmatter/lib/tests/render_tree_roundtrip.rs` JSON-surface snapshots
 
-- [ ] **Step 1: Update docs/skills**
+- [x] **Step 1: Update docs/skills**
 
 Describe the typed `NodeAttrs` (layout/style/sequence_join/list_marker_policy/component/data), the `ComponentHints` grouping (incl. the index-keyed `TableHints.columns`), the `InheritedStyle` resolver, and the perf-gate invariant. State explicitly: render-tree JSON is **same-version** serde output (debug/inspection/persistence), **not** a promised cross-version durable format; `data` is for package-local extension namespaces only. Remove any claim that layout/style/hints are stored as JSON in `data`.
 
 Run: `rg -n 'stored as JSON|data: BTreeMap|renderable\.layout\.layout' .claude/skills/renderable renderable/docs`
 Expected: no stale storage claims remain.
 
-- [ ] **Step 2: Re-accept the changed JSON-surface snapshots**
+- [x] **Step 2: Re-accept the changed JSON-surface snapshots**
 
 The `data`-keyed hint JSON is gone from the wire; the document-JSON-surface snapshots change (the rendered *Markdown* snapshots must NOT). Inspect and accept only the JSON-surface diffs:
 
 Run: `cargo test -p darkmatter --test render_tree_roundtrip` then `cargo insta review`
 Expected: only `document_json_surface` / NodeAttrs-shape snapshots differ (typed fields replace `data` keys); rendered-output snapshots are unchanged. Accept the JSON-surface diffs; investigate any rendered-output diff as a regression.
 
-- [ ] **Step 3: Regenerate skill hashes**
+- [x] **Step 3: Regenerate skill hashes** (no-op — the renderable skill files carry no `hash:` frontmatter)
 
 For each edited skill file: `md hash .claude/skills/renderable/tree.md` (etc.) and update its `hash:` frontmatter.
 
@@ -657,12 +718,12 @@ git commit -m "docs(renderable): document typed NodeAttrs, ComponentHints, inher
 
 ## Phase 7: Whole-workspace verification
 
-- [ ] **Step 1: Acceptance greps**
+- [x] **Step 1: Acceptance greps**
 
 Run: `rg -n 'set_hint\(HintNamespace::(LAYOUT|STYLE|LIST|TABLE|CODE|TERMINAL|WIDGET_' renderable/src --type rust`
 Expected: only `data`-extension/stale-input test code (no first-class writes).
 
-- [ ] **Step 2: Build + test the affected crates**
+- [x] **Step 2: Build + test the affected crates**
 
 Run: `cargo build --workspace && cargo test -p renderable -p biscuit-terminal -p darkmatter`
 Expected: PASS. Rendered-output snapshots unchanged; only JSON-surface snapshots were re-baselined in Phase 6.
