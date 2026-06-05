@@ -1,5 +1,5 @@
 ---
-description: Target-agnostic appearance configuration in the renderable library — Style, PerMode, TextEmphasis, Border, and Fill.
+description: Target-agnostic appearance configuration in the renderable library — Style, PerMode, TextEmphasis, Border, and Background.
 ---
 
 # Style Module
@@ -38,9 +38,12 @@ let style = Style {
 };
 ```
 
-`Style::default()` is all-none / all-false; `Style::is_empty()` reports it.
+`Style::default()` is all-none / all-false; `Style::is_empty()` reports it. A
+`Style` carrying only `Background::subtle()` / `pronounced()` is **not** empty.
 
-Fields: `color`, `background`, `emphasis`, `border`, `fill`.
+Fields: `color`, `background`, `emphasis`, `border`. (`background` paints the
+component's content box *and* its `Layout.padding` box, matching CSS — there is
+no separate `fill` field.)
 
 ### Inheritance
 
@@ -49,8 +52,8 @@ Only the **text-appearance** fields inherit through render-tree traversal:
 - `color` — a `None` child color falls back to the parent's color.
 - `emphasis` — the union of the parent's and child's emphasis.
 
-`background`, `border`, and `fill` are box-painting properties and **never
-inherit** — they stay explicit on the node that paints them.
+`background` and `border` are box-painting properties and **never inherit** —
+they stay explicit on the node that paints them.
 `Style::inherited_from(&parent)` computes the effective child style.
 
 ## PerMode&lt;T&gt;
@@ -123,14 +126,32 @@ let border = Border {
 - `BorderSides`: `All` (default), `None`, or per-side `Sides { top, right,
   bottom, left }` — addresses each edge without a separate `LeftBorder` type.
 
-## Fill
+## Background
 
-How a component paints its band of available width — does **not** inherit.
-`Fill` models painted-band *behavior* and is intentionally separate from
-`Style::background` (plain adaptive color).
+`Background` is a zero-sized **constructor namespace**, not a stored type. Its
+constructors return the `TargetValue<PerMode<Color>>` value `Style.background`
+already holds, so serialized `Style.background` still contains only a color.
+They preserve the adaptive tints the deleted `Fill` intensities supplied
+implicitly.
 
-- `FillIntensity`: `Transparent`, `Subtle` (default), `Pronounced`.
-- `FillBand`: `Full` (default), `Padded`, `Indented`.
+```rust
+use renderable::style::{Style, Background};
+
+let style = Style {
+    background: Some(Background::subtle()),   // faint adaptive tint (former subtle fill tint)
+    ..Style::default()
+};
+Background::pronounced();   // strong adaptive tint (former pronounced fill tint)
+```
+
+- `Background::subtle()` — `rgb(235,235,238)` light / `rgb(30,30,34)` dark.
+- `Background::pronounced()` — `rgb(215,215,220)` light / `rgb(50,50,56)` dark.
+
+The former fill abstraction (its band, intensity, and inset knobs) is
+**deleted**. Its capabilities are expressed with the CSS box model: a painted
+inner gutter is `Layout.padding` + `background`; a band hugging the text is
+`Layout.width: FitContent` + `alignment` + `background`. See
+[Layout Module](./layout.md) for `Width` and `Edges`.
 
 ## Carrying Style on the Render Tree
 
@@ -146,8 +167,10 @@ attrs.set_style(&Style::default());
 assert_eq!(attrs.style(), Some(Style::default()));
 ```
 
-`Style`, `PerMode`, `Border`, `Fill`, and the emphasis leaves all derive
-`serde` with `snake_case` enum casing, so a style serializes with the tree.
+`Style`, `PerMode`, `Border`, and the emphasis leaves all derive `serde` with
+`snake_case` enum casing, so a style serializes with the tree. (serde ignores
+the now-unknown `fill` key, so a render tree serialized before `fill` was
+deleted still deserializes.)
 
 ## Component Style Slots
 
@@ -169,5 +192,6 @@ Browser lowering currently covers `color`, `background`, and `emphasis`:
 inline bold/italic/strikethrough use semantic wrappers, block-level emphasis
 uses CSS declarations, and underline variants, dim, blink, and inverse
 (`filter:invert(1)`) lower to CSS.
-`border` and `fill` are not lowered to Browser CSS yet; Terminal remains the
-only target that renders border glyphs and fill bands.
+`border` is not lowered to Browser CSS yet; Terminal remains the only target
+that renders border glyphs. Terminal/browser painting of the `padding` box and
+`Width::FitContent` is deferred to the renderer-folds spec.

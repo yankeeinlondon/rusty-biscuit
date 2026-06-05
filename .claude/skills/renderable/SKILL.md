@@ -71,8 +71,8 @@ Terminal from the single tree it produces.
 | [HTML Module](./html.md)                  | `HtmlPage` assembly, fragment composition, metadata merging, tag types                                         |
 | [Stylesheet Module](./stylesheet.md)      | Type-safe CSS builder: `CssStyle`, `CssRule`, `Stylesheet`, typed properties and values                        |
 | [Color Module](./color.md)                | Cross-target color system: `Color`, `CssColor`, `WebColor`, `BasicColor`, `Tailwind`, RGB, HDR                 |
-| [Layout Module](./layout.md)              | Target-agnostic layout: `Layout`, `TargetValue`, `Length`, `Margin`, `Alignment`                               |
-| [Style Module](./style.md)                | Target-agnostic appearance: `Style`, `PerMode`, `TextEmphasis`, `Border`, `Fill`                               |
+| [Layout Module](./layout.md)              | Target-agnostic layout: `Layout`, `TargetValue`, `Length`, `Edges`, `Width`, `Alignment`                       |
+| [Style Module](./style.md)                | Target-agnostic appearance: `Style`, `PerMode`, `TextEmphasis`, `Border`, `Background`                          |
 | [Markdown Module](./markdown.md)          | `MarkdownRenderable` trait and style-aware Markdown output                                                     |
 | [Tree Module](./tree.md)                  | Render tree: `RenderNode`, `Document`, `TreeRenderable`, component projection, render hints, `CodeRenderer`, tree renderers |
 | [Migrating a Component to the IR](../../../renderable/docs/migrate-component-to-ir.md) | Canonical recipe — flip-from-bespoke (Variant A) and born-on-the-tree (Variant B), escape-hatch rules, doc-update obligations |
