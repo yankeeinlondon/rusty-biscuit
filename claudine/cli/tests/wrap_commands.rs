@@ -2395,9 +2395,11 @@ fn compose_non_tty_uses_cwd_config_when_source_outside_git() {
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     let plain = strip_ansi(&stderr);
 
+    // With no agent hint and no explicit provider, dry-run shows the
+    // unresolved no-agent state rather than auto-selecting the favorite.
     assert!(
-        plain.contains("Goose"),
-        "non-TTY compose with source outside git should use CWD config favorite; stderr was:\n{plain}"
+        plain.contains("didn't specify the Agent"),
+        "non-TTY compose dry-run should show the no-agent state; stderr was:\n{plain}"
     );
 }
 
@@ -3770,17 +3772,15 @@ exit 99
         .current_dir(workspace.path())
         .args(["compose", md_file.to_str().unwrap()])
         .assert()
-        .success();
+        .code(1);
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     let plain = strip_ansi(&stderr);
+    // Non-TTY with no agent hint aborts with the no-agent message;
+    // the config favorite is no longer used as a non-TTY fallback.
     assert!(
-        plain.contains("Goose"),
-        "repo config favorite should select Goose; stderr was: {plain}"
-    );
-    assert!(
-        args_file.exists(),
-        "goose should have been invoked via the config favorite"
+        plain.contains("didn't specify the Agent"),
+        "non-TTY no-agent should abort with the no-agent message; stderr was: {plain}"
     );
 }
 
@@ -3819,9 +3819,11 @@ fn agent_hint_resolved_early_in_non_tty() {
 
 #[cfg(unix)]
 #[test]
-fn unknown_agent_hint_fails_early_in_non_tty() {
-    // Verifies that an unknown `agent` hint fails during preparation
-    // instead of hanging on interactive selection.
+fn unknown_agent_hint_is_non_fatal_and_aborts_in_non_tty() {
+    // Invalid `agent` values are no longer fatal during preparation.
+    // In non-TTY mode the invalid hint is discarded and the run aborts
+    // because no provider can be resolved, mirroring the no-agent
+    // non-TTY behavior until the Phase 3 live-path messaging lands.
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -3848,7 +3850,7 @@ fn unknown_agent_hint_fails_early_in_non_tty() {
         .args(["compose", md_file.to_str().unwrap()])
         .assert()
         .code(1)
-        .stderr(contains("does not match any known provider"));
+        .stderr(contains("agent resolution failed"));
 }
 
 #[cfg(unix)]
@@ -4543,18 +4545,21 @@ fn sequence_dry_run_concatenates_bodies_with_dividers() {
         "stdout should contain all three composed bodies; stdout was:\n{stdout}"
     );
 
-    // Dividers precede documents 2 and 3, but never the first document.
+    // Horizontal-rule delimiters precede documents 2 and 3, but never the
+    // first document. The old text divider is no longer emitted.
     assert!(
-        stderr.contains("=== Document 2 of 3 ==="),
-        "stderr should carry a divider before document 2; stderr was:\n{stderr}"
+        !stderr.contains("=== Document"),
+        "old text divider must not appear; stderr was:\n{stderr}"
     );
+    let hr_lines: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.len() >= 10 && l.chars().all(|c| c == '╌' || c == '-'))
+        .collect();
+    // Each document emits an HR after its body, plus one HR between docs 2&3.
+    // That's 3 per-document HRs + 2 inter-document HRs = 5 total.
     assert!(
-        stderr.contains("=== Document 3 of 3 ==="),
-        "stderr should carry a divider before document 3; stderr was:\n{stderr}"
-    );
-    assert!(
-        !stderr.contains("=== Document 1 of 3 ==="),
-        "no divider should precede the first document; stderr was:\n{stderr}"
+        hr_lines.len() >= 2,
+        "stderr should contain horizontal-rule delimiters; stderr was:\n{stderr}"
     );
 
     // No provider launched.
@@ -4608,8 +4613,16 @@ fn sequence_dry_run_quiet_and_silent_are_no_op() {
             "{flag} must not suppress the composed bodies; stdout was:\n{stdout}"
         );
         assert!(
-            stderr.contains("=== Document 2 of 2 ==="),
-            "{flag} must not suppress the dry-run divider; stderr was:\n{stderr}"
+            !stderr.contains("=== Document"),
+            "{flag}: old text divider must not appear; stderr was:\n{stderr}"
+        );
+        let hr_lines: Vec<&str> = stderr
+            .lines()
+            .filter(|l| l.len() >= 10 && l.chars().all(|c| c == '╌' || c == '-'))
+            .collect();
+        assert!(
+            hr_lines.len() >= 2,
+            "{flag} must not suppress the dry-run horizontal rules; stderr was:\n{stderr}"
         );
     }
 }
@@ -4712,7 +4725,19 @@ fn compose_dry_run_body_only_on_stdout_metadata_on_stderr() {
         );
     }
 
-    // stderr: frontmatter (YAML) + the metadata table.
+    // stderr: horizontal rule, heading, frontmatter (YAML) + metadata table.
+    let hr_lines: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.len() >= 10 && l.chars().all(|c| c == '╌' || c == '-'))
+        .collect();
+    assert!(
+        !hr_lines.is_empty(),
+        "stderr should contain a horizontal rule; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Frontmatter") && stderr.contains("resolved"),
+        "stderr should carry the 'Frontmatter (resolved):' heading; stderr was:\n{stderr}"
+    );
     assert!(
         stderr.contains("name:") && stderr.contains("description:"),
         "stderr should carry the highlighted frontmatter; stderr was:\n{stderr}"
@@ -4774,6 +4799,10 @@ fn compose_dry_run_quiet_and_silent_are_no_op() {
         assert!(
             stderr.contains("YOLO") && stderr.contains("name:"),
             "{flag} must not suppress the dry-run metadata on stderr; stderr was:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("Frontmatter") && stderr.contains("resolved"),
+            "{flag} must not suppress the dry-run heading on stderr; stderr was:\n{stderr}"
         );
     }
 }
@@ -6368,7 +6397,6 @@ fn compose_opencode_dry_run_calls_opencode_models_and_fails_with_test_double() {
         .args([
             "compose",
             "--opencode",
-            "--dry-run",
             md_file.to_str().unwrap(),
         ])
         .assert()
@@ -6503,7 +6531,6 @@ exit 0
         .args([
             "compose",
             "--opencode",
-            "--dry-run",
             md_file.to_str().unwrap(),
         ])
         .stdout(std::process::Stdio::piped())
