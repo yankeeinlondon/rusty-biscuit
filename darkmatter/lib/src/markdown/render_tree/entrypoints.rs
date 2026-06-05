@@ -1894,8 +1894,10 @@ mod tests {
     fn browser_options_mapping_maps_mermaid_off_to_code() {
         use renderable::tree::BrowserMermaidMode;
 
-        let mut opts = HtmlOptions::default();
-        opts.mermaid_mode = crate::markdown::output::terminal::MermaidMode::Off;
+        let opts = HtmlOptions {
+            mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
+            ..Default::default()
+        };
         let browser_opts = browser_options_from_html_options(&opts);
         assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::Code);
     }
@@ -1908,8 +1910,10 @@ mod tests {
     fn browser_options_mapping_maps_mermaid_image_to_static_svg() {
         use renderable::tree::BrowserMermaidMode;
 
-        let mut opts = HtmlOptions::default();
-        opts.mermaid_mode = crate::markdown::output::terminal::MermaidMode::Image;
+        let opts = HtmlOptions {
+            mermaid_mode: crate::markdown::output::terminal::MermaidMode::Image,
+            ..Default::default()
+        };
         let browser_opts = browser_options_from_html_options(&opts);
         assert_eq!(browser_opts.mermaid_mode, BrowserMermaidMode::StaticSvg);
     }
@@ -1957,8 +1961,10 @@ mod tests {
     /// and Mermaid promotion.
     #[test]
     fn terminal_options_mapping_maps_never_to_off() {
-        let mut opts = TerminalOptions::default();
-        opts.image_mode = crate::markdown::output::terminal::TerminalImageMode::Never;
+        let opts = TerminalOptions {
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
+            ..Default::default()
+        };
         let term_opts = terminal_options_from_terminal_options(&opts);
         assert_eq!(term_opts.context.graphics_mode, GraphicsMode::Off);
         assert!(!term_opts.context.force_graphics);
@@ -1969,8 +1975,10 @@ mod tests {
     /// and inline image rendering when capabilities allow.
     #[test]
     fn terminal_options_mapping_maps_auto_to_rich() {
-        let mut opts = TerminalOptions::default();
-        opts.image_mode = crate::markdown::output::terminal::TerminalImageMode::Auto;
+        let opts = TerminalOptions {
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Auto,
+            ..Default::default()
+        };
         let term_opts = terminal_options_from_terminal_options(&opts);
         assert_eq!(term_opts.context.graphics_mode, GraphicsMode::Rich);
         assert!(!term_opts.context.force_graphics);
@@ -1981,8 +1989,10 @@ mod tests {
     /// bypasses capability detection.
     #[test]
     fn terminal_options_mapping_maps_force_to_rich_with_force_flag() {
-        let mut opts = TerminalOptions::default();
-        opts.image_mode = crate::markdown::output::terminal::TerminalImageMode::Force;
+        let opts = TerminalOptions {
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Force,
+            ..Default::default()
+        };
         let term_opts = terminal_options_from_terminal_options(&opts);
         assert_eq!(term_opts.context.graphics_mode, GraphicsMode::Rich);
         assert!(term_opts.context.force_graphics);
@@ -1995,8 +2005,10 @@ mod tests {
     fn terminal_options_mapping_maps_mermaid_opt_in() {
         use renderable::tree::TerminalMermaidMode;
 
-        let mut image = TerminalOptions::default();
-        image.mermaid_mode = crate::markdown::output::terminal::MermaidMode::Image;
+        let image = TerminalOptions {
+            mermaid_mode: crate::markdown::output::terminal::MermaidMode::Image,
+            ..Default::default()
+        };
         assert_eq!(
             terminal_options_from_terminal_options(&image)
                 .context
@@ -2017,8 +2029,10 @@ mod tests {
     fn terminal_options_mapping_threads_code_theme_name() {
         use crate::markdown::highlighting::ThemePair;
 
-        let mut opts = TerminalOptions::default();
-        opts.code_theme = ThemePair::Dracula;
+        let opts = TerminalOptions {
+            code_theme: ThemePair::Dracula,
+            ..Default::default()
+        };
         let term_opts = terminal_options_from_terminal_options(&opts);
         assert_eq!(
             term_opts.context.code_theme.as_deref(),
@@ -2035,8 +2049,10 @@ mod tests {
         use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
         use crate::markdown::highlighting::ColorMode as DmColorMode;
 
-        let mut opts = TerminalOptions::default();
-        opts.color_mode = DmColorMode::Light;
+        let mut opts = TerminalOptions {
+            color_mode: DmColorMode::Light,
+            ..Default::default()
+        };
         let term_opts = terminal_options_from_terminal_options(&opts);
         assert!(matches!(
             term_opts.context.terminal.color_mode,
@@ -2057,8 +2073,10 @@ mod tests {
     fn terminal_options_mapping_threads_image_base_path() {
         use std::path::PathBuf;
 
-        let mut opts = TerminalOptions::default();
-        opts.base_path = Some(PathBuf::from("/docs/assets"));
+        let opts = TerminalOptions {
+            base_path: Some(PathBuf::from("/docs/assets")),
+            ..Default::default()
+        };
         let term_opts = terminal_options_from_terminal_options(&opts);
         assert_eq!(
             term_opts.context.image_base_path,
@@ -2136,9 +2154,11 @@ mod tests {
         }
 
         let md: Markdown = "> This is a fairly long quoted paragraph that should be forced to wrap onto a second visible line once the Indent(10) fill caps the blockquote width below the page width.\n".into();
-        let mut opts = TerminalOptions::default();
-        opts.max_width = Some(80);
-        opts.color_depth = Some(ColorDepth::TrueColor);
+        let opts = TerminalOptions {
+            max_width: Some(80),
+            color_depth: Some(ColorDepth::TrueColor),
+            ..Default::default()
+        };
 
         let ctx = layout_ctx_with_blockquote_indent();
         let out = render_tree_terminal_with_layout(&md, &opts, &ctx)
@@ -2231,9 +2251,11 @@ mod tests {
         let ctx = decorated_ctx(HashMap::new(), HashMap::new(), Some(hyperlink_style), None);
 
         let md: Markdown = "[go](https://example.com)\n".into();
-        let mut opts = TerminalOptions::default();
-        opts.max_width = Some(80);
-        opts.color_depth = Some(ColorDepth::None);
+        let opts = TerminalOptions {
+            max_width: Some(80),
+            color_depth: Some(ColorDepth::None),
+            ..Default::default()
+        };
 
         let out = render_tree_terminal_with_layout(&md, &opts, &ctx)
             .expect("decorated render")
@@ -2262,9 +2284,11 @@ mod tests {
         let ctx = decorated_ctx(HashMap::new(), HashMap::new(), Some(hyperlink_style), None);
 
         let md: Markdown = "[a very long label](https://example.com)\n".into();
-        let mut opts = TerminalOptions::default();
-        opts.max_width = Some(80);
-        opts.color_depth = Some(ColorDepth::None);
+        let opts = TerminalOptions {
+            max_width: Some(80),
+            color_depth: Some(ColorDepth::None),
+            ..Default::default()
+        };
 
         let out = render_tree_terminal_with_layout(&md, &opts, &ctx)
             .expect("decorated render")
@@ -2289,11 +2313,13 @@ mod tests {
         let ctx = decorated_ctx(HashMap::new(), HashMap::new(), None, None);
 
         let md: Markdown = "![a diagram](diagram.png)\n".into();
-        let mut opts = TerminalOptions::default();
-        opts.max_width = Some(80);
-        opts.color_depth = Some(ColorDepth::None);
-        // Suppress raster so the fallback placeholder path runs deterministically.
-        opts.image_mode = crate::markdown::output::terminal::TerminalImageMode::Never;
+        let opts = TerminalOptions {
+            max_width: Some(80),
+            color_depth: Some(ColorDepth::None),
+            // Suppress raster so the fallback placeholder path runs deterministically.
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
+            ..Default::default()
+        };
 
         let out = render_tree_terminal_with_layout(&md, &opts, &ctx)
             .expect("decorated render")
@@ -2322,9 +2348,11 @@ mod tests {
         let ctx = decorated_ctx(alignments, fills, None, None);
 
         let md: Markdown = "- item body\n".into();
-        let mut opts = TerminalOptions::default();
-        opts.max_width = Some(80);
-        opts.color_depth = Some(ColorDepth::None);
+        let opts = TerminalOptions {
+            max_width: Some(80),
+            color_depth: Some(ColorDepth::None),
+            ..Default::default()
+        };
 
         let out = render_tree_terminal_with_layout(&md, &opts, &ctx)
             .expect("decorated render")

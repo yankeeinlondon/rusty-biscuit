@@ -480,8 +480,10 @@ mod tests {
         // Render via Markdown YAML fence
         let md_content = format!("```yaml\n{}\n```", yaml_content);
         let md: Markdown = md_content.into();
-        let mut opts = TerminalOptions::default();
-        opts.color_depth = Some(ColorDepth::TrueColor);
+        let opts = TerminalOptions {
+            color_depth: Some(ColorDepth::TrueColor),
+            ..Default::default()
+        };
         let md_output = md.as_terminal(opts).unwrap();
 
         // Header parity: both must contain the " yaml " language label.
