@@ -19,7 +19,7 @@
 // `layout/context.rs`).
 #![allow(deprecated)]
 
-use renderable::layout::{Alignment, Length, Margin, TargetValue};
+use renderable::layout::{Alignment, Length, Edges, TargetValue};
 use renderable::style::{PerMode, Style};
 use renderable::tree::{HintNamespace, NodeKind, RenderNode};
 
@@ -169,7 +169,7 @@ fn apply_component_layout(node: &mut RenderNode, ctx: &LayoutContext, component:
     }
 
     let mut layout = node.attrs.layout().unwrap_or_default();
-    layout.margin = Margin {
+    layout.margin = Edges {
         left: cells(left),
         ..layout.margin
     };
@@ -216,7 +216,7 @@ fn apply_lone_image_layout(node: &mut RenderNode, ctx: &LayoutContext, alt: &str
         return;
     }
     let mut layout = node.attrs.layout().unwrap_or_default();
-    layout.margin = Margin {
+    layout.margin = Edges {
         left: cells(left),
         ..layout.margin
     };

@@ -382,7 +382,7 @@ impl DarkmatterPage {
     /// [`TerminalRenderable::layout`] accessor consistent with the builder
     /// state without disturbing the bespoke row-decoration pipeline.
     fn rebuild_layout(&mut self) {
-        use renderable::layout::{Length, Margin as RMargin, TargetValue};
+        use renderable::layout::{Length, Edges as RMargin, TargetValue};
 
         let margin: RMargin = self.margin.into();
         let padding: RMargin = self.padding.into();
@@ -404,7 +404,7 @@ impl DarkmatterPage {
             .map(|mw| TargetValue::universal(Length::ch(u32::from(mw))));
     }
 
-    // ---------- Margin builders ----------
+    // ---------- Edges builders ----------
 
     /// Set all four sides of the margin to `n` cells.
     pub fn with_margin(mut self, n: u16) -> Self {

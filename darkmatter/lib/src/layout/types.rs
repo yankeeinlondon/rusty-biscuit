@@ -13,13 +13,13 @@
 
 use super::error::PageRenderError;
 
-/// Margin (transparent space outside the page's content rectangle).
+/// Edges (transparent space outside the page's content rectangle).
 ///
 /// Margins are specified in terminal cells: rows for vertical sides, columns
 /// for horizontal sides.
 #[deprecated(
     since = "0.1.0",
-    note = "use renderable::layout::Layout (via renderable::layout::Margin)"
+    note = "use renderable::layout::Layout (via renderable::layout::Edges)"
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PageMargin {
@@ -69,7 +69,7 @@ impl PageMargin {
 /// the page background color.
 #[deprecated(
     since = "0.1.0",
-    note = "use renderable::layout::Layout (via renderable::layout::Margin)"
+    note = "use renderable::layout::Layout (via renderable::layout::Edges)"
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PagePadding {
@@ -120,7 +120,7 @@ impl PagePadding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PageBackground {
-    /// Default. Margin and padding are visually identical (both transparent).
+    /// Default. Edges and padding are visually identical (both transparent).
     #[default]
     Transparent,
     /// Slightly off-background fill — darker than terminal bg in light mode,
@@ -291,13 +291,13 @@ impl PageFill {
 
 // ---------- Deprecation bridges onto `renderable::layout` ----------
 
-impl From<PageMargin> for renderable::layout::Margin {
+impl From<PageMargin> for renderable::layout::Edges {
     /// Map a [`PageMargin`] (terminal cells) onto a
-    /// [`renderable::layout::Margin`] of universal `Ch` lengths.
-    fn from(m: PageMargin) -> renderable::layout::Margin {
+    /// [`renderable::layout::Edges`] of universal `Ch` lengths.
+    fn from(m: PageMargin) -> renderable::layout::Edges {
         use renderable::layout::{Length, TargetValue};
         let cell = |n: u16| TargetValue::universal(Length::ch(u32::from(n)));
-        renderable::layout::Margin {
+        renderable::layout::Edges {
             top: cell(m.top),
             right: cell(m.right),
             bottom: cell(m.bottom),
@@ -306,18 +306,18 @@ impl From<PageMargin> for renderable::layout::Margin {
     }
 }
 
-impl From<PagePadding> for renderable::layout::Margin {
+impl From<PagePadding> for renderable::layout::Edges {
     /// Map a [`PagePadding`] (terminal cells) onto a
-    /// [`renderable::layout::Margin`] of universal `Ch` lengths.
+    /// [`renderable::layout::Edges`] of universal `Ch` lengths.
     ///
     /// The new [`Layout`](renderable::layout::Layout) primitive has no
     /// separate padding concept; page padding is expressed as additional
     /// margin cells. Background-fill semantics that previously distinguished
     /// margin from padding are a `Style` concern and are not represented here.
-    fn from(p: PagePadding) -> renderable::layout::Margin {
+    fn from(p: PagePadding) -> renderable::layout::Edges {
         use renderable::layout::{Length, TargetValue};
         let cell = |n: u16| TargetValue::universal(Length::ch(u32::from(n)));
-        renderable::layout::Margin {
+        renderable::layout::Edges {
             top: cell(p.top),
             right: cell(p.right),
             bottom: cell(p.bottom),
@@ -521,7 +521,7 @@ mod tests {
 
     #[test]
     fn page_margin_converts_to_layout_margin() {
-        use renderable::layout::{Length, Margin as RMargin, TargetValue};
+        use renderable::layout::{Length, Edges as RMargin, TargetValue};
 
         let page = PageMargin::all(2);
         let rendered: RMargin = page.into();
@@ -541,7 +541,7 @@ mod tests {
 
     #[test]
     fn page_padding_converts_to_layout_margin() {
-        use renderable::layout::{Length, Margin as RMargin, TargetValue};
+        use renderable::layout::{Length, Edges as RMargin, TargetValue};
 
         let padding = PagePadding::all(3);
         let rendered: RMargin = padding.into();
@@ -627,7 +627,7 @@ mod tests {
 
     #[test]
     fn deprecation_bridge_produces_valid_layout() {
-        use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue};
+        use renderable::layout::{Alignment, Layout, Length, Edges, TargetValue};
 
         // Page margin + padding are summed into the layout margin, exactly as
         // `DarkmatterPage::rebuild_layout` documents (the `Layout` primitive
@@ -636,8 +636,8 @@ mod tests {
         let page_padding = PagePadding::all(1);
         let page_alignment = PageAlignment::Center;
 
-        let margin: Margin = page_margin.into();
-        let padding: Margin = page_padding.into();
+        let margin: Edges = page_margin.into();
+        let padding: Edges = page_padding.into();
         let alignment: Alignment = page_alignment.into();
 
         let cells = |tv: &TargetValue<Length>| match tv {
@@ -647,7 +647,7 @@ mod tests {
         let sum = |a: &TargetValue<Length>, b: &TargetValue<Length>| {
             TargetValue::universal(Length::ch(cells(a) + cells(b)))
         };
-        let combined_margin = Margin {
+        let combined_margin = Edges {
             top: sum(&margin.top, &padding.top),
             right: sum(&margin.right, &padding.right),
             bottom: sum(&margin.bottom, &padding.bottom),
@@ -661,6 +661,7 @@ mod tests {
             alignment,
             max_width: None,
             word_wrap: renderable::wrap_policy::WordWrap::None,
+            ..Layout::default()
         };
 
         assert!(
@@ -671,17 +672,18 @@ mod tests {
 
     #[test]
     fn deprecation_bridge_page_fill_max_width_produces_valid_layout() {
-        use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue};
+        use renderable::layout::{Alignment, Layout, Length, Edges, TargetValue};
 
         let fill = PageFill::Max(WidthUnit::Fixed(60));
         let max_width: Option<TargetValue<Length>> = fill.try_into().unwrap();
         assert_eq!(max_width, Some(TargetValue::universal(Length::ch(60))));
 
         let layout = Layout {
-            margin: Margin::default(),
+            margin: Edges::default(),
             alignment: Alignment::default(),
             max_width,
             word_wrap: renderable::wrap_policy::WordWrap::None,
+            ..Layout::default()
         };
         assert!(layout.validate().is_ok());
     }
@@ -714,7 +716,7 @@ mod tests {
         padding: PagePadding,
         max_width: Option<u16>,
     ) -> renderable::layout::Layout {
-        use renderable::layout::{Layout, Length, Margin as RMargin, TargetValue};
+        use renderable::layout::{Layout, Length, Edges as RMargin, TargetValue};
 
         let m: RMargin = margin.into();
         let p: RMargin = padding.into();
@@ -735,6 +737,7 @@ mod tests {
             alignment: renderable::layout::Alignment::default(),
             max_width: max_width.map(|w| TargetValue::universal(Length::ch(u32::from(w)))),
             word_wrap: renderable::wrap_policy::WordWrap::None,
+            ..Layout::default()
         }
     }
 
@@ -749,7 +752,7 @@ mod tests {
 
         let term = Terminal::new_optimistic(80);
 
-        // Margin-only.
+        // Edges-only.
         let page = DarkmatterPage::new(&term).with_margin(4);
         assert_eq!(
             page.layout(),
@@ -757,7 +760,7 @@ mod tests {
             "margin-only builder must match bridge Layout"
         );
 
-        // Margin + padding (summed into the layout margin).
+        // Edges + padding (summed into the layout margin).
         let page = DarkmatterPage::new(&term).with_margin(2).with_padding(3);
         assert_eq!(
             page.layout(),
