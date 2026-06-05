@@ -7,78 +7,69 @@ description: A record of novel things learned about how to best perform commits 
 
 ## Repo Conventions
 
-- Do not stage additional files just to make a commit work. Commit exactly what the caller already staged. If nothing is staged, stop and report that.
-- Do not second-guess the staged set. The caller chose those files intentionally.
-- When viewing history, use `git log` directly. `sniff git commits` is not a valid command in this repo.
-- Conventional commit scopes and subjects in this repo use lowercase after the colon, for example `docs(darkmatter): update parser notes`.
-- For documentation restructuring in `.claude/` or skill files, prefer a `docs(<area>): ...` prefix.
+- Commit exactly what the caller already staged. Do not stage extra files to make a commit "work," and do not unstage or second-guess the staged set — the caller chose it intentionally. If nothing is staged, stop and report it.
+- Conventional commit subjects use lowercase after the colon, e.g. `docs(darkmatter): update parser notes`. For `.claude/` or skill-file restructuring, prefer `docs(<area>): ...`.
+- View history with `git log` directly. `sniff git commits` is not a command in this repo.
 
-## Check What Will Be Committed
+## Inspect Before Committing
 
-- Use `git status --short` first to see what is staged, unstaged, untracked, or renamed.
-- Use `git diff --staged --name-status` to confirm the exact staged file set before committing.
-- Use `git diff --staged --stat` to see the change size for each file before organizing groups. When diff output is truncated, it is easy to miss that certain files have actual changes.
-- Review staged source changes with `git diff --staged` before committing. Git will happily commit unresolved conflict markers if they are present in the staged content.
-- For new files, `git diff --staged` shows the file as a diff against `/dev/null`. That is normal; confirm the staging state with `git status --short`.
-- A file may appear in the staged list but have no actual content changes (e.g., auto-formatting that matched existing formatting). If `git diff --staged` shows no diff for a file, it has no actual changes and committing it is harmless but unnecessary.
+- `git status --short` shows staged / unstaged / untracked / renamed at a glance.
+- `git diff --staged --stat` (change size per file) and `git diff --staged --name-status` (exact staged set) before grouping. Truncated diff output makes it easy to miss that a file has real changes.
+- A staged file may have no actual diff (e.g. formatting that already matched). Committing it is harmless but unnecessary.
+- New files show as a diff against `/dev/null` under `git diff --staged` — that is normal; confirm staging with `git status --short`.
+- Review staged content with `git diff --staged` before committing — git will happily commit unresolved conflict markers.
 
 ## Path-Limited Commits
 
-- `git commit --only -m "message" -- path1 path2` is the recommended form when committing a specific subset of staged files. Always use `--only` to explicitly limit the commit to only the named paths.
-- All options must come before the `--` pathspec separator. `git commit --only -- path -m "message"` is wrong because `-m` is then parsed as a path.
-- `git commit -m "message" -- path` WITHOUT `--only` commits ALL staged files, not just the named paths. The paths after `--` are purely to disambiguate `-m` from a path argument; they do not scope the commit. Always use `--only` when committing specific staged files:
-  - `git commit --only -m "message" -- path1 path2` — commits only path1 and path2
-  - `git commit -m "message" -- path1 path2` — commits ALL staged files (the paths are informational only)
-- Quote paths that contain spaces when passing them to `git commit`.
-- Be careful with renames. When files are staged as renamed (R100), `git commit --only` with only the new path can produce incomplete commits that record only the deletion of the old path, not the addition of the new path. To preserve a rename atomically, either commit without path-limiting (let git infer the paths) or include both old and new paths explicitly.
-  - **Recovery:** If a rename commit only recorded deletions (missing the new files), extract the file content from the index blobs directly and create a new commit. Use `git ls-files --stage` to find blob hashes, `git show <hash> > path` to restore content, then `git add` and `git commit` normally.
-  - **Better approach for multi-agent workflows:** Avoid using `--only` with renamed files. Instead, have the orchestrator stage files one group at a time and have subagents commit sequentially, rather than pre-staging all groups and using concurrent `--only` commits.
-- `git commit --only -m "message" -- path` also works for a newly added file, as long as the file has already been staged.
+- Use `git commit --only -F - -- <paths>` to commit a specific staged subset. `--only` is **mandatory**: without it, `git commit -- <paths>` commits the ENTIRE staged set (the paths after `--` only disambiguate the message flag from pathspecs; they do not scope the commit).
+- All options must precede the `--` pathspec separator.
+- Feed the message on stdin via a **single-quoted heredoc** (`<<'COMMIT_MSG'`), never inline `-m "..."`. Commit bodies contain backticks, `$`, `_`, and code spans; inside a double-quoted string the shell expands them (backticks are command substitution even when double-quoted), corrupting the message and making OpenCode's snapshot layer try to `git add` the extracted tokens as pathspecs (`fatal: pathspec '::end-block' did not match any files`). The `'COMMIT_MSG'` delimiter must be single-quoted — that is what disables expansion.
 
-## History and Verification
+  ```
+  git commit --only -F - -- path1 path2 <<'COMMIT_MSG'
+  refactor(darkmatter): scope block-quote support to ::shell-block
 
-- `git log --oneline -n <count>` can miss a relevant commit either because the count is too small or because the commit is reachable on the branch but not on the current ancestry path. Increase `-n` or use `git log --all --oneline` when needed.
-- Do not assume `HEAD` still points to your new commit in a concurrent workflow. Capture the commit hash from `git commit` output and verify that object directly.
-- A commit may be reachable from a branch without being an ancestor of the current `HEAD`. Use `git branch --contains <commit>` when you need reachability, not just local history order.
-- Lost commits can usually be found in `git reflog`. Treat reflog lookup as the recovery starting point instead of memorizing one rigid reset sequence.
+  - Add `quoted` field to stack entries
+  - `::end-block` only closes matching quoted openers
+  COMMIT_MSG
+  ```
+
+- Renames: `--only` with only the new path can record just the deletion of the old path. To keep a rename atomic, commit without path-limiting (let git infer both paths) or list old AND new paths explicitly. Do not mix `--only` and rename handling in the same concurrent batch (see Multi-Agent Workflow).
+
+## A Successful Commit Is Final — Do Not Verify-Loop
+
+This is the single biggest source of wasted time and outright hangs in this workflow.
+
+- **A zero exit from `git commit` is authoritative.** Capture the hash from its output; at most run `git show <hash> --stat` once. Then STOP and report success.
+- **Do NOT diff `HEAD:<file>` against the working-tree `<file>`.** When the caller staged a *partial* change, or a developer is still editing, the working tree legitimately differs from what you committed. A non-empty `git diff HEAD -- <file>` (or differing `wc -l`) is EXPECTED, not a failed commit. Treating it as failure sends the agent into an endless forensic loop — `reflog`, blob extraction, `branch --contains`, `.git/` spelunking — that burns the entire wall-clock budget. This is a confirmed cause of 15-minute hangs.
+- **Do NOT trust `git log -1` / `HEAD` to confirm YOUR commit** in a concurrent batch — it may show a sibling's commit. Use the hash captured from your own `git commit` output. This is the *only* re-check you need, and only if a check is genuinely warranted.
+- **`git reflog` and `.git/` inspection are last-resort recovery tools for an actually-reported failure, never a routine verification step.** If a commit genuinely fails, the evidence is the non-zero exit code and stderr from `git commit` itself — report THAT. Do not go hunting for proof that a *successful* commit "really" landed.
+
+## Never Leave the Worktree (Hard Deadlock)
+
+- **Never read, `ls`, `find`, or `cd` into any absolute path outside the active worktree root** — including `.git/worktrees/<name>/`, `~/.claudine/worktrees/<repo>/`, or the repo's parent directory. The wrapper already placed you at the worktree root; every `git` and `sniff` command is worktree-aware from there.
+- Touching an external path triggers OpenCode's `external_directory: ask` permission. In a non-interactive session nobody can answer it, so the agent **blocks until the wall-clock timeout kills it**. A verification spiral that wanders into `.git/worktrees/…` to "check the index" is the exact path that produced a real 15-minute hang.
+- Run diagnostics plainly from the inherited cwd: `git status`, `git log`, `sniff repo`. Never prefix with `cd <path>`.
 
 ## Multi-Agent Workflow
 
-- **Verify all staged files are assigned before dispatching.** After organizing into semantic groups, cross-check that every staged file appears in exactly one group's file list. A missed file will silently remain staged after all subagents finish, requiring a follow-up dispatch. Use `git status --short` after all subagents report completion to confirm a clean index.
-- Subagents may see a different staged set than the prompt implies. Always verify the actual index state before committing.
-- In a shared worktree, concurrent agents share the same index. `git reset HEAD` without paths resets the entire staged set for everyone.
-- **Orchestrator staging discipline:** When committing from the same worktree with multiple subagents, two strategies work:
-  1. **Sequential:** Stage each group's files and have the subagent commit BEFORE staging the next group. This is the safest approach.
-  2. **Concurrent with `--only`:** Pre-stage all files upfront, then launch concurrent subagents each using `git commit --only -m "..." -- <paths>`. Because `--only` limits the commit to only the named paths, it does NOT unstage other files — so concurrent commits from the same worktree can succeed safely when all agents use this form.
-    - Without `--only`, concurrent commits are unsafe because `git commit path` commits the path AND removes it from the staging area, racing against other agents.
-    - With `--only`, concurrent commits are safe because only the specified paths are committed; other staged files remain staged.
-- If another worker already committed some assigned files, a later commit may legitimately report `nothing to commit`. That does not mean the earlier commit was missing.
-- **Staged file overlap with concurrent agents:** When using concurrent subagents with pre-staged files, if ANY subagent uses `git commit` without `--only` (e.g., to handle renames atomically), it will commit ALL currently staged files, potentially including files assigned to other semantic groups. In this session, the kickoff docs commit (handling R100 renames without `--only`) inadvertently included the spec files that were semantically group 6. Either stage files one-group-at-a-time sequentially, or ensure no subagent needs to bypass `--only` for rename handling when running concurrent agents against the same pre-staged set.
-- Auto-formatting workflows (e.g., rustfmt on save) may pre-commit files before an orchestrator assigns them. If a subagent finds no staged changes for an assigned file, it was likely auto-committed by a formatting hook.
-- Commit message hooks may rewrite the submitted message after `git commit` returns. A subagent reported the resulting message differed from what was attempted. If message fidelity is critical, verify the actual commit with `git show <hash>` rather than trusting the submitted message text.
-- **Concurrent `git commit` invocations can hit `.git/index.lock: File exists` (or `refs/heads/<branch>.lock`)** even when each uses `--only`. Git's locks are fail-fast, not queuing. This is not corruption — wait 1–3 seconds and retry the same `git commit --only ...` command. Up to 5 retries with short backoff is a reasonable budget. Always brief subagents on this retry policy when dispatching parallel commits.
-- **`git log -1` after a concurrent commit may show a sibling subagent's commit, not yours.** Verify your own commit landed by capturing the hash from the `git commit` output and using `git show <hash>` or `git log --oneline -N` (with N large enough to span the parallel batch), not by assuming HEAD points at your work.
-- **Merge-in-progress state blocks `--only` partial commits.** When the repo is in a merge state (conflicts resolved, merge not yet committed), `git commit --only` cannot do partial commits — Git requires a full merge commit to conclude the merge. Subagents should detect this with `git status` (look for "All conflicts fixed but are still committing") and either complete the merge first or stage files one-group-at-a-time sequentially. The orchestrator should verify no merge is in progress before launching concurrent subagents.
-
-## Git Path Handling in Workspaces
-
-- When the worktree is a Cargo workspace member (e.g., running from `darkmatter/darkmatter/`), git interprets relative paths as relative to the current working directory, not the repo root. Use paths relative to the workspace member directory when committing from within a package subdirectory, not paths from the repo root like `darkmatter/lib/src/...`.
-- **Never `cd` out of the current git worktree to run inspection commands.** The wrapper has already placed you at the worktree root. Specifically, do NOT prefix `sniff repo` (or any other diagnostic) with `cd ~/.claudine/worktrees/<repo>/` — that path is the *parent* directory containing all linked worktrees of `<repo>` and is OUTSIDE the active worktree. OpenCode's permission engine treats it as `external_directory` and surfaces a permission ask (auto-allowed under `--dangerously-skip-permissions` but noise either way). All sniff and git subcommands are already worktree-aware; run them plainly from the inherited cwd.
+- **Assign every staged file to exactly one group before dispatching.** After all subagents report done, `git status --short` should show a clean index; a leftover file means a missed assignment and needs a follow-up dispatch.
+- **Concurrent `--only` commits against one worktree are safe** — each commits only its own paths and leaves the rest staged. But if any subagent commits WITHOUT `--only` (e.g. to handle a rename atomically), it sweeps in ALL currently-staged files, stealing other groups' files. Keep every subagent on `--only`, or stage one group at a time sequentially.
+- **Lock contention is not corruption.** Concurrent `git commit` can fail fast with `.git/index.lock: File exists` (or `refs/heads/<branch>.lock`). Git's locks are fail-fast, not queuing — wait 1–3s and retry the same command, up to ~5 times with short backoff. Brief subagents on this policy.
+- **A merge in progress blocks `--only` partial commits** (git requires a full merge commit). Detect with `git status` ("All conflicts fixed but are still committing"); the orchestrator should confirm no merge is in progress before launching concurrent subagents.
+- Auto-format-on-save hooks may commit or alter an assigned file before a subagent acts, so "nothing to commit" can be legitimate. Commit-message hooks may rewrite the submitted message after `git commit` returns.
 
 ## Shell Gotchas
 
-- Literal backticks inside a double-quoted shell command trigger command substitution in `zsh`. If a commit message contains Markdown code spans, escape the backticks or build the message with a single-quoted heredoc first.
-- When generating temporary files for use in shell commands (e.g., as input for `git commit -F`), they must be placed inside the project's temporary directory (`.gemini/tmp/...`) rather than the global `/tmp` directory, which may be outside the allowed workspace scope.
-- Function names, identifiers with underscores, or code-like strings in commit messages can be interpreted as commands by zsh if they match shell functions or aliases. Prefer writing commit message bodies in prose that describes the feature rather than naming implementation details, or use single-quoted strings to prevent expansion.
-- In scripts that run `git add .`, use `git add . || exit 0` to prevent CI failure when there is nothing to commit.
-- In `zsh`, `$status` is a read-only special variable (alias of `$?`). When wrapping `git commit` in a retry loop, capture the exit code into a non-reserved name immediately after the command (e.g. `rc=$?`) — assigning to `status=$?` silently fails and breaks success/failure detection. Verify the result with `git show <hash>` rather than re-parsing captured stdout.
-- For complex commit messages with bullet points and special characters (like backticks or underscores), some agents prefer committing with a simple placeholder message first and then using `git commit --amend` (or passing the message via a temporary file) to avoid shell expansion and command-injection false positives in the `-m` argument.
+- Use a single-quoted heredoc (`<<'COMMIT_MSG'`) for any message containing backticks, `$`, `_`, or code-like identifiers — otherwise zsh triggers command substitution or alias expansion on them.
+- In zsh, `$status` is read-only (an alias of `$?`). In a retry loop, capture the exit code immediately into another name (`rc=$?`); `status=$?` silently fails and breaks success/failure detection.
+- Temp files for `git commit -F` must live inside the workspace temp dir, not global `/tmp`, which may be outside the allowed scope.
 
 ## Rust Idioms
 
-- Prefer `sort_by_key` over `sort_by(|a, b| key(a).cmp(&key(b)))` for single-key sorts — it is more idiomatic and slightly more efficient.
-- Prefer guard clauses (`if condition =>`) in pattern matches over nested `if` blocks inside match arms.
+- Prefer `sort_by_key` over `sort_by(|a, b| key(a).cmp(&key(b)))` for single-key sorts.
+- Prefer guard clauses (`if condition =>`) in match arms over nested `if` blocks.
 
 ## Testing Terminal-Rendering CLIs
 
-- When writing tests for CLI table output that uses terminal rendering, be aware that non-TTY test contexts default to 80-column width, which may be too narrow for some tables. Tests should gracefully accept the "could not be rendered" (or equivalent) error message when the terminal is too narrow, rather than only asserting on successful table render. This makes tests more robust across different CI environments and execution contexts.
+- Non-TTY test contexts default to 80-column width, which can be too narrow for some tables. Tests should also accept the "could not be rendered" (or equivalent) error rather than only asserting a successful render, so they stay robust across CI environments.
