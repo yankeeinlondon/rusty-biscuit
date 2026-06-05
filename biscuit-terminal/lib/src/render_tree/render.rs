@@ -35,7 +35,7 @@ use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
     ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HintNamespace,
     InheritedStyle, NodeKind, ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered,
-    Severity, TableColumnHints, TerminalMermaidMode,
+    Severity, TableColumnHints, TableTerminalHints, TerminalMermaidMode,
 };
 use renderable::tree::{ValidationError, ValidationMode, validate};
 
@@ -171,8 +171,8 @@ impl Writer<'_> {
     /// prefixed by the left margin (plus any alignment offset), and the
     /// vertical margins emit leading/trailing blank lines.
     fn render(&mut self, node: &RenderNode) -> Result<String, RenderError> {
-        match node.attrs.layout() {
-            Some(layout) if !is_inline_kind(&node.kind) => self.render_with_layout(node, &layout),
+        match node.attrs.layout_ref() {
+            Some(layout) if !is_inline_kind(&node.kind) => self.render_with_layout(node, layout),
             _ => self.render_styled(node),
         }
     }
@@ -188,11 +188,11 @@ impl Writer<'_> {
     /// [`Style`]: renderable::style::Style
     /// [`Layout`]: renderable::layout::Layout
     fn render_styled(&mut self, node: &RenderNode) -> Result<String, RenderError> {
-        let Some(style) = node.attrs.style().filter(|s| !s.is_empty()) else {
+        let Some(style) = node.attrs.style_ref().filter(|s| !s.is_empty()) else {
             return self.render_kind(node);
         };
 
-        let overhead = style::border_horizontal_overhead(&style);
+        let overhead = style::border_horizontal_overhead(style);
         let inner_width = self
             .opts
             .context
@@ -205,7 +205,7 @@ impl Writer<'_> {
         // descendant paragraphs and inline spans see the ancestor
         // color/emphasis (Spec B D6). The resolver carries only the inheriting
         // fields forward — the box-painting layers are cleared.
-        let (child_ctx, _) = self.inherited.enter(Some(&style));
+        let (child_ctx, _) = self.inherited.enter(Some(style));
         let prev = std::mem::replace(&mut self.inherited, child_ctx);
 
         let content = if overhead > 0 {
@@ -219,7 +219,7 @@ impl Writer<'_> {
 
         Ok(style::apply_style(
             &content,
-            &style,
+            style,
             &self.opts.context.terminal,
             inner_width,
         ))
@@ -368,10 +368,10 @@ impl Writer<'_> {
                 // ancestor color/emphasis after it.
                 let effective = self.inherited.effective().clone();
                 let markup = self.render_inline(children, &effective)?;
-                if let Some(hints) = node.attrs.progress_hints() {
+                if let Some(hints) = node.attrs.progress_hints_ref() {
                     // A progress bar is a single fixed-width glyph run; wrapping
                     // it would split the bar, so it is emitted as-is.
-                    let bar = render_progress_bar(&hints, &markup, self.opts.context.color_depth);
+                    let bar = render_progress_bar(hints, &markup, self.opts.context.color_depth);
                     Ok(self.render_prose(&bar))
                 } else if self.opts.context.wrap_prose {
                     // Top-level paragraphs wrap to the post-margin content width,
@@ -384,9 +384,9 @@ impl Writer<'_> {
                 }
             }
             NodeKind::BlockQuote { children } => {
-                if let Some(hints) = node.attrs.columns_hints() {
-                    self.render_columns(children, &hints)
-                } else if node.attrs.style().is_some_and(|s| !s.is_empty()) {
+                if let Some(hints) = node.attrs.columns_hints_ref() {
+                    self.render_columns(children, hints)
+                } else if node.attrs.style_ref().is_some_and(|s| !s.is_empty()) {
                     // The node carries a declared `Style` — a migrated
                     // `BlockQuote` component projects its border, fill, and
                     // colors onto the node. `render_styled` lowers that
@@ -455,7 +455,7 @@ impl Writer<'_> {
                 let table = self.render_table(align, children, node)?;
                 // A table title/caption is emitted above the top border. An
                 // empty or whitespace-only title is ignored.
-                match node.attrs.table_title() {
+                match node.attrs.table_title_ref() {
                     Some(title) if !title.trim().is_empty() => {
                         Ok(format!("{}\n{table}", title.trim()))
                     }
@@ -772,7 +772,7 @@ impl Writer<'_> {
                 // text-appearance layers (color, emphasis) inherit from the
                 // enclosing `effective` appearance; box-painting layers
                 // (border, fill) and background have no inline meaning here.
-                match node.attrs.style().filter(|s| !s.is_empty()) {
+                match node.attrs.style_ref().filter(|s| !s.is_empty()) {
                     Some(span_style) => {
                         let child_effective = span_style.inherited_from(effective);
                         let inner = self.render_inline(children, &child_effective)?;
@@ -810,7 +810,7 @@ impl Writer<'_> {
                 // appearance inherits from the enclosing `effective` and wraps
                 // the visible link text; the OSC8 escapes are added around the
                 // already-styled text so the color rides inside the hyperlink.
-                let link_effective = match node.attrs.style().filter(|s| !s.is_empty()) {
+                let link_effective = match node.attrs.style_ref().filter(|s| !s.is_empty()) {
                     Some(link_style) => link_style.inherited_from(effective),
                     None => effective.clone(),
                 };
@@ -845,7 +845,7 @@ impl Writer<'_> {
                         ImagePlaceholder::Bracket => format!("[{alt}]"),
                         ImagePlaceholder::Block => format!("▉ IMAGE[{alt}]"),
                     };
-                    match node.attrs.style().filter(|s| !s.is_empty()) {
+                    match node.attrs.style_ref().filter(|s| !s.is_empty()) {
                         Some(img_style) => {
                             let img_effective = img_style.inherited_from(effective);
                             if img_effective == *effective {
@@ -1002,14 +1002,21 @@ impl Writer<'_> {
             }
         }
 
-        let hints = attrs.list_hints();
-        let bullet = hints.bullet.unwrap_or_else(|| "- ".to_string());
+        let hints = attrs.list_hints_ref();
+        let bullet = hints
+            .and_then(|h| h.bullet.as_deref())
+            .unwrap_or("- ")
+            .to_string();
         let origin = start.unwrap_or(1);
 
         // The indent for nested block children: explicit hint, else the
         // default for the list kind (4 for ordered, bullet width otherwise).
         let default_indent = if ordered { 4 } else { visible_width(&bullet) };
-        let indent_children = hints.indent_children.unwrap_or(default_indent);
+        let indent_children = hints
+            .and_then(|h| h.indent_children)
+            .unwrap_or(default_indent);
+        // Absent list hints fall back to the default `hanging_indent` (`true`).
+        let hanging_indent = hints.is_none_or(|h| h.hanging_indent);
 
         let mut lines = Vec::with_capacity(children.len());
         for (offset, child) in children.iter().enumerate() {
@@ -1022,7 +1029,7 @@ impl Writer<'_> {
             lines.push(self.render_list_item(
                 child,
                 &prefix,
-                hints.hanging_indent,
+                hanging_indent,
                 indent_children,
             )?);
         }
@@ -1115,10 +1122,9 @@ impl Writer<'_> {
                     // the item label inherits its color / emphasis, then wrap
                     // the rendered label with the matching SGR — without this
                     // the projection's `Style` never reaches terminal output.
-                    let item_style = item_child.attrs.style().filter(|s| !s.is_empty());
-                    let render_effective = item_style
-                        .as_ref()
-                        .map(|s| s.inherited_from(self.inherited.effective()));
+                    let item_style = item_child.attrs.style_ref().filter(|s| !s.is_empty());
+                    let render_effective =
+                        item_style.map(|s| s.inherited_from(self.inherited.effective()));
                     let effective = render_effective
                         .as_ref()
                         .unwrap_or_else(|| self.inherited.effective())
@@ -1133,7 +1139,7 @@ impl Writer<'_> {
                     let label = match item_style {
                         Some(style) => {
                             let open =
-                                style::text_appearance_sgr(&style, &self.opts.context.terminal);
+                                style::text_appearance_sgr(style, &self.opts.context.terminal);
                             if open.is_empty() {
                                 label
                             } else {
@@ -1191,7 +1197,7 @@ impl Writer<'_> {
         // task-state glyph replaces the default `[ ] ` / `[x] ` checkbox. The
         // marker applies only to the checkbox — description styling stays in
         // the item's child nodes and `Style`.
-        let check_marker = match node.attrs.task_hints() {
+        let check_marker = match node.attrs.task_hints_ref() {
             Some(hints) => task_state_marker(hints.state, &self.opts.context.terminal),
             None => match checked {
                 Some(true) => "[x] ".to_string(),
@@ -1511,9 +1517,13 @@ impl Writer<'_> {
             .iter()
             .enumerate()
             .map(|(idx, text)| {
-                let hints = table_node.attrs.table_column_hints(idx);
+                let default_hints = TableColumnHints::default();
+                let hints = table_node
+                    .attrs
+                    .table_column_hints_ref(idx)
+                    .unwrap_or(&default_hints);
                 let kind = first_data_kinds.get(idx).and_then(|k| k.as_deref());
-                build_table_column(text, idx, align, &hints, kind)
+                build_table_column(text, idx, align, hints, kind)
             })
             .collect();
 
@@ -1527,7 +1537,11 @@ impl Writer<'_> {
             return Ok(String::new());
         }
 
-        let terminal_hints = table_node.attrs.table_terminal_hints();
+        let default_terminal_hints = TableTerminalHints::default();
+        let terminal_hints = table_node
+            .attrs
+            .table_terminal_hints_ref()
+            .unwrap_or(&default_terminal_hints);
         let table = Table::new()
             .with_columns(columns.clone())
             .with_data(data.clone());
@@ -1563,9 +1577,9 @@ impl Writer<'_> {
                 NodeKind::TableRow { children } => children.first(),
                 _ => None,
             })
-            .and_then(|cell| cell.attrs.style())
+            .and_then(|cell| cell.attrs.style_ref())
             .filter(|s| !s.is_empty())
-            .map(|s| style::text_appearance_sgr(&s, &self.opts.context.terminal))
+            .map(|s| style::text_appearance_sgr(s, &self.opts.context.terminal))
             .filter(|sgr| !sgr.is_empty());
 
         Ok(emit_table(
@@ -1611,10 +1625,10 @@ impl Writer<'_> {
     /// cell renders visibly instead of being flattened. A cell with no
     /// declared style (or one that lowers to nothing) is returned unchanged.
     fn apply_cell_style(&self, cell: &RenderNode, content: String) -> String {
-        let Some(cell_style) = cell.attrs.style().filter(|s| !s.is_empty()) else {
+        let Some(cell_style) = cell.attrs.style_ref().filter(|s| !s.is_empty()) else {
             return content;
         };
-        let open = style::text_appearance_sgr(&cell_style, &self.opts.context.terminal);
+        let open = style::text_appearance_sgr(cell_style, &self.opts.context.terminal);
         if open.is_empty() {
             return content;
         }
@@ -2066,7 +2080,7 @@ fn table_row_cell_kinds(row: &RenderNode) -> Vec<Option<String>> {
     };
     children
         .iter()
-        .map(|cell| cell.attrs.table_cell_hints().map(|h| h.kind))
+        .map(|cell| cell.attrs.table_cell_hints_ref().map(|h| h.kind.clone()))
         .collect()
 }
 
@@ -2113,7 +2127,7 @@ fn build_table_column(
 /// so numeric/currency cells re-render with their readable formatting.
 /// Malformed or absent hints degrade to the rendered `text`.
 fn reconstruct_cell(attrs: &renderable::tree::NodeAttrs, text: String) -> TableCellContent {
-    let Some(hints) = attrs.table_cell_hints() else {
+    let Some(hints) = attrs.table_cell_hints_ref() else {
         return TableCellContent::Text(text);
     };
     match hints.kind.as_str() {
