@@ -63,7 +63,7 @@ The lessons learned are found in {{lessons_learned}}
 
 The following files have been staged for commit:
 
-::shell sniff repo staged-files -v --plain --on-error 'no staged files; nothing to do!'
+::shell sniff repo staged-files -v --plain --on-error '**No staged files**; nothing to do!' --no-error
 
 ## Task
 
