@@ -22,9 +22,9 @@ use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Length, TargetValue};
 use claudine::composition::{
-    AgentResolutionState, CompositionExecutionRequest, classify_agent_resolution,
+    AgentResolutionState, CompositionExecutionRequest, ProviderResolutionReason,
+    agent_state_breakdown, classify_agent_resolution,
 };
-use claudine::provider::Provider;
 use darkmatter::markdown::highlighting::{
     ColorMode as DmColorMode, ThemePair, detect_prose_theme, highlight_yaml_lines_with_theme,
 };
@@ -73,12 +73,25 @@ impl DryRunRender {
         let frontmatter = request.prepared.effective_frontmatter.clone();
         let name = string_field(&frontmatter, "name");
         let description = string_field(&frontmatter, "description");
-        let agent = if let Some(target) = &request.resolved_target {
+        // An explicit `--<provider>` flag has no frontmatter state to render,
+        // so it shows as the selected provider. For every other resolved
+        // target (a frontmatter-driven `Selected` or `ListOneInstalled`
+        // auto-select), reclassify from the snapshot so the cell carries the
+        // full breakdown — otherwise an auto-selected one-installed list would
+        // collapse to a bare provider name and lose its auto-select header.
+        let explicit_flag = request.resolved_target.as_ref().is_some_and(|t| {
+            matches!(t.provider_reason, ProviderResolutionReason::ExplicitFlag)
+        });
+        let agent = if explicit_flag {
             AgentResolutionState::Selected {
-                provider: target.provider,
+                provider: request.resolved_target.as_ref().unwrap().provider,
             }
         } else if let Some(snapshot) = &request.installed_snapshot {
             classify_agent_resolution(&request.prepared.selection_hints, snapshot)
+        } else if let Some(target) = &request.resolved_target {
+            AgentResolutionState::Selected {
+                provider: target.provider,
+            }
         } else {
             AgentResolutionState::NoAgent
         };
@@ -180,90 +193,11 @@ fn relative_or_abs(path: &Path) -> String {
 ///
 /// All content stays inside the single `Agent` table row; the table
 /// component is responsible for preserving embedded newlines and bullet
-/// indentation.
+/// indentation. The markup is shared with the live no-TTY abort body via
+/// [`agent_state_breakdown`] so the dry-run table stays a faithful
+/// prediction of the live path.
 fn render_agent_cell(state: &AgentResolutionState, term: &Terminal) -> String {
-    match state {
-        AgentResolutionState::NoAgent => Prose::new(
-            "- CLI caller didn't specify the Agent\n\
-             - the Markdown document didn't suggest any Agents in <inverse>agent</inverse> Frontmatter property\n\
-             - the caller will be interactively asked to choose an agent when <i>composing</i> called without the <green>--dry-run</green> flag; otherwise the run aborts with the same message",
-        )
-        .render(term),
-        AgentResolutionState::Selected { provider } => {
-            Prose::new(provider.to_string()).render(term)
-        }
-        AgentResolutionState::SingleInvalid { hint } => Prose::new(format!(
-            "<red><b>Invalid Agent</b></red>(<dim>{hint}</dim>) <i>defined in Markdown's <inverse>agent</inverse> Frontmatter! Caller will be prompted to choose a valid Agent when run interactively; otherwise the run aborts with the same message.</i>"
-        ))
-        .render(term),
-        AgentResolutionState::SingleNotInstalled { provider } => Prose::new(format!(
-            "<yellow><b>Agent Not Installed:</b></yellow>(<dim>{provider}</dim>) <i>the Markdown document's <inverse>agent</inverse> specifies an Agent platform which is not installed on this host. When run interactively, caller will be asked to choose an Agent; otherwise the run aborts with the same message.</i>"
-        ))
-        .render(term),
-        AgentResolutionState::ListMultipleInstalled {
-            installed,
-            not_installed,
-            invalid,
-        } => {
-            let mut body = String::from(
-                "<green>✓</green> caller will be asked to choose interactively between suggested Agents:\n",
-            );
-            for provider in installed {
-                body.push_str(&format!("- {provider}\n"));
-            }
-            for provider in not_installed {
-                body.push_str(&format!("- <dim>{provider}</dim>\n"));
-            }
-            if !invalid.is_empty() {
-                body.push_str(
-                    "\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:\n",
-                );
-                for hint in invalid {
-                    body.push_str(&format!("- {hint}\n"));
-                }
-            }
-            Prose::new(body).render(term)
-        }
-        AgentResolutionState::ListOneInstalled {
-            selected,
-            invalid,
-            ..
-        } => {
-            let mut body = format!(
-                "<green>✓</green> the <b>{selected}</b> will be used without the need for interactive prompting\n\
-                 the Markdown document suggested multiple agent's but only <b>{selected}</b> is installed on this host"
-            );
-            if !invalid.is_empty() {
-                body.push_str(
-                    "\n\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:\n",
-                );
-                for hint in invalid {
-                    body.push_str(&format!("- {hint}\n"));
-                }
-            }
-            Prose::new(body).render(term)
-        }
-        AgentResolutionState::ZeroInstalledList {
-            not_installed,
-            invalid,
-        } => {
-            let mut body = String::from(
-                "None of the suggested agents are installed/valid; caller will choose from all installed agents when run interactively; otherwise the run aborts with the same message:\n",
-            );
-            for provider in not_installed {
-                body.push_str(&format!("- <dim>{provider}</dim>\n"));
-            }
-            if !invalid.is_empty() {
-                body.push_str(
-                    "\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:\n",
-                );
-                for hint in invalid {
-                    body.push_str(&format!("- {hint}\n"));
-                }
-            }
-            Prose::new(body).render(term)
-        }
-    }
+    Prose::new(agent_state_breakdown(state)).render(term)
 }
 
 /// Render the dry-run metadata table to a terminal string.
@@ -327,6 +261,7 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
 mod tests {
     use super::*;
     use biscuit_terminal::prelude::strip_escape_codes;
+    use claudine::provider::Provider;
     use serde_json::json;
 
     /// Build a minimal `DryRunRender` for table assertions.

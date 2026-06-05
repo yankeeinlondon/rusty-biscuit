@@ -22,8 +22,8 @@ use claudine::composition::lifecycle::{
 use claudine::composition::{
     AgentResolutionState, CompositionClosurePlan, CompositionError, CompositionExecutionRequest,
     CompositionMode, InlineClosurePlan, ModelResolutionReason, ResolvedExecutionTarget,
-    SelectionReason, build_installed_snapshot, build_picker_plan, classify_agent_resolution,
-    resolve_target_non_tty_with_catalog,
+    SelectionReason, agent_state_breakdown, build_installed_snapshot, build_picker_plan,
+    classify_agent_resolution, invalid_agent_message, resolve_target_non_tty_with_catalog,
 };
 use claudine::config::claudine_config::ProviderModelOverride;
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
@@ -594,6 +594,55 @@ fn resolve_live_target_with_tty(
     }
 }
 
+/// The styled pre-prompt message a TTY run shows before the `choose_one`
+/// picker, or `None` for states that go straight to the picker.
+///
+/// The text is the single source of truth shared with the dry-run table cell
+/// and the no-TTY abort body (via [`agent_state_breakdown`] /
+/// [`invalid_agent_message`]) so the three surfaces cannot drift. Returns
+/// Prose **markup**; callers render it with their own terminal.
+fn agent_prompt_message(
+    state: &AgentResolutionState,
+    source_path: &std::path::Path,
+) -> Option<String> {
+    match state {
+        AgentResolutionState::SingleInvalid { hint } => {
+            let file_href = format!("file://{}", source_path.display());
+            let file_label = source_path.display().to_string();
+            let file_link = format!("<a href=\"{file_href}\">{file_label}</a>");
+            Some(invalid_agent_message(hint, &file_link))
+        }
+        AgentResolutionState::ZeroInstalledList { .. } => Some(agent_state_breakdown(state)),
+        _ => None,
+    }
+}
+
+/// Which installed providers the picker is scoped to for a given state.
+///
+/// Only [`AgentResolutionState::ListMultipleInstalled`] narrows the picker to
+/// its suggested installed providers; every other prompting state offers all
+/// installed agents (`None`), matching the spec's per-state scoping rules.
+fn picker_scope_for_state(state: &AgentResolutionState) -> Option<&[Provider]> {
+    match state {
+        AgentResolutionState::ListMultipleInstalled { installed, .. } => Some(installed.as_slice()),
+        _ => None,
+    }
+}
+
+/// Build the picker plan for a prompting state, applying the per-state scope.
+///
+/// Pure (no I/O): the live path and L1 tests both go through here so the
+/// scope contract is verifiable without a TTY.
+#[allow(clippy::result_large_err)]
+fn scoped_picker_plan_for_state(
+    state: &AgentResolutionState,
+    hints: &claudine::composition::EffectiveSelectionHints,
+    snapshot: &claudine::composition::InstalledProviderSnapshot,
+    favorite: Option<Provider>,
+) -> Result<claudine::composition::ProviderPickerPlan, CompositionError> {
+    build_scoped_picker_plan(hints, snapshot, favorite, picker_scope_for_state(state))
+}
+
 /// Emit the pre-prompt message for TTY states that require one, then
 /// show the `choose_one` picker and return the user-selected provider.
 fn prompt_for_agent_state(
@@ -603,48 +652,12 @@ fn prompt_for_agent_state(
     favorite: Option<Provider>,
     source_path: &std::path::Path,
 ) -> Result<Provider> {
-    let term = wrap_terminal();
-    let file_href = format!("file://{}", source_path.display());
-    let file_label = source_path.display().to_string();
-
-    match state {
-        AgentResolutionState::SingleInvalid { hint } => {
-            let rendered = Prose::new(format!(
-                "<red><b>Invalid Agent:</b></red> the <a href=\"{file_href}\">{file_label}</a> references an invalid Agent provider '{hint}'. Choose from the installed agents on this host:"
-            ))
-            .render(&term);
-            log::message(&rendered);
-        }
-        AgentResolutionState::ZeroInstalledList {
-            not_installed,
-            invalid,
-        } => {
-            let mut body = String::from(
-                "None of the suggested agents are installed/valid; caller will choose from all installed agents:\n",
-            );
-            for provider in not_installed {
-                body.push_str(&format!("- <dim>{provider}</dim>\n"));
-            }
-            if !invalid.is_empty() {
-                body.push_str(
-                    "\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:\n",
-                );
-                for hint in invalid {
-                    body.push_str(&format!("- {hint}\n"));
-                }
-            }
-            let rendered = Prose::new(body).render(&term);
-            log::message(&rendered);
-        }
-        _ => {}
+    if let Some(markup) = agent_prompt_message(state, source_path) {
+        let term = wrap_terminal();
+        log::message(&Prose::new(markup).render(&term));
     }
 
-    let scope = match state {
-        AgentResolutionState::ListMultipleInstalled { installed, .. } => Some(installed.as_slice()),
-        _ => None,
-    };
-
-    let plan = build_scoped_picker_plan(hints, snapshot, favorite, scope)?;
+    let plan = scoped_picker_plan_for_state(state, hints, snapshot, favorite)?;
     super::selection_ui::prompt_one_shot_provider(plan)
         .map_err(|e| eyre!("provider selection cancelled: {e}"))
 }
@@ -2539,7 +2552,7 @@ mod tests {
         claudine::composition::EffectiveSelectionHints {
             agent: None,
             model: Some(ModelHint::Single(model.into())),
-            agent_invalid: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -2870,5 +2883,131 @@ mod tests {
             false,
         );
         assert_agent_resolution_failed(&result, state);
+    }
+
+    // -- Picker scope per state (pure planner helper) ------------------------
+
+    fn list_hint(providers: Vec<Provider>) -> claudine::composition::EffectiveSelectionHints {
+        claudine::composition::EffectiveSelectionHints {
+            agent: Some(claudine::composition::AgentHint::List(providers)),
+            agent_was_list: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn picker_scope_list_multiple_installed_is_scoped_to_suggested() {
+        // The picker for a multi-installed list must offer ONLY the suggested
+        // installed providers, even when more agents are installed on the host.
+        let hints = list_hint(vec![Provider::Claude, Provider::Gemini]);
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Gemini, Provider::Codex]);
+        let state = AgentResolutionState::ListMultipleInstalled {
+            installed: vec![Provider::Claude, Provider::Gemini],
+            not_installed: Vec::new(),
+            invalid: Vec::new(),
+        };
+        let plan = scoped_picker_plan_for_state(&state, &hints, &snapshot, None).unwrap();
+        let providers: Vec<Provider> = plan.options.iter().map(|o| o.provider).collect();
+        assert_eq!(providers, vec![Provider::Claude, Provider::Gemini]);
+        assert!(
+            !providers.contains(&Provider::Codex),
+            "installed-but-unsuggested Codex must not appear in the scoped picker"
+        );
+    }
+
+    #[test]
+    fn picker_scope_zero_installed_list_offers_all_installed() {
+        // The zero-installed-list state scopes to ALL installed agents, since
+        // none of the suggestions are installed.
+        let hints = list_hint(vec![Provider::Gemini, Provider::Goose]);
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex]);
+        let state = AgentResolutionState::ZeroInstalledList {
+            not_installed: vec![Provider::Gemini, Provider::Goose],
+            invalid: Vec::new(),
+        };
+        let plan = scoped_picker_plan_for_state(&state, &hints, &snapshot, None).unwrap();
+        let providers: Vec<Provider> = plan.options.iter().map(|o| o.provider).collect();
+        assert!(providers.contains(&Provider::Claude));
+        assert!(providers.contains(&Provider::Codex));
+        assert_eq!(providers.len(), 2);
+    }
+
+    #[test]
+    fn picker_scope_no_agent_and_invalid_offer_all_installed() {
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex]);
+        for state in [
+            AgentResolutionState::NoAgent,
+            AgentResolutionState::SingleInvalid {
+                hint: "nope".into(),
+            },
+            AgentResolutionState::SingleNotInstalled {
+                provider: Provider::Gemini,
+            },
+        ] {
+            assert!(
+                picker_scope_for_state(&state).is_none(),
+                "state {state:?} must offer all installed agents (no scope)"
+            );
+            let plan =
+                scoped_picker_plan_for_state(&state, &make_empty_hints(), &snapshot, None).unwrap();
+            assert_eq!(
+                plan.options.len(),
+                2,
+                "state {state:?} should offer both installed providers"
+            );
+        }
+    }
+
+    // -- Pre-prompt message text (shared with dry-run / no-TTY) ---------------
+
+    #[test]
+    fn agent_prompt_message_single_invalid_is_imperative_with_link() {
+        let state = AgentResolutionState::SingleInvalid {
+            hint: "totally-bogus".into(),
+        };
+        let msg = agent_prompt_message(&state, Path::new("/tmp/doc.md"))
+            .expect("single-invalid has a pre-prompt message");
+        assert!(msg.contains("<red><b>Invalid Agent:</b></red>"), "got: {msg}");
+        assert!(msg.contains("totally-bogus"), "got: {msg}");
+        assert!(msg.contains("/tmp/doc.md"), "got: {msg}");
+        // The TTY pre-prompt and the no-TTY abort body share this exact text.
+        assert!(
+            msg.starts_with(&invalid_agent_message(
+                "totally-bogus",
+                "<a href=\"file:///tmp/doc.md\">/tmp/doc.md</a>"
+            )),
+            "got: {msg}"
+        );
+    }
+
+    #[test]
+    fn agent_prompt_message_zero_installed_matches_breakdown() {
+        let state = AgentResolutionState::ZeroInstalledList {
+            not_installed: vec![Provider::Gemini],
+            invalid: vec!["bad".into()],
+        };
+        let msg = agent_prompt_message(&state, Path::new("/tmp/doc.md"))
+            .expect("zero-installed-list has a pre-prompt message");
+        assert_eq!(msg, agent_state_breakdown(&state));
+    }
+
+    #[test]
+    fn agent_prompt_message_is_none_for_picker_only_states() {
+        for state in [
+            AgentResolutionState::NoAgent,
+            AgentResolutionState::SingleNotInstalled {
+                provider: Provider::Gemini,
+            },
+            AgentResolutionState::ListMultipleInstalled {
+                installed: vec![Provider::Claude, Provider::Codex],
+                not_installed: Vec::new(),
+                invalid: Vec::new(),
+            },
+        ] {
+            assert!(
+                agent_prompt_message(&state, Path::new("/tmp/doc.md")).is_none(),
+                "state {state:?} should not show a pre-prompt message"
+            );
+        }
     }
 }
