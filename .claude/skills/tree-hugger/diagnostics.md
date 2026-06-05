@@ -29,13 +29,18 @@ enable an off-by-default rule.
 
 Symbol analysis rules computed at runtime:
 
-| Rule | Severity | Description |
-|------|----------|-------------|
-| `undefined-symbol` | Error | Reference to undefined symbol |
-| `undefined-module` | Warning | Reference to undefined module or namespace |
-| `unused-symbol` | Warning | Symbol defined but never used |
-| `unused-import` | Warning | Imported symbol never referenced |
-| `dead-code` | Warning | Code after unconditional return/throw/panic |
+| Rule | Severity | Description | Default |
+|------|----------|-------------|---------|
+| `undefined-symbol` | Error | Reference to undefined symbol | experimental |
+| `undefined-module` | Warning | Reference to undefined module or namespace | experimental |
+| `unused-symbol` | Warning | Symbol defined but never used | experimental |
+| `unused-import` | Warning | Imported symbol never referenced | off (low confidence) |
+| `dead-code` | Warning | Code after unconditional return/throw/panic | on |
+
+`unused-import` is off by default (opt in with `--warn unused-import`): a syntactic
+scan cannot resolve imports used only via trait methods or macros, so it has an
+irreducible false-positive rate. `pub use` re-exports and type-position usages
+(`fn f(x: T)`, `field: T`) are **not** flagged — those were fixed.
 
 ### Syntax Diagnostics
 

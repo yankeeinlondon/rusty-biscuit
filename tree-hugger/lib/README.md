@@ -190,13 +190,18 @@ for d in diagnostics {
 
 These rules analyze symbol definitions, imports, and references:
 
-| Rule | Severity | Description |
-|------|----------|-------------|
-| `undefined-symbol` | Error | Reference to a symbol not defined, imported, or builtin |
-| `undefined-module` | Warning | Reference to undefined module or namespace |
-| `unused-symbol` | Warning | Symbol defined but never referenced or exported |
-| `unused-import` | Warning | Imported symbol never used in the file |
-| `dead-code` | Warning | Code after unconditional return/throw/panic |
+| Rule | Severity | Description | Default |
+|------|----------|-------------|---------|
+| `undefined-symbol` | Error | Reference to a symbol not defined, imported, or builtin | experimental |
+| `undefined-module` | Warning | Reference to undefined module or namespace | experimental |
+| `unused-symbol` | Warning | Symbol defined but never referenced or exported | experimental |
+| `unused-import` | Warning | Imported symbol never used in the file | off (low confidence) |
+| `dead-code` | Warning | Code after unconditional return/throw/panic | on |
+
+`unused-import` is off by default: without trait/type resolution a syntactic scan
+cannot see imports used only through trait methods (`Write` for `.write_all()`) or
+macros, so it has an irreducible false-positive rate. Enable with `--warn unused-import`.
+The `experimental` rules require `--experimental-semantics`.
 
 ### Pattern Rules
 
