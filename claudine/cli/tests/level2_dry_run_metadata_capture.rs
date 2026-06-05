@@ -59,6 +59,33 @@ description: a styled description
 Just a body.
 ";
 
+/// Fixture with an invalid `agent` frontmatter value.
+const FIXTURE_INVALID_AGENT: &str = "\
+---
+name: Invalid Agent Doc
+agent: totally-invalid-agent
+---
+Just a body.
+";
+
+/// Fixture with a valid but not-installed `agent` frontmatter value.
+/// The test harness only stubs `goose` on PATH, so `roo` is not installed.
+const FIXTURE_NOT_INSTALLED: &str = "\
+---
+name: Not Installed Doc
+agent: roo
+---
+Just a body.
+";
+
+/// Fixture with no `agent` frontmatter and no explicit provider flag.
+const FIXTURE_NO_AGENT: &str = "\
+---
+name: No Agent Doc
+---
+Just a body.
+";
+
 /// What the captured frame the driver returns carries alongside the pane
 /// capture, kept together so the temp workspace outlives the capture.
 struct DryRunCapture {
@@ -126,19 +153,75 @@ fn run_dry_run_compose<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
     }
 }
 
-/// Return the raw (escape-bearing) capture line whose plain (escape-stripped)
-/// form contains `label`, pairing raw and plain lines by index.
+/// Stage a workspace and run `claudine compose --dry-run doc.md` with a custom
+/// document content and **no** explicit `--<provider>` flag.
 ///
-/// The metadata-table row labels (`Document`, `Description`, …) are
-/// capitalized and unique to the table, so they never collide with the
-/// lowercase YAML frontmatter keys also printed to stderr or with the echoed
-/// command line.
+/// Only `goose` is stubbed on PATH; `qwen` is absent so it resolves as
+/// not-installed. This lets frontmatter `agent` values drive the resolution
+/// state rendered in the metadata table.
+fn run_dry_run_compose_with_doc<H: TerminalHarness>(
+    harness: &mut H,
+    doc_content: &str,
+    workspace_name: &str,
+) -> DryRunCapture {
+    let workspace = TestWorkspace::named(workspace_name);
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    let claudine_dir = workspace.path().join(".claudine");
+    fs::create_dir_all(&claudine_dir).unwrap();
+    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+
+    // Only goose is present on PATH.
+    write_executable(&bin_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let doc = workspace.path().join("doc.md");
+    fs::write(&doc, doc_content).unwrap();
+
+    let claudine = cargo_bin!("claudine").display().to_string();
+    let path = augmented_path(&bin_dir);
+    let path = path.to_string_lossy().into_owned();
+    let home = workspace.path().to_string_lossy().into_owned();
+
+    harness
+        .send_text(format!("cd {}\n", workspace.path().display()).as_bytes())
+        .expect("cd into workspace");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+
+    // No --goose (or any --provider) flag — frontmatter drives resolution.
+    let cmd = format!("{claudine} compose --dry-run {}", doc.display());
+    harness
+        .send_command_with_env(
+            &cmd,
+            &[
+                ("HOME", home.as_str()),
+                ("PATH", path.as_str()),
+                ("FORCE_COLOR", "1"),
+                ("COLUMNS", "80"),
+            ],
+        )
+        .expect("send compose --dry-run");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+    std::thread::sleep(Duration::from_millis(250));
+
+    let frame = harness.capture().expect("capture failed");
+    DryRunCapture {
+        frame,
+        _workspace: workspace,
+    }
+}
+
+/// Return the raw (escape-bearing) capture line whose plain (escape-stripped)
+/// form contains `label` inside the metadata table.
+///
+/// Matches `│ {label}` so YAML frontmatter values (e.g. `name: Invalid Agent
+/// Doc`) or wrapped command lines do not collide with table row labels.
 fn row_raw<'a>(frame: &'a CapturedFrame, label: &str) -> Option<&'a str> {
     let raw_lines: Vec<&str> = frame.raw.lines().collect();
     let plain_lines: Vec<&str> = frame.plain.lines().collect();
     plain_lines
         .iter()
-        .position(|l| l.contains(label))
+        .position(|l| l.contains(&format!("│ {label}")))
         .and_then(|i| raw_lines.get(i).copied())
 }
 
@@ -146,6 +229,7 @@ fn row_raw<'a>(frame: &'a CapturedFrame, label: &str) -> Option<&'a str> {
 /// capture line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Attr {
+    Bold,
     Dim,
     Italic,
     /// Basic or bright foreground color (`30`–`37`, `90`–`97`).
@@ -193,6 +277,7 @@ fn decode_params(params: &[i64], out: &mut Vec<Attr>) {
     let mut i = 0;
     while i < params.len() {
         match params[i] {
+            1 => out.push(Attr::Bold),
             2 => out.push(Attr::Dim),
             3 => out.push(Attr::Italic),
             38 | 48 => match params.get(i + 1) {
@@ -225,6 +310,22 @@ fn has_red(line: &str) -> bool {
     attrs.contains(&Attr::Fg(31)) || attrs.contains(&Attr::Fg(91))
 }
 
+/// Whether `line` selects basic or bright yellow foreground (`33`/`93`).
+fn has_yellow(line: &str) -> bool {
+    let attrs = decode_attrs(line);
+    attrs.contains(&Attr::Fg(33)) || attrs.contains(&Attr::Fg(93))
+}
+
+/// Whether `line` carries the dim attribute (`2`).
+fn has_dim(line: &str) -> bool {
+    decode_attrs(line).contains(&Attr::Dim)
+}
+
+/// Whether `line` carries the bold attribute (`1`).
+fn has_bold(line: &str) -> bool {
+    decode_attrs(line).contains(&Attr::Bold)
+}
+
 /// Assert the visible table cells and the SGR color/dim/italic contract shared
 /// by every backend.
 fn assert_styled_rows(frame: &CapturedFrame) {
@@ -235,7 +336,7 @@ fn assert_styled_rows(frame: &CapturedFrame) {
         "Description",
         "a styled description",
         "Agent",
-        "goose",
+        "Goose",
         "Model",
         "default",
         "YOLO",
@@ -271,6 +372,160 @@ fn assert_styled_rows(frame: &CapturedFrame) {
         "expected the YOLO `false` cell to render red (SGR 31/91).\nrow: {yolo:?}",
     );
 }
+
+/// Assert the `Frontmatter (resolved):` heading is present, bold on
+/// "Frontmatter", italic on "resolved", and followed by a blank line (bottom
+/// margin of 1).
+fn assert_frontmatter_heading_and_spacing(frame: &CapturedFrame) {
+    let plain_lines: Vec<&str> = frame.plain.lines().collect();
+    let heading_idx = plain_lines
+        .iter()
+        .position(|l| l.contains("Frontmatter") && l.contains("resolved"))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected 'Frontmatter (resolved):' heading.\nplain:\n{}",
+                frame.plain
+            )
+        });
+
+    // The line after the heading must be blank (bottom margin of 1).
+    assert!(
+        plain_lines
+            .get(heading_idx + 1)
+            .map_or(false, |l| l.trim().is_empty()),
+        "expected blank line after 'Frontmatter (resolved):' heading (bottom margin 1).\nplain:\n{}",
+        frame.plain,
+    );
+
+    let raw_lines: Vec<&str> = frame.raw.lines().collect();
+    let raw_heading = raw_lines.get(heading_idx).unwrap_or_else(|| {
+        panic!(
+            "raw heading line missing at index {heading_idx}.\nraw:\n{}",
+            frame.raw
+        )
+    });
+    assert!(
+        has_bold(raw_heading),
+        "expected 'Frontmatter' to render bold (SGR 1).\nrow: {raw_heading:?}",
+    );
+    assert!(
+        decode_attrs(raw_heading).contains(&Attr::Italic),
+        "expected 'resolved' to render italic (SGR 3).\nrow: {raw_heading:?}",
+    );
+}
+
+/// Assert that the YAML frontmatter block carries syntax-highlighting SGR
+/// codes (proving inverse-theme highlighting was applied).
+fn assert_inverse_theme_yaml(frame: &CapturedFrame) {
+    let plain_lines: Vec<&str> = frame.plain.lines().collect();
+    let heading_idx = plain_lines
+        .iter()
+        .position(|l| l.contains("Frontmatter") && l.contains("resolved"))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected 'Frontmatter (resolved):' heading.\nplain:\n{}",
+                frame.plain
+            )
+        });
+
+    // The YAML block sits between the heading+blank-line and the metadata table.
+    // Look for the first table border (`┌`) after the heading.
+    let table_start = plain_lines
+        .iter()
+        .skip(heading_idx)
+        .position(|l| l.contains('┌'))
+        .map(|i| heading_idx + i)
+        .unwrap_or_else(|| {
+            panic!(
+                "expected metadata table start after heading.\nplain:\n{}",
+                frame.plain
+            )
+        });
+
+    let raw_lines: Vec<&str> = frame.raw.lines().collect();
+    let yaml_lines = &raw_lines[heading_idx + 2..table_start];
+
+    // At least one YAML line must carry SGR escape codes (syntax highlighting).
+    let highlighted_count = yaml_lines
+        .iter()
+        .filter(|l| l.contains('\x1b'))
+        .count();
+    assert!(
+        highlighted_count >= 1,
+        "expected at least one YAML line with syntax-highlighting SGR.\n\
+         yaml raw lines:\n{}",
+        yaml_lines.join("\n"),
+    );
+}
+
+/// Assert that a multi-line `Agent` cell preserves two-column table alignment:
+/// every `│` column separator inside the metadata table appears at the same
+/// positions across all table lines.
+fn assert_agent_cell_alignment(frame: &CapturedFrame, agent_label: &str) {
+    let plain_lines: Vec<&str> = frame.plain.lines().collect();
+
+    // Find the table start by the top-left border character.
+    let table_start = plain_lines
+        .iter()
+        .position(|l| l.contains('┌'))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected table top border (`┌`) in pane.\nplain:\n{}",
+                frame.plain
+            )
+        });
+
+    // Find the table end by the bottom-left border character.
+    let table_end = plain_lines
+        .iter()
+        .skip(table_start)
+        .position(|l| l.contains('└'))
+        .map(|i| table_start + i)
+        .unwrap_or_else(|| {
+            panic!(
+                "expected table bottom border (`└`) in pane.\nplain:\n{}",
+                frame.plain
+            )
+        });
+
+    // Confirm the Agent label is inside the table so we're testing the right
+    // region.
+    let agent_in_table = plain_lines[table_start..=table_end]
+        .iter()
+        .any(|l| l.contains(agent_label));
+    assert!(
+        agent_in_table,
+        "expected '{agent_label}' inside the metadata table.\nplain:\n{}",
+        frame.plain,
+    );
+
+    // Gather the column positions of every `│` on each table line.
+    let mut expected_positions: Option<Vec<usize>> = None;
+    for line in &plain_lines[table_start..=table_end] {
+        let positions: Vec<usize> = line
+            .char_indices()
+            .filter(|(_, c)| *c == '│')
+            .map(|(i, _)| i)
+            .collect();
+        // Borders have at least two `│` separators; skip stray characters.
+        if positions.len() >= 2 {
+            if let Some(ref expected) = expected_positions {
+                assert_eq!(
+                    positions, *expected,
+                    "table column separators misaligned.\n\
+                     line: {line:?}\nexpected positions: {expected:?}\nplain:\n{}",
+                    frame.plain,
+                );
+            } else {
+                expected_positions = Some(positions);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Existing tests (selected-provider fixture)
+// ---------------------------------------------------------------------------
 
 /// tmux is the portable, headless backend and faithfully re-emits SGR, so it
 /// covers the color/dim/italic contract on every host that has `tmux`.
@@ -317,4 +572,177 @@ fn level2_dry_run_document_cell_renders_osc8_link_in_wezterm() {
 
     // OSC8 fidelity aside, WezTerm also re-emits the SGR contract.
     assert_styled_rows(&capture.frame);
+}
+
+/// Stage a workspace and run `claudine compose --goose --dry-run doc.md`
+/// **without** `FORCE_COLOR=1`.
+///
+/// This avoids the optimistic terminal path that forces Kitty graphics
+/// protocol support (tmux strips Kitty images from pane captures), so the
+/// horizontal rule renders as visible text and structural assertions are
+/// reliable.
+fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
+    let workspace = TestWorkspace::named("claudine-dryrun-l2-plain");
+    let bin_dir = workspace.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    let claudine_dir = workspace.path().join(".claudine");
+    fs::create_dir_all(&claudine_dir).unwrap();
+    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+
+    write_executable(&bin_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let doc = workspace.path().join("doc.md");
+    fs::write(&doc, FIXTURE_DOC).unwrap();
+
+    let claudine = cargo_bin!("claudine").display().to_string();
+    let path = augmented_path(&bin_dir);
+    let path = path.to_string_lossy().into_owned();
+    let home = workspace.path().to_string_lossy().into_owned();
+
+    harness
+        .send_text(format!("cd {}\n", workspace.path().display()).as_bytes())
+        .expect("cd into workspace");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+
+    let cmd = format!("{claudine} compose --goose --dry-run {}", doc.display());
+    harness
+        .send_command_with_env(
+            &cmd,
+            &[
+                ("HOME", home.as_str()),
+                ("PATH", path.as_str()),
+                ("COLUMNS", "80"),
+            ],
+        )
+        .expect("send compose --dry-run");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+    std::thread::sleep(Duration::from_millis(250));
+
+    let frame = harness.capture().expect("capture failed");
+    DryRunCapture {
+        frame,
+        _workspace: workspace,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 — structural formatting (hr, heading, YAML) in a real terminal
+// ---------------------------------------------------------------------------
+
+/// Structural dry-run formatting: `Frontmatter (resolved):` heading with
+/// bottom margin 1, and inverse-theme YAML syntax highlighting.
+///
+/// Note: the horizontal rule is emitted as a Kitty graphics image when
+/// `FORCE_COLOR=1` is active (which the test harness sets on tmux sessions).
+/// tmux strips Kitty graphics from `capture-pane` output, so the hr cannot be
+/// asserted in tmux L2. It is fully covered by L1 integration tests
+/// (`compose_dry_run_body_only_on_stdout_metadata_on_stderr` and siblings).
+#[test]
+#[serial(level2_terminal)]
+fn level2_dry_run_yaml_heading_structure_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let capture = run_dry_run_compose_plain(&mut harness);
+    assert_frontmatter_heading_and_spacing(&capture.frame);
+    assert_inverse_theme_yaml(&capture.frame);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 — agent-state styling captures
+// ---------------------------------------------------------------------------
+
+/// An invalid `agent` frontmatter value renders the `Invalid Agent` header in
+/// red (SGR 31/91) inside the Agent table cell.
+#[test]
+#[serial(level2_terminal)]
+fn level2_dry_run_invalid_agent_renders_red_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let capture = run_dry_run_compose_with_doc(
+        &mut harness,
+        FIXTURE_INVALID_AGENT,
+        "claudine-dryrun-invalid-l2",
+    );
+
+    let plain = &capture.frame.plain;
+    assert!(
+        plain.contains("Invalid Agent"),
+        "expected 'Invalid Agent' in Agent cell.\nplain:\n{plain}",
+    );
+    assert!(
+        plain.contains("totally-invalid-agent"),
+        "expected the invalid hint in Agent cell.\nplain:\n{plain}",
+    );
+
+    let agent_raw = row_raw(&capture.frame, "Agent")
+        .unwrap_or_else(|| panic!("Agent row not found.\nraw:\n{}", capture.frame.raw));
+    assert!(
+        has_red(agent_raw),
+        "expected the Invalid Agent header to render red (SGR 31/91).\nrow: {agent_raw:?}",
+    );
+}
+
+/// A not-installed `agent` frontmatter value renders the
+/// `Agent Not Installed:` header in yellow (SGR 33/93) and the provider name
+/// in dim (SGR 2) inside the Agent table cell.
+#[test]
+#[serial(level2_terminal)]
+fn level2_dry_run_not_installed_renders_yellow_dim_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let capture = run_dry_run_compose_with_doc(
+        &mut harness,
+        FIXTURE_NOT_INSTALLED,
+        "claudine-dryrun-notinst-l2",
+    );
+
+    let plain = &capture.frame.plain;
+    assert!(
+        plain.contains("Agent Not Installed"),
+        "expected 'Agent Not Installed' in Agent cell.\nplain:\n{plain}",
+    );
+    assert!(
+        plain.contains("Roo"),
+        "expected the not-installed provider name in Agent cell.\nplain:\n{plain}",
+    );
+
+    let agent_raw = row_raw(&capture.frame, "Agent")
+        .unwrap_or_else(|| panic!("Agent row not found.\nraw:\n{}", capture.frame.raw));
+    assert!(
+        has_yellow(agent_raw),
+        "expected the 'Agent Not Installed:' header to render yellow (SGR 33/93).\n\
+         row: {agent_raw:?}",
+    );
+    assert!(
+        has_dim(agent_raw),
+        "expected the dimmed provider name in the Agent cell (SGR 2).\nrow: {agent_raw:?}",
+    );
+}
+
+/// The no-agent state produces a multi-line Agent cell. In a real terminal the
+/// table's two-column alignment and the `1ch` left offset must be preserved
+/// across all continuation lines.
+#[test]
+#[serial(level2_terminal)]
+fn level2_dry_run_no_agent_multiline_alignment_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let capture = run_dry_run_compose_with_doc(
+        &mut harness,
+        FIXTURE_NO_AGENT,
+        "claudine-dryrun-noagent-l2",
+    );
+
+    let plain = &capture.frame.plain;
+    assert!(
+        plain.contains("didn't specify the Agent"),
+        "expected no-agent unordered list in Agent cell.\nplain:\n{plain}",
+    );
+
+    assert_agent_cell_alignment(&capture.frame, "Agent");
 }
