@@ -24,7 +24,7 @@
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub mod apple_terminal;
 pub mod cliclick;
@@ -461,6 +461,49 @@ pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Captures the pane repeatedly until its rendered output has *settled* —
+/// two consecutive captures are byte-identical and a shell prompt is
+/// visible — or `MAX` elapses, whichever comes first.
+///
+/// This is the adaptive replacement for the fixed post-command sleep dance
+/// (`settle` + a blind [`wait_for_prompt`] poll + an explicit `sleep` + a
+/// single `capture`). On a quiet machine it returns after the first stable
+/// pair (~one poll interval); under load it keeps polling up to the budget
+/// rather than capturing a half-drawn frame.
+///
+/// ## Notes
+///
+/// The prompt check reuses the bottom-most non-blank heuristic from
+/// [`wait_for_prompt`]: emulators pad captures with trailing blank lines,
+/// so the literal last line is usually empty.
+pub fn capture_settled(harness: &mut impl TerminalHarness) -> io::Result<CapturedFrame> {
+    const POLL: Duration = Duration::from_millis(40);
+    const MAX: Duration = Duration::from_millis(2000);
+    let deadline = Instant::now() + MAX;
+    let mut prev: Option<String> = None;
+    loop {
+        let frame = harness.capture()?;
+        let prompt_ready = frame
+            .plain
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .map(|l| {
+                let t = l.trim_end();
+                t.ends_with('$') || t.ends_with('#') || t.ends_with('%')
+            })
+            .unwrap_or(false);
+        if prompt_ready && prev.as_deref() == Some(frame.raw.as_str()) {
+            return Ok(frame);
+        }
+        if Instant::now() >= deadline {
+            return Ok(frame);
+        }
+        prev = Some(frame.raw.clone());
+        std::thread::sleep(POLL);
+    }
 }
 
 /// Best-effort cleanup for stale resources owned by the real-terminal
