@@ -2236,8 +2236,8 @@ fn is_inline_void_tag(tag: &VoidTag) -> bool {
 /// [`Layout`](crate::layout::Layout) plus the CSS-bearing layers of a stored
 /// [`Style`](crate::style::Style) to an inline `style` attribute.
 ///
-/// Layout is skipped for inline nodes; the validation gate records a warning
-/// when an inline node carries a layout, and the renderer drops it per D5.
+/// Layout is skipped for inline nodes; the validation gate rejects a layout on
+/// an inline node as an error, and the renderer drops it per D5.
 /// `Style` is applied to both block nodes and inline `Span` nodes. The
 /// layout and style declarations share a single `style` attribute and never
 /// overwrite each other.

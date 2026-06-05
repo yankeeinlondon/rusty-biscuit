@@ -372,11 +372,10 @@ fn check_node(
     // Layout attributes are permitted only on block-level nodes.
     if let Some(layout) = node.attrs.layout() {
         if is_inline_kind(&node.kind) {
-            report.findings.push(ValidationFinding {
-                severity: Severity::Warning,
-                message: "layout attributes are permitted only on block-level nodes".into(),
-                span: span.clone(),
-            });
+            report.findings.push(error(
+                "layout attributes are permitted only on block-level nodes",
+                span.clone(),
+            ));
         }
 
         if let Err(err) = layout.validate() {
@@ -683,7 +682,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_on_inline_node_is_a_warning() {
+    fn layout_on_inline_node_is_an_error() {
         use crate::layout::Layout;
 
         let mut text = RenderNode::text("hello");
@@ -692,17 +691,16 @@ mod tests {
 
         let report = validate(&root, ValidationMode::Full);
         assert!(
-            !report.has_errors(),
-            "layout on an inline Text node must be a warning, not an error"
+            report.has_errors(),
+            "layout on an inline Text node must be an error: Layout is block-only"
         );
         assert!(
             report
-                .findings
-                .iter()
-                .any(|f| f.severity == Severity::Warning && f.message.contains("block-level")),
-            "should contain a warning about block-level"
+                .errors()
+                .any(|f| f.message.contains("block-level")),
+            "should contain an error about block-level"
         );
-        assert!(ensure_valid(&root).is_ok());
+        assert!(ensure_valid(&root).is_err());
     }
 
     #[test]
