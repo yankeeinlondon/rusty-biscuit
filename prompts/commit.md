@@ -4,6 +4,8 @@ timeout: 15m
 step_timeout: 8m
 show_system_prompt: false
 operation: commit
+agent: opencode
+model: minimax/MiniMax-M3
 ---
 # Commit Staged Files
 
