@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn tree_renderable_can_supply_a_layout() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
 
         struct Demo;
         impl TreeRenderable for Demo {
@@ -130,7 +130,7 @@ mod tests {
             }
             fn tree_layout(&self) -> Option<Layout> {
                 Some(Layout {
-                    margin: Margin::x(Length::ch(1)),
+                    margin: Edges::x(Length::ch(1)),
                     ..Layout::default()
                 })
             }

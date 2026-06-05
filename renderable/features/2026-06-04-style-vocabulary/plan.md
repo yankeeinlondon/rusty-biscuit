@@ -5,8 +5,83 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - renderable/src/layout/edges.rs
+  - renderable/src/layout/mod.rs
+  - renderable/src/prelude.rs
+  - renderable/src/tree/attrs.rs
+  - renderable/src/tree/mod.rs
+  - renderable/src/tree/render/browser.rs
+  - renderable/src/tree/render/markdown.rs
+  - biscuit-terminal/lib/src/prelude.rs
+  - biscuit-terminal/lib/src/utils/layout.rs
+  - biscuit-terminal/lib/src/render_tree/options.rs
+  - biscuit-terminal/lib/src/render_tree/render.rs
+  - biscuit-terminal/lib/src/components/filesystem/mod.rs
+  - biscuit-terminal/lib/src/components/horizontal_rule/mod.rs
+  - biscuit-terminal/lib/src/components/list.rs
+  - biscuit-terminal/lib/src/components/progress.rs
+  - biscuit-terminal/lib/src/components/section.rs
+  - biscuit-terminal/lib/src/components/status_block.rs
+  - biscuit-terminal/lib/src/components/table/table.rs
+  - biscuit-terminal/lib/src/components/terminal_image/mod.rs
+  - biscuit-terminal/lib/src/components/two_column.rs
+  - biscuit-terminal/lib/tests/layout_matrix_support/mod.rs
+  - biscuit-terminal/lib/tests/tree_layout.rs
+  - biscuit-terminal/lib/tests/two_column_parity.rs
+  - biscuit-terminal/lib/benches/rendering.rs
+  - biscuit-test-harness/src/layout_invariants.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/layout/types.rs
+  - darkmatter/lib/src/markdown/render_tree/decorate.rs
+  - darkmatter/lib/tests/layout_matrix_support/mod.rs
+  - claudine/lib/src/prompt_reporting/formatting.rs
+  - claudine/cli/src/commands/context.rs
+  - claudine/cli/src/commands/providers.rs
+  - claudine/cli/src/commands/skills.rs
+  - claudine/cli/src/commands/sync.rs
+  - claudine/cli/src/commands/hooks/capture_method.rs
+  - claudine/cli/src/commands/hooks/describe.rs
+  - claudine/cli/src/commands/hooks/list.rs
+  - claudine/cli/src/commands/hooks/mapping.rs
+  - claudine/cli/src/commands/hooks/support.rs
+  - claudine/cli/src/commands/hooks/variables.rs
+  - claudine/cli/src/commands/wrap/composition/dry_run.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/errors.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tool_calls.rs
+  - claudine/cli/src/table_utils.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - renderable/src/layout/mod.rs
+  - darkmatter/lib/src/layout/types.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages_during_phase_3:
+  - renderable
+  - darkmatter
+source_files_during_phase_4:
+  - renderable/src/style.rs
+  - renderable/src/prelude.rs
+  - biscuit-terminal/lib/src/render_tree/style.rs
+  - biscuit-terminal/lib/src/render_tree/render.rs
+  - biscuit-terminal/lib/src/components/text_block.rs
+  - biscuit-terminal/cli/src/commands/block.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+packages_during_phase_4:
+  - renderable
+  - biscuit-terminal
 packages:
   - renderable
+  - biscuit-terminal
+  - biscuit-test-harness
+  - darkmatter
+  - claudine
 ---
 
 # Style Vocabulary Implementation Plan
@@ -63,7 +138,7 @@ Expected: test binaries compile.
 - Create: `renderable/src/layout/width.rs`
 - Modify: `renderable/src/layout/mod.rs` (module decl + re-export)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `renderable/src/layout/width.rs` with only the tests first:
 
@@ -100,12 +175,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p renderable layout::width -- --nocapture`
 Expected: FAIL — `cannot find type Width in this scope` (module not declared / type not defined).
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Prepend to `renderable/src/layout/width.rs` (above the `#[cfg(test)]` block):
 
@@ -160,7 +235,7 @@ mod width;
 pub use width::Width;
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test -p renderable layout::width`
 Expected: PASS (3 tests).
@@ -184,7 +259,7 @@ The type `renderable::layout::Margin` becomes `Edges`. The **field** `Layout.mar
 - Modify: `biscuit-terminal/lib/src/utils/layout.rs`, `biscuit-terminal/lib/src/prelude.rs`
 - Modify: every site `cargo build` flags (renderable internals, biscuit-terminal, darkmatter, downstream crates)
 
-- [ ] **Step 1: Rename the module file and the type within it**
+- [x] **Step 1: Rename the module file and the type within it**
 
 ```bash
 git mv renderable/src/layout/margin.rs renderable/src/layout/edges.rs
@@ -208,7 +283,7 @@ pub struct Edges {
 
 Update `impl Default for Edges`, `impl Edges`, and the `-> Margin` return types of `all` / `x` / `y` to `-> Edges`. Update the in-file `#[cfg(test)]` references (`Margin::default()` → `Edges::default()`, `Margin::x(..)` → `Edges::x(..)`). `Alignment` in this file is unchanged.
 
-- [ ] **Step 2: Update renderable module wiring + re-exports**
+- [x] **Step 2: Update renderable module wiring + re-exports**
 
 `renderable/src/layout/mod.rs`:
 
@@ -228,16 +303,16 @@ and in `impl Default for Layout`: `margin: Edges::default(),`.
 
 `renderable/src/prelude.rs`: change the `Margin` export to `Edges` (leave everything else; `Fill` handled in Phase 4).
 
-- [ ] **Step 3: Update biscuit-terminal's re-export so downstream still resolves**
+- [x] **Step 3: Update biscuit-terminal's re-export so downstream still resolves**
 
 `biscuit-terminal/lib/src/utils/layout.rs:15` and `biscuit-terminal/lib/src/prelude.rs:48`: replace `Margin` with `Edges` in the `pub use renderable::layout::{...}` / re-export lists.
 
-- [ ] **Step 4: Build the workspace and let the compiler enumerate the rest**
+- [x] **Step 4: Build the workspace and let the compiler enumerate the rest**
 
 Run: `cargo build --workspace 2>&1 | rg "cannot find|expected.*Margin|Margin" | head -50`
 Expected: a list of `error[E0412]: cannot find type \`Margin\`` (and similar) at exactly the sites that used renderable's type.
 
-- [ ] **Step 5: Fix each flagged site**
+- [x] **Step 5: Fix each flagged site**
 
 For every compiler error, replace the renderable `Margin` type reference with `Edges`:
 - imports: `use renderable::layout::{… Margin …}` → `… Edges …`; `use biscuit_terminal::utils::layout::Margin` → `… Edges`.
@@ -248,7 +323,7 @@ Do **not** change `PageMargin` (a different darkmatter type) and do **not** chan
 Run: `cargo build --workspace`
 Expected (when done): builds clean.
 
-- [ ] **Step 6: Verify the rename is complete and correct**
+- [x] **Step 6: Verify the rename is complete and correct**
 
 Run: `rg -n 'renderable::layout::Margin|layout::Margin\b' --type rust`
 Expected: no matches.
@@ -265,13 +340,13 @@ git commit -m "refactor(renderable): rename layout Margin type to Edges"
 
 ---
 
-## Phase 3: Add `padding` + `width` to `Layout` (with serde back-compat)
+ Add `padding` + `width` to `Layout` (with serde back-compat)
 
 **Files:**
 - Modify: `renderable/src/layout/mod.rs` (`Layout` struct, `Default`, `validate`, tests)
 - Modify: any `Layout { … }` literal without a `..default` spread (the compiler will flag them)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to the `#[cfg(test)] mod tests` in `renderable/src/layout/mod.rs`:
 
@@ -337,12 +412,12 @@ Add to the `#[cfg(test)] mod tests` in `renderable/src/layout/mod.rs`:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p renderable layout::tests -- --nocapture`
 Expected: FAIL — `no field \`padding\` on type \`Layout\`` / `no field \`width\``.
 
-- [ ] **Step 3: Add the fields, defaults, and validation**
+- [x] **Step 3: Add the fields, defaults, and validation**
 
 In `renderable/src/layout/mod.rs`, add the imports `use crate::layout::Width;` if not already re-exported in scope, then extend `Layout`:
 
@@ -391,12 +466,12 @@ Extend `Layout::validate`:
 
 (`Edges::validate` already exists from the renamed `margin.rs`; it validates all four sides.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p renderable layout::tests`
 Expected: PASS (new + existing layout tests).
 
-- [ ] **Step 5: Fix any `Layout { … }` literal the field-add broke**
+- [x] **Step 5: Fix any `Layout { … }` literal the field-add broke**
 
 Run: `cargo build --workspace 2>&1 | rg "missing field|cannot find" | head -30`
 Expected: at minimum `renderable/src/tree/render/browser.rs:~3802` — a `Layout { margin, alignment, max_width }` literal with no spread.
@@ -435,7 +510,7 @@ git commit -m "feat(renderable): add padding and width to Layout with serde defa
 - Modify: `biscuit-terminal/cli/src/commands/block.rs` (drop `style.fill = …`)
 - Modify: any other site the compiler flags (`biscuit-terminal/lib/src/render_tree/render.rs`, etc.)
 
-- [ ] **Step 1: Write the failing tests for the `Background` helper + `is_empty`**
+- [x] **Step 1: Write the failing tests for the `Background` helper + `is_empty`**
 
 In `renderable/src/style.rs` tests, add:
 
@@ -497,12 +572,12 @@ In `renderable/src/style.rs` tests, add:
 
 Note the test module needs `use renderable::target::RenderTarget;` — add `use crate::target::RenderTarget;` to the `mod tests` imports.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p renderable style:: -- --nocapture`
 Expected: FAIL — `cannot find … Background` / `no field \`fill\`` is still present.
 
-- [ ] **Step 3: Delete the fill types and the `fill` field; add `Background`**
+- [x] **Step 3: Delete the fill types and the `fill` field; add `Background`**
 
 In `renderable/src/style.rs`:
 
@@ -548,12 +623,12 @@ impl Background {
 
 In `renderable/src/prelude.rs`: remove `Fill, FillBand, FillIntensity` from the `pub use crate::style::{…}` list and add `Background`.
 
-- [ ] **Step 4: Run the renderable tests**
+- [x] **Step 4: Run the renderable tests**
 
 Run: `cargo test -p renderable style::`
 Expected: PASS (new Background/is_empty tests + the trimmed existing ones).
 
-- [ ] **Step 5: Remove fill lowering from the terminal renderer**
+- [x] **Step 5: Remove fill lowering from the terminal renderer**
 
 In `biscuit-terminal/lib/src/render_tree/style.rs`:
 - Drop `Fill, FillBand, FillIntensity` from the `use renderable::style::{…}` import (line ~23) and the module doc bullet referencing `Fill` (lines ~13-15).
@@ -595,7 +670,7 @@ In `biscuit-terminal/lib/src/render_tree/style.rs`:
 
 > Behavior note: per-component fill *band geometry* is intentionally not reproduced here; it returns via `padding` + `background` in *renderer-folds*. The adaptive tint itself is preserved through `Background::subtle()/pronounced()` set on `style.background`.
 
-- [ ] **Step 6: Remove the CLI fill write and fix remaining flagged sites**
+- [x] **Step 6: Remove the CLI fill write and fix remaining flagged sites**
 
 `biscuit-terminal/cli/src/commands/block.rs`: delete the `use renderable::style::Fill;` and the `style.fill = Some(Fill { … })` block (and the `--fill` arg plumbing that fed it, if it is now dead — follow the compiler).
 
@@ -605,7 +680,7 @@ Fix each flagged site (e.g. `biscuit-terminal/lib/src/render_tree/render.rs:~345
 Run: `cargo build --workspace`
 Expected: builds clean.
 
-- [ ] **Step 7: Verify the deletion and run tests**
+- [x] **Step 7: Verify the deletion and run tests**
 
 Run: `rg -n 'FillBand|FillIntensity' renderable/ biscuit-terminal/ darkmatter/ --type rust`
 Expected: no matches (outside this `features/` plan/spec text).

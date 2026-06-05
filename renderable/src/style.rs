@@ -14,8 +14,8 @@
 //! Alongside the leaf primitives, this module also defines [`Style`] — the
 //! appearance primitive a component declares and the tree renderers apply,
 //! the sibling of [`Layout`](crate::layout::Layout). `Style` re-homes the
-//! foreground/background color, text emphasis, border, and fill concepts
-//! that were previously expressed as bespoke component fields.
+//! foreground/background color, text emphasis, and border concepts that were
+//! previously expressed as bespoke component fields.
 
 use serde::{Deserialize, Serialize};
 
@@ -349,47 +349,35 @@ pub struct Border {
     pub radius: Option<TargetValue<Length>>,
 }
 
-/// How intensely a [`Fill`] paints its band relative to the background.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FillIntensity {
-    /// No paint — the band is left transparent.
-    Transparent,
-    /// A faint tint.
-    #[default]
-    Subtle,
-    /// A strong, clearly visible band.
-    Pronounced,
-}
-
-/// How wide a band a [`Fill`] paints across the available width.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FillBand {
-    /// Paint the full available width.
-    #[default]
-    Full,
-    /// Paint the content band, leaving the component's padding unpainted.
-    Padded,
-    /// Paint an indented band, inset from both edges.
-    Indented,
-}
-
-/// How a component paints its band of available width.
+/// Constructors for the adaptive background tints that the deleted `Fill`
+/// intensities used to supply implicitly.
 ///
-/// `Fill` models painted-band *behavior* — how and whether the width is
-/// painted — and is intentionally separate from [`Style::background`], which
-/// is plain adaptive color. A fill does not inherit through the render tree.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct Fill {
-    /// Fill color, if any. `None` derives a tint from the background.
-    pub color: Option<TargetValue<PerMode<Color>>>,
-    /// Paint intensity.
-    pub intensity: FillIntensity,
-    /// The band painted across the available width.
-    pub band: FillBand,
-    /// Optional inset applied to the painted band.
-    pub inset: Option<TargetValue<Length>>,
+/// These return the `TargetValue<PerMode<Color>>` value [`Style::background`]
+/// holds; `Background` itself is a zero-sized constructor namespace, never
+/// stored, so serialized `Style.background` still contains only the color
+/// value.
+pub struct Background;
+
+impl Background {
+    /// A faint adaptive tint (former `FillIntensity::Subtle`):
+    /// `rgb(235,235,238)` on light, `rgb(30,30,34)` on dark.
+    pub fn subtle() -> TargetValue<PerMode<Color>> {
+        use crate::color::{BasicColor, RgbColor};
+        TargetValue::universal(PerMode::adaptive(
+            Color::Rgb(RgbColor::new(235, 235, 238, BasicColor::White)),
+            Color::Rgb(RgbColor::new(30, 30, 34, BasicColor::Black)),
+        ))
+    }
+
+    /// A strong adaptive tint (former `FillIntensity::Pronounced`):
+    /// `rgb(215,215,220)` on light, `rgb(50,50,56)` on dark.
+    pub fn pronounced() -> TargetValue<PerMode<Color>> {
+        use crate::color::{BasicColor, RgbColor};
+        TargetValue::universal(PerMode::adaptive(
+            Color::Rgb(RgbColor::new(215, 215, 220, BasicColor::White)),
+            Color::Rgb(RgbColor::new(50, 50, 56, BasicColor::Black)),
+        ))
+    }
 }
 
 /// How a component paints itself and its named sub-parts.
@@ -401,8 +389,8 @@ pub struct Fill {
 ///
 /// `Style` may attach to block nodes and inline `Span` nodes. Only the text
 /// appearance fields — `color` and `emphasis` — inherit through render-tree
-/// traversal; `background`, `border`, and `fill` are box-painting properties
-/// that stay explicit on the node that paints them.
+/// traversal; `background` and `border` are box-painting properties that stay
+/// explicit on the node that paints them.
 ///
 /// ## Serialized shape
 ///
@@ -439,8 +427,7 @@ pub struct Fill {
 ///     "sides": { "sides": { "top": false, "right": false,
 ///                           "bottom": false, "left": true } },
 ///     "radius": null
-///   },
-///   "fill": null
+///   }
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -458,9 +445,6 @@ pub struct Style {
     pub emphasis: TextEmphasis,
     /// Border appearance, if any. Does not inherit.
     pub border: Option<Border>,
-    /// Fill — how the component paints its band of available width. Does not
-    /// inherit.
-    pub fill: Option<Fill>,
 }
 
 impl Style {
@@ -475,9 +459,9 @@ impl Style {
     /// [`color`](Self::color) falls back to the parent's color, and
     /// [`emphasis`](Self::emphasis) is the union of the parent's and this
     /// style's emphasis via [`TextEmphasis::inherited_from`]. The
-    /// box-painting fields — [`background`](Self::background),
-    /// [`border`](Self::border), and [`fill`](Self::fill) — never inherit
-    /// and are taken from `self` unchanged.
+    /// box-painting fields — [`background`](Self::background) and
+    /// [`border`](Self::border) — never inherit and are taken from `self`
+    /// unchanged.
     #[must_use]
     pub fn inherited_from(&self, parent: &Style) -> Style {
         Style {
@@ -485,7 +469,6 @@ impl Style {
             background: self.background.clone(),
             emphasis: self.emphasis.inherited_from(&parent.emphasis),
             border: self.border.clone(),
-            fill: self.fill.clone(),
         }
     }
 }
@@ -494,6 +477,61 @@ impl Style {
 mod tests {
     use super::*;
     use crate::color::Tailwind;
+    use crate::target::RenderTarget;
+
+    #[test]
+    fn background_subtle_matches_former_fill_tints() {
+        use crate::color::{BasicColor, Color, ColorMode, RgbColor};
+
+        let bg = Background::subtle();
+        let per_mode = bg.resolve(RenderTarget::Terminal).unwrap();
+        assert_eq!(
+            per_mode.resolve(ColorMode::Dark),
+            &Color::Rgb(RgbColor::new(30, 30, 34, BasicColor::Black))
+        );
+        assert_eq!(
+            per_mode.resolve(ColorMode::Light),
+            &Color::Rgb(RgbColor::new(235, 235, 238, BasicColor::White))
+        );
+    }
+
+    #[test]
+    fn background_pronounced_matches_former_fill_tints() {
+        use crate::color::{BasicColor, Color, ColorMode, RgbColor};
+
+        let per_mode = *Background::pronounced().resolve(RenderTarget::Terminal).unwrap();
+        assert_eq!(
+            per_mode.resolve(ColorMode::Dark),
+            &Color::Rgb(RgbColor::new(50, 50, 56, BasicColor::Black))
+        );
+        assert_eq!(
+            per_mode.resolve(ColorMode::Light),
+            &Color::Rgb(RgbColor::new(215, 215, 220, BasicColor::White))
+        );
+    }
+
+    #[test]
+    fn style_with_only_background_is_not_empty() {
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        assert!(!style.is_empty());
+    }
+
+    #[test]
+    fn old_style_payload_with_fill_key_still_deserializes() {
+        // serde ignores unknown fields by default, so a pre-deletion tree that
+        // still carries "fill": null deserializes fine.
+        let json = r#"{
+            "color": null, "background": null,
+            "emphasis": { "bold": false, "dim": false, "italic": false,
+                          "strikethrough": false, "blink": false, "underline": null },
+            "border": null, "fill": null
+        }"#;
+        let style: Style = serde_json::from_str(json).unwrap();
+        assert!(style.is_empty());
+    }
 
     #[test]
     fn default_is_empty() {
@@ -673,22 +711,6 @@ mod tests {
     }
 
     #[test]
-    fn fill_serde_roundtrip() {
-        let fill = Fill {
-            color: Some(TargetValue::universal(PerMode::adaptive(
-                Color::Tailwind(Tailwind::Slate100),
-                Color::Tailwind(Tailwind::Slate800),
-            ))),
-            intensity: FillIntensity::Pronounced,
-            band: FillBand::Padded,
-            inset: Some(TargetValue::universal(Length::ch(2))),
-        };
-        let json = serde_json::to_string(&fill).unwrap();
-        let back: Fill = serde_json::from_str(&json).unwrap();
-        assert_eq!(fill, back);
-    }
-
-    #[test]
     fn style_default_is_empty() {
         assert!(Style::default().is_empty());
     }
@@ -717,7 +739,6 @@ mod tests {
                 },
                 ..Border::default()
             }),
-            fill: None,
         };
         let json = serde_json::to_string(&style).unwrap();
         let back: Style = serde_json::from_str(&json).unwrap();
@@ -787,14 +808,12 @@ mod tests {
                 Tailwind::Slate100,
             )))),
             border: Some(Border::default()),
-            fill: Some(Fill::default()),
             ..Style::default()
         };
         // The child declares no box-painting properties; none are inherited.
         let merged = Style::default().inherited_from(&parent);
         assert!(merged.background.is_none());
         assert!(merged.border.is_none());
-        assert!(merged.fill.is_none());
     }
 
     #[test]

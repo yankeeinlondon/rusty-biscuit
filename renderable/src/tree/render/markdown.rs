@@ -1395,13 +1395,13 @@ mod tests {
 
     #[test]
     fn markdown_body_is_unchanged_when_layout_is_present() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
 
         let plain = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("hi")])]);
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
         para.attrs.set_layout(&Layout {
-            margin: Margin::all(Length::ch(4)),
+            margin: Edges::all(Length::ch(4)),
             ..Layout::default()
         });
         let with_layout = RenderNode::root(vec![para]);

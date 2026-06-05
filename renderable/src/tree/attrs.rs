@@ -1769,10 +1769,10 @@ mod tests {
 
     #[test]
     fn layout_roundtrips_through_node_attrs() {
-        use crate::layout::{Alignment, Layout, Length, Margin};
+        use crate::layout::{Alignment, Layout, Length, Edges};
 
         let layout = Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             alignment: Alignment::Center,
             ..Layout::default()
         };

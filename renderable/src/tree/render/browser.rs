@@ -2386,7 +2386,7 @@ fn wrap_style_emphasis(
 /// Lowers a [`Layout`](crate::layout::Layout) to an inline CSS declaration
 /// string for the browser target.
 ///
-/// Margin sides are resolved with [`TargetValue::resolve`] for
+/// Edges sides are resolved with [`TargetValue::resolve`] for
 /// [`RenderTarget::Browser`]. Vertical sides (`top` / `bottom`) lower a
 /// [`Length::Ch`] to `lh` (line-height units); horizontal sides lower it to
 /// `ch`. A `max_width` adds `margin-left` / `margin-right: auto` per the
@@ -3796,11 +3796,11 @@ mod tests {
 
     #[test]
     fn browser_renderer_lowers_layout_to_css() {
-        use crate::layout::{Alignment, Layout, Length, Margin, TargetValue};
+        use crate::layout::{Alignment, Layout, Length, Edges, TargetValue};
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
         para.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             alignment: Alignment::Center,
             max_width: Some(TargetValue::universal(Length::Percent(80.0))),
             ..Layout::default()
@@ -3827,11 +3827,11 @@ mod tests {
 
     #[test]
     fn browser_renderer_lowers_vertical_margin_to_lh() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
         para.attrs.set_layout(&Layout {
-            margin: Margin::y(Length::ch(1)),
+            margin: Edges::y(Length::ch(1)),
             ..Layout::default()
         });
         let root = RenderNode::root(vec![para]);
@@ -3973,7 +3973,7 @@ mod tests {
 
     #[test]
     fn progress_applies_node_layout_to_outer_element() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
         let mut node = progress_para(
             "40%",
             crate::tree::ProgressHints {
@@ -3982,7 +3982,7 @@ mod tests {
             },
         );
         node.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(3)),
+            margin: Edges::x(Length::ch(3)),
             ..Layout::default()
         });
         let out = html(&node);
@@ -4219,14 +4219,14 @@ mod tests {
     #[test]
     fn style_and_layout_share_one_style_attribute() {
         use crate::color::{BasicColor, Color};
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
         let mut para = RenderNode::paragraph(vec![RenderNode::text("text")]);
         para.attrs.set_style(&crate::style::Style {
             color: Some(universal_color(Color::BasicColor(BasicColor::Red))),
             ..Default::default()
         });
         para.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             ..Layout::default()
         });
         let out = html(&RenderNode::root(vec![para]));
@@ -4331,10 +4331,10 @@ mod tests {
 
     #[test]
     fn columns_layout_and_column_css_coexist() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
         let mut node = columns_bq(crate::tree::ColumnsHints::default(), vec![]);
         node.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             ..Layout::default()
         });
         let out = html(&node);

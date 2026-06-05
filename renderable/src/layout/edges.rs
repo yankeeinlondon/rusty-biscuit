@@ -1,4 +1,4 @@
-//! Margin box and alignment for [`Layout`](super::Layout).
+//! Edge box (margins / padding) and alignment for [`Layout`](super::Layout).
 
 use serde::{Deserialize, Serialize};
 
@@ -19,21 +19,22 @@ pub enum Alignment {
     Right,
 }
 
-/// A four-sided margin box. Each side is a [`TargetValue<Length>`].
+/// A four-sided edge box (used for both `margin` and `padding`). Each side is
+/// a [`TargetValue<Length>`].
 ///
 /// All sides accept the same `Ch` / `Percent` / `Zero` units; the browser
 /// renderer lowers vertical sides (`top` / `bottom`) to `lh` automatically.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Margin {
+pub struct Edges {
     pub top: TargetValue<Length>,
     pub right: TargetValue<Length>,
     pub bottom: TargetValue<Length>,
     pub left: TargetValue<Length>,
 }
 
-impl Default for Margin {
-    fn default() -> Margin {
-        Margin {
+impl Default for Edges {
+    fn default() -> Edges {
+        Edges {
             top: TargetValue::universal(Length::Zero),
             right: TargetValue::universal(Length::Zero),
             bottom: TargetValue::universal(Length::Zero),
@@ -42,10 +43,10 @@ impl Default for Margin {
     }
 }
 
-impl Margin {
-    /// A margin with all four sides set to the same universal length.
-    pub fn all(length: Length) -> Margin {
-        Margin {
+impl Edges {
+    /// An edge box with all four sides set to the same universal length.
+    pub fn all(length: Length) -> Edges {
+        Edges {
             top: TargetValue::universal(length.clone()),
             right: TargetValue::universal(length.clone()),
             bottom: TargetValue::universal(length.clone()),
@@ -53,21 +54,21 @@ impl Margin {
         }
     }
 
-    /// A margin with left + right set to `length`, top + bottom zero.
-    pub fn x(length: Length) -> Margin {
-        Margin {
+    /// An edge box with left + right set to `length`, top + bottom zero.
+    pub fn x(length: Length) -> Edges {
+        Edges {
             right: TargetValue::universal(length.clone()),
             left: TargetValue::universal(length),
-            ..Margin::default()
+            ..Edges::default()
         }
     }
 
-    /// A margin with top + bottom set to `length`, left + right zero.
-    pub fn y(length: Length) -> Margin {
-        Margin {
+    /// An edge box with top + bottom set to `length`, left + right zero.
+    pub fn y(length: Length) -> Edges {
+        Edges {
             top: TargetValue::universal(length.clone()),
             bottom: TargetValue::universal(length),
-            ..Margin::default()
+            ..Edges::default()
         }
     }
 
@@ -91,14 +92,14 @@ mod tests {
 
     #[test]
     fn default_is_all_zero() {
-        let m = Margin::default();
+        let m = Edges::default();
         assert_eq!(m.left, TargetValue::universal(Length::Zero));
         assert_eq!(m.top, TargetValue::universal(Length::Zero));
     }
 
     #[test]
     fn x_sets_only_horizontal() {
-        let m = Margin::x(Length::ch(4));
+        let m = Edges::x(Length::ch(4));
         assert_eq!(m.left, TargetValue::universal(Length::ch(4)));
         assert_eq!(m.right, TargetValue::universal(Length::ch(4)));
         assert_eq!(m.top, TargetValue::universal(Length::Zero));
@@ -106,9 +107,9 @@ mod tests {
 
     #[test]
     fn validate_propagates_errors() {
-        let m = Margin {
+        let m = Edges {
             left: TargetValue::universal(Length::Percent(150.0)),
-            ..Margin::default()
+            ..Edges::default()
         };
         assert!(m.validate().is_err());
     }
