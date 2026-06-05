@@ -275,11 +275,32 @@ impl MetricsTree {
             if row.emphasize {
                 label = format!("<b>{label}</b>");
             }
-            let value = format!("{:>num_w$}{:<unit_w$}", row.num, row.unit);
+            // Pad the mantissa and unit to their column widths BEFORE wrapping
+            // in markup: widths were computed from the bare strings, so any tag
+            // counted into them would skew the value column. The unit is dimmed
+            // to separate it visually from the mantissa; trailing pad spaces sit
+            // inside the `<dim>` harmlessly (dimming whitespace is invisible).
+            let num = format!("{:>num_w$}", row.num);
+            let unit = format!("<dim>{:<unit_w$}</dim>", row.unit);
+            // A hot row's whole value (mantissa and unit) reads red so the
+            // dominant cost is scannable. The dim unit nests inside the red so
+            // the markup stays well-formed (`<red>…<dim>…</dim>…</red>`).
+            let value = if row.hot {
+                format!("<red>{num}{unit}</red>")
+            } else {
+                format!("{num}{unit}")
+            };
             // Escape the literal `<` in `<1%` so Prose's tag tokenizer treats it
             // as text rather than an opening tag (the backslash is invisible, so
-            // the column width computed above still holds).
+            // the column width computed above still holds). Sub-percent slivers
+            // are dimmed to recede; the dim wraps the padded+escaped cell so the
+            // right-align spaces stay outside the visible glyphs.
             let share = format!("{:>share_w$}", row.share).replace('<', "\\<");
+            let share = if row.share == "<1%" {
+                format!("<dim>{share}</dim>")
+            } else {
+                share
+            };
             body.push_str(&format!("{label}  {value}  {share}"));
             if let Some(calls) = row.calls.filter(|c| *c > 1) {
                 body.push_str(&format!("  <dim>{}{calls}</dim>", glyphs.times));
@@ -727,5 +748,116 @@ mod tests {
         assert!(plain.contains("# HOT"), "ASCII marker missing:\n{plain}");
         assert!(plain.contains("x2"), "ASCII calls missing:\n{plain}");
         assert!(plain.contains("900us"), "ASCII duration unit missing:\n{plain}");
+    }
+
+    #[test]
+    fn unit_suffix_renders_dim() {
+        // build_markup is private; render WITH color and inspect the raw SGR.
+        // The dim attribute is `\x1b[2m` and must wrap every unit suffix.
+        let colored = MetricsTree::new(sample_tree()).render_optimistic(Some(80));
+        assert!(
+            colored.contains("\u{1b}[2m"),
+            "unit suffix must emit dim SGR (\\x1b[2m):\n{colored:?}"
+        );
+    }
+
+    #[test]
+    fn hot_row_value_renders_red() {
+        // Per repo lore `<red>` emits 3-bit `\x1b[31m`, never truecolor `38;2;`.
+        let root = MetricNode::branch(
+            "Total",
+            MetricValue::Duration(Duration::from_millis(100)),
+            MetricShare::Full,
+            vec![
+                MetricNode::leaf(
+                    "hot stage",
+                    MetricValue::Duration(Duration::from_millis(90)),
+                    MetricShare::Of(0.9),
+                )
+                .with_marker(MetricMarker::Highlight),
+            ],
+        );
+        let colored = MetricsTree::new(root).render_optimistic(Some(80));
+        assert!(
+            colored.contains("\u{1b}[31m"),
+            "hot value must emit 3-bit red SGR (\\x1b[31m):\n{colored:?}"
+        );
+        assert!(
+            !colored.contains("38;2;"),
+            "red must stay 3-bit, not truecolor:\n{colored:?}"
+        );
+        // The red must enclose the hot row's value: the red SGR appears on the
+        // line carrying the value, ahead of its reset, on the hot label's row.
+        let hot_line = colored
+            .lines()
+            .find(|l| strip_ansi(l).contains("hot stage"))
+            .expect("hot row present");
+        assert!(
+            hot_line.contains("\u{1b}[31m"),
+            "red SGR must sit on the hot row:\n{hot_line:?}"
+        );
+    }
+
+    #[test]
+    fn sub_percent_share_renders_dim() {
+        // The 45µs parse leaf is well under 1% of 100ms, so its share reads
+        // `<1%` and must carry the dim attribute. Assert the `1%` glyphs are
+        // preceded by a dim SGR with no intervening reset — i.e. the sliver text
+        // itself is emitted while dim is active, not merely that dim appears
+        // somewhere on the (unit-dimmed) row.
+        let colored = MetricsTree::new(sample_tree()).render_optimistic(Some(80));
+        let parse_line = colored
+            .lines()
+            .find(|l| strip_ansi(l).contains("parse"))
+            .expect("parse row present");
+        assert!(
+            strip_ansi(parse_line).contains("<1%"),
+            "parse share must read <1%:\n{parse_line:?}"
+        );
+        let pct_at = parse_line.find('%').expect("percent glyph present");
+        let prefix = &parse_line[..pct_at];
+        let last_dim = prefix.rfind("\u{1b}[2m");
+        let last_reset = prefix
+            .rfind("\u{1b}[0m")
+            .or_else(|| prefix.rfind("\u{1b}[22m"));
+        assert!(
+            matches!((last_dim, last_reset), (Some(d), reset) if reset.is_none_or(|r| r < d)),
+            "sub-percent sliver must render under an open dim SGR:\n{parse_line:?}"
+        );
+    }
+
+    #[test]
+    fn nested_red_dim_on_hot_unit_renders_without_corrupting_columns() {
+        // The hot row's unit is both red (value) and dim (unit), nested
+        // `<red>…<dim>…</dim>…</red>`. Stripping ANSI must still leave the unit
+        // column aligned with the non-hot rows.
+        let root = MetricNode::branch(
+            "Total",
+            MetricValue::Duration(Duration::from_millis(100)),
+            MetricShare::Full,
+            vec![
+                MetricNode::leaf(
+                    "hot stage",
+                    MetricValue::Duration(Duration::from_millis(90)),
+                    MetricShare::Of(0.9),
+                )
+                .with_marker(MetricMarker::Highlight),
+                MetricNode::leaf(
+                    "cool stage",
+                    MetricValue::Duration(Duration::from_millis(10)),
+                    MetricShare::Of(0.1),
+                ),
+            ],
+        );
+        let plain = strip_ansi(&MetricsTree::new(root).render_optimistic(Some(80)));
+        let unit_columns: Vec<usize> = plain
+            .lines()
+            .filter_map(|l| l.find("ms").map(|idx| l[..idx].chars().count()))
+            .collect();
+        assert!(unit_columns.len() >= 2, "expected multiple ms rows:\n{plain}");
+        assert!(
+            unit_columns.iter().all(|c| *c == unit_columns[0]),
+            "nested red+dim hot unit broke column alignment: {unit_columns:?}\n{plain}"
+        );
     }
 }
