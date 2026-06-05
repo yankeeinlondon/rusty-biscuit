@@ -392,7 +392,7 @@ fn assert_frontmatter_heading_and_spacing(frame: &CapturedFrame) {
     assert!(
         plain_lines
             .get(heading_idx + 1)
-            .map_or(false, |l| l.trim().is_empty()),
+            .is_some_and(|l| l.trim().is_empty()),
         "expected blank line after 'Frontmatter (resolved):' heading (bottom margin 1).\nplain:\n{}",
         frame.plain,
     );
@@ -411,6 +411,30 @@ fn assert_frontmatter_heading_and_spacing(frame: &CapturedFrame) {
     assert!(
         decode_attrs(raw_heading).contains(&Attr::Italic),
         "expected 'resolved' to render italic (SGR 3).\nrow: {raw_heading:?}",
+    );
+}
+
+/// Assert that the full-width horizontal rule renders as visible text in a
+/// real terminal.
+///
+/// The dry-run hr is a `RuleStyle::Dashes` / `RuleAlignment::Full` rule. Under
+/// a non-image terminal (the plain, no-`FORCE_COLOR` capture path) it renders
+/// as a run of `╌` glyphs (ASCII `-` in a restricted terminal), which tmux
+/// faithfully captures — unlike the Kitty-graphics image tier the optimistic
+/// `FORCE_COLOR` terminal would select.
+fn assert_horizontal_rule(frame: &CapturedFrame) {
+    let has_rule = frame.plain.lines().any(|line| {
+        let trimmed = line.trim();
+        let dash_count = trimmed.chars().filter(|&c| c == '╌' || c == '-').count();
+        dash_count >= 10
+            && trimmed
+                .chars()
+                .all(|c| c == '╌' || c == '-' || c.is_whitespace())
+    });
+    assert!(
+        has_rule,
+        "expected a full-width horizontal rule (dashes) in the captured pane.\nplain:\n{}",
+        frame.plain,
     );
 }
 
@@ -574,13 +598,17 @@ fn level2_dry_run_document_cell_renders_osc8_link_in_wezterm() {
     assert_styled_rows(&capture.frame);
 }
 
-/// Stage a workspace and run `claudine compose --goose --dry-run doc.md`
-/// **without** `FORCE_COLOR=1`.
+/// Stage a workspace and run `claudine compose --goose --dry-run doc.md` with
+/// image support disabled (empty `TERM_PROGRAM`) and **without** `FORCE_COLOR`.
 ///
-/// This avoids the optimistic terminal path that forces Kitty graphics
-/// protocol support (tmux strips Kitty images from pane captures), so the
-/// horizontal rule renders as visible text and structural assertions are
-/// reliable.
+/// `biscuit-terminal` keys image-protocol detection off `TERM_PROGRAM` / `TERM`
+/// ([`biscuit_terminal::discovery::detection::image_support`]). Inside the
+/// harness the child otherwise inherits an image-capable `TERM_PROGRAM` (e.g.
+/// `WezTerm`), so the horizontal rule renders as a Kitty graphics image that
+/// tmux strips from `capture-pane`. Clearing `TERM_PROGRAM` drops image support
+/// to `None`, so the rule renders as visible dash glyphs that tmux captures;
+/// 256-color SGR (YAML highlighting, bold/italic heading) is keyed off `TERM` /
+/// `COLORTERM` and is unaffected.
 fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
     let workspace = TestWorkspace::named("claudine-dryrun-l2-plain");
     let bin_dir = workspace.path().join("bin");
@@ -613,6 +641,16 @@ fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCaptu
                 ("HOME", home.as_str()),
                 ("PATH", path.as_str()),
                 ("COLUMNS", "80"),
+                // Neutralize the harness's session-level `FORCE_COLOR=1`, which
+                // otherwise routes claudine through an optimistic terminal that
+                // claims Kitty image support (the hr would then emit as a Kitty
+                // image that tmux strips). With it off, real detection applies:
+                // the tmux pane still reports 256-color (YAML highlighting kept)
+                // but no image protocol, so the hr renders as text dashes.
+                ("FORCE_COLOR", "0"),
+                ("CLICOLOR_FORCE", "0"),
+                // Belt-and-braces: also clear the image-capable TERM_PROGRAM.
+                ("TERM_PROGRAM", ""),
             ],
         )
         .expect("send compose --dry-run");
@@ -630,14 +668,14 @@ fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCaptu
 // Phase 6 — structural formatting (hr, heading, YAML) in a real terminal
 // ---------------------------------------------------------------------------
 
-/// Structural dry-run formatting: `Frontmatter (resolved):` heading with
-/// bottom margin 1, and inverse-theme YAML syntax highlighting.
+/// Structural dry-run formatting: the full-width horizontal rule, the
+/// `Frontmatter (resolved):` heading with bottom margin 1, and inverse-theme
+/// YAML syntax highlighting.
 ///
-/// Note: the horizontal rule is emitted as a Kitty graphics image when
-/// `FORCE_COLOR=1` is active (which the test harness sets on tmux sessions).
-/// tmux strips Kitty graphics from `capture-pane` output, so the hr cannot be
-/// asserted in tmux L2. It is fully covered by L1 integration tests
-/// (`compose_dry_run_body_only_on_stdout_metadata_on_stderr` and siblings).
+/// The capture omits `FORCE_COLOR` (see [`run_dry_run_compose_plain`]) so the
+/// terminal does not advertise Kitty graphics; the hr therefore renders as
+/// visible dash glyphs that tmux captures, rather than as a Kitty image (which
+/// tmux strips from `capture-pane`).
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_yaml_heading_structure_in_tmux() {
@@ -645,6 +683,7 @@ fn level2_dry_run_yaml_heading_structure_in_tmux() {
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let capture = run_dry_run_compose_plain(&mut harness);
+    assert_horizontal_rule(&capture.frame);
     assert_frontmatter_heading_and_spacing(&capture.frame);
     assert_inverse_theme_yaml(&capture.frame);
 }

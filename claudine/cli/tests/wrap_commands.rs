@@ -3853,6 +3853,138 @@ fn unknown_agent_hint_is_non_fatal_and_aborts_in_non_tty() {
         .stderr(contains("agent resolution failed"));
 }
 
+/// End-to-end (Finding 1): a frontmatter `agent` list resolving to exactly one
+/// installed provider must render the **auto-select header** in the dry-run
+/// `Agent` cell — not collapse to a bare provider name. Before the fix the
+/// resolved target masked the list state at the dry-run seam.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_list_one_installed_renders_auto_select_header() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // Suggest two agents; install only `claude` so the list resolves to a
+    // single installed provider (ListOneInstalled).
+    let md_file = workspace.path().join("doc.md");
+    fs::write(
+        &md_file,
+        "---\nname: one-installed\nagent: [claude, gemini]\n---\nBODY\n",
+    )
+    .unwrap();
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        // Restrict PATH to the fake bin so only `claude` is "installed".
+        .env("PATH", &path_dir)
+        .args(["compose", "--dry-run", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "dry-run should succeed; stderr was:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    // `prompting` only appears in the auto-select header ("…without the need
+    // for interactive prompting"); it is the single-token proof that the cell
+    // is the list auto-select state, not a bare `Selected` provider name.
+    assert!(
+        stderr.contains("prompting"),
+        "list-with-one-installed dry-run must render the auto-select header; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Claude"),
+        "the auto-selected provider must still be named; stderr was:\n{stderr}"
+    );
+}
+
+/// End-to-end (Finding 2): a single-entry all-invalid `agent` list
+/// (`agent: [not-real]`) must render the **zero-installed-list** state, not the
+/// single-invalid scalar cell. Before the fix the lost list-ness collapsed it
+/// to `Invalid Agent(…)`.
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_single_entry_invalid_list_is_zero_installed() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("doc.md");
+    fs::write(&md_file, "---\nname: zero\nagent: [not-real]\n---\nBODY\n").unwrap();
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["compose", "--dry-run", md_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "dry-run should succeed; stderr was:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    // `installed/valid` is the single-token signature of the zero-installed
+    // header; it survives table word-wrap.
+    assert!(
+        stderr.contains("installed/valid"),
+        "single-entry invalid list must render the zero-installed-list state; stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("not-real"),
+        "the invalid suggestion must appear in the NOT-valid list; stderr was:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Invalid Agent"),
+        "must NOT render the single-invalid scalar cell; stderr was:\n{stderr}"
+    );
+}
+
+/// End-to-end (Findings 3/4): `--silent` governs status verbosity only — it
+/// must not suppress the live no-TTY agent-resolution report, and the run must
+/// still abort with a non-zero exit.
+#[cfg(unix)]
+#[test]
+fn compose_silent_does_not_suppress_agent_resolution_report() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // No agent hint, no explicit provider → live no-TTY abort.
+    let md_file = workspace.path().join("doc.md");
+    fs::write(&md_file, "---\ntitle: t\n---\nPrompt body\n").unwrap();
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+
+    let stdin_file = workspace.path().join("empty-stdin.txt");
+    fs::write(&stdin_file, "").unwrap();
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .pipe_stdin(&stdin_file)
+        .unwrap()
+        .args(["compose", "--silent", md_file.to_str().unwrap()])
+        .assert()
+        .code(1);
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(
+        stderr.contains("didn't specify the Agent"),
+        "--silent must not suppress the agent-resolution report; stderr was:\n{stderr}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn effective_composed_frontmatter_activates_harness() {
