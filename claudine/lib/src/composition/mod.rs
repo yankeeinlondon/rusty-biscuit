@@ -11,6 +11,7 @@
 //! validations, handlers, and provider selection across `compose`,
 //! `inline-compose`, and `sequence`.
 
+pub mod agent_message;
 pub mod closure;
 mod error;
 mod guardrails;
@@ -28,6 +29,7 @@ mod select;
 pub mod sequence;
 mod types;
 
+pub use agent_message::{agent_state_breakdown, invalid_agent_message};
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
     CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
