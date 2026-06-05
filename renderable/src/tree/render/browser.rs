@@ -351,15 +351,15 @@ impl Writer<'_> {
                 // A projected `Progress` widget carries `ProgressHints`. The
                 // browser emits a semantic CSS progress bar before falling
                 // back to normal paragraph rendering.
-                if let Some(hints) = node.attrs.progress_hints() {
-                    self.render_progress(node, &hints, children)
+                if let Some(hints) = node.attrs.progress_hints_ref() {
+                    self.render_progress(node, hints, children)
                 } else {
                     self.block(BlockTag::P, &node.attrs, children)
                 }
             }
             NodeKind::BlockQuote { children } => {
-                if let Some(hints) = node.attrs.columns_hints() {
-                    self.render_columns(node, &hints, children)
+                if let Some(hints) = node.attrs.columns_hints_ref() {
+                    self.render_columns(node, hints, children)
                 } else {
                     self.block(BlockTag::Blockquote, &node.attrs, children)
                 }
@@ -690,8 +690,8 @@ impl Writer<'_> {
         let fallback_text = plain_text(children);
         let layout_css = node
             .attrs
-            .layout()
-            .map(|layout| layout_to_css(&layout))
+            .layout_ref()
+            .map(layout_to_css)
             .filter(|css| !css.is_empty())
             .unwrap_or_default();
         let html = super::shared::progress_html(hints, &fallback_text, &layout_css);
@@ -1001,7 +1001,7 @@ impl Writer<'_> {
 
         // A table title/caption is emitted as a `<caption>` before `<thead>`
         // and `<tbody>`. An empty or whitespace-only title is ignored.
-        if let Some(title) = node.attrs.table_title()
+        if let Some(title) = node.attrs.table_title_ref()
             && !title.trim().is_empty()
         {
             let caption = BrowserFragment::new()
@@ -1283,7 +1283,7 @@ impl StreamWriter<'_> {
     /// streaming analogue of [`Writer::render`] + [`wrap_style_emphasis`].
     fn write(&mut self, node: &RenderNode) -> Result<(), RenderError> {
         if is_inline_node_kind(&node.kind)
-            && let Some(style) = node.attrs.style().filter(|s| !s.is_empty())
+            && let Some(style) = node.attrs.style_ref().filter(|s| !s.is_empty())
         {
             let emphasis = style.emphasis;
             // Outermost-first so the nesting renders `<strong><em><s>…`,
@@ -1326,16 +1326,16 @@ impl StreamWriter<'_> {
                 children,
             } => self.write_section(node, *depth, heading, children),
             NodeKind::Paragraph { children } => {
-                if let Some(hints) = node.attrs.progress_hints() {
-                    self.write_progress(node, &hints, children);
+                if let Some(hints) = node.attrs.progress_hints_ref() {
+                    self.write_progress(node, hints, children);
                     Ok(())
                 } else {
                     self.block(BlockTag::P, &node.attrs, children)
                 }
             }
             NodeKind::BlockQuote { children } => {
-                if let Some(hints) = node.attrs.columns_hints() {
-                    self.write_columns(node, &hints, children)
+                if let Some(hints) = node.attrs.columns_hints_ref() {
+                    self.write_columns(node, hints, children)
                 } else {
                     self.block(BlockTag::Blockquote, &node.attrs, children)
                 }
@@ -1497,8 +1497,8 @@ impl StreamWriter<'_> {
         let fallback_text = plain_text(children);
         let layout_css = node
             .attrs
-            .layout()
-            .map(|layout| layout_to_css(&layout))
+            .layout_ref()
+            .map(layout_to_css)
             .filter(|css| !css.is_empty())
             .unwrap_or_default();
         self.buf
@@ -1787,7 +1787,7 @@ impl StreamWriter<'_> {
     ) -> Result<(), RenderError> {
         self.open_block(&BlockTag::Table, &node_attributes(&node.attrs, false));
 
-        if let Some(title) = node.attrs.table_title()
+        if let Some(title) = node.attrs.table_title_ref()
             && !title.trim().is_empty()
         {
             self.open_block(&BlockTag::Caption, &[]);
@@ -2253,8 +2253,8 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
     }
 
     let mut decls: Vec<String> = Vec::new();
-    if !inline && let Some(layout) = attrs.layout() {
-        let css = layout_to_css(&layout);
+    if !inline && let Some(layout) = attrs.layout_ref() {
+        let css = layout_to_css(layout);
         if !css.is_empty() {
             decls.push(css);
         }
@@ -2263,8 +2263,8 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
     // nodes. Bold / italic / strikethrough emphasis lowers to CSS here for
     // block nodes; for inline nodes it is applied as semantic wrappers by
     // `wrap_style_emphasis` instead, so the CSS form is suppressed.
-    if let Some(style) = attrs.style().filter(|s| !s.is_empty()) {
-        let css = style_css_declarations(&style, !inline);
+    if let Some(style) = attrs.style_ref().filter(|s| !s.is_empty()) {
+        let css = style_css_declarations(style, !inline);
         if !css.is_empty() {
             decls.push(css);
         }
@@ -2356,7 +2356,7 @@ fn wrap_style_emphasis(
     attrs: &NodeAttrs,
     fragment: BrowserFragment<Ready>,
 ) -> BrowserFragment<Ready> {
-    let Some(style) = attrs.style().filter(|s| !s.is_empty()) else {
+    let Some(style) = attrs.style_ref().filter(|s| !s.is_empty()) else {
         return fragment;
     };
     let emphasis = style.emphasis;

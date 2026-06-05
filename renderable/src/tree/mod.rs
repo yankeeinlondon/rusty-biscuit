@@ -37,6 +37,11 @@ pub use attrs::{
     HintNamespace, ListMarkerPolicy, ListRenderHints, NodeAttrs, ProgressHints, SequenceJoin,
     TableCellHints, TableColumnHints, TableHints, TableTerminalHints, TaskHints, TaskState,
 };
+// Test-only instrumentation (gated): exposed so a downstream crate's perf-gate
+// test can observe the `NodeAttrs::data` hint-access counter while folding a
+// corpus through renderable. See the `hint-access-counter` feature.
+#[cfg(any(test, feature = "hint-access-counter"))]
+pub use attrs::{hint_accesses, reset_hint_accesses};
 pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
 pub use inherit::InheritedStyle;
 pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};

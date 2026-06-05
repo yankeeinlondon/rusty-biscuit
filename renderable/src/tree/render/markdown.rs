@@ -215,17 +215,17 @@ impl Writer<'_> {
                 // A projected `Progress` widget carries `ProgressHints`. Plain
                 // Markdown renders the paragraph fallback text; MarkdownPlus
                 // emits the same semantic progress HTML as the browser.
-                match node.attrs.progress_hints() {
+                match node.attrs.progress_hints_ref() {
                     Some(hints) if self.opts.dialect == MarkdownDialect::MarkdownPlus => {
                         let text = self.render_inline(children)?;
-                        Ok(progress_html(&hints, &text))
+                        Ok(progress_html(hints, &text))
                     }
                     _ => self.render_inline(children),
                 }
             }
             NodeKind::BlockQuote { children } => {
-                if let Some(hints) = node.attrs.columns_hints() {
-                    self.render_columns(children, &hints)
+                if let Some(hints) = node.attrs.columns_hints_ref() {
+                    self.render_columns(children, hints)
                 } else {
                     let inner = self.render_blocks(children)?;
                     Ok(prefix_lines(&inner, "> "))
@@ -262,7 +262,7 @@ impl Writer<'_> {
                 // A table title/caption is emitted as escaped plain text on
                 // its own line before the table, separated by a blank line.
                 // An empty or whitespace-only title is ignored.
-                match node.attrs.table_title() {
+                match node.attrs.table_title_ref() {
                     Some(title) if !title.trim().is_empty() => {
                         Ok(format!("{}\n\n{table}", escape_text(title.trim())))
                     }
@@ -567,9 +567,9 @@ impl Writer<'_> {
         let classes = &node.attrs.classes;
         let style_css = node
             .attrs
-            .style()
+            .style_ref()
             .filter(|style| !style.is_empty())
-            .and_then(|style| markdown_plus_style_css(&style));
+            .and_then(markdown_plus_style_css);
 
         match self.opts.dialect {
             MarkdownDialect::MarkdownPlus => {

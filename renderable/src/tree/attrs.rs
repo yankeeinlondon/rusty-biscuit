@@ -6,10 +6,19 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-/// A namespace for render hints stored in [`NodeAttrs::data`].
+/// A namespace for extension render hints stored in [`NodeAttrs::data`].
 ///
 /// Namespaces provide a structured way to organize hints without key collisions.
 /// The full key is constructed as `"{namespace}.{key}"`.
+///
+/// The `data` bag is **extension-only**: it carries package-local namespaces
+/// such as `darkmatter.hr.*`. First-class renderable presentation —
+/// layout, style, and the per-component hints — lives in typed
+/// [`NodeAttrs`] fields, and the validator rejects stale `renderable.*` keys in
+/// `data`. Use a custom namespace such as `HintNamespace("myapp.custom")` for
+/// your own hints. The `renderable.*` constants below are retained only for
+/// compatibility and testing; do not route new first-class attributes through
+/// them.
 ///
 /// ## Examples
 ///
@@ -17,13 +26,22 @@ use serde::{Deserialize, Serialize};
 /// use renderable::tree::{HintNamespace, NodeAttrs};
 /// use serde_json::json;
 ///
+/// const CUSTOM: HintNamespace = HintNamespace("myapp.custom");
+///
 /// let mut attrs = NodeAttrs::default();
-/// attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2));
-/// assert_eq!(attrs.get_hint(HintNamespace::LAYOUT, "margin_top"), Some(&json!(2)));
+/// attrs.set_hint(CUSTOM, "margin_top", json!(2));
+/// assert_eq!(attrs.get_hint(CUSTOM, "margin_top"), Some(&json!(2)));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HintNamespace(pub &'static str);
 
+/// Compatibility/testing namespace constants.
+///
+/// These predate the typed [`NodeAttrs`] fields and name the
+/// `renderable.*` namespaces. They are **not** for new first-class attributes —
+/// the validator rejects `renderable.*` keys in [`NodeAttrs::data`]. They remain
+/// to exercise the namespace-classification path (e.g. the perf-gate counter).
+/// Define your own [`HintNamespace`] for extension hints.
 impl HintNamespace {
     /// Layout hints (margins, alignment, etc.).
     pub const LAYOUT: HintNamespace = HintNamespace("renderable.layout");
@@ -734,8 +752,10 @@ pub enum ComponentHints {
 #[serde(rename_all = "camelCase")]
 pub struct NodeAttrs {
     /// Optional unique identifier for the node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     /// CSS-style class names associated with the node.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub classes: Vec<String>,
     /// Block-positioning layout, when set. Permitted on block-level nodes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -755,6 +775,7 @@ pub struct NodeAttrs {
     pub component: Option<Box<ComponentHints>>,
     /// Extension-namespace structured data keyed by name (e.g.
     /// `darkmatter.hr.*`). Not used for first-class `renderable.*` hints.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub data: BTreeMap<String, serde_json::Value>,
 }
 
@@ -764,26 +785,37 @@ pub struct NodeAttrs {
 // structural perf gate folds a styled corpus and asserts the first slot stayed
 // at zero — every first-class hint must read from a typed field, never
 // round-trip through `NodeAttrs::data`.
-#[cfg(test)]
+//
+// Active under `cfg(test)` (renderable's own gate) and under the
+// `hint-access-counter` feature, which a downstream crate (e.g. `biscuit-terminal`)
+// enables from `[dev-dependencies]` so its own perf-gate test can observe the
+// counter while folding a corpus through renderable.
+#[cfg(any(test, feature = "hint-access-counter"))]
 thread_local! {
     pub(crate) static HINT_ACCESSES: std::cell::Cell<(u64, u64)> =
         const { std::cell::Cell::new((0, 0)) };
 }
 
-/// Resets the [`HINT_ACCESSES`] counter to `(0, 0)`.
-#[cfg(test)]
-pub(crate) fn reset_hint_accesses() {
+/// Resets the hint-access counter to `(0, 0)`.
+///
+/// Test-only instrumentation gated behind the `hint-access-counter` feature
+/// (and `cfg(test)`); not part of the released API.
+#[cfg(any(test, feature = "hint-access-counter"))]
+pub fn reset_hint_accesses() {
     HINT_ACCESSES.with(|c| c.set((0, 0)));
 }
 
 /// Returns the current `(renderable_owned, extension)` bag-access counts.
-#[cfg(test)]
-pub(crate) fn hint_accesses() -> (u64, u64) {
+///
+/// Test-only instrumentation gated behind the `hint-access-counter` feature
+/// (and `cfg(test)`); not part of the released API.
+#[cfg(any(test, feature = "hint-access-counter"))]
+pub fn hint_accesses() -> (u64, u64) {
     HINT_ACCESSES.with(std::cell::Cell::get)
 }
 
 /// Classifies one bag access by namespace and bumps the matching counter.
-#[cfg(test)]
+#[cfg(any(test, feature = "hint-access-counter"))]
 fn record_hint_access(ns: HintNamespace) {
     HINT_ACCESSES.with(|c| {
         let (r, e) = c.get();
@@ -798,7 +830,9 @@ fn record_hint_access(ns: HintNamespace) {
 impl NodeAttrs {
     /// Sets a hint value in the given namespace.
     ///
-    /// The full key is constructed as `"{namespace}.{key}"`.
+    /// The full key is constructed as `"{namespace}.{key}"`. Use an extension
+    /// namespace such as `HintNamespace("myapp.custom")`; `renderable.*` keys are
+    /// rejected by validation.
     ///
     /// ## Examples
     ///
@@ -807,10 +841,10 @@ impl NodeAttrs {
     /// use serde_json::json;
     ///
     /// let mut attrs = NodeAttrs::default();
-    /// attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2));
+    /// attrs.set_hint(HintNamespace("myapp.custom"), "margin_top", json!(2));
     /// ```
     pub fn set_hint(&mut self, ns: HintNamespace, key: &str, value: serde_json::Value) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "hint-access-counter"))]
         record_hint_access(ns);
         let full_key = format!("{}.{}", ns.0, key);
         self.data.insert(full_key, value);
@@ -827,12 +861,13 @@ impl NodeAttrs {
     /// use serde_json::json;
     ///
     /// let mut attrs = NodeAttrs::default();
-    /// attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2));
-    /// assert_eq!(attrs.get_hint(HintNamespace::LAYOUT, "margin_top"), Some(&json!(2)));
-    /// assert_eq!(attrs.get_hint(HintNamespace::LAYOUT, "nonexistent"), None);
+    /// let ns = HintNamespace("myapp.custom");
+    /// attrs.set_hint(ns, "margin_top", json!(2));
+    /// assert_eq!(attrs.get_hint(ns, "margin_top"), Some(&json!(2)));
+    /// assert_eq!(attrs.get_hint(ns, "nonexistent"), None);
     /// ```
     pub fn get_hint(&self, ns: HintNamespace, key: &str) -> Option<&serde_json::Value> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "hint-access-counter"))]
         record_hint_access(ns);
         // The common node carries no hints at all (plain text runs, attribute-less
         // table cells, list items). Skip building the `"{ns}.{key}"` lookup string
@@ -856,13 +891,14 @@ impl NodeAttrs {
     /// use serde_json::json;
     ///
     /// let mut attrs = NodeAttrs::default();
-    /// attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2));
-    /// let removed = attrs.remove_hint(HintNamespace::LAYOUT, "margin_top");
+    /// let ns = HintNamespace("myapp.custom");
+    /// attrs.set_hint(ns, "margin_top", json!(2));
+    /// let removed = attrs.remove_hint(ns, "margin_top");
     /// assert_eq!(removed, Some(json!(2)));
-    /// assert_eq!(attrs.get_hint(HintNamespace::LAYOUT, "margin_top"), None);
+    /// assert_eq!(attrs.get_hint(ns, "margin_top"), None);
     /// ```
     pub fn remove_hint(&mut self, ns: HintNamespace, key: &str) -> Option<serde_json::Value> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "hint-access-counter"))]
         record_hint_access(ns);
         let full_key = format!("{}.{}", ns.0, key);
         self.data.remove(&full_key)
@@ -1037,6 +1073,17 @@ impl NodeAttrs {
         }
     }
 
+    /// Borrowed accessor for renderer hot paths (no clone).
+    ///
+    /// Returns `None` when the node is not a projected progress widget.
+    #[must_use]
+    pub fn progress_hints_ref(&self) -> Option<&ProgressHints> {
+        match self.component.as_deref() {
+            Some(ComponentHints::Progress(h)) => Some(h),
+            _ => None,
+        }
+    }
+
     /// Stores [`ColumnsHints`] as the node's [`ComponentHints::Columns`].
     ///
     /// The presence of the hint marks the block quote as a projected
@@ -1074,6 +1121,17 @@ impl NodeAttrs {
     pub fn columns_hints(&self) -> Option<ColumnsHints> {
         match self.component.as_deref() {
             Some(ComponentHints::Columns(h)) => Some(h.clone()),
+            _ => None,
+        }
+    }
+
+    /// Borrowed accessor for renderer hot paths (no clone).
+    ///
+    /// Returns `None` when the node is not a projected two-column widget.
+    #[must_use]
+    pub fn columns_hints_ref(&self) -> Option<&ColumnsHints> {
+        match self.component.as_deref() {
+            Some(ComponentHints::Columns(h)) => Some(h),
             _ => None,
         }
     }
@@ -1123,6 +1181,17 @@ impl NodeAttrs {
         }
     }
 
+    /// Borrowed accessor for renderer hot paths (no clone).
+    ///
+    /// Returns `None` when column `index` carries no stored hints.
+    #[must_use]
+    pub fn table_column_hints_ref(&self, index: usize) -> Option<&TableColumnHints> {
+        match self.component.as_deref() {
+            Some(ComponentHints::Table(t)) => t.columns.get(&index),
+            _ => None,
+        }
+    }
+
     /// Stores [`TableCellHints`] as the node's [`ComponentHints::TableCell`].
     ///
     /// The presence of the hint marks the cell as a projected typed cell;
@@ -1167,6 +1236,17 @@ impl NodeAttrs {
         }
     }
 
+    /// Borrowed accessor for renderer hot paths (no clone).
+    ///
+    /// Returns `None` when the cell is not a projected typed cell.
+    #[must_use]
+    pub fn table_cell_hints_ref(&self) -> Option<&TableCellHints> {
+        match self.component.as_deref() {
+            Some(ComponentHints::TableCell(h)) => Some(h),
+            _ => None,
+        }
+    }
+
     /// Stores [`TableTerminalHints`] in this node's [`ComponentHints::Table`].
     ///
     /// Co-resident with the per-column and title table hints.
@@ -1207,6 +1287,17 @@ impl NodeAttrs {
         match self.component.as_deref() {
             Some(ComponentHints::Table(t)) => t.terminal.clone().unwrap_or_default(),
             _ => TableTerminalHints::default(),
+        }
+    }
+
+    /// Borrowed accessor for renderer hot paths (no clone).
+    ///
+    /// Returns `None` when the table carries no terminal hints.
+    #[must_use]
+    pub fn table_terminal_hints_ref(&self) -> Option<&TableTerminalHints> {
+        match self.component.as_deref() {
+            Some(ComponentHints::Table(t)) => t.terminal.as_ref(),
+            _ => None,
         }
     }
 
@@ -1401,6 +1492,17 @@ impl NodeAttrs {
         }
     }
 
+    /// Borrowed accessor for renderer hot paths.
+    ///
+    /// Returns `None` when the list item is not a projected task-list item.
+    #[must_use]
+    pub fn task_hints_ref(&self) -> Option<&TaskHints> {
+        match self.component.as_deref() {
+            Some(ComponentHints::Task(h)) => Some(h),
+            _ => None,
+        }
+    }
+
     /// Stores a table title/caption in this node's [`ComponentHints::Table`].
     ///
     /// A whitespace-only title is stored as-is; renderers are responsible for
@@ -1435,6 +1537,17 @@ impl NodeAttrs {
     pub fn table_title(&self) -> Option<String> {
         match self.component.as_deref() {
             Some(ComponentHints::Table(t)) => t.title.clone(),
+            _ => None,
+        }
+    }
+
+    /// Borrowed accessor for renderer hot paths (no clone).
+    ///
+    /// Returns `None` when no table title is set.
+    #[must_use]
+    pub fn table_title_ref(&self) -> Option<&str> {
+        match self.component.as_deref() {
+            Some(ComponentHints::Table(t)) => t.title.as_deref(),
             _ => None,
         }
     }
@@ -1474,12 +1587,53 @@ mod tests {
     }
 
     #[test]
-    fn default_node_serializes_without_new_fields() {
+    fn default_node_serializes_to_empty_object() {
+        // A default `NodeAttrs` carries no attribute, so every field is skipped
+        // and the wire shape is the empty object — no identity, class, or data
+        // noise.
         let json = serde_json::to_string(&NodeAttrs::default()).unwrap();
-        // sparse: no layout/style/component/sequenceJoin keys
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn sparse_typed_payload_deserializes_via_defaults() {
+        // A payload that carries only one typed field deserializes with every
+        // other field defaulted — the absent fields are `#[serde(default)]`.
+        let attrs: NodeAttrs = serde_json::from_str(r#"{"listMarkerPolicy":"none"}"#).unwrap();
+        assert_eq!(attrs.list_marker_policy, ListMarkerPolicy::None);
+        assert!(attrs.id.is_none());
+        assert!(attrs.classes.is_empty());
+        assert!(attrs.layout.is_none());
+        assert!(attrs.style.is_none());
+        assert!(attrs.sequence_join.is_none());
+        assert!(attrs.component.is_none());
+        assert!(attrs.data.is_empty());
+
+        // The fully-empty object is also a valid (all-default) `NodeAttrs`.
+        let empty: NodeAttrs = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty, NodeAttrs::default());
+    }
+
+    #[test]
+    fn populated_attrs_serialize_only_set_fields() {
+        // Only the fields a node actually carries appear on the wire; identity,
+        // class, and data noise are skipped when empty.
+        let mut attrs = NodeAttrs {
+            id: Some("anchor".into()),
+            classes: vec!["lead".into()],
+            ..NodeAttrs::default()
+        };
+        attrs.set_sequence_join(SequenceJoin::None);
+        let json = serde_json::to_string(&attrs).unwrap();
+        assert!(json.contains("\"id\":\"anchor\""));
+        assert!(json.contains("\"classes\":[\"lead\"]"));
+        assert!(json.contains("sequenceJoin"));
+        // Untouched fields are absent from the sparse shape.
         assert!(!json.contains("layout"));
+        assert!(!json.contains("style"));
         assert!(!json.contains("component"));
-        assert!(!json.contains("sequenceJoin"));
+        assert!(!json.contains("data"));
+        assert!(!json.contains("listMarkerPolicy"));
     }
 
     #[test]
@@ -2118,9 +2272,12 @@ mod tests {
         assert_eq!(extension, 2, "two extension-namespace bag accesses");
     }
 
-    /// Builds a styled corpus exercising layout, inherited style, a list
-    /// (marker policy + list hints), a table (column + title), a code block, a
-    /// task item, and one `darkmatter.hr` extension hint. The first-class
+    /// Builds a styled corpus exercising every first-class hint branch the
+    /// renderers read: layout, inherited block style, an inline styled span
+    /// with a nested styled span (inline style inheritance), a progress widget,
+    /// a two-column widget, a list (marker policy + list hints), a task item, a
+    /// table (column + title + terminal striping hints + a typed data cell), a
+    /// code block, and one `darkmatter.hr` extension hint. The first-class
     /// presentation rides on typed fields; only the extension hint lives in the
     /// bag, so a behaving fold touches `data` zero times for `renderable.*`.
     #[cfg(test)]
@@ -2142,12 +2299,46 @@ mod tests {
             },
             ..Style::default()
         };
+        let italic = Style {
+            emphasis: TextEmphasis {
+                italic: true,
+                ..Default::default()
+            },
+            ..Style::default()
+        };
 
         // Heading carrying layout + an inheritable style.
         let mut heading =
             RenderNode::heading(HeadingDepth::new(2).unwrap(), vec![RenderNode::text("Title")]);
         heading.attrs.set_layout(&Layout::default());
         heading.attrs.set_style(&red);
+
+        // Paragraph carrying an inline styled span that nests a second styled
+        // span, so the fold walks inline style inheritance.
+        let mut inner_span = RenderNode::span(vec![], vec![RenderNode::text("inner")]);
+        inner_span.attrs.set_style(&italic);
+        let mut outer_span =
+            RenderNode::span(vec![], vec![RenderNode::text("outer "), inner_span]);
+        outer_span.attrs.set_style(&red);
+        let styled_para = RenderNode::paragraph(vec![outer_span]);
+
+        // Progress widget: a paragraph carrying ProgressHints.
+        let mut progress = RenderNode::paragraph(vec![RenderNode::text("75%")]);
+        progress.attrs.set_progress_hints(&ProgressHints {
+            value: 0.75,
+            ..Default::default()
+        });
+
+        // Two-column widget: a block quote carrying ColumnsHints; the first
+        // child is the left column, the rest the right column.
+        let mut columns = RenderNode::block_quote(vec![
+            RenderNode::paragraph(vec![RenderNode::text("left")]),
+            RenderNode::paragraph(vec![RenderNode::text("right")]),
+        ]);
+        columns.attrs.set_columns_hints(&ColumnsHints {
+            left_count: 1,
+            ..Default::default()
+        });
 
         // List with a marker policy and list hints; one task item carries a
         // `darkmatter.hr` extension hint to populate the bag.
@@ -2167,10 +2358,23 @@ mod tests {
             ..Default::default()
         });
 
-        // Table with a column hint and a title.
-        let cell = RenderNode::table_cell(vec![RenderNode::text("c0")]);
-        let row = RenderNode::table_row(vec![cell]);
-        let mut table = RenderNode::table(vec![crate::tree::ColumnAlign::Left], vec![row]);
+        // Table with a column hint, a title, terminal striping hints, and a
+        // data row whose typed cell carries cell hints.
+        let header_row = RenderNode::table_row(vec![RenderNode::table_cell(vec![
+            RenderNode::text("c0"),
+        ])]);
+        let mut data_cell = RenderNode::table_cell(vec![RenderNode::text("42")]);
+        data_cell.attrs.set_table_cell_hints(&TableCellHints {
+            kind: "integer".into(),
+            raw_value: json!(42),
+            alignment: "right".into(),
+            vertical_alignment: "top".into(),
+        });
+        let data_row = RenderNode::table_row(vec![data_cell]);
+        let mut table = RenderNode::table(
+            vec![crate::tree::ColumnAlign::Left],
+            vec![header_row, data_row],
+        );
         table.attrs.set_table_column_hints(
             0,
             &TableColumnHints {
@@ -2178,6 +2382,10 @@ mod tests {
                 ..Default::default()
             },
         );
+        table.attrs.set_table_terminal_hints(&TableTerminalHints {
+            alternate_background: true,
+            ..Default::default()
+        });
         table.attrs.set_table_title("Totals");
 
         // Code block with hints.
@@ -2191,19 +2399,24 @@ mod tests {
         Document {
             sources: SourceRegistry::default(),
             metadata: DocumentMetadata::default(),
-            root: RenderNode::root(vec![heading, list, table, code]),
+            root: RenderNode::root(vec![
+                heading, styled_para, progress, columns, list, table, code,
+            ]),
         }
     }
 
-    /// Structural perf gate: folding the styled corpus to Markdown must not
-    /// round-trip any renderable-owned hint through [`NodeAttrs::data`]. Every
-    /// first-class hint is a typed field, so the renderable-owned counter stays
-    /// at zero. (Terminal and browser folds gate the same invariant in their
-    /// own crates; this is the AC #5 minimum.)
+    /// Structural perf gate: folding the styled corpus must not round-trip any
+    /// renderable-owned hint through [`NodeAttrs::data`]. Every first-class hint
+    /// is a typed field, so the renderable-owned counter stays at zero on each
+    /// renderable-owned fold: Markdown, the browser fragment fold, and the
+    /// browser streaming fold. The terminal fold gates the same invariant in
+    /// `biscuit-terminal` (it owns that renderer); see its
+    /// `terminal_fold_does_zero_renderable_owned_hint_roundtrips` test.
     #[test]
     fn fold_does_zero_renderable_owned_hint_roundtrips() {
         let doc = styled_corpus_document();
 
+        // Markdown fold.
         super::reset_hint_accesses();
         let _ = crate::tree::render::render_markdown_document(
             &doc,
@@ -2211,10 +2424,35 @@ mod tests {
         )
         .expect("markdown fold");
         let (renderable_owned, _extension) = super::hint_accesses();
-
         assert_eq!(
             renderable_owned, 0,
-            "the fold must not round-trip any renderable-owned hint through `data`",
+            "the Markdown fold must not round-trip any renderable-owned hint through `data`",
+        );
+
+        // Browser fragment fold.
+        super::reset_hint_accesses();
+        let _ = crate::tree::render::render_browser_document(
+            &doc,
+            &crate::tree::render::BrowserRenderOptions::default(),
+        )
+        .expect("browser fragment fold");
+        let (renderable_owned, _extension) = super::hint_accesses();
+        assert_eq!(
+            renderable_owned, 0,
+            "the browser fragment fold must not round-trip any renderable-owned hint through `data`",
+        );
+
+        // Browser streaming fold.
+        super::reset_hint_accesses();
+        let _ = crate::tree::render::render_browser_document_html(
+            &doc,
+            &crate::tree::render::BrowserRenderOptions::default(),
+        )
+        .expect("browser streaming fold");
+        let (renderable_owned, _extension) = super::hint_accesses();
+        assert_eq!(
+            renderable_owned, 0,
+            "the browser streaming fold must not round-trip any renderable-owned hint through `data`",
         );
     }
 }
