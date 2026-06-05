@@ -213,48 +213,69 @@ limit, or when `BISCUIT_TEST_HARNESS_SWEEP_LEGACY_WEZTERM=1` is set.
 ### Apple Terminal: known gaps and invariants
 
 Terminal.app is GUI-automated via `osascript` and is the most fragile
-backend. Two known issues bite anyone editing `apple_terminal.rs`:
+backend. Several issues bite anyone editing `apple_terminal.rs`:
 
-1. **The pid tag does not survive.** Spawned windows are tagged with a
-   custom title (`biscuit-test-terminal-<pid>`), but an interactive shell
-   prompt overwrites the window title (zsh `precmd` / bash
-   `PROMPT_COMMAND`), so the title-based reaper cannot find leaked windows.
-   **Fixed** by a title-independent window-id registry
-   (`${TMPDIR}/biscuit-test-terminal-registry.jsonl`): every owned spawn
-   records its window id, and the reaper closes registry windows whose
-   owner process is dead — regardless of title. The registry is pruned
-   after each reaper run, and mutations that can race with a rewrite use a
-   sidecar lock.
-2. **`do script` reuses the idle front window.** `do script "cmd"` with no
+1. **Window identity (title-independent registry).** Spawned windows get a
+   custom title (`biscuit-test-terminal-<pid>`), but it is not load-bearing:
+   an interactive shell prompt can overwrite the window title, and identity
+   must survive that. Every owned spawn records its window id in
+   `${TMPDIR}/biscuit-test-terminal-registry.jsonl`; the reaper closes
+   registry windows whose owner process is dead, regardless of title. The
+   registry is pruned after each reaper run, and mutations that can race with
+   a rewrite use a sidecar lock.
+2. **The idle-shell predicate must match the real login shell.** The reaper
+   guards every close with `looks_like_harness_window` (idle, default 80×24,
+   empty/"Terminal"/harness-tag title, only login-shell processes). Two bugs
+   made it match **nothing**, so leaked windows piled up unbounded: (a) it
+   built its process allowlist from `detect_shell()` (which prefers `bash`)
+   while Terminal windows actually run the user's login shell (`-zsh`); (b)
+   `item 1 of (every window …)` + `processes of t` produces a reference chain
+   that fails `as text` coercion with AppleScript error `-1700` on *every*
+   window. The predicate now accepts any common login shell and uses a direct
+   `first window whose id …` reference with a materialized process list.
+3. **`do script` reuses the idle front window.** `do script "cmd"` with no
    target nondeterministically runs in the frontmost idle window instead of
    creating a new one. A self-spawning test (`level2_apple_terminal_harness_lifecycle`)
-   could thereby capture and close the *shared* test window, breaking every
-   later test with `Can't get selected tab of window …`. **Fixed** (focus-free):
+   could thereby capture and close the *shared* test window. **Fixed** (focus-free):
    `spawn_shell` reports whether the window was genuinely new (id-diff) and
    clears `owned` on reuse so `Drop` never closes a reused window; the
    self-spawning lifecycle test skips when a shared broker window is present.
+4. **`close` cannot destroy a window — it leaves an invisible husk.** On
+   current macOS, `close … saving no` does not remove a Terminal.app window;
+   it leaves a `visible false`, zero-tab **husk** that no further `close`
+   removes (even the Drop path's polling-close just times out against it).
+   Husks accumulate ~1 per spawn/kill cycle and eventually slow every
+   full-window scan. The only reliable recovery is to **quit** the app — see
+   the self-healing cleanup below.
 
 Two **invariants** any spawn change must preserve: spawning must **never
 steal foreground focus** (no `activate` / `System Events keystroke`), and
 the harness must **never close a window it did not create** (track
 ownership by window-id diff, not by `id of front window`).
 
-#### Legacy sweep (opt-in)
+#### Self-healing cleanup (sweep + quit-relaunch)
 
-The registry cannot catch windows **restored by macOS** (new ids, not in the
-registry) or leaked by harness versions predating the registry. An opt-in
-legacy sweep is available:
+Mirroring the WezTerm sweep, cleanup self-heals when leaks pile up — no env
+var required:
 
-```bash
-BISCUIT_TEST_HARNESS_SWEEP_LEGACY_APPLE=1 cargo test …
-```
+- **Sweep.** When the open-window count exceeds `LEGACY_WINDOW_LIMIT` (or
+  `BISCUIT_TEST_HARNESS_SWEEP_LEGACY_APPLE=1` is set), every window is tested
+  against the strict `looks_like_harness_window` predicate and matches are
+  closed. This catches leaks the registry cannot see (macOS-restored windows
+  with new ids, pre-registry leaks, leaks recorded under a different
+  `$TMPDIR`).
+- **Quit-relaunch (husk recovery).** Because `close` cannot remove invisible
+  husks, when the window list has degenerated into **only** disposable
+  windows — invisible husks plus idle harness-signature windows — past the
+  same limit, cleanup quits Terminal.app (the one thing that clears husks)
+  and lets it relaunch clean on the next spawn. It **refuses to quit** if any
+  window looks like real work (visible, non-default, titled, or running a
+  command), so a developer's window is never lost.
 
-When enabled, the reaper tests **every** open Terminal.app window against a
-strict idle-shell predicate (default 80×24 geometry, empty/"Terminal" title,
-only idle login-shell processes) and closes matching windows. This is
-**disabled by default** because an idle login-shell window can belong to a
-developer who actually uses Terminal.app. Enable only on CI or on machines
-where Terminal.app is not the interactive terminal.
+`LEGACY_WINDOW_LIMIT` is conservative because Terminal.app has no workspace
+isolation (unlike WezTerm's quarantined `biscuit-bg` workspace); the narrow
+predicate is what keeps the sweep and quit safe on a machine where someone
+uses Terminal.app interactively.
 
 #### macOS window-restoration mitigation
 
