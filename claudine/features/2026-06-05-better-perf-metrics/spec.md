@@ -145,7 +145,7 @@ hard-block on every upstream landing (see [Phasing](#phasing)).
   whether or not the new instrumentation is read.
 - **NG-2** No new sub-millisecond instrumentation _purely_ to shrink the unattributed remainder. The
   remainder is made **explicit** (see TR-3), not engineered to zero. (This does not forbid the upstream
-  spans in G-8, which exist to attribute _material_ cost like per-command shell expansion.)
+  spans in G-9, which exist to attribute _material_ cost like per-command shell expansion.)
 - **NG-3** No change to `--perf` gating / bootstrap detection (`scan_perf_bootstrap`, `PerfBootstrap`). The
   set of commands that support `--perf` is unchanged.
 - **NG-4** Not a machine-readable / JSON perf export. This is the human-facing terminal report only. A
@@ -160,8 +160,11 @@ hard-block on every upstream landing (see [Phasing](#phasing)).
 
 `process_start: Instant` captured in `run()` (`main.rs:191`) is the **only** zero point. It must be threaded
 to the report-emission site so wall-clock can be computed there as `process_start.elapsed()`. Today
-`process_start` reaches `pre_dispatch` but is dropped before the report is built; the report instead invents
-`total_start`. That invented timer is removed.
+`process_start` reaches `pre_dispatch` but is dropped before the report is built; each report-emission site
+instead invents its own mid-flight timer. There are **six** such sites — composition
+(`mod.rs:848/1693/1900/2000`), wrapper (`wrap/mod.rs:334`), and sequence (`wrap/sequence.rs:442/757`) — every
+one computing `<timer>.elapsed()` as the headline. All six invented timers are removed and replaced by the
+single threaded baseline, ideally via one shared emit helper so they cannot drift back apart.
 
 Concretely, `StartupTimings` (`perf.rs:37`) carries the **baseline instant** (or a pre-measured
 `pre_dispatch` plus the `process_start` instant) down through `run_provider_wrapper` /
@@ -439,7 +442,7 @@ defect in the [motivating example](#motivating-example-todays-broken-output).
 | Area | File / anchor | Nature of change |
 | --- | --- | --- |
 | Baseline threading | `cli/src/main.rs:191,254,263-273,301-311` | Carry `process_start` baseline into the collector instead of dropping it |
-| Headline source | `cli/src/commands/wrap/composition/mod.rs:790,848` | Remove invented `total_start`; headline = baseline elapsed at build |
+| Headline source (6 emit sites) | composition `mod.rs:790,848,1693,1900,2000`; wrapper `wrap/mod.rs:313,334`; sequence `wrap/sequence.rs:442,757` | Remove the per-site mid-flight timers (`total_start`/`wrapper_start`/`sequence_start`); headline = threaded `process_start` baseline elapsed at build. **Centralize** so the six sites cannot drift |
 | Prep window | `cli/src/commands/compose.rs:328,670,681,1077` | Keep measuring prep; expose compose as a **child** of prep, not a peer |
 | Env sub-stage clock | `mod.rs:804-814,1230,1524` | TR-2: one timer for `environment setup` + its sub-stages |
 | Report model | `cli/src/perf.rs:20-117,277-373` | Replace flat `CliOverheadReport` + separate sections with the `PerfNode` tree |
