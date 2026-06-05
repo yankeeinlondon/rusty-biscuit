@@ -83,6 +83,7 @@ fn apple_terminal_double_underline_degrades_to_straight() {
     let mut session = spawn_with_env(&[
         ("PROBE", "prose"),
         ("PROBE_TERM_PROGRAM", "Apple_Terminal"),
+        ("PROBE_TERM", "xterm-256color"),
         (
             "PROBE_PROSE_INPUT",
             "<double-underline>important text</double-underline>",
