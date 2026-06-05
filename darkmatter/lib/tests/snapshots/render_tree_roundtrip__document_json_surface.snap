@@ -40,11 +40,7 @@ expression: json
                         }
                       }
                     },
-                    "attrs": {
-                      "id": null,
-                      "classes": [],
-                      "data": {}
-                    }
+                    "attrs": {}
                   }
                 ]
               }
@@ -60,9 +56,7 @@ expression: json
               }
             },
             "attrs": {
-              "id": "sample-heading",
-              "classes": [],
-              "data": {}
+              "id": "sample-heading"
             }
           },
           {
@@ -85,11 +79,7 @@ expression: json
                         }
                       }
                     },
-                    "attrs": {
-                      "id": null,
-                      "classes": [],
-                      "data": {}
-                    }
+                    "attrs": {}
                   },
                   {
                     "kind": {
@@ -111,11 +101,7 @@ expression: json
                                 }
                               }
                             },
-                            "attrs": {
-                              "id": null,
-                              "classes": [],
-                              "data": {}
-                            }
+                            "attrs": {}
                           }
                         ]
                       }
@@ -130,11 +116,7 @@ expression: json
                         }
                       }
                     },
-                    "attrs": {
-                      "id": null,
-                      "classes": [],
-                      "data": {}
-                    }
+                    "attrs": {}
                   },
                   {
                     "kind": {
@@ -152,11 +134,7 @@ expression: json
                         }
                       }
                     },
-                    "attrs": {
-                      "id": null,
-                      "classes": [],
-                      "data": {}
-                    }
+                    "attrs": {}
                   },
                   {
                     "kind": {
@@ -180,11 +158,7 @@ expression: json
                                 }
                               }
                             },
-                            "attrs": {
-                              "id": null,
-                              "classes": [],
-                              "data": {}
-                            }
+                            "attrs": {}
                           }
                         ]
                       }
@@ -199,11 +173,7 @@ expression: json
                         }
                       }
                     },
-                    "attrs": {
-                      "id": null,
-                      "classes": [],
-                      "data": {}
-                    }
+                    "attrs": {}
                   },
                   {
                     "kind": {
@@ -221,11 +191,7 @@ expression: json
                         }
                       }
                     },
-                    "attrs": {
-                      "id": null,
-                      "classes": [],
-                      "data": {}
-                    }
+                    "attrs": {}
                   }
                 ]
               }
@@ -240,11 +206,7 @@ expression: json
                 }
               }
             },
-            "attrs": {
-              "id": null,
-              "classes": [],
-              "data": {}
-            }
+            "attrs": {}
           },
           {
             "kind": {
@@ -273,11 +235,7 @@ expression: json
                                 }
                               }
                             },
-                            "attrs": {
-                              "id": null,
-                              "classes": [],
-                              "data": {}
-                            }
+                            "attrs": {}
                           }
                         ]
                       }
@@ -292,11 +250,7 @@ expression: json
                         }
                       }
                     },
-                    "attrs": {
-                      "id": null,
-                      "classes": [],
-                      "data": {}
-                    }
+                    "attrs": {}
                   }
                 ]
               }
@@ -311,11 +265,7 @@ expression: json
                 }
               }
             },
-            "attrs": {
-              "id": null,
-              "classes": [],
-              "data": {}
-            }
+            "attrs": {}
           },
           {
             "kind": {
@@ -336,8 +286,6 @@ expression: json
               }
             },
             "attrs": {
-              "id": null,
-              "classes": [],
               "component": {
                 "kind": "code",
                 "value": {
@@ -345,8 +293,7 @@ expression: json
                   "language_label": "rust",
                   "highlight": true
                 }
-              },
-              "data": {}
+              }
             }
           }
         ]
@@ -356,10 +303,6 @@ expression: json
       "provenance": "synthetic",
       "location": null
     },
-    "attrs": {
-      "id": null,
-      "classes": [],
-      "data": {}
-    }
+    "attrs": {}
   }
 }
