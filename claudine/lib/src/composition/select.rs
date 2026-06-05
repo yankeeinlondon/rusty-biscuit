@@ -61,14 +61,18 @@ pub fn classify_agent_resolution(
         None => {
             if invalid.is_empty() {
                 AgentResolutionState::NoAgent
-            } else if invalid.len() == 1 {
-                AgentResolutionState::SingleInvalid {
-                    hint: invalid[0].clone(),
-                }
-            } else {
+            } else if hints.agent_was_list {
+                // A list-valued hint that resolved to zero valid providers —
+                // including a single-entry all-invalid list — is the
+                // zero-installed-list state, never a single-invalid scalar.
                 AgentResolutionState::ZeroInstalledList {
                     not_installed: Vec::new(),
                     invalid,
+                }
+            } else {
+                // A scalar value parses to at most one invalid entry.
+                AgentResolutionState::SingleInvalid {
+                    hint: invalid[0].clone(),
                 }
             }
         }
@@ -587,9 +591,10 @@ mod tests {
             prompt: "test prompt".to_string(),
             effective_frontmatter: json!({}),
             selection_hints: EffectiveSelectionHints {
-                agent: agent_hint,
+                agent: agent_hint.clone(),
                 model: model_hint,
                 agent_invalid: Vec::new(),
+                agent_was_list: matches!(agent_hint, Some(AgentHint::List(_))),
             },
             closure: CompositionClosurePlan::Direct,
             lifecycle: LifecycleConfig::default(),
@@ -1007,10 +1012,20 @@ mod tests {
         agent: Option<AgentHint>,
         invalid: Vec<String>,
     ) -> EffectiveSelectionHints {
+        let was_list = matches!(agent, Some(AgentHint::List(_)));
+        hints_from_agent_with_list(agent, invalid, was_list)
+    }
+
+    fn hints_from_agent_with_list(
+        agent: Option<AgentHint>,
+        invalid: Vec<String>,
+        was_list: bool,
+    ) -> EffectiveSelectionHints {
         EffectiveSelectionHints {
             agent,
             model: None,
             agent_invalid: invalid,
+            agent_was_list: was_list,
         }
     }
 
@@ -1136,7 +1151,7 @@ mod tests {
     fn classify_all_invalid_list() {
         let snapshot = make_snapshot(vec![Provider::Claude], BTreeSet::new());
         let state = classify_agent_resolution(
-            &hints_from_agent(None, vec!["bad".into(), "worse".into()]),
+            &hints_from_agent_with_list(None, vec!["bad".into(), "worse".into()], true),
             &snapshot,
         );
         assert!(matches!(
@@ -1147,6 +1162,46 @@ mod tests {
             } if not_installed.is_empty()
                 && invalid == vec!["bad".to_string(), "worse".to_string()]
         ));
+    }
+
+    #[test]
+    fn classify_single_entry_all_invalid_list_is_zero_installed() {
+        // Regression: a one-element invalid list (`agent: ["not-real"]`)
+        // resolves to `agent: None` + one invalid entry, which is shape-
+        // identical to a scalar invalid value. The preserved `agent_was_list`
+        // flag must route it to the zero-installed-list state.
+        let snapshot = make_snapshot(vec![Provider::Claude], BTreeSet::new());
+        let state = classify_agent_resolution(
+            &hints_from_agent_with_list(None, vec!["not-real".into()], true),
+            &snapshot,
+        );
+        assert!(
+            matches!(
+                state,
+                AgentResolutionState::ZeroInstalledList {
+                    ref not_installed,
+                    ref invalid,
+                } if not_installed.is_empty() && invalid == &vec!["not-real".to_string()]
+            ),
+            "single-entry all-invalid list must be ZeroInstalledList, got {state:?}"
+        );
+    }
+
+    #[test]
+    fn classify_single_scalar_invalid_is_single_invalid() {
+        // The scalar counterpart (`agent: not-real`, `agent_was_list = false`)
+        // must remain the single-invalid state.
+        let snapshot = make_snapshot(vec![Provider::Claude], BTreeSet::new());
+        let state = classify_agent_resolution(
+            &hints_from_agent_with_list(None, vec!["not-real".into()], false),
+            &snapshot,
+        );
+        assert_eq!(
+            state,
+            AgentResolutionState::SingleInvalid {
+                hint: "not-real".into(),
+            }
+        );
     }
 
     #[test]

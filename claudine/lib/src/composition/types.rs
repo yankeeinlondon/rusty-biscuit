@@ -438,6 +438,14 @@ pub struct EffectiveSelectionHints {
     /// continue to operate on valid providers only while the new rendering
     /// and live-path code surfaces invalid values as styled non-fatal state.
     pub agent_invalid: Vec<String>,
+    /// Whether the source `agent` frontmatter value was an array.
+    ///
+    /// Preserved independently of [`Self::agent`] because a list whose only
+    /// entries are invalid produces `agent: None`, which would otherwise be
+    /// indistinguishable from a single invalid scalar. Classification needs
+    /// this to route a single-entry all-invalid list to the zero-installed
+    /// list state rather than the single-invalid state.
+    pub agent_was_list: bool,
 }
 
 /// A composition prepared with effective (composed) frontmatter.
