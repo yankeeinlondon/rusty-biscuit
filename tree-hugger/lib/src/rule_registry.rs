@@ -476,9 +476,13 @@ impl RuleRegistry {
             title: "Imported symbol is never used".to_string(),
             category: DiagnosticCategory::Style,
             default_severity: DiagnosticSeverity::Warning,
-            confidence: DiagnosticConfidence::Medium,
+            // Without trait/type resolution a syntactic scan cannot see imports
+            // used only through trait methods (`Write` for `.write_all()`) or
+            // macros, so it has an irreducible false-positive rate. Low
+            // confidence, off by default; opt in with `--warn unused-import`.
+            confidence: DiagnosticConfidence::Low,
             languages: ProgrammingLanguage::all(),
-            enabled_by_default: true,
+            enabled_by_default: false,
             requires_experimental_semantics: false,
             examples: vec![RuleExample {
                 description: "Unused import".to_string(),
@@ -486,7 +490,9 @@ impl RuleRegistry {
                 fixed: Some("fn main() {}".to_string()),
                 language: ProgrammingLanguage::Rust,
             }],
-            caveats: vec!["May flag imports used only for side effects.".to_string()],
+            caveats: vec![
+                "Flags imports used only via trait methods or macros, or for side effects, as false positives.".to_string(),
+            ],
             needs_project_context: false,
             aliases: Vec::new(),
         });

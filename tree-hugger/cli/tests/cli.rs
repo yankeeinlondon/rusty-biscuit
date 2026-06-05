@@ -1317,10 +1317,18 @@ fn test_lint_explicit_fixture_path_overrides_default_exclude() {
     std::fs::create_dir_all(root.join("tests/fixtures")).unwrap();
     std::fs::write(root.join("tests/fixtures/sample.rs"), "use std::io::Write;\n").unwrap();
 
-    // Naming the fixture explicitly re-includes it despite the default exclude.
+    // Naming the fixture explicitly re-includes it despite the default exclude
+    // (`unused-import` is off by default, so opt in to get a visible signal).
     hug_cmd()
         .current_dir(root)
-        .args(["--no-cache", "--plain", "lint", "tests/fixtures/sample.rs"])
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--warn",
+            "unused-import",
+            "tests/fixtures/sample.rs",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("[unused-import]"));

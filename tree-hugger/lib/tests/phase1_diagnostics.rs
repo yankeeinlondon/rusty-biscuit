@@ -93,7 +93,7 @@ fn main() {
 }
 
 #[test]
-fn test_unused_import_still_enabled_by_default() {
+fn test_unused_import_detected_by_library_layer_but_off_by_default() {
     let dir = TempDir::new().unwrap();
     let path = create_temp_file(
         &dir,
@@ -108,16 +108,26 @@ func main() {
 "#,
     );
 
+    // The raw library layer reports the diagnostic regardless of policy...
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
-
     let unused_import = diagnostics
         .iter()
         .find(|d| d.rule.as_deref() == Some("unused-import"));
     assert!(
         unused_import.is_some(),
-        "unused-import should be enabled by default"
+        "library layer should still detect an unused import"
     );
+
+    // ...but the rule is off by default (trait/macro usage it can't resolve makes
+    // it false-positive-prone), so the CLI policy layer hides it unless opted in.
+    let registry = RuleRegistry::new();
+    let rule = registry.get("unused-import").unwrap();
+    assert!(
+        !rule.enabled_by_default,
+        "unused-import should be off by default"
+    );
+    assert_eq!(rule.confidence, tree_hugger::DiagnosticConfidence::Low);
 }
 
 // ============================================================================
