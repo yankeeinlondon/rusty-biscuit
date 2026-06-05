@@ -167,6 +167,7 @@ impl TreeFile {
                 let (source, original_name, alias) =
                     self.extract_import_metadata(node, &name, self.language);
                 let statement_range = self.import_statement_range(node, self.language);
+                let is_reexport = self.import_is_reexport(node, self.language);
 
                 imports.push(ImportSymbol {
                     name,
@@ -177,6 +178,7 @@ impl TreeFile {
                     language: self.language,
                     file: self.file.clone(),
                     source,
+                    is_reexport,
                 });
             }
 
@@ -495,6 +497,24 @@ impl TreeFile {
         };
 
         statement.map(range_for_node)
+    }
+
+    /// Reports whether an import re-exports its symbol (part of the public API).
+    ///
+    /// Only languages with explicit re-export syntax are detected; others return
+    /// `false`. Rust: a `use` declaration carrying a `visibility_modifier`
+    /// (`pub use`, `pub(crate) use`, …) is a re-export.
+    fn import_is_reexport(&self, node: Node, language: ProgrammingLanguage) -> bool {
+        match language {
+            ProgrammingLanguage::Rust => find_ancestor_by_kind(node, "use_declaration")
+                .map(|stmt| {
+                    let mut cursor = stmt.walk();
+                    stmt.children(&mut cursor)
+                        .any(|child| child.kind() == "visibility_modifier")
+                })
+                .unwrap_or(false),
+            _ => false,
+        }
     }
 
     /// Extracts import metadata for JavaScript/TypeScript.
@@ -1315,6 +1335,12 @@ impl TreeFile {
 
             // Skip if referenced
             if referenced_names.contains(name) {
+                continue;
+            }
+
+            // Skip re-exports (e.g. Rust `pub use`): exporting the symbol is the
+            // use, so a missing local reference is expected, not a defect.
+            if import.is_reexport {
                 continue;
             }
 
