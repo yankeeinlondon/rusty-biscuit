@@ -227,7 +227,8 @@ fn load_session_events(conn: &Connection, session_key: &str) -> Result<Vec<Sessi
                COALESCE(input_tokens, 0), COALESCE(output_tokens, 0),
                COALESCE(total_tokens, 0), COALESCE(cache_read_tokens, 0),
                COALESCE(cost_usd, 0),
-               extra_json, env_json
+               extra_json, env_json,
+               claudine_pid, agent_pid
         FROM events
         WHERE session_key = ?1
         ORDER BY timestamp ASC
@@ -262,6 +263,8 @@ fn load_session_events(conn: &Connection, session_key: &str) -> Result<Vec<Sessi
             row.get::<_, f64>(23)?,
             row.get::<_, String>(24)?,
             row.get::<_, String>(25)?,
+            row.get::<_, Option<i64>>(26)?,
+            row.get::<_, Option<i64>>(27)?,
         ))
     })?;
 
@@ -294,6 +297,8 @@ fn load_session_events(conn: &Connection, session_key: &str) -> Result<Vec<Sessi
             cost_usd,
             extra_json,
             env_json,
+            claudine_pid,
+            agent_pid,
         ) = row?;
 
         events.push(SessionEvent {
@@ -323,6 +328,8 @@ fn load_session_events(conn: &Connection, session_key: &str) -> Result<Vec<Sessi
             cost_usd: cost_usd.max(0.0),
             extra: parse_json_value(Some(extra_json)),
             env: parse_json_value(Some(env_json)),
+            claudine_pid: claudine_pid.and_then(|v| v.try_into().ok()),
+            agent_pid: agent_pid.and_then(|v| v.try_into().ok()),
         });
     }
 
@@ -382,7 +389,8 @@ fn load_session_errors(conn: &Connection, session_key: &str) -> Result<Vec<Error
                       AND p.timestamp <= e.timestamp
                     ORDER BY p.timestamp DESC LIMIT 1)
                ) AS prompt_text,
-               e.tool_input_json, e.notification_message, e.extra_json
+               e.tool_input_json, e.notification_message, e.extra_json,
+               e.claudine_pid, e.agent_pid
         FROM events e
         LEFT JOIN sessions s ON e.session_key = s.session_key
         WHERE e.session_key = ?1
@@ -406,6 +414,8 @@ fn load_session_errors(conn: &Connection, session_key: &str) -> Result<Vec<Error
             row.get::<_, Option<String>>(10)?,
             row.get::<_, Option<String>>(11)?,
             row.get::<_, Option<String>>(12)?,
+            row.get::<_, Option<i64>>(13)?,
+            row.get::<_, Option<i64>>(14)?,
         ))
     })?;
 
@@ -425,6 +435,8 @@ fn load_session_errors(conn: &Connection, session_key: &str) -> Result<Vec<Error
             tool_input_json,
             notification_message,
             extra_json,
+            claudine_pid,
+            agent_pid,
         ) = row?;
         errors.push(ErrorRecord {
             timestamp: parse_timestamp(&timestamp)?,
@@ -440,6 +452,8 @@ fn load_session_errors(conn: &Connection, session_key: &str) -> Result<Vec<Error
             tool_input: parse_json_value(tool_input_json),
             notification_message,
             extra: parse_json_value(extra_json),
+            claudine_pid: claudine_pid.and_then(|v| v.try_into().ok()),
+            agent_pid: agent_pid.and_then(|v| v.try_into().ok()),
         });
     }
 
