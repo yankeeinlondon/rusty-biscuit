@@ -129,7 +129,7 @@ fn test_registry_lookup_by_id() {
     let registry = RuleRegistry::new();
     let rule = registry.get("unwrap-call").unwrap();
     assert_eq!(rule.id, "unwrap-call");
-    assert_eq!(rule.category, tree_hugger::DiagnosticCategory::Suspicious);
+    assert_eq!(rule.category, tree_hugger::DiagnosticCategory::Restriction);
     assert_eq!(rule.confidence, tree_hugger::DiagnosticConfidence::High);
 }
 
@@ -178,7 +178,7 @@ fn test_rule_selector_parse_all() {
 
 #[test]
 fn test_rule_selector_parse_category() {
-    let selector = RuleSelector::parse("category:suspicious").unwrap();
+    let selector = RuleSelector::parse("category:restriction").unwrap();
     let registry = RuleRegistry::new();
     let unwrap = registry.get("unwrap-call").unwrap();
     assert!(selector.matches(unwrap));

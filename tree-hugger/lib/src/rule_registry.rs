@@ -210,11 +210,14 @@ impl RuleRegistry {
             id: "unwrap-call".to_string(),
             version: "1.0.0".to_string(),
             title: "Explicit unwrap() call".to_string(),
-            category: DiagnosticCategory::Suspicious,
+            // Restriction, not Suspicious: an explicit unwrap() is a deliberate
+            // "panic on None/Err" choice, not an anomaly. Off by default; opt in
+            // with `--warn unwrap-call` / `--deny unwrap-call`.
+            category: DiagnosticCategory::Restriction,
             default_severity: DiagnosticSeverity::Warning,
             confidence: DiagnosticConfidence::High,
             languages: vec![ProgrammingLanguage::Rust],
-            enabled_by_default: true,
+            enabled_by_default: false,
             requires_experimental_semantics: false,
             examples: vec![RuleExample {
                 description: "Unwrap on Option".to_string(),
@@ -231,11 +234,13 @@ impl RuleRegistry {
             id: "expect-call".to_string(),
             version: "1.0.0".to_string(),
             title: "Explicit expect() call".to_string(),
-            category: DiagnosticCategory::Suspicious,
+            // Restriction, not Suspicious: expect() is a deliberate panic with a
+            // documented reason. Off by default; opt in with `--warn`/`--deny`.
+            category: DiagnosticCategory::Restriction,
             default_severity: DiagnosticSeverity::Warning,
             confidence: DiagnosticConfidence::High,
             languages: vec![ProgrammingLanguage::Rust],
-            enabled_by_default: true,
+            enabled_by_default: false,
             requires_experimental_semantics: false,
             examples: vec![RuleExample {
                 description: "Expect on Result".to_string(),
@@ -795,7 +800,7 @@ mod tests {
     fn category_selector_matches() {
         let registry = RuleRegistry::new();
         let unwrap = registry.get("unwrap-call").unwrap();
-        let selector = RuleSelector::Category(DiagnosticCategory::Suspicious);
+        let selector = RuleSelector::Category(DiagnosticCategory::Restriction);
         assert!(selector.matches(unwrap));
     }
 
