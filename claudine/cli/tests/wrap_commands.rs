@@ -1160,16 +1160,12 @@ exit 0
         "stderr should contain Performance section; got: {plain}"
     );
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead section; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
     );
     assert!(
-        plain.contains("Agent Execution"),
-        "stderr should contain Agent Execution section; got: {plain}"
-    );
-    assert!(
-        plain.contains("launches:"),
-        "stderr should show launch count; got: {plain}"
+        plain.contains("agent execution"),
+        "stderr should contain the agent execution bucket; got: {plain}"
     );
 }
 
@@ -1205,8 +1201,8 @@ exit 1
         "stderr should contain Performance section; got: {plain}"
     );
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead section; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
     );
     assert!(
         plain.contains("dry run") || plain.contains("skipped"),
@@ -6043,12 +6039,12 @@ fn compose_perf_emits_report_to_stderr() {
         "stderr should contain Performance section; got: {plain}"
     );
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead section; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
     );
     assert!(
-        plain.contains("Agent Execution"),
-        "stderr should contain Agent Execution section; got: {plain}"
+        plain.contains("agent execution"),
+        "stderr should contain the agent execution bucket; got: {plain}"
     );
 }
 
@@ -6134,12 +6130,12 @@ fn inline_compose_perf_emits_report_to_stderr() {
         "stderr should contain Performance section; got: {plain}"
     );
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead section; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
     );
     assert!(
-        plain.contains("Agent Execution"),
-        "stderr should contain Agent Execution section; got: {plain}"
+        plain.contains("agent execution"),
+        "stderr should contain the agent execution bucket; got: {plain}"
     );
 }
 
@@ -6276,22 +6272,22 @@ fn perf_arg_parsing_includes_clap_time() {
     // The arg parsing line must be present and show a duration.
     // We allow 0µs because timer resolution varies, but the line must exist.
     assert!(
-        plain.contains("arg parsing:"),
+        plain.contains("arg parsing"),
         "perf report must include arg parsing timing; got: {plain}"
     );
 
     // Ensure the other startup timings are also present, confirming the
-    // full CLI Overhead section is rendered.
+    // pre-dispatch and environment-setup buckets are rendered.
     assert!(
-        plain.contains("config loading:"),
+        plain.contains("config loading"),
         "perf report must include config loading timing; got: {plain}"
     );
     assert!(
-        plain.contains("tracing init:"),
+        plain.contains("tracing init"),
         "perf report must include tracing init timing; got: {plain}"
     );
     assert!(
-        plain.contains("environment setup:"),
+        plain.contains("environment setup"),
         "perf report must include environment setup timing; got: {plain}"
     );
 }

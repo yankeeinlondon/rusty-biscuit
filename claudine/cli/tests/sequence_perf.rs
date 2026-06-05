@@ -61,12 +61,25 @@ exit 0
     );
 
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
+    );
+
+    // TM-3: the sequence renders a `steps` Structural node with one per-step
+    // subtree, not a single aggregate `agent execution` bucket. Execution lives
+    // under each step, so the per-step `agent` breakdown — not a top-level
+    // `agent execution` node — is what appears.
+    assert!(
+        plain.contains("steps"),
+        "stderr should contain the steps bucket; got: {plain}"
     );
     assert!(
-        plain.contains("Agent Execution"),
-        "stderr should contain Agent Execution; got: {plain}"
+        plain.contains("step 1: alpha") && plain.contains("step 2: beta"),
+        "stderr should contain per-step subtrees `step N: <name>`; got: {plain}"
+    );
+    assert!(
+        !plain.contains("agent execution"),
+        "sequence should not render a top-level aggregate `agent execution` node; got: {plain}"
     );
 
     // Sequence finished should appear before the perf block
@@ -81,11 +94,14 @@ exit 0
         "Sequence finished should appear before Performance block"
     );
 
-    // No per-step Composition Report sections — at most one aggregated block
-    let composition_count = plain.matches("Composition Report").count();
-    assert!(
-        composition_count <= 1,
-        "expected at most one Composition Report, found {composition_count}; stderr: {plain}"
+    // Per-step composition subtrees: each step nests its own `composition`
+    // node ("─ composition", distinct from the "mcp composition" env substage),
+    // so a two-step run shows two — the opposite of the old merged-aggregate
+    // behavior this feature replaced.
+    let composition_count = plain.matches("─ composition").count();
+    assert_eq!(
+        composition_count, 2,
+        "expected one composition node per step (2 total), found {composition_count}; stderr: {plain}"
     );
 }
 
@@ -206,15 +222,15 @@ exit 0
     let plain = strip_ansi(&stderr);
 
     assert!(
-        plain.contains("arg parsing:"),
+        plain.contains("arg parsing"),
         "stderr should contain arg parsing timing; got: {plain}"
     );
     assert!(
-        plain.contains("config loading:"),
+        plain.contains("config loading"),
         "stderr should contain config loading timing; got: {plain}"
     );
     assert!(
-        plain.contains("tracing init:"),
+        plain.contains("tracing init"),
         "stderr should contain tracing init timing; got: {plain}"
     );
 }
