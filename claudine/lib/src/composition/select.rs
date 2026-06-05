@@ -7,7 +7,7 @@ use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider, provider_info};
 
 use super::error::CompositionError;
 use super::types::{
-    AgentHint, EffectiveSelectionHints, InstalledProviderSnapshot, ModelHint,
+    AgentHint, AgentResolutionState, EffectiveSelectionHints, InstalledProviderSnapshot, ModelHint,
     ModelResolutionReason, ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason,
     ResolutionMode, ResolvedExecutionTarget, SelectedProvider, SelectionReason,
 };
@@ -40,6 +40,73 @@ pub fn build_installed_snapshot(
         excluded: excluded.clone(),
         all_installed: installed.to_vec(),
         binary_paths,
+    }
+}
+
+/// Classify a frontmatter `agent` value against the installed-provider
+/// snapshot and return the corresponding [`AgentResolutionState`].
+///
+/// This function is pure: it does not prompt, emit output, or consult
+/// `--silent`. The caller (dry-run renderer or live execution gate) decides
+/// what to do with each variant.
+pub fn classify_agent_resolution(
+    hints: &EffectiveSelectionHints,
+    snapshot: &InstalledProviderSnapshot,
+) -> AgentResolutionState {
+    // Explicit CLI provider is handled upstream; this classifies frontmatter
+    // hints only.
+    let invalid = hints.agent_invalid.clone();
+
+    match &hints.agent {
+        None => {
+            if invalid.is_empty() {
+                AgentResolutionState::NoAgent
+            } else if invalid.len() == 1 {
+                AgentResolutionState::SingleInvalid {
+                    hint: invalid[0].clone(),
+                }
+            } else {
+                AgentResolutionState::ZeroInstalledList {
+                    not_installed: Vec::new(),
+                    invalid,
+                }
+            }
+        }
+        Some(AgentHint::Single(provider)) => {
+            if snapshot.runnable.contains(provider) {
+                AgentResolutionState::Selected { provider: *provider }
+            } else {
+                AgentResolutionState::SingleNotInstalled { provider: *provider }
+            }
+        }
+        Some(AgentHint::List(providers)) => {
+            let mut installed = Vec::with_capacity(providers.len());
+            let mut not_installed = Vec::with_capacity(providers.len());
+            for provider in providers {
+                if snapshot.runnable.contains(provider) {
+                    installed.push(*provider);
+                } else {
+                    not_installed.push(*provider);
+                }
+            }
+
+            match installed.len() {
+                0 => AgentResolutionState::ZeroInstalledList {
+                    not_installed,
+                    invalid,
+                },
+                1 => AgentResolutionState::ListOneInstalled {
+                    selected: installed[0],
+                    not_installed,
+                    invalid,
+                },
+                _ => AgentResolutionState::ListMultipleInstalled {
+                    installed,
+                    not_installed,
+                    invalid,
+                },
+            }
+        }
     }
 }
 
@@ -522,6 +589,7 @@ mod tests {
             selection_hints: EffectiveSelectionHints {
                 agent: agent_hint,
                 model: model_hint,
+                agent_invalid: Vec::new(),
             },
             closure: CompositionClosurePlan::Direct,
             lifecycle: LifecycleConfig::default(),
@@ -931,6 +999,194 @@ mod tests {
         // Goose not installed, so no reordering happens; default stays 0
         assert_eq!(plan.options[0].provider, Provider::Claude);
         assert_eq!(plan.default_index, 0);
+    }
+
+    // -- Agent-resolution classification tests -------------------------------
+
+    fn hints_from_agent(
+        agent: Option<AgentHint>,
+        invalid: Vec<String>,
+    ) -> EffectiveSelectionHints {
+        EffectiveSelectionHints {
+            agent,
+            model: None,
+            agent_invalid: invalid,
+        }
+    }
+
+    #[test]
+    fn classify_no_agent() {
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
+        let state = classify_agent_resolution(&hints_from_agent(None, vec![]), &snapshot);
+        assert!(matches!(state, AgentResolutionState::NoAgent));
+    }
+
+    #[test]
+    fn classify_single_valid_installed() {
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
+        let state = classify_agent_resolution(
+            &hints_from_agent(Some(AgentHint::Single(Provider::Codex)), vec![]),
+            &snapshot,
+        );
+        assert_eq!(
+            state,
+            AgentResolutionState::Selected {
+                provider: Provider::Codex,
+            }
+        );
+    }
+
+    #[test]
+    fn classify_single_invalid() {
+        let snapshot = make_snapshot(vec![Provider::Claude], BTreeSet::new());
+        let state = classify_agent_resolution(
+            &hints_from_agent(None, vec!["not-a-provider".into()]),
+            &snapshot,
+        );
+        assert_eq!(
+            state,
+            AgentResolutionState::SingleInvalid {
+                hint: "not-a-provider".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn classify_single_not_installed() {
+        let snapshot = make_snapshot(vec![Provider::Claude], BTreeSet::new());
+        let state = classify_agent_resolution(
+            &hints_from_agent(Some(AgentHint::Single(Provider::Codex)), vec![]),
+            &snapshot,
+        );
+        assert_eq!(
+            state,
+            AgentResolutionState::SingleNotInstalled {
+                provider: Provider::Codex,
+            }
+        );
+    }
+
+    #[test]
+    fn classify_list_multiple_installed() {
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex, Provider::Gemini], BTreeSet::new());
+        let state = classify_agent_resolution(
+            &hints_from_agent(
+                Some(AgentHint::List(vec![Provider::Codex, Provider::Gemini])),
+                vec![],
+            ),
+            &snapshot,
+        );
+        assert!(matches!(
+            state,
+            AgentResolutionState::ListMultipleInstalled {
+                installed,
+                not_installed,
+                invalid,
+            } if installed == vec![Provider::Codex, Provider::Gemini]
+                && not_installed.is_empty()
+                && invalid.is_empty()
+        ));
+    }
+
+    #[test]
+    fn classify_list_one_installed() {
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
+        let state = classify_agent_resolution(
+            &hints_from_agent(
+                Some(AgentHint::List(vec![Provider::Codex, Provider::Gemini])),
+                vec![],
+            ),
+            &snapshot,
+        );
+        assert!(matches!(
+            state,
+            AgentResolutionState::ListOneInstalled {
+                selected,
+                not_installed,
+                invalid,
+            } if selected == Provider::Codex
+                && not_installed == vec![Provider::Gemini]
+                && invalid.is_empty()
+        ));
+    }
+
+    #[test]
+    fn classify_list_with_invalid_entries() {
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
+        let state = classify_agent_resolution(
+            &hints_from_agent(
+                Some(AgentHint::List(vec![Provider::Codex])),
+                vec!["bad".into(), "worse".into()],
+            ),
+            &snapshot,
+        );
+        assert!(matches!(
+            state,
+            AgentResolutionState::ListOneInstalled {
+                selected,
+                not_installed,
+                invalid,
+            } if selected == Provider::Codex
+                && not_installed.is_empty()
+                && invalid == vec!["bad".to_string(), "worse".to_string()]
+        ));
+    }
+
+    #[test]
+    fn classify_all_invalid_list() {
+        let snapshot = make_snapshot(vec![Provider::Claude], BTreeSet::new());
+        let state = classify_agent_resolution(
+            &hints_from_agent(None, vec!["bad".into(), "worse".into()]),
+            &snapshot,
+        );
+        assert!(matches!(
+            state,
+            AgentResolutionState::ZeroInstalledList {
+                not_installed,
+                invalid,
+            } if not_installed.is_empty()
+                && invalid == vec!["bad".to_string(), "worse".to_string()]
+        ));
+    }
+
+    #[test]
+    fn classify_all_not_installed_list() {
+        let snapshot = make_snapshot(vec![Provider::Claude], BTreeSet::new());
+        let state = classify_agent_resolution(
+            &hints_from_agent(
+                Some(AgentHint::List(vec![Provider::Codex, Provider::Gemini])),
+                vec![],
+            ),
+            &snapshot,
+        );
+        assert!(matches!(
+            state,
+            AgentResolutionState::ZeroInstalledList {
+                not_installed,
+                invalid,
+            } if not_installed == vec![Provider::Codex, Provider::Gemini]
+                && invalid.is_empty()
+        ));
+    }
+
+    #[test]
+    fn classify_zero_installed_list_mixed_invalid_and_not_installed() {
+        let snapshot = make_snapshot(vec![Provider::Claude], BTreeSet::new());
+        let state = classify_agent_resolution(
+            &hints_from_agent(
+                Some(AgentHint::List(vec![Provider::Codex])),
+                vec!["bad".into()],
+            ),
+            &snapshot,
+        );
+        assert!(matches!(
+            state,
+            AgentResolutionState::ZeroInstalledList {
+                not_installed,
+                invalid,
+            } if not_installed == vec![Provider::Codex]
+                && invalid == vec!["bad".to_string()]
+        ));
     }
 
     // -- OpenCode non-TTY hard error test --------------------------------------

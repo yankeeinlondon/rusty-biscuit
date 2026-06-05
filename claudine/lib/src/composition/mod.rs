@@ -62,17 +62,18 @@ pub use schema_validation::{
 };
 pub use select::{
     build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,
-    resolve_model, resolve_model_with_catalog, resolve_model_with_hints, resolve_target_non_tty,
-    resolve_target_non_tty_with_catalog, resolve_target_non_tty_with_hints, select_provider,
+    classify_agent_resolution, resolve_model, resolve_model_with_catalog, resolve_model_with_hints,
+    resolve_target_non_tty, resolve_target_non_tty_with_catalog, resolve_target_non_tty_with_hints,
+    select_provider,
 };
 pub use sequence::{build_step_overlay, resolve_sequence_plan};
 pub use types::{
-    AgentHint, AmbientVariable, CompositionClosurePlan, CompositionExecutionRequest,
-    CompositionMode, EffectiveSelectionHints, InlineClosurePlan, InstalledProviderSnapshot,
-    LoopAction, LoopCondition, LoopConfig, ModelHint, ModelResolutionReason, OnRateLimit,
-    OutputFormat, PickerInfluence, PreparedComposition, ProviderPickerOption, ProviderPickerPlan,
-    ProviderResolutionReason, ResolutionMode, ResolvedCompositionSource, ResolvedExecutionTarget,
-    SelectedProvider, SelectionReason, SequenceExecutionOptions, SequencePlan, SequenceRunSummary,
-    SequenceSource, SequenceStep, SequenceStepDraft, SequenceStepOverlay, SequenceStepResult,
-    SharedApprovalCache,
+    AgentHint, AgentResolutionState, AmbientVariable, CompositionClosurePlan,
+    CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
+    InstalledProviderSnapshot, LoopAction, LoopCondition, LoopConfig, ModelHint,
+    ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
+    ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
+    ResolvedCompositionSource, ResolvedExecutionTarget, SelectedProvider, SelectionReason,
+    SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceSource, SequenceStep,
+    SequenceStepDraft, SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
 };

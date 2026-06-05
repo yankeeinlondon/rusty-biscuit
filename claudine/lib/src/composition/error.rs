@@ -99,6 +99,18 @@ pub enum CompositionError {
     #[error("agent hint `{0}` does not match any known provider")]
     AgentHintInvalid(String),
 
+    /// Agent resolution could not select a runnable provider in the current
+    /// session (non-TTY, or the user cancelled the interactive picker).
+    #[error("agent resolution failed for {source_path}: {state:?}")]
+    AgentResolutionFailed {
+        /// The prompt file whose `agent` hint could not be resolved.
+        source_path: PathBuf,
+        /// Classified state explaining why resolution failed.
+        state: super::types::AgentResolutionState,
+        /// Installed providers at the time of resolution (for diagnostic lists).
+        installed: Vec<Provider>,
+    },
+
     /// The `agent` frontmatter property is not a valid type.
     #[error("frontmatter `agent` must be a string or array of strings, got {0}")]
     AgentHintWrongType(String),
@@ -850,6 +862,21 @@ impl BlockError for CompositionError {
                          frontmatter.",
                     )
             }
+            CompositionError::AgentResolutionFailed {
+                source_path,
+                state,
+                installed,
+            } => {
+                let file_link = render_file_link(source_path);
+                let body = render_agent_resolution_failed_body(state, installed, &file_link);
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("CompositionError", "agent resolution failed"))
+                    .body(body)
+                    .hint(
+                        "Specify an installed provider with --claude, --codex, etc., run in an \
+                         interactive terminal, or correct the `agent` frontmatter property."
+                    )
+            }
             CompositionError::ComposedBodyEmpty {
                 source_path,
                 mode,
@@ -918,6 +945,124 @@ fn render_file_link(path: &std::path::Path) -> String {
         escape_prose_path(&abs_display),
         escape_prose_path(&label)
     )
+}
+
+/// Render the human-facing body for [`CompositionError::AgentResolutionFailed`].
+///
+/// The markup mirrors the dry-run `Agent` cell so the live no-TTY abort
+/// message is a faithful prediction of what the TTY path would show.
+fn render_agent_resolution_failed_body(
+    state: &super::types::AgentResolutionState,
+    installed: &[Provider],
+    file_link: &str,
+) -> String {
+    use super::types::AgentResolutionState;
+
+    let mut body = String::new();
+    match state {
+        AgentResolutionState::NoAgent => {
+            body.push_str(&format!(
+                "Could not determine which agent to use for {file_link}."
+            ));
+            body.push_str(
+                "\n\n- CLI caller didn't specify the Agent\n\
+                 - the Markdown document didn't suggest any Agents in \
+                   <inverse>agent</inverse> Frontmatter property\n\
+                 - the caller will be interactively asked to choose an agent \
+                   when run in a TTY; otherwise the run aborts with this message"
+            );
+        }
+        AgentResolutionState::SingleInvalid { hint } => {
+            let escaped = escape_prose_path(hint);
+            body.push_str(&format!(
+                "<red><b>Invalid Agent:</b></red> the {file_link} references an invalid Agent provider <cyan>`{escaped}`</cyan>. Choose from the installed agents on this host:"
+            ));
+            if installed.is_empty() {
+                body.push_str("\n\n<i><dim>(no agents are installed)</dim></i>");
+            } else {
+                for provider in installed {
+                    body.push_str(&format!("\n- {provider}"));
+                }
+            }
+        }
+        AgentResolutionState::SingleNotInstalled { provider } => {
+            body.push_str(&format!(
+                "<yellow><b>Agent Not Installed:</b></yellow>(<dim>{provider}</dim>) \
+                 the Markdown document's <inverse>agent</inverse> specifies an Agent platform \
+                 which is not installed on this host. When run interactively, the caller will \
+                 be asked to choose an Agent; otherwise the run aborts with this message."
+            ));
+        }
+        AgentResolutionState::ListMultipleInstalled {
+            installed: suggested_installed,
+            not_installed,
+            invalid,
+        } => {
+            body.push_str(
+                "Multiple suggested agents are installed; the interactive picker would ask \
+                 the caller to choose one of the following:"
+            );
+            for provider in suggested_installed {
+                body.push_str(&format!("\n- {provider}"));
+            }
+            if !not_installed.is_empty() {
+                body.push_str(
+                    "\n\nThe following suggested agents are valid but <i><dim>not installed</dim></i>:"
+                );
+                for provider in not_installed {
+                    body.push_str(&format!("\n- <dim>{provider}</dim>"));
+                }
+            }
+            if !invalid.is_empty() {
+                body.push_str(
+                    "\n\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:"
+                );
+                for hint in invalid {
+                    body.push_str(&format!("\n- <cyan>`{}`</cyan>", escape_prose_path(hint)));
+                }
+            }
+            body.push_str(
+                "\n\n<i>Run interactively to choose, or pass an explicit provider flag.</i>"
+            );
+        }
+        AgentResolutionState::ListOneInstalled { .. } => {
+            // This state auto-selects silently and should never abort.
+            body.push_str(&format!(
+                "Agent resolution unexpectedly aborted for {file_link} despite an auto-selectable suggestion."
+            ));
+        }
+        AgentResolutionState::ZeroInstalledList {
+            not_installed,
+            invalid,
+        } => {
+            body.push_str(
+                "None of the suggested agents are installed/valid; the caller would choose \
+                 from all installed agents when run interactively, but the current session \
+                 is not interactive:"
+            );
+            if !not_installed.is_empty() {
+                body.push_str("\n\nSuggested-but-not-installed agents:");
+                for provider in not_installed {
+                    body.push_str(&format!("\n- <dim>{provider}</dim>"));
+                }
+            }
+            if !invalid.is_empty() {
+                body.push_str(
+                    "\n\nThe following agents were suggested but are <b><red>NOT</red></b> valid Agents:"
+                );
+                for hint in invalid {
+                    body.push_str(&format!("\n- <cyan>`{}`</cyan>", escape_prose_path(hint)));
+                }
+            }
+        }
+        AgentResolutionState::Selected { provider } => {
+            body.push_str(&format!(
+                "Agent resolution unexpectedly aborted for {file_link} when <b>{provider}</b> \
+                 was already selected."
+            ));
+        }
+    }
+    body
 }
 
 fn render_sequence_missing_properties_block(

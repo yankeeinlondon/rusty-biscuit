@@ -363,6 +363,59 @@ pub enum AgentHint {
     List(Vec<Provider>),
 }
 
+/// Classified outcome of resolving a frontmatter `agent` value against the
+/// known provider catalog and the installed-provider snapshot.
+///
+/// This is the data model for both the dry-run metadata table and the live
+/// execution path: every variant corresponds to a specific user-facing
+/// message and a specific TTY/no-TTY behavior.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentResolutionState {
+    /// No `agent` hint was provided by the caller or the document.
+    NoAgent,
+    /// A single valid, installed provider was selected.
+    Selected {
+        /// The provider that will run the composition.
+        provider: Provider,
+    },
+    /// A single value was given but it does not match any known provider.
+    SingleInvalid {
+        /// The invalid value exactly as it appeared in frontmatter.
+        hint: String,
+    },
+    /// A single known provider was requested but is not installed on this host.
+    SingleNotInstalled {
+        /// The requested provider.
+        provider: Provider,
+    },
+    /// A list-valued hint resolved to two or more installed providers.
+    ListMultipleInstalled {
+        /// Installed providers from the suggestion list, in declaration order.
+        installed: Vec<Provider>,
+        /// Known-but-not-installed providers from the list, in declaration order.
+        not_installed: Vec<Provider>,
+        /// Values that did not match the provider catalog, in declaration order.
+        invalid: Vec<String>,
+    },
+    /// A list-valued hint resolved to exactly one installed provider.
+    ListOneInstalled {
+        /// The single installed provider that will be auto-selected.
+        selected: Provider,
+        /// Known-but-not-installed providers from the list, in declaration order.
+        not_installed: Vec<Provider>,
+        /// Values that did not match the provider catalog, in declaration order.
+        invalid: Vec<String>,
+    },
+    /// A list-valued hint resolved to zero installed providers (all invalid,
+    /// all not-installed, or a mix with nothing runnable).
+    ZeroInstalledList {
+        /// Known-but-not-installed providers from the list, in declaration order.
+        not_installed: Vec<Provider>,
+        /// Values that did not match the provider catalog, in declaration order.
+        invalid: Vec<String>,
+    },
+}
+
 /// A typed hint for which model(s) to use, parsed from frontmatter `model`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelHint {
@@ -379,6 +432,12 @@ pub struct EffectiveSelectionHints {
     pub agent: Option<AgentHint>,
     /// Parsed `model` frontmatter property.
     pub model: Option<ModelHint>,
+    /// `agent` strings that did not match the known provider catalog.
+    ///
+    /// Kept separate from [`Self::agent`] so existing resolution code can
+    /// continue to operate on valid providers only while the new rendering
+    /// and live-path code surfaces invalid values as styled non-fatal state.
+    pub agent_invalid: Vec<String>,
 }
 
 /// A composition prepared with effective (composed) frontmatter.
