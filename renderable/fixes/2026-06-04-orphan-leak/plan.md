@@ -234,6 +234,37 @@ docs). A future interactive session can revisit Option A under the broker harnes
   "Defensive cleanup" section; regenerate the `rust-testing` SKILL.md `hash:`
   if its text changes (`md hash --save`).
 
+## Post-Implementation Correction (2026-06-04, review)
+
+A review run found the shipped Layer 1/3 implementation reaped **nothing** — 76
+windows had accumulated. The plan's root-cause premise ("title doesn't survive")
+was only partly right and was not the operative failure. Four issues, fixed:
+
+1. **`looks_like_harness_window` errored on every window (`-1700`).**
+   `set w to item 1 of (every window whose id …)` + `repeat with p in
+   (processes of t)` builds a nested element-reference chain that fails
+   `p as text`. Since both the registry reap and the sweep gate on this
+   predicate, *nothing* was ever closed. Fix: direct `first window whose id …`
+   reference + materialize `processes of t` into a list variable.
+2. **Predicate matched the wrong shell.** It allowed only `detect_shell()`
+   (`bash`); Terminal windows run the login shell `-zsh`. Fix: accept any
+   common login shell, dash-prefixed or not.
+3. **No self-healing.** The plan explicitly refused WezTerm's count auto-trigger,
+   so leaks never self-cleared. Fix: `sweep_legacy_apple_terminal_windows` now
+   runs when window count exceeds `LEGACY_WINDOW_LIMIT` **or** the env var is
+   set — matching `cleanup_stale_wezterm_panes`.
+4. **`close` cannot destroy a window (new finding).** On current macOS,
+   `close … saving no` leaves an invisible (`visible false`) zero-tab **husk**
+   that no further `close` removes; husks accumulate ~1 per spawn/kill. The only
+   recovery is to **quit** Terminal. Added Layer 4: `quit_terminal_if_only_disposable`
+   quits Terminal when, past the limit, every window is disposable (husk or idle
+   harness-signature) — and refuses if any real working window is present.
+   Verified both the recovery and the refusal-to-quit safety paths.
+
+`TERM_PROGRAM=WezTerm` on this machine confirms Terminal.app is a test-only
+target, so quit-relaunch is safe here; the disposability gate keeps it safe
+where it is not.
+
 ## Acceptance Criteria
 
 1. After a `kill -9` mid-run leak, the **next** `spawn_shell` reaps the orphan

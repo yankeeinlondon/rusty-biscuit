@@ -67,6 +67,16 @@ use super::{
 const WINDOW_TITLE_PREFIX: &str = "biscuit-test-terminal-";
 static CLEANUP_ONCE: Once = Once::new();
 
+/// Open-window count above which [`sweep_legacy_apple_terminal_windows`]
+/// self-heals without the opt-in env var. The shared-broker model keeps
+/// only one harness window open at a time, so a pile-up well past this is
+/// almost certainly leaked test windows; the narrow
+/// [`looks_like_harness_window`] predicate still protects a developer's real
+/// windows during the sweep. Counterpart to WezTerm's
+/// `LEGACY_BACKGROUND_PANE_LIMIT` (which can be higher because its panes are
+/// quarantined in an isolated workspace).
+const LEGACY_WINDOW_LIMIT: usize = 16;
+
 /// Basename of the title-independent window-id registry.
 ///
 /// One JSONL row per harness-created window lives under `${TMPDIR:-/tmp}`
@@ -567,16 +577,106 @@ impl AppleTerminalHarness {
 ///    `custom title` was overwritten by the login shell (Pitfall 2).
 /// 2. **Title pass (secondary).** The legacy scan for windows still
 ///    carrying a `biscuit-test-terminal-<pid>-<seq>` custom title with a
-///    dead `<pid>`. Cheap, and a useful backstop if Layer 2 (title
-///    survival) lands; harmless otherwise.
+///    dead `<pid>`. Cheap, and catches windows that kept their tag.
+/// 3. **Self-healing sweep ([`sweep_legacy_apple_terminal_windows`]).**
+///    Catches leaks the registry cannot see (macOS-restored windows,
+///    pre-registry leaks, leaks recorded under a different `$TMPDIR`). Runs
+///    when the open-window count exceeds [`LEGACY_WINDOW_LIMIT`] or the
+///    opt-in env var is set, mirroring the WezTerm sweep.
+///
+/// Before those passes, [`quit_terminal_if_only_disposable`] handles the case
+/// `close` cannot: invisible zero-tab **husks**. `close … saving no` does not
+/// destroy a Terminal.app window on current macOS — it leaves a `visible
+/// false` husk that no further `close` removes, and the only reliable
+/// recovery is to quit the app.
 pub fn cleanup_stale_apple_terminal_windows() {
     if !AppleTerminalHarness::available() {
+        return;
+    }
+    // Husk recovery first: if the window list has degenerated into only
+    // leaked harness windows and unclosceable husks, quitting Terminal is the
+    // one thing that clears husks. It relaunches clean on the next spawn, so
+    // the per-window passes below have nothing left to do.
+    if quit_terminal_if_only_disposable() {
         return;
     }
     close_tabless_windows();
     reap_registered_windows();
     reap_titled_windows();
     sweep_legacy_apple_terminal_windows();
+}
+
+/// Quits Terminal.app when every open window is **disposable** and the count
+/// has piled up past [`LEGACY_WINDOW_LIMIT`] (or the opt-in sweep env var is
+/// set). This is the only recovery for invisible zero-tab husks, which
+/// `close` cannot remove.
+///
+/// A window is disposable when it is an invisible husk
+/// ([`window_is_invisible`]) or an idle harness-signature window
+/// ([`looks_like_harness_window`]). If **any** window is neither — i.e. a
+/// developer's real working window — this refuses to quit and returns
+/// `false`, leaving the gentler per-window passes to run. Returns `true` only
+/// when it actually quit Terminal.
+fn quit_terminal_if_only_disposable() -> bool {
+    let Some(ids) = existing_window_ids() else {
+        return false;
+    };
+    let forced = env::var("BISCUIT_TEST_HARNESS_SWEEP_LEGACY_APPLE").as_deref() == Ok("1");
+    if !forced && ids.len() <= LEGACY_WINDOW_LIMIT {
+        return false;
+    }
+    if ids
+        .iter()
+        .any(|&id| !window_is_invisible(id) && !looks_like_harness_window(id))
+    {
+        return false;
+    }
+    quit_terminal();
+    true
+}
+
+/// Whether the window with `window_id` is gone or `visible false` — the state
+/// a husk left behind by `close … saving no` presents. A window that cannot
+/// be enumerated is treated as gone (disposable).
+fn window_is_invisible(window_id: i64) -> bool {
+    let script = format!(
+        r#"tell application "Terminal"
+            set matches to (every window whose id is {id})
+            if (count of matches) is 0 then return "gone"
+            if visible of (first window whose id is {id}) is false then return "hidden"
+        end tell
+        return "visible""#,
+        id = window_id,
+    );
+    matches!(
+        AppleTerminalHarness::run_script(&script).as_deref(),
+        Ok("hidden") | Ok("gone")
+    )
+}
+
+/// Quits Terminal.app and waits for the process to actually exit so the next
+/// `do script` relaunches a clean instance rather than racing a quitting one.
+/// Best-effort: idle login shells and husks do not trip Terminal's
+/// running-process quit prompt, so `quit` returns without blocking.
+fn quit_terminal() {
+    let mut cmd = Command::new("osascript");
+    cmd.args(["-e", "tell application \"Terminal\" to quit"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
+    for _ in 0..30 {
+        std::thread::sleep(Duration::from_millis(100));
+        let running = Command::new("pgrep")
+            .args(["-x", "Terminal"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !running {
+            break;
+        }
+    }
 }
 
 /// Closes Terminal.app windows that have no tabs.
@@ -698,69 +798,93 @@ fn existing_window_ids() -> Option<Vec<i64>> {
 }
 
 /// Whether the window with `window_id` still presents as an idle harness
-/// login shell: it exists, no tab is `busy`, every tab process is the
-/// login shell itself (no foreground program), geometry is the default
-/// 80×24, and the title is empty or the generic "Terminal".
+/// login shell: it exists, no tab is `busy`, every tab process is a bare
+/// login shell (no foreground program), geometry is the default 80×24, and
+/// the title is empty or the generic "Terminal".
 ///
 /// Gates every registry-driven close so a window id that Terminal recycled
 /// to host real work — or one a developer is actively using — is never
 /// closed. Any osascript failure is treated as "not a harness window"
 /// (returns `false`), erring toward leaving windows open.
 ///
+/// ## Why a shell allowlist, not [`super::detect_shell`]
+///
+/// The harness spawns `exec <detect_shell()> -l`, but a Terminal.app window
+/// reports the *login* shell macOS started it with — which is the user's
+/// `UserShell` (commonly `zsh`, shown as `-zsh`), not whatever
+/// `detect_shell()` (which prefers `bash`) selected. Matching only the
+/// detected shell therefore never recognized a real leaked window, so they
+/// accumulated and slowed every full-window osascript scan. We instead
+/// accept any common interactive login shell (with or without the leading
+/// `-` login marker). The narrow blast radius is preserved by the other
+/// conjuncts: not busy, default 80×24 geometry, empty/"Terminal" title.
+///
 /// This predicate is also used by the opt-in legacy sweep
-/// ([`sweep_legacy_apple_terminal_windows`]), so it intentionally narrows
-/// the match to windows that are very unlikely to belong to a developer.
+/// ([`sweep_legacy_apple_terminal_windows`]).
 fn looks_like_harness_window(window_id: i64) -> bool {
-    let shell = super::detect_shell();
+    // `set w to item 1 of (every window whose id …)` then `processes of t`
+    // produces a nested element-reference chain that fails `p as text` with
+    // AppleScript error -1700. Use a direct `first window whose id …`
+    // reference and materialize `processes of t` into a list variable first,
+    // which coerces cleanly. (This bug previously made the predicate error
+    // on *every* window, so the reaper never closed anything.)
     let script = format!(
         r#"tell application "Terminal"
             set matches to (every window whose id is {id})
             if (count of matches) is 0 then return "missing"
-            set w to item 1 of matches
+            set w to (first window whose id is {id})
             repeat with t in tabs of w
                 if busy of t is true then return "busy"
-                repeat with p in (processes of t)
+                set procList to processes of t
+                repeat with p in procList
                     set pname to (p as text)
-                    if pname is not "login" and pname is not "{shell}" and pname is not "-{shell}" then return "busy"
+                    if pname starts with "-" and (length of pname) > 1 then set pname to (text 2 thru -1 of pname)
+                    if pname is not "login" and pname is not "bash" and pname is not "zsh" and pname is not "sh" and pname is not "dash" and pname is not "fish" then return "busy"
                 end repeat
                 set cols to number of columns of t
                 set rows to number of rows of t
                 if cols is not 80 or rows is not 24 then return "geometry"
             end repeat
             set ttitle to custom title of w
-            if ttitle is not "" and ttitle is not "Terminal" then return "title"
+            if ttitle is not "" and ttitle is not "Terminal" and ttitle does not start with "{prefix}" then return "title"
         end tell
         return "idle""#,
         id = window_id,
-        shell = shell,
+        prefix = WINDOW_TITLE_PREFIX,
     );
     matches!(AppleTerminalHarness::run_script(&script).as_deref(), Ok("idle"))
 }
 
-/// Opt-in legacy sweep for Terminal.app windows that are not in the
-/// registry (e.g. restored by macOS with new ids, or leaked by pre-registry
-/// harness versions).
+/// Sweep for Terminal.app windows that the registry pass cannot see —
+/// macOS-restored windows (new ids), pre-registry leaks, and windows leaked
+/// under a different `$TMPDIR` (so their registry rows live in another file).
 ///
-/// This is **disabled by default** because Terminal.app has no workspace
-/// isolation — an idle login-shell window can belong to a developer who
-/// actually uses Terminal.app. Enable only on CI or on machines where
-/// Terminal.app is not the interactive terminal:
+/// ## Trigger
+///
+/// Mirrors the self-healing WezTerm sweep ([`super::wezterm`]'s
+/// `cleanup_stale_wezterm_panes`): runs when **either** the opt-in env var
+/// is set **or** the open-window count exceeds [`LEGACY_WINDOW_LIMIT`].
+/// WezTerm can sweep unconditionally inside its isolated `biscuit-bg`
+/// workspace; Terminal.app has no workspace isolation, so the count gate is
+/// what keeps a developer's handful of real windows safe while still letting
+/// an abnormal pile-up of leaked test windows self-heal without an env var.
 ///
 /// ```bash
 /// BISCUIT_TEST_HARNESS_SWEEP_LEGACY_APPLE=1 cargo test …
 /// ```
 ///
-/// When enabled, every open Terminal.app window is tested with
-/// [`looks_like_harness_window`]; matching windows are closed. The predicate
-/// requires default geometry (80×24), an empty/"Terminal" title, and only
-/// idle login-shell processes — a very narrow match.
+/// Every open window is then tested with [`looks_like_harness_window`] and
+/// only matches are closed: the predicate requires default 80×24 geometry,
+/// an empty/"Terminal"/harness-tag title, and only idle login-shell
+/// processes — a match a developer's working window effectively never has.
 fn sweep_legacy_apple_terminal_windows() {
-    if env::var("BISCUIT_TEST_HARNESS_SWEEP_LEGACY_APPLE").as_deref() != Ok("1") {
-        return;
-    }
     let Some(ids) = existing_window_ids() else {
         return;
     };
+    let forced = env::var("BISCUIT_TEST_HARNESS_SWEEP_LEGACY_APPLE").as_deref() == Ok("1");
+    if !forced && ids.len() <= LEGACY_WINDOW_LIMIT {
+        return;
+    }
     for id in ids {
         if looks_like_harness_window(id) {
             close_window_by_id(id);
