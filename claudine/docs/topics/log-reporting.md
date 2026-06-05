@@ -39,6 +39,8 @@ Every event is serialized as a single-line JSON record with these fields:
 | `notification_message` | `Option<String>` | Notification body text                                          |
 | `extra`             | `HashMap`         | Provider-specific fields (model, permission_mode, transcript_path, tool_use_id, stop_hook_active) |
 | `env`               | `EnvironmentContext` | Full environment snapshot (see below)                         |
+| `env.claudine_pid`  | `Option<u32>`     | Claudine's own process ID, captured at wrapper startup          |
+| `agent_pid`         | `Option<u32>`     | Immediate child PID after successful spawn; omitted when unavailable |
 
 ### Environment Context (embedded in every event)
 
