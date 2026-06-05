@@ -165,12 +165,19 @@ the push-down by hand.
 ## Performance Gate
 
 The typed fields exist so that **a fold round-trips zero renderable-owned hints
-through `data`**. A structural test gate enforces this: a `#[cfg(test)]`
-namespace-partitioned counter (`HINT_ACCESSES`) bumps on every `set_hint` /
-`get_hint` / `remove_hint`, and the gate folds a styled corpus and asserts the
-`renderable.*` slot stayed at zero (the extension slot is non-zero, proving the
-counter works). Any accessor that reaches back into the bag for a first-class
-hint fails the gate.
+through `data`**. A structural test gate enforces this: a namespace-partitioned
+counter (`HINT_ACCESSES`) bumps on every `set_hint` / `get_hint` / `remove_hint`,
+and the gate folds a styled corpus per target and asserts the `renderable.*` slot
+stayed at zero (the extension slot is non-zero, proving the counter works). Any
+accessor that reaches back into the bag for a first-class hint fails the gate.
+
+The gate covers **every** fold: `renderable`'s own test folds the corpus through
+the Markdown, browser-fragment, and browser-streaming renderers; `biscuit-terminal`
+folds it through the terminal renderer (`tests/perf_gate.rs`). The counter is
+active under `cfg(test)` and under renderable's test-only `hint-access-counter`
+feature, which `biscuit-terminal` enables from `[dev-dependencies]` so its
+out-of-crate test can observe the counter. The feature is never enabled in a
+release build, so the instrumentation carries no runtime cost in production.
 
 ## CodeRenderer
 
