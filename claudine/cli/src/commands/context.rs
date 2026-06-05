@@ -368,7 +368,7 @@ fn render_default_report(sections: &[ContextSection]) {
             TableColumn::new("Description"),
         ];
         let mut table = Table::new().with_columns(columns);
-        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+        table.layout_mut().margin = biscuit_terminal::utils::layout::Edges::x(
             biscuit_terminal::utils::layout::Length::ch(1),
         );
 
@@ -414,7 +414,7 @@ fn render_values_report(sections: &[ContextSection]) {
             TableColumn::new("Value"),
         ];
         let mut table = Table::new().with_columns(columns);
-        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+        table.layout_mut().margin = biscuit_terminal::utils::layout::Edges::x(
             biscuit_terminal::utils::layout::Length::ch(1),
         );
 
@@ -775,7 +775,7 @@ fn render_expr_blocks(term: &biscuit_terminal::terminal::Terminal, blocks: &[Exp
                     .map(|h| TableColumn::new(h.as_str()))
                     .collect();
                 let mut table = Table::new().with_columns(columns);
-                table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+                table.layout_mut().margin = biscuit_terminal::utils::layout::Edges::x(
                     biscuit_terminal::utils::layout::Length::ch(1),
                 );
                 for row in rows {
@@ -926,7 +926,7 @@ fn render_precedence_table(term: &biscuit_terminal::terminal::Terminal, sections
     ];
     let mut table = Table::new().with_columns(columns);
     table.layout_mut().margin =
-        biscuit_terminal::utils::layout::Margin::x(biscuit_terminal::utils::layout::Length::ch(1));
+        biscuit_terminal::utils::layout::Edges::x(biscuit_terminal::utils::layout::Length::ch(1));
 
     for (i, (name, desc)) in items.iter().enumerate() {
         let row: Vec<TableCellContent> = vec![
@@ -956,7 +956,7 @@ fn render_truthiness_table(term: &biscuit_terminal::terminal::Terminal, sections
                 .map(|h| TableColumn::new(h.as_str()))
                 .collect();
             let mut table = Table::new().with_columns(columns);
-            table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+            table.layout_mut().margin = biscuit_terminal::utils::layout::Edges::x(
                 biscuit_terminal::utils::layout::Length::ch(1),
             );
 
@@ -986,7 +986,7 @@ fn render_unary_operators(term: &biscuit_terminal::terminal::Terminal, sections:
     ];
     let mut table = Table::new().with_columns(columns);
     table.layout_mut().margin =
-        biscuit_terminal::utils::layout::Margin::x(biscuit_terminal::utils::layout::Length::ch(1));
+        biscuit_terminal::utils::layout::Edges::x(biscuit_terminal::utils::layout::Length::ch(1));
 
     for block in &section.blocks {
         if let ExprBlock::UnorderedList(list) = block {
@@ -1024,7 +1024,7 @@ fn render_functions(term: &biscuit_terminal::terminal::Terminal, sections: &[Exp
             TableColumn::new("Description"),
         ];
         let mut table = Table::new().with_columns(columns);
-        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+        table.layout_mut().margin = biscuit_terminal::utils::layout::Edges::x(
             biscuit_terminal::utils::layout::Length::ch(1),
         );
 
@@ -1342,7 +1342,7 @@ mod tests {
             TableColumn::new("Description"),
         ];
         let mut table = Table::new().with_columns(columns);
-        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+        table.layout_mut().margin = biscuit_terminal::utils::layout::Edges::x(
             biscuit_terminal::utils::layout::Length::ch(1),
         );
 
