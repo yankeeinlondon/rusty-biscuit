@@ -338,11 +338,15 @@ expression: json
             "attrs": {
               "id": null,
               "classes": [],
-              "data": {
-                "renderable.code.header_row": true,
-                "renderable.code.highlight": true,
-                "renderable.code.language_label": "rust"
-              }
+              "component": {
+                "kind": "code",
+                "value": {
+                  "header_row": true,
+                  "language_label": "rust",
+                  "highlight": true
+                }
+              },
+              "data": {}
             }
           }
         ]

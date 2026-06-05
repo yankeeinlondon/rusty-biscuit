@@ -69,6 +69,20 @@ pub enum SequenceJoin {
     None,
 }
 
+impl Serialize for SequenceJoin {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.to_token())
+    }
+}
+
+impl<'de> Deserialize<'de> for SequenceJoin {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let token = String::deserialize(d)?;
+        SequenceJoin::from_token(&token)
+            .ok_or_else(|| serde::de::Error::custom(format!("invalid SequenceJoin token: {token}")))
+    }
+}
+
 impl SequenceJoin {
     /// Returns the compact string token for this join policy.
     #[must_use]
@@ -142,6 +156,29 @@ impl ListMarkerPolicy {
             _ => None,
         }
     }
+
+    /// Whether this is the implicit [`ListMarkerPolicy::Default`] policy.
+    ///
+    /// Used as the `skip_serializing_if` predicate for the typed
+    /// [`NodeAttrs::list_marker_policy`] field so the common case adds no key.
+    pub(crate) fn is_default(&self) -> bool {
+        *self == ListMarkerPolicy::default()
+    }
+}
+
+impl Serialize for ListMarkerPolicy {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.to_token())
+    }
+}
+
+impl<'de> Deserialize<'de> for ListMarkerPolicy {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let token = String::deserialize(d)?;
+        ListMarkerPolicy::from_token(&token).ok_or_else(|| {
+            serde::de::Error::custom(format!("invalid ListMarkerPolicy token: {token}"))
+        })
+    }
 }
 
 /// The state of a task-list item.
@@ -204,6 +241,20 @@ impl TaskState {
     }
 }
 
+impl Serialize for TaskState {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.to_token())
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskState {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let token = String::deserialize(d)?;
+        TaskState::from_token(&token)
+            .ok_or_else(|| serde::de::Error::custom(format!("invalid TaskState token: {token}")))
+    }
+}
+
 /// Render hints for a task-list item.
 ///
 /// A `Todo` component projects to a one-item [`NodeKind::List`] with a
@@ -223,7 +274,7 @@ impl TaskState {
 /// attrs.set_task_hints(&TaskHints { state: TaskState::InProgress });
 /// assert_eq!(attrs.task_hints().unwrap().state, TaskState::InProgress);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TaskHints {
     /// The task's state.
     pub state: TaskState,
@@ -249,7 +300,7 @@ pub struct TaskHints {
 /// assert!(hints.hanging_indent);
 /// assert_eq!(hints.indent_children, None);
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ListRenderHints {
     /// Custom bullet string for unordered lists.
     pub bullet: Option<String>,
@@ -290,7 +341,7 @@ impl Default for ListRenderHints {
 /// assert!(hints.header_row);
 /// assert_eq!(hints.language_label.as_deref(), Some("yaml"));
 /// ```
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct CodeRenderHints {
     /// Whether to render a header row with the language label.
     pub header_row: bool,
@@ -320,7 +371,7 @@ pub struct CodeRenderHints {
 /// assert_eq!(hints.bar_width, 20);
 /// assert_eq!(hints.fill_char, '█');
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProgressHints {
     /// Completion value, 0.0..=1.0.
     pub value: f32,
@@ -370,7 +421,7 @@ impl Default for ProgressHints {
 /// let half = ColumnWidthKind::Percent(0.5);
 /// assert_ne!(fixed, half);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ColumnWidthKind {
     /// Fixed width in characters.
     Fixed(u32),
@@ -399,7 +450,7 @@ pub enum ColumnWidthKind {
 /// assert_eq!(hints.gap, 3);
 /// assert!(hints.stack_below);
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ColumnsHints {
     /// Character gap between the two columns.
     pub gap: u32,
@@ -480,10 +531,25 @@ impl ColumnConditional {
     }
 }
 
+impl Serialize for ColumnConditional {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.to_token())
+    }
+}
+
+impl<'de> Deserialize<'de> for ColumnConditional {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let token = String::deserialize(d)?;
+        ColumnConditional::from_token(&token).ok_or_else(|| {
+            serde::de::Error::custom(format!("invalid ColumnConditional token: {token}"))
+        })
+    }
+}
+
 /// Per-column render hints for a projected [`NodeKind::Table`] node.
 ///
-/// A `Table` component records one set of these per column under the
-/// [`HintNamespace::TABLE`] namespace, keyed `column.{i}.*`. Renderers that
+/// A `Table` component records one set of these per column in the table
+/// node's [`TableHints::columns`] map, keyed by column index. Renderers that
 /// recognize the hints reproduce bespoke column width and visibility
 /// behavior; renderers that do not fall back to plain table layout.
 ///
@@ -503,7 +569,7 @@ impl ColumnConditional {
 /// let hints = attrs.table_column_hints(0);
 /// assert_eq!(hints.min_width, Some(8));
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TableColumnHints {
     /// Minimum column width in characters.
     pub min_width: Option<u32>,
@@ -550,7 +616,7 @@ pub struct TableColumnHints {
 /// let hints = attrs.table_cell_hints().expect("cell hints present");
 /// assert_eq!(hints.kind, "currency");
 /// ```
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct TableCellHints {
     /// Cell kind: `"text"`, `"integer"`, `"float"`, or `"currency"`.
     pub kind: String,
@@ -564,7 +630,7 @@ pub struct TableCellHints {
 
 /// Terminal-specific render hints for a projected [`NodeKind::Table`] node.
 ///
-/// These are stored under the [`HintNamespace::TERMINAL`] namespace and
+/// These are stored in the table node's [`TableHints::terminal`] and
 /// influence terminal-only behaviors. Markdown and browser renderers ignore
 /// them.
 ///
@@ -584,7 +650,7 @@ pub struct TableCellHints {
 /// let hints = attrs.table_terminal_hints();
 /// assert!(hints.prefer_cursor_alignment);
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TableTerminalHints {
     /// Whether to use cursor positioning for cell alignment.
     pub prefer_cursor_alignment: bool,
@@ -600,10 +666,57 @@ pub struct TableTerminalHints {
     pub stripe_text: Option<crate::color::Color>,
 }
 
+/// A [`NodeKind::Table`] node's hints, grouped together.
+///
+/// Column hints are keyed per column index, so columns can be addressed
+/// independently while the terminal striping and title hints stay co-resident
+/// on the same table node.
+///
+/// [`NodeKind::Table`]: crate::tree::NodeKind::Table
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct TableHints {
+    /// Per-column hints, keyed by zero-based column index.
+    pub columns: BTreeMap<usize, TableColumnHints>,
+    /// Terminal-only striping and cursor-alignment hints.
+    pub terminal: Option<TableTerminalHints>,
+    /// Optional table title/caption.
+    pub title: Option<String>,
+}
+
+/// Per-component render hints; only nodes of the matching kind carry one.
+///
+/// A render node carries at most one `ComponentHints`, matched to its
+/// [`NodeKind`](crate::tree::NodeKind): a list node may hold
+/// [`ComponentHints::List`], a code node [`ComponentHints::Code`], and so on.
+/// Stored as the typed [`NodeAttrs::component`] field rather than serialized
+/// into [`NodeAttrs::data`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind", content = "value")]
+pub enum ComponentHints {
+    /// Hints for a list node.
+    List(ListRenderHints),
+    /// Hints for a code-block node.
+    Code(CodeRenderHints),
+    /// Hints for a projected progress-bar paragraph node.
+    Progress(ProgressHints),
+    /// Hints for a projected two-column block-quote node.
+    Columns(ColumnsHints),
+    /// Hints for a projected task-list item node.
+    Task(TaskHints),
+    /// Hints for a table node.
+    Table(TableHints),
+    /// Hints for a single table-cell node.
+    TableCell(TableCellHints),
+}
+
 /// Optional presentational attributes carried by every render node.
 ///
 /// All fields are optional; the [`Default`] value is an empty set of
-/// attributes (no id, no classes, no data).
+/// attributes. First-class presentation — `layout`, `style`, the two hot
+/// per-node hints (`sequence_join`, `list_marker_policy`), and the per-kind
+/// `component` hint group — lives in typed sparse fields, so reads cost no
+/// serde round-trip. `data` carries only package-local extension namespaces
+/// (e.g. `darkmatter.hr.*`).
 ///
 /// ## Examples
 ///
@@ -613,6 +726,8 @@ pub struct TableTerminalHints {
 /// let attrs = NodeAttrs::default();
 /// assert!(attrs.id.is_none());
 /// assert!(attrs.classes.is_empty());
+/// assert!(attrs.layout.is_none());
+/// assert!(attrs.component.is_none());
 /// assert!(attrs.data.is_empty());
 /// ```
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -622,8 +737,62 @@ pub struct NodeAttrs {
     pub id: Option<String>,
     /// CSS-style class names associated with the node.
     pub classes: Vec<String>,
-    /// Arbitrary structured data keyed by name.
+    /// Block-positioning layout, when set. Permitted on block-level nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<Box<crate::layout::Layout>>,
+    /// Target-agnostic appearance, when set. Permitted on block nodes and
+    /// inline `Span` nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<Box<crate::style::Style>>,
+    /// Child-sequence join policy (Root nodes only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence_join: Option<SequenceJoin>,
+    /// List marker presentation policy.
+    #[serde(default, skip_serializing_if = "ListMarkerPolicy::is_default")]
+    pub list_marker_policy: ListMarkerPolicy,
+    /// Per-component render hints, when the node kind carries any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<Box<ComponentHints>>,
+    /// Extension-namespace structured data keyed by name (e.g.
+    /// `darkmatter.hr.*`). Not used for first-class `renderable.*` hints.
     pub data: BTreeMap<String, serde_json::Value>,
+}
+
+// Test-only `data`-bag access counter, partitioned by namespace. The tuple is
+// `(renderable_owned, extension)`: bag accesses whose namespace starts with
+// `"renderable."` increment the first slot, all others the second. The
+// structural perf gate folds a styled corpus and asserts the first slot stayed
+// at zero — every first-class hint must read from a typed field, never
+// round-trip through `NodeAttrs::data`.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static HINT_ACCESSES: std::cell::Cell<(u64, u64)> =
+        const { std::cell::Cell::new((0, 0)) };
+}
+
+/// Resets the [`HINT_ACCESSES`] counter to `(0, 0)`.
+#[cfg(test)]
+pub(crate) fn reset_hint_accesses() {
+    HINT_ACCESSES.with(|c| c.set((0, 0)));
+}
+
+/// Returns the current `(renderable_owned, extension)` bag-access counts.
+#[cfg(test)]
+pub(crate) fn hint_accesses() -> (u64, u64) {
+    HINT_ACCESSES.with(std::cell::Cell::get)
+}
+
+/// Classifies one bag access by namespace and bumps the matching counter.
+#[cfg(test)]
+fn record_hint_access(ns: HintNamespace) {
+    HINT_ACCESSES.with(|c| {
+        let (r, e) = c.get();
+        if ns.0.starts_with("renderable.") {
+            c.set((r + 1, e));
+        } else {
+            c.set((r, e + 1));
+        }
+    });
 }
 
 impl NodeAttrs {
@@ -641,6 +810,8 @@ impl NodeAttrs {
     /// attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2));
     /// ```
     pub fn set_hint(&mut self, ns: HintNamespace, key: &str, value: serde_json::Value) {
+        #[cfg(test)]
+        record_hint_access(ns);
         let full_key = format!("{}.{}", ns.0, key);
         self.data.insert(full_key, value);
     }
@@ -661,6 +832,8 @@ impl NodeAttrs {
     /// assert_eq!(attrs.get_hint(HintNamespace::LAYOUT, "nonexistent"), None);
     /// ```
     pub fn get_hint(&self, ns: HintNamespace, key: &str) -> Option<&serde_json::Value> {
+        #[cfg(test)]
+        record_hint_access(ns);
         // The common node carries no hints at all (plain text runs, attribute-less
         // table cells, list items). Skip building the `"{ns}.{key}"` lookup string
         // for them — every renderer probes `style()` / `layout()` per node, so this
@@ -689,15 +862,27 @@ impl NodeAttrs {
     /// assert_eq!(attrs.get_hint(HintNamespace::LAYOUT, "margin_top"), None);
     /// ```
     pub fn remove_hint(&mut self, ns: HintNamespace, key: &str) -> Option<serde_json::Value> {
+        #[cfg(test)]
+        record_hint_access(ns);
         let full_key = format!("{}.{}", ns.0, key);
         self.data.remove(&full_key)
     }
 
-    /// Stores [`ListRenderHints`] under the [`HintNamespace::LIST`] namespace.
-    ///
-    /// Only non-default fields are written: a `None` bullet, a `true`
-    /// `hanging_indent`, and a `None` `indent_children` are left unset so the
-    /// hint footprint stays minimal.
+    /// Returns a mutable reference to this node's [`TableHints`], initializing
+    /// the [`ComponentHints::Table`] variant if the node does not already carry
+    /// one. Lets the per-column, terminal, and title setters mutate their own
+    /// slice of the table hints without clobbering a co-resident sub-hint.
+    fn table_hints_mut(&mut self) -> &mut TableHints {
+        if !matches!(self.component.as_deref(), Some(ComponentHints::Table(_))) {
+            self.component = Some(Box::new(ComponentHints::Table(TableHints::default())));
+        }
+        match self.component.as_deref_mut() {
+            Some(ComponentHints::Table(t)) => t,
+            _ => unreachable!("just initialized to Table"),
+        }
+    }
+
+    /// Stores [`ListRenderHints`] as the node's [`ComponentHints::List`].
     ///
     /// ## Examples
     ///
@@ -716,42 +901,12 @@ impl NodeAttrs {
     /// assert_eq!(hints.indent_children, Some(4));
     /// ```
     pub fn set_list_hints(&mut self, hints: &ListRenderHints) {
-        match &hints.bullet {
-            Some(bullet) => self.set_hint(
-                HintNamespace::LIST,
-                "bullet",
-                serde_json::Value::String(bullet.clone()),
-            ),
-            None => {
-                self.remove_hint(HintNamespace::LIST, "bullet");
-            }
-        }
-
-        if hints.hanging_indent {
-            self.remove_hint(HintNamespace::LIST, "hanging_indent");
-        } else {
-            self.set_hint(
-                HintNamespace::LIST,
-                "hanging_indent",
-                serde_json::Value::Bool(false),
-            );
-        }
-
-        match hints.indent_children {
-            Some(indent) => self.set_hint(
-                HintNamespace::LIST,
-                "indent_children",
-                serde_json::Value::from(indent),
-            ),
-            None => {
-                self.remove_hint(HintNamespace::LIST, "indent_children");
-            }
-        }
+        self.component = Some(Box::new(ComponentHints::List(hints.clone())));
     }
 
-    /// Reads [`ListRenderHints`] from the [`HintNamespace::LIST`] namespace.
+    /// Reads this node's [`ListRenderHints`], if it carries any.
     ///
-    /// Missing hints fall back to [`ListRenderHints::default`].
+    /// A node without list hints falls back to [`ListRenderHints::default`].
     ///
     /// ## Examples
     ///
@@ -766,33 +921,24 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn list_hints(&self) -> ListRenderHints {
-        let bullet = self
-            .get_hint(HintNamespace::LIST, "bullet")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string);
-
-        let hanging_indent = self
-            .get_hint(HintNamespace::LIST, "hanging_indent")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(true);
-
-        let indent_children = self
-            .get_hint(HintNamespace::LIST, "indent_children")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|v| u32::try_from(v).ok());
-
-        ListRenderHints {
-            bullet,
-            hanging_indent,
-            indent_children,
+        match self.component.as_deref() {
+            Some(ComponentHints::List(h)) => h.clone(),
+            _ => ListRenderHints::default(),
         }
     }
 
-    /// Stores [`CodeRenderHints`] under the [`HintNamespace::CODE`] namespace.
+    /// Borrowed accessor for renderer hot paths (no clone).
     ///
-    /// Only non-default fields are written: a `false` `header_row`, a `None`
-    /// `language_label`, and a `false` `highlight` are left unset so the hint
-    /// footprint stays minimal.
+    /// Returns `None` when the node carries no list hints.
+    #[must_use]
+    pub fn list_hints_ref(&self) -> Option<&ListRenderHints> {
+        match self.component.as_deref() {
+            Some(ComponentHints::List(h)) => Some(h),
+            _ => None,
+        }
+    }
+
+    /// Stores [`CodeRenderHints`] as the node's [`ComponentHints::Code`].
     ///
     /// ## Examples
     ///
@@ -811,41 +957,12 @@ impl NodeAttrs {
     /// assert!(hints.highlight);
     /// ```
     pub fn set_code_hints(&mut self, hints: &CodeRenderHints) {
-        if hints.header_row {
-            self.set_hint(
-                HintNamespace::CODE,
-                "header_row",
-                serde_json::Value::Bool(true),
-            );
-        } else {
-            self.remove_hint(HintNamespace::CODE, "header_row");
-        }
-
-        match &hints.language_label {
-            Some(label) => self.set_hint(
-                HintNamespace::CODE,
-                "language_label",
-                serde_json::Value::String(label.clone()),
-            ),
-            None => {
-                self.remove_hint(HintNamespace::CODE, "language_label");
-            }
-        }
-
-        if hints.highlight {
-            self.set_hint(
-                HintNamespace::CODE,
-                "highlight",
-                serde_json::Value::Bool(true),
-            );
-        } else {
-            self.remove_hint(HintNamespace::CODE, "highlight");
-        }
+        self.component = Some(Box::new(ComponentHints::Code(hints.clone())));
     }
 
-    /// Reads [`CodeRenderHints`] from the [`HintNamespace::CODE`] namespace.
+    /// Reads this node's [`CodeRenderHints`], if it carries any.
     ///
-    /// Missing hints fall back to [`CodeRenderHints::default`].
+    /// A node without code hints falls back to [`CodeRenderHints::default`].
     ///
     /// ## Examples
     ///
@@ -861,33 +978,27 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn code_hints(&self) -> CodeRenderHints {
-        let header_row = self
-            .get_hint(HintNamespace::CODE, "header_row")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-
-        let language_label = self
-            .get_hint(HintNamespace::CODE, "language_label")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string);
-
-        let highlight = self
-            .get_hint(HintNamespace::CODE, "highlight")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-
-        CodeRenderHints {
-            header_row,
-            language_label,
-            highlight,
+        match self.component.as_deref() {
+            Some(ComponentHints::Code(h)) => h.clone(),
+            _ => CodeRenderHints::default(),
         }
     }
 
-    /// Stores [`ProgressHints`] under the [`HintNamespace::WIDGET_PROGRESS`]
-    /// namespace.
+    /// Borrowed accessor for renderer hot paths (no clone).
     ///
-    /// All six fields are written so [`NodeAttrs::progress_hints`] can detect
-    /// the presence of progress hints and reproduce the bar faithfully.
+    /// Returns `None` when the node carries no code hints.
+    #[must_use]
+    pub fn code_hints_ref(&self) -> Option<&CodeRenderHints> {
+        match self.component.as_deref() {
+            Some(ComponentHints::Code(h)) => Some(h),
+            _ => None,
+        }
+    }
+
+    /// Stores [`ProgressHints`] as the node's [`ComponentHints::Progress`].
+    ///
+    /// The presence of the hint marks the paragraph as a projected progress
+    /// widget; [`NodeAttrs::progress_hints`] returns `Some` for it.
     ///
     /// ## Examples
     ///
@@ -902,57 +1013,13 @@ impl NodeAttrs {
     /// assert_eq!(attrs.progress_hints().unwrap().value, 0.5);
     /// ```
     pub fn set_progress_hints(&mut self, hints: &ProgressHints) {
-        self.set_hint(
-            HintNamespace::WIDGET_PROGRESS,
-            "value",
-            serde_json::Value::from(hints.value),
-        );
-        self.set_hint(
-            HintNamespace::WIDGET_PROGRESS,
-            "bar_width",
-            serde_json::Value::from(hints.bar_width),
-        );
-        self.set_hint(
-            HintNamespace::WIDGET_PROGRESS,
-            "fill_char",
-            serde_json::Value::String(hints.fill_char.to_string()),
-        );
-        self.set_hint(
-            HintNamespace::WIDGET_PROGRESS,
-            "empty_char",
-            serde_json::Value::String(hints.empty_char.to_string()),
-        );
-        self.set_hint(
-            HintNamespace::WIDGET_PROGRESS,
-            "left_bracket",
-            serde_json::Value::String(hints.left_bracket.to_string()),
-        );
-        self.set_hint(
-            HintNamespace::WIDGET_PROGRESS,
-            "right_bracket",
-            serde_json::Value::String(hints.right_bracket.to_string()),
-        );
-        // Slot colors are optional: stored only when set, so a glyph-only
-        // progress bar carries no color keys.
-        for (key, color) in [
-            ("filled_color", hints.filled_color),
-            ("empty_color", hints.empty_color),
-            ("bracket_color", hints.bracket_color),
-        ] {
-            if let Some(color) = color
-                && let Ok(value) = serde_json::to_value(color)
-            {
-                self.set_hint(HintNamespace::WIDGET_PROGRESS, key, value);
-            }
-        }
+        self.component = Some(Box::new(ComponentHints::Progress(hints.clone())));
     }
 
-    /// Reads [`ProgressHints`] from the [`HintNamespace::WIDGET_PROGRESS`]
-    /// namespace.
+    /// Reads this node's [`ProgressHints`], if it carries any.
     ///
-    /// Returns `None` when no progress `value` hint is present, so renderers
-    /// can detect whether a paragraph is a projected progress widget. Any
-    /// individual missing field falls back to [`ProgressHints::default`].
+    /// Returns `None` when the node is not a projected progress widget, so
+    /// renderers can detect whether a paragraph should draw a bar.
     ///
     /// ## Examples
     ///
@@ -964,48 +1031,16 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn progress_hints(&self) -> Option<ProgressHints> {
-        let value = self
-            .get_hint(HintNamespace::WIDGET_PROGRESS, "value")
-            .and_then(serde_json::Value::as_f64)? as f32;
-
-        let defaults = ProgressHints::default();
-
-        let bar_width = self
-            .get_hint(HintNamespace::WIDGET_PROGRESS, "bar_width")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|v| u32::try_from(v).ok())
-            .unwrap_or(defaults.bar_width);
-
-        let read_char = |key: &str, fallback: char| -> char {
-            self.get_hint(HintNamespace::WIDGET_PROGRESS, key)
-                .and_then(serde_json::Value::as_str)
-                .and_then(|s| s.chars().next())
-                .unwrap_or(fallback)
-        };
-
-        let read_color = |key: &str| -> Option<crate::color::Color> {
-            self.get_hint(HintNamespace::WIDGET_PROGRESS, key)
-                .and_then(|value| serde_json::from_value(value.clone()).ok())
-        };
-
-        Some(ProgressHints {
-            value,
-            bar_width,
-            fill_char: read_char("fill_char", defaults.fill_char),
-            empty_char: read_char("empty_char", defaults.empty_char),
-            left_bracket: read_char("left_bracket", defaults.left_bracket),
-            right_bracket: read_char("right_bracket", defaults.right_bracket),
-            filled_color: read_color("filled_color"),
-            empty_color: read_color("empty_color"),
-            bracket_color: read_color("bracket_color"),
-        })
+        match self.component.as_deref() {
+            Some(ComponentHints::Progress(h)) => Some(h.clone()),
+            _ => None,
+        }
     }
 
-    /// Stores [`ColumnsHints`] under the [`HintNamespace::WIDGET_COLUMNS`]
-    /// namespace.
+    /// Stores [`ColumnsHints`] as the node's [`ComponentHints::Columns`].
     ///
-    /// All fields are written so [`NodeAttrs::columns_hints`] can detect the
-    /// presence of column hints and reconstruct the two-column layout.
+    /// The presence of the hint marks the block quote as a projected
+    /// two-column widget; [`NodeAttrs::columns_hints`] returns `Some` for it.
     ///
     /// ## Examples
     ///
@@ -1020,39 +1055,12 @@ impl NodeAttrs {
     /// assert_eq!(attrs.columns_hints().unwrap().left_count, 2);
     /// ```
     pub fn set_columns_hints(&mut self, hints: &ColumnsHints) {
-        self.set_hint(
-            HintNamespace::WIDGET_COLUMNS,
-            "gap",
-            serde_json::Value::from(hints.gap),
-        );
-        let (kind, value) = match hints.left_width {
-            ColumnWidthKind::Fixed(chars) => ("fixed", serde_json::Value::from(chars)),
-            ColumnWidthKind::Percent(percent) => ("percent", serde_json::Value::from(percent)),
-        };
-        self.set_hint(
-            HintNamespace::WIDGET_COLUMNS,
-            "left_width_kind",
-            serde_json::Value::String(kind.to_string()),
-        );
-        self.set_hint(HintNamespace::WIDGET_COLUMNS, "left_width", value);
-        self.set_hint(
-            HintNamespace::WIDGET_COLUMNS,
-            "left_count",
-            serde_json::Value::from(hints.left_count as u64),
-        );
-        self.set_hint(
-            HintNamespace::WIDGET_COLUMNS,
-            "stack_below",
-            serde_json::Value::Bool(hints.stack_below),
-        );
+        self.component = Some(Box::new(ComponentHints::Columns(hints.clone())));
     }
 
-    /// Reads [`ColumnsHints`] from the [`HintNamespace::WIDGET_COLUMNS`]
-    /// namespace.
+    /// Reads this node's [`ColumnsHints`], if it carries any.
     ///
-    /// Returns `None` when no `gap` hint is present, so renderers can detect
-    /// whether a block quote is a projected two-column widget. Any individual
-    /// missing field falls back to [`ColumnsHints::default`].
+    /// Returns `None` when the node is not a projected two-column widget.
     ///
     /// ## Examples
     ///
@@ -1064,55 +1072,17 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn columns_hints(&self) -> Option<ColumnsHints> {
-        let gap = self
-            .get_hint(HintNamespace::WIDGET_COLUMNS, "gap")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|v| u32::try_from(v).ok())?;
-
-        let defaults = ColumnsHints::default();
-
-        let left_width = match self
-            .get_hint(HintNamespace::WIDGET_COLUMNS, "left_width_kind")
-            .and_then(serde_json::Value::as_str)
-        {
-            Some("fixed") => self
-                .get_hint(HintNamespace::WIDGET_COLUMNS, "left_width")
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|v| u32::try_from(v).ok())
-                .map(ColumnWidthKind::Fixed)
-                .unwrap_or(defaults.left_width),
-            Some("percent") => self
-                .get_hint(HintNamespace::WIDGET_COLUMNS, "left_width")
-                .and_then(serde_json::Value::as_f64)
-                .map(|v| ColumnWidthKind::Percent(v as f32))
-                .unwrap_or(defaults.left_width),
-            _ => defaults.left_width,
-        };
-
-        let left_count = self
-            .get_hint(HintNamespace::WIDGET_COLUMNS, "left_count")
-            .and_then(serde_json::Value::as_u64)
-            .map(|v| v as usize)
-            .unwrap_or(defaults.left_count);
-
-        let stack_below = self
-            .get_hint(HintNamespace::WIDGET_COLUMNS, "stack_below")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(defaults.stack_below);
-
-        Some(ColumnsHints {
-            gap,
-            left_width,
-            left_count,
-            stack_below,
-        })
+        match self.component.as_deref() {
+            Some(ComponentHints::Columns(h)) => Some(h.clone()),
+            _ => None,
+        }
     }
 
-    /// Stores [`TableColumnHints`] for column `index` under the
-    /// [`HintNamespace::TABLE`] namespace.
+    /// Stores [`TableColumnHints`] for column `index` in this node's
+    /// [`ComponentHints::Table`], keyed by column index.
     ///
-    /// Keys are prefixed `column.{index}.`. Only non-default fields are
-    /// written so the hint footprint stays minimal.
+    /// Co-resident with the terminal and title table hints; setting one does
+    /// not clobber the others.
     ///
     /// ## Examples
     ///
@@ -1127,76 +1097,14 @@ impl NodeAttrs {
     /// assert_eq!(attrs.table_column_hints(2).fixed_width, Some(12));
     /// ```
     pub fn set_table_column_hints(&mut self, index: usize, hints: &TableColumnHints) {
-        let key = |suffix: &str| format!("column.{index}.{suffix}");
-
-        for (suffix, value) in [
-            ("min_width", hints.min_width),
-            ("max_width", hints.max_width),
-            ("fixed_width", hints.fixed_width),
-        ] {
-            match value {
-                Some(width) => self.set_hint(
-                    HintNamespace::TABLE,
-                    &key(suffix),
-                    serde_json::Value::from(width),
-                ),
-                None => {
-                    self.remove_hint(HintNamespace::TABLE, &key(suffix));
-                }
-            }
-        }
-
-        if hints.conditional == ColumnConditional::Always {
-            self.remove_hint(HintNamespace::TABLE, &key("conditional"));
-        } else {
-            self.set_hint(
-                HintNamespace::TABLE,
-                &key("conditional"),
-                serde_json::Value::String(hints.conditional.to_token()),
-            );
-        }
-
-        match &hints.drop_note {
-            Some(note) => self.set_hint(
-                HintNamespace::TABLE,
-                &key("drop_note"),
-                serde_json::Value::String(note.clone()),
-            ),
-            None => {
-                self.remove_hint(HintNamespace::TABLE, &key("drop_note"));
-            }
-        }
-
-        // `droppable` is the authoritative droppability signal — a column
-        // may be droppable without a `drop_note` (silent drop), so it must
-        // round-trip independently. Only emit the hint when true to keep
-        // default attribute sets empty.
-        if hints.droppable {
-            self.set_hint(
-                HintNamespace::TABLE,
-                &key("droppable"),
-                serde_json::Value::Bool(true),
-            );
-        } else {
-            self.remove_hint(HintNamespace::TABLE, &key("droppable"));
-        }
-
-        if hints.uniform_alignment {
-            self.set_hint(
-                HintNamespace::TABLE,
-                &key("uniform_alignment"),
-                serde_json::Value::Bool(true),
-            );
-        } else {
-            self.remove_hint(HintNamespace::TABLE, &key("uniform_alignment"));
-        }
+        self.table_hints_mut().columns.insert(index, hints.clone());
     }
 
-    /// Reads [`TableColumnHints`] for column `index` from the
-    /// [`HintNamespace::TABLE`] namespace.
+    /// Reads [`TableColumnHints`] for column `index` from this node's
+    /// [`ComponentHints::Table`].
     ///
-    /// Missing hints fall back to [`TableColumnHints::default`]. Malformed
-    /// conditional tokens fall back to [`ColumnConditional::Always`].
+    /// A column without stored hints falls back to
+    /// [`TableColumnHints::default`].
     ///
     /// ## Examples
     ///
@@ -1209,54 +1117,16 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn table_column_hints(&self, index: usize) -> TableColumnHints {
-        let key = |suffix: &str| format!("column.{index}.{suffix}");
-
-        let read_width = |suffix: &str| -> Option<u32> {
-            self.get_hint(HintNamespace::TABLE, &key(suffix))
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|v| u32::try_from(v).ok())
-        };
-
-        let conditional = self
-            .get_hint(HintNamespace::TABLE, &key("conditional"))
-            .and_then(serde_json::Value::as_str)
-            .and_then(ColumnConditional::from_token)
-            .unwrap_or_default();
-
-        let drop_note = self
-            .get_hint(HintNamespace::TABLE, &key("drop_note"))
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string);
-
-        // A column with a non-empty `drop_note` is implicitly droppable —
-        // honor that as a fallback so legacy attribute sets written before
-        // the explicit `droppable` hint existed still round-trip correctly.
-        let droppable = self
-            .get_hint(HintNamespace::TABLE, &key("droppable"))
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-            || drop_note.is_some();
-
-        let uniform_alignment = self
-            .get_hint(HintNamespace::TABLE, &key("uniform_alignment"))
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-
-        TableColumnHints {
-            min_width: read_width("min_width"),
-            max_width: read_width("max_width"),
-            fixed_width: read_width("fixed_width"),
-            conditional,
-            droppable,
-            drop_note,
-            uniform_alignment,
+        match self.component.as_deref() {
+            Some(ComponentHints::Table(t)) => t.columns.get(&index).cloned().unwrap_or_default(),
+            _ => TableColumnHints::default(),
         }
     }
 
-    /// Stores [`TableCellHints`] under the [`HintNamespace::TABLE`] namespace.
+    /// Stores [`TableCellHints`] as the node's [`ComponentHints::TableCell`].
     ///
-    /// All four fields are written so [`NodeAttrs::table_cell_hints`] can
-    /// detect the presence of cell hints.
+    /// The presence of the hint marks the cell as a projected typed cell;
+    /// [`NodeAttrs::table_cell_hints`] returns `Some` for it.
     ///
     /// ## Examples
     ///
@@ -1274,32 +1144,12 @@ impl NodeAttrs {
     /// assert!(attrs.table_cell_hints().is_some());
     /// ```
     pub fn set_table_cell_hints(&mut self, hints: &TableCellHints) {
-        self.set_hint(
-            HintNamespace::TABLE,
-            "cell.kind",
-            serde_json::Value::String(hints.kind.clone()),
-        );
-        self.set_hint(
-            HintNamespace::TABLE,
-            "cell.raw_value",
-            hints.raw_value.clone(),
-        );
-        self.set_hint(
-            HintNamespace::TABLE,
-            "cell.alignment",
-            serde_json::Value::String(hints.alignment.clone()),
-        );
-        self.set_hint(
-            HintNamespace::TABLE,
-            "cell.vertical_alignment",
-            serde_json::Value::String(hints.vertical_alignment.clone()),
-        );
+        self.component = Some(Box::new(ComponentHints::TableCell(hints.clone())));
     }
 
-    /// Reads [`TableCellHints`] from the [`HintNamespace::TABLE`] namespace.
+    /// Reads this node's [`TableCellHints`], if it carries any.
     ///
-    /// Returns `None` when no `cell.kind` hint is present, so renderers can
-    /// detect whether a table cell carries typed-cell hints.
+    /// Returns `None` when the cell is not a projected typed cell.
     ///
     /// ## Examples
     ///
@@ -1311,35 +1161,15 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn table_cell_hints(&self) -> Option<TableCellHints> {
-        let kind = self
-            .get_hint(HintNamespace::TABLE, "cell.kind")
-            .and_then(serde_json::Value::as_str)?
-            .to_string();
-
-        let raw_value = self
-            .get_hint(HintNamespace::TABLE, "cell.raw_value")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-
-        let read_str = |key: &str, fallback: &str| -> String {
-            self.get_hint(HintNamespace::TABLE, key)
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(fallback)
-                .to_string()
-        };
-
-        Some(TableCellHints {
-            kind,
-            raw_value,
-            alignment: read_str("cell.alignment", "left"),
-            vertical_alignment: read_str("cell.vertical_alignment", "top"),
-        })
+        match self.component.as_deref() {
+            Some(ComponentHints::TableCell(h)) => Some(h.clone()),
+            _ => None,
+        }
     }
 
-    /// Stores [`TableTerminalHints`] under the [`HintNamespace::TERMINAL`]
-    /// namespace.
+    /// Stores [`TableTerminalHints`] in this node's [`ComponentHints::Table`].
     ///
-    /// Only `true` flags are written so the hint footprint stays minimal.
+    /// Co-resident with the per-column and title table hints.
     ///
     /// ## Examples
     ///
@@ -1354,35 +1184,14 @@ impl NodeAttrs {
     /// assert!(attrs.table_terminal_hints().alternate_text_color);
     /// ```
     pub fn set_table_terminal_hints(&mut self, hints: &TableTerminalHints) {
-        for (key, flag) in [
-            ("prefer_cursor_alignment", hints.prefer_cursor_alignment),
-            ("alternate_background", hints.alternate_background),
-            ("alternate_text_color", hints.alternate_text_color),
-        ] {
-            if flag {
-                self.set_hint(HintNamespace::TERMINAL, key, serde_json::Value::Bool(true));
-            } else {
-                self.remove_hint(HintNamespace::TERMINAL, key);
-            }
-        }
-        // Explicit stripe colors are optional: stored only when set.
-        for (key, color) in [
-            ("stripe_bg", hints.stripe_bg),
-            ("stripe_text", hints.stripe_text),
-        ] {
-            match color.and_then(|c| serde_json::to_value(c).ok()) {
-                Some(value) => self.set_hint(HintNamespace::TERMINAL, key, value),
-                None => {
-                    self.remove_hint(HintNamespace::TERMINAL, key);
-                }
-            }
-        }
+        self.table_hints_mut().terminal = Some(hints.clone());
     }
 
-    /// Reads [`TableTerminalHints`] from the [`HintNamespace::TERMINAL`]
-    /// namespace.
+    /// Reads this node's [`TableTerminalHints`] from its
+    /// [`ComponentHints::Table`].
     ///
-    /// Missing hints fall back to [`TableTerminalHints::default`].
+    /// A table without terminal hints falls back to
+    /// [`TableTerminalHints::default`].
     ///
     /// ## Examples
     ///
@@ -1395,30 +1204,14 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn table_terminal_hints(&self) -> TableTerminalHints {
-        let read_flag = |key: &str| -> bool {
-            self.get_hint(HintNamespace::TERMINAL, key)
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-        };
-        let read_color = |key: &str| -> Option<crate::color::Color> {
-            self.get_hint(HintNamespace::TERMINAL, key)
-                .and_then(|value| serde_json::from_value(value.clone()).ok())
-        };
-
-        TableTerminalHints {
-            prefer_cursor_alignment: read_flag("prefer_cursor_alignment"),
-            alternate_background: read_flag("alternate_background"),
-            alternate_text_color: read_flag("alternate_text_color"),
-            stripe_bg: read_color("stripe_bg"),
-            stripe_text: read_color("stripe_text"),
+        match self.component.as_deref() {
+            Some(ComponentHints::Table(t)) => t.terminal.clone().unwrap_or_default(),
+            _ => TableTerminalHints::default(),
         }
     }
 
-    /// Stores a [`Layout`](crate::layout::Layout) under the
-    /// [`HintNamespace::LAYOUT`] namespace.
-    ///
-    /// The layout is serialized to JSON and recovered by
-    /// [`NodeAttrs::layout`].
+    /// Stores a [`Layout`](crate::layout::Layout) as the typed
+    /// [`NodeAttrs::layout`] field.
     ///
     /// ## Examples
     ///
@@ -1431,15 +1224,12 @@ impl NodeAttrs {
     /// assert_eq!(attrs.layout(), Some(Layout::default()));
     /// ```
     pub fn set_layout(&mut self, layout: &crate::layout::Layout) {
-        if let Ok(value) = serde_json::to_value(layout) {
-            self.set_hint(HintNamespace::LAYOUT, "layout", value);
-        }
+        self.layout = Some(Box::new(layout.clone()));
     }
 
     /// Reads the [`Layout`](crate::layout::Layout) stored on this node, if any.
     ///
-    /// Returns `None` when no layout hint is present or the stored value
-    /// fails to deserialize.
+    /// Returns `None` when no layout is set.
     ///
     /// ## Examples
     ///
@@ -1451,16 +1241,22 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn layout(&self) -> Option<crate::layout::Layout> {
-        let value = self.get_hint(HintNamespace::LAYOUT, "layout")?;
-        serde_json::from_value(value.clone()).ok()
+        self.layout.as_deref().cloned()
     }
 
-    /// Stores a [`Style`](crate::style::Style) under the
-    /// [`HintNamespace::STYLE`] namespace.
+    /// Borrowed accessor for renderer hot paths (no clone).
     ///
-    /// The style is serialized to JSON and recovered by
-    /// [`NodeAttrs::style`]. `Style` may attach to block nodes and inline
-    /// `Span` nodes — it is not block-only.
+    /// Returns `None` when no layout is set.
+    #[must_use]
+    pub fn layout_ref(&self) -> Option<&crate::layout::Layout> {
+        self.layout.as_deref()
+    }
+
+    /// Stores a [`Style`](crate::style::Style) as the typed
+    /// [`NodeAttrs::style`] field.
+    ///
+    /// `Style` may attach to block nodes and inline `Span` nodes — it is not
+    /// block-only.
     ///
     /// ## Examples
     ///
@@ -1473,15 +1269,12 @@ impl NodeAttrs {
     /// assert_eq!(attrs.style(), Some(Style::default()));
     /// ```
     pub fn set_style(&mut self, style: &crate::style::Style) {
-        if let Ok(value) = serde_json::to_value(style) {
-            self.set_hint(HintNamespace::STYLE, "style", value);
-        }
+        self.style = Some(Box::new(style.clone()));
     }
 
     /// Reads the [`Style`](crate::style::Style) stored on this node, if any.
     ///
-    /// Returns `None` when no style hint is present or the stored value
-    /// fails to deserialize.
+    /// Returns `None` when no style is set.
     ///
     /// ## Examples
     ///
@@ -1493,12 +1286,19 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn style(&self) -> Option<crate::style::Style> {
-        let value = self.get_hint(HintNamespace::STYLE, "style")?;
-        serde_json::from_value(value.clone()).ok()
+        self.style.as_deref().cloned()
     }
 
-    /// Stores a [`SequenceJoin`] policy under the [`HintNamespace::LAYOUT`]
-    /// namespace.
+    /// Borrowed accessor for renderer hot paths (no clone).
+    ///
+    /// Returns `None` when no style is set.
+    #[must_use]
+    pub fn style_ref(&self) -> Option<&crate::style::Style> {
+        self.style.as_deref()
+    }
+
+    /// Stores a [`SequenceJoin`] policy as the typed
+    /// [`NodeAttrs::sequence_join`] field.
     ///
     /// A node carrying this hint is rendered as an ordered sequence with no
     /// renderer-inserted block separators.
@@ -1513,17 +1313,12 @@ impl NodeAttrs {
     /// assert_eq!(attrs.sequence_join(), Some(SequenceJoin::None));
     /// ```
     pub fn set_sequence_join(&mut self, join: SequenceJoin) {
-        self.set_hint(
-            HintNamespace::LAYOUT,
-            "sequence_join",
-            serde_json::Value::String(join.to_token().to_string()),
-        );
+        self.sequence_join = Some(join);
     }
 
     /// Reads the [`SequenceJoin`] policy stored on this node, if any.
     ///
-    /// Returns `None` when no sequence-join hint is present or the stored
-    /// token is unrecognized.
+    /// Returns `None` when no sequence-join policy is set.
     ///
     /// ## Examples
     ///
@@ -1534,16 +1329,14 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn sequence_join(&self) -> Option<SequenceJoin> {
-        self.get_hint(HintNamespace::LAYOUT, "sequence_join")
-            .and_then(serde_json::Value::as_str)
-            .and_then(SequenceJoin::from_token)
+        self.sequence_join
     }
 
-    /// Stores a [`ListMarkerPolicy`] under the [`HintNamespace::LIST`]
-    /// namespace.
+    /// Stores a [`ListMarkerPolicy`] as the typed
+    /// [`NodeAttrs::list_marker_policy`] field.
     ///
-    /// [`ListMarkerPolicy::Default`] is the implicit policy and is left
-    /// unset so the hint footprint stays minimal.
+    /// [`ListMarkerPolicy::Default`] is the implicit policy and serializes to
+    /// nothing so the hint footprint stays minimal.
     ///
     /// ## Examples
     ///
@@ -1555,21 +1348,12 @@ impl NodeAttrs {
     /// assert_eq!(attrs.list_marker_policy(), ListMarkerPolicy::TreeConnectors);
     /// ```
     pub fn set_list_marker_policy(&mut self, policy: ListMarkerPolicy) {
-        if policy == ListMarkerPolicy::Default {
-            self.remove_hint(HintNamespace::LIST, "marker_policy");
-        } else {
-            self.set_hint(
-                HintNamespace::LIST,
-                "marker_policy",
-                serde_json::Value::String(policy.to_token().to_string()),
-            );
-        }
+        self.list_marker_policy = policy;
     }
 
     /// Reads the [`ListMarkerPolicy`] stored on this node.
     ///
-    /// Missing or unrecognized hints fall back to
-    /// [`ListMarkerPolicy::Default`].
+    /// Defaults to [`ListMarkerPolicy::Default`].
     ///
     /// ## Examples
     ///
@@ -1580,13 +1364,10 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn list_marker_policy(&self) -> ListMarkerPolicy {
-        self.get_hint(HintNamespace::LIST, "marker_policy")
-            .and_then(serde_json::Value::as_str)
-            .and_then(ListMarkerPolicy::from_token)
-            .unwrap_or_default()
+        self.list_marker_policy
     }
 
-    /// Stores [`TaskHints`] under the [`HintNamespace::WIDGET_TASK`] namespace.
+    /// Stores [`TaskHints`] as the node's [`ComponentHints::Task`].
     ///
     /// ## Examples
     ///
@@ -1598,17 +1379,12 @@ impl NodeAttrs {
     /// assert_eq!(attrs.task_hints().unwrap().state, TaskState::Completed);
     /// ```
     pub fn set_task_hints(&mut self, hints: &TaskHints) {
-        self.set_hint(
-            HintNamespace::WIDGET_TASK,
-            "state",
-            serde_json::Value::String(hints.state.to_token().to_string()),
-        );
+        self.component = Some(Box::new(ComponentHints::Task(*hints)));
     }
 
-    /// Reads [`TaskHints`] from the [`HintNamespace::WIDGET_TASK`] namespace.
+    /// Reads this node's [`TaskHints`], if it carries any.
     ///
-    /// Returns `None` when no `state` hint is present, so renderers can detect
-    /// whether a list item is a projected task-list item.
+    /// Returns `None` when the list item is not a projected task-list item.
     ///
     /// ## Examples
     ///
@@ -1619,18 +1395,17 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn task_hints(&self) -> Option<TaskHints> {
-        let state = self
-            .get_hint(HintNamespace::WIDGET_TASK, "state")
-            .and_then(serde_json::Value::as_str)
-            .and_then(TaskState::from_token)?;
-        Some(TaskHints { state })
+        match self.component.as_deref() {
+            Some(ComponentHints::Task(h)) => Some(*h),
+            _ => None,
+        }
     }
 
-    /// Stores a table title/caption under the [`HintNamespace::TABLE`]
-    /// namespace.
+    /// Stores a table title/caption in this node's [`ComponentHints::Table`].
     ///
     /// A whitespace-only title is stored as-is; renderers are responsible for
-    /// ignoring an empty or whitespace-only title.
+    /// ignoring an empty or whitespace-only title. Co-resident with the
+    /// per-column and terminal table hints.
     ///
     /// ## Examples
     ///
@@ -1642,16 +1417,12 @@ impl NodeAttrs {
     /// assert_eq!(attrs.table_title().as_deref(), Some("Quarterly Results"));
     /// ```
     pub fn set_table_title(&mut self, title: impl Into<String>) {
-        self.set_hint(
-            HintNamespace::TABLE,
-            "title",
-            serde_json::Value::String(title.into()),
-        );
+        self.table_hints_mut().title = Some(title.into());
     }
 
     /// Reads the table title/caption stored on this node, if any.
     ///
-    /// Returns `None` when no title hint is present.
+    /// Returns `None` when no title is set.
     ///
     /// ## Examples
     ///
@@ -1662,9 +1433,10 @@ impl NodeAttrs {
     /// ```
     #[must_use]
     pub fn table_title(&self) -> Option<String> {
-        self.get_hint(HintNamespace::TABLE, "title")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)
+        match self.component.as_deref() {
+            Some(ComponentHints::Table(t)) => t.title.clone(),
+            _ => None,
+        }
     }
 }
 
@@ -1672,6 +1444,110 @@ impl NodeAttrs {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn typed_layout_does_not_touch_data() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_layout(&crate::layout::Layout::default());
+        assert!(attrs.layout.is_some()); // typed field set
+        assert!(attrs.data.is_empty()); // NOT in the bag
+        assert_eq!(attrs.layout(), Some(crate::layout::Layout::default()));
+    }
+
+    #[test]
+    fn table_column_hints_keep_per_index_addressing() {
+        let mut attrs = NodeAttrs::default();
+        let c0 = TableColumnHints {
+            min_width: Some(3),
+            ..Default::default()
+        };
+        let c2 = TableColumnHints {
+            max_width: Some(9),
+            ..Default::default()
+        };
+        attrs.set_table_column_hints(0, &c0);
+        attrs.set_table_column_hints(2, &c2);
+        assert_eq!(attrs.table_column_hints(0), c0);
+        assert_eq!(attrs.table_column_hints(2), c2);
+        assert_eq!(attrs.table_column_hints(1), TableColumnHints::default());
+        assert!(attrs.data.is_empty());
+    }
+
+    #[test]
+    fn default_node_serializes_without_new_fields() {
+        let json = serde_json::to_string(&NodeAttrs::default()).unwrap();
+        // sparse: no layout/style/component/sequenceJoin keys
+        assert!(!json.contains("layout"));
+        assert!(!json.contains("component"));
+        assert!(!json.contains("sequenceJoin"));
+    }
+
+    #[test]
+    fn extension_hint_still_uses_data() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_hint(HintNamespace("darkmatter.hr"), "kind", json!("solid"));
+        assert!(attrs.data.contains_key("darkmatter.hr.kind"));
+    }
+
+    #[test]
+    fn token_enums_serialize_as_compact_tokens() {
+        // Token enums serialize to their `to_token()` string, not the variant name.
+        assert_eq!(
+            serde_json::to_value(SequenceJoin::None).unwrap(),
+            serde_json::Value::String(SequenceJoin::None.to_token().to_string())
+        );
+        let back: SequenceJoin =
+            serde_json::from_value(serde_json::to_value(SequenceJoin::None).unwrap()).unwrap();
+        assert_eq!(back, SequenceJoin::None);
+
+        assert_eq!(
+            serde_json::to_value(ListMarkerPolicy::TreeConnectors).unwrap(),
+            serde_json::Value::String(ListMarkerPolicy::TreeConnectors.to_token().to_string())
+        );
+        assert_eq!(
+            serde_json::to_value(TaskState::Completed).unwrap(),
+            serde_json::Value::String(TaskState::Completed.to_token().to_string())
+        );
+        assert_eq!(
+            serde_json::to_value(ColumnConditional::WidthGreaterThan(80)).unwrap(),
+            serde_json::Value::String(ColumnConditional::WidthGreaterThan(80).to_token())
+        );
+        let back: ColumnConditional =
+            serde_json::from_str(&serde_json::to_string(&ColumnConditional::LessThanOrEqual(40)).unwrap())
+                .unwrap();
+        assert_eq!(back, ColumnConditional::LessThanOrEqual(40));
+    }
+
+    #[test]
+    fn hint_structs_serde_roundtrip() {
+        let list = ListRenderHints {
+            bullet: Some("* ".into()),
+            ..Default::default()
+        };
+        let back: ListRenderHints =
+            serde_json::from_str(&serde_json::to_string(&list).unwrap()).unwrap();
+        assert_eq!(list, back);
+
+        let cols = TableColumnHints::default();
+        let back: TableColumnHints =
+            serde_json::from_str(&serde_json::to_string(&cols).unwrap()).unwrap();
+        assert_eq!(cols, back);
+
+        let columns = ColumnsHints {
+            left_width: ColumnWidthKind::Fixed(30),
+            ..Default::default()
+        };
+        let back: ColumnsHints =
+            serde_json::from_str(&serde_json::to_string(&columns).unwrap()).unwrap();
+        assert_eq!(columns, back);
+
+        let task = TaskHints {
+            state: TaskState::Blocked,
+        };
+        let back: TaskHints =
+            serde_json::from_str(&serde_json::to_string(&task).unwrap()).unwrap();
+        assert_eq!(task, back);
+    }
 
     #[test]
     fn hint_round_trip_set_get_remove() {
@@ -1908,23 +1784,6 @@ mod tests {
     }
 
     #[test]
-    fn progress_hints_missing_fields_fall_back_to_defaults() {
-        // Only `value` is present; the rest fall back to defaults.
-        let mut attrs = NodeAttrs::default();
-        attrs.set_hint(HintNamespace::WIDGET_PROGRESS, "value", json!(0.25));
-
-        let hints = attrs.progress_hints().expect("value present");
-        assert!((hints.value - 0.25).abs() < 1e-6);
-        assert_eq!(
-            hints,
-            ProgressHints {
-                value: hints.value,
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
     fn columns_hints_default_matches_two_column_component() {
         let hints = ColumnsHints::default();
         assert_eq!(hints.gap, 3);
@@ -2035,26 +1894,6 @@ mod tests {
         assert!(hints.drop_note.is_none());
     }
 
-    /// Legacy attribute sets written before the explicit `droppable` hint
-    /// existed only carried `drop_note`. Reading those must still report
-    /// the column as droppable so older serialized trees keep behaving.
-    #[test]
-    fn table_column_hints_legacy_drop_note_implies_droppable() {
-        let mut attrs = NodeAttrs::default();
-        attrs.set_hint(
-            HintNamespace::TABLE,
-            "column.0.drop_note",
-            serde_json::Value::String("legacy note".into()),
-        );
-
-        let hints = attrs.table_column_hints(0);
-        assert!(
-            hints.droppable,
-            "drop_note presence must imply droppable for backwards compat",
-        );
-        assert_eq!(hints.drop_note.as_deref(), Some("legacy note"));
-    }
-
     #[test]
     fn table_column_hints_default_fields_left_unset() {
         let mut attrs = NodeAttrs::default();
@@ -2104,18 +1943,6 @@ mod tests {
     #[test]
     fn table_cell_hints_absent_returns_none() {
         assert!(NodeAttrs::default().table_cell_hints().is_none());
-    }
-
-    #[test]
-    fn table_cell_hints_missing_fields_fall_back() {
-        // Only `cell.kind` is set; the rest fall back to defaults.
-        let mut attrs = NodeAttrs::default();
-        attrs.set_hint(HintNamespace::TABLE, "cell.kind", json!("text"));
-        let hints = attrs.table_cell_hints().expect("kind present");
-        assert_eq!(hints.kind, "text");
-        assert_eq!(hints.alignment, "left");
-        assert_eq!(hints.vertical_alignment, "top");
-        assert_eq!(hints.raw_value, serde_json::Value::Null);
     }
 
     #[test]
@@ -2208,15 +2035,19 @@ mod tests {
     }
 
     #[test]
-    fn task_hints_stored_under_widget_task_namespace() {
+    fn task_hints_stored_as_typed_component_not_data() {
         let mut attrs = NodeAttrs::default();
         attrs.set_task_hints(&TaskHints {
             state: TaskState::Blocked,
         });
-        assert_eq!(
-            attrs.data.get("renderable.widget.task.state"),
-            Some(&json!("blocked"))
-        );
+        // The task state rides on the typed `component` field, never the bag.
+        assert!(attrs.data.is_empty());
+        assert!(matches!(
+            attrs.component.as_deref(),
+            Some(ComponentHints::Task(TaskHints {
+                state: TaskState::Blocked
+            }))
+        ));
     }
 
     #[test]
@@ -2225,11 +2056,32 @@ mod tests {
         assert!(attrs.table_title().is_none());
         attrs.set_table_title("Quarterly Results");
         assert_eq!(attrs.table_title().as_deref(), Some("Quarterly Results"));
-        // The title is stored under the table hint namespace.
-        assert_eq!(
-            attrs.data.get("renderable.table.title"),
-            Some(&json!("Quarterly Results"))
+        // The title rides on the typed `component` field, never the bag.
+        assert!(attrs.data.is_empty());
+    }
+
+    /// The per-column, terminal, and title table hints are co-resident: each
+    /// setter routes through `table_hints_mut()` so setting one does not
+    /// clobber the others.
+    #[test]
+    fn table_hints_coexist_on_one_node() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_table_column_hints(
+            0,
+            &TableColumnHints {
+                min_width: Some(7),
+                ..Default::default()
+            },
         );
+        attrs.set_table_terminal_hints(&TableTerminalHints {
+            alternate_background: true,
+            ..Default::default()
+        });
+        attrs.set_table_title("Totals");
+
+        assert_eq!(attrs.table_column_hints(0).min_width, Some(7));
+        assert!(attrs.table_terminal_hints().alternate_background);
+        assert_eq!(attrs.table_title().as_deref(), Some("Totals"));
     }
 
     #[test]
@@ -2244,6 +2096,125 @@ mod tests {
         assert_eq!(
             attrs.data.get("myapp.custom.setting"),
             Some(&json!("value"))
+        );
+    }
+
+    /// The perf-gate counter must classify a `renderable.*` bag access as
+    /// renderable-owned and any other namespace as an extension access, across
+    /// `set_hint` / `get_hint` / `remove_hint`. This proves the gate below is
+    /// not vacuous: the counter genuinely increments when the bag is touched.
+    #[test]
+    fn hint_access_counter_classifies_by_namespace() {
+        let mut attrs = NodeAttrs::default();
+        super::reset_hint_accesses();
+
+        attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2)); // renderable-owned
+        attrs.set_hint(HintNamespace("darkmatter.hr"), "kind", json!("solid")); // extension
+        let _ = attrs.get_hint(HintNamespace("darkmatter.hr"), "kind"); // extension
+        let _ = attrs.remove_hint(HintNamespace::LAYOUT, "margin_top"); // renderable-owned
+
+        let (renderable_owned, extension) = super::hint_accesses();
+        assert_eq!(renderable_owned, 2, "two `renderable.*` bag accesses");
+        assert_eq!(extension, 2, "two extension-namespace bag accesses");
+    }
+
+    /// Builds a styled corpus exercising layout, inherited style, a list
+    /// (marker policy + list hints), a table (column + title), a code block, a
+    /// task item, and one `darkmatter.hr` extension hint. The first-class
+    /// presentation rides on typed fields; only the extension hint lives in the
+    /// bag, so a behaving fold touches `data` zero times for `renderable.*`.
+    #[cfg(test)]
+    fn styled_corpus_document() -> crate::tree::Document {
+        use crate::color::{Color, Tailwind};
+        use crate::layout::{Layout, TargetValue};
+        use crate::style::{PerMode, Style, TextEmphasis};
+        use crate::tree::{
+            Document, DocumentMetadata, HeadingDepth, RenderNode, SourceRegistry,
+        };
+
+        let red = Style {
+            color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+                Tailwind::Red500,
+            )))),
+            emphasis: TextEmphasis {
+                bold: true,
+                ..Default::default()
+            },
+            ..Style::default()
+        };
+
+        // Heading carrying layout + an inheritable style.
+        let mut heading =
+            RenderNode::heading(HeadingDepth::new(2).unwrap(), vec![RenderNode::text("Title")]);
+        heading.attrs.set_layout(&Layout::default());
+        heading.attrs.set_style(&red);
+
+        // List with a marker policy and list hints; one task item carries a
+        // `darkmatter.hr` extension hint to populate the bag.
+        let mut task_item = RenderNode::list_item(Some(false), vec![RenderNode::paragraph(vec![
+            RenderNode::text("todo"),
+        ])]);
+        task_item.attrs.set_task_hints(&TaskHints {
+            state: TaskState::InProgress,
+        });
+        task_item
+            .attrs
+            .set_hint(HintNamespace("darkmatter.hr"), "kind", json!("solid"));
+        let mut list = RenderNode::list(false, None, vec![task_item]);
+        list.attrs.set_list_marker_policy(ListMarkerPolicy::None);
+        list.attrs.set_list_hints(&ListRenderHints {
+            bullet: Some("* ".into()),
+            ..Default::default()
+        });
+
+        // Table with a column hint and a title.
+        let cell = RenderNode::table_cell(vec![RenderNode::text("c0")]);
+        let row = RenderNode::table_row(vec![cell]);
+        let mut table = RenderNode::table(vec![crate::tree::ColumnAlign::Left], vec![row]);
+        table.attrs.set_table_column_hints(
+            0,
+            &TableColumnHints {
+                min_width: Some(4),
+                ..Default::default()
+            },
+        );
+        table.attrs.set_table_title("Totals");
+
+        // Code block with hints.
+        let mut code = RenderNode::code(Some("rust".into()), None, "let x = 1;");
+        code.attrs.set_code_hints(&CodeRenderHints {
+            header_row: true,
+            language_label: Some("rust".into()),
+            highlight: true,
+        });
+
+        Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![heading, list, table, code]),
+        }
+    }
+
+    /// Structural perf gate: folding the styled corpus to Markdown must not
+    /// round-trip any renderable-owned hint through [`NodeAttrs::data`]. Every
+    /// first-class hint is a typed field, so the renderable-owned counter stays
+    /// at zero. (Terminal and browser folds gate the same invariant in their
+    /// own crates; this is the AC #5 minimum.)
+    #[test]
+    fn fold_does_zero_renderable_owned_hint_roundtrips() {
+        let doc = styled_corpus_document();
+
+        super::reset_hint_accesses();
+        let _ = crate::tree::render::render_markdown_document(
+            &doc,
+            &crate::tree::render::MarkdownRenderOptions::default(),
+        )
+        .expect("markdown fold");
+        let (renderable_owned, _extension) = super::hint_accesses();
+
+        assert_eq!(
+            renderable_owned, 0,
+            "the fold must not round-trip any renderable-owned hint through `data`",
         );
     }
 }
