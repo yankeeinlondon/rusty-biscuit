@@ -213,6 +213,7 @@ fn headline_compose_with_setter_then_late_flags_preserves_flag_semantics() {
 
     let output = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("TERM_WIDTH", "120")
         .args([
             "compose",
             fixture.to_str().unwrap(),
@@ -260,6 +261,7 @@ fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
 
     let output = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("TERM_WIDTH", "120")
         .args([
             "compose",
             fixture.to_str().unwrap(),
