@@ -4,6 +4,11 @@ reviewed: true
 date: 2026-06-04
 owner: ken
 parent: renderable/features/2026-06-02-tree-cutover/spec.md
+child_specs:
+    - "2026-06-05-darkmatter-cutover"
+    - "2026-06-05-renderer-folds"
+    - "2026-06-05-tree-attrs"
+    - "2026-06-05-style-vocabulary"
 ---
 
 # CSS Box Architecture
