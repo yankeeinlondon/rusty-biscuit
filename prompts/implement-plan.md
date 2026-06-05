@@ -3,8 +3,10 @@ $schema:
     phase: number(required)
     total_phases: number(required)
     plan: file(required)
+    spec: file
 phase: 1
 dir: "$(dirname '{{plan}}')"
+# spec: "{{ frontmatter( }}"
 area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 start:
@@ -37,6 +39,8 @@ Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan
 You are done when:
 
 - all functionality defined in phase {{phase}} has been implemented
+- all GFM tasks/todos in the plan have been completed (and have been marked as complete)
+    - NOTE: you should mark tasks as complete as soon as you believe they are complete (e.g., implemented and any relevant tests suggest this is complete). Doing this allows an immediate feedback loop but also helps in recovering from a phase that didn't complete
 - all tests are passing (using `just test` in the {{ctx.current_package_area}} package area)
 - all lints are passing (using `just lint` in the {{ctx.current_package_area}} package area)
 - You must set the following Frontmatter properties:
@@ -44,6 +48,10 @@ You are done when:
     - `docs_updated_during_phase_{{phase}}` should be set to all documentation files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
     - `docs_created_during_phase_{{phase}}` should be set to all documentation files which were created during this phase of the implementation; put an empty list (e.g., `[]`) if none
     - `skills_files_updated_during_phase_{{phase}}` should be set to all agent skill files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
+    ::block when="phase == total_phases"
+        - set `source_code` Frontmatter to every source code file that was updated or created during the various phases of the plan
+        - set `documentation` Frontmatter to every documentation file that was updated or created during the various phases of the plan
+    ::end-block
     - if this is a monorepo, then include `packages` as a list of packages in the monorepo which were touched by the implementation in phase {{phase}}
 ::block when="memory"
 - Once all Frontmatter has been set to the plan file ({{plan}}), consider if there was anything surprising or novel that you discovered during this phase that would be valuable to know in future stages. If there is, then add a H2 heading `## Phase {{phase}}` to the end of the file `memory/{{memory}}.md`
