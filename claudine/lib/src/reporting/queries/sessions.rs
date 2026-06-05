@@ -108,7 +108,9 @@ fn load_session_by_key(conn: &Connection, session_key: &str) -> Result<SessionIn
             COALESCE(SUM(output_tokens), 0),
             COALESCE(SUM(total_tokens), 0),
             COALESCE(SUM(cache_read_tokens), 0),
-            COALESCE(SUM(cost_usd), 0)
+            COALESCE(SUM(cost_usd), 0),
+            MAX(claudine_pid),
+            MAX(agent_pid)
         FROM events
         WHERE session_key = ?1
         GROUP BY session_key
@@ -142,6 +144,8 @@ fn load_session_by_key(conn: &Connection, session_key: &str) -> Result<SessionIn
                 row.get::<_, i64>(23)?,
                 row.get::<_, i64>(24)?,
                 row.get::<_, f64>(25)?,
+                row.get::<_, Option<i64>>(26)?,
+                row.get::<_, Option<i64>>(27)?,
             ))
         },
     )?;
@@ -173,6 +177,8 @@ fn load_session_by_key(conn: &Connection, session_key: &str) -> Result<SessionIn
         total_tokens,
         total_cache_read_tokens,
         total_cost_usd,
+        claudine_pid,
+        agent_pid,
     ) = row;
 
     let started_at = parse_timestamp(&started_at)?;
@@ -206,6 +212,8 @@ fn load_session_by_key(conn: &Connection, session_key: &str) -> Result<SessionIn
         total_tokens: total_tokens.max(0) as u64,
         total_cache_read_tokens: total_cache_read_tokens.max(0) as u64,
         total_cost_usd: total_cost_usd.max(0.0),
+        claudine_pid: claudine_pid.and_then(|v| v.try_into().ok()),
+        agent_pid: agent_pid.and_then(|v| v.try_into().ok()),
     })
 }
 

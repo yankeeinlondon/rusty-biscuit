@@ -154,10 +154,12 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: Some(12_345),
             extra: Default::default(),
             env: EnvironmentContext {
                 package_area: Some("claudine".to_string()),
                 package: Some("claudine-cli".to_string()),
+                claudine_pid: Some(54_321),
                 ..EnvironmentContext::default()
             },
         };
@@ -176,10 +178,12 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: None,
             extra: Default::default(),
             env: EnvironmentContext {
                 package_area: Some("sniff".to_string()),
                 package: Some("sniff-cli".to_string()),
+                claudine_pid: None,
                 ..EnvironmentContext::default()
             },
         };
@@ -215,5 +219,7 @@ mod tests {
             report.sessions[0].session_id.as_deref(),
             Some("claudine-session")
         );
+        assert_eq!(report.sessions[0].claudine_pid, Some(54_321));
+        assert_eq!(report.sessions[0].agent_pid, Some(12_345));
     }
 }

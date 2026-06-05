@@ -184,6 +184,12 @@ pub struct SessionInfo {
     pub total_tokens: u64,
     pub total_cache_read_tokens: u64,
     pub total_cost_usd: f64,
+    /// Claudine's own process ID, captured once at wrapper startup.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claudine_pid: Option<u32>,
+    /// Immediate child PID returned by the wrapper spawn operation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_pid: Option<u32>,
 }
 
 /// Session list wrapper for JSON output.
