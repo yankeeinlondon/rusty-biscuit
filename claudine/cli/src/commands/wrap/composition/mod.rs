@@ -787,7 +787,6 @@ pub(crate) fn execute_composition_request_inner(
     startup_timings: Option<crate::perf::StartupTimings>,
     perf_enabled: bool,
 ) -> Result<SingleCompositionOutcome> {
-    let total_start = std::time::Instant::now();
     let mut perf_collector = if perf_enabled {
         startup_timings.map(|timings| {
             crate::perf::CommandPerfCollector::new_with_composition(
@@ -799,7 +798,10 @@ pub(crate) fn execute_composition_request_inner(
     } else {
         None
     };
-    let mut last_checkpoint = total_start;
+    // Local checkpoint origin for the env-setup sub-stage chain only. The
+    // headline is the threaded wall-clock baseline sampled at report build,
+    // not this mid-flight timer (TM-1).
+    let mut last_checkpoint = std::time::Instant::now();
     /// Helper to record a named sub-stage timing and reset the checkpoint.
     fn record_substage(
         collector: &mut Option<crate::perf::CommandPerfCollector>,
@@ -845,9 +847,7 @@ pub(crate) fn execute_composition_request_inner(
             iteration_signals: None,
         };
         if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&collector.into_report());
         }
         return Ok(outcome);
     }
@@ -1690,9 +1690,7 @@ pub(crate) fn execute_composition_request_inner(
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&collector.into_report());
         }
         return Ok(outcome);
     }
@@ -1897,9 +1895,7 @@ pub(crate) fn execute_composition_request_inner(
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&collector.into_report());
         }
         Ok(outcome)
     } else {
@@ -1997,9 +1993,7 @@ pub(crate) fn execute_composition_request_inner(
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&collector.into_report());
         }
         Ok(outcome)
     }

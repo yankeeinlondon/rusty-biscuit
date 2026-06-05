@@ -55,7 +55,6 @@ pub(crate) fn execute_sequence(
     perf_enabled: bool,
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
-    let sequence_start = std::time::Instant::now();
     let silent = shared.silent;
 
     // Inline vs compose is decided once for the whole sequence by the
@@ -438,9 +437,7 @@ pub(crate) fn execute_sequence(
         if let Some(mut acc) = perf_accumulator {
             acc.mark_env_setup_complete();
             acc.set_partial();
-            let total = sequence_start.elapsed();
-            let report = acc.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&acc.into_report());
         }
         return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
     }
@@ -588,6 +585,7 @@ pub(crate) fn execute_sequence(
                     acc.add_step(crate::perf::SequenceStepPerf {
                         step_index,
                         step_name: step.name.clone(),
+                        wall_clock: duration,
                         compose_perf: step_ctx.prepared.compose_perf.clone(),
                         agent_perf: outcome.agent_perf,
                     });
@@ -632,6 +630,7 @@ pub(crate) fn execute_sequence(
                     acc.add_step(crate::perf::SequenceStepPerf {
                         step_index,
                         step_name: step.name.clone(),
+                        wall_clock: duration,
                         compose_perf: step_ctx.prepared.compose_perf.clone(),
                         agent_perf: outcome.agent_perf,
                     });
@@ -663,6 +662,7 @@ pub(crate) fn execute_sequence(
                     acc.add_step(crate::perf::SequenceStepPerf {
                         step_index,
                         step_name: step.name.clone(),
+                        wall_clock: duration,
                         compose_perf: step_ctx.prepared.compose_perf.clone(),
                         agent_perf: outcome.agent_perf,
                     });
@@ -753,9 +753,7 @@ pub(crate) fn execute_sequence(
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.
     if let Some(acc) = perf_accumulator {
-        let total = sequence_start.elapsed();
-        let report = acc.into_report(total);
-        eprint!("{}", crate::perf::render_perf_report(&report));
+        crate::perf::emit_report(&acc.into_report());
     }
 
     if interrupt_observed || interrupted.load(Ordering::SeqCst) {
