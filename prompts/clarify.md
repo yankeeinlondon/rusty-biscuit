@@ -1,5 +1,6 @@
 ---
-doc: ""
+doc: "{{spec || design}}"
+interactive: true
 start:
     stderr: "We are starting the clarification process and will need human involvement."
     say: "Please stand by while we prepare a set of clarification questions"
@@ -120,5 +121,3 @@ Drive the conversation forward through structured human-in-the-loop clarificatio
 
     - If you believe there is still more work to be done in finalizing the functional specification, return to step 1 and go through another round of questions
     - If you believe that the specification is now complete then summarize this to the user and you are done
-
-

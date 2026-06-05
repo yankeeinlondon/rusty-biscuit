@@ -8,17 +8,22 @@ Tree Hugger provides three categories of diagnostics: lint (pattern-based), sema
 
 Pattern-based rules defined in `<lang>/lint.scm` queries.
 
-| Language | Rule | Description |
-|----------|------|-------------|
-| **Rust** | `unwrap-call` | Explicit `.unwrap()` call |
-| **Rust** | `expect-call` | Explicit `.expect()` call |
-| **Rust** | `dbg-macro` | Debug macro `dbg!()` usage |
-| **JS/TS** | `debugger-statement` | `debugger;` statement |
-| **JS/TS** | `eval-call` | Usage of `eval()` |
-| **Python** | `eval-call` | Usage of `eval()` |
-| **Python** | `exec-call` | Usage of `exec()` |
-| **Python** | `breakpoint-call` | Usage of `breakpoint()` |
-| **PHP** | `eval-call` | Usage of `eval()` |
+| Language | Rule | Description | Default |
+|----------|------|-------------|---------|
+| **Rust** | `unwrap-call` | Explicit `.unwrap()` call | off (`restriction`) |
+| **Rust** | `expect-call` | Explicit `.expect()` call | off (`restriction`) |
+| **Rust** | `dbg-macro` | Debug macro `dbg!()` usage | on |
+| **JS/TS** | `debugger-statement` | `debugger;` statement | on |
+| **JS/TS** | `eval-call` | Usage of `eval()` | on |
+| **Python** | `eval-call` | Usage of `eval()` | on |
+| **Python** | `exec-call` | Usage of `exec()` | on |
+| **Python** | `breakpoint-call` | Usage of `breakpoint()` | on |
+| **PHP** | `eval-call` | Usage of `eval()` | on |
+
+`unwrap-call` and `expect-call` are `restriction`-category rules: the construct is
+valid and deliberate, so they are silent unless opted in with `--warn <rule>` or
+`--deny <rule>` (or `--deny category:restriction`). `--allow` and `--strict` never
+enable an off-by-default rule.
 
 ### Semantic Diagnostics
 
