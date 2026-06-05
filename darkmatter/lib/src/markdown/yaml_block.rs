@@ -284,7 +284,7 @@ mod tests {
     use super::*;
     use crate::markdown::highlighting::{ColorMode, detect_color_mode};
     use crate::markdown::output::html::HtmlOptions;
-    use crate::markdown::output::terminal::TerminalOptions;
+    use crate::markdown::output::terminal::{ColorDepth, TerminalOptions};
     use biscuit_terminal::utils::layout::{Length, TargetValue};
     use serial_test::serial;
     use std::io::Write;
@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn test_terminal_render_contains_ansi_and_content() {
         let block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
-        let term = Terminal::new();
+        let term = Terminal::new_optimistic(80);
         let output = TerminalRenderable::render(&block, &term);
 
         // Should contain ANSI escape codes for syntax highlighting
@@ -474,13 +474,15 @@ mod tests {
 
         // Render via YamlBlock
         let block = YamlBlock::new(yaml_content).unwrap();
-        let term = Terminal::new();
+        let term = Terminal::new_optimistic(80);
         let block_output = TerminalRenderable::render(&block, &term);
 
         // Render via Markdown YAML fence
         let md_content = format!("```yaml\n{}\n```", yaml_content);
         let md: Markdown = md_content.into();
-        let md_output = md.as_terminal(TerminalOptions::default()).unwrap();
+        let mut opts = TerminalOptions::default();
+        opts.color_depth = Some(ColorDepth::TrueColor);
+        let md_output = md.as_terminal(opts).unwrap();
 
         // Header parity: both must contain the " yaml " language label.
         assert!(
@@ -646,7 +648,9 @@ mod tests {
         assert_eq!(detect_color_mode(), ColorMode::Dark);
 
         let block = YamlBlock::new("key: value").unwrap();
-        let dark_out = TerminalRenderable::render(&block, &Terminal::default());
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = biscuit_terminal::discovery::detection::ColorMode::Dark;
+        let dark_out = TerminalRenderable::render(&block, &term);
         assert!(
             dark_out.contains("\x1b["),
             "Dark-mode render should still emit ANSI escape sequences"
@@ -669,7 +673,9 @@ mod tests {
         assert_eq!(detect_color_mode(), ColorMode::Light);
 
         let block = YamlBlock::new("key: value").unwrap();
-        let light_out = TerminalRenderable::render(&block, &Terminal::default());
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = biscuit_terminal::discovery::detection::ColorMode::Light;
+        let light_out = TerminalRenderable::render(&block, &term);
         assert!(
             light_out.contains("\x1b["),
             "Light-mode render should still emit ANSI escape sequences"
@@ -967,7 +973,7 @@ mod tests {
     #[test]
     fn test_terminal_render_empty_yaml() {
         let block = YamlBlock::new("").unwrap();
-        let term = Terminal::new();
+        let term = Terminal::new_optimistic(80);
         let output = TerminalRenderable::render(&block, &term);
 
         // Should still produce valid output (padding rows at minimum)

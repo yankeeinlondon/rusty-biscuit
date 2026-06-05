@@ -1759,12 +1759,10 @@ style:\n  ul:\n    color: red-500\n---\n\
     };
 
     // Tailwind Red-500 lowers to truecolor (251, 44, 54). WezTerm's
-    // `get-text --escapes` re-emits cell attributes and collapses
-    // contiguous same-attribute cells into a single SGR span, so counting
-    // opens is unreliable. Instead, verify both items live inside the same
-    // red span: a red SGR (semicolon or ITU colon form) precedes the first
-    // item, and no foreground reset (`\x1b[39m` or `\x1b[0m`) appears
-    // between the two item bodies.
+    // `get-text --escapes` re-emits cell attributes from the terminal grid, so
+    // a row boundary may either keep the foreground span open or close and
+    // reopen the same color. If it resets between bodies, it must reopen red
+    // before the second body.
     let red_semi = "\x1b[38;2;251;44;54m";
     let red_colon = "\x1b[38:2::251:44:54m";
     let red_open_at = frame
@@ -1782,10 +1780,13 @@ style:\n  ul:\n    color: red-500\n---\n\
         frame.raw
     );
     let between = &frame.raw[alpha_at..beta_at];
+    let has_reset = between.contains("\x1b[39m") || between.contains("\x1b[0m");
+    let reopens_red = between.contains(red_semi) || between.contains(red_colon);
     assert!(
-        !between.contains("\x1b[39m") && !between.contains("\x1b[0m"),
-        "no foreground reset may appear between item bodies — both must \
-         inherit ul.color. between={between:?}, raw={:?}",
+        !has_reset || reopens_red,
+        "if foreground resets between item bodies, red SGR must reopen before \
+         the second body so both items inherit ul.color. between={between:?}, \
+         raw={:?}",
         frame.raw
     );
     // Layout must also still show the bodies in the plain view.
@@ -2362,17 +2363,21 @@ fn level2_style_images_local_style_width_alignment_in_terminal() {
         return;
     };
 
-    // The fallback line is "▉ IMAGE[A]" (10 cells visible). Right-padded to
-    // 40 cells means 30 leading spaces. Look for that prefix on the fallback
-    // line.
+    // The tree path applies local image width/alignment to the alt text
+    // itself, so the placeholder is `▉ IMAGE[<pad>A]`.
     let fallback_line = frame
         .plain
         .lines()
-        .find(|l| l.contains("IMAGE[A]"))
+        .find(|l| l.contains("▉ IMAGE["))
         .unwrap_or_else(|| panic!("fallback line missing in plain capture:\n{}", frame.plain));
-    let leading_spaces = fallback_line.chars().take_while(|c| *c == ' ').count();
+    let inner = fallback_line
+        .split_once("▉ IMAGE[")
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map(|(inner, _)| inner)
+        .unwrap_or("");
+    let leading_spaces = inner.chars().take_while(|c| *c == ' ').count();
     assert!(
-        leading_spaces >= 28,
-        "expected >=28 leading spaces for right-aligned width:40 fallback, got {leading_spaces}: {fallback_line:?}"
+        leading_spaces >= 28 && inner.trim() == "A",
+        "expected right-aligned width:40 alt text inside fallback, got {leading_spaces} leading: {fallback_line:?}"
     );
 }
