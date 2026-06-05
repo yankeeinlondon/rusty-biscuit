@@ -94,14 +94,25 @@ exit 0
         "Sequence finished should appear before Performance block"
     );
 
-    // Per-step composition subtrees: each step nests its own `composition`
-    // node ("─ composition", distinct from the "mcp composition" env substage),
-    // so a two-step run shows two — the opposite of the old merged-aggregate
-    // behavior this feature replaced.
-    let composition_count = plain.matches("─ composition").count();
+    // Per-step composition is metered during environment setup (Phase 1c), not
+    // the per-step execution window, so it renders under a `step preparation`
+    // node beneath `environment setup` — not nested under each `steps → step N`
+    // execution node, where a slow compose could exceed its parent (review-2 /
+    // G-2). Each step name therefore appears twice: once under `step
+    // preparation` (its compose detail) and once under `steps` (its execution).
+    assert!(
+        plain.contains("step preparation"),
+        "stderr should contain the step preparation bucket under environment setup; got: {plain}"
+    );
     assert_eq!(
-        composition_count, 2,
-        "expected one composition node per step (2 total), found {composition_count}; stderr: {plain}"
+        plain.matches("step 1: alpha").count(),
+        2,
+        "step 1 should appear under both `step preparation` and `steps`; stderr: {plain}"
+    );
+    assert_eq!(
+        plain.matches("step 2: beta").count(),
+        2,
+        "step 2 should appear under both `step preparation` and `steps`; stderr: {plain}"
     );
 }
 
