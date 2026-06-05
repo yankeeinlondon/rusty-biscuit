@@ -88,8 +88,9 @@ test-l2 *args="":
     @just _test_l2 {{ CLI }} {{ args }}
 
 # not applicable: biscuit-terminal has no OS-keyboard-injection (Level-3) tests
-test-l3:
-    @echo "test-l3: not applicable for biscuit-terminal"
+test-l3 *args="":
+    @just _test_l3 {{ LIBRARY }} {{ args }}
+    @just _test_l3 {{ CLI }} {{ args }}
 
 # not applicable today; planned alongside the BrowserRenderable target
 test-browser:
