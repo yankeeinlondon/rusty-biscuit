@@ -4,10 +4,27 @@
 //! consults; [`TerminalRenderOptions`] pairs that context with a
 //! [`RenderStrictness`] policy.
 
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use renderable::layout::Layout as RenderableLayout;
-use renderable::tree::{CodeRenderer, RenderStrictness};
+use renderable::tree::{CodeRenderer, GraphicsMode, RenderStrictness, TerminalMermaidMode};
+
+/// How an image renders when no raster form is emitted (graphics off / vector,
+/// or a failed protocol render).
+///
+/// The default [`Bracket`](Self::Bracket) form (`[alt]`) is the generic
+/// renderable fallback. The darkmatter decorated document pipeline opts into
+/// [`Block`](Self::Block) (`▉ IMAGE[alt]`) to match its legacy
+/// `for_terminal_with_layout` placeholder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImagePlaceholder {
+    /// `[alt]` — the generic inline fallback.
+    #[default]
+    Bracket,
+    /// `▉ IMAGE[alt]` — the darkmatter legacy block placeholder.
+    Block,
+}
 
 use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
 use crate::terminal::Terminal;
@@ -76,6 +93,63 @@ pub struct TerminalRenderContext {
     ///
     /// [`with_layout`]: TerminalRenderContext::with_layout
     pub active_layout: Option<RenderableLayout>,
+    /// The graphics fidelity tier for this render.
+    pub graphics_mode: GraphicsMode,
+    /// Whether to force graphics rendering even when the terminal
+    /// capability detection suggests the feature is unavailable.
+    pub force_graphics: bool,
+    /// Whether Mermaid code fences are promoted to diagrams.
+    ///
+    /// Orthogonal to [`graphics_mode`](Self::graphics_mode), which is the
+    /// fidelity ceiling: a Mermaid fence is promoted only when this opt-in is
+    /// [`TerminalMermaidMode::Image`] *and* the tier permits rasterization.
+    pub mermaid_mode: TerminalMermaidMode,
+    /// Base path for resolving relative image paths at
+    /// [`GraphicsMode::Rich`]. When `None`, the current working directory is
+    /// used (matching the legacy terminal image renderer).
+    pub image_base_path: Option<PathBuf>,
+    /// Whether top-level paragraphs are word-wrapped to
+    /// [`available_width`](Self::available_width).
+    ///
+    /// Off by default: component callers (e.g. [`Prose`](crate::components::prose::Prose))
+    /// apply their own post-render wrapping, so the tree paragraph path must
+    /// emit unwrapped lines for them. The darkmatter Markdown document pipeline
+    /// turns this on so top-level prose flows to the content width, matching the
+    /// legacy `for_terminal` renderer's line wrapping.
+    pub wrap_prose: bool,
+    /// Optional code-theme name forwarded to the [`CodeRenderer`] hook via
+    /// [`TerminalCodeContext`](renderable::color::TerminalCodeContext).
+    ///
+    /// A plain string (e.g. `"github"`) so the renderer stays free of any
+    /// consumer-specific theme types. When `None`, the code renderer uses its
+    /// own default theme. The darkmatter terminal entry point sets this from
+    /// `TerminalOptions::code_theme` so a caller's `with_code_theme(...)`
+    /// reaches the highlighted code panel.
+    ///
+    /// [`CodeRenderer`]: renderable::tree::CodeRenderer
+    pub code_theme: Option<String>,
+    /// Whether fenced code blocks render a line-number gutter, forwarded to the
+    /// [`CodeRenderer`](renderable::tree::CodeRenderer) hook.
+    ///
+    /// Off by default. The darkmatter document pipeline sets this from
+    /// `TerminalOptions::include_line_numbers` so the page line-number toggle
+    /// reaches the highlighted code panel.
+    pub line_numbers: bool,
+    /// Optional left-border prefix for unstyled block quotes.
+    ///
+    /// When `None` (the default), an unstyled [`NodeKind::Block­Quote`](renderable::tree::NodeKind::BlockQuote)
+    /// renders through the shared [`BlockQuote`](crate::components::block_quote::BlockQuote)
+    /// component with its canonical `│ ` border. When set, each quoted line is
+    /// prefixed with this string instead, and nested quotes repeat it per level.
+    /// The darkmatter Markdown document pipeline sets `"▐   "` so block quotes
+    /// match the legacy `for_terminal` renderer's quarter-block bar.
+    pub blockquote_prefix: Option<String>,
+    /// How an image renders when no raster form is emitted.
+    ///
+    /// [`ImagePlaceholder::Bracket`] (the default) emits `[alt]`. The darkmatter
+    /// decorated document pipeline sets [`ImagePlaceholder::Block`] so the
+    /// fallback matches the legacy `▉ IMAGE[alt]` block placeholder.
+    pub image_placeholder: ImagePlaceholder,
 }
 
 impl TerminalRenderContext {
@@ -100,6 +174,15 @@ impl TerminalRenderContext {
             available_width: width,
             current_indent: 0,
             active_layout: None,
+            graphics_mode: GraphicsMode::default(),
+            force_graphics: false,
+            mermaid_mode: TerminalMermaidMode::default(),
+            image_base_path: None,
+            wrap_prose: false,
+            code_theme: None,
+            line_numbers: false,
+            blockquote_prefix: None,
+            image_placeholder: ImagePlaceholder::default(),
         }
     }
 
@@ -288,6 +371,22 @@ mod tests {
     }
 
     #[test]
+    fn from_terminal_initializes_graphics_mode_to_rich() {
+        let term = Terminal::new_optimistic(80);
+        let ctx = TerminalRenderContext::from_terminal(&term);
+
+        assert_eq!(ctx.graphics_mode, GraphicsMode::Rich);
+    }
+
+    #[test]
+    fn from_terminal_initializes_force_graphics_to_false() {
+        let term = Terminal::new_optimistic(80);
+        let ctx = TerminalRenderContext::from_terminal(&term);
+
+        assert!(!ctx.force_graphics);
+    }
+
+    #[test]
     fn fallback_initializes_new_fields_correctly() {
         let ctx = TerminalRenderContext::fallback();
 
@@ -295,6 +394,23 @@ mod tests {
         assert_eq!(ctx.available_width, 80);
         assert_eq!(ctx.current_indent, 0);
         assert!(ctx.active_layout.is_none());
+        assert_eq!(ctx.graphics_mode, GraphicsMode::Rich);
+        assert!(!ctx.force_graphics);
+        assert_eq!(ctx.mermaid_mode, TerminalMermaidMode::Code);
+        assert!(ctx.image_base_path.is_none());
+        assert!(!ctx.wrap_prose);
+        assert!(ctx.code_theme.is_none());
+        assert!(!ctx.line_numbers);
+        assert!(ctx.blockquote_prefix.is_none());
+        assert_eq!(ctx.image_placeholder, ImagePlaceholder::Bracket);
+    }
+
+    #[test]
+    fn from_terminal_keeps_mermaid_promotion_off_by_default() {
+        // Public default: a Mermaid fence stays a code block unless the caller
+        // opts in. `GraphicsMode::Rich` is only the ceiling, not a request.
+        let ctx = TerminalRenderContext::from_terminal(&Terminal::new_optimistic(80));
+        assert_eq!(ctx.mermaid_mode, TerminalMermaidMode::Code);
     }
 
     #[test]

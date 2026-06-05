@@ -1,5 +1,7 @@
 //! The canonical owned render tree node and its kinds.
 
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -231,6 +233,23 @@ pub enum NodeKind {
         /// Whether the HTML is block-level.
         block: bool,
     },
+    /// A target-agnostic extension node identified by a `token`.
+    ///
+    /// Carries nested inline `children` for wrap-style extensions (such as
+    /// `mark` and `dim`) and an optional scalar `payload` for atomic
+    /// extensions. Renderers dispatch on `token`; a token a renderer does not
+    /// recognize falls back to a neutral default that preserves `children`.
+    Extended {
+        /// The extension identifier (for example `"mark"` or `"dim"`).
+        ///
+        /// `Cow<'static, str>` keeps built-in tokens zero-allocation literals
+        /// while still allowing owned dynamic tokens.
+        token: Cow<'static, str>,
+        /// Nested inline content for wrap-style extensions.
+        children: Vec<RenderNode>,
+        /// A scalar value for atomic extensions; `None` for pure wrap tokens.
+        payload: Option<String>,
+    },
     /// Content that has no canonical representation.
     Unsupported {
         /// A label describing the unsupported content.
@@ -289,6 +308,7 @@ impl RenderNode {
             | NodeKind::Strong { children }
             | NodeKind::Delete { children }
             | NodeKind::Span { children }
+            | NodeKind::Extended { children, .. }
             | NodeKind::Link { children, .. } => children,
             NodeKind::Code { .. }
             | NodeKind::ThematicBreak
@@ -325,6 +345,7 @@ impl RenderNode {
             | NodeKind::Strong { children }
             | NodeKind::Delete { children }
             | NodeKind::Span { children }
+            | NodeKind::Extended { children, .. }
             | NodeKind::Link { children, .. } => Some(children),
             NodeKind::Code { .. }
             | NodeKind::ThematicBreak
@@ -527,6 +548,20 @@ impl RenderNode {
         Self::synthetic(NodeKind::Html {
             value: value.into(),
             block,
+        })
+    }
+
+    /// Creates a [`NodeKind::Extended`] node for the given extension `token`.
+    #[must_use]
+    pub fn extended(
+        token: impl Into<Cow<'static, str>>,
+        children: Vec<RenderNode>,
+        payload: Option<String>,
+    ) -> Self {
+        Self::synthetic(NodeKind::Extended {
+            token: token.into(),
+            children,
+            payload,
         })
     }
 

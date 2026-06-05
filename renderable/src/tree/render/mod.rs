@@ -16,7 +16,8 @@ pub mod markdown;
 mod shared;
 
 pub use browser::{
-    BrowserRenderOptions, RawHtmlPolicy, render_browser_document, render_browser_node,
+    BrowserRenderOptions, RawHtmlPolicy, render_browser_document, render_browser_document_html,
+    render_browser_node,
 };
 pub use markdown::{
     MarkdownDialect, MarkdownRenderOptions, MarkdownStyleOptions, render_markdown_document,
@@ -99,4 +100,35 @@ pub trait CodeRenderer {
         meta: Option<&str>,
         attrs: &NodeAttrs,
     ) -> Option<BrowserFragment<Ready>>;
+
+    /// Promotes a Mermaid diagram to a static SVG fragment.
+    ///
+    /// This is deliberately separate from [`render_browser_code`] so the browser
+    /// renderer can tell a *successful* SVG promotion from a *failed* one: a
+    /// `None` here means "I could not produce an SVG", which lets the renderer
+    /// apply its strictness policy (reject under `Strict`, diagnose and fall
+    /// back under `Warn`). Folding Mermaid into `render_browser_code` would
+    /// overload `Some(fragment)` — an implementor that catches its own SVG
+    /// failure and returns a code-block fragment would hide the failure from the
+    /// renderer and silently bypass strictness.
+    ///
+    /// The default implementation returns `None` (no Mermaid support), so the
+    /// renderer degrades per its strictness policy.
+    ///
+    /// ## Arguments
+    ///
+    /// - `value`: The raw Mermaid diagram source.
+    /// - `meta`: The fenced code-block info string beyond the language token.
+    /// - `attrs`: Node attributes including optional code render hints.
+    ///
+    /// [`render_browser_code`]: CodeRenderer::render_browser_code
+    fn render_browser_mermaid(
+        &self,
+        value: &str,
+        meta: Option<&str>,
+        attrs: &NodeAttrs,
+    ) -> Option<BrowserFragment<Ready>> {
+        let _ = (value, meta, attrs);
+        None
+    }
 }

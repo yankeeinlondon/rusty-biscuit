@@ -6,17 +6,21 @@
 //! emphasis, links, images, breaks, raw HTML, task lists), plus footnotes,
 //! grouped raw-HTML blocks, and native superscript/subscript spans.
 //!
-//! Two darkmatter inline conveniences are intentionally **deferred** to a
-//! follow-up feature: `==mark==` / dim inline styles and horizontal rules with
-//! attribute blocks. Both are produced by darkmatter's `InlineStyleProcessor` /
-//! `RuleProcessor`, which are iterator adapters bounded
-//! `where I: Iterator<Item = Event<'a>>`. They cannot consume an `OffsetIter`
-//! (item `(Event, Range)`) and they discard source byte ranges (splitting text
-//! events, replacing whole paragraphs). Routing the fold through them would
-//! make every node `Synthetic` with no location — a regression. Reconciling
-//! offset preservation with those processors needs a separate design decision,
-//! so the fold stays on `Parser::new_ext(...).into_offset_iter()` and the two
-//! features wait for that follow-up.
+//! Two darkmatter inline conveniences — `==mark==` / `⌄dim⌄` inline styles and
+//! horizontal rules with attribute blocks — are folded by
+//! [`fold_markdown_spanned_with_frontmatter`], the span-aware entry point the
+//! tree renderers route through. Rather than the old `InlineStyleProcessor` /
+//! `RuleProcessor` iterator adapters (which discarded source byte ranges by
+//! splitting text events and replacing whole paragraphs, forcing every node to
+//! be `Synthetic`), the fold preserves offsets with two pre-parse passes:
+//! `rewrite_inline_extensions` lowers `==mark==` / `⌄dim⌄` into canonical
+//! GFM-strikethrough envelopes and records a provenance table that maps every
+//! rewritten range back to the original source, and `BlockExtensionProcessor`
+//! lifts HR-attribute paragraphs out of the event stream. The fold itself stays
+//! on `Parser::new_ext(...).into_offset_iter()`, so every node keeps a concrete
+//! span; `Fold::dispatch_strikethrough` then routes each `~~…~~` container to
+//! [`NodeKind::Extended`] (registered envelope) or [`NodeKind::Delete`]
+//! (ordinary strikethrough).
 //!
 //! The fold is **total**: every event the parser can emit either becomes a node
 //! or produces a [`Diagnostic`] — no event is silently dropped. The
@@ -36,12 +40,13 @@
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use renderable::tree::{
     ColumnAlign, Diagnostic, Document, DocumentMetadata, Frontmatter as TreeFrontmatter,
-    FrontmatterFormat, HeadingDepth, NodeKind, Provenance, RenderNode, SourceDescriptor, SourceId,
-    SourceLocation, SourceSpan,
+    FrontmatterFormat, HeadingDepth, HintNamespace, NodeKind, Provenance, RenderNode,
+    SourceDescriptor, SourceId, SourceLocation, SourceSpan,
 };
 use std::ops::Range;
 
 use super::source::single_source_registry;
+use crate::markdown::inline::HorizontalRuleAttrs;
 
 /// Canonical parser-option set the render-tree fold uses.
 ///
@@ -126,17 +131,6 @@ enum ContainerKind {
     /// `Tag::HtmlBlock` — the `Event::Html` lines inside it are concatenated
     /// into a single `NodeKind::Html { block: true }` node on close.
     HtmlBlock,
-    /// A darkmatter `==mark==` inline span. Pushed onto the main fold stack
-    /// by the span-aware fold when an [`InlineEvent::Start(InlineTag::Mark)`]
-    /// arrives; nested standard events (`Emphasis`, `Strong`, links, …)
-    /// accumulate inside this frame naturally before the matching
-    /// [`InlineEvent::End`] closes it.
-    Mark,
-    /// A darkmatter `⌄dim⌄` inline span. Pushed onto the main fold stack by
-    /// the span-aware fold and closed the same way as [`ContainerKind::Mark`],
-    /// gaining a [`Style`](renderable::style::Style) whose
-    /// `emphasis.dim` is set on the produced [`NodeKind::Span`].
-    Dim,
 }
 
 /// The mutable state threaded through the fold.
@@ -183,8 +177,8 @@ impl Fold {
     ///
     /// Extracted from the body loop so the span-aware fold (see
     /// [`fold_markdown_spanned_with_frontmatter`]) can replay the same logic
-    /// for `InlineEvent::Standard(_)` events while routing mark/dim and HR
-    /// attribute events separately.
+    /// for [`BlockExtensionEvent::Standard`](super::block_extension::BlockExtensionEvent::Standard)
+    /// events while routing lifted HR-attribute events separately.
     pub(super) fn feed_event(&mut self, event: Event<'_>, range: Range<usize>) {
         match event {
             Event::Start(tag) => self.start(tag, range),
@@ -331,27 +325,76 @@ pub fn fold_markdown_with_frontmatter(
     fold_markdown_to_document_with_metadata(source, md.content(), metadata)
 }
 
-/// Folds Markdown through the span-aware processor chain (DMTR-3), preserving
-/// source byte ranges for `==mark==`, dim, and HR-attribute paragraphs.
+/// Builds the synthetic [`NodeKind::ThematicBreak`] node for an HR-attribute
+/// paragraph that the block-extension processor lifted from the event stream.
 ///
-/// Walks the chain
-/// `Parser::new_ext(...).into_offset_iter() -> SpanningAdapter ->
-/// SpannedInlineStyleProcessor -> SpannedRuleProcessor` and folds:
+/// The returned node has [`Provenance::Generated`] (it was synthesized from a
+/// paragraph) and carries the parsed `darkmatter.hr.*` hints. `body_range`
+/// must point at the original paragraph body bytes — not the wider
+/// `End(Paragraph)` range — so the produced
+/// [`renderable::tree::SourceLocation`] is byte-identical to the retired
+/// span-aware HR output.
+fn lower_hr_attrs_to_node(
+    attrs: HorizontalRuleAttrs,
+    body_range: Range<usize>,
+    source: SourceId,
+) -> RenderNode {
+    let mut node = RenderNode::thematic_break();
+    node.span = SourceSpan {
+        provenance: Provenance::Generated,
+        location: Some(SourceLocation {
+            source,
+            bytes: body_range,
+        }),
+    };
+    let hr_ns = HintNamespace("darkmatter.hr");
+    if let Some(kind) = attrs.kind.as_ref().or(attrs.legacy_style.as_ref()) {
+        node.attrs.set_hint(hr_ns, "kind", serde_json::json!(kind));
+    }
+    if let Some(alignment) = attrs.alignment {
+        node.attrs
+            .set_hint(hr_ns, "alignment", serde_json::json!(alignment));
+    }
+    if let Some(weight) = attrs.weight {
+        node.attrs
+            .set_hint(hr_ns, "weight", serde_json::json!(weight));
+    }
+    if let Some(width) = attrs.width {
+        node.attrs
+            .set_hint(hr_ns, "width", serde_json::json!(width));
+    }
+    if let Some(color) = attrs.color {
+        node.attrs
+            .set_hint(hr_ns, "color", serde_json::json!(color));
+    }
+    node
+}
+
+/// Folds Markdown through the source-rewrite inline-extension pipeline,
+/// preserving source byte ranges for `==mark==`, `⌄dim⌄`, and HR-attribute
+/// paragraphs.
 ///
-/// - `InlineEvent::Standard(_)` events through the existing
-///   [`Fold::feed_event`] dispatch.
-/// - `InlineEvent::Start(InlineTag::Mark)` / `End(Mark)` into
-///   [`NodeKind::Span`] containers with class `"mark"`.
-/// - `InlineEvent::Start(InlineTag::Dim)` / `End(Dim)` into
-///   [`NodeKind::Span`] containers whose `Style.emphasis.dim` is set so the
-///   browser renderer lowers it to `opacity: 0.6` and the terminal renderer
-///   emits the dim SGR (`\x1b[2m`) automatically.
-/// - `InlineEvent::HorizontalRule(attrs)` into a [`NodeKind::ThematicBreak`]
-///   with `darkmatter.hr.*` hints (and `Provenance::Generated` because the
-///   event was synthesized from a paragraph).
+/// The pipeline is:
 ///
-/// The body fold sees only Markdown content; darkmatter's already extracted
-/// frontmatter flows into [`DocumentMetadata::frontmatter`].
+/// 1. [`rewrite_inline_extensions`](super::inline_extension::rewrite_inline_extensions)
+///    rewrites darkmatter inline syntax (`==mark==`, `⌄dim⌄`) into canonical
+///    GFM-strikethrough envelopes before `pulldown-cmark` ever sees the source.
+/// 2. `pulldown-cmark` parses the rewritten source; the
+///    [`BlockExtensionProcessor`](super::block_extension::BlockExtensionProcessor)
+///    lifts HR-attribute paragraphs out of the event stream.
+/// 3. The plain [`Fold`] consumes the events. Each `~~…~~` container is
+///    dispatched by [`Fold::dispatch_strikethrough`]: a registered envelope
+///    folds to [`NodeKind::Extended`] (`mark` / `dim`), an ordinary
+///    strikethrough folds to [`NodeKind::Delete`].
+/// 4. Because the fold parsed a *rewritten* source, every node and diagnostic
+///    range is mapped back to the original source through the rewriter's
+///    provenance table.
+///
+/// HR-attribute paragraphs fold to a [`NodeKind::ThematicBreak`] with
+/// `darkmatter.hr.*` hints (and [`Provenance::Generated`] because the event was
+/// synthesized from a paragraph). The body fold sees only Markdown content;
+/// darkmatter's already extracted frontmatter flows into
+/// [`DocumentMetadata::frontmatter`].
 ///
 /// ## Returns
 ///
@@ -361,10 +404,8 @@ pub fn fold_markdown_spanned_with_frontmatter(
     source: SourceDescriptor,
     md: &crate::markdown::Markdown,
 ) -> (Document, Vec<Diagnostic>) {
-    use super::span::{
-        SpannedEventProvenance, SpannedInlineStyleProcessor, SpannedRuleProcessor, SpanningAdapter,
-    };
-    use crate::markdown::inline::{InlineEvent, InlineTag};
+    use super::block_extension::{BlockExtensionEvent, BlockExtensionProcessor};
+    use super::inline_extension::rewrite_inline_extensions;
 
     let metadata = DocumentMetadata {
         frontmatter: md.frontmatter().raw_source().map(|raw| TreeFrontmatter {
@@ -374,12 +415,17 @@ pub fn fold_markdown_spanned_with_frontmatter(
     };
     let (registry, source_id) = single_source_registry(source);
 
+    // 1. Source-layer rewrite. `==mark==` / `⌄dim⌄` become canonical
+    //    strikethrough envelopes; everything else (including ordinary `~~…~~`)
+    //    is untouched. A document with no darkmatter inline borrows its source
+    //    unchanged with an empty provenance table.
+    let rewrite = rewrite_inline_extensions(md.content());
+
+    // 2. Parse the rewritten source. HR-attribute paragraphs are lifted out
+    //    before the fold sees them, exactly as on the plain path.
     let options = render_tree_parser_options();
-    let parser = Parser::new_ext(md.content(), options).into_offset_iter();
-    let chain = SpannedRuleProcessor::new(SpannedInlineStyleProcessor::new(
-        md.content(),
-        SpanningAdapter::new(parser),
-    ));
+    let parser = Parser::new_ext(rewrite.source.as_ref(), options).into_offset_iter();
+    let chain = BlockExtensionProcessor::new(parser);
 
     let mut fold = Fold {
         stack: vec![Frame {
@@ -391,120 +437,60 @@ pub fn fold_markdown_spanned_with_frontmatter(
         diagnostics: Vec::new(),
     };
 
-    // Mark/dim frames live directly on `fold.stack` as `ContainerKind::Mark`
-    // / `ContainerKind::Dim` so that nested standard events (Emphasis, Strong,
-    // links, …) accumulate inside them naturally instead of being drained out
-    // by a parallel sidecar. The fold's existing `feed_event` already pushes
-    // children into whichever frame is innermost, so no extra wiring is
-    // required for the standard branch.
-    for spanned in chain {
-        match spanned.event {
-            InlineEvent::Standard(event) => {
-                fold.feed_event(event, spanned.range);
-            }
-            InlineEvent::Start(tag) => {
-                let kind = match tag {
-                    InlineTag::Mark => ContainerKind::Mark,
-                    InlineTag::Dim => ContainerKind::Dim,
-                };
-                fold.stack.push(Frame {
-                    tag: kind,
-                    children: Vec::new(),
-                    start: spanned.range.start,
-                });
-            }
-            InlineEvent::End(tag) => {
-                // The innermost frame should be the matching inline tag.
-                let matches_open = fold.stack.last().is_some_and(|f| {
-                    matches!(
-                        (&f.tag, tag),
-                        (ContainerKind::Mark, InlineTag::Mark)
-                            | (ContainerKind::Dim, InlineTag::Dim)
-                    )
-                });
-                if !matches_open {
-                    fold.diagnostics.push(Diagnostic::structural(
-                        format!("mismatched inline tag end: closing {tag:?}"),
-                        Some(fold.parsed_span(spanned.range.clone())),
-                    ));
-                    continue;
-                }
-                let frame = fold.stack.pop().expect("checked non-empty above");
-                let span = fold.parsed_span(frame.start..spanned.range.end);
-                let Frame {
-                    tag: kind,
-                    children,
-                    ..
-                } = frame;
-                let mut node = build_container(kind, children);
-                node.span = span;
-                fold.push_child(node);
-            }
-            InlineEvent::HorizontalRule(attrs) => {
-                let location_range = match spanned.provenance {
-                    SpannedEventProvenance::GeneratedFrom { source } => source,
-                    SpannedEventProvenance::Parsed => spanned.range.clone(),
-                };
-                let mut node = RenderNode::thematic_break();
-                // Provenance::Generated because the event was synthesized
-                // from a paragraph (span-aware-processor-design.md).
-                node.span = renderable::tree::SourceSpan {
-                    provenance: renderable::tree::Provenance::Generated,
-                    location: Some(renderable::tree::SourceLocation {
-                        source: fold.source,
-                        bytes: location_range,
-                    }),
-                };
-                let hr_ns = renderable::tree::HintNamespace("darkmatter.hr");
-                if let Some(kind) = attrs.kind.as_ref().or(attrs.legacy_style.as_ref()) {
-                    node.attrs
-                        .set_hint(hr_ns, "kind", serde_json::json!(kind));
-                }
-                if let Some(alignment) = attrs.alignment {
-                    node.attrs
-                        .set_hint(hr_ns, "alignment", serde_json::json!(alignment));
-                }
-                if let Some(weight) = attrs.weight {
-                    node.attrs
-                        .set_hint(hr_ns, "weight", serde_json::json!(weight));
-                }
-                if let Some(width) = attrs.width {
-                    node.attrs
-                        .set_hint(hr_ns, "width", serde_json::json!(width));
-                }
-                if let Some(color) = attrs.color {
-                    node.attrs
-                        .set_hint(hr_ns, "color", serde_json::json!(color));
-                }
+    // 3. Plain fold. `Fold::end` dispatches `~~…~~` containers to `Extended`
+    //    (registered envelope) or `Delete` (ordinary strikethrough); HR events
+    //    lower to a generated `ThematicBreak`.
+    for be in chain {
+        match be {
+            BlockExtensionEvent::Standard(event, range) => fold.feed_event(event, range),
+            BlockExtensionEvent::HorizontalRule { attrs, body_range } => {
+                let node = lower_hr_attrs_to_node(attrs, body_range, fold.source);
                 fold.push_child(node);
             }
         }
     }
 
-    // Drain remaining frames. Only the root should remain. Any unclosed
-    // mark/dim or pulldown container splices its children upward and emits a
-    // structural diagnostic — matching the legacy "unclosed reverts to
-    // literal" posture without losing the inner content.
+    // Drain remaining frames. Only the root should remain; an unclosed
+    // container splices its children upward and emits a structural diagnostic.
     while fold.stack.len() > 1 {
         let frame = fold.stack.pop().expect("len checked");
-        let message = match &frame.tag {
-            ContainerKind::Mark => "unclosed mark span".to_string(),
-            ContainerKind::Dim => "unclosed dim span".to_string(),
-            _ => "unclosed container in event stream".to_string(),
-        };
-        fold.diagnostics.push(Diagnostic::structural(message, None));
+        fold.diagnostics.push(Diagnostic::structural(
+            "unclosed container in event stream",
+            None,
+        ));
         if let Some(parent) = fold.stack.last_mut() {
             parent.children.extend(frame.children);
         }
     }
 
     let root_children = fold.stack.pop().map(|f| f.children).unwrap_or_default();
+    let mut diagnostics = fold.diagnostics;
+    let mut root = RenderNode::root(root_children);
+
+    // 4. The fold built every span over rewritten-source offsets. When a
+    //    rewrite occurred, map each node and diagnostic range back to the
+    //    original source so provenance points at the bytes the user typed. An
+    //    empty provenance table is the identity map, so the borrowed-source
+    //    case skips the walk entirely.
+    if !rewrite.provenance.is_empty() {
+        resolve_node_spans(&mut root, &rewrite.provenance);
+        for diagnostic in &mut diagnostics {
+            if let Some(location) = diagnostic
+                .span
+                .as_mut()
+                .and_then(|span| span.location.as_mut())
+            {
+                location.bytes = rewrite.provenance.resolve_range(location.bytes.clone());
+            }
+        }
+    }
+
     let document = Document {
         sources: registry,
         metadata,
-        root: RenderNode::root(root_children),
+        root,
     };
-    (document, fold.diagnostics)
+    (document, diagnostics)
 }
 
 impl Fold {
@@ -631,10 +617,59 @@ impl Fold {
                 self.diagnostics
                     .push(Diagnostic::unsupported(label, Some(span)));
             }
+            ContainerKind::Delete => {
+                // A `~~…~~` container is either an ordinary GFM strikethrough or
+                // a darkmatter inline-extension envelope produced by the source
+                // rewriter (`==mark==` / `⌄dim⌄`). Peek the leading marker and
+                // dispatch accordingly.
+                let node = self.dispatch_strikethrough(children, span);
+                self.push_child(node);
+            }
             other => {
                 let mut node = build_container(other, children);
                 node.span = span;
                 self.push_child(node);
+            }
+        }
+    }
+
+    /// Decides whether a closed `~~…~~` container is a darkmatter inline
+    /// extension envelope or an ordinary GFM strikethrough.
+    ///
+    /// The inline source rewriter (see
+    /// [`inline_extension`](super::inline_extension)) emits the canonical
+    /// envelope `~~{{!TOKEN!}}\u{FDD0}payload{{!TOKEN!}}\u{FDD0}~~`, so the
+    /// first child of an extension container is a text node whose value begins
+    /// with the `{{!TOKEN!}}\u{FDD0}` marker. A registered token strips its
+    /// markers and folds to [`NodeKind::Extended`]; an unknown token (only
+    /// reachable on a rewriter/registry drift bug) records a diagnostic and
+    /// falls back to [`NodeKind::Delete`]; any other container is a plain
+    /// strikethrough.
+    fn dispatch_strikethrough(
+        &mut self,
+        children: Vec<RenderNode>,
+        span: SourceSpan,
+    ) -> RenderNode {
+        let Some(token) = envelope_token(&children) else {
+            let mut node = RenderNode::delete(children);
+            node.span = span;
+            return node;
+        };
+        match super::inline_extension::token_by_name(&token) {
+            Some(spec) => {
+                let stripped = strip_envelope_markers(children, spec.name);
+                let mut node = RenderNode::extended(spec.name, stripped, None);
+                node.span = span;
+                node
+            }
+            None => {
+                self.diagnostics.push(Diagnostic::structural(
+                    format!("unknown inline extension token `{token}` in strikethrough envelope"),
+                    Some(span.clone()),
+                ));
+                let mut node = RenderNode::delete(children);
+                node.span = span;
+                node
             }
         }
     }
@@ -674,7 +709,19 @@ fn build_container(kind: ContainerKind, children: Vec<RenderNode>) -> RenderNode
         }
         ContainerKind::BlockQuote => RenderNode::block_quote(children),
         ContainerKind::CodeBlock { lang, meta } => {
-            RenderNode::code(lang, meta, code_text(&children))
+            let mut node = RenderNode::code(lang.clone(), meta, code_text(&children));
+            // Request a code-block header row so the terminal tree path emits
+            // the same right-aligned language pill the legacy terminal renderer
+            // produces for every fenced block (parity with
+            // `output::terminal::emit_highlighted_code_block`). The browser code
+            // hook ignores this hint, so HTML output is unaffected; the plain
+            // (no-`CodeRenderer`) tree fallback ignores it too.
+            node.attrs.set_code_hints(&renderable::tree::CodeRenderHints {
+                header_row: true,
+                language_label: lang,
+                highlight: true,
+            });
+            node
         }
         ContainerKind::List { ordered, start } => RenderNode::list(ordered, start, children),
         ContainerKind::Item { checked } => RenderNode::list_item(checked, children),
@@ -683,36 +730,109 @@ fn build_container(kind: ContainerKind, children: Vec<RenderNode>) -> RenderNode
         ContainerKind::TableCell => RenderNode::table_cell(children),
         ContainerKind::Emphasis => RenderNode::emphasis(children),
         ContainerKind::Strong => RenderNode::strong(children),
-        ContainerKind::Delete => RenderNode::delete(children),
         ContainerKind::Span { classes } => RenderNode::span(classes, children),
         ContainerKind::FootnoteDefinition { identifier } => {
             RenderNode::footnote_definition(identifier, children)
         }
         ContainerKind::Link { url, title } => RenderNode::link(url, title, children),
         ContainerKind::Image { url, title } => RenderNode::image(url, title, image_alt(&children)),
-        ContainerKind::Mark => RenderNode::span(vec!["mark".to_string()], children),
-        ContainerKind::Dim => {
-            // The span-aware design (`span-aware-processor-design.md`) requires
-            // dim to ride in `Style.emphasis.dim`, not in semantic emphasis or
-            // a custom hint, so both the terminal renderer's inline-style SGR
-            // path (`\x1b[2m`) and the browser renderer's CSS lowering
-            // (`opacity:0.6`) consume it automatically.
-            let mut node = RenderNode::span(Vec::new(), children);
-            let style = renderable::style::Style {
-                emphasis: renderable::style::TextEmphasis {
-                    dim: true,
-                    ..Default::default()
-                },
-                ..Default::default()
-            };
-            node.attrs.set_style(&style);
-            node
-        }
-        // Handled by `Fold::end`; unreachable here.
+        // Handled by `Fold::end`; unreachable here. `Delete` is intercepted by
+        // `Fold::end`'s strikethrough dispatch before it can reach this match.
         ContainerKind::Root
         | ContainerKind::HtmlBlock
         | ContainerKind::TableHead
+        | ContainerKind::Delete
         | ContainerKind::Unsupported { .. } => RenderNode::unsupported("internal: unhandled"),
+    }
+}
+
+/// Peeks the first child of a closed `~~…~~` container for a darkmatter
+/// inline-extension opener marker, returning the token name when present.
+///
+/// The rewriter emits `{{!TOKEN!}}\u{FDD0}` as the opener, so an extension
+/// container always begins with a text node whose value starts with that
+/// marker. The U+FDD0 sentinel must immediately follow the `{{!TOKEN!}}` form;
+/// a bare `{{!TOKEN!}}` a user typed in prose (with no adjacent sentinel) is
+/// not an envelope and returns `None`.
+fn envelope_token(children: &[RenderNode]) -> Option<String> {
+    let NodeKind::Text { value } = &children.first()?.kind else {
+        return None;
+    };
+    let rest = value.strip_prefix("{{!")?;
+    let (name, after) = rest.split_once("!}}")?;
+    after.strip_prefix(super::inline_extension::ENVELOPE_SENTINEL)?;
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+/// Strips the `{{!name!}}\u{FDD0}` opener from the first text child and the
+/// matching closer from the last text child of an envelope container.
+///
+/// The marker bytes are removed in the rewritten-offset space the fold builds
+/// its spans in; the start/end of each stripped node's `SourceLocation` is
+/// advanced/retracted by the marker length so the later provenance pass
+/// resolves the remaining payload bytes back to the original source. Boundary
+/// text nodes left empty by stripping are dropped.
+fn strip_envelope_markers(mut children: Vec<RenderNode>, name: &str) -> Vec<RenderNode> {
+    let marker = format!("{{{{!{name}!}}}}{}", super::inline_extension::ENVELOPE_SENTINEL);
+    if let Some(first) = children.first_mut() {
+        strip_text_prefix(first, &marker);
+    }
+    if let Some(last) = children.last_mut() {
+        strip_text_suffix(last, &marker);
+    }
+    children.retain(|child| !matches!(&child.kind, NodeKind::Text { value } if value.is_empty()));
+    children
+}
+
+/// Removes `marker` from the start of a text `node`, advancing its
+/// rewritten-space source range by the removed byte length. A no-op unless
+/// `node` is a text node beginning with `marker`.
+fn strip_text_prefix(node: &mut RenderNode, marker: &str) {
+    if let NodeKind::Text { value } = &mut node.kind
+        && let Some(rest) = value.strip_prefix(marker)
+    {
+        let removed = value.len() - rest.len();
+        *value = rest.to_string();
+        if let Some(location) = node.span.location.as_mut() {
+            location.bytes.start += removed;
+        }
+    }
+}
+
+/// Removes `marker` from the end of a text `node`, retracting its
+/// rewritten-space source range by the removed byte length. A no-op unless
+/// `node` is a text node ending with `marker`.
+fn strip_text_suffix(node: &mut RenderNode, marker: &str) {
+    if let NodeKind::Text { value } = &mut node.kind
+        && let Some(rest) = value.strip_suffix(marker)
+    {
+        let removed = value.len() - rest.len();
+        *value = rest.to_string();
+        if let Some(location) = node.span.location.as_mut() {
+            location.bytes.end -= removed;
+        }
+    }
+}
+
+/// Maps every `SourceLocation` byte range in the tree rooted at `node` from
+/// rewritten-source offsets back to original-source offsets.
+///
+/// The span-aware fold parses a rewritten source string, so each node's range
+/// initially indexes the rewritten bytes. This pass walks the whole tree and
+/// applies the rewriter's [`ProvenanceTable`](super::inline_extension::ProvenanceTable)
+/// so downstream consumers see the bytes the user actually typed.
+fn resolve_node_spans(node: &mut RenderNode, provenance: &super::inline_extension::ProvenanceTable) {
+    if let Some(location) = node.span.location.as_mut() {
+        location.bytes = provenance.resolve_range(location.bytes.clone());
+    }
+    if let Some(children) = node.children_mut() {
+        for child in children {
+            resolve_node_spans(child, provenance);
+        }
     }
 }
 
@@ -1192,45 +1312,41 @@ mod tests {
         )
     }
 
-    /// Visits `node` and every descendant, collecting `Span` nodes whose
-    /// `attrs.classes` contains `class`.
-    fn collect_spans_with_class<'a>(node: &'a RenderNode, class: &str) -> Vec<&'a RenderNode> {
+    /// Visits `node` and every descendant, collecting `Extended` nodes whose
+    /// `token` equals `token`.
+    fn collect_extended<'a>(node: &'a RenderNode, token: &str) -> Vec<&'a RenderNode> {
         let mut out = Vec::new();
-        fn walk<'a>(node: &'a RenderNode, class: &str, out: &mut Vec<&'a RenderNode>) {
-            if matches!(node.kind, NodeKind::Span { .. })
-                && node.attrs.classes.iter().any(|c| c == class)
-            {
+        fn walk<'a>(node: &'a RenderNode, token: &str, out: &mut Vec<&'a RenderNode>) {
+            if matches!(&node.kind, NodeKind::Extended { token: t, .. } if t == token) {
                 out.push(node);
             }
             for child in node.children() {
-                walk(child, class, out);
+                walk(child, token, out);
             }
         }
-        walk(node, class, &mut out);
+        walk(node, token, &mut out);
         out
     }
 
     #[test]
-    fn span_aware_fold_emits_mark_span_with_class() {
+    fn span_aware_fold_emits_mark_extended_node() {
         let (doc, diags) = fold_spanned("plain ==highlighted== after");
         assert!(diags.is_empty(), "clean fixture must fold cleanly");
-        let marks = collect_spans_with_class(&doc.root, "mark");
-        assert_eq!(marks.len(), 1, "expected one mark Span");
+        let marks = collect_extended(&doc.root, "mark");
+        assert_eq!(marks.len(), 1, "expected one mark Extended node");
         // The mark contains the highlighted text.
         let mut text = String::new();
         collect_text(marks[0].children(), &mut text);
         assert_eq!(text, "highlighted");
     }
 
-    /// Locates the first descendant `Span` whose `Style.emphasis.dim` is set.
-    fn find_dim_span(node: &RenderNode) -> Option<&RenderNode> {
-        if matches!(node.kind, NodeKind::Span { .. })
-            && node.attrs.style().is_some_and(|s| s.emphasis.dim)
-        {
+    /// Locates the first descendant `Extended` node carrying the given `token`.
+    fn find_extended<'a>(node: &'a RenderNode, token: &str) -> Option<&'a RenderNode> {
+        if matches!(&node.kind, NodeKind::Extended { token: t, .. } if t == token) {
             return Some(node);
         }
         for child in node.children() {
-            if let Some(found) = find_dim_span(child) {
+            if let Some(found) = find_extended(child, token) {
                 return Some(found);
             }
         }
@@ -1238,13 +1354,63 @@ mod tests {
     }
 
     #[test]
-    fn span_aware_fold_emits_dim_span_with_style() {
+    fn span_aware_fold_emits_dim_extended_node() {
         let (doc, diags) = fold_spanned("normal \u{2304}dimmed\u{2304} after");
         assert!(diags.is_empty());
-        let dim = find_dim_span(&doc.root).expect("dim Span must exist");
+        let dim = find_extended(&doc.root, "dim").expect("dim Extended node must exist");
         let mut text = String::new();
         collect_text(dim.children(), &mut text);
         assert_eq!(text, "dimmed");
+    }
+
+    #[test]
+    fn span_aware_fold_ordinary_strikethrough_stays_delete() {
+        // A real GFM strikethrough carries no envelope marker, so it must fold
+        // to `NodeKind::Delete`, never an `Extended` node.
+        let (doc, diags) = fold_spanned("plain ~~struck~~ after");
+        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        assert!(
+            collect_extended(&doc.root, "mark").is_empty()
+                && collect_extended(&doc.root, "dim").is_empty(),
+            "ordinary strikethrough must not produce an Extended node",
+        );
+        fn find_delete(node: &RenderNode) -> Option<&RenderNode> {
+            if matches!(node.kind, NodeKind::Delete { .. }) {
+                return Some(node);
+            }
+            node.children().iter().find_map(find_delete)
+        }
+        let delete = find_delete(&doc.root).expect("ordinary `~~…~~` must fold to Delete");
+        let mut text = String::new();
+        collect_text(delete.children(), &mut text);
+        assert_eq!(text, "struck");
+    }
+
+    #[test]
+    fn span_aware_fold_unknown_token_diagnoses_and_falls_back_to_delete() {
+        // A synthetic envelope whose token is not registered is only reachable
+        // on a rewriter/registry drift bug. The fold must record a diagnostic
+        // and degrade to a standard `Delete` rather than emit an `Extended`
+        // node for an unknown token. The U+FDD0 sentinel cannot be typed by a
+        // user, so this envelope is constructed directly.
+        let md: crate::markdown::Markdown =
+            "~~{{!bogus!}}\u{FDD0}content{{!bogus!}}\u{FDD0}~~".into();
+        let (doc, diags) = fold_markdown_spanned_with_frontmatter(
+            SourceDescriptor::Virtual {
+                name: "spanned".into(),
+            },
+            &md,
+        );
+        assert!(
+            collect_extended(&doc.root, "bogus").is_empty(),
+            "unknown token must not produce an Extended node",
+        );
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("unknown inline extension token")),
+            "unknown token must record a diagnostic: {diags:?}",
+        );
     }
 
     #[test]
@@ -1278,6 +1444,50 @@ mod tests {
         assert!(hr.span.location.is_some());
     }
 
+    /// An HR-attribute paragraph whose quoted scalar contains delimiter-like
+    /// text (`==…==` / `⌄…⌄`) must still lift to a generated `ThematicBreak`.
+    /// The block-extension construct owns the whole paragraph, so the inline
+    /// rewriter must leave the body untouched — otherwise the embedded `==`
+    /// would be rewritten into a strikethrough envelope, split the paragraph,
+    /// and defeat HR recognition, leaking raw `---`/`==` source into the tree.
+    /// Regression guard for the spec's block-before-inline sequencing.
+    #[test]
+    fn span_aware_fold_hr_attribute_with_delimiter_scalar_still_lifts_to_rule() {
+        for input in [
+            "--- { kind: \"==waves==\" }\n",
+            "--- { kind: \"\u{2304}dots\u{2304}\" }\n",
+        ] {
+            let (doc, diags) = fold_spanned(input);
+            assert!(diags.is_empty(), "HR fixture must fold cleanly: {diags:?}");
+
+            fn find_hr(node: &RenderNode) -> Option<&RenderNode> {
+                if matches!(node.kind, NodeKind::ThematicBreak) {
+                    return Some(node);
+                }
+                node.children().iter().find_map(find_hr)
+            }
+            let hr = find_hr(&doc.root)
+                .unwrap_or_else(|| panic!("ThematicBreak must exist for {input:?}"));
+            assert_eq!(hr.span.provenance, Provenance::Generated);
+
+            // The delimiter-like scalar must survive verbatim as the HR kind,
+            // never be re-interpreted as a mark/dim inline extension.
+            assert!(
+                collect_extended(&doc.root, "mark").is_empty()
+                    && collect_extended(&doc.root, "dim").is_empty(),
+                "HR-attribute body must not fold to an inline Extended node: {input:?}",
+            );
+
+            // No raw HR-paragraph source may leak as visible text.
+            let mut text = String::new();
+            collect_text(doc.root.children(), &mut text);
+            assert!(
+                !text.contains("---") && !text.contains("=="),
+                "raw HR source leaked into the tree for {input:?}: {text:?}",
+            );
+        }
+    }
+
     #[test]
     fn span_aware_fold_plain_rule_keeps_parsed_provenance() {
         // A bare `---` arrives as `Event::Rule` and folds straight through to
@@ -1299,21 +1509,14 @@ mod tests {
         assert_eq!(hr.span.provenance, Provenance::Parsed);
         let ns = renderable::tree::HintNamespace("darkmatter.hr");
         assert!(
-            hr.attrs.get_hint(ns, "style").is_none(),
+            hr.attrs.get_hint(ns, "kind").is_none(),
             "plain rule must not carry HR hints"
         );
     }
 
-    /// Review-2 finding 2: the previous fold drained nested standard children
-    /// out of the active fold frame into a sidecar, breaking sibling
-    /// containers that appeared *after* a closed mark span. With the
-    /// sidecar replaced by [`ContainerKind::Mark`] / [`ContainerKind::Dim`]
-    /// frames on the main fold stack, an emphasis that follows a closed mark
-    /// must remain its own container with its own text — not become an empty
-    /// sibling of the drained text.
-    ///
-    /// Cross-text-event mark/dim spanning (review-3 finding 2) is covered by
-    /// the `span_aware_fold_wraps_emphasis_inside_*` tests below.
+    /// A mark envelope followed by an emphasis must keep both as separate,
+    /// populated children of the paragraph — the mark folds to its own
+    /// `Extended` node and the emphasis stays an independent sibling.
     #[test]
     fn span_aware_fold_preserves_emphasis_sibling_after_mark() {
         let (doc, diags) = fold_spanned("==marked== then *italic*");
@@ -1323,11 +1526,8 @@ mod tests {
         );
         let para = &doc.root.children()[0];
 
-        // The mark span and the emphasis must each survive as separate,
-        // populated children of the paragraph — the sidecar bug would have
-        // either swallowed the emphasis or left it empty.
-        let marks = collect_spans_with_class(&doc.root, "mark");
-        assert_eq!(marks.len(), 1, "expected one mark Span");
+        let marks = collect_extended(&doc.root, "mark");
+        assert_eq!(marks.len(), 1, "expected one mark Extended node");
         let mut marked_text = String::new();
         collect_text(marks[0].children(), &mut marked_text);
         assert_eq!(marked_text, "marked");
@@ -1342,12 +1542,10 @@ mod tests {
         assert_eq!(italic_text, "italic");
     }
 
-    /// Review-3 finding 2: `==*highlighted*==` must fold to a mark Span whose
-    /// child is the Emphasis container — proving the
-    /// [`SpannedInlineStyleProcessor`](super::span::SpannedInlineStyleProcessor)
-    /// tracks mark state across pulldown text events. The Emphasis arrives
-    /// between the two `==` delimiters, which pulldown-cmark emits as
-    /// separate text events.
+    /// `==*highlighted*==` must fold to a mark `Extended` node whose child is
+    /// the Emphasis container. The rewriter preserves the `*emphasized*`
+    /// payload verbatim inside the envelope, so `pulldown-cmark` parses the
+    /// emphasis structurally and the dispatcher keeps it as a nested child.
     #[test]
     fn span_aware_fold_wraps_emphasis_inside_mark() {
         let (doc, diags) = fold_spanned("==*highlighted*== rest");
@@ -1355,13 +1553,13 @@ mod tests {
             diags.is_empty(),
             "clean fixture must fold cleanly: {diags:?}"
         );
-        let marks = collect_spans_with_class(&doc.root, "mark");
-        assert_eq!(marks.len(), 1, "expected one mark Span");
+        let marks = collect_extended(&doc.root, "mark");
+        assert_eq!(marks.len(), 1, "expected one mark Extended node");
         let mark = marks[0];
         let first = mark
             .children()
             .first()
-            .expect("mark span must have at least one child");
+            .expect("mark node must have at least one child");
         assert!(
             matches!(first.kind, NodeKind::Emphasis { .. }),
             "expected Emphasis inside mark; got {:?}",
@@ -1372,8 +1570,8 @@ mod tests {
         assert_eq!(text, "highlighted");
     }
 
-    /// Review-3 finding 2: the design's `⌄*dim and italic*⌄` fixture must
-    /// fold to a dim Span whose single child is the Emphasis container.
+    /// The `⌄*dim and italic*⌄` fixture must fold to a dim `Extended` node
+    /// whose single child is the Emphasis container.
     #[test]
     fn span_aware_fold_wraps_emphasis_inside_dim() {
         let (doc, diags) = fold_spanned("\u{2304}*dim and italic*\u{2304}");
@@ -1381,11 +1579,11 @@ mod tests {
             diags.is_empty(),
             "clean fixture must fold cleanly: {diags:?}"
         );
-        let dim = find_dim_span(&doc.root).expect("dim Span must exist");
+        let dim = find_extended(&doc.root, "dim").expect("dim Extended node must exist");
         let first = dim
             .children()
             .first()
-            .expect("dim span must have at least one child");
+            .expect("dim node must have at least one child");
         assert!(
             matches!(first.kind, NodeKind::Emphasis { .. }),
             "expected Emphasis inside dim; got {:?}",
@@ -1396,15 +1594,16 @@ mod tests {
         assert_eq!(text, "dim and italic");
     }
 
-    /// Review-3 finding 2: an unclosed cross-text-event mark must revert to
-    /// literal text rather than leaking an open container.
+    /// An unclosed `==` must revert to literal text rather than emit a mark
+    /// node. The rewriter finds no closing delimiter and leaves the `==`
+    /// untouched, so `pulldown-cmark` never sees a strikethrough envelope.
     #[test]
     fn span_aware_fold_unclosed_cross_event_mark_reverts() {
         let (doc, _diags) = fold_spanned("==*never closed* and on");
-        let marks = collect_spans_with_class(&doc.root, "mark");
+        let marks = collect_extended(&doc.root, "mark");
         assert!(
             marks.is_empty(),
-            "unclosed cross-event mark must not emit a Span: {marks:?}",
+            "unclosed mark must not emit an Extended node: {marks:?}",
         );
         // The literal `==` and the emphasis must both still appear.
         let para = &doc.root.children()[0];
@@ -1417,13 +1616,11 @@ mod tests {
         );
     }
 
-    /// Review-4 finding 1 / span-aware-processor-design "Mixed Mark and
-    /// Dim": `==highlighted and ⌄dim within mark⌄==` must fold to a mark
-    /// Span containing a nested dim Span. The earlier single-slot
-    /// implementation modeled mark and dim as mutually exclusive — a dim
-    /// delimiter inside an open mark became literal text — which made the
-    /// designed fixture impossible. The stack-based processor preserves
-    /// nesting.
+    /// Mixed mark/dim nesting: `==highlighted and ⌄dim within mark⌄==` must
+    /// fold to a mark `Extended` node containing a nested dim `Extended` node.
+    /// The rewriter emits nested strikethrough envelopes, which
+    /// `pulldown-cmark` parses as nested `Strikethrough` containers, and the
+    /// dispatcher lowers each to its own `Extended` node.
     #[test]
     fn span_aware_fold_nests_dim_inside_mark() {
         let (doc, diags) = fold_spanned("==highlighted and \u{2304}dim within mark\u{2304}==");
@@ -1432,30 +1629,25 @@ mod tests {
             "clean fixture must fold cleanly: {diags:?}"
         );
 
-        let marks = collect_spans_with_class(&doc.root, "mark");
-        assert_eq!(marks.len(), 1, "expected one mark Span: {marks:?}");
+        let marks = collect_extended(&doc.root, "mark");
+        assert_eq!(marks.len(), 1, "expected one mark Extended node: {marks:?}");
         let mark = marks[0];
 
-        // The mark contains literal text plus a nested dim Span.
+        // The mark contains literal text plus a nested dim node.
         let dim = mark
             .children()
             .iter()
-            .find(|n| {
-                matches!(n.kind, NodeKind::Span { .. })
-                    && n.attrs.style().is_some_and(|s| s.emphasis.dim)
-            })
-            .expect("mark must contain a nested dim Span");
+            .find(|n| matches!(&n.kind, NodeKind::Extended { token, .. } if token == "dim"))
+            .expect("mark must contain a nested dim Extended node");
         let mut dim_text = String::new();
         collect_text(dim.children(), &mut dim_text);
         assert_eq!(dim_text, "dim within mark");
 
-        // The leading text "highlighted and " must precede the dim Span
+        // The leading text "highlighted and " must precede the dim node
         // inside the mark.
         let mut leading = String::new();
         for child in mark.children() {
-            if matches!(child.kind, NodeKind::Span { .. })
-                && child.attrs.style().is_some_and(|s| s.emphasis.dim)
-            {
+            if matches!(&child.kind, NodeKind::Extended { token, .. } if token == "dim") {
                 break;
             }
             collect_text(std::slice::from_ref(child), &mut leading);
@@ -1463,11 +1655,9 @@ mod tests {
         assert_eq!(leading.trim_end(), "highlighted and");
     }
 
-    /// Review-4 finding 1 (reverse direction): nesting works in the other
-    /// direction too — a mark delimiter inside an open dim opens a nested
-    /// mark frame. This is not in the design's fixture list explicitly but
-    /// falls out of the symmetric stack policy and guards against regressing
-    /// to the old single-slot model in the other direction.
+    /// Mixed nesting in the reverse direction: a mark envelope inside a dim
+    /// envelope yields a dim `Extended` node containing a nested mark
+    /// `Extended` node. Guards the symmetric nesting of the dispatcher.
     #[test]
     fn span_aware_fold_nests_mark_inside_dim() {
         let (doc, diags) = fold_spanned("\u{2304}dim with ==marked inside==\u{2304}");
@@ -1476,15 +1666,12 @@ mod tests {
             "clean fixture must fold cleanly: {diags:?}"
         );
 
-        let dim = find_dim_span(&doc.root).expect("dim Span must exist");
+        let dim = find_extended(&doc.root, "dim").expect("dim Extended node must exist");
         let nested_mark = dim
             .children()
             .iter()
-            .find(|n| {
-                matches!(n.kind, NodeKind::Span { .. })
-                    && n.attrs.classes.iter().any(|c| c == "mark")
-            })
-            .expect("dim must contain a nested mark Span");
+            .find(|n| matches!(&n.kind, NodeKind::Extended { token, .. } if token == "mark"))
+            .expect("dim must contain a nested mark Extended node");
         let mut nested_text = String::new();
         collect_text(nested_mark.children(), &mut nested_text);
         assert_eq!(nested_text, "marked inside");
@@ -1492,32 +1679,29 @@ mod tests {
 
     #[test]
     fn span_aware_fold_emits_no_mark_for_escaped_delimiter() {
-        // `\==` is escaped and must not open a mark span. The legacy
-        // pre-processor rewrites `\==` upstream; the span-aware processor
-        // honors a literal backslash escape directly in its own pass.
+        // `\==` is escaped, so the rewriter leaves it literal and no envelope
+        // is emitted — the dispatcher therefore never produces a mark node.
         let (doc, diags) = fold_spanned("foo \\== not highlighted\n");
         assert!(diags.is_empty());
-        let marks = collect_spans_with_class(&doc.root, "mark");
+        let marks = collect_extended(&doc.root, "mark");
         assert!(
             marks.is_empty(),
-            "escaped mark delimiter must not open a Span"
+            "escaped mark delimiter must not produce an Extended node"
         );
     }
 
     // -----------------------------------------------------------------------
-    // Review-6 finding 2 (fold tier): pin the exact `SourceLocation.bytes`
-    // ranges from `span-aware-processor-design.md` for the container Span
-    // and the generated thematic break. The span-tier event-range tests in
-    // `super::span::tests` cover the inline event stream; these fold-tier
-    // tests cover the assembled `RenderNode.span` that downstream tools and
-    // diagnostics actually consume.
+    // Provenance (fold tier): the fold parses a rewritten source, so every
+    // node and diagnostic range is mapped back to the original source through
+    // the rewriter's provenance table. These tests pin the resolved
+    // `SourceLocation.bytes` that downstream tools and diagnostics consume.
     // -----------------------------------------------------------------------
 
-    /// `plain ==highlighted== after` must fold to a mark `Span` whose
-    /// `SourceLocation.bytes` spans the full delimited region `6..21` (the
-    /// opener at `6..8`, the inner text at `8..19`, and the closer at
-    /// `19..21`). A bug that built container spans from only the opener or
-    /// inner-text range would fail this test.
+    /// `plain ==highlighted== after` must fold to a mark `Extended` node whose
+    /// `SourceLocation.bytes` resolves back to the full **original** delimited
+    /// region `6..21` (`==` opener at `6..8`, `highlighted` at `8..19`, `==`
+    /// closer at `19..21`) — not to the synthetic envelope bytes the fold
+    /// actually parsed. Pins the provenance round-trip for the container span.
     #[test]
     fn span_aware_fold_mark_container_span_covers_full_delimited_region() {
         let input = "plain ==highlighted== after";
@@ -1526,19 +1710,44 @@ mod tests {
             diags.is_empty(),
             "clean fixture must fold cleanly: {diags:?}"
         );
-        let marks = collect_spans_with_class(&doc.root, "mark");
-        assert_eq!(marks.len(), 1, "expected exactly one mark Span");
+        let marks = collect_extended(&doc.root, "mark");
+        assert_eq!(marks.len(), 1, "expected exactly one mark Extended node");
         let mark = marks[0];
         let location = mark
             .span
             .location
             .as_ref()
-            .expect("mark Span must carry a SourceLocation");
+            .expect("mark node must carry a SourceLocation");
         assert_eq!(
             location.bytes,
             6..21,
-            "mark container span must cover the opener, inner text, and closer",
+            "mark container span must resolve to the original opener, inner text, and closer",
         );
+        assert_eq!(&input[location.bytes.clone()], "==highlighted==");
+    }
+
+    /// The inner payload of a mark envelope must resolve to the original
+    /// payload bytes. For `plain ==highlighted== after` the `highlighted` text
+    /// node sits at original bytes `8..19` once the synthetic markers are
+    /// stripped and provenance is applied.
+    #[test]
+    fn span_aware_fold_mark_inner_text_resolves_to_original_payload_bytes() {
+        let input = "plain ==highlighted== after";
+        let (doc, diags) = fold_spanned(input);
+        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        let mark = find_extended(&doc.root, "mark").expect("mark Extended node must exist");
+        let text = mark
+            .children()
+            .iter()
+            .find(|n| matches!(&n.kind, NodeKind::Text { value } if value == "highlighted"))
+            .expect("mark must contain the highlighted text node");
+        let location = text
+            .span
+            .location
+            .as_ref()
+            .expect("inner text must carry a SourceLocation");
+        assert_eq!(location.bytes, 8..19);
+        assert_eq!(&input[location.bytes.clone()], "highlighted");
     }
 
     /// `--- { style: waves }` must fold to a `ThematicBreak` whose
@@ -1581,15 +1790,62 @@ mod tests {
         );
     }
 
-    /// Fold-tier counterpart of the span-tier escaped-mark test: the
-    /// escaped `\==` literal must reach the fold as a Text node whose
-    /// `SourceLocation.bytes` includes the backslash byte. This pins
-    /// `span-aware-processor-design.md` *Mark: Escaped* at the fold layer.
+    /// When an earlier inline rewrite shifts byte offsets, the generated HR
+    /// `SourceLocation.bytes` must still resolve to the **original** paragraph
+    /// body range — not the rewritten-source range the fold actually parsed.
+    /// The leading `==marked==` rewrites to a canonical envelope longer than
+    /// `==marked==`, so every byte after it is shifted in the parsed source;
+    /// provenance must undo that shift for the HR span. This is the regression
+    /// guard for HR source-span parity behind an offset-shifting rewrite.
     #[test]
-    fn span_aware_fold_escaped_mark_literal_text_includes_backslash_byte() {
-        // Byte layout: `foo \== bar` (11 bytes). The `\` is at byte 4 and the
-        // `==` token is at bytes 5..7, so the design-conforming literal span
-        // is `4..7`.
+    fn span_aware_fold_hr_source_location_survives_earlier_inline_rewrite() {
+        let body = "--- { style: waves }";
+        let input = format!("Lead ==marked== text.\n\n{body}\n");
+        let body_start = input.find(body).expect("HR body must be present in source");
+        let expected = body_start..body_start + body.len();
+
+        let (doc, diags) = fold_spanned(&input);
+        assert!(diags.is_empty(), "HR fixture must fold cleanly: {diags:?}");
+
+        // Sanity: the leading inline extension actually folded, so the rewrite
+        // ran and offsets were shifted before the HR paragraph.
+        assert_eq!(
+            collect_extended(&doc.root, "mark").len(),
+            1,
+            "leading ==marked== must fold to one mark Extended node",
+        );
+
+        fn find_hr(node: &RenderNode) -> Option<&RenderNode> {
+            if matches!(node.kind, NodeKind::ThematicBreak) {
+                return Some(node);
+            }
+            for child in node.children() {
+                if let Some(found) = find_hr(child) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
+        assert_eq!(hr.span.provenance, Provenance::Generated);
+        let location = hr
+            .span
+            .location
+            .as_ref()
+            .expect("generated HR must carry a SourceLocation");
+        assert_eq!(
+            location.bytes, expected,
+            "generated HR SourceLocation must resolve to the original body range despite the rewrite",
+        );
+        assert_eq!(&input[location.bytes.clone()], body);
+    }
+
+    /// An escaped `\==` must survive as literal `==` visible text and produce
+    /// no mark node. The rewriter leaves the escaped delimiter untouched, so
+    /// `pulldown-cmark` applies its own CommonMark escape (consuming the
+    /// backslash) and the `==` reaches the fold as ordinary text.
+    #[test]
+    fn span_aware_fold_escaped_mark_stays_literal_text() {
         let input = "foo \\== bar";
         let (doc, diags) = fold_spanned(input);
         assert!(
@@ -1597,32 +1853,110 @@ mod tests {
             "escape fixture must fold cleanly: {diags:?}"
         );
 
-        // Walk every Text descendant; the literal `==` must appear with the
-        // exact `4..7` source range.
-        fn find_text<'a>(node: &'a RenderNode, value: &str) -> Option<&'a RenderNode> {
-            if let NodeKind::Text { value: text } = &node.kind
-                && text == value
-            {
+        assert!(
+            collect_extended(&doc.root, "mark").is_empty(),
+            "escaped `\\==` must not produce a mark Extended node",
+        );
+
+        // The literal `==` must survive as visible text.
+        let mut text = String::new();
+        collect_text(doc.root.children(), &mut text);
+        assert!(
+            text.contains("=="),
+            "escaped delimiter must keep a literal `==`: {text:?}",
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Verbatim-region protection at the fold tier (review-1 finding 1). The
+    // source rewriter protects code/HTML/link/image regions, so the fold must
+    // never see an envelope for delimiters that lived inside them.
+    // -----------------------------------------------------------------------
+
+    /// `==code==` inside an inline code span must stay literal: the fold sees an
+    /// `InlineCode` node carrying the delimiters verbatim, not a mark `Extended`.
+    #[test]
+    fn span_aware_fold_inline_code_keeps_delimiters_literal() {
+        let (doc, diags) = fold_spanned("text `==code==` more");
+        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        assert!(
+            collect_extended(&doc.root, "mark").is_empty(),
+            "an inline code span must not produce a mark Extended node",
+        );
+        fn find_code(node: &RenderNode) -> Option<&RenderNode> {
+            if matches!(node.kind, NodeKind::InlineCode { .. }) {
                 return Some(node);
             }
-            for child in node.children() {
-                if let Some(found) = find_text(child, value) {
-                    return Some(found);
-                }
-            }
-            None
+            node.children().iter().find_map(find_code)
         }
-        let literal = find_text(&doc.root, "==")
-            .expect("escaped mark literal must reach the fold as a Text node");
-        let location = literal
-            .span
-            .location
-            .as_ref()
-            .expect("escaped mark literal must carry a SourceLocation");
-        assert_eq!(
-            location.bytes,
-            4..7,
-            "escaped mark literal SourceLocation must include the backslash byte",
+        let code = find_code(&doc.root).expect("inline code node must exist");
+        match &code.kind {
+            NodeKind::InlineCode { value } => assert_eq!(value, "==code=="),
+            other => panic!("expected inline code, got {other:?}"),
+        }
+    }
+
+    /// A fenced code block containing `==`/`⌄` must preserve them verbatim in
+    /// the `Code` node body and emit no `Extended` nodes.
+    #[test]
+    fn span_aware_fold_fenced_code_keeps_delimiters_literal() {
+        let (doc, diags) = fold_spanned("```\n==code== and \u{2304}dim\u{2304}\n```\n");
+        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        assert!(
+            collect_extended(&doc.root, "mark").is_empty()
+                && collect_extended(&doc.root, "dim").is_empty(),
+            "a fenced code block must not produce Extended nodes",
         );
+        let code = &doc.root.children()[0];
+        match &code.kind {
+            NodeKind::Code { value, .. } => {
+                assert!(
+                    value.contains("==code==") && value.contains('\u{2304}'),
+                    "code body must keep delimiters verbatim: {value:?}",
+                );
+            }
+            other => panic!("expected code block, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Table-cell inline extensions (review-1 finding 2). A pipe-free envelope
+    // keeps GFM cell boundaries intact, so mark/dim render inside table cells.
+    // -----------------------------------------------------------------------
+
+    /// `==hi==` in a table header cell must fold to a mark `Extended` node while
+    /// the table keeps its two columns — proving the envelope injected no stray
+    /// `|` bytes that would split the row.
+    #[test]
+    fn span_aware_fold_mark_inside_table_cell_preserves_columns() {
+        let (doc, diags) = fold_spanned("| ==hi== | ok |\n|----|----|\n| a | b |\n");
+        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+
+        fn find_table(node: &RenderNode) -> Option<&RenderNode> {
+            if matches!(node.kind, NodeKind::Table { .. }) {
+                return Some(node);
+            }
+            node.children().iter().find_map(find_table)
+        }
+        let table = find_table(&doc.root).expect("table node must exist");
+        let NodeKind::Table { align, children: rows } = &table.kind else {
+            unreachable!("matched above");
+        };
+        assert_eq!(align.len(), 2, "table must keep exactly two columns");
+        // Header row first; it must carry two cells, not extra ones split off a
+        // stray marker pipe.
+        let header = &rows[0];
+        assert_eq!(
+            header.children().len(),
+            2,
+            "header row must keep two cells: {:?}",
+            header.children(),
+        );
+
+        // The first header cell holds the mark Extended node with text "hi".
+        let mark = find_extended(&doc.root, "mark").expect("mark Extended node must exist");
+        let mut mark_text = String::new();
+        collect_text(mark.children(), &mut mark_text);
+        assert_eq!(mark_text, "hi");
     }
 }

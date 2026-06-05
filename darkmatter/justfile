@@ -1,5 +1,5 @@
-set dotenv-load := true
-set positional-arguments := true
+set dotenv-load
+set positional-arguments
 # set allow-duplicate-recipes := true
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
@@ -75,9 +75,10 @@ test-l2 *args="":
     @just _test_l2 {{ LIBRARY }} {{ args }}
     @just _test_l2 {{ CLI }} {{ args }}
 
-# not applicable: darkmatter has no OS-keyboard-injection (Level-3) tests
-test-l3:
-    @echo "test-l3: not applicable for darkmatter"
+# darkmatter Level-3 tests
+test-l3 *args="":
+    @just _test_l3 {{ LIBRARY }} {{ args }}
+    @just _test_l3 {{ CLI }} {{ args }}
 
 # Headless-browser tests (chromiumoxide). Selects every `browser_*` test in
 # the library crate. Skips cleanly when Chrome is absent unless

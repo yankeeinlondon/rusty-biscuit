@@ -157,7 +157,33 @@ impl TerminalRenderable for HorizontalRule {
             return image;
         }
 
-        // Determine the width based on alignment, custom width, and terminal width
+        self.render_text_tier(term)
+    }
+
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
+    }
+
+    fn is_block_level(&self) -> bool {
+        true
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl HorizontalRule {
+    /// Renders the text tier (Unicode or ASCII glyphs) without attempting
+    /// the image tier.
+    ///
+    /// Used by the render-tree renderer when [`GraphicsMode::Off`] suppresses
+    /// graphics, or when the image tier is unavailable or fails.
+    pub(crate) fn render_text_tier(&self, term: &Terminal) -> String {
         let term_width = term.width() as usize;
         let rule_width = self.resolve_width(term_width);
 
@@ -191,24 +217,6 @@ impl TerminalRenderable for HorizontalRule {
         }
     }
 
-    fn layout(&self) -> &Layout {
-        &self.layout
-    }
-
-    fn layout_mut(&mut self) -> &mut Layout {
-        &mut self.layout
-    }
-
-    fn is_block_level(&self) -> bool {
-        true
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-impl HorizontalRule {
     /// Resolves the width of the rule in characters based on the terminal
     /// width and the CSS-like width specification.
     ///
@@ -318,7 +326,7 @@ impl HorizontalRule {
     /// [`DEFAULT_CELL_WIDTH`]×[`DEFAULT_CELL_HEIGHT`] (8×16 px) per cell.
     /// This matches typical monospace fonts at common DPI; oversized fonts
     /// render a proportionally thicker-looking rule.
-    fn render_image_tier(&self, term: &Terminal) -> Option<String> {
+    pub(crate) fn render_image_tier(&self, term: &Terminal) -> Option<String> {
         if !term.is_tty
             || !matches!(
                 term.image_support,
@@ -2731,6 +2739,188 @@ mod tests {
             }
             let json = serde_json::to_string(&RuleWeight::Thick).unwrap();
             assert_eq!(json, "\"thick\"");
+        }
+
+        // ================================================================
+        // Phase 2 parity: renderable::tree::graphics::horizontal_rule_svg
+        // must match HorizontalRule::render_browser_svg byte-for-byte.
+        // ================================================================
+
+        #[test]
+        fn parity_default_dashes() {
+            let rule = HorizontalRule::new();
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                None, None, None, None, "0", "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "default dashed SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_waves_thick_blue() {
+            let rule = HorizontalRule::new()
+                .style(RuleStyle::Waves)
+                .weight(RuleWeight::Thick)
+                .color("blue");
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                Some("waves"),
+                Some("thick"),
+                None,
+                Some("blue"),
+                "0",
+                "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "waves+thick+blue SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_dots_thin_custom_width() {
+            let rule = HorizontalRule::new()
+                .style(RuleStyle::Dots)
+                .weight(RuleWeight::Thin)
+                .width("50%");
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                Some("dots"),
+                Some("thin"),
+                Some("50%"),
+                None,
+                "0",
+                "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "dots+thin+50% SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_line_star() {
+            let rule = HorizontalRule::new().style(RuleStyle::LineStar);
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                Some("line-star"),
+                None,
+                None,
+                None,
+                "0",
+                "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "line-star SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_line_circle() {
+            let rule = HorizontalRule::new().style(RuleStyle::LineCircle);
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                Some("line-circle"),
+                None,
+                None,
+                None,
+                "0",
+                "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "line-circle SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_inset_line() {
+            let rule = HorizontalRule::new().style(RuleStyle::InsetLine);
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                Some("inset-line"),
+                None,
+                None,
+                None,
+                "0",
+                "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "inset-line SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_curtain_rod() {
+            let rule = HorizontalRule::new().style(RuleStyle::CurtainRod);
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                Some("curtain-rod"),
+                None,
+                None,
+                None,
+                "0",
+                "0",
+            );
+            assert_eq!(
+                actual, expected,
+                "curtain-rod SVG must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn parity_with_custom_margins() {
+            let rule = HorizontalRule::new()
+                .with_layout(crate::utils::layout::Layout {
+                    margin: crate::utils::layout::Margin {
+                        top: renderable::layout::TargetValue::universal(
+                            renderable::layout::Length::ch(2),
+                        ),
+                        right: renderable::layout::TargetValue::universal(
+                            renderable::layout::Length::Zero,
+                        ),
+                        bottom: renderable::layout::TargetValue::universal(
+                            renderable::layout::Length::ch(1),
+                        ),
+                        left: renderable::layout::TargetValue::universal(
+                            renderable::layout::Length::Zero,
+                        ),
+                    },
+                    ..crate::utils::layout::Layout::default()
+                });
+            let expected = rule.render_browser_svg();
+            let actual = renderable::tree::graphics::horizontal_rule_svg(
+                None, None, None, None, "2ch", "1ch",
+            );
+            assert_eq!(
+                actual, expected,
+                "SVG with custom margins must match between renderable and biscuit-terminal"
+            );
+        }
+
+        #[test]
+        fn render_text_tier_matches_render_when_image_unavailable() {
+            let _guard = ScopedLcAll::force_utf8();
+            let hr = HorizontalRule::new()
+                .style(RuleStyle::Waves)
+                .alignment(RuleAlignment::Centered)
+                .width("50%");
+            let term = text_terminal_with_width(80);
+
+            // text_terminal disables the image tier, so render() falls through
+            // to the text tier automatically.
+            let via_render = hr.render(&term);
+            let via_text_tier = hr.render_text_tier(&term);
+
+            assert_eq!(
+                via_render, via_text_tier,
+                "render_text_tier must match render() when image tier is unavailable"
+            );
         }
     }
 }

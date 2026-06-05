@@ -1,8 +1,8 @@
 //! Shared, target-neutral text-styling leaf primitives.
 //!
 //! [`TextEmphasis`] is the single source of truth for text weight and
-//! decoration intent — bold, dim, italic, underline, strikethrough, and
-//! blink. It is reused by `biscuit-terminal`'s `Prose` styling and is
+//! decoration intent — bold, dim, italic, underline, strikethrough, blink,
+//! and inverse. It is reused by `biscuit-terminal`'s `Prose` styling and is
 //! intended to back the render-tree `Style` primitive, so terminal SGR
 //! emission and browser CSS / semantic-HTML emission are written once here
 //! and never drift between targets.
@@ -86,6 +86,8 @@ pub enum EmphasisLayer {
     Strikethrough,
     /// Blink.
     Blink,
+    /// Inverse (reverse video) — swaps foreground and background.
+    Inverse,
 }
 
 impl EmphasisLayer {
@@ -97,6 +99,7 @@ impl EmphasisLayer {
             Self::Underline => "\x1b[24m",
             Self::Strikethrough => "\x1b[29m",
             Self::Blink => "\x1b[25m",
+            Self::Inverse => "\x1b[27m",
         }
     }
 }
@@ -121,6 +124,12 @@ pub struct TextEmphasis {
     pub strikethrough: bool,
     /// Blink.
     pub blink: bool,
+    /// Inverse (reverse video) — swaps the foreground and background.
+    ///
+    /// `#[serde(default)]` so render trees serialized before `inverse`
+    /// existed deserialize with `inverse == false`.
+    #[serde(default)]
+    pub inverse: bool,
     /// Underline variant, if any.
     pub underline: Option<UnderlineStyle>,
 }
@@ -154,6 +163,9 @@ impl TextEmphasis {
         if self.strikethrough {
             ops.push((EmphasisLayer::Strikethrough, "\x1b[9m"));
         }
+        if self.inverse {
+            ops.push((EmphasisLayer::Inverse, "\x1b[7m"));
+        }
         ops
     }
 
@@ -170,6 +182,7 @@ impl TextEmphasis {
             italic: self.italic || parent.italic,
             strikethrough: self.strikethrough || parent.strikethrough,
             blink: self.blink || parent.blink,
+            inverse: self.inverse || parent.inverse,
             underline: self.underline.or(parent.underline),
         }
     }
@@ -204,6 +217,9 @@ impl TextEmphasis {
                 "<span style=\"text-decoration: blink\">".to_string(),
                 "</span>",
             ));
+        }
+        if self.inverse {
+            wrappers.push(("<span style=\"filter: invert(1)\">".to_string(), "</span>"));
         }
         wrappers
     }
@@ -413,6 +429,7 @@ pub struct Fill {
 ///     "italic": true,
 ///     "strikethrough": false,
 ///     "blink": false,
+///     "inverse": false,
 ///     "underline": null
 ///   },
 ///   "border": {
@@ -527,6 +544,58 @@ mod tests {
     fn underline_sgr_open_matches_variant() {
         assert_eq!(UnderlineStyle::Straight.sgr_open(), "\x1b[4m");
         assert_eq!(UnderlineStyle::Double.sgr_open(), "\x1b[4:2m");
+    }
+
+    #[test]
+    fn sgr_ops_includes_inverse_set_code() {
+        let e = TextEmphasis {
+            inverse: true,
+            ..Default::default()
+        };
+        let ops = e.sgr_ops();
+        assert_eq!(ops, vec![(EmphasisLayer::Inverse, "\x1b[7m")]);
+    }
+
+    #[test]
+    fn inverse_layer_resets_with_sgr_27() {
+        assert_eq!(EmphasisLayer::Inverse.sgr_reset(), "\x1b[27m");
+    }
+
+    #[test]
+    fn inverse_html_wrapper_uses_invert_filter() {
+        let e = TextEmphasis {
+            inverse: true,
+            ..Default::default()
+        };
+        let wrappers = e.html_wrappers();
+        assert_eq!(wrappers[0].0, "<span style=\"filter: invert(1)\">");
+    }
+
+    #[test]
+    fn inverse_inheritance_unions_from_parent() {
+        let parent = TextEmphasis {
+            inverse: true,
+            ..Default::default()
+        };
+        // A child that declares no inverse inherits the parent's.
+        let merged = TextEmphasis::default().inherited_from(&parent);
+        assert!(merged.inverse);
+    }
+
+    #[test]
+    fn missing_inverse_deserializes_as_false() {
+        // A render tree serialized before `inverse` existed omits the field.
+        let json = r#"{
+            "bold": true,
+            "dim": false,
+            "italic": false,
+            "strikethrough": false,
+            "blink": false,
+            "underline": null
+        }"#;
+        let e: TextEmphasis = serde_json::from_str(json).unwrap();
+        assert!(e.bold);
+        assert!(!e.inverse);
     }
 
     #[test]

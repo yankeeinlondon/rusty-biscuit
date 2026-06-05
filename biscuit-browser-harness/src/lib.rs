@@ -245,6 +245,15 @@ pub struct ChromeHarness {
     browser: Option<Browser>,
     handler_handle: Option<tokio::task::JoinHandle<()>>,
     workdir: Option<tempfile::TempDir>,
+    /// Per-harness Chrome profile (`--user-data-dir`). Each spawn gets its
+    /// own dir so concurrent test processes never collide on Chrome's
+    /// `SingletonLock`. chromiumoxide otherwise defaults every instance to a
+    /// single shared `$TMPDIR/chromiumoxide-runner`, which fails the second
+    /// concurrent launch — and `#[serial]` cannot prevent that under
+    /// nextest's process-per-test model. Held only so the dir is removed
+    /// when the harness drops.
+    #[allow(dead_code)]
+    profile_dir: Option<tempfile::TempDir>,
     extra_args: Vec<String>,
 }
 
@@ -258,6 +267,7 @@ impl ChromeHarness {
             browser: None,
             handler_handle: None,
             workdir: None,
+            profile_dir: None,
             extra_args: vec!["--no-sandbox".to_string()],
         }
     }
@@ -316,13 +326,20 @@ impl BrowserHarness for ChromeHarness {
             Some(p) => p,
             None => return Err(BrowserError::NoBrowser),
         };
-        let mut builder = BrowserConfig::builder().chrome_executable(chrome);
+        // A fresh per-harness profile dir keeps concurrent test processes off
+        // chromiumoxide's shared default profile, whose `SingletonLock` fails
+        // the second simultaneous launch.
+        let profile = tempfile::tempdir()?;
+        let mut builder = BrowserConfig::builder()
+            .chrome_executable(chrome)
+            .user_data_dir(profile.path());
         for arg in &self.extra_args {
             builder = builder.arg(arg);
         }
         let config = builder
             .build()
             .map_err(|e| BrowserError::Command(e.to_string()))?;
+        self.profile_dir = Some(profile);
         let (browser, mut handler) = Browser::launch(config)
             .await
             .map_err(|e| BrowserError::Command(e.to_string()))?;

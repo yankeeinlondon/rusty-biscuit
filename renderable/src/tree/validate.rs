@@ -124,6 +124,7 @@ fn is_inline_kind(kind: &NodeKind) -> bool {
             | NodeKind::Strong { .. }
             | NodeKind::Delete { .. }
             | NodeKind::Span { .. }
+            | NodeKind::Extended { .. }
             | NodeKind::InlineCode { .. }
             | NodeKind::Link { .. }
             | NodeKind::Image { .. }
@@ -175,6 +176,7 @@ fn kind_name(kind: &NodeKind) -> &'static str {
         NodeKind::SoftBreak => "SoftBreak",
         NodeKind::HardBreak => "HardBreak",
         NodeKind::Html { .. } => "Html",
+        NodeKind::Extended { .. } => "Extended",
         NodeKind::Unsupported { .. } => "Unsupported",
     }
 }

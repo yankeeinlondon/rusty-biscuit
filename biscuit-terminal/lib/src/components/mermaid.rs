@@ -273,6 +273,27 @@ impl MermaidRenderer {
         self.diagram.fallback_code_block()
     }
 
+    /// Renders the diagram to an SVG string.
+    ///
+    /// Delegates to `biscuit-visualized`'s Mermaid renderer and reads the
+    /// cached SVG file into a string. This is the browser static-SVG path
+    /// for Mermaid promotion.
+    ///
+    /// ## Errors
+    ///
+    /// Returns error if diagram rendering or file I/O fails.
+    pub fn render_to_svg(&self) -> Result<String, MermaidRenderError> {
+        let request = biscuit_visualized::artifact::RenderRequest {
+            format: biscuit_visualized::artifact::OutputFormat::Svg,
+            scale: self.scale,
+            target_width: None,
+            transparent_background: self.transparent_background,
+        };
+        let artifact = self.diagram.render(&request)?;
+        std::fs::read_to_string(&artifact.path)
+            .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))
+    }
+
     /// Renders the diagram to a cached PNG file, returning the path and cache hit status.
     ///
     /// This method renders the diagram using biscuit-visualized's caching system.
@@ -448,6 +469,13 @@ impl MermaidDiagram {
     /// Returns the fallback code block for the diagram.
     pub fn fallback_code_block(&self) -> String {
         self.renderer.fallback_code_block()
+    }
+
+    /// Renders the diagram to an SVG string.
+    ///
+    /// Delegates to [`MermaidRenderer::render_to_svg`].
+    pub fn render_to_svg(&self) -> Result<String, MermaidRenderError> {
+        self.renderer.render_to_svg()
     }
 
     /// Renders the diagram to a terminal-displayable string.
@@ -727,6 +755,31 @@ mod tests {
                 // the assertion rather than fail — the Level-2 tests
                 // exercise the full pipeline.
                 eprintln!("Mermaid render unavailable in unit-test env: {e}");
+            }
+        }
+    }
+
+    /// `render_to_svg` must produce an SVG string containing expected Mermaid
+    /// elements, or gracefully skip when the host lacks rendering deps.
+    #[test]
+    fn diagram_render_to_svg_produces_svg() {
+        let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+        match diagram.render_to_svg() {
+            Ok(svg) => {
+                assert!(
+                    svg.contains("<svg"),
+                    "render_to_svg must produce an <svg> element, got: {svg}"
+                );
+                assert!(
+                    svg.contains("</svg>"),
+                    "render_to_svg must close the <svg> element, got: {svg}"
+                );
+            }
+            Err(e) => {
+                // If the host lacks Mermaid rendering dependencies, skip
+                // rather than fail — the Level-2 tests exercise the full
+                // pipeline.
+                eprintln!("Mermaid SVG render unavailable in unit-test env: {e}");
             }
         }
     }

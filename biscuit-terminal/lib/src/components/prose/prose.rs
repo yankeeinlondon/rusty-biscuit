@@ -1,12 +1,22 @@
-//! Public [`Prose`] struct, builder methods, and the `parse_tokens` entry point.
+//! Public [`Prose`] struct, builder methods, and target trait implementations.
+
+use std::any::Any;
+
+use renderable::browser::{BrowserRenderable, PageOptions};
+use renderable::browser::fragment::{BrowserFragment, ComposableNode, Ready};
+use renderable::html::HtmlPage;
+use renderable::html::tag::BlockTag;
+use renderable::markdown::MarkdownRenderable;
+use renderable::tree::render::{
+    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
+    render_markdown_node,
+};
+use renderable::tree::TreeRenderable;
 
 use crate::{
-    terminal::Terminal,
     utils::layout::{Layout, Length, TargetValue},
     utils::wrap_policy::WordWrap,
 };
-
-use super::ir::ProseDocument;
 
 /// Styled text with token and block tag support for rich terminal output.
 ///
@@ -239,22 +249,7 @@ impl Prose {
         format!("{quote}{body}{quote}")
     }
 
-    /// Parse the raw content into the target-neutral [`ProseDocument`] IR.
-    ///
-    /// Pre-processes the supported Markdown subset (`**bold**`, `_italics_`,
-    /// `[desc](ref)`) and parses bracketed tags. Former atomic-token syntax
-    /// (`{{…}}`) is treated as ordinary literal text.
-    pub(super) fn document(&self) -> ProseDocument {
-        ProseDocument::parse(&self.content)
-    }
 
-    /// Parse and render the content to terminal ANSI/OSC8 output.
-    ///
-    /// Builds the [`ProseDocument`] IR and renders it through the terminal
-    /// emitter. Only the outermost emit produces the final `\x1b[0m` reset.
-    pub(super) fn parse_tokens(&self, term: Option<&Terminal>) -> String {
-        super::terminal::render(&self.document(), term)
-    }
 }
 
 impl Default for Prose {
@@ -302,5 +297,109 @@ impl IntoProseVec for &str {
 impl IntoProseVec for String {
     fn into_prose_vec(self) -> Vec<Prose> {
         vec![Prose::new(self)]
+    }
+}
+
+impl MarkdownRenderable for Prose {
+    /// Renders the prose as portable Markdown via the canonical render tree.
+    fn render_markdown(&self) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        match render_markdown_node(&node, &MarkdownRenderOptions::default()) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Prose",
+                    dialect = "Markdown",
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+
+    /// Renders the prose as MarkdownPlus via the canonical render tree.
+    fn render_markdown_plus(&self) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = MarkdownRenderOptions {
+            dialect: MarkdownDialect::MarkdownPlus,
+            ..MarkdownRenderOptions::default()
+        };
+        match render_markdown_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Prose",
+                    dialect = "MarkdownPlus",
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+}
+
+impl BrowserRenderable for Prose {
+    /// Renders the prose as a layout-free inline `<span class="prose">` HTML
+    /// fragment.
+    ///
+    /// ## Interim layout contract (revisit with style-based-alignment)
+    ///
+    /// The fragment deliberately carries **no** layout (margins, alignment,
+    /// width): it wraps the styled inline children in a single
+    /// `<span class="prose">` and stops there. Layout is owned by the caller —
+    /// the `bt prose` CLI wraps this fragment in its own `<div style="…">` (see
+    /// `biscuit-terminal/cli/src/commands/prose.rs::render_html_with_layout`).
+    ///
+    /// This splits the contract on purpose. Routing the fragment through
+    /// [`TreeRenderable::render_tree`] folds Prose's `Layout` into the fragment
+    /// (`<div style="margin-…"><p>…</p></div>`), which then **double-applies**
+    /// the margin against the CLI's own wrapper. Keeping the fragment inline and
+    /// letting the CLI own layout is the resolution chosen on 2026-06-04 for
+    /// that double-margin defect.
+    ///
+    /// It is an interim choice. Once
+    /// `renderable/features/2026-06-04-style-based-alignment` moves layout onto
+    /// CSS-Box-Layout `renderable::style`/`Layout` primitives that lower to CSS,
+    /// the component-owns-its-layout model becomes viable again and this split
+    /// should be reconsidered (fragment carries its layout; CLI stops wrapping).
+    /// Until then, do not re-route this through `render_tree`.
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        // Render each projected node to its own HTML through the shared tree
+        // renderer, then concatenate the strings inside one `<span class="prose">`.
+        // Rendering per node (rather than wrapping the nodes in one inline Span
+        // tree) keeps a top-level block-level `Code` node valid — a fenced code
+        // block folds to `<pre><code>…</code></pre>` and only the final HTML
+        // string carries it inside the span, which the tree validator never sees.
+        let opts = BrowserRenderOptions::default();
+        let mut inner = String::new();
+        for child in self.to_render_nodes() {
+            match render_browser_node(&child, &opts) {
+                Ok(rendered) => inner.push_str(&rendered.output.render()),
+                Err(error) => tracing::error!(
+                    component = "Prose",
+                    error = %error,
+                    "render_browser_node failed; skipping node"
+                ),
+            }
+        }
+        BrowserFragment::new()
+            .define_as_block_tag(BlockTag::Span, "prose")
+            .add_child(ComposableNode::RawHtml(inner))
+            .finalize()
+    }
+
+    /// Wraps the HTML fragment in a complete [`HtmlPage`].
+    fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
+        let mut html_page = HtmlPage::from(self.render_html_fragment());
+        if let Some(options) = page {
+            html_page.apply_page_options(options);
+        }
+        html_page
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

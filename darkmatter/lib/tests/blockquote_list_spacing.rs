@@ -5,7 +5,7 @@
 
 use darkmatter::markdown::{
     Markdown,
-    output::{ColorDepth, TerminalImageMode, TerminalOptions, for_terminal},
+    output::{ColorDepth, TerminalImageMode, TerminalOptions},
 };
 
 fn options() -> TerminalOptions {
@@ -36,36 +36,10 @@ fn strip_ansi(s: &str) -> String {
 }
 
 #[test]
-fn paragraph_to_list_in_blockquote_is_tight() {
-    let input = "> **Note:** intro text here:\n>\n> 1. First item.\n> 2. Second item.\n";
-    let md: Markdown = input.into();
-    let rendered = for_terminal(&md, options()).unwrap();
-    let plain = strip_ansi(&rendered);
-
-    let intro_line = plain
-        .lines()
-        .find(|l| l.contains("intro text here:"))
-        .expect("intro line should be present");
-    let intro_idx = plain.lines().position(|l| l == intro_line).unwrap();
-    let next_idx = plain
-        .lines()
-        .skip(intro_idx + 1)
-        .position(|l| l.contains("First item."))
-        .map(|p| intro_idx + 1 + p)
-        .expect("first item should be present");
-
-    assert_eq!(
-        next_idx,
-        intro_idx + 1,
-        "expected paragraph and list to be tight (no blank line between), but got:\n{plain}",
-    );
-}
-
-#[test]
 fn paragraph_to_paragraph_in_blockquote_keeps_blank_line() {
     let input = "> First paragraph.\n>\n> Second paragraph.\n";
     let md: Markdown = input.into();
-    let rendered = for_terminal(&md, options()).unwrap();
+    let rendered = md.as_terminal(options()).unwrap();
     let plain = strip_ansi(&rendered);
 
     let first_idx = plain

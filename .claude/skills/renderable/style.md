@@ -94,9 +94,14 @@ let emphasis = TextEmphasis {
 - `inherited_from(&parent)` — boolean union; the underline variant falls back
   to the parent's when this side has none.
 
+`TextEmphasis` fields: `bold`, `dim`, `italic`, `strikethrough`, `blink`,
+`inverse` (reverse video; SGR set `7` / reset `27`, browser `filter:invert(1)`),
+and `underline`. `inverse` is `#[serde(default)]`, so render trees serialized
+before it existed deserialize with `inverse == false`.
+
 `UnderlineStyle`: `Straight`, `Double`, `Curly`, `Dotted`, `Dashed`.
-`EmphasisLayer`: `Weight`, `Italic`, `Underline`, `Strikethrough`, `Blink` —
-each knows its `sgr_reset()` code.
+`EmphasisLayer`: `Weight`, `Italic`, `Underline`, `Strikethrough`, `Blink`,
+`Inverse` — each knows its `sgr_reset()` code.
 
 ## Border
 
@@ -162,6 +167,7 @@ or the typed slot struct.
 
 Browser lowering currently covers `color`, `background`, and `emphasis`:
 inline bold/italic/strikethrough use semantic wrappers, block-level emphasis
-uses CSS declarations, and underline variants, dim, and blink lower to CSS.
+uses CSS declarations, and underline variants, dim, blink, and inverse
+(`filter:invert(1)`) lower to CSS.
 `border` and `fill` are not lowered to Browser CSS yet; Terminal remains the
 only target that renders border glyphs and fill bands.

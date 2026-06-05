@@ -2,6 +2,10 @@
 
 Condensed history of significant Claudine features and refactors, newest first. Each entry names the feature/fix slug and the durable takeaway; deep references live in the linked docs. For current behavior always trust [architecture.md](architecture.md), [cli-reference.md](cli-reference.md), and the repo `docs/topics/*` — this file is historical context, not a spec.
 
+## 2026-06
+
+- **2026-06-03 — `dry-run`**: The long-dormant `--dry-run` flag on `compose` / `inline-compose` / `sequence` became a real pre-launch gate. It runs the full composition pipeline up to (not including) provider launch — schema validation, real shell execution, harness pre-checks, and provider/model resolution all run — then emits the composed **body to stdout** and the highlighted YAML frontmatter + a metadata table (Document OSC8 link, Description, Agent, Model, YOLO, Area) **to stderr**. The old behavior (a provider-command dump via `output::log_dry_run`) was swapped out of the composition path but kept for the raw provider wrappers. `--quiet`/`--silent` are no-ops under `--dry-run`. Non-TTY unapproved shell commands fail fast with `Cannot dry-run: shell command 'X' requires interactive approval…` (bypass with `--yolo`); in a TTY the normal approval prompt fires. `inline-compose --dry-run` never mutates the source file; `sequence --dry-run` concatenates bodies to stdout with `=== Document N of M ===` dividers on stderr and fails fast. Render core lives in `cli/.../wrap/composition/dry_run.rs`. See [Composition — Dry Run](../../../claudine/docs/topics/composition.md#dry-run).
+
 ## 2026-05
 
 - **2026-05-12 — `improved-error-handling`**: Compose-loop errors split out of the overloaded `LoopInvalid`. New `LoopIterationFailed { iteration, prompt_path, exit_code, reason, exit_reason }` and `LoopRateLimited { ... reset_at, message }`; `reason`/`exit_reason` come from the iteration's `session_end` JSONL row. Loop became rate-limit-aware via `loop.on_rate_limit: pause|abort|continue` (default `pause`), `--on-rate-limit`, and exit code `75` (`EX_TEMPFAIL`). `LoopInvalid` now means frontmatter parse failure only.

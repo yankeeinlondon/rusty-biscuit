@@ -239,9 +239,22 @@ fn bench_tree_component(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_component_render_path_comparison(c: &mut Criterion) {
+/// Renders every tree-rendering component once, through the tree terminal
+/// renderer (`render_tree()` -> `render_terminal_node`). This is the permanent
+/// per-component perf signal for the cutover gate (Part 2, baseline-tracked).
+/// It is NOT a bespoke comparison — every listed component already defaults to
+/// the tree, so there is no second arm to measure.
+fn bench_component_render(c: &mut Criterion) {
+    use biscuit_terminal::components::block_quote::BlockQuote;
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::status::StatusState;
+    use biscuit_terminal::components::status_block::StatusBlock;
+    use biscuit_terminal::components::text_block::TextBlock;
+    use biscuit_terminal::components::todo::Todo;
+
     let term = Terminal::new_optimistic(120);
     let opts = TerminalRenderOptions::new(&term, Default::default());
+
     let progress = Progress::new(0.72)
         .with_label("Indexing")
         .with_bar_width(48);
@@ -280,30 +293,45 @@ fn bench_component_render_path_comparison(c: &mut Criterion) {
                         TableCellContent::Text(format!("Item {i}")),
                         TableCellContent::Text(if i % 3 == 0 { "Ready" } else { "Queued" }.into()),
                         TableCellContent::Text(format!(
-                            "This row has enough text to exercise wrapping and width planning {i}"
+                            "This row has enough text to exercise wrapping {i}"
                         )),
                     ]
                 })
                 .collect(),
         );
 
-    let mut group = c.benchmark_group("component_render_path_comparison");
+    let block_quote = BlockQuote::new::<String>(
+        (0..20)
+            .map(|i| format!("Quoted line {i} with some length to wrap"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into(),
+        None,
+    );
+    let text_block = TextBlock::new(
+        (0..40)
+            .map(|i| format!("Text block line {i} of uniformly styled content"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let status_block = StatusBlock::new(StatusState::Info)
+        .body("A severity-colored status block body line with detail.");
+    let todo = Todo::new("Wire the perf gate benchmark suite");
+    let prose = Prose::new(
+        "A <b>prose</b> paragraph with <red>color</red>, <i>emphasis</i>, and a \
+         [link](https://example.com) plus enough words to exercise wrapping across the line.",
+    );
+
+    let mut group = c.benchmark_group("component_render");
 
     macro_rules! bench_component {
         ($name:literal, $component:expr) => {{
             group.bench_with_input(
-                BenchmarkId::new($name, "bespoke"),
-                &$component,
-                |b, component| b.iter(|| component.render(black_box(&term))),
-            );
-            group.bench_with_input(
-                BenchmarkId::new($name, "tree"),
+                BenchmarkId::from_parameter($name),
                 &$component,
                 |b, component| {
                     b.iter(|| {
-                        let node = component
-                            .render_tree_node()
-                            .expect("comparison component should support tree rendering");
+                        let node = TreeRenderable::render_tree(component);
                         render_terminal_node(black_box(&node), black_box(&opts))
                             .expect("tree rendering should succeed")
                             .output
@@ -319,6 +347,11 @@ fn bench_component_render_path_comparison(c: &mut Criterion) {
     bench_component!("section_60", section);
     bench_component!("two_column", two_column);
     bench_component!("table_80x3", table);
+    bench_component!("block_quote_20", block_quote);
+    bench_component!("text_block_40", text_block);
+    bench_component!("status_block", status_block);
+    bench_component!("todo", todo);
+    bench_component!("prose", prose);
 
     group.finish();
 }
@@ -328,6 +361,6 @@ criterion_group!(
     bench_render_node,
     bench_render_document,
     bench_tree_component,
-    bench_component_render_path_comparison,
+    bench_component_render,
 );
 criterion_main!(benches);

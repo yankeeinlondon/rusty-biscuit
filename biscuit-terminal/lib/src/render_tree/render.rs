@@ -4,11 +4,10 @@
 //! and [`render_terminal_document`] does the same for a whole [`Document`].
 //!
 //! The renderer reuses biscuit-terminal's existing components wherever they
-//! fit — [`Prose`] for inline runs, [`Table`], [`BlockQuote`], and
-//! [`HorizontalRule`] — rather than re-implementing terminal formatting.
-//! Headings, sections, and lists are rendered natively. Inline subtrees are
-//! projected into [`Prose`] block-tag markup so color, styling, and OSC8
-//! hyperlinks are handled by the established component.
+//! fit — [`Table`], [`BlockQuote`], and [`HorizontalRule`] — rather than
+//! re-implementing terminal formatting. Headings, sections, and lists are
+//! rendered natively. Inline subtrees are lowered directly to ANSI SGR
+//! escapes, OSC8 hyperlinks, and markdown fallback syntax.
 //!
 //! ## Strictness
 //!
@@ -32,17 +31,21 @@
 //! ```
 
 use renderable::color::TerminalCodeContext;
-use renderable::style::Style;
+use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
-    ColumnAlign, ColumnConditional, Diagnostic, Document, HintNamespace, NodeKind, ProgressHints,
-    RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
+    ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HintNamespace, NodeKind,
+    ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
+    TerminalMermaidMode,
 };
 use renderable::tree::{ValidationError, ValidationMode, validate};
 
 use crate::components::block_quote::BlockQuote;
 use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
+use crate::components::mermaid::MermaidDiagram;
 use crate::components::prose::Prose;
 use crate::components::renderable::TerminalRenderable;
+use crate::components::terminal_image::TerminalImage;
+use crate::discovery::detection::ImageSupport;
 use crate::components::table::cell::pad_cell;
 use crate::components::table::table::{
     BG_RESET, FG_RESET, apply_vertical_padding, build_border, stripe_bg_escape, stripe_fg_escape,
@@ -55,8 +58,12 @@ use crate::discovery::detection::ColorDepth;
 use crate::utils::block_constraint::{split_lines, visible_width, wrap_lines};
 use crate::utils::layout::{Alignment, WordWrap};
 
-use super::options::TerminalRenderOptions;
+use super::options::{ImagePlaceholder, TerminalRenderOptions};
 use super::style;
+
+/// Maximum size of an inline terminal image at [`GraphicsMode::Rich`], matching
+/// the legacy terminal image renderer's 10 MiB ceiling.
+const MAX_TERMINAL_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 
 /// Renders a render-tree node to a terminal string.
 ///
@@ -363,8 +370,16 @@ impl Writer<'_> {
                 let effective = self.effective.clone();
                 let markup = self.render_inline(children, &effective)?;
                 if let Some(hints) = node.attrs.progress_hints() {
+                    // A progress bar is a single fixed-width glyph run; wrapping
+                    // it would split the bar, so it is emitted as-is.
                     let bar = render_progress_bar(&hints, &markup, self.opts.context.color_depth);
                     Ok(self.render_prose(&bar))
+                } else if self.opts.context.wrap_prose {
+                    // Top-level paragraphs wrap to the post-margin content width,
+                    // matching the legacy `for_terminal` renderer's line wrapping.
+                    // Off by default so component callers (which apply their own
+                    // post-render wrapping) are unaffected.
+                    Ok(self.wrap_prose(&markup))
                 } else {
                     Ok(self.render_prose(&markup))
                 }
@@ -394,6 +409,14 @@ impl Writer<'_> {
                         self.opts.context.available_width,
                     );
                     Ok(wrapped.join("\n"))
+                } else if let Some(prefix) = self.opts.context.blockquote_prefix.clone() {
+                    // The darkmatter document pipeline asks for its own quarter-
+                    // block bar (`▐   `) instead of the component's `│ ` border.
+                    // Children render at the reduced width so inner prose wraps
+                    // inside the bar, then each line is prefixed; nested quotes
+                    // recurse and prepend their own bar, matching the legacy
+                    // renderer's per-depth `"▐   ".repeat(depth)`.
+                    Ok(self.render_blockquote_with_prefix(children, &prefix)?)
                 } else {
                     let inner = self.render_blocks(children)?;
                     let quote = BlockQuote::from(inner.as_str());
@@ -414,11 +437,20 @@ impl Writer<'_> {
                 })
             }
             NodeKind::Code { lang, meta, value } => {
-                Ok(self.render_code_node(lang.as_deref(), value, meta.as_deref(), &node.attrs))
+                self.render_code_node(lang.as_deref(), value, meta.as_deref(), &node.attrs)
             }
             NodeKind::ThematicBreak => {
                 let rule = horizontal_rule_from_attrs(&node.attrs);
-                Ok(rule.render(&self.opts.context.terminal))
+                let term = self.effective_terminal();
+                // The terminal has no vector HR form, so `Vector` coincides with
+                // `Off` (Unicode / ASCII). Only `Rich` rasterizes to an image.
+                match self.opts.context.graphics_mode {
+                    GraphicsMode::Off | GraphicsMode::Vector => Ok(rule.render_text_tier(&term)),
+                    GraphicsMode::Rich => match rule.render_image_tier(&term) {
+                        Some(image) => Ok(image),
+                        None => Ok(rule.render_text_tier(&term)),
+                    },
+                }
             }
             NodeKind::Table { align, children } => {
                 let table = self.render_table(align, children, node)?;
@@ -426,8 +458,7 @@ impl Writer<'_> {
                 // empty or whitespace-only title is ignored.
                 match node.attrs.table_title() {
                     Some(title) if !title.trim().is_empty() => {
-                        let heading = self.render_prose(&Prose::escape_text(title.trim()));
-                        Ok(format!("{heading}\n{table}"))
+                        Ok(format!("{}\n{table}", title.trim()))
                     }
                     _ => Ok(table),
                 }
@@ -463,6 +494,7 @@ impl Writer<'_> {
             | NodeKind::Strong { .. }
             | NodeKind::Delete { .. }
             | NodeKind::Span { .. }
+            | NodeKind::Extended { .. }
             | NodeKind::InlineCode { .. }
             | NodeKind::Link { .. }
             | NodeKind::Image { .. }
@@ -515,9 +547,7 @@ impl Writer<'_> {
                 kind if is_inline_kind(kind) => {
                     let effective = self.effective.clone();
                     let markup = self.render_inline_node(child, &effective)?;
-                    // Lower the Prose markup to terminal SGR without
-                    // applying Prose's word-wrap / trailing-newline trim.
-                    output.push_str(&Prose::new(&markup).render_optimistic(None));
+                    output.push_str(&markup);
                 }
                 _ => {
                     let rendered = self.render(child)?;
@@ -640,11 +670,49 @@ impl Writer<'_> {
         result
     }
 
-    /// Renders a sequence of inline nodes into [`Prose`] block-tag markup.
+    /// Renders an unstyled block quote with a caller-supplied left-border
+    /// `prefix` (the darkmatter `▐   ` bar) instead of the shared
+    /// [`BlockQuote`] component's `│ ` border.
     ///
-    /// Literal text is escaped with [`Prose::escape_text`] so document text
-    /// never accidentally triggers Prose markup; styling wraps the escaped
-    /// runs in block tags the [`Prose`] parser already understands.
+    /// The children render at the width left after the prefix so inner prose
+    /// wraps inside the bar; each produced line is then prefixed with the bar
+    /// painted in the legacy gray foreground. Nested block quotes recurse
+    /// through the same path and prepend their own bar, reproducing the legacy
+    /// renderer's per-depth `"▐   ".repeat(depth)`.
+    fn render_blockquote_with_prefix(
+        &mut self,
+        children: &[RenderNode],
+        prefix: &str,
+    ) -> Result<String, RenderError> {
+        let prefix_width = visible_width(prefix);
+        let child_width = self
+            .opts
+            .context
+            .available_width
+            .saturating_sub(prefix_width)
+            .max(1);
+        let inner = self.render_blocks_in_width(children, child_width)?;
+
+        // Gray foreground for the bar, matching the legacy renderer's
+        // `\x1b[38;2;100;100;100m` quarter-block. The page-frame post-pass owns
+        // the subtle background band, so the bar itself only carries its fg.
+        let colored_prefix = format!("\x1b[38;2;100;100;100m{prefix}\x1b[39m");
+
+        let mut out = String::new();
+        for (idx, line) in inner.split('\n').enumerate() {
+            if idx > 0 {
+                out.push('\n');
+            }
+            out.push_str(&colored_prefix);
+            out.push_str(line);
+        }
+        Ok(out)
+    }
+
+    /// Renders a sequence of inline nodes into terminal SGR output.
+    ///
+    /// Each inline node is lowered directly to ANSI escapes without an
+    /// intermediate Prose markup pass.
     ///
     /// `effective` is the text appearance (color, emphasis) inherited from the
     /// enclosing block and ancestor spans. A nested
@@ -662,37 +730,43 @@ impl Writer<'_> {
         Ok(output)
     }
 
-    /// Projects a single inline node into [`Prose`] markup.
+    /// Projects a single inline node into terminal SGR output.
     fn render_inline_node(
         &mut self,
         node: &RenderNode,
         effective: &Style,
     ) -> Result<String, RenderError> {
+        let term = &self.opts.context.terminal;
         match &node.kind {
             NodeKind::Text { value } => Ok(apply_classes(
-                &Prose::escape_text(value),
+                value,
                 &node.attrs.classes,
+                effective,
+                term,
             )),
             NodeKind::Emphasis { children } => {
                 let inner = self.render_inline(children, effective)?;
-                Ok(apply_classes(
-                    &format!("<italic>{inner}</italic>"),
-                    &node.attrs.classes,
-                ))
+                let mut child_effective = effective.clone();
+                child_effective.emphasis.italic = true;
+                let open = style::text_appearance_sgr(&child_effective, term);
+                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Strong { children } => {
                 let inner = self.render_inline(children, effective)?;
-                Ok(apply_classes(
-                    &format!("<bold>{inner}</bold>"),
-                    &node.attrs.classes,
-                ))
+                let mut child_effective = effective.clone();
+                child_effective.emphasis.bold = true;
+                let open = style::text_appearance_sgr(&child_effective, term);
+                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Delete { children } => {
                 let inner = self.render_inline(children, effective)?;
-                Ok(apply_classes(
-                    &format!("<strikethrough>{inner}</strikethrough>"),
-                    &node.attrs.classes,
-                ))
+                let mut child_effective = effective.clone();
+                child_effective.emphasis.strikethrough = true;
+                let open = style::text_appearance_sgr(&child_effective, term);
+                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Span { children } => {
                 // An inline `Span` may carry a declared `Style`. Its
@@ -703,8 +777,7 @@ impl Writer<'_> {
                     Some(span_style) => {
                         let child_effective = span_style.inherited_from(effective);
                         let inner = self.render_inline(children, &child_effective)?;
-                        let styled = self.render_span_classes(node, &inner)?;
-                        let term = &self.opts.context.terminal;
+                        let styled = self.render_span_classes(node, &inner, &child_effective)?;
                         let open = style::text_appearance_sgr(&child_effective, term);
                         // Reset, then restore the ancestor appearance so the
                         // run after the span keeps the inherited color/emphasis.
@@ -717,40 +790,113 @@ impl Writer<'_> {
                     }
                     None => {
                         let inner = self.render_inline(children, effective)?;
-                        self.render_span_classes(node, &inner)
+                        self.render_span_classes(node, &inner, effective)
                     }
                 }
             }
-            NodeKind::InlineCode { value } => Ok(apply_classes(
-                &format!("<dim>{}</dim>", Prose::escape_text(value)),
-                &node.attrs.classes,
-            )),
+            NodeKind::InlineCode { value } => {
+                let mut child_effective = effective.clone();
+                child_effective.emphasis.dim = true;
+                let open = style::text_appearance_sgr(&child_effective, term);
+                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                Ok(apply_classes(&format!("{open}{value}{close}"), &node.attrs.classes, effective, term))
+            }
             NodeKind::Link {
                 url,
                 title: _,
                 children,
             } => {
-                let inner = self.render_inline(children, effective)?;
-                Ok(format!(
-                    "<a href=\"{}\">{inner}</a>",
-                    Prose::escape_text(url)
-                ))
+                // A link may carry its own `Style` (e.g. a darkmatter
+                // `style.hyperlinks.*` color lowered onto the node). Its text
+                // appearance inherits from the enclosing `effective` and wraps
+                // the visible link text; the OSC8 escapes are added around the
+                // already-styled text so the color rides inside the hyperlink.
+                let link_effective = match node.attrs.style().filter(|s| !s.is_empty()) {
+                    Some(link_style) => link_style.inherited_from(effective),
+                    None => effective.clone(),
+                };
+                let inner = self.render_inline(children, &link_effective)?;
+                let styled = if link_effective == *effective {
+                    inner
+                } else {
+                    let open = style::text_appearance_sgr(&link_effective, term);
+                    let close = format!(
+                        "{}{}",
+                        style::SGR_RESET,
+                        style::text_appearance_sgr(effective, term),
+                    );
+                    format!("{open}{inner}{close}")
+                };
+                if url.is_empty() {
+                    Ok(styled)
+                } else if term.osc_link_support {
+                    Ok(format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, styled))
+                } else {
+                    let desc = styled.replace(']', "\\]");
+                    Ok(format!("[{desc}]({url})"))
+                }
             }
-            NodeKind::Image { alt, .. } => {
-                // Terminal inline images are out of scope for this phase
-                // (visual components keep bespoke renderers). The alt text
-                // stands in for the image.
-                self.diagnostics.push(Diagnostic::lossy(
-                    "image rendered as alt text; inline terminal images are out of scope",
-                    Some(node.span.clone()),
-                ));
-                Ok(format!("[{}]", Prose::escape_text(alt)))
+            NodeKind::Image { url, alt, .. } => {
+                // The alt-text fallback inherits the image node's own `Style`
+                // (e.g. a darkmatter `style.images.*` color lowered onto the
+                // node). A successfully rendered inline image is left unstyled —
+                // color has no meaning for a raster cell.
+                let fallback = || {
+                    let inner = match self.opts.context.image_placeholder {
+                        ImagePlaceholder::Bracket => format!("[{alt}]"),
+                        ImagePlaceholder::Block => format!("▉ IMAGE[{alt}]"),
+                    };
+                    match node.attrs.style().filter(|s| !s.is_empty()) {
+                        Some(img_style) => {
+                            let img_effective = img_style.inherited_from(effective);
+                            if img_effective == *effective {
+                                inner
+                            } else {
+                                let open = style::text_appearance_sgr(&img_effective, term);
+                                let close = format!(
+                                    "{}{}",
+                                    style::SGR_RESET,
+                                    style::text_appearance_sgr(effective, term),
+                                );
+                                format!("{open}{inner}{close}")
+                            }
+                        }
+                        None => inner,
+                    }
+                };
+                match self.opts.context.graphics_mode {
+                    // Off / Vector: alt-text fallback (no raster form).
+                    GraphicsMode::Off | GraphicsMode::Vector => Ok(fallback()),
+                    // Rich: attempt the inline image protocol, falling back to
+                    // alt text when the source is out of contract or unrenderable.
+                    GraphicsMode::Rich => {
+                        Ok(self.render_terminal_image(url, alt).unwrap_or_else(fallback))
+                    }
+                }
             }
             NodeKind::FootnoteReference { identifier } => {
-                Ok(format!("[^{}]", Prose::escape_text(identifier)))
+                Ok(format!("[^{identifier}]"))
             }
             NodeKind::SoftBreak => Ok(" ".to_string()),
             NodeKind::HardBreak => Ok("\n".to_string()),
+            // Built-in tokens lower to direct SGR: `mark` highlights via
+            // reverse video (SGR 7) and `dim` dims (SGR 2), mirroring the
+            // legacy span-class path in `apply_classes`. An unrecognized token
+            // renders its children as plain inline content.
+            NodeKind::Extended {
+                token, children, ..
+            } => {
+                let inner = self.render_inline(children, effective)?;
+                let mut child_effective = effective.clone();
+                match token.as_ref() {
+                    "mark" => child_effective.emphasis.inverse = true,
+                    "dim" => child_effective.emphasis.dim = true,
+                    _ => return Ok(inner),
+                }
+                let open = style::text_appearance_sgr(&child_effective, term);
+                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                Ok(format!("{open}{inner}{close}"))
+            }
             // A non-inline node appearing in an inline position is a
             // structural problem the validator would have rejected; treat it
             // defensively by rendering it as a block. Enumerated explicitly
@@ -773,9 +919,32 @@ impl Writer<'_> {
         }
     }
 
-    /// Renders [`Prose`] markup to a styled terminal string.
+    /// Returns markup as-is — inline content is already rendered to terminal
+    /// SGR by [`Self::render_inline_node`].
     fn render_prose(&self, markup: &str) -> String {
-        Prose::new(markup).render(&self.opts.context.terminal)
+        markup.to_string()
+    }
+
+    /// Word-wraps already-SGR-rendered inline `markup` to the post-margin
+    /// content width ([`available_width`](TerminalRenderContext::available_width)).
+    ///
+    /// Uses the SGR-aware [`wrap_lines`] primitive directly — the same one the
+    /// styled-blockquote and two-column paths use — so top-level paragraphs
+    /// flow onto extra rows instead of overrunning the content width, matching
+    /// the legacy `for_terminal` renderer's line wrapping.
+    ///
+    /// `wrap_lines` (rather than constructing a [`Prose`] and calling
+    /// `render_in_width`) is deliberate: `Prose::render` routes back through
+    /// [`render_terminal_node`], which re-enters this very paragraph path —
+    /// using `Prose` here would recurse infinitely.
+    fn wrap_prose(&self, markup: &str) -> String {
+        let width = self.opts.context.available_width;
+        if width == 0 {
+            return markup.to_string();
+        }
+        let lines = split_lines(markup);
+        let wrapped = wrap_lines(lines, &WordWrap::WrapProse(None, None), width);
+        wrapped.join("\n")
     }
 
     /// Renders a heading line from a depth and pre-rendered inline `markup`.
@@ -940,15 +1109,38 @@ impl Writer<'_> {
                 {
                     nested.push(self.render_tree_connector_list(nested_children, &continuation)?);
                 } else if is_inline_block(item_child) {
+                    // A connector-list item's paragraph carries a per-entry
+                    // `Style` (e.g. `FileSystem`'s `fs_entry_style`: red for a
+                    // highlight match, italic for a dotfile, cyan for a
+                    // symlink). Fold that style into the effective appearance so
+                    // the item label inherits its color / emphasis, then wrap
+                    // the rendered label with the matching SGR — without this
+                    // the projection's `Style` never reaches terminal output.
+                    let item_style = item_child.attrs.style().filter(|s| !s.is_empty());
+                    let render_effective = item_style
+                        .as_ref()
+                        .map(|s| s.inherited_from(&self.effective));
+                    let effective = render_effective.as_ref().unwrap_or(&self.effective).clone();
                     let markup = match &item_child.kind {
                         NodeKind::Paragraph { children } => {
-                            self.render_inline(children, &Style::default())?
+                            self.render_inline(children, &effective)?
                         }
-                        _ => {
-                            self.render_inline(std::slice::from_ref(item_child), &Style::default())?
-                        }
+                        _ => self.render_inline(std::slice::from_ref(item_child), &effective)?,
                     };
-                    label_parts.push(self.render_prose(&markup));
+                    let label = self.render_prose(&markup);
+                    let label = match item_style {
+                        Some(style) => {
+                            let open =
+                                style::text_appearance_sgr(&style, &self.opts.context.terminal);
+                            if open.is_empty() {
+                                label
+                            } else {
+                                format!("{open}{label}{}", style::SGR_RESET)
+                            }
+                        }
+                        None => label,
+                    };
+                    label_parts.push(label);
                 } else {
                     label_parts.push(self.render(item_child)?);
                 }
@@ -1007,6 +1199,29 @@ impl Writer<'_> {
         };
         let full_prefix = format!("{prefix}{check_marker}");
 
+        // A decorated right/center-aligned list item lifts its marker to its own
+        // line and left-pads the body block, matching the legacy
+        // `for_terminal_with_layout` model (the marker stays in the list's
+        // column; the body shifts as one block). Gated strictly on the
+        // `darkmatter.li` hint the decoration pass sets — the default path never
+        // sets it, so its inline rendering below is byte-unchanged.
+        if let Some(pad) = list_item_align_pad(node) {
+            // The marker keeps its trailing space and stays in the list's
+            // column (legacy emits `"- "` / `"1. "` on its own line).
+            let mut out = full_prefix.clone();
+            for child in item_children {
+                out.push('\n');
+                let body = match &child.kind {
+                    NodeKind::Paragraph { children } => {
+                        self.render_inline(children, &Style::default())?
+                    }
+                    _ => self.render(child)?,
+                };
+                out.push_str(&indent_block(&body, pad));
+            }
+            return Ok(out);
+        }
+
         let mut out = String::new();
         let mut prefix_used = false;
         for (idx, child) in item_children.iter().enumerate() {
@@ -1054,7 +1269,10 @@ impl Writer<'_> {
         } else {
             None
         };
-        let prose = Prose::new(markup).with_word_wrap(WordWrap::WrapProse(None, hang));
+        // Escape Prose-special characters so literal `<b>` etc. in the
+        // rendered inline output are not mis-parsed as tags during wrap.
+        let safe = Prose::escape_text(markup);
+        let prose = Prose::new(safe).with_word_wrap(WordWrap::WrapProse(None, hang));
         let rendered = prose.render_in_width(term, child_width);
 
         let mut out = String::new();
@@ -1077,44 +1295,182 @@ impl Writer<'_> {
     /// [`TerminalCodeContext`] containing the available render width, color
     /// depth, and color mode. A `Some` result is used verbatim; a `None`
     /// result falls back to [`Self::render_code`].
+    ///
+    /// ## Mermaid promotion
+    ///
+    /// A `lang="mermaid"` block is promoted to a rasterized image only when the
+    /// Mermaid opt-in ([`TerminalRenderContext::mermaid_mode`] is
+    /// [`TerminalMermaidMode::Image`]) *and* the fidelity ceiling
+    /// ([`TerminalRenderContext::graphics_mode`] is [`GraphicsMode::Rich`]) both
+    /// permit it. [`GraphicsMode`] alone never promotes a fence — that keeps the
+    /// public default ("Mermaid stays code") intact. When promotion is not
+    /// requested the block degrades through the code-render hook and finally to
+    /// the built-in plain fallback.
+    ///
+    /// ## Errors
+    ///
+    /// Under [`RenderStrictness::Strict`] a failed Mermaid promotion returns
+    /// [`RenderError::LossyRejected`] rather than silently falling back; under
+    /// [`RenderStrictness::Warn`] it records a lossy diagnostic and falls back.
     fn render_code_node(
-        &self,
+        &mut self,
         lang: Option<&str>,
         value: &str,
         meta: Option<&str>,
         attrs: &renderable::tree::NodeAttrs,
-    ) -> String {
+    ) -> Result<String, RenderError> {
+        let is_mermaid = lang
+            .map(|l| l.eq_ignore_ascii_case("mermaid"))
+            .unwrap_or(false);
+
+        // Promotion is gated by the opt-in AND the ceiling: terminal Mermaid
+        // rasterizes only at `Rich`, and only when the caller opted in.
+        if is_mermaid
+            && self.opts.context.mermaid_mode == TerminalMermaidMode::Image
+            && self.opts.context.graphics_mode == GraphicsMode::Rich
+        {
+            let term = self.effective_terminal();
+            let diagram = MermaidDiagram::new(value);
+            match diagram.try_render(&term) {
+                Ok(result) => return Ok(result.output),
+                Err(e) => match self.opts.strictness {
+                    RenderStrictness::Strict => {
+                        return Err(RenderError::LossyRejected {
+                            message: format!("Mermaid promotion failed: {e}"),
+                        });
+                    }
+                    RenderStrictness::Warn => {
+                        self.diagnostics.push(Diagnostic::lossy(
+                            format!(
+                                "Mermaid rasterization failed, falling back to code block: {e}"
+                            ),
+                            None,
+                        ));
+                    }
+                    RenderStrictness::Lossy => {}
+                },
+            }
+        }
+
         if let Some(renderer) = &self.opts.code_renderer {
             let context = TerminalCodeContext::new(
                 self.opts.context.available_width,
                 (&self.opts.context.color_depth).into(),
                 (&self.opts.context.color_mode).into(),
-            );
+            )
+            .with_code_theme_name(self.opts.context.code_theme.clone())
+            .with_line_numbers(self.opts.context.line_numbers);
             if let Some(rendered) = renderer.render_terminal_code(lang, value, meta, attrs, context)
             {
-                return rendered;
+                return Ok(rendered);
             }
         }
-        self.render_code(lang, value)
+        Ok(self.render_code(lang, value))
+    }
+
+    /// Returns the terminal capability snapshot the graphics paths consult,
+    /// applying the [`force_graphics`](TerminalRenderContext::force_graphics)
+    /// capability override.
+    ///
+    /// `TerminalImageMode::Force` (mapped to `force_graphics` at the darkmatter
+    /// entry point) attempts image-protocol output even when detection reports
+    /// no support: the returned terminal is marked as a TTY and, if it
+    /// advertises no image protocol, is upgraded to Kitty. This mirrors the
+    /// legacy terminal image renderer's force path so the policy is enforced at
+    /// the renderer boundary rather than dropped.
+    fn effective_terminal(&self) -> std::borrow::Cow<'_, crate::terminal::Terminal> {
+        use std::borrow::Cow;
+
+        if !self.opts.context.force_graphics {
+            return Cow::Borrowed(&self.opts.context.terminal);
+        }
+        let mut forced = self.opts.context.terminal.clone();
+        forced.is_tty = true;
+        if matches!(forced.image_support, ImageSupport::None) {
+            forced.image_support = ImageSupport::Kitty;
+        }
+        Cow::Owned(forced)
+    }
+
+    /// Renders a Markdown image to an inline terminal-image string at
+    /// [`GraphicsMode::Rich`], or returns `None` to signal the alt-text
+    /// fallback.
+    ///
+    /// Ports the legacy terminal image renderer's security contract: remote
+    /// URLs and absolute paths are rejected, a relative path resolves against
+    /// [`image_base_path`](TerminalRenderContext::image_base_path) (the current
+    /// working directory when unset) and must stay within it, and the file must
+    /// exist and be at most [`MAX_TERMINAL_IMAGE_BYTES`]. The capability
+    /// snapshot honors `force_graphics` via [`Self::effective_terminal`].
+    fn render_terminal_image(&self, url: &str, alt: &str) -> Option<String> {
+        // Remote URLs and absolute paths are out of contract — no fetch, no
+        // sandbox escape.
+        if url.starts_with("http://") || url.starts_with("https://") {
+            return None;
+        }
+        let rel = std::path::Path::new(url);
+        if rel.is_absolute() {
+            return None;
+        }
+
+        let base = self
+            .opts
+            .context
+            .image_base_path
+            .clone()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        let full_path = base.join(rel);
+
+        // Path-traversal guard: when both ends canonicalize, the resolved file
+        // must stay within the base directory.
+        if let Ok(canonical_base) = base.canonicalize()
+            && let Ok(canonical_full) = full_path.canonicalize()
+            && !canonical_full.starts_with(&canonical_base)
+        {
+            return None;
+        }
+        if !full_path.exists() {
+            return None;
+        }
+        if let Ok(metadata) = std::fs::metadata(&full_path)
+            && metadata.len() > MAX_TERMINAL_IMAGE_BYTES
+        {
+            return None;
+        }
+
+        let term = self.effective_terminal();
+        // Without graphics support (and without force) there is no image
+        // protocol to target — fall back to alt text.
+        if !term.is_tty || matches!(term.image_support, ImageSupport::None) {
+            return None;
+        }
+
+        let image = TerminalImage::new(&full_path).ok()?.with_alt_text(alt);
+        let output = image.render(&term);
+        (!output.is_empty()).then_some(output)
     }
 
     /// Renders a code block as a dim, indented panel.
     ///
     /// Syntax highlighting is out of scope for this phase; the language tag
-    /// is shown as a header so the lossy projection is visible.
+    /// is shown as a header so the lossy projection is visible. Under
+    /// [`ColorDepth::None`] no SGR is emitted at all, honoring the no-color
+    /// contract (the legacy renderer suppresses every escape in that mode).
     fn render_code(&self, lang: Option<&str>, value: &str) -> String {
         let body = value.trim_end_matches('\n');
+        let no_color = self.opts.context.color_depth == ColorDepth::None;
+        let dim_open = if no_color { "" } else { "\x1b[2m" };
+        let dim_close = if no_color { "" } else { "\x1b[0m" };
         let header = lang
             .filter(|l| !l.is_empty())
-            .map(|l| format!("<dim>```{l}</dim>\n"))
+            .map(|l| format!("{dim_open}```{l}{dim_close}\n"))
             .unwrap_or_default();
-        let escaped: String = body
+        let indented: String = body
             .lines()
-            .map(|line| format!("    {}", Prose::escape_text(line)))
+            .map(|line| format!("    {line}"))
             .collect::<Vec<_>>()
             .join("\n");
-        let markup = format!("{header}<dim>{escaped}</dim>");
-        self.render_prose(&markup)
+        format!("{header}{dim_open}{indented}{dim_close}")
     }
 
     /// Renders a [`NodeKind::Table`] node with a native two-pass renderer.
@@ -1180,7 +1536,7 @@ impl Writer<'_> {
             Ok(plan) => plan,
             // Width planning failed (table cannot fit): degrade to the
             // structured error message, matching the bespoke component.
-            Err(error) => return Ok(self.render_prose(&Prose::escape_text(&error.to_string()))),
+            Err(error) => return Ok(error.to_string()),
         };
 
         // ── Pass 2: native emit ────────────────────────────────────────────
@@ -1294,7 +1650,7 @@ impl Writer<'_> {
         Ok(cells)
     }
 
-    /// Maps semantic span classes to Prose styling.
+    /// Maps semantic span classes to direct SGR styling.
     ///
     /// The documented class vocabulary — `mark`, `dim`, `sup`, `sub` — maps
     /// to visual treatment; unknown classes are ignored, with a diagnostic
@@ -1303,8 +1659,9 @@ impl Writer<'_> {
         &mut self,
         node: &RenderNode,
         inner: &str,
+        effective: &Style,
     ) -> Result<String, RenderError> {
-        let styled = apply_classes(inner, &node.attrs.classes);
+        let styled = apply_classes(inner, &node.attrs.classes, effective, &self.opts.context.terminal);
         for class in &node.attrs.classes {
             if !is_known_class(class) && self.opts.strictness == RenderStrictness::Warn {
                 self.diagnostics.push(Diagnostic::lossy(
@@ -1361,10 +1718,9 @@ impl Writer<'_> {
                     format!("unsupported content dropped: {label}"),
                     Some(node.span.clone()),
                 ));
-                Ok(self.render_prose(&format!(
-                    "<dim>[unsupported: {}]</dim>",
-                    Prose::escape_text(label)
-                )))
+                let dim_open = "\x1b[2m";
+                let dim_close = "\x1b[0m";
+                Ok(format!("{dim_open}[unsupported: {label}]{dim_close}"))
             }
             RenderStrictness::Lossy => Ok(String::new()),
         }
@@ -1392,16 +1748,18 @@ fn wrap_column_lines(rendered: &str, width: u32) -> String {
 /// Builds a [`HorizontalRule`] from `darkmatter.hr.*` hints on a
 /// [`NodeKind::ThematicBreak`] node.
 ///
-/// Darkmatter's span-aware fold lowers HR-attribute paragraphs (e.g.
-/// `--- { style: waves, weight: thick }`) into a [`NodeKind::ThematicBreak`]
+/// Darkmatter's fold lowers HR-attribute paragraphs (e.g.
+/// `--- { kind: waves, weight: thick }`) into a [`NodeKind::ThematicBreak`]
 /// whose [`NodeAttrs::data`] carries string-valued hints under the
 /// `darkmatter.hr` namespace — see
 /// `renderable/features/2026-05-20-darkmatter-tree/span-aware-processor-design.md`.
-/// Without consuming those hints the terminal renderer would emit a plain
-/// rule for every HR regardless of authored attributes (review-4 finding 2).
+/// The visual rule kind lives under the canonical `kind` hint (legacy `style`
+/// is normalized to `kind` during the fold). Without consuming those hints the
+/// terminal renderer would emit a plain rule for every HR regardless of
+/// authored attributes (review-4 finding 2).
 ///
 /// Unknown enum values fall back to the [`HorizontalRule`] defaults so a
-/// malformed `style: dashse` still produces output rather than panicking.
+/// malformed `kind: dashse` still produces output rather than panicking.
 ///
 /// [`NodeAttrs::data`]: renderable::tree::NodeAttrs
 fn horizontal_rule_from_attrs(attrs: &renderable::tree::NodeAttrs) -> HorizontalRule {
@@ -1414,8 +1772,8 @@ fn horizontal_rule_from_attrs(attrs: &renderable::tree::NodeAttrs) -> Horizontal
     };
 
     let mut rule = HorizontalRule::new();
-    if let Some(style) = hint_str("style") {
-        rule = match style.as_str() {
+    if let Some(kind) = hint_str("kind") {
+        rule = match kind.as_str() {
             "dashes" => rule.style(RuleStyle::Dashes),
             "dots" => rule.style(RuleStyle::Dots),
             "waves" => rule.style(RuleStyle::Waves),
@@ -1429,7 +1787,9 @@ fn horizontal_rule_from_attrs(attrs: &renderable::tree::NodeAttrs) -> Horizontal
     if let Some(alignment) = hint_str("alignment") {
         rule = match alignment.as_str() {
             "full" => rule.alignment(RuleAlignment::Full),
-            "centered" => rule.alignment(RuleAlignment::Centered),
+            // `center` is the `style.hr` schema-canonical spelling (projected by
+            // page-level HR defaults); `centered` is the inline-attribute alias.
+            "center" | "centered" => rule.alignment(RuleAlignment::Centered),
             "left" => rule.alignment(RuleAlignment::Left),
             "right" => rule.alignment(RuleAlignment::Right),
             _ => rule,
@@ -1538,6 +1898,7 @@ fn is_inline_kind(kind: &NodeKind) -> bool {
             | NodeKind::Strong { .. }
             | NodeKind::Delete { .. }
             | NodeKind::Span { .. }
+            | NodeKind::Extended { .. }
             | NodeKind::InlineCode { .. }
             | NodeKind::Link { .. }
             | NodeKind::Image { .. }
@@ -1578,20 +1939,45 @@ fn prefix_first_line(prefix: &str, body: &str) -> String {
     out
 }
 
-/// Wraps `inner` in Prose markup for any recognized semantic classes.
+/// The left pad (in cells) for a decorated non-left-aligned list item, or
+/// `None` for the default inline rendering.
+///
+/// Reads the `darkmatter.li` `pad` hint the darkmatter decoration pass sets for
+/// `Center` / `Right`-aligned lists; the pad is the precomputed left offset
+/// (`alignment_padding(Li, li_width)`). A missing or non-positive hint means the
+/// item renders inline (the default-path contract).
+fn list_item_align_pad(node: &RenderNode) -> Option<u32> {
+    let pad = node
+        .attrs
+        .get_hint(HintNamespace("darkmatter.li"), "pad")?
+        .as_u64()?;
+    (pad > 0).then_some(pad as u32)
+}
+
+/// Applies recognized semantic classes as direct SGR escapes.
 ///
 /// `mark` highlights via reverse video, `dim` dims, and `sup`/`sub` are
 /// approximated as dim text since terminals lack super/subscript.
-fn apply_classes(inner: &str, classes: &[String]) -> String {
-    let mut out = inner.to_string();
+fn apply_classes(inner: &str, classes: &[String], effective: &Style, term: &crate::terminal::Terminal) -> String {
+    let mut emphasis = TextEmphasis::default();
     for class in classes {
-        out = match class.as_str() {
-            "mark" => format!("<reverse>{out}</reverse>"),
-            "dim" | "sup" | "sub" => format!("<dim>{out}</dim>"),
-            _ => out,
-        };
+        match class.as_str() {
+            "mark" => emphasis.inverse = true,
+            "dim" | "sup" | "sub" => emphasis.dim = true,
+            _ => {}
+        }
     }
-    out
+    if emphasis.is_empty() {
+        return inner.to_string();
+    }
+    let style = Style {
+        emphasis,
+        ..Default::default()
+    };
+    let child_effective = style.inherited_from(effective);
+    let open = style::text_appearance_sgr(&child_effective, term);
+    let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+    format!("{open}{inner}{close}")
 }
 
 /// The terminal checkbox marker for a task-list item in a given [`TaskState`].
@@ -1982,6 +2368,46 @@ mod render_tree_tests {
         let node = RenderNode::paragraph(vec![RenderNode::text("hello world")]);
         let out = render(&node);
         assert!(strip_escape_codes(&out.output).contains("hello world"));
+    }
+
+    #[test]
+    fn render_tree_extended_unknown_token_renders_children() {
+        // An unrecognized token renders its children as plain inline content;
+        // the wrapper itself adds nothing to the output.
+        let node = RenderNode::paragraph(vec![
+            RenderNode::text("before "),
+            RenderNode::extended(
+                "custom-token",
+                vec![RenderNode::strong(vec![RenderNode::text("inner")])],
+                None,
+            ),
+            RenderNode::text(" after"),
+        ]);
+        let out = strip_escape_codes(&render(&node).output);
+        assert_eq!(out, "before inner after");
+    }
+
+    #[test]
+    fn render_tree_extended_mark_and_dim_emit_sgr() {
+        // `mark` highlights via reverse video (SGR 7); `dim` dims (SGR 2). The
+        // payload text survives once the escape codes are stripped.
+        let mark = RenderNode::paragraph(vec![RenderNode::extended(
+            "mark",
+            vec![RenderNode::text("highlighted")],
+            None,
+        )]);
+        let out = render(&mark);
+        assert!(out.output.contains("\x1b[7m"));
+        assert!(strip_escape_codes(&out.output).contains("highlighted"));
+
+        let dim = RenderNode::paragraph(vec![RenderNode::extended(
+            "dim",
+            vec![RenderNode::text("quiet")],
+            None,
+        )]);
+        let out = render(&dim);
+        assert!(out.output.contains("\x1b[2m"));
+        assert!(strip_escape_codes(&out.output).contains("quiet"));
     }
 
     /// Builds render options with a terminal of explicit color / nerd-font
@@ -2471,12 +2897,184 @@ mod render_tree_tests {
         assert!(out.diagnostics.len() >= 2);
     }
 
+    /// An image whose source is out of contract (here a relative path with no
+    /// matching file) degrades to its alt text. The default render context is
+    /// `Rich`, so this also proves the Rich-tier path falls back cleanly — and
+    /// silently, matching the legacy terminal image renderer's contract.
     #[test]
-    fn render_tree_image_renders_alt_text_with_diagnostic() {
+    fn render_tree_image_falls_back_to_alt_text() {
         let node = RenderNode::paragraph(vec![RenderNode::image("pic.png", None, "a cat")]);
         let out = render(&node);
         assert!(strip_escape_codes(&out.output).contains("[a cat]"));
-        assert!(out.diagnostics.iter().any(|d| d.message.contains("image")));
+    }
+
+    /// Finding 6 (review-1): at `Off`/`Vector` an image is always alt text;
+    /// only `Rich` attempts the image protocol. A non-image terminal at `Rich`
+    /// with a real file still degrades to alt text (no protocol to target).
+    #[test]
+    fn render_tree_image_alt_text_at_off_and_vector() {
+        let node = RenderNode::paragraph(vec![RenderNode::image("pic.png", None, "a cat")]);
+        for mode in [GraphicsMode::Off, GraphicsMode::Vector] {
+            let mut o = opts(RenderStrictness::Warn);
+            o.context.graphics_mode = mode;
+            let out = render_terminal_node(&node, &o).expect("render");
+            assert!(
+                strip_escape_codes(&out.output).contains("[a cat]"),
+                "{mode:?} must render alt text",
+            );
+        }
+    }
+
+    /// Writes a tiny valid 2×2 PNG into a fresh temp dir. Returns the dir
+    /// (kept alive by the caller for the file's lifetime) plus the relative
+    /// file name to reference against an `image_base_path`.
+    fn temp_png() -> (tempfile::TempDir, String) {
+        use image::{ImageBuffer, ImageFormat, Rgb};
+        use std::io::Cursor;
+
+        let img: ImageBuffer<Rgb<u8>, Vec<u8>> =
+            ImageBuffer::from_fn(2, 2, |_x, _y| Rgb([255u8, 0u8, 0u8]));
+        let mut buffer = Cursor::new(Vec::new());
+        img.write_to(&mut buffer, ImageFormat::Png)
+            .expect("encode test png");
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("pic.png"), buffer.into_inner()).expect("write png");
+        (dir, "pic.png".to_string())
+    }
+
+    /// Finding 3 (review-3): the success path. At `Rich` on an image-capable
+    /// TTY, a resolvable image node must emit the inline image protocol — the
+    /// fallback-only tests never proved the protocol actually fires.
+    #[test]
+    fn render_tree_image_rich_emits_image_protocol() {
+        use crate::discovery::detection::ImageSupport;
+
+        let (dir, name) = temp_png();
+        let node = RenderNode::paragraph(vec![RenderNode::image(&name, None, "a cat")]);
+
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::Kitty)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.image_base_path = Some(dir.path().to_path_buf());
+
+        let out = render_terminal_node(&node, &opts).expect("render").output;
+        assert!(
+            out.contains("\x1b_G"),
+            "Rich + Kitty must emit the Kitty image protocol; got: {out:?}",
+        );
+        assert!(
+            !strip_escape_codes(&out).contains("[a cat]"),
+            "the success path must not fall back to bracketed alt text; got: {out:?}",
+        );
+    }
+
+    /// Finding 3 (review-3): the no-capability fallback. At `Rich` with a real,
+    /// resolvable file but a terminal that advertises no image protocol, the
+    /// node degrades to alt text — there is no protocol to target.
+    #[test]
+    fn render_tree_image_rich_no_capability_falls_back_to_alt_text() {
+        use crate::discovery::detection::ImageSupport;
+
+        let (dir, name) = temp_png();
+        let node = RenderNode::paragraph(vec![RenderNode::image(&name, None, "a cat")]);
+
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::None)
+            .is_tty(false)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.image_base_path = Some(dir.path().to_path_buf());
+
+        let out = render_terminal_node(&node, &opts).expect("render").output;
+        assert!(
+            strip_escape_codes(&out).contains("[a cat]"),
+            "no image capability at Rich must degrade to alt text; got: {out:?}",
+        );
+        assert!(
+            !out.contains("\x1b_G"),
+            "no-capability fallback must not emit image protocol bytes; got: {out:?}",
+        );
+    }
+
+    /// Finding 3 (review-3): the security contract. At `Rich` on a fully
+    /// image-capable terminal, out-of-contract sources — a remote URL, an
+    /// absolute path, and a path-traversal escape from the base dir — must all
+    /// be rejected and degrade to alt text, never reaching the image pipeline.
+    #[test]
+    fn render_tree_image_rich_rejects_remote_absolute_and_traversal() {
+        use crate::discovery::detection::ImageSupport;
+
+        // A base dir with a sibling file *outside* it, reachable only via `..`.
+        let parent = tempfile::tempdir().expect("tempdir");
+        let base = parent.path().join("base");
+        std::fs::create_dir(&base).expect("mkdir base");
+        let (img_dir, _name) = temp_png();
+        let outside = parent.path().join("outside.png");
+        std::fs::copy(img_dir.path().join("pic.png"), &outside).expect("copy outside");
+
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::Kitty)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.image_base_path = Some(base.clone());
+
+        for url in [
+            "https://example.com/cat.png",
+            "http://example.com/cat.png",
+            "/etc/hosts",
+            "../outside.png",
+        ] {
+            let node = RenderNode::paragraph(vec![RenderNode::image(url, None, "blocked")]);
+            let out = render_terminal_node(&node, &opts).expect("render").output;
+            assert!(
+                strip_escape_codes(&out).contains("[blocked]") && !out.contains("\x1b_G"),
+                "out-of-contract source {url:?} must be rejected to alt text; got: {out:?}",
+            );
+        }
+    }
+
+    /// Finding 3 (review-3): `force_graphics`. On a terminal that advertises no
+    /// image support, forcing graphics upgrades the capability snapshot so a
+    /// resolvable image node still emits the image protocol at `Rich`.
+    #[test]
+    fn render_tree_image_force_graphics_emits_protocol_on_unsupported_terminal() {
+        use crate::discovery::detection::ImageSupport;
+
+        let (dir, name) = temp_png();
+        let node = RenderNode::paragraph(vec![RenderNode::image(&name, None, "a cat")]);
+
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::None)
+            .is_tty(false)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.image_base_path = Some(dir.path().to_path_buf());
+
+        // Without force: no protocol (mirrors the no-capability test).
+        let plain = render_terminal_node(&node, &opts).expect("render").output;
+        assert!(
+            !plain.contains("\x1b_G"),
+            "no image support without force must degrade to alt text; got: {plain:?}",
+        );
+
+        // With force: the snapshot is upgraded to Kitty and the protocol fires.
+        opts.context.force_graphics = true;
+        let forced = render_terminal_node(&node, &opts).expect("render").output;
+        assert!(
+            forced.contains("\x1b_G"),
+            "force_graphics must emit the image protocol on an unsupported terminal; got: {forced:?}",
+        );
     }
 
     #[test]
@@ -2884,6 +3482,47 @@ mod render_tree_tests {
         );
     }
 
+    #[test]
+    fn render_tree_inline_span_restores_parent_inverse() {
+        use renderable::style::{Style, TextEmphasis};
+
+        // A child span resets at its close, then the parent's inverse is
+        // re-applied — the tail after the child stays inverse rather than
+        // losing all emphasis state.
+        let inverse_style = Style {
+            emphasis: TextEmphasis {
+                inverse: true,
+                ..TextEmphasis::default()
+            },
+            ..Style::default()
+        };
+        let mut child = RenderNode::span(vec![], vec![RenderNode::text("child")]);
+        // The child declares its own color so its close fires a reset.
+        child
+            .attrs
+            .set_style(&fg_style(renderable::color::BasicColor::Green));
+        let mut parent = RenderNode::span(
+            vec![],
+            vec![
+                RenderNode::text("head "),
+                child,
+                RenderNode::text(" tail"),
+            ],
+        );
+        parent.attrs.set_style(&inverse_style);
+        let para = RenderNode::paragraph(vec![parent]);
+
+        let out = render(&para).output;
+        // The child's close restores the parent inverse (SGR 7), not a bare
+        // reset that would drop it.
+        let after_child = out.split("child").nth(1).expect("child run");
+        assert!(
+            after_child.contains("\x1b[7m"),
+            "parent inverse not restored after child span: {out:?}"
+        );
+        assert!(strip_escape_codes(&out).contains("head child tail"));
+    }
+
     // ── Table slot styling (Spec B D5) ─────────────────────────────────
 
     /// Builds a one-column, one-row table render tree from a `Table`.
@@ -2981,7 +3620,7 @@ mod render_tree_tests {
 
         let mut hr = RenderNode::thematic_break();
         let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "style", serde_json::json!("waves"));
+        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
 
         let term = Terminal::builder()
             .width(40)
@@ -3002,6 +3641,28 @@ mod render_tree_tests {
         );
     }
 
+    /// `horizontal_rule_from_attrs` must accept both the `style.hr`
+    /// schema-canonical `center` (projected by page-level HR defaults) and the
+    /// inline-attribute alias `centered`, mapping both to
+    /// [`RuleAlignment::Centered`]. Without the `center` arm a page-default
+    /// centered rule would silently fall back to `Full`.
+    #[test]
+    fn horizontal_rule_from_attrs_accepts_center_and_centered() {
+        use renderable::tree::HintNamespace;
+
+        let ns = HintNamespace("darkmatter.hr");
+        for alignment in ["center", "centered"] {
+            let mut attrs = renderable::tree::NodeAttrs::default();
+            attrs.set_hint(ns, "alignment", serde_json::json!(alignment));
+            let rule = horizontal_rule_from_attrs(&attrs);
+            assert_eq!(
+                *rule.rule_alignment(),
+                RuleAlignment::Centered,
+                "{alignment:?} must map to RuleAlignment::Centered",
+            );
+        }
+    }
+
     /// A `NodeKind::ThematicBreak` with no hints must still render through
     /// the default `HorizontalRule` path — the hint-consumer change cannot
     /// regress plain rules.
@@ -3016,6 +3677,154 @@ mod render_tree_tests {
         let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
         let out = render_terminal_node(&hr, &opts).expect("render hr").output;
         assert!(!out.is_empty(), "default rule must produce output");
+    }
+
+    /// GraphicsMode::Off must suppress the image tier and force the text
+    /// tier, even on a Kitty-capable TTY.
+    #[test]
+    fn render_tree_thematic_break_off_mode_suppresses_image_tier() {
+        use crate::discovery::detection::ImageSupport;
+        let mut hr = RenderNode::thematic_break();
+        let ns = HintNamespace("darkmatter.hr");
+        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+
+        let term = Terminal::builder()
+            .width(40)
+            .image_support(ImageSupport::Kitty)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = renderable::tree::GraphicsMode::Off;
+
+        let out = render_terminal_node(&hr, &opts).expect("render hr").output;
+        // Image tier is suppressed → no Kitty escape sequences.
+        assert!(
+            !out.contains("\x1b_G"),
+            "GraphicsMode::Off must suppress Kitty image tier: {out:?}"
+        );
+        // Text tier produces the waves glyph.
+        assert!(
+            out.contains('\u{224B}') || out.contains('~'),
+            "expected waves text tier under Off mode; got: {out:?}"
+        );
+    }
+
+    /// GraphicsMode::Rich on a Kitty-capable TTY should use the image tier
+    /// when available.
+    #[test]
+    fn render_tree_thematic_break_rich_mode_uses_image_tier_when_available() {
+        use crate::discovery::detection::ImageSupport;
+        let mut hr = RenderNode::thematic_break();
+        let ns = HintNamespace("darkmatter.hr");
+        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+
+        let term = Terminal::builder()
+            .width(40)
+            .image_support(ImageSupport::Kitty)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = renderable::tree::GraphicsMode::Rich;
+
+        let out = render_terminal_node(&hr, &opts).expect("render hr").output;
+        // Kitty image tier should be active.
+        assert!(
+            out.contains("\x1b_G"),
+            "GraphicsMode::Rich must use Kitty image tier when available: {out:?}"
+        );
+    }
+
+    /// Finding 1 (review-1): the terminal has no vector HR form, so
+    /// `GraphicsMode::Vector` must use the text tier — never rasterize — even on
+    /// a Kitty-capable TTY. Only `Rich` is allowed to emit image escapes.
+    #[test]
+    fn render_tree_thematic_break_vector_mode_uses_text_tier() {
+        use crate::discovery::detection::ImageSupport;
+        let mut hr = RenderNode::thematic_break();
+        let ns = HintNamespace("darkmatter.hr");
+        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+
+        let term = Terminal::builder()
+            .width(40)
+            .image_support(ImageSupport::Kitty)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = renderable::tree::GraphicsMode::Vector;
+
+        let out = render_terminal_node(&hr, &opts).expect("render hr").output;
+        assert!(
+            !out.contains("\x1b_G"),
+            "GraphicsMode::Vector must not rasterize the HR on the terminal: {out:?}"
+        );
+        assert!(
+            out.contains('\u{224B}') || out.contains('~'),
+            "expected waves text tier under Vector mode; got: {out:?}"
+        );
+    }
+
+    /// Finding 5 (review-1): `force_graphics` must be enforced at the renderer
+    /// boundary, not merely stored. On a terminal that advertises no image
+    /// support, forcing graphics upgrades the capability snapshot so the HR
+    /// image tier still fires at `Rich`.
+    #[test]
+    fn render_tree_thematic_break_force_graphics_rasterizes_on_unsupported_terminal() {
+        use crate::discovery::detection::ImageSupport;
+        let mut hr = RenderNode::thematic_break();
+        let ns = HintNamespace("darkmatter.hr");
+        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+
+        let term = Terminal::builder()
+            .width(40)
+            .image_support(ImageSupport::None)
+            .is_tty(false)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = renderable::tree::GraphicsMode::Rich;
+
+        // Without force: no image support → text tier (no Kitty escape).
+        let plain = render_terminal_node(&hr, &opts).expect("render hr").output;
+        assert!(
+            !plain.contains("\x1b_G"),
+            "no image support without force must use the text tier: {plain:?}"
+        );
+
+        // With force: capability snapshot is upgraded → image tier fires.
+        opts.context.force_graphics = true;
+        let forced = render_terminal_node(&hr, &opts).expect("render hr").output;
+        assert!(
+            forced.contains("\x1b_G"),
+            "force_graphics must enable the Kitty image tier on an unsupported terminal: {forced:?}"
+        );
+    }
+
+    /// Finding 7 (review-1): under `RenderStrictness::Strict`, a Mermaid
+    /// promotion that cannot complete must escalate to a `RenderError` rather
+    /// than silently degrading to a code block. A terminal with no image
+    /// support guarantees the promotion fails (no protocol to target, or no
+    /// rasterization deps) regardless of host capability.
+    #[test]
+    fn mermaid_promotion_failure_rejects_under_strict() {
+        use crate::discovery::detection::ImageSupport;
+        use renderable::tree::{GraphicsMode, TerminalMermaidMode};
+
+        let mermaid_node =
+            RenderNode::code(Some("mermaid".to_string()), None, "flowchart LR\n    A --> B");
+
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::None)
+            .is_tty(false)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Strict);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.mermaid_mode = TerminalMermaidMode::Image;
+
+        let result = render_terminal_node(&mermaid_node, &opts);
+        assert!(
+            matches!(result, Err(RenderError::LossyRejected { .. })),
+            "strict Mermaid promotion failure must reject; got {result:?}",
+        );
     }
 
     #[test]

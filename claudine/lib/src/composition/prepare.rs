@@ -106,11 +106,12 @@ pub fn prepare_direct(
     }
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
-    let agent_hint = composed
+    let agent_full = composed
         .frontmatter()
         .as_map()
         .get("agent")
-        .map_or(Ok(None), parse_agent_hint)?;
+        .map_or(Ok(ParsedAgentHint::default()), parse_agent_hint_full)?;
+    let agent_hint = agent_full.to_agent_hint();
     let model_hint = composed
         .frontmatter()
         .as_map()
@@ -119,6 +120,8 @@ pub fn prepare_direct(
     let selection_hints = EffectiveSelectionHints {
         agent: agent_hint,
         model: model_hint,
+        agent_invalid: agent_full.invalid,
+        agent_was_list: agent_full.is_list,
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
 
@@ -186,11 +189,12 @@ pub fn prepare_inline(
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
-    let agent_hint = composed
+    let agent_full = composed
         .frontmatter()
         .as_map()
         .get("agent")
-        .map_or(Ok(None), parse_agent_hint)?;
+        .map_or(Ok(ParsedAgentHint::default()), parse_agent_hint_full)?;
+    let agent_hint = agent_full.to_agent_hint();
     let model_hint = composed
         .frontmatter()
         .as_map()
@@ -199,6 +203,8 @@ pub fn prepare_inline(
     let selection_hints = EffectiveSelectionHints {
         agent: agent_hint,
         model: model_hint,
+        agent_invalid: agent_full.invalid,
+        agent_was_list: agent_full.is_list,
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
 
@@ -267,32 +273,71 @@ pub fn parse_selection_hints_from_frontmatter(
     fm: &darkmatter::markdown::Frontmatter,
 ) -> Result<EffectiveSelectionHints, CompositionError> {
     let map = fm.as_map();
-    let agent = map.get("agent").map_or(Ok(None), parse_agent_hint)?;
+    let agent_full = map
+        .get("agent")
+        .map_or(Ok(ParsedAgentHint::default()), parse_agent_hint_full)?;
+    let agent = agent_full.to_agent_hint();
     let model = map.get("model").map_or(Ok(None), parse_model_hint)?;
-    Ok(EffectiveSelectionHints { agent, model })
+    Ok(EffectiveSelectionHints {
+        agent,
+        model,
+        agent_invalid: agent_full.invalid,
+        agent_was_list: agent_full.is_list,
+    })
 }
 
-/// Parse the `agent` frontmatter value into a typed `AgentHint`.
+/// Raw parse result for an `agent` frontmatter value.
 ///
-/// Accepts a single string or an array of strings. Each string is
-/// fuzzy-matched against known providers. Unknown provider names fail
-/// early so composition preparation surfaces the error instead of
-/// deferring it to launch-time resolver failures.
-fn parse_agent_hint(value: &serde_json::Value) -> Result<Option<AgentHint>, CompositionError> {
+/// Preserves fuzzy-matched providers alongside unknown strings so invalid
+/// entries can be surfaced as non-fatal state rather than aborting
+/// composition. The `is_list` flag distinguishes a single value from an
+/// array so a one-element list is still rendered as a list suggestion.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ParsedAgentHint {
+    valid: Vec<Provider>,
+    invalid: Vec<String>,
+    is_list: bool,
+}
+
+impl ParsedAgentHint {
+    fn to_agent_hint(&self) -> Option<AgentHint> {
+        if self.valid.is_empty() {
+            return None;
+        }
+        if self.is_list {
+            Some(AgentHint::List(self.valid.clone()))
+        } else {
+            Some(AgentHint::Single(self.valid[0]))
+        }
+    }
+}
+
+/// Parse the `agent` frontmatter value while preserving invalid entries.
+///
+/// Strings that do not match a known provider are collected in
+/// [`ParsedAgentHint::invalid`] rather than raising an error. Type errors
+/// (non-string array entries, booleans, numbers, objects) are still fatal
+/// because they cannot be meaningfully classified.
+fn parse_agent_hint_full(value: &serde_json::Value) -> Result<ParsedAgentHint, CompositionError> {
+    let mut result = ParsedAgentHint::default();
     match value {
         serde_json::Value::String(s) => {
-            let provider = Provider::fuzzy_match_cli_name(s)
-                .ok_or_else(|| CompositionError::AgentHintInvalid(s.clone()))?;
-            Ok(Some(AgentHint::Single(provider)))
+            if let Some(provider) = Provider::fuzzy_match_cli_name(s) {
+                result.valid.push(provider);
+            } else {
+                result.invalid.push(s.clone());
+            }
         }
         serde_json::Value::Array(arr) => {
-            let mut providers = Vec::with_capacity(arr.len());
+            result.is_list = true;
             for item in arr {
                 match item {
                     serde_json::Value::String(s) => {
-                        let provider = Provider::fuzzy_match_cli_name(s)
-                            .ok_or_else(|| CompositionError::AgentHintInvalid(s.clone()))?;
-                        providers.push(provider);
+                        if let Some(provider) = Provider::fuzzy_match_cli_name(s) {
+                            result.valid.push(provider);
+                        } else {
+                            result.invalid.push(s.clone());
+                        }
                     }
                     other => {
                         return Err(CompositionError::AgentHintWrongType(
@@ -301,17 +346,15 @@ fn parse_agent_hint(value: &serde_json::Value) -> Result<Option<AgentHint>, Comp
                     }
                 }
             }
-            if providers.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(AgentHint::List(providers)))
-            }
         }
-        serde_json::Value::Null => Ok(None),
-        other => Err(CompositionError::AgentHintWrongType(
-            json_type_name(other).to_string(),
-        )),
+        serde_json::Value::Null => {}
+        other => {
+            return Err(CompositionError::AgentHintWrongType(
+                json_type_name(other).to_string(),
+            ));
+        }
     }
+    Ok(result)
 }
 
 /// Parse the `model` frontmatter value into a typed `ModelHint`.
@@ -652,12 +695,81 @@ mod tests {
     }
 
     #[test]
-    fn direct_composition_agent_unknown_provider_errors() {
+    fn direct_composition_agent_unknown_provider_is_non_fatal() {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("agent", json!("unknown-provider"))], "Content");
 
-        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
-        assert!(matches!(err, CompositionError::AgentHintInvalid(_)));
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.agent, None);
+        assert_eq!(
+            prepared.selection_hints.agent_invalid,
+            vec!["unknown-provider".to_string()]
+        );
+    }
+
+    #[test]
+    fn direct_composition_agent_list_skips_invalid_entries() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[("agent", json!(["claude", "not-real", "codex"]))],
+            "Content",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(
+            prepared.selection_hints.agent,
+            Some(AgentHint::List(vec![Provider::Claude, Provider::Codex]))
+        );
+        assert_eq!(
+            prepared.selection_hints.agent_invalid,
+            vec!["not-real".to_string()]
+        );
+    }
+
+    #[test]
+    fn direct_composition_agent_list_all_invalid_is_empty_hint() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("agent", json!(["bad", "worse"]))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.agent, None);
+        assert_eq!(
+            prepared.selection_hints.agent_invalid,
+            vec!["bad".to_string(), "worse".to_string()]
+        );
+        // Even with no valid providers, the list-ness must survive so a
+        // zero-valid list is not mistaken for a scalar value downstream.
+        assert!(prepared.selection_hints.agent_was_list);
+    }
+
+    #[test]
+    fn direct_composition_single_entry_all_invalid_list_preserves_list_flag() {
+        // A one-element invalid list (`agent: ["not-real"]`) must record
+        // `agent_was_list = true` so classification routes it to the
+        // zero-installed-list state, not the single-invalid scalar state.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("agent", json!(["not-real"]))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.agent, None);
+        assert_eq!(
+            prepared.selection_hints.agent_invalid,
+            vec!["not-real".to_string()]
+        );
+        assert!(prepared.selection_hints.agent_was_list);
+    }
+
+    #[test]
+    fn direct_composition_single_scalar_invalid_is_not_list() {
+        // A scalar invalid value (`agent: not-real`) must record
+        // `agent_was_list = false`.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("agent", json!("not-real"))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.agent, None);
+        assert!(!prepared.selection_hints.agent_was_list);
     }
 
     #[test]

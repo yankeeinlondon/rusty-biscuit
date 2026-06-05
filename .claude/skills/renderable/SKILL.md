@@ -170,7 +170,8 @@ The **renderable** library can and should be used by any renderable components w
     - provides all sorts of utilities for discovering features of a given terminal as well as how to render to a terminal (with good fallbacks)
     - because it is so concentrated on terminal features, the `TerminalRenderable` trait resides in **biscuit-terminal** instead of **renderable**
     - current IR migration goal: every IR-aware component should share one private projection helper between `TreeRenderable::render_tree` and `TerminalRenderable::render_tree_node`; nested `RenderableTerminalContent::Component` values should project structurally instead of falling back to ANSI-stripped text
-    - Stage 3 closed the remaining structural-projection gap for `BlockQuote`, `StatusBlock`, and `FileSystem`, deferred the `FileSystem::render` terminal flip to Stage 4, and retired or documented each remaining `render_bespoke` compatibility hook
+    - Stage 3 closed the remaining structural-projection gap for `BlockQuote`, `StatusBlock`, and `FileSystem`, deferred the `FileSystem::render` terminal flip, and retired or documented each remaining `render_bespoke` compatibility hook
+    - tree-cutover Phase 4 closed the connector-list per-item `Style` lowering gap (`render_tree_connector_list` now applies each list item's `Paragraph` `Style`), so `FileSystem`'s terminal styling is at parity; the terminal `render` flip itself stays deferred because the target-agnostic projection emits Unicode icons and cannot reproduce the bespoke Nerd Font terminal icons. `FileSystem` is not rendered by the darkmatter document pipeline, so it is not a cutover blocker
     - **biscuit-terminal** also provides these important components:
         - `Prose`
         - `Table`
@@ -186,6 +187,7 @@ The **renderable** library can and should be used by any renderable components w
             - HTML
             - Terminal
     - The render pipeline currently provides strong capability but is not _yet_ implementing all of the "renderable" traits it should.
+    - Tree-cutover status (`renderable/features/2026-06-02-tree-cutover/`): the document pipeline is fully flipped on **every** target. **Terminal:** `Markdown::as_terminal`, the default-layout `DarkmatterPage::render`, *and* the per-component-layout path (`as_terminal_with_layout(Some(ctx))`) all route through the render-tree terminal renderer (`render_tree::render_tree_terminal` / `render_tree_terminal_with_layout`). The decorated path's hyperlink-label width/alignment/truncation, `▉ IMAGE[alt]` placeholder, and right-aligned list-item body are implemented on the tree via the `render_tree::decorate` pass plus the `image_placeholder` flag and the `darkmatter.li` alignment hint. **Browser:** `Markdown::as_html` / `DarkmatterPage::render_to_browser` route through `render_tree::render_tree_html`; structured link directives (`class`/`target`/`data-*`/`prompt`) and per-link inline CSS are lowered to `<a>` attributes by `render_tree::entrypoints`, and a malformed fenced code-block directive is still a fatal `MarkdownError::InvalidLineRange` (via the `validate_code_directives` preflight `as_html` runs). The `Prose` collapse is landed and darkmatter's `YamlBlock` is now `tree render only` (Phase 4): its terminal `render` and browser `render_html_fragment` fold the projected `Code` node through the shared tree renderers wired with `TerminalCodeRenderer`.
 
 
 ## Migration from Pre-Renderable

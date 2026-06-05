@@ -1,9 +1,7 @@
 ---
 source: darkmatter/lib/tests/layout_snapshots.rs
-expression: page_out
+expression: pinned
 ---
-[38;2;220;223;228m█ [0m[38;2;220;223;228mHello[0m [38;2;220;223;228mWorld[0m
+[1m# Hello World[0m
 
-[38;2;220;223;228mSome[0m [38;2;220;223;228mprose[0m [38;2;220;223;228mhere.[0m
-
-[0m
+Some prose here.

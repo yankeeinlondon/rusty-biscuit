@@ -2,6 +2,6 @@
 source: biscuit-terminal/cli/tests/integration_test.rs
 expression: stdout
 ---
-[38;2;106;114;130m│[0m To be or not to be, that is the question.
-[38;2;106;114;130m│[0m 
-[38;2;106;114;130m│[0m — Shakespeare
+│ To be or not to be, that is the question.
+│ 
+│ — Shakespeare

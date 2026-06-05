@@ -30,11 +30,11 @@ pub mod terminal;
 
 pub use ast::as_ast;
 pub(crate) use ast::parse_mdast;
-pub use html::{HtmlOptions, as_html};
+pub use html::HtmlOptions;
 pub use string::as_string;
 pub use terminal::{
     ColorDepth, HyperlinkMode, ImageRenderer, ItalicMode, MermaidMode, TerminalImageMode,
-    TerminalOptions, for_terminal, write_terminal,
+    TerminalOptions,
 };
 
 #[cfg(test)]

@@ -364,4 +364,54 @@ mod tests {
         // The frontmatter portion must remain unchanged
         assert!(result.starts_with(frontmatter));
     }
+
+    #[test]
+    fn cleanup_inline_output_rewrites_dirty_body_on_disk() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+
+        let frontmatter = "---\nprompt: test\nlast_updated: 2026-03-18\n---\n";
+        // "Dirty" body: no blank line between header and paragraph
+        let dirty_body = "# Title\nParagraph text\n";
+        let text = format!("{frontmatter}{dirty_body}");
+        std::fs::write(&file, &text).unwrap();
+
+        let changed = cleanup_inline_output(&file).unwrap();
+        assert!(changed, "cleanup should report changes for dirty body");
+
+        let on_disk = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            on_disk.contains("# Title\n\nParagraph"),
+            "cleanup must insert blank line between header and paragraph; got:\n{on_disk}"
+        );
+        assert!(
+            on_disk.starts_with(frontmatter),
+            "frontmatter must be preserved byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn cleanup_inline_output_returns_false_for_clean_body() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+
+        let frontmatter = "---\nprompt: test\nlast_updated: 2026-03-18\n---\n";
+        // Already-clean body
+        let clean_body = "# Title\n\nParagraph text\n";
+        let text = format!("{frontmatter}{clean_body}");
+        std::fs::write(&file, &text).unwrap();
+
+        let changed = cleanup_inline_output(&file).unwrap();
+        assert!(
+            !changed,
+            "cleanup should report no changes for already-clean body"
+        );
+
+        let on_disk = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(on_disk, text, "file must be unchanged");
+    }
 }

@@ -1,21 +1,22 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/page_block.rs
-assertion_line: 72
 expression: out
 ---
 ⤫ PageBlockError: The file sample.md has an unterminated ::block / ::end-block
   block definition.
 ┃ The Frontmatter of this document was:
 ┃ 
-┃   ---
-┃   title: Sample
-┃   ---
+┃ ```yaml
+┃     ---
+┃     title: Sample
+┃     ---
 ┃ 
 ┃ The opening page block was found here:
 ┃ 
-┃      6 │ Intro paragraph.
-┃      7 │ 
-┃   >  8 │ ::block when="condition"
-┃      9 │ body line one
-┃     10 │ body line two
+┃ ```md
+┃        6 │ Intro paragraph.
+┃        7 │ 
+┃     >  8 │ ::block when="condition"
+┃        9 │ body line one
+┃       10 │ body line two
 Add a matching ::end-block directive to close the region.

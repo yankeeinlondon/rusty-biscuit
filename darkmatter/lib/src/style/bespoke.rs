@@ -1471,10 +1471,10 @@ mod tests {
 
         // Width 10 + Left alignment over text "hi" (2 cells) must pad with
         // 8 trailing spaces. The optimistic terminal falls back to the
-        // `text [url]` format (no OSC 8 support claimed), so the padding
-        // sits between the label and ` [https://example.com]`.
+        // tree renderer's `[label](url)` no-OSC8 form, so the padded label
+        // sits inside the brackets alongside `(https://example.com)`.
         assert!(
-            output.contains("hi        ") && output.contains(" [https://example.com]"),
+            output.contains("hi        ") && output.contains("(https://example.com)"),
             "padded display text not present. output={:?}",
             output
         );
@@ -1653,18 +1653,25 @@ mod tests {
         let md: Markdown = "![a](./local.png)".into();
         let output = page.render(&md).unwrap();
 
-        // Fallback text "▉ IMAGE[a]\n" — the ▉ block is treated as an
-        // ambiguous-width glyph; we don't pin the exact pad count, just that
-        // the fallback line is right-padded with a substantial leading run
-        // of spaces (>= 28 cells of leading space).
+        // The tree path applies `local_image_style` (width 40, Right) to the alt
+        // text itself, so the placeholder becomes `▉ IMAGE[<pad>a]` with the
+        // padding inside the brackets — a documented parity-difference from the
+        // legacy serializer, which padded the whole `▉ IMAGE[a]` string. The
+        // alt `a` (1 cell) right-aligns into 40 cells, so a substantial leading
+        // run of spaces precedes it inside the brackets.
         let fallback_line = output
             .lines()
-            .find(|l| l.contains("▉ IMAGE[a]"))
+            .find(|l| l.contains("▉ IMAGE["))
             .unwrap_or_else(|| panic!("fallback line missing in output={output:?}"));
-        let leading = fallback_line.chars().take_while(|c| *c == ' ').count();
+        let inner = fallback_line
+            .split_once("▉ IMAGE[")
+            .and_then(|(_, rest)| rest.split_once(']'))
+            .map(|(inner, _)| inner)
+            .unwrap_or("");
+        let leading = inner.chars().take_while(|c| *c == ' ').count();
         assert!(
-            leading >= 28,
-            "right-padded fallback should have >=28 leading spaces, got {leading}: {fallback_line:?}"
+            leading >= 28 && inner.trim() == "a",
+            "alt should be right-padded to ~40 cells inside the placeholder, got {leading} leading: {fallback_line:?}"
         );
     }
 

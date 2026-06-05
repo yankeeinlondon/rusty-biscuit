@@ -154,13 +154,14 @@ fn headline_compose_with_fuzzy_provider_resolves_to_claude() {
     let combined = format!("{stderr}{stdout}");
 
     assert!(
-        combined.contains("AGENT=claude"),
-        "dry-run should report `AGENT=claude` after fuzzy match \
+        combined.contains("Claude"),
+        "dry-run should resolve to Claude after fuzzy match \
          (`cl` → `claude`); got: {combined}"
     );
+    // The composed body on stdout is the defining dry-run marker.
     assert!(
-        combined.contains("[DRY RUN]"),
-        "dry-run header should appear in output; got: {combined}"
+        stdout.contains("Hello."),
+        "dry-run should render the composed body to stdout; got: {combined}"
     );
 }
 
@@ -191,13 +192,14 @@ fn headline_compose_with_plain_setter_behaves_as_before() {
     let combined = format!("{stderr}{stdout}");
 
     assert!(
-        combined.contains("AGENT=claude"),
+        combined.contains("Claude"),
         "plain setter path should still route to the chosen provider; \
          got: {combined}"
     );
+    // The composed body on stdout is the defining dry-run marker.
     assert!(
-        combined.contains("[DRY RUN]"),
-        "dry-run header should appear in output; got: {combined}"
+        stdout.contains("Hello."),
+        "dry-run should render the composed body to stdout; got: {combined}"
     );
 }
 
@@ -211,6 +213,7 @@ fn headline_compose_with_setter_then_late_flags_preserves_flag_semantics() {
 
     let output = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("TERM_WIDTH", "120")
         .args([
             "compose",
             fixture.to_str().unwrap(),
@@ -230,16 +233,22 @@ fn headline_compose_with_setter_then_late_flags_preserves_flag_semantics() {
     let combined = format!("{stderr}{stdout}");
 
     assert!(
-        combined.contains("AGENT=gemini"),
+        combined.contains("Gemini"),
         "expected provider selection to survive mixed ordering; got: {combined}"
     );
+    // `-y` surfaces in the dry-run metadata table's YOLO row.
     assert!(
-        combined.contains("YOLO=true"),
+        combined.contains("YOLO") && combined.contains("true"),
         "expected trailing `-y` to remain a Claudine flag; got: {combined}"
     );
+    // `-i` is not surfaced in the dry-run output, but a `-i` that failed to
+    // normalize would be misclassified as a second positional file reference
+    // and abort before any output. The rendered dry-run body therefore proves
+    // `-i` was parsed as the interactive flag, not swallowed as a positional.
     assert!(
-        combined.contains("INTERACTIVE=true"),
-        "expected trailing `-i` to remain a Claudine flag; got: {combined}"
+        stdout.contains("Hello."),
+        "expected trailing `-i` to parse as a flag and the dry-run body to \
+         render to stdout; got: {combined}"
     );
 }
 
@@ -252,6 +261,7 @@ fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
 
     let output = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("TERM_WIDTH", "120")
         .args([
             "compose",
             fixture.to_str().unwrap(),
@@ -271,16 +281,22 @@ fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
     let combined = format!("{stderr}{stdout}");
 
     assert!(
-        combined.contains("AGENT=gemini"),
+        combined.contains("Gemini"),
         "expected provider selection to survive setter-first ordering; got: {combined}"
     );
+    // `-y` surfaces in the dry-run metadata table's YOLO row.
     assert!(
-        combined.contains("YOLO=true"),
+        combined.contains("YOLO") && combined.contains("true"),
         "expected `-y` after a setter to remain a Claudine flag; got: {combined}"
     );
+    // `-i` is not surfaced in the dry-run output, but a `-i` that failed to
+    // normalize would be misclassified as a second positional file reference
+    // and abort before any output. The rendered dry-run body therefore proves
+    // `-i` was parsed as the interactive flag, not swallowed as a positional.
     assert!(
-        combined.contains("INTERACTIVE=true"),
-        "expected `-i` after a setter to remain a Claudine flag; got: {combined}"
+        stdout.contains("Hello."),
+        "expected `-i` after a setter to parse as a flag and the dry-run body \
+         to render to stdout; got: {combined}"
     );
 }
 

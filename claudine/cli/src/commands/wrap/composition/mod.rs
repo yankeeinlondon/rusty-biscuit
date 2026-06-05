@@ -12,6 +12,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
@@ -19,9 +20,10 @@ use claudine::composition::lifecycle::{
     DefaultLifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal,
 };
 use claudine::composition::{
-    CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
-    InlineClosurePlan, ModelResolutionReason, ResolvedExecutionTarget, SelectionReason,
-    build_installed_snapshot, build_picker_plan, resolve_target_non_tty_with_catalog,
+    AgentResolutionState, CompositionClosurePlan, CompositionError, CompositionExecutionRequest,
+    CompositionMode, InlineClosurePlan, ModelResolutionReason, ResolvedExecutionTarget,
+    SelectionReason, agent_state_breakdown, build_installed_snapshot, build_picker_plan,
+    classify_agent_resolution, invalid_agent_message, resolve_target_non_tty_with_catalog,
 };
 use claudine::config::claudine_config::ProviderModelOverride;
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
@@ -36,7 +38,7 @@ use super::live_semantic_sink::LiveSemanticSink;
 use super::profile::{self, WrapperProfile};
 use super::{
     HarnessPromptMode, HarnessPromptState, StreamSummaryContext, StructuredCodexOutput,
-    StructuredSummaryDetails, WrapperHarnessPermissionProbe,
+    StructuredSummaryDetails, WrapperHarnessPermissionProbe, apply_composition_shell_overrides,
     build_harness_shell_options_with_cache, emit_stream_summary_with_context, format_summary_prose,
     format_verbose_summary_details_prose, materialized_harness_prompt_from_prepared,
     resolve_binary_path_direct, run_harness_loop, structured_verbosity, switch_process_cwd,
@@ -44,6 +46,7 @@ use super::{
 };
 use crate::log;
 
+pub(crate) mod dry_run;
 pub(crate) mod inline_guards;
 pub(crate) mod legacy_goose;
 pub(crate) mod prep_context;
@@ -421,17 +424,20 @@ fn composition_dispatch_context(
 /// rendered, so `{{env.AGENT}}` in the body or inline `prompt` resolves
 /// to the chosen provider.
 ///
-/// Mirrors the resolution logic in [`execute_composition_request_inner`]
-/// — explicit flag wins, then frontmatter agent hint, then favorite, with
-/// a TTY picker when no signal yields a unique answer. The hints come
-/// from raw frontmatter (no compose), so an `agent: "{{...}}"` template
-/// is treated as absent and falls back to the picker / favorite.
+/// This is the Phase 3 live-path entry point: explicit flag wins, then
+/// the frontmatter `agent` hint is classified and acted on according to
+/// the TTY-only gate. In `--dry-run` mode the function returns
+/// `Ok(None)` for any unresolved state so the dry-run renderer can
+/// report it without prompting; for auto-selectable states it still
+/// returns the selected target so `AGENT` interpolation works.
 pub(crate) fn eagerly_resolve_target(
     ctx: &CompositionPrepContext,
     hints: &claudine::composition::EffectiveSelectionHints,
     explicit_provider: Option<Provider>,
     cli_model: Option<&str>,
-) -> Result<ResolvedExecutionTarget> {
+    dry_run: bool,
+    source_path: &std::path::Path,
+) -> Result<Option<ResolvedExecutionTarget>> {
     // Phase 2 (2026-05-09-slow-prep): the installed-provider snapshot and
     // selection config are pre-built on the shared `CompositionPrepContext`
     // so this function no longer rediscovers the source repo root, reloads
@@ -450,79 +456,237 @@ pub(crate) fn eagerly_resolve_target(
     // touches the catalog.
     let favorite = selection_config.and_then(|c| c.favorite);
 
-    let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-
-    if is_tty {
-        if let Some(provider) = explicit_provider {
-            // Probe model resolution without catalog to determine whether
-            // an env var override makes refresh unnecessary.
-            let (_, probe_reason) =
-                claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
-            refresh_for_model_validation(&catalog, provider, hints, Some(&probe_reason));
-            let (model, model_reason) = claudine::composition::resolve_model_with_hints(
-                provider,
-                hints,
-                cli_model,
-                Some(&catalog),
-            );
-            return Ok(ResolvedExecutionTarget {
-                provider,
-                provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
-                model,
-                model_reason,
-            });
-        }
-        let plan = claudine::composition::build_picker_plan_with_hints(hints, snapshot, favorite)
-            .map_err(|e| eyre!("{e}"))?;
-        let provider = super::selection_ui::prompt_one_shot_provider(plan)
-            .map_err(|e| eyre!("provider selection cancelled: {e}"))?;
+    if let Some(provider) = explicit_provider {
         // Probe model resolution without catalog to determine whether
         // an env var override makes refresh unnecessary.
         let (_, probe_reason) =
             claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
-        refresh_for_model_validation(&catalog, provider, hints, Some(&probe_reason));
-        let (model, model_reason) = claudine::composition::resolve_model_with_hints(
+        if !dry_run {
+            refresh_for_model_validation(&catalog, provider, hints, Some(&probe_reason));
+        }
+        let catalog_ref = if dry_run { None } else { Some(&catalog) };
+        let (model, model_reason) =
+            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, catalog_ref);
+        return Ok(Some(ResolvedExecutionTarget {
             provider,
-            hints,
-            cli_model,
-            Some(&catalog),
-        );
+            provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
+            model,
+            model_reason,
+        }));
+    }
+
+    let state = classify_agent_resolution(hints, snapshot);
+
+    if dry_run {
+        // Dry-run only needs a concrete target when the state auto-selects.
+        // Otherwise the renderer reports the unresolved state.
+        let (provider, provider_reason) = match state {
+            AgentResolutionState::Selected { provider } => (
+                provider,
+                claudine::composition::ProviderResolutionReason::FrontmatterSingle,
+            ),
+            AgentResolutionState::ListOneInstalled { selected, .. } => (
+                selected,
+                claudine::composition::ProviderResolutionReason::FrontmatterList,
+            ),
+            _ => return Ok(None),
+        };
+        let (model, model_reason) =
+            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
+        return Ok(Some(ResolvedExecutionTarget {
+            provider,
+            provider_reason,
+            model,
+            model_reason,
+        }));
+    }
+
+    resolve_live_target(state, hints, snapshot, favorite, cli_model, &catalog, source_path)
+        .map(Some)
+}
+
+/// Resolve a classified agent state for a live (non-dry-run) run.
+///
+/// Applies the TTY-only gate per the Phase 3 spec:
+/// - auto-selectable states return the target directly,
+/// - TTY prompting states show the scoped picker (and any required
+///   pre-prompt message),
+/// - no-TTY prompting states abort with a structured error.
+fn resolve_live_target(
+    state: AgentResolutionState,
+    hints: &claudine::composition::EffectiveSelectionHints,
+    snapshot: &claudine::composition::InstalledProviderSnapshot,
+    favorite: Option<Provider>,
+    cli_model: Option<&str>,
+    catalog: &claudine::model_catalog::ModelCatalogService,
+    source_path: &std::path::Path,
+) -> Result<ResolvedExecutionTarget> {
+    resolve_live_target_with_tty(
+        state,
+        hints,
+        snapshot,
+        favorite,
+        cli_model,
+        catalog,
+        source_path,
+        std::io::stderr().is_terminal(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_live_target_with_tty(
+    state: AgentResolutionState,
+    hints: &claudine::composition::EffectiveSelectionHints,
+    snapshot: &claudine::composition::InstalledProviderSnapshot,
+    favorite: Option<Provider>,
+    cli_model: Option<&str>,
+    catalog: &claudine::model_catalog::ModelCatalogService,
+    source_path: &std::path::Path,
+    is_tty: bool,
+) -> Result<ResolvedExecutionTarget> {
+    use claudine::composition::ProviderResolutionReason;
+
+    let selected_provider = match state {
+        AgentResolutionState::Selected { provider } => Some(provider),
+        AgentResolutionState::ListOneInstalled { selected, .. } => Some(selected),
+        _ => None,
+    };
+
+    if let Some(provider) = selected_provider {
+        let (_, probe_reason) =
+            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
+        refresh_for_model_validation(catalog, provider, hints, Some(&probe_reason));
+        let (model, model_reason) =
+            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, Some(catalog));
+        let provider_reason = match state {
+            AgentResolutionState::Selected { .. } => ProviderResolutionReason::FrontmatterSingle,
+            _ => ProviderResolutionReason::FrontmatterList,
+        };
+        return Ok(ResolvedExecutionTarget {
+            provider,
+            provider_reason,
+            model,
+            model_reason,
+        });
+    }
+
+    if is_tty {
+        let provider =
+            prompt_for_agent_state(&state, hints, snapshot, favorite, source_path)?;
+        let (_, probe_reason) =
+            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
+        refresh_for_model_validation(catalog, provider, hints, Some(&probe_reason));
+        let (model, model_reason) =
+            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, Some(catalog));
         Ok(ResolvedExecutionTarget {
             provider,
-            provider_reason: claudine::composition::ProviderResolutionReason::InteractivePicker,
+            provider_reason: ProviderResolutionReason::InteractivePicker,
             model,
             model_reason,
         })
     } else {
-        // Non-TTY: provider resolution doesn't touch the catalog, so we
-        // perform a first pass with `None` to learn the provider, refresh
-        // only that provider's catalog (when needed), and re-resolve so
-        // model validation observes the freshly fetched data.
-        let provider_only = claudine::composition::resolve_target_non_tty_with_hints(
-            explicit_provider,
-            hints,
-            snapshot,
-            favorite,
-            cli_model,
-            None,
-        )
-        .map_err(|e| eyre!("{e}"))?;
-        refresh_for_model_validation(
-            &catalog,
-            provider_only.provider,
-            hints,
-            Some(&provider_only.model_reason),
-        );
-        claudine::composition::resolve_target_non_tty_with_hints(
-            explicit_provider,
-            hints,
-            snapshot,
-            favorite,
-            cli_model,
-            Some(&catalog),
-        )
-        .map_err(|e| eyre!("{e}"))
+        Err(CompositionError::AgentResolutionFailed {
+            source_path: source_path.to_path_buf(),
+            state,
+            installed: snapshot.runnable.clone(),
+        }
+        .into())
     }
+}
+
+/// The styled pre-prompt message a TTY run shows before the `choose_one`
+/// picker, or `None` for states that go straight to the picker.
+///
+/// The text is the single source of truth shared with the dry-run table cell
+/// and the no-TTY abort body (via [`agent_state_breakdown`] /
+/// [`invalid_agent_message`]) so the three surfaces cannot drift. Returns
+/// Prose **markup**; callers render it with their own terminal.
+fn agent_prompt_message(
+    state: &AgentResolutionState,
+    source_path: &std::path::Path,
+) -> Option<String> {
+    match state {
+        AgentResolutionState::SingleInvalid { hint } => {
+            let file_href = format!("file://{}", source_path.display());
+            let file_label = source_path.display().to_string();
+            let file_link = format!("<a href=\"{file_href}\">{file_label}</a>");
+            Some(invalid_agent_message(hint, &file_link))
+        }
+        AgentResolutionState::ZeroInstalledList { .. } => Some(agent_state_breakdown(state)),
+        _ => None,
+    }
+}
+
+/// Which installed providers the picker is scoped to for a given state.
+///
+/// Only [`AgentResolutionState::ListMultipleInstalled`] narrows the picker to
+/// its suggested installed providers; every other prompting state offers all
+/// installed agents (`None`), matching the spec's per-state scoping rules.
+fn picker_scope_for_state(state: &AgentResolutionState) -> Option<&[Provider]> {
+    match state {
+        AgentResolutionState::ListMultipleInstalled { installed, .. } => Some(installed.as_slice()),
+        _ => None,
+    }
+}
+
+/// Build the picker plan for a prompting state, applying the per-state scope.
+///
+/// Pure (no I/O): the live path and L1 tests both go through here so the
+/// scope contract is verifiable without a TTY.
+#[allow(clippy::result_large_err)]
+fn scoped_picker_plan_for_state(
+    state: &AgentResolutionState,
+    hints: &claudine::composition::EffectiveSelectionHints,
+    snapshot: &claudine::composition::InstalledProviderSnapshot,
+    favorite: Option<Provider>,
+) -> Result<claudine::composition::ProviderPickerPlan, CompositionError> {
+    build_scoped_picker_plan(hints, snapshot, favorite, picker_scope_for_state(state))
+}
+
+/// Emit the pre-prompt message for TTY states that require one, then
+/// show the `choose_one` picker and return the user-selected provider.
+fn prompt_for_agent_state(
+    state: &AgentResolutionState,
+    hints: &claudine::composition::EffectiveSelectionHints,
+    snapshot: &claudine::composition::InstalledProviderSnapshot,
+    favorite: Option<Provider>,
+    source_path: &std::path::Path,
+) -> Result<Provider> {
+    if let Some(markup) = agent_prompt_message(state, source_path) {
+        let term = wrap_terminal();
+        log::message(&Prose::new(markup).render(&term));
+    }
+
+    let plan = scoped_picker_plan_for_state(state, hints, snapshot, favorite)?;
+    super::selection_ui::prompt_one_shot_provider(plan)
+        .map_err(|e| eyre!("provider selection cancelled: {e}"))
+}
+
+/// Build a picker plan scoped to a subset of installed providers.
+///
+/// When `scope` is `Some`, only providers in that list are shown. The
+/// ordering and default index are inherited from the unscoped plan so
+/// frontmatter/favorite influence is preserved.
+#[allow(clippy::result_large_err)]
+fn build_scoped_picker_plan(
+    hints: &claudine::composition::EffectiveSelectionHints,
+    snapshot: &claudine::composition::InstalledProviderSnapshot,
+    favorite: Option<Provider>,
+    scope: Option<&[Provider]>,
+) -> Result<claudine::composition::ProviderPickerPlan, CompositionError> {
+    let mut plan =
+        claudine::composition::build_picker_plan_with_hints(hints, snapshot, favorite)?;
+
+    if let Some(scope) = scope {
+        let scope_set: std::collections::BTreeSet<Provider> = scope.iter().copied().collect();
+        plan.options.retain(|o| scope_set.contains(&o.provider));
+        if plan.options.is_empty() {
+            return Err(CompositionError::NoRunnableProviders);
+        }
+        plan.default_index = plan.default_index.min(plan.options.len() - 1);
+    }
+
+    Ok(plan)
 }
 
 /// Refresh a single provider's catalog only when frontmatter `model`
@@ -646,6 +810,42 @@ pub(crate) fn execute_composition_request_inner(
     let _span = tracing::info_span!("composition_prepare").entered();
 
     let term = wrap_terminal();
+
+    // Early dry-run seam for unresolved agent states. When the upstream
+    // caller left `resolved_target` as `None` (e.g. compose --dry-run with
+    // no explicit provider and no auto-selectable frontmatter hint), skip
+    // provider selection, header emission, and harness preflight entirely.
+    // The renderer reports the classified state in the metadata table.
+    if request.dry_run && request.resolved_target.is_none() {
+        let render = dry_run::DryRunRender::from_request(&request);
+
+        crate::log::data(&render.body);
+        crate::log::message(&dry_run::render_hr(&term));
+        crate::log::message(&dry_run::render_frontmatter_heading(&term));
+        crate::log::message("");
+        crate::log::message(&dry_run::render_frontmatter(&render.frontmatter, &term));
+        crate::log::message(&dry_run::render_metadata_table(&render, &term));
+
+        if let Some(collector) = perf_collector.as_mut() {
+            collector.set_dry_run();
+        }
+        let outcome = SingleCompositionOutcome {
+            exit_code: 0,
+            // Provider is intentionally unknown for unresolved dry-run;
+            // the placeholder is never displayed because the caller returns
+            // immediately on the dry-run path.
+            provider: claudine::provider::Provider::Claude,
+            agent_perf: None,
+            iteration_signals: None,
+        };
+        if let Some(collector) = perf_collector {
+            let total = total_start.elapsed();
+            let report = collector.into_report(total);
+            eprint!("{}", crate::perf::render_perf_report(&report));
+        }
+        return Ok(outcome);
+    }
+
     let launch_cwd = std::env::current_dir()?;
     let detail_requested = verbose > 0;
     let quiet = request.quiet;
@@ -689,20 +889,42 @@ pub(crate) fn execute_composition_request_inner(
             ),
             None => claudine::model_catalog::ModelCatalogService::new(),
         };
-        // Phase 1 (2026-05-09-slow-prep): refresh is provider-scoped and
-        // only runs after we know which provider was selected. The
-        // unconditional global `refresh_blocking()` previously emitted
-        // from this point was the dominant prep-time cost in the trace
-        // and has been removed.
         let favorite = selection_config.as_ref().and_then(|c| c.favorite);
 
-        let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+        if let Some(provider) = request.explicit_provider {
+            let (_, probe_reason) = claudine::composition::resolve_model_with_catalog(
+                provider,
+                &request.prepared,
+                request.model.as_deref(),
+                None,
+            );
+            refresh_for_prepared_model_validation(
+                &catalog,
+                provider,
+                &request.prepared,
+                Some(&probe_reason),
+            );
+            let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
+                provider,
+                &request.prepared,
+                request.model.as_deref(),
+                Some(&catalog),
+            );
+            ResolvedExecutionTarget {
+                provider,
+                provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
+                model,
+                model_reason,
+            }
+        } else {
+            let state = classify_agent_resolution(&request.prepared.selection_hints, &snapshot);
+            let selected_provider = match state {
+                AgentResolutionState::Selected { provider } => Some(provider),
+                AgentResolutionState::ListOneInstalled { selected, .. } => Some(selected),
+                _ => None,
+            };
 
-        if is_tty {
-            // TTY mode: explicit flag wins unconditionally; otherwise show picker.
-            if let Some(provider) = request.explicit_provider {
-                // Probe model resolution without catalog to determine whether
-                // an env var override makes refresh unnecessary.
+            if let Some(provider) = selected_provider {
                 let (_, probe_reason) = claudine::composition::resolve_model_with_catalog(
                     provider,
                     &request.prepared,
@@ -721,74 +943,62 @@ pub(crate) fn execute_composition_request_inner(
                     request.model.as_deref(),
                     Some(&catalog),
                 );
+                let provider_reason = match state {
+                    AgentResolutionState::Selected { .. } => {
+                        claudine::composition::ProviderResolutionReason::FrontmatterSingle
+                    }
+                    _ => claudine::composition::ProviderResolutionReason::FrontmatterList,
+                };
                 ResolvedExecutionTarget {
                     provider,
-                    provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
+                    provider_reason,
                     model,
                     model_reason,
                 }
             } else {
-                let plan = build_picker_plan(&request.prepared, &snapshot, favorite)
-                    .map_err(|e| eyre!("{e}"))?;
-                let provider = super::selection_ui::prompt_one_shot_provider(plan)
-                    .map_err(|e| eyre!("provider selection cancelled: {e}"))?;
-                // Probe model resolution without catalog to determine whether
-                // an env var override makes refresh unnecessary.
-                let (_, probe_reason) = claudine::composition::resolve_model_with_catalog(
-                    provider,
-                    &request.prepared,
-                    request.model.as_deref(),
-                    None,
-                );
-                refresh_for_prepared_model_validation(
-                    &catalog,
-                    provider,
-                    &request.prepared,
-                    Some(&probe_reason),
-                );
-                let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
-                    provider,
-                    &request.prepared,
-                    request.model.as_deref(),
-                    Some(&catalog),
-                );
-                ResolvedExecutionTarget {
-                    provider,
-                    provider_reason:
-                        claudine::composition::ProviderResolutionReason::InteractivePicker,
-                    model,
-                    model_reason,
+                let is_tty = std::io::stderr().is_terminal();
+                if is_tty {
+                    let provider = prompt_for_agent_state(
+                        &state,
+                        &request.prepared.selection_hints,
+                        &snapshot,
+                        favorite,
+                        &request.prepared.resolved_path,
+                    )?;
+                    let (_, probe_reason) = claudine::composition::resolve_model_with_catalog(
+                        provider,
+                        &request.prepared,
+                        request.model.as_deref(),
+                        None,
+                    );
+                    refresh_for_prepared_model_validation(
+                        &catalog,
+                        provider,
+                        &request.prepared,
+                        Some(&probe_reason),
+                    );
+                    let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
+                        provider,
+                        &request.prepared,
+                        request.model.as_deref(),
+                        Some(&catalog),
+                    );
+                    ResolvedExecutionTarget {
+                        provider,
+                        provider_reason:
+                            claudine::composition::ProviderResolutionReason::InteractivePicker,
+                        model,
+                        model_reason,
+                    }
+                } else {
+                    return Err(CompositionError::AgentResolutionFailed {
+                        source_path: request.prepared.resolved_path.clone(),
+                        state,
+                        installed: snapshot.runnable.clone(),
+                    }
+                    .into());
                 }
             }
-        } else {
-            // Non-TTY: provider resolution doesn't touch the catalog. First
-            // pass with no catalog to determine the provider, then refresh
-            // only that provider, then re-resolve with the catalog so
-            // model validation observes the freshly fetched data.
-            let provider_only = resolve_target_non_tty_with_catalog(
-                request.explicit_provider,
-                &request.prepared,
-                &snapshot,
-                favorite,
-                request.model.as_deref(),
-                None,
-            )
-            .map_err(|e| eyre!("{e}"))?;
-            refresh_for_prepared_model_validation(
-                &catalog,
-                provider_only.provider,
-                &request.prepared,
-                Some(&provider_only.model_reason),
-            );
-            resolve_target_non_tty_with_catalog(
-                request.explicit_provider,
-                &request.prepared,
-                &snapshot,
-                favorite,
-                request.model.as_deref(),
-                Some(&catalog),
-            )
-            .map_err(|e| eyre!("{e}"))?
         }
     };
 
@@ -1298,8 +1508,6 @@ pub(crate) fn execute_composition_request_inner(
         super::profile::validate_argv_flags_before_separator(profile.binary(), &child_args);
     }
 
-    let sp_display_lines = super::system_prompt::describe_effective(&effective_sp);
-
     record_substage(
         &mut perf_collector,
         &mut last_checkpoint,
@@ -1310,38 +1518,10 @@ pub(crate) fn execute_composition_request_inner(
         collector.mark_env_setup_complete();
     }
 
-    // --dry-run: print what would be executed and exit
-    if request.dry_run {
-        crate::output::log_dry_run(
-            profile,
-            &binary_path,
-            &child_args,
-            request.repo,
-            &env_plan,
-            None,
-            child_cwd,
-            &term,
-            sp_display_lines.as_deref(),
-        );
-        if let Some(collector) = perf_collector.as_mut() {
-            collector.set_dry_run();
-        }
-        let outcome = SingleCompositionOutcome {
-            exit_code: 0,
-            provider,
-            agent_perf: None,
-            // Dry-run never produces a per-iteration summary.
-            iteration_signals: None,
-        };
-        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
-        // The perf report is always emitted to stderr when requested.
-        if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
-        }
-        return Ok(outcome);
-    }
+    // --dry-run no longer exits here. The seam now sits *after* the harness
+    // preflight block below, so harness shell-approval + writability
+    // pre-checks participate in the dry-run gate before the composed output
+    // is rendered. See the `request.dry_run` early-return after preflight.
 
     switch_process_cwd(child_cwd)?;
 
@@ -1366,10 +1546,14 @@ pub(crate) fn execute_composition_request_inner(
     let harness_enabled =
         claudine::harness::has_harness_properties(&request.prepared.effective_frontmatter);
 
-    let shell_options = build_harness_shell_options_with_cache(
-        &request.prepared.resolved_path,
-        effective_repo_root,
-        request.shared_approval_cache.clone(),
+    let shell_options = apply_composition_shell_overrides(
+        build_harness_shell_options_with_cache(
+            &request.prepared.resolved_path,
+            effective_repo_root,
+            request.shared_approval_cache.clone(),
+        ),
+        request.dry_run,
+        request.yolo,
     );
 
     // --- Lifecycle notification setup ---
@@ -1467,6 +1651,44 @@ pub(crate) fn execute_composition_request_inner(
             guard.emit_blocked_or_failure();
             eyre!("{reason}")
         })?;
+    }
+
+    // --dry-run seam: the full composition pipeline (compose, real shell
+    // expansion, shell approval, harness pre-checks) has now run. Stop here —
+    // before any provider launches — and emit the composed artifacts:
+    //   - the composed body → stdout (the data product; pipeable/redirectable)
+    //   - the finalized frontmatter (highlighted YAML) → stderr
+    //   - a metadata table → stderr (after the frontmatter)
+    // `--quiet` / `--silent` do not suppress this render: the dry-run output
+    // *is* the command's purpose.
+    if request.dry_run {
+        let render = dry_run::DryRunRender::from_request(&request);
+
+        crate::log::data(&render.body);
+        crate::log::message(&dry_run::render_hr(&term));
+        crate::log::message(&dry_run::render_frontmatter_heading(&term));
+        crate::log::message("");
+        crate::log::message(&dry_run::render_frontmatter(&render.frontmatter, &term));
+        crate::log::message(&dry_run::render_metadata_table(&render, &term));
+
+        if let Some(collector) = perf_collector.as_mut() {
+            collector.set_dry_run();
+        }
+        let outcome = SingleCompositionOutcome {
+            exit_code: 0,
+            provider,
+            agent_perf: None,
+            // Dry-run never produces a per-iteration summary.
+            iteration_signals: None,
+        };
+        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+        // The perf report is always emitted to stderr when requested.
+        if let Some(collector) = perf_collector {
+            let total = total_start.elapsed();
+            let report = collector.into_report(total);
+            eprint!("{}", crate::perf::render_perf_report(&report));
+        }
+        return Ok(outcome);
     }
 
     // Emit a single preflight-complete indicator for direct compose and
@@ -1995,9 +2217,13 @@ mod tests {
     #[serial_test::serial]
     fn select_launch_workspace_falls_back_once_when_prep_missing() {
         reset_launch_workspace_fallbacks_for_tests();
-        let cwd = std::env::current_dir().unwrap();
+        // Point the fallback walker at an empty tempdir rather than the real
+        // current dir: the counter increments before the walk, so the
+        // contract holds, while avoiding an expensive repo scan of the whole
+        // monorepo worktree.
+        let cwd = tempfile::tempdir().unwrap();
 
-        let _ = select_launch_workspace(None, &cwd, None);
+        let _ = select_launch_workspace(None, cwd.path(), None);
 
         assert_eq!(
             launch_workspace_fallback_count_for_tests(),
@@ -2095,27 +2321,15 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn load_selection_config_handles_missing_config() {
         let dir = tempfile::tempdir().unwrap();
-        let home = dir.path();
-
-        let old_home = std::env::var("HOME").ok();
-        unsafe {
-            std::env::set_var("HOME", home);
-        }
-
-        let result = load_selection_config(home);
-
-        unsafe {
-            if let Some(old) = old_home {
-                std::env::set_var("HOME", old);
-            } else {
-                std::env::remove_var("HOME");
-            }
-        }
-
-        assert!(result.is_none());
+        let nonexistent = dir.path().join("no-such-config.json");
+        let result =
+            claudine::dispatch::loader::load_claudine_config(Some(&nonexistent), None);
+        assert!(
+            result.is_err(),
+            "expected error for missing config file"
+        );
     }
 
     #[test]
@@ -2338,6 +2552,7 @@ mod tests {
         claudine::composition::EffectiveSelectionHints {
             agent: None,
             model: Some(ModelHint::Single(model.into())),
+            ..Default::default()
         }
     }
 
@@ -2435,5 +2650,364 @@ mod tests {
         // Refresh should have been attempted (will fail gracefully since
         // opencode is not on PATH, but the attempt counter increments).
         assert_eq!(catalog.opencode_fetch_attempts(), 1);
+    }
+
+    // ------------------------------------------------------------------------
+    // Live agent resolution TTY gate (Phase 3)
+    // ------------------------------------------------------------------------
+
+    fn make_empty_hints() -> claudine::composition::EffectiveSelectionHints {
+        claudine::composition::EffectiveSelectionHints::default()
+    }
+
+    fn make_snapshot(runnable: Vec<Provider>) -> claudine::composition::InstalledProviderSnapshot {
+        claudine::composition::InstalledProviderSnapshot {
+            runnable: runnable.clone(),
+            excluded: std::collections::BTreeSet::new(),
+            all_installed: runnable,
+            binary_paths: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn assert_agent_resolution_failed(
+        result: &Result<ResolvedExecutionTarget>,
+        expected_state: claudine::composition::AgentResolutionState,
+    ) {
+        let err = result
+            .as_ref()
+            .expect_err("expected AgentResolutionFailed error");
+        let composition_err = err
+            .downcast_ref::<claudine::composition::CompositionError>()
+            .expect("error should downcast to CompositionError");
+        match composition_err {
+            claudine::composition::CompositionError::AgentResolutionFailed { state, .. } => {
+                assert_eq!(*state, expected_state, "unexpected resolution state");
+            }
+            other => panic!("expected AgentResolutionFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn live_selected_auto_selects_regardless_of_tty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let hints = make_empty_hints();
+        let snapshot = make_snapshot(vec![Provider::Claude]);
+        let state = claudine::composition::AgentResolutionState::Selected {
+            provider: Provider::Claude,
+        };
+        let result = resolve_live_target_with_tty(
+            state,
+            &hints,
+            &snapshot,
+            None,
+            None,
+            &catalog,
+            Path::new("/tmp/doc.md"),
+            false,
+        );
+        let target = result.expect("should auto-select");
+        assert_eq!(target.provider, Provider::Claude);
+        assert!(matches!(
+            target.provider_reason,
+            claudine::composition::ProviderResolutionReason::FrontmatterSingle
+        ));
+    }
+
+    #[test]
+    fn live_list_one_installed_auto_selects_regardless_of_tty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let hints = claudine::composition::EffectiveSelectionHints {
+            agent: Some(claudine::composition::AgentHint::List(vec![
+                Provider::Claude,
+                Provider::Gemini,
+            ])),
+            ..Default::default()
+        };
+        let snapshot = make_snapshot(vec![Provider::Claude]);
+        let state = claudine::composition::AgentResolutionState::ListOneInstalled {
+            selected: Provider::Claude,
+            not_installed: vec![Provider::Gemini],
+            invalid: Vec::new(),
+        };
+        let result = resolve_live_target_with_tty(
+            state,
+            &hints,
+            &snapshot,
+            None,
+            None,
+            &catalog,
+            Path::new("/tmp/doc.md"),
+            false,
+        );
+        let target = result.expect("should auto-select from list");
+        assert_eq!(target.provider, Provider::Claude);
+        assert!(matches!(
+            target.provider_reason,
+            claudine::composition::ProviderResolutionReason::FrontmatterList
+        ));
+    }
+
+    #[test]
+    fn live_no_agent_aborts_when_not_tty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let hints = make_empty_hints();
+        let snapshot = make_snapshot(vec![]);
+        let state = claudine::composition::AgentResolutionState::NoAgent;
+        let result = resolve_live_target_with_tty(
+            state.clone(),
+            &hints,
+            &snapshot,
+            None,
+            None,
+            &catalog,
+            Path::new("/tmp/doc.md"),
+            false,
+        );
+        assert_agent_resolution_failed(&result, state);
+    }
+
+    #[test]
+    fn live_single_invalid_aborts_when_not_tty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let hints = claudine::composition::EffectiveSelectionHints {
+            agent_invalid: vec!["nope".into()],
+            ..Default::default()
+        };
+        let snapshot = make_snapshot(vec![]);
+        let state = claudine::composition::AgentResolutionState::SingleInvalid {
+            hint: "nope".into(),
+        };
+        let result = resolve_live_target_with_tty(
+            state.clone(),
+            &hints,
+            &snapshot,
+            None,
+            None,
+            &catalog,
+            Path::new("/tmp/doc.md"),
+            false,
+        );
+        assert_agent_resolution_failed(&result, state);
+    }
+
+    #[test]
+    fn live_single_not_installed_aborts_when_not_tty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let hints = claudine::composition::EffectiveSelectionHints {
+            agent: Some(claudine::composition::AgentHint::Single(Provider::Gemini)),
+            ..Default::default()
+        };
+        let snapshot = make_snapshot(vec![]);
+        let state = claudine::composition::AgentResolutionState::SingleNotInstalled {
+            provider: Provider::Gemini,
+        };
+        let result = resolve_live_target_with_tty(
+            state.clone(),
+            &hints,
+            &snapshot,
+            None,
+            None,
+            &catalog,
+            Path::new("/tmp/doc.md"),
+            false,
+        );
+        assert_agent_resolution_failed(&result, state);
+    }
+
+    #[test]
+    fn live_list_multiple_installed_aborts_when_not_tty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let hints = claudine::composition::EffectiveSelectionHints {
+            agent: Some(claudine::composition::AgentHint::List(vec![
+                Provider::Claude,
+                Provider::Gemini,
+            ])),
+            ..Default::default()
+        };
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Gemini]);
+        let state = claudine::composition::AgentResolutionState::ListMultipleInstalled {
+            installed: vec![Provider::Claude, Provider::Gemini],
+            not_installed: Vec::new(),
+            invalid: Vec::new(),
+        };
+        let result = resolve_live_target_with_tty(
+            state.clone(),
+            &hints,
+            &snapshot,
+            None,
+            None,
+            &catalog,
+            Path::new("/tmp/doc.md"),
+            false,
+        );
+        assert_agent_resolution_failed(&result, state);
+    }
+
+    #[test]
+    fn live_zero_installed_list_aborts_when_not_tty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let hints = claudine::composition::EffectiveSelectionHints {
+            agent: Some(claudine::composition::AgentHint::List(vec![
+                Provider::Claude,
+                Provider::Gemini,
+            ])),
+            ..Default::default()
+        };
+        let snapshot = make_snapshot(vec![]);
+        let state = claudine::composition::AgentResolutionState::ZeroInstalledList {
+            not_installed: vec![Provider::Claude, Provider::Gemini],
+            invalid: Vec::new(),
+        };
+        let result = resolve_live_target_with_tty(
+            state.clone(),
+            &hints,
+            &snapshot,
+            None,
+            None,
+            &catalog,
+            Path::new("/tmp/doc.md"),
+            false,
+        );
+        assert_agent_resolution_failed(&result, state);
+    }
+
+    // -- Picker scope per state (pure planner helper) ------------------------
+
+    fn list_hint(providers: Vec<Provider>) -> claudine::composition::EffectiveSelectionHints {
+        claudine::composition::EffectiveSelectionHints {
+            agent: Some(claudine::composition::AgentHint::List(providers)),
+            agent_was_list: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn picker_scope_list_multiple_installed_is_scoped_to_suggested() {
+        // The picker for a multi-installed list must offer ONLY the suggested
+        // installed providers, even when more agents are installed on the host.
+        let hints = list_hint(vec![Provider::Claude, Provider::Gemini]);
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Gemini, Provider::Codex]);
+        let state = AgentResolutionState::ListMultipleInstalled {
+            installed: vec![Provider::Claude, Provider::Gemini],
+            not_installed: Vec::new(),
+            invalid: Vec::new(),
+        };
+        let plan = scoped_picker_plan_for_state(&state, &hints, &snapshot, None).unwrap();
+        let providers: Vec<Provider> = plan.options.iter().map(|o| o.provider).collect();
+        assert_eq!(providers, vec![Provider::Claude, Provider::Gemini]);
+        assert!(
+            !providers.contains(&Provider::Codex),
+            "installed-but-unsuggested Codex must not appear in the scoped picker"
+        );
+    }
+
+    #[test]
+    fn picker_scope_zero_installed_list_offers_all_installed() {
+        // The zero-installed-list state scopes to ALL installed agents, since
+        // none of the suggestions are installed.
+        let hints = list_hint(vec![Provider::Gemini, Provider::Goose]);
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex]);
+        let state = AgentResolutionState::ZeroInstalledList {
+            not_installed: vec![Provider::Gemini, Provider::Goose],
+            invalid: Vec::new(),
+        };
+        let plan = scoped_picker_plan_for_state(&state, &hints, &snapshot, None).unwrap();
+        let providers: Vec<Provider> = plan.options.iter().map(|o| o.provider).collect();
+        assert!(providers.contains(&Provider::Claude));
+        assert!(providers.contains(&Provider::Codex));
+        assert_eq!(providers.len(), 2);
+    }
+
+    #[test]
+    fn picker_scope_no_agent_and_invalid_offer_all_installed() {
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex]);
+        for state in [
+            AgentResolutionState::NoAgent,
+            AgentResolutionState::SingleInvalid {
+                hint: "nope".into(),
+            },
+            AgentResolutionState::SingleNotInstalled {
+                provider: Provider::Gemini,
+            },
+        ] {
+            assert!(
+                picker_scope_for_state(&state).is_none(),
+                "state {state:?} must offer all installed agents (no scope)"
+            );
+            let plan =
+                scoped_picker_plan_for_state(&state, &make_empty_hints(), &snapshot, None).unwrap();
+            assert_eq!(
+                plan.options.len(),
+                2,
+                "state {state:?} should offer both installed providers"
+            );
+        }
+    }
+
+    // -- Pre-prompt message text (shared with dry-run / no-TTY) ---------------
+
+    #[test]
+    fn agent_prompt_message_single_invalid_is_imperative_with_link() {
+        let state = AgentResolutionState::SingleInvalid {
+            hint: "totally-bogus".into(),
+        };
+        let msg = agent_prompt_message(&state, Path::new("/tmp/doc.md"))
+            .expect("single-invalid has a pre-prompt message");
+        assert!(msg.contains("<red><b>Invalid Agent:</b></red>"), "got: {msg}");
+        assert!(msg.contains("totally-bogus"), "got: {msg}");
+        assert!(msg.contains("/tmp/doc.md"), "got: {msg}");
+        // The TTY pre-prompt and the no-TTY abort body share this exact text.
+        assert!(
+            msg.starts_with(&invalid_agent_message(
+                "totally-bogus",
+                "<a href=\"file:///tmp/doc.md\">/tmp/doc.md</a>"
+            )),
+            "got: {msg}"
+        );
+    }
+
+    #[test]
+    fn agent_prompt_message_zero_installed_matches_breakdown() {
+        let state = AgentResolutionState::ZeroInstalledList {
+            not_installed: vec![Provider::Gemini],
+            invalid: vec!["bad".into()],
+        };
+        let msg = agent_prompt_message(&state, Path::new("/tmp/doc.md"))
+            .expect("zero-installed-list has a pre-prompt message");
+        assert_eq!(msg, agent_state_breakdown(&state));
+    }
+
+    #[test]
+    fn agent_prompt_message_is_none_for_picker_only_states() {
+        for state in [
+            AgentResolutionState::NoAgent,
+            AgentResolutionState::SingleNotInstalled {
+                provider: Provider::Gemini,
+            },
+            AgentResolutionState::ListMultipleInstalled {
+                installed: vec![Provider::Claude, Provider::Codex],
+                not_installed: Vec::new(),
+                invalid: Vec::new(),
+            },
+        ] {
+            assert!(
+                agent_prompt_message(&state, Path::new("/tmp/doc.md")).is_none(),
+                "state {state:?} should not show a pre-prompt message"
+            );
+        }
     }
 }

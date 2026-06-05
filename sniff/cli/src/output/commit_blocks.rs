@@ -23,7 +23,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use chrono::{DateTime, Duration, Local, NaiveDate};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
+use darkmatter::markdown::output::terminal::TerminalOptions;
 
 use sniff::filesystem::git::ConventionalCommit;
 use sniff::filesystem::git::recent_commits::{CommitDesc, CommitDescSet, CommitFileChange};
@@ -160,7 +160,7 @@ pub(crate) fn render_commit_set_styled(
 /// markdown-driven output.
 fn render_section_heading(title: &str, period_label: &str) -> String {
     let md = format!("### {} (_{}_)\n", title, period_label);
-    match for_terminal(&Markdown::from(md.as_str()), TerminalOptions::default()) {
+    match Markdown::from(md.as_str()).as_terminal(TerminalOptions::default()) {
         Ok(rendered) => rendered,
         Err(_) => md,
     }

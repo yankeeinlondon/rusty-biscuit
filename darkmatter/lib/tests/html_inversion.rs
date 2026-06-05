@@ -4,7 +4,7 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
-use darkmatter::markdown::output::{HtmlOptions, as_html};
+use darkmatter::markdown::output::HtmlOptions;
 
 /// `#rrggbb` background of a resolved (theme-pair, mode) pair.
 fn theme_bg_hex(pair: ThemePair, mode: ColorMode) -> String {
@@ -22,7 +22,7 @@ fn github_html(mode: ColorMode) -> String {
     opts.code_theme = ThemePair::Github;
     opts.prose_theme = ThemePair::Github;
     opts.color_mode = mode;
-    as_html(&md, opts).expect("as_html")
+    md.as_html(opts).expect("as_html")
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn single_variant_theme_html_is_mode_invariant() {
         opts.code_theme = ThemePair::Dracula;
         opts.prose_theme = ThemePair::Dracula;
         opts.color_mode = mode;
-        as_html(&md, opts).expect("as_html")
+        md.as_html(opts).expect("as_html")
     };
     assert_eq!(render(ColorMode::Dark), render(ColorMode::Light));
 }

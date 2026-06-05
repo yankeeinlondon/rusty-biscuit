@@ -5,6 +5,10 @@ use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use biscuit_terminal::components::horizontal_rule::{
+    HorizontalRule, RuleAlignment, RuleStyle, RuleWeight,
+};
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
@@ -53,6 +57,27 @@ pub(crate) fn execute_sequence(
 ) -> Result<i32> {
     let sequence_start = std::time::Instant::now();
     let silent = shared.silent;
+
+    // Inline vs compose is decided once for the whole sequence by the
+    // presence of a `prompt` frontmatter property — the same signal that
+    // splits the top-level `compose` and `inline-compose` commands. When
+    // `prompt` is present, every step runs as an inline composition: the
+    // composed `prompt` becomes the agent prompt and the provider's output
+    // replaces the document body on disk (see `prepare_inline_with_schema`
+    // and the `CompositionClosurePlan::Inline` write-back). Each step reads
+    // the live file at run time, so it sees the prior step's rewritten body.
+    // A present-but-non-string `prompt` is rejected up front with the same
+    // typed error `inline-compose` raises, rather than once per step.
+    let inline_mode = match source.markdown.frontmatter().as_map().get("prompt") {
+        Some(serde_json::Value::String(_)) => true,
+        Some(other) => {
+            return Err(CompositionError::PromptPropertyWrongType(
+                crate::commands::compose::json_type_name(other).to_string(),
+            )
+            .into());
+        }
+        None => false,
+    };
 
     let mut perf_accumulator = if perf_enabled {
         startup_timings.map(|timings| {
@@ -254,8 +279,9 @@ pub(crate) fn execute_sequence(
             failures,
         }
         .into());
-    } else if is_tty && explicit_provider.is_none() {
-        // TTY review screen
+    } else if !shared.dry_run && is_tty && explicit_provider.is_none() {
+        // TTY review screen. Skipped under --dry-run so the dry-run seam
+        // never invokes an interactive picker.
         match super::selection_ui::review_sequence(drafts, &catalog) {
             Ok(targets) => targets,
             Err(e) => {
@@ -313,6 +339,7 @@ pub(crate) fn execute_sequence(
         source_repo_root.as_deref(),
         shared,
         effective_fail_fast,
+        inline_mode,
         Arc::clone(&shared_approval_cache),
         HashSet::new(),
         &interrupted,
@@ -369,6 +396,21 @@ pub(crate) fn execute_sequence(
         }
         let step = &plan.steps[step_index];
 
+        // Dry-run: separate each document's rendered metadata block with a
+        // full-width horizontal rule on stderr. The per-document render
+        // (frontmatter + table → stderr, body → stdout) happens inside
+        // `execute_composition_request_inner`; the rule sits *between*
+        // documents, so it precedes docs 2..M. `--quiet` / `--silent` have
+        // no effect on dry-run output, so this emits unconditionally.
+        if shared.dry_run && step_index > 0 {
+            let hr = HorizontalRule::new()
+                .style(RuleStyle::Dashes)
+                .alignment(RuleAlignment::Full)
+                .weight(RuleWeight::Medium)
+                .render(&log::terminal());
+            log::message(&hr);
+        }
+
         let _step_span = info_span!(
             "sequence_step",
             step_index = step_index + 1,
@@ -397,7 +439,11 @@ pub(crate) fn execute_sequence(
         };
 
         let request = CompositionExecutionRequest {
-            mode: CompositionMode::ChainedDocument,
+            mode: if inline_mode {
+                CompositionMode::InlineFrontmatterPrompt
+            } else {
+                CompositionMode::ChainedDocument
+            },
             file_ref: source.original_ref.clone(),
             prepared,
             resolved_target,
@@ -663,6 +709,7 @@ fn run_phase_1c_with_schema(
     source_repo_root: Option<&std::path::Path>,
     shared: &SharedComposeArgs,
     effective_fail_fast: bool,
+    inline_mode: bool,
     shared_approval_cache: composition::SharedApprovalCache,
     initial_cumulative_approved: HashSet<String>,
     interrupted: &Arc<AtomicBool>,
@@ -681,6 +728,7 @@ fn run_phase_1c_with_schema(
             source_repo_root,
             shared,
             effective_fail_fast,
+            inline_mode,
             Arc::clone(&shared_approval_cache),
             initial_cumulative_approved.clone(),
             interrupted,
@@ -794,6 +842,7 @@ fn run_phase_1c_attempt(
     source_repo_root: Option<&std::path::Path>,
     shared: &SharedComposeArgs,
     effective_fail_fast: bool,
+    inline_mode: bool,
     shared_approval_cache: composition::SharedApprovalCache,
     initial_cumulative_approved: HashSet<String>,
     interrupted: &Arc<AtomicBool>,
@@ -893,8 +942,16 @@ fn run_phase_1c_attempt(
             source_repo_root: source_repo_root.map(std::path::Path::to_path_buf),
         };
 
-        let prepared = match composition::prepare_direct_with_schema(&step_source, prepare_options)
-        {
+        // Inline steps prepare via `prepare_inline_with_schema` so the
+        // composed `prompt` frontmatter becomes the agent prompt and the
+        // prepared closure is `Inline` (drives body write-back in Phase 2).
+        // Compose steps keep the body-as-prompt behavior.
+        let prepare_result = if inline_mode {
+            composition::prepare_inline_with_schema(&step_source, prepare_options)
+        } else {
+            composition::prepare_direct_with_schema(&step_source, prepare_options)
+        };
+        let prepared = match prepare_result {
             Ok(prepared) => {
                 emit_dropped_optional_warnings(&prepared.dropped_optionals);
                 prepared
