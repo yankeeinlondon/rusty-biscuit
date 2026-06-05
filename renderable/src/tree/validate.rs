@@ -18,6 +18,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::tree::ComponentHints;
 use crate::tree::Severity;
 use crate::tree::node::{NodeKind, RenderNode};
 use crate::tree::source::SourceSpan;
@@ -339,15 +340,44 @@ fn check_node(
         ));
     }
 
-    // Task hints are a ListItem-only hint.
-    if node.attrs.task_hints().is_some() && !matches!(node.kind, NodeKind::ListItem { .. }) {
-        report.findings.push(error(
-            format!(
-                "task hints are permitted only on a ListItem node, found on {}",
-                kind_name(&node.kind),
-            ),
-            span.clone(),
-        ));
+    // Per-component hints are matched to a specific node kind. Validation reads
+    // the typed `component` field directly — no `data`-bag round-trip — and a
+    // hint carried on the wrong kind is malformed typed IR. The table-title
+    // rule below adds its own message for the title slice of `Table` hints.
+    if let Some(component) = node.attrs.component.as_deref() {
+        let mismatch: Option<(&str, &str)> = match component {
+            ComponentHints::List(_) if !matches!(node.kind, NodeKind::List { .. }) => {
+                Some(("list render hints", "List"))
+            }
+            ComponentHints::Code(_) if !matches!(node.kind, NodeKind::Code { .. }) => {
+                Some(("code render hints", "Code"))
+            }
+            ComponentHints::Progress(_) if !matches!(node.kind, NodeKind::Paragraph { .. }) => {
+                Some(("progress hints", "Paragraph"))
+            }
+            ComponentHints::Columns(_) if !matches!(node.kind, NodeKind::BlockQuote { .. }) => {
+                Some(("column hints", "BlockQuote"))
+            }
+            ComponentHints::Task(_) if !matches!(node.kind, NodeKind::ListItem { .. }) => {
+                Some(("task hints", "ListItem"))
+            }
+            ComponentHints::Table(_) if !matches!(node.kind, NodeKind::Table { .. }) => {
+                Some(("table hints", "Table"))
+            }
+            ComponentHints::TableCell(_) if !matches!(node.kind, NodeKind::TableCell { .. }) => {
+                Some(("table cell hints", "TableCell"))
+            }
+            _ => None,
+        };
+        if let Some((what, required_kind)) = mismatch {
+            report.findings.push(error(
+                format!(
+                    "{what} are permitted only on a {required_kind} node, found on {}",
+                    kind_name(&node.kind),
+                ),
+                span.clone(),
+            ));
+        }
     }
 
     // A table title/caption is a Table-only hint.
@@ -792,6 +822,177 @@ mod tests {
         );
         table.attrs.set_table_title("Caption");
         let root = RenderNode::root(vec![table]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    // ── Typed ComponentHints kind-placement ───────────────────────────────
+
+    #[test]
+    fn list_hints_on_non_list_is_an_error() {
+        use crate::tree::ListRenderHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_list_hints(&ListRenderHints {
+            bullet: Some("* ".into()),
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("list render hints are permitted only"))
+        );
+    }
+
+    #[test]
+    fn code_hints_on_non_code_is_an_error() {
+        use crate::tree::CodeRenderHints;
+        let mut item = RenderNode::list_item(None, vec![]);
+        item.attrs.set_code_hints(&CodeRenderHints {
+            header_row: true,
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![RenderNode::list(false, None, vec![item])]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("code render hints are permitted only"))
+        );
+    }
+
+    #[test]
+    fn code_hints_on_code_is_valid() {
+        use crate::tree::CodeRenderHints;
+        let mut code = RenderNode::code(Some("rust".into()), None, "let x = 1;");
+        code.attrs.set_code_hints(&CodeRenderHints {
+            header_row: true,
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![code]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    #[test]
+    fn progress_hints_on_non_paragraph_is_an_error() {
+        use crate::tree::ProgressHints;
+        let mut bq = RenderNode::block_quote(vec![RenderNode::text("x")]);
+        bq.attrs.set_progress_hints(&ProgressHints::default());
+        let root = RenderNode::root(vec![bq]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("progress hints are permitted only"))
+        );
+    }
+
+    #[test]
+    fn progress_hints_on_paragraph_is_valid() {
+        use crate::tree::ProgressHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("50%")]);
+        para.attrs.set_progress_hints(&ProgressHints::default());
+        let root = RenderNode::root(vec![para]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    #[test]
+    fn columns_hints_on_non_block_quote_is_an_error() {
+        use crate::tree::ColumnsHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_columns_hints(&ColumnsHints::default());
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("column hints are permitted only"))
+        );
+    }
+
+    #[test]
+    fn columns_hints_on_block_quote_is_valid() {
+        use crate::tree::ColumnsHints;
+        let mut bq = RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
+            "left",
+        )])]);
+        bq.attrs.set_columns_hints(&ColumnsHints::default());
+        let root = RenderNode::root(vec![bq]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    #[test]
+    fn table_column_hints_on_non_table_is_an_error() {
+        use crate::tree::TableColumnHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_table_column_hints(
+            0,
+            &TableColumnHints {
+                min_width: Some(4),
+                ..Default::default()
+            },
+        );
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("table hints are permitted only")),
+            "table column hints on a non-Table node must be an error",
+        );
+    }
+
+    #[test]
+    fn table_terminal_hints_on_non_table_is_an_error() {
+        use crate::tree::TableTerminalHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_table_terminal_hints(&TableTerminalHints {
+            alternate_background: true,
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("table hints are permitted only")),
+            "table terminal hints on a non-Table node must be an error",
+        );
+    }
+
+    #[test]
+    fn table_cell_hints_on_non_cell_is_an_error() {
+        use crate::tree::TableCellHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_table_cell_hints(&TableCellHints {
+            kind: "integer".into(),
+            raw_value: serde_json::json!(1),
+            alignment: "right".into(),
+            vertical_alignment: "top".into(),
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("table cell hints are permitted only"))
+        );
+    }
+
+    #[test]
+    fn table_cell_hints_on_cell_is_valid() {
+        use crate::tree::TableCellHints;
+        let mut cell = RenderNode::table_cell(vec![RenderNode::text("42")]);
+        cell.attrs.set_table_cell_hints(&TableCellHints {
+            kind: "integer".into(),
+            raw_value: serde_json::json!(42),
+            alignment: "right".into(),
+            vertical_alignment: "top".into(),
+        });
+        let root = RenderNode::root(vec![RenderNode::table(
+            vec![ColumnAlign::Right],
+            vec![RenderNode::table_row(vec![cell])],
+        )]);
         assert!(ensure_valid(&root).is_ok());
     }
 
