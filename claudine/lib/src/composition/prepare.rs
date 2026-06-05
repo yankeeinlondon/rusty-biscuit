@@ -121,6 +121,7 @@ pub fn prepare_direct(
         agent: agent_hint,
         model: model_hint,
         agent_invalid: agent_full.invalid,
+        agent_was_list: agent_full.is_list,
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
 
@@ -203,6 +204,7 @@ pub fn prepare_inline(
         agent: agent_hint,
         model: model_hint,
         agent_invalid: agent_full.invalid,
+        agent_was_list: agent_full.is_list,
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
 
@@ -280,6 +282,7 @@ pub fn parse_selection_hints_from_frontmatter(
         agent,
         model,
         agent_invalid: agent_full.invalid,
+        agent_was_list: agent_full.is_list,
     })
 }
 
@@ -735,6 +738,38 @@ mod tests {
             prepared.selection_hints.agent_invalid,
             vec!["bad".to_string(), "worse".to_string()]
         );
+        // Even with no valid providers, the list-ness must survive so a
+        // zero-valid list is not mistaken for a scalar value downstream.
+        assert!(prepared.selection_hints.agent_was_list);
+    }
+
+    #[test]
+    fn direct_composition_single_entry_all_invalid_list_preserves_list_flag() {
+        // A one-element invalid list (`agent: ["not-real"]`) must record
+        // `agent_was_list = true` so classification routes it to the
+        // zero-installed-list state, not the single-invalid scalar state.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("agent", json!(["not-real"]))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.agent, None);
+        assert_eq!(
+            prepared.selection_hints.agent_invalid,
+            vec!["not-real".to_string()]
+        );
+        assert!(prepared.selection_hints.agent_was_list);
+    }
+
+    #[test]
+    fn direct_composition_single_scalar_invalid_is_not_list() {
+        // A scalar invalid value (`agent: not-real`) must record
+        // `agent_was_list = false`.
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("agent", json!("not-real"))], "Content");
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert_eq!(prepared.selection_hints.agent, None);
+        assert!(!prepared.selection_hints.agent_was_list);
     }
 
     #[test]
