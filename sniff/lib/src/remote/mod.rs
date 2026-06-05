@@ -355,6 +355,20 @@ impl RemoteRepoProvider for GitRemote {
         }
     }
 
+    async fn list_workflow_runs(
+        &self,
+        owner: &str,
+        repo: &str,
+        limit: usize,
+    ) -> Result<Vec<CiCdInfo>, SniffError> {
+        match self {
+            Self::GitHub(p) => p.list_workflow_runs(owner, repo, limit).await,
+            Self::GitLab(p) => p.list_workflow_runs(owner, repo, limit).await,
+            Self::Gitea(p) => p.list_workflow_runs(owner, repo, limit).await,
+            Self::Bitbucket(p) => p.list_workflow_runs(owner, repo, limit).await,
+        }
+    }
+
     async fn list_org_repos(&self, org: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
         match self {
             Self::GitHub(p) => p.list_org_repos(org).await,

@@ -148,6 +148,9 @@ hug lint "src/**/*.rs" --lint-only
 
 # Run only syntax diagnostics
 hug lint "src/**/*.rs" --syntax-only
+
+# List registered lint rules
+hug lint --list-rules
 ```
 
 ## Classes Command
@@ -209,3 +212,9 @@ src/main.rs (Rust)
 Options:
 - `--lint-only` - Show only lint diagnostics (pattern rules and semantic analysis)
 - `--syntax-only` - Show only syntax diagnostics (parse errors)
+- `--deny <RULE|CATEGORY>` - Treat matching lint rules as errors
+- `--warn <RULE|CATEGORY>` - Treat matching lint rules as warnings
+- `--allow <RULE|CATEGORY>` - Treat matching lint rules as info
+- `--strict` - Promote warnings to errors
+- `--experimental-semantics` - Enable experimental semantic diagnostics
+- `--list-rules` - Print registered rule metadata and exit

@@ -1,6 +1,19 @@
+// The resolved-layout-precedence tests exercise `DarkmatterPage`'s still-active
+// `Page*` getters (`margin()`, `padding()`, `fill_for()`, `alignment_for()`).
+// Migrating those to `renderable::layout::Layout` is the deferred Spec A
+// milestone; until then this mirrors the library's own module-level allow in
+// `darkmatter/lib/src/layout/mod.rs`.
+#![allow(deprecated)]
+
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::io::Write;
+use std::net::TcpListener;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+use std::thread;
 
 /// Helper to create a `md` command from cargo bin.
 fn md_cmd() -> assert_cmd::Command {
@@ -13,6 +26,70 @@ fn md_file(content: &str) -> tempfile::NamedTempFile {
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     write!(tmp, "{}", content).unwrap();
     tmp
+}
+
+struct MockHttpResponse {
+    status: u16,
+    body: &'static str,
+    cache_control: Option<&'static str>,
+}
+
+struct MockHttpServer {
+    base_url: String,
+    requests: Arc<AtomicUsize>,
+}
+
+impl MockHttpServer {
+    fn url(&self, path: &str) -> String {
+        format!("{}{}", self.base_url, path)
+    }
+
+    fn request_count(&self) -> usize {
+        self.requests.load(Ordering::SeqCst)
+    }
+}
+
+fn mock_http_server(responses: Vec<MockHttpResponse>) -> MockHttpServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let request_count = Arc::clone(&requests);
+
+    thread::spawn(move || {
+        for response in responses {
+            let Ok((mut stream, _)) = listener.accept() else {
+                break;
+            };
+            request_count.fetch_add(1, Ordering::SeqCst);
+
+            let mut buf = [0_u8; 4096];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+
+            let status_text = match response.status {
+                200 => "OK",
+                304 => "Not Modified",
+                500 => "Internal Server Error",
+                _ => "OK",
+            };
+            let mut headers = format!(
+                "HTTP/1.1 {} {}\r\nContent-Length: {}\r\n",
+                response.status,
+                status_text,
+                response.body.len()
+            );
+            if let Some(cache_control) = response.cache_control {
+                headers.push_str(&format!("Cache-Control: {cache_control}\r\n"));
+            }
+            headers.push_str("\r\n");
+            let _ = stream.write_all(headers.as_bytes());
+            let _ = stream.write_all(response.body.as_bytes());
+        }
+    });
+
+    MockHttpServer {
+        base_url: format!("http://{addr}"),
+        requests,
+    }
 }
 
 // =============================================================================
@@ -396,6 +473,258 @@ fn test_compose_basic() {
         .success()
         .stdout(predicate::str::contains("Hello"))
         .stdout(predicate::str::contains("World"));
+}
+
+#[test]
+fn test_compose_remote_allowed_host_fetches_url() {
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "Remote body\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/remote.md");
+
+    md_cmd()
+        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .write_stdin(format!("# Local\n\n::file {url}\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Remote body"));
+
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn test_compose_remote_deny_all_fails_without_request() {
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "should not be fetched\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/blocked.md");
+
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin(format!("# Local\n\n::file {url}\n"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("remote read denied"))
+        .stderr(predicate::str::contains("127.0.0.1"));
+
+    assert_eq!(server.request_count(), 0);
+}
+
+#[test]
+fn test_compose_remote_expression_function_reads_url() {
+    // Read-side expression functions must work through the real `md compose`
+    // pipeline, not just helper-level unit tests. The URL argument is quoted
+    // because the interpolation expression parser requires a string literal.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "# Remote Heading\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/remote.md");
+
+    md_cmd()
+        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .write_stdin(format!("Title: {{{{ markdown_title(\"{url}\") }}}}\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Title: Remote Heading"));
+
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn test_compose_remote_expression_function_denied_host_reads_false() {
+    // `file_exists` against a host that is not allowed must read as `false`
+    // (the fetch is policy-denied, never issued) rather than failing compose.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "should not be fetched\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/blocked.md");
+
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin(format!("Exists: {{{{ file_exists(\"{url}\") }}}}\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Exists: false"));
+
+    assert_eq!(server.request_count(), 0);
+}
+
+#[test]
+fn test_compose_remote_prologue_allowed_host_fetches_url() {
+    // A remote `prologue` URL on an allowed host must be registered, fetched,
+    // and prepended to the body.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "Prologue body\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/intro.md");
+
+    md_cmd()
+        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .write_stdin(format!("---\nprologue: {url}\n---\n# Local\n\nBody.\n"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Prologue body"))
+        .stdout(predicate::str::contains("Local"));
+
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn test_compose_remote_epilogue_deny_all_fails_without_request() {
+    // A remote `epilogue` on a non-allowed host must fail by policy and never
+    // issue a request — not fail with an internal "not registered" error.
+    let server = mock_http_server(vec![MockHttpResponse {
+        status: 200,
+        body: "should not be fetched\n",
+        cache_control: None,
+    }]);
+    let url = server.url("/outro.md");
+
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin(format!("---\nepilogue: {url}\n---\n# Local\n\nBody.\n"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("remote read denied"))
+        .stderr(predicate::str::contains("127.0.0.1"));
+
+    assert_eq!(server.request_count(), 0);
+}
+
+#[test]
+fn test_compose_remote_refresh_revalidates_cached_url() {
+    let cache_dir = tempfile::TempDir::new().unwrap();
+    let server = mock_http_server(vec![
+        MockHttpResponse {
+            status: 200,
+            body: "First remote body\n",
+            cache_control: Some("max-age=3600"),
+        },
+        MockHttpResponse {
+            status: 200,
+            body: "Second remote body\n",
+            cache_control: Some("max-age=3600"),
+        },
+    ]);
+    let url = server.url("/cached.md");
+    let input = format!("# Local\n\n::file {url}\n");
+
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--allow-host",
+            "127.0.0.1",
+            "--cache-root",
+        ])
+        .arg(cache_dir.path())
+        .write_stdin(input.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("First remote body"));
+
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--allow-host",
+            "127.0.0.1",
+            "--cache-root",
+        ])
+        .arg(cache_dir.path())
+        .args(["--remote-refresh"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Second remote body"));
+
+    assert_eq!(server.request_count(), 2);
+}
+
+#[test]
+fn test_compose_remote_fallback_serves_stale_cache_on_failure() {
+    let cache_dir = tempfile::TempDir::new().unwrap();
+    let server = mock_http_server(vec![
+        MockHttpResponse {
+            status: 200,
+            body: "Cached remote body\n",
+            cache_control: Some("max-age=0"),
+        },
+        MockHttpResponse {
+            status: 500,
+            body: "server unavailable\n",
+            cache_control: None,
+        },
+    ]);
+    let url = server.url("/stale.md");
+    let input = format!("# Local\n\n::file {url}\n");
+
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--allow-host",
+            "127.0.0.1",
+            "--cache-root",
+        ])
+        .arg(cache_dir.path())
+        .write_stdin(input.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cached remote body"));
+
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--allow-host",
+            "127.0.0.1",
+            "--cache-root",
+        ])
+        .arg(cache_dir.path())
+        .args(["--remote-freshness", "fallback"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cached remote body"));
+
+    assert_eq!(server.request_count(), 2);
+}
+
+#[test]
+fn test_compose_invalid_remote_freshness_fails_fast() {
+    // A typo must fail with a non-zero exit and list the accepted values,
+    // rather than silently degrading to a single freshness mode.
+    md_cmd()
+        .args(["compose", "-", "--remote-freshness", "fallbak"])
+        .write_stdin("# Local\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("optimistic"))
+        .stderr(predicate::str::contains("strict"))
+        .stderr(predicate::str::contains("fallback"));
+}
+
+#[test]
+fn test_compose_preserves_rendered_remote_links() {
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin("[Remote](https://example.com/path?q=1)\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "[Remote](https://example.com/path?q=1)",
+        ));
 }
 
 #[test]
@@ -1914,16 +2243,28 @@ fn test_get_no_frontmatter_returns_empty_string() {
 /// YAML line in the rendered StatusBlock.
 #[test]
 fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
+    use darkmatter::testing::strip_ansi_codes;
+
     let yaml = "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n";
 
-    md_cmd()
+    let output = md_cmd()
         .args(["get", "-", "phases"])
         .write_stdin(yaml)
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("MarkdownError"))
-        .stderr(predicate::str::contains("frontmatter parse failed"))
-        .stderr(predicate::str::contains("'@' magic lookup emits results"));
+        .output()
+        .expect("md get should run");
+
+    assert!(!output.status.success(), "expected a failure exit status");
+
+    // The offending YAML line is syntax-highlighted, so its characters are
+    // interleaved with SGR escapes in the raw stderr; strip ANSI before
+    // asserting on the visible text.
+    let stderr = strip_ansi_codes(&String::from_utf8_lossy(&output.stderr));
+    assert!(stderr.contains("MarkdownError"), "stderr: {stderr}");
+    assert!(stderr.contains("frontmatter parse failed"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("'@' magic lookup emits results"),
+        "offending line must be shown. stderr: {stderr}"
+    );
 }
 
 #[test]

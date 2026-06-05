@@ -1062,6 +1062,7 @@ fn prepare_branch_pipeline(
         executable,
         args,
         span: 0..0,
+        indent: String::new(),
         origin: ShellCommandOrigin::Frontmatter {
             key: candidate.key.clone(),
         },

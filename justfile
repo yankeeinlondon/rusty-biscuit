@@ -46,6 +46,36 @@ test *args="":
     set -euo pipefail
     failed_areas=()
     passed_areas=()
+    current_area=""
+
+    print_summary() {
+        echo ""
+        echo "================================================"
+        echo "Test Summary"
+        echo "================================================"
+        echo -e "{{ GREEN }}Passed{{ RESET }} (${#passed_areas[@]}): ${passed_areas[*]:-(none)}"
+        if [[ ${#failed_areas[@]} -gt 0 ]]; then
+            echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): ${failed_areas[*]}"
+        else
+            echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): (none)"
+        fi
+        echo "================================================"
+        echo ""
+    }
+
+    # `just`/`cargo`/`nextest` trap SIGINT and exit *normally* with a non-zero
+    # code instead of dying by the signal, so bash never auto-aborts on Ctrl-C:
+    # the `if (cd ... && just test)` swallows the 130 like an ordinary failure
+    # and the loop runs on to the next area. Trap it ourselves so Ctrl-C stops
+    # the whole run and still prints the partial summary.
+    on_interrupt() {
+        trap - INT                  # a second Ctrl-C hard-kills
+        echo
+        echo "Interrupted (Ctrl-C)${current_area:+ while testing ${current_area}} -- aborting remaining areas."
+        print_summary
+        exit 130
+    }
+    trap on_interrupt INT
 
     if [[ -z "{{ args }}" ]]; then
         echo ""
@@ -57,12 +87,14 @@ test *args="":
                 if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "test"; then
                     echo
                     echo "Testing $area..."
+                    current_area="$area"
                     if (cd "./$area" && just test); then
                         passed_areas+=("$area")
                     else
                         failed_areas+=("$area")
                         just _message "Tests failed in $area"
                     fi
+                    current_area=""
                 else
                     echo "- no test command for the area **$area**" >&2
                 fi
@@ -81,12 +113,14 @@ test *args="":
                 if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "test"; then
                     echo
                     echo "Testing $area..."
+                    current_area="$area"
                     if (cd "./$area" && just test); then
                         passed_areas+=("$area")
                     else
                         failed_areas+=("$area")
                         just _message "Tests failed in $area"
                     fi
+                    current_area=""
                 else
                     echo "Error: area '$area' has no test recipe" >&2
                     failed_areas+=("$area (no test recipe)")
@@ -98,22 +132,20 @@ test *args="":
         done
     fi
 
-    echo ""
-    echo "================================================"
-    echo "Test Summary"
-    echo "================================================"
-    echo -e "{{ GREEN }}Passed{{ RESET }} (${#passed_areas[@]}): ${passed_areas[*]:-(none)}"
-    if [[ ${#failed_areas[@]} -gt 0 ]]; then
-        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): ${failed_areas[*]}"
-    else
-        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): (none)"
-    fi
-    echo "================================================"
-    echo ""
+    print_summary
 
     if [[ ${#failed_areas[@]} -gt 0 ]]; then
         exit 1
     fi
+
+# run the test suite, then sweep for child processes that outlived it
+#
+# Wraps `just test` in the cross-platform `leak-sweep` detector (tools/test-toolkit).
+# nextest's per-test LEAK status only catches children still holding a test's
+# stdout/stderr; this also catches detached orphans (exit code 99 if any survive,
+# rooted at the repo). Pass `--warn-only` semantics by running leak-sweep directly.
+test-leaks *args="":
+    @cargo run -q -p test-toolkit --features leak-sweep --bin leak-sweep -- just test {{ args }}
 
 # detect which monorepo areas have changed files compared to the upstream branch
 #

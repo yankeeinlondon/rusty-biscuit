@@ -45,8 +45,11 @@ impl WrapperProfile for GooseWrapper {
     ) -> Option<String> {
         // Goose selects models via the GOOSE_MODEL env var, not a CLI flag.
         // The typed catalog has no model-delivery-mechanism field, so this
-        // override routes through env only.
+        // override routes the provider's own selection through env. The
+        // generic `MODEL` env var is Claudine's wrapper contract (templates,
+        // hooks, reporting) and is exported alongside it.
         env_overrides.push(("GOOSE_MODEL".to_string(), model.to_string()));
+        env_overrides.push(("MODEL".to_string(), model.to_string()));
         None
     }
 

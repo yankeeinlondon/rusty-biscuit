@@ -37,6 +37,10 @@ pub struct ShellApprovalOptions {
     pub approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
     /// Session-local cache for repeated approval decisions.
     pub approval_cache: Arc<Mutex<HashMap<String, CachedApprovalDecision>>>,
+    /// When set, a non-TTY unapproved command is reported with dry-run
+    /// framing (a `Cannot dry-run: …` message pointing at `--yolo` /
+    /// pre-approval) instead of the generic "no approval handler" guidance.
+    pub dry_run: bool,
 }
 
 impl Default for ShellApprovalOptions {
@@ -45,6 +49,7 @@ impl Default for ShellApprovalOptions {
             policy_root: None,
             approval_handler: None,
             approval_cache: Arc::new(Mutex::new(HashMap::new())),
+            dry_run: false,
         }
     }
 }

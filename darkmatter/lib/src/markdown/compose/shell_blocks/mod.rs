@@ -109,6 +109,9 @@ pub(crate) fn run_shell_blocks_stage(
                 executable: command.executable.clone(),
                 args: command.args.clone(),
                 span: command.physical_span.clone(),
+                // Opener indentation is applied once to the combined block output
+                // at the splice boundary, not per command.
+                indent: String::new(),
                 origin: ShellCommandOrigin::ShellBlock {
                     start_line: pair.start_line,
                     command_line: command.start_line,
@@ -173,7 +176,15 @@ pub(crate) fn run_shell_blocks_stage(
             }
         }
 
-        let output = render::render_block_output(&results);
+        // Re-indent the combined block output to the opener's column so
+        // generated lines stay nested under the surrounding list or block
+        // quote. `indent_text` returns an empty rendered block unchanged, so an
+        // empty block never becomes an indentation-only string.
+        let output = super::indent::indent_text(
+            &render::render_block_output(&results),
+            &region.indent,
+            None,
+        );
         replacements.push((pair.span.clone(), output));
         report.shell_blocks_applied += 1;
     }
@@ -314,7 +325,9 @@ mod tests {
         let mut runtime = ShellExpansionRuntime::new();
         let (result, report) =
             run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
-        assert_eq!(result, "hello\n\nworld\n");
+        // Each command's output is concatenated verbatim; the line break between
+        // them is each `echo`'s own trailing newline, not an inserted blank line.
+        assert_eq!(result, "hello\nworld\n");
         assert_eq!(report.shell_blocks_applied, 1);
     }
 
@@ -504,11 +517,9 @@ mod tests {
         let (result, report) =
             run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(report.shell_blocks_applied, 1);
-        // Empty outputs should be omitted; non-empty should have blank line between
-        assert_eq!(
-            result, "hello\n\nworld\n",
-            "Expected mixed output: {result}"
-        );
+        // `echo -n` contributes an empty string, so it simply concatenates to
+        // nothing; the surviving outputs keep their own trailing newlines.
+        assert_eq!(result, "hello\nworld\n", "Expected mixed output: {result}");
     }
 
     #[test]
@@ -538,5 +549,167 @@ mod tests {
             }
             other => panic!("Expected Command error, got: {other:?}"),
         }
+    }
+
+    // ── Phase 4 indentation tests ─────────────────────────────────────
+
+    /// Composes a shell-block through the stage with an allow-once handler,
+    /// returning the rewritten content.
+    fn run_block_stage(content: &str) -> (String, ComposeReport) {
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let mut runtime = ShellExpansionRuntime::new();
+        run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap()
+    }
+
+    #[test]
+    fn indented_block_output_under_list_item_is_reindented() {
+        let content =
+            "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        // Every output line keeps the opener's 4-space indent so the lines stay
+        // nested under the list item rather than becoming siblings of the outer
+        // list. The two outputs are adjacent (each `echo`'s own trailing newline
+        // separates them) — no blank line is inserted between commands.
+        assert!(result.contains("    hello\n    world\n"), "got: {result:?}");
+        assert!(!result.contains("\nhello\n"), "got: {result:?}");
+    }
+
+    #[test]
+    fn tab_indented_block_output_is_reindented() {
+        let content =
+            "- intro\n\n\t::shell-block\n\techo hello\n\techo world\n\t::end-block\n\n- next\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert!(result.contains("\thello\n\tworld\n"), "got: {result:?}");
+    }
+
+    #[test]
+    fn root_level_block_output_has_no_indent() {
+        let content = "intro\n\n::shell-block\necho hello\necho world\n::end-block\n\nnext\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert!(result.contains("hello\nworld\n"), "got: {result:?}");
+        assert!(!result.contains("    hello"), "got: {result:?}");
+    }
+
+    #[test]
+    fn block_output_preserves_trailing_whitespace_and_line_endings() {
+        // Spec requirement 5: the only transformation a shell block applies to
+        // captured output is container indentation. Trailing spaces and the
+        // command's exact newline shape must survive byte-for-byte — the old
+        // `trim()` contract stripped both.
+        let content = "intro\n\n::shell-block\nprintf 'a  \\n\\nb\\n'\n::end-block\n\nnext\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        // `a  ` keeps its two trailing spaces; the interior blank line and the
+        // final newline are preserved exactly as emitted.
+        assert!(result.contains("a  \n\nb\n"), "got: {result:?}");
+    }
+
+    #[test]
+    fn indented_block_trailing_newline_does_not_become_indent_only_line() {
+        // `render_block_output` preserves the command's trailing newline
+        // verbatim, so after re-indenting the block ends in a bare newline —
+        // never an indentation-only `"    "` line. Mirrors the `::shell`
+        // trailing-newline guarantee.
+        let content = "- intro\n\n    ::shell-block\n    printf 'one\\n'\n    ::end-block\n\n- next\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert!(result.contains("    one\n\n- next"), "got: {result:?}");
+        assert!(!result.contains("    one\n    "), "got: {result:?}");
+    }
+
+    #[test]
+    fn empty_indented_block_does_not_become_indentation_only() {
+        let content = "- intro\n\n    ::shell-block\n    ::end-block\n\n- next\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        // An empty rendered block stays empty; it must never collapse to a line
+        // holding only the captured indent.
+        assert_eq!(result, "- intro\n\n\n- next\n");
+    }
+
+    /// Composes a shell-block through the stage, then renders the rewritten
+    /// content to HTML so the splice can be validated against the CommonMark
+    /// block structure rather than raw substrings.
+    fn run_block_stage_to_html(content: &str) -> String {
+        let (rewritten, _report) = run_block_stage(content);
+        let md: crate::markdown::Markdown = rewritten.as_str().into();
+        md.as_html(crate::markdown::output::HtmlOptions::default())
+            .unwrap()
+    }
+
+    #[test]
+    fn indented_block_output_is_nested_under_list_item_in_commonmark() {
+        // Re-indented block output is a continuation of the first list item, so
+        // the document stays a single list with two items — the generated lines
+        // are children of the parent <li>, not siblings of the outer list.
+        let content =
+            "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
+        let html = run_block_stage_to_html(content);
+        assert_eq!(html.matches("<ul>").count(), 1, "got: {html}");
+        assert_eq!(html.matches("<li>").count(), 2, "got: {html}");
+    }
+
+    #[test]
+    fn root_level_block_output_is_a_sibling_block_in_commonmark() {
+        // The column-1 baseline is intentionally a top-level sibling: the spliced
+        // output splits the surrounding list into two separate <ul> blocks.
+        let content =
+            "- intro\n\n::shell-block\necho hello\necho world\n::end-block\n\n- next\n";
+        let html = run_block_stage_to_html(content);
+        assert_eq!(html.matches("<ul>").count(), 2, "got: {html}");
+    }
+
+    #[test]
+    fn blockquote_marked_shell_block_output_is_re_quoted() {
+        // A `>`-led shell block is recognized: the opener, body, and closer
+        // markers are stripped for execution, and the rendered output is
+        // re-quoted with the opener's `> ` prefix on every line so it stays
+        // inside the block quote rather than escaping it.
+        let content = "> ::shell-block\n> echo hello\n> echo world\n> ::end-block\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert!(result.contains("> hello\n> world\n"), "got: {result:?}");
+        assert!(!result.contains("\nhello\n"), "got: {result:?}");
+    }
+
+    #[test]
+    fn blockquote_shell_block_output_is_nested_in_blockquote_in_commonmark() {
+        // The re-quoted output keeps the whole region inside a single
+        // <blockquote> rather than breaking out into a sibling block.
+        let content = "> ::shell-block\n> echo hello\n> echo world\n> ::end-block\n";
+        let html = run_block_stage_to_html(content);
+        assert_eq!(html.matches("<blockquote>").count(), 1, "got: {html}");
+        assert!(html.contains("hello"), "got: {html}");
+        assert!(html.contains("world"), "got: {html}");
+    }
+
+    #[test]
+    fn nested_blockquote_marked_shell_block_output_is_re_quoted() {
+        // A `> > `-led shell block replays the nested block-quote markers on
+        // every emitted line so the output stays inside the nested quote rather
+        // than escaping it.
+        let content = "> > ::shell-block\n> > echo hello\n> > echo world\n> > ::end-block\n";
+        let (result, report) = run_block_stage(content);
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert!(
+            result.contains("> > hello\n> > world\n"),
+            "got: {result:?}"
+        );
+        assert!(!result.contains("\nhello\n"), "got: {result:?}");
+    }
+
+    #[test]
+    fn nested_blockquote_shell_block_output_stays_nested_in_commonmark() {
+        // The re-quoted output keeps the whole region inside the two-level
+        // block quote: CommonMark renders nested <blockquote> wrappers rather
+        // than the output breaking out into a sibling block.
+        let content = "> > ::shell-block\n> > echo hello\n> > echo world\n> > ::end-block\n";
+        let html = run_block_stage_to_html(content);
+        assert_eq!(html.matches("<blockquote>").count(), 2, "got: {html}");
+        assert!(html.contains("hello"), "got: {html}");
+        assert!(html.contains("world"), "got: {html}");
     }
 }

@@ -19,6 +19,7 @@ use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{ErrorHeader, SourceContext, StatusBlockExt};
 
+use crate::markdown::highlighting::highlight_yaml_lines;
 use crate::markdown::schemas::{ValidationProblem, ValidationProblemKind};
 
 /// Build the [`StatusBlock`] for [`MarkdownError::FileLoad`].
@@ -61,7 +62,6 @@ pub(crate) fn url_fetch_block(source: &reqwest::Error) -> StatusBlock {
 /// exactly which line broke parsing without re-running the command.
 pub(crate) fn frontmatter_parse_block(ctx: SourceContext, source: &YamlParseError) -> StatusBlock {
     let location = source.location();
-    let location_line = location.map(|loc| loc.line());
 
     let mut body = Vec::new();
 
@@ -74,9 +74,13 @@ pub(crate) fn frontmatter_parse_block(ctx: SourceContext, source: &YamlParseErro
 
     body.push(Prose::new(format!("<dim>YAML:</dim> {source}")));
 
-    if let Some(line) = location_line {
+    if let Some(loc) = location {
         body.push(Prose::new("Frontmatter parsing failed here:"));
-        body.push(ctx.excerpt_prose(line, 1, "yaml"));
+        body.push(frontmatter_excerpt_prose(
+            &ctx,
+            frontmatter_doc_line(&ctx, loc.line()),
+            1,
+        ));
     }
 
     StatusBlock::new(StatusState::Error)
@@ -86,6 +90,68 @@ pub(crate) fn frontmatter_parse_block(ctx: SourceContext, source: &YamlParseErro
         ))
         .body(body)
         .hint("Check the YAML between the leading `---` markers for syntax errors.")
+}
+
+/// Translate a `serde_yaml_ng` error line into a 1-based line in the full
+/// source document.
+///
+/// `serde_yaml_ng` reports the line relative to the YAML it was handed — the
+/// text *between* the `---` markers, with the opening delimiter already
+/// stripped. When the context's content includes that delimiter (the on-disk
+/// load path), the excerpt numbers lines document-absolutely, so the
+/// YAML-relative line must be shifted past the opening `---`. When no
+/// frontmatter delimiters are detected (e.g. a bare-YAML context), the reported
+/// line already addresses the right content line and is returned unchanged.
+fn frontmatter_doc_line(ctx: &SourceContext, yaml_line: usize) -> usize {
+    match ctx.frontmatter.as_ref() {
+        Some(range) => {
+            let opening_delim_line = ctx.content[..range.start]
+                .bytes()
+                .filter(|&b| b == b'\n')
+                .count()
+                + 1;
+            opening_delim_line + yaml_line
+        }
+        None => yaml_line,
+    }
+}
+
+/// Render a syntax-highlighted, gutter-numbered excerpt centered on `line`
+/// (1-based, document-absolute) with `context` lines above and below.
+///
+/// The offending line carries a leading `>` gutter marker. YAML content is
+/// highlighted through [`highlight_yaml_lines`] — a lexical highlighter that
+/// tolerates the malformed input that produced the error — then escaped so
+/// literal `<`, `{`, etc. in the source render verbatim instead of being parsed
+/// as Prose markup ([`Prose::escape_text`] passes the highlighter's ANSI
+/// sequences through untouched). Falls back to unstyled text when the
+/// highlighter does not return one line per input line.
+fn frontmatter_excerpt_prose(ctx: &SourceContext, line: usize, context: usize) -> Prose {
+    use std::fmt::Write as _;
+
+    let lines: Vec<&str> = ctx.content.lines().collect();
+    let total = lines.len();
+    let start = line.saturating_sub(context + 1).min(total);
+    let end = (line + context).min(total);
+    let gutter_width = end.to_string().len();
+
+    let window = &lines[start..end];
+    let highlighted = highlight_yaml_lines(&window.join("\n"));
+    let use_highlight = highlighted.len() == window.len();
+
+    let mut buf = String::new();
+    for (idx, raw) in window.iter().enumerate() {
+        let n = start + idx + 1;
+        let marker = if n == line { ">" } else { " " };
+        let content = if use_highlight {
+            Prose::escape_text(&highlighted[idx])
+        } else {
+            Prose::escape_text(raw)
+        };
+        let _ = writeln!(buf, "<dim>{marker} {n:>gutter_width$} │</dim> {content}");
+    }
+
+    Prose::new(buf.trim_end_matches('\n').to_string())
 }
 
 /// Build the [`StatusBlock`] for [`MarkdownError::FrontmatterMerge`].
@@ -330,6 +396,65 @@ mod tests {
             "missing offending line snippet: {out}",
         );
         assert!(out.contains(">"), "missing gutter marker: {out}");
+    }
+
+    /// Regression: when the context holds the full document (the on-disk load
+    /// path), `serde_yaml_ng`'s YAML-relative line must be shifted past the
+    /// opening `---` so the gutter marks the real document line — not the
+    /// delimiter. Mirrors the `prompt: |--` case from the field report.
+    #[test]
+    fn frontmatter_parse_block_marks_document_line_not_yaml_line() {
+        // Full document INCLUDING delimiters; serde only parses the inner YAML.
+        let doc = "---\nprompt: |--\nbody: ok\n---\n";
+        let inner = "prompt: |--\nbody: ok";
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), doc);
+        assert!(
+            ctx.frontmatter.is_some(),
+            "delimiters should be detected for the offset shift"
+        );
+        let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(inner).unwrap_err();
+        let out = render_block(&frontmatter_parse_block(ctx, &err));
+
+        // The offending `prompt: |--` is document line 2; the gutter marks it.
+        assert!(
+            out.contains("> 2 │ prompt: |--"),
+            "expected marker on document line 2: {out}",
+        );
+        // The line FOLLOWING the error is shown as trailing context.
+        assert!(
+            out.contains("3 │ body: ok"),
+            "expected following line shown: {out}",
+        );
+        // The opening delimiter shows as the preceding context line.
+        assert!(out.contains("1 │ ---"), "expected preceding line shown: {out}");
+    }
+
+    /// The excerpt body carries syntax-highlight SGR (best-effort, tolerant of
+    /// the malformed line) while the stripped output still shows a correctly
+    /// numbered gutter and the following line.
+    #[test]
+    fn frontmatter_excerpt_prose_highlights_and_marks_line() {
+        use biscuit_terminal::terminal::Terminal;
+
+        let doc = "---\nprompt: |--\nbody: ok\n---\n";
+        let ctx = SourceContext::new(PathBuf::from("/t.md"), PathBuf::from("t.md"), doc);
+        // Document line 2 is `prompt: |--`.
+        let raw = frontmatter_excerpt_prose(&ctx, 2, 1).render(&Terminal::new_optimistic(80));
+
+        assert!(
+            raw.contains("\x1b[38;2;"),
+            "expected truecolor highlight SGR in excerpt: {raw:?}",
+        );
+
+        let plain = strip_escape_codes(&raw);
+        assert!(
+            plain.contains("> 2 │ prompt: |--"),
+            "expected gutter marker on doc line 2: {plain:?}",
+        );
+        assert!(
+            plain.contains("3 │ body: ok"),
+            "expected following line in excerpt: {plain:?}",
+        );
     }
 
     #[test]

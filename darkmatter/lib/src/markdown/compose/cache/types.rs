@@ -40,6 +40,8 @@ pub enum ArtifactClass {
     ComposeDocumentCore,
     /// Individual operation result (code transclusion, TOC linking).
     OperationResult,
+    /// Remote URL artifact (fetched HTTP/HTTPS response body).
+    RemoteUrl,
 }
 
 /// Classification of a document's source origin.

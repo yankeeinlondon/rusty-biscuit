@@ -1,5 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use serde_json::Value;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 #[allow(deprecated)] // We need Command struct to set current_dir
@@ -914,7 +916,7 @@ fn test_prelude_flag_with_real_prelude_file() {
         .to_path_buf();
     let bt_lib = repo_root.join("biscuit-terminal/lib");
 
-    let mut cmd = Command::cargo_bin("hug").unwrap();
+    let mut cmd = hug_cmd();
     cmd.current_dir(&bt_lib)
         .args(["symbols", "src/terminal.rs", "--prelude", "--plain"])
         .assert()
@@ -927,7 +929,7 @@ fn test_prelude_flag_with_real_prelude_file() {
 fn test_symbols_prelude_reports_direct_prelude_exports() {
     let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prelude_pkg");
 
-    let mut cmd = Command::cargo_bin("hug").unwrap();
+    let mut cmd = hug_cmd();
     cmd.current_dir(&fixture_pkg)
         .args(["symbols", "--prelude", "--plain"])
         .assert()
@@ -947,7 +949,7 @@ fn test_symbols_prelude_reports_direct_prelude_exports() {
 fn test_symbols_prelude_comments_show_resolved_doc_comments() {
     let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prelude_pkg");
 
-    let mut cmd = Command::cargo_bin("hug").unwrap();
+    let mut cmd = hug_cmd();
     cmd.current_dir(&fixture_pkg)
         .args(["symbols", "--prelude", "--plain", "--comments"])
         .assert()
@@ -962,22 +964,70 @@ fn test_symbols_prelude_comments_show_resolved_doc_comments() {
 
 #[test]
 fn test_functions_prelude_from_package_area_root_discovers_child_package_prelude() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    let package_area_root = repo_root.join("biscuit-terminal");
+    // A package-area root (no manifest of its own) holding `lib/` and `cli/`
+    // child packages, mirroring layouts like `biscuit-terminal/`. Built in a
+    // temp dir (outside the repo) so `--prelude` only walks these few files —
+    // running against a real area would parse hundreds of source files just to
+    // surface the handful of prelude-named functions.
+    let area = tempfile::TempDir::new().unwrap();
+    let root = area.path();
 
-    let mut cmd = Command::cargo_bin("hug").unwrap();
-    cmd.current_dir(&package_area_root)
+    // `lib` child: a function defined in a deep module and re-exported through
+    // the child package's own prelude. Discovery must descend into `lib/` to
+    // find this prelude and resolve `parse_width_spec`.
+    std::fs::create_dir_all(root.join("lib/src/components")).unwrap();
+    std::fs::write(
+        root.join("lib/Cargo.toml"),
+        "[package]\nname = \"prelude-area-lib\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("lib/src/lib.rs"),
+        "pub mod components;\npub mod prelude;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("lib/src/prelude.rs"),
+        "pub use crate::components::width::parse_width_spec;\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("lib/src/components/mod.rs"), "pub mod width;\n").unwrap();
+    std::fs::write(
+        root.join("lib/src/components/width.rs"),
+        // `parse_width_spec` is prelude-exported; `not_in_prelude` is not.
+        "pub fn parse_width_spec(spec: &str) -> usize { spec.len() }\npub fn not_in_prelude() {}\n",
+    )
+    .unwrap();
+
+    // `cli` child: scanned as a second package but exports no prelude, so it
+    // contributes no symbols. This keeps the multi-package code path live while
+    // proving single-package output is not split with per-package headings.
+    std::fs::create_dir_all(root.join("cli/src")).unwrap();
+    std::fs::write(
+        root.join("cli/Cargo.toml"),
+        "[package]\nname = \"prelude-area-cli\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("cli/src/main.rs"),
+        "pub fn run_cli() {}\nfn main() {}\n",
+    )
+    .unwrap();
+
+    let mut cmd = hug_cmd();
+    cmd.current_dir(root)
         .args(["functions", "--prelude", "--plain"])
+        // A single child package supplies the prelude symbols, so output must
+        // not be split into per-package sections.
         .assert()
         .success()
-        .stdout(predicate::str::contains("\n\nbiscuit-terminal/cli\n\n").not())
-        .stdout(predicate::str::contains("\n\nbiscuit-terminal/lib\n\n").not())
+        .stdout(predicate::str::contains("\n\nlib\n\n").not())
+        .stdout(predicate::str::contains("\n\ncli\n\n").not())
+        // Discovered through `lib/`'s prelude.
         .stdout(predicate::str::contains("parse_width_spec"))
+        // Not prelude-exported, so excluded.
+        .stdout(predicate::str::contains("not_in_prelude").not())
+        .stdout(predicate::str::contains("run_cli").not())
         .stdout(predicate::str::contains("(no symbols)").not());
 }
 
@@ -1000,4 +1050,395 @@ fn test_exported_flag_classes() {
         .success()
         .stdout(predicate::str::contains("--exported"))
         .stdout(predicate::str::contains("--prelude"));
+}
+
+#[test]
+fn test_language_override_parses_extensionless_file() {
+    // A forced language should parse an explicitly named file even when its
+    // extension does not map to that language (here, no extension at all).
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("myscript");
+    std::fs::write(&path, "pub fn collect_widgets() {}\n").unwrap();
+
+    hug_cmd()
+        .args([
+            "symbols",
+            path.to_str().unwrap(),
+            "--language",
+            "rust",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("collect_widgets"));
+}
+
+#[test]
+fn test_language_override_parses_bare_extensionless_file_from_cwd() {
+    // Regression: a bare, slashless, extensionless token run from the file's own
+    // directory must still resolve as an explicit file under `--language`.
+    // Previously it was misclassified as a symbol glob and returned NoSourceFiles.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("myscript"), "pub fn collect_widgets() {}\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["symbols", "myscript", "--language", "rust", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("collect_widgets"));
+}
+
+#[test]
+fn test_language_override_explicit_file_respects_exclude_files() {
+    // Regression: `--exclude-files` must apply to explicitly resolved files, not
+    // only to directory/glob scans.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("alpha"), "pub fn alpha_fn() {}\n").unwrap();
+    std::fs::write(dir.path().join("beta"), "pub fn beta_fn() {}\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "symbols",
+            "alpha",
+            "beta",
+            "--language",
+            "rust",
+            "--exclude-files",
+            "beta",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("alpha_fn"))
+        .stdout(predicate::str::contains("beta_fn").not());
+}
+
+#[test]
+fn test_language_override_parses_tsx_as_typescript() {
+    // Forcing TypeScript on a .tsx file must use the TSX grammar so JSX parses
+    // and symbols are still extracted through the CLI path.
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("component.tsx");
+    std::fs::write(
+        &path,
+        "export function AppRoot() {\n  return <div>hi</div>;\n}\n",
+    )
+    .unwrap();
+
+    hug_cmd()
+        .args([
+            "symbols",
+            path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("AppRoot"));
+}
+
+#[test]
+fn test_lint_experimental_semantics_enables_semantic_diagnostics() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("probe.rs");
+    std::fs::write(&path, "fn main() {\n    missing_symbol();\n}\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["--no-cache", "--plain", "lint", "probe.rs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("undefined-symbol").not());
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--experimental-semantics",
+            "probe.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("undefined-symbol"));
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--experimental-semantics",
+            "--strict",
+            "probe.rs",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("undefined-symbol"));
+}
+
+#[test]
+fn test_lint_policy_selectors_affect_severity_and_exit_code() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("probe.rs");
+    std::fs::write(&path, "fn main() {\n    Some(1).unwrap();\n}\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--warn",
+            "unwrap-call",
+            "probe.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("warning"))
+        .stdout(predicate::str::contains("[unwrap-call]"));
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--deny",
+            "unwrap-call",
+            "probe.rs",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("error"))
+        .stdout(predicate::str::contains("[unwrap-call]"));
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--deny",
+            "category:suspicious",
+            "probe.rs",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("error"))
+        .stdout(predicate::str::contains("[unwrap-call]"));
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args([
+            "--no-cache",
+            "--plain",
+            "lint",
+            "--allow",
+            "unwrap-call",
+            "probe.rs",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("info"))
+        .stdout(predicate::str::contains("[unwrap-call]"));
+}
+
+#[test]
+fn test_lint_list_rules_exposes_rule_metadata() {
+    hug_cmd()
+        .args(["--plain", "lint", "--list-rules"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("unwrap-call"))
+        .stdout(predicate::str::contains("suspicious"))
+        .stdout(predicate::str::contains("default-on"));
+}
+
+#[test]
+fn test_lint_list_rules_json_exposes_rule_metadata() {
+    let output = hug_cmd()
+        .args(["--json", "lint", "--list-rules"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let unwrap_rule = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["id"] == "unwrap-call")
+        .unwrap();
+
+    assert_eq!(unwrap_rule["category"], "suspicious");
+    assert_eq!(unwrap_rule["enabled_by_default"], true);
+}
+
+#[test]
+fn test_lint_cache_separates_experimental_semantics_policy() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("probe.rs");
+    std::fs::write(&path, "fn main() {\n    missing_symbol();\n}\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["--plain", "lint", "probe.rs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("undefined-symbol").not());
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["--plain", "lint", "--experimental-semantics", "probe.rs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("undefined-symbol"));
+}
+
+#[test]
+fn test_lint_cache_reuse_respects_policy_selector_changes() {
+    // Policy is applied after the symbol cache is consulted, so reusing a cached
+    // entry must not pin the earlier run's severity. First run warms the cache
+    // with the default `unwrap-call` warning; the second run reuses it under
+    // `--deny` and must still escalate to an error and fail.
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("probe.rs");
+    std::fs::write(&path, "fn main() {\n    Some(1).unwrap();\n}\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["--plain", "lint", "probe.rs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("warning"))
+        .stdout(predicate::str::contains("[unwrap-call]"));
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .args(["--plain", "lint", "--deny", "unwrap-call", "probe.rs"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("error"))
+        .stdout(predicate::str::contains("[unwrap-call]"));
+}
+
+#[test]
+fn test_lint_json_includes_syntax_metadata() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("broken.rs");
+    std::fs::write(&path, "fn main( {\n").unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .args(["--no-cache", "--json", "lint", "broken.rs"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let metadata = &json["files"][0]["syntax"][0]["metadata"];
+
+    assert_eq!(metadata["source"], "SyntaxParser");
+    assert_eq!(metadata["category"], "Correctness");
+    assert_eq!(metadata["effective_severity"], "Error");
+}
+
+#[test]
+fn test_lint_invokes_oxlint_for_javascript() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let bin_dir = dir.path().join("bin");
+    std::fs::create_dir(&bin_dir).unwrap();
+    let oxlint = bin_dir.join("oxlint");
+    std::fs::write(
+        &oxlint,
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "oxlint 1.0.0"
+  exit 0
+fi
+cat <<'JSON'
+{"messages":[{"message":"Avoid debugger","severity":2,"rule_id":"no-debugger","line":1,"column":1,"end_line":1,"end_column":9,"file_path":"probe.js","category":"correctness"}],"exit_code":1}
+JSON
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&oxlint).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&oxlint, permissions).unwrap();
+
+    let source = dir.path().join("probe.js");
+    std::fs::write(&source, "debugger;\n").unwrap();
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .env("PATH", path)
+        .args(["--no-cache", "--json", "lint", "probe.js"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let lint = json["files"][0]["lint"].as_array().unwrap();
+    let oxlint_diagnostic = lint
+        .iter()
+        .find(|diagnostic| diagnostic["rule"] == "no-debugger")
+        .unwrap();
+
+    assert_eq!(oxlint_diagnostic["message"], "Avoid debugger");
+    assert_eq!(oxlint_diagnostic["metadata"]["source"], "ExternalTool");
+    assert_eq!(oxlint_diagnostic["severity"], "Error");
+}
+
+#[test]
+fn test_lint_warns_when_oxlint_is_unavailable() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let bin_dir = dir.path().join("bin");
+    std::fs::create_dir(&bin_dir).unwrap();
+    std::fs::write(dir.path().join("probe.js"), "const value = 1;\n").unwrap();
+
+    hug_cmd()
+        .current_dir(dir.path())
+        .env("PATH", bin_dir)
+        .args(["--plain", "lint", "probe.js"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "external lint adapter 'oxlint' is unavailable",
+        ));
+}
+
+#[test]
+fn test_lint_json_reports_unavailable_oxlint_metadata() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let bin_dir = dir.path().join("bin");
+    std::fs::create_dir(&bin_dir).unwrap();
+    std::fs::write(dir.path().join("probe.js"), "const value = 1;\n").unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .env("PATH", bin_dir)
+        .args(["--json", "lint", "probe.js"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let metadata = &json["adapter_metadata"][0];
+
+    assert_eq!(metadata["tool_name"], "oxlint");
+    assert_eq!(metadata["tool_available"], false);
 }

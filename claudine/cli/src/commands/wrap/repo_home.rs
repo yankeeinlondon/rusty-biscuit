@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
@@ -72,6 +73,18 @@ impl RepoHomeManager {
                 continue;
             }
 
+            // Live SQLite databases must never be symlinked into the shadow home.
+            // Doing so points two independent provider processes (e.g. bare `codex`
+            // and `claudine codex`) at one physical WAL-mode DB through a symlink;
+            // their -wal/-shm sidecars desync and SQLite reports SQLITE_CANTOPEN
+            // ("database appears damaged"). Purge any stale shadow copy so the
+            // provider rebuilds its own fresh, consistent DB on launch. Config
+            // files (auth.json, config.toml, …) are still shared via symlink.
+            if is_volatile_state_file(&file_name) {
+                remove_existing_path(&dest)?;
+                continue;
+            }
+
             if dest.exists() || dest.is_symlink() {
                 if let Ok(dest_meta) = fs::symlink_metadata(&dest)
                     && dest_meta.file_type().is_symlink()
@@ -140,6 +153,17 @@ impl RepoHomeManager {
             _ => vec!["skills", "commands", "agents", "hooks"],
         }
     }
+}
+
+/// Live SQLite state databases and their WAL/SHM/journal sidecars. These are
+/// per-environment runtime state, not shareable config — see the call site in
+/// `sync_shadow_home` for why sharing them via symlink corrupts the DB.
+fn is_volatile_state_file(file_name: &OsStr) -> bool {
+    let name = file_name.to_string_lossy();
+    name.ends_with(".sqlite")
+        || name.ends_with(".sqlite-wal")
+        || name.ends_with(".sqlite-shm")
+        || name.ends_with(".sqlite-journal")
 }
 
 pub fn needs_shadow_home(provider: Provider, cwd: &Path, repo_only: bool) -> bool {
@@ -331,6 +355,22 @@ fn remove_existing_path(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn volatile_state_files_match_live_dbs_only() {
+        // Live DBs + sidecars must be detected (never shared via symlink).
+        assert!(is_volatile_state_file(OsStr::new("state_5.sqlite")));
+        assert!(is_volatile_state_file(OsStr::new("logs_2.sqlite-wal")));
+        assert!(is_volatile_state_file(OsStr::new("memories_1.sqlite-shm")));
+        assert!(is_volatile_state_file(OsStr::new("goals_1.sqlite-journal")));
+
+        // Shared config and codex's own repair backups must NOT match.
+        assert!(!is_volatile_state_file(OsStr::new("config.toml")));
+        assert!(!is_volatile_state_file(OsStr::new("auth.json")));
+        assert!(!is_volatile_state_file(OsStr::new(
+            "state_5.sqlite.codex-repair-1780436523.0.bak"
+        )));
+    }
 
     #[test]
     fn codex_repo_prompts_source_prefers_codex_dir_then_claude_commands() {

@@ -119,4 +119,28 @@ mod tests {
         assert!(plain.contains("b.md"), "got:\n{plain}");
         assert!(plain.contains("cycle detected"), "got:\n{plain}");
     }
+
+    #[test]
+    fn renders_frontmatter_parse_block_through_composition_error() {
+        let yaml_err: biscuit_file::YamlParseError =
+            biscuit_file::serde_yaml_ng::from_str::<biscuit_file::serde_yaml_ng::Value>(
+                "prompt: |-\n    four spaces\n   three spaces\n",
+            )
+            .expect_err("malformed YAML should fail to parse");
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("metadata.md"),
+            PathBuf::from("metadata.md"),
+            "prompt: |-\n    four spaces\n   three spaces\n".to_string(),
+        );
+        let md = MarkdownError::FrontmatterParse {
+            ctx,
+            source: yaml_err,
+        };
+        let report: Report = eyre!(claudine::composition::CompositionError::FrontmatterParse(md));
+
+        let rendered = try_render_block_report(&report, &width80()).expect("block error found");
+        let plain = strip_escape_codes(&rendered);
+        assert!(plain.contains("frontmatter parse failed"), "got:\n{plain}");
+        assert!(plain.contains("metadata.md"), "got:\n{plain}");
+    }
 }

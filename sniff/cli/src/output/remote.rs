@@ -7,6 +7,7 @@
 use std::fmt::Write;
 
 use biscuit_terminal::prelude::*;
+use chrono::{DateTime, Utc};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::terminal::TerminalOptions;
 
@@ -54,10 +55,14 @@ pub fn render_remote_text(report: &RemoteReport, readme_content: Option<&str>) -
     }
     if let Some(issues) = meta.open_issues {
         stats_parts.push(format!(
-            "<dim>◎</dim> {} open",
+            "<dim>◎</dim> {} issues",
             format_number(issues as usize)
         ));
     }
+    stats_parts.push(format!(
+        "<dim>⇄</dim> {} PRs",
+        format_number(report.pull_requests.len())
+    ));
     if !stats_parts.is_empty() {
         write!(out, "{}", Prose::new(stats_parts.join("  ")).display(&term)).unwrap();
     }
@@ -183,29 +188,108 @@ fn render_documents(docs: &[DocumentRef], term: &Terminal) -> String {
 }
 
 /// Render CI/CD information.
-fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
+///
+/// When entries have workflow run details (`started_at` is present), renders
+/// a compact table with a styled status cell (see [`cicd_status_cell`]),
+/// workflow name, branch, event, and relative start time. Falls back to an
+/// unordered list for presence-only detection.
+pub fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
     if cicd.is_empty() {
         return String::new();
     }
 
     let mut out = String::new();
     writeln!(out).unwrap();
-    write!(out, "{}", Prose::new("<b><u>CI/CD</u></b>").display(term)).unwrap();
 
-    let items: Vec<String> = cicd
-        .iter()
-        .map(|ci| {
-            let path_info = ci
-                .config_path
-                .as_ref()
-                .map(|p| format!(" <dim>({})</dim>", p))
+    // Check if we have "run-shaped" entries with actual workflow run data
+    let run_shaped: Vec<&CiCdInfo> = cicd.iter().filter(|ci| ci.started_at.is_some()).collect();
+
+    if !run_shaped.is_empty() {
+        let shown = run_shaped.len().min(10);
+        let heading = format!("<b><u>CI/CD</u></b> <dim>(last {shown} runs)</dim>");
+        write!(out, "{}", Prose::new(&heading).display(term)).unwrap();
+
+        let columns = vec![
+            // Status cell: a glyph for completed runs, or dim status text for
+            // runs still in flight — min-width lets it grow to fit the word.
+            TableColumn::new("").with_min_width(2),
+            TableColumn::new("Workflow"),
+            TableColumn::new("Branch").with_min_width(8),
+            TableColumn::new("Event").with_min_width(6),
+            TableColumn::new("Time").with_min_width(10),
+        ];
+
+        let mut table = Table::new().with_columns(columns);
+        let now = Utc::now();
+
+        for ci in run_shaped.iter().take(10) {
+            // Table cells are not markup-aware (they only strip ANSI for width),
+            // so the status markup must be rendered to ANSI before it goes in.
+            let status = Prose::new(cicd_status_cell(ci)).render(term);
+            let time_str = ci
+                .started_at
+                .as_deref()
+                .map(|t| relative_time(t, now))
                 .unwrap_or_default();
-            Prose::new(format!("<b>{}</b>{}", ci.provider, path_info)).render(term)
-        })
-        .collect();
 
-    write!(out, "{}", UnorderedList::new(items).display(term)).unwrap();
+            table.add_row(vec![
+                status.into(),
+                ci.name.clone().into(),
+                ci.head_branch.clone().unwrap_or_default().into(),
+                ci.event.clone().unwrap_or_default().into(),
+                time_str.into(),
+            ]);
+        }
+
+        write!(out, "{}", table.display(term)).unwrap();
+    } else {
+        // Presence-only fallback: render as unordered list
+        write!(out, "{}", Prose::new("<b><u>CI/CD</u></b>").display(term)).unwrap();
+        let items: Vec<String> = cicd
+            .iter()
+            .map(|ci| {
+                let path_info = ci
+                    .config_path
+                    .as_ref()
+                    .map(|p| format!(" <dim>({})</dim>", p))
+                    .unwrap_or_default();
+                Prose::new(format!("<b>{}</b>{}", ci.provider, path_info)).render(term)
+            })
+            .collect();
+
+        write!(out, "{}", UnorderedList::new(items).display(term)).unwrap();
+    }
+
     out
+}
+
+/// Build the styled status cell for a CI/CD run row.
+///
+/// Completed runs map their conclusion to a glyph; runs that have not concluded
+/// yet (`conclusion` is `None`) show their dim status text instead. The returned
+/// string carries biscuit-terminal markup for color/dim styling:
+///
+/// | conclusion / status | cell | style |
+/// |---------------------|------|-------|
+/// | `success`           | `✓`  | green |
+/// | `failure`           | `✗`  | red   |
+/// | `cancelled`, `skipped` | `⊘` | dim |
+/// | in-progress / queued (no conclusion) | status text | dim |
+fn cicd_status_cell(ci: &CiCdInfo) -> String {
+    let Some(conclusion) = ci.conclusion.as_deref() else {
+        // No conclusion yet: the run is queued / in progress / waiting.
+        return format!("<dim>{}</dim>", ci.status);
+    };
+
+    match conclusion {
+        "success" => "<green>✓</green>".to_string(),
+        "failure" => "<red>✗</red>".to_string(),
+        "cancelled" | "skipped" => "<dim>⊘</dim>".to_string(),
+        "timed_out" => "<red>⏱</red>".to_string(),
+        "action_required" => "<yellow>⚠</yellow>".to_string(),
+        "neutral" => "<dim>○</dim>".to_string(),
+        other => format!("<dim>{}</dim>", other.chars().next().unwrap_or('?')),
+    }
 }
 
 /// Render recent pull requests as a table.
@@ -361,6 +445,52 @@ fn render_key_urls(report: &RemoteReport, term: &Terminal) -> String {
     } else {
         String::new()
     }
+}
+
+/// Convert an ISO 8601 timestamp to a compact relative time string.
+///
+/// Examples: "just now", "8m ago", "2h ago", "3d ago", "2w ago", "5mo ago",
+/// "2y ago".
+pub fn relative_time(iso: &str, now: DateTime<Utc>) -> String {
+    let parsed = match DateTime::parse_from_rfc3339(iso) {
+        Ok(dt) => dt.with_timezone(&Utc),
+        Err(_) => return iso.to_string(),
+    };
+
+    let duration = now.signed_duration_since(parsed);
+    let seconds = duration.num_seconds();
+
+    if seconds < 60 {
+        return "just now".to_string();
+    }
+
+    let minutes = duration.num_minutes();
+    if minutes < 60 {
+        return format!("{minutes}m ago");
+    }
+
+    let hours = duration.num_hours();
+    if hours < 24 {
+        return format!("{hours}h ago");
+    }
+
+    let days = duration.num_days();
+    if days < 7 {
+        return format!("{days}d ago");
+    }
+
+    let weeks = days / 7;
+    if weeks < 4 {
+        return format!("{weeks}w ago");
+    }
+
+    let months = days / 30;
+    if months < 12 {
+        return format!("{months}mo ago");
+    }
+
+    let years = days / 365;
+    format!("{years}y ago")
 }
 
 /// Format PR state with semantic meaning.
@@ -765,5 +895,393 @@ mod tests {
     fn test_pr_state_display_unknown() {
         let pr = make_test_pr(1, "unknown", false, None);
         assert_eq!(pr_state_display(&pr), "unknown");
+    }
+
+    #[test]
+    fn test_relative_time_just_now() {
+        let now = Utc::now();
+        let iso = now.to_rfc3339();
+        assert_eq!(relative_time(&iso, now), "just now");
+    }
+
+    #[test]
+    fn test_relative_time_minutes_ago() {
+        let now = Utc::now();
+        let then = now - chrono::Duration::minutes(5);
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "5m ago");
+    }
+
+    #[test]
+    fn test_relative_time_one_minute_ago() {
+        let now = Utc::now();
+        let then = now - chrono::Duration::minutes(1);
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "1m ago");
+    }
+
+    #[test]
+    fn test_relative_time_hours_ago() {
+        let now = Utc::now();
+        let then = now - chrono::Duration::hours(3);
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "3h ago");
+    }
+
+    #[test]
+    fn test_relative_time_one_hour_ago() {
+        let now = Utc::now();
+        let then = now - chrono::Duration::hours(1);
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "1h ago");
+    }
+
+    #[test]
+    fn test_relative_time_days_ago() {
+        let now = Utc::now();
+        let then = now - chrono::Duration::days(2);
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "2d ago");
+    }
+
+    #[test]
+    fn test_relative_time_one_day_ago() {
+        let now = Utc::now();
+        let then = now - chrono::Duration::days(1);
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "1d ago");
+    }
+
+    #[test]
+    fn test_relative_time_weeks_ago() {
+        let now = Utc::now();
+        let then = now - chrono::Duration::days(14);
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "2w ago");
+    }
+
+    #[test]
+    fn test_relative_time_one_week_ago() {
+        let now = Utc::now();
+        let then = now - chrono::Duration::days(7);
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "1w ago");
+    }
+
+    #[test]
+    fn test_relative_time_months_ago() {
+        let now = Utc::now();
+        let then = now - chrono::Duration::days(60);
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "2mo ago");
+    }
+
+    #[test]
+    fn test_relative_time_one_month_ago() {
+        let now = Utc::now();
+        let then = now - chrono::Duration::days(30);
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "1mo ago");
+    }
+
+    #[test]
+    fn test_relative_time_years_ago() {
+        let now = Utc::now();
+        let then = now - chrono::Duration::days(730);
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "2y ago");
+    }
+
+    #[test]
+    fn test_relative_time_one_year_ago() {
+        let now = Utc::now();
+        let then = now - chrono::Duration::days(365);
+        assert_eq!(relative_time(&then.to_rfc3339(), now), "1y ago");
+    }
+
+    #[test]
+    fn test_relative_time_invalid_iso_returns_original() {
+        let now = Utc::now();
+        assert_eq!(relative_time("not-a-date", now), "not-a-date");
+    }
+
+    #[test]
+    fn test_render_remote_text_issues_relabeled() {
+        let report = make_test_report();
+        let rendered = render_remote_text(&report, None);
+        assert!(rendered.contains("◎") && rendered.contains("12 issues"));
+        assert!(!rendered.contains("12 open"));
+    }
+
+    #[test]
+    fn test_render_remote_text_shows_pr_count() {
+        let mut report = make_test_report();
+        report.pull_requests = vec![
+            make_test_pr(1, "open", false, None),
+            make_test_pr(2, "open", false, None),
+        ];
+        let rendered = render_remote_text(&report, None);
+        assert!(rendered.contains("⇄") && rendered.contains("2 PRs"));
+    }
+
+    #[test]
+    fn test_render_remote_text_shows_zero_pr_count_when_empty() {
+        let report = make_test_report();
+        let rendered = render_remote_text(&report, None);
+        assert!(rendered.contains("⇄") && rendered.contains("0 PRs"));
+    }
+
+    fn make_test_cicd(
+        name: &str,
+        status: &str,
+        conclusion: Option<&str>,
+        started_at: Option<&str>,
+        head_branch: Option<&str>,
+        event: Option<&str>,
+    ) -> CiCdInfo {
+        CiCdInfo {
+            provider: "GitHub Actions".to_string(),
+            config_path: None,
+            name: name.to_string(),
+            status: status.to_string(),
+            conclusion: conclusion.map(|s| s.to_string()),
+            html_url: None,
+            started_at: started_at.map(|s| s.to_string()),
+            head_branch: head_branch.map(|s| s.to_string()),
+            event: event.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_cicd_status_cell_success_green_check() {
+        let ci = make_test_cicd("CI", "completed", Some("success"), None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<green>✓</green>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_failure_red_cross() {
+        let ci = make_test_cicd("CI", "completed", Some("failure"), None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<red>✗</red>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_cancelled_dim_circle() {
+        let ci = make_test_cicd("CI", "completed", Some("cancelled"), None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<dim>⊘</dim>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_skipped_dim_circle() {
+        // Spec requires `⊘` (not `⊝`) for skipped, dimmed.
+        let ci = make_test_cicd("CI", "completed", Some("skipped"), None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<dim>⊘</dim>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_timed_out() {
+        let ci = make_test_cicd("CI", "completed", Some("timed_out"), None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<red>⏱</red>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_action_required() {
+        let ci = make_test_cicd("CI", "completed", Some("action_required"), None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<yellow>⚠</yellow>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_neutral() {
+        let ci = make_test_cicd("CI", "completed", Some("neutral"), None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<dim>○</dim>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_in_progress_dim_status_text() {
+        // Active runs (no conclusion) render the dim status word, not a glyph.
+        let ci = make_test_cicd("CI", "in_progress", None, None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<dim>in_progress</dim>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_queued_dim_status_text() {
+        let ci = make_test_cicd("CI", "queued", None, None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<dim>queued</dim>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_waiting_dim_status_text() {
+        let ci = make_test_cicd("CI", "waiting", None, None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<dim>waiting</dim>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_pending_dim_status_text() {
+        let ci = make_test_cicd("CI", "pending", None, None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<dim>pending</dim>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_unknown_conclusion() {
+        let ci = make_test_cicd("CI", "completed", Some("weird"), None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<dim>w</dim>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_no_conclusion_shows_status() {
+        // A run with no conclusion falls back to its dim status word.
+        let ci = make_test_cicd("CI", "completed", None, None, None, None);
+        assert_eq!(cicd_status_cell(&ci), "<dim>completed</dim>");
+    }
+
+    #[test]
+    fn test_cicd_status_cell_renders_green_ansi_on_color_terminal() {
+        // Verify the markup actually produces a green SGR sequence when rendered
+        // through a color-capable terminal (sniff's styling contract end-to-end,
+        // minus the physical terminal). biscuit-terminal owns the real-terminal
+        // capture coverage for its color primitives.
+        let term = Terminal::new_optimistic(80);
+        let ci = make_test_cicd("CI", "completed", Some("success"), None, None, None);
+        let rendered = Prose::new(cicd_status_cell(&ci)).render(&term);
+        assert!(
+            rendered.contains("\x1b[32m") || rendered.contains("32m"),
+            "success cell should emit a green SGR sequence, got: {rendered:?}"
+        );
+        assert!(rendered.contains('✓'));
+    }
+
+    #[test]
+    fn test_cicd_status_cell_renders_red_ansi_on_color_terminal() {
+        let term = Terminal::new_optimistic(80);
+        let ci = make_test_cicd("CI", "completed", Some("failure"), None, None, None);
+        let rendered = Prose::new(cicd_status_cell(&ci)).render(&term);
+        assert!(
+            rendered.contains("\x1b[31m") || rendered.contains("31m"),
+            "failure cell should emit a red SGR sequence, got: {rendered:?}"
+        );
+        assert!(rendered.contains('✗'));
+    }
+
+    #[test]
+    fn test_render_cicd_empty() {
+        let term = Terminal::default();
+        let rendered = render_cicd(&[], &term);
+        assert!(rendered.is_empty());
+    }
+
+    #[test]
+    fn test_render_cicd_presence_only_fallback() {
+        let term = Terminal::default();
+        let cicd = vec![CiCdInfo {
+            provider: "GitHub Actions".to_string(),
+            config_path: Some(".github/workflows".to_string()),
+            name: "GitHub Actions".to_string(),
+            status: "detected".to_string(),
+            conclusion: None,
+            html_url: None,
+            started_at: None,
+            head_branch: None,
+            event: None,
+        }];
+        let rendered = render_cicd(&cicd, &term);
+        assert!(rendered.contains("CI/CD"));
+        assert!(rendered.contains("GitHub Actions"));
+        assert!(rendered.contains(".github/workflows"));
+    }
+
+    #[test]
+    fn test_render_cicd_run_shaped_table() {
+        let term = Terminal::default();
+        let now = Utc::now();
+        let started = (now - chrono::Duration::minutes(5)).to_rfc3339();
+        let cicd = vec![make_test_cicd(
+            "Test Workflow",
+            "completed",
+            Some("success"),
+            Some(&started),
+            Some("main"),
+            Some("push"),
+        )];
+        let rendered = render_cicd(&cicd, &term);
+        assert!(rendered.contains("CI/CD"));
+        assert!(rendered.contains("last 1 runs"));
+        assert!(rendered.contains("Test Workflow"));
+        assert!(rendered.contains("main"));
+        assert!(rendered.contains("push"));
+        assert!(rendered.contains("5m ago"));
+        // Table rendering uses box-drawing characters
+        assert!(rendered.contains('│') || rendered.contains('┌'));
+    }
+
+    #[test]
+    fn test_render_cicd_run_shaped_multiple_runs() {
+        let term = Terminal::default();
+        let now = Utc::now();
+        let started1 = (now - chrono::Duration::hours(1)).to_rfc3339();
+        let started2 = (now - chrono::Duration::days(1)).to_rfc3339();
+        let cicd = vec![
+            make_test_cicd(
+                "Build",
+                "completed",
+                Some("success"),
+                Some(&started1),
+                Some("main"),
+                Some("push"),
+            ),
+            make_test_cicd(
+                "Lint",
+                "completed",
+                Some("failure"),
+                Some(&started2),
+                Some("feature"),
+                Some("pull_request"),
+            ),
+        ];
+        let rendered = render_cicd(&cicd, &term);
+        assert!(rendered.contains("last 2 runs"));
+        assert!(rendered.contains("Build"));
+        assert!(rendered.contains("Lint"));
+        assert!(rendered.contains("feature"));
+        assert!(rendered.contains("pull_request"));
+    }
+
+    #[test]
+    fn test_render_cicd_mixed_run_and_presence_prefers_table() {
+        let term = Terminal::default();
+        let now = Utc::now();
+        let started = (now - chrono::Duration::minutes(10)).to_rfc3339();
+        let cicd = vec![
+            make_test_cicd(
+                "Test",
+                "completed",
+                Some("success"),
+                Some(&started),
+                Some("main"),
+                Some("push"),
+            ),
+            CiCdInfo {
+                provider: "GitHub Actions".to_string(),
+                config_path: Some(".github/workflows".to_string()),
+                name: "GitHub Actions".to_string(),
+                status: "detected".to_string(),
+                conclusion: None,
+                html_url: None,
+                started_at: None,
+                head_branch: None,
+                event: None,
+            },
+        ];
+        let rendered = render_cicd(&cicd, &term);
+        // When at least one run-shaped entry exists, table mode is used
+        assert!(rendered.contains("Test"));
+        assert!(rendered.contains("main"));
+        assert!(rendered.contains("push"));
+    }
+
+    #[test]
+    fn test_render_remote_text_includes_cicd_table() {
+        let mut report = make_test_report();
+        let now = Utc::now();
+        let started = (now - chrono::Duration::minutes(15)).to_rfc3339();
+        report.ci_cd = vec![make_test_cicd(
+            "CI",
+            "completed",
+            Some("success"),
+            Some(&started),
+            Some("main"),
+            Some("push"),
+        )];
+        let rendered = render_remote_text(&report, None);
+        assert!(rendered.contains("CI/CD"));
+        assert!(rendered.contains("last 1 runs"));
+        assert!(rendered.contains("main"));
     }
 }

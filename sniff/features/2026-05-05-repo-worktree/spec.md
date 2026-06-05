@@ -2,6 +2,8 @@
 
 The `sniff repo worktree` subcommand identifies if the current directory is part of a linked Git worktree and returns its name.
 
+> **Status:** Implemented. This spec describes the shipped behavior.
+
 ## Functional Requirements
 
 - **Worktree Identification**: The command returns the **base directory name** of the worktree path.
@@ -23,6 +25,10 @@ The `sniff repo worktree` subcommand identifies if the current directory is part
 ### Plain Text (Default)
 - **Success**: The name of the linked worktree (e.g., `my-feature-fix`).
 - **Failure**: No output (unless `--on-error` is used).
+
+### Plain Text (Verbose, `--verbose` / `-v`)
+- **Success**: The worktree name followed by its absolute path in brackets, e.g. `my-feature-fix [/abs/path/to/my-feature-fix]`.
+- **Failure**: Same as default plain text.
 
 ### JSON (Global `--json` flag)
 - **Success**: 

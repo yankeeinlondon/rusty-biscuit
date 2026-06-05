@@ -3,6 +3,11 @@
 Notes on L2 tests that use `biscuit_test_harness::wezterm::WezTermHarness` to
 capture `frame.raw` from a real WezTerm pane.
 
+> For backend selection, `SpawnVisibility`, `SharedHarness`, and the
+> "which terminal am I running inside" gotcha, load the
+> `biscuit-test-harness` skill via the Skill tool. This page is scoped
+> to *assertion patterns* against captured frames.
+
 ## SGR Re-emission Collapses
 
 `harness.capture()` reads the pane via `wezterm cli get-text --escapes`, which

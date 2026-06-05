@@ -110,6 +110,22 @@ pub trait RemoteRepoProvider: Send + Sync {
     /// Returns `None` if no CI/CD configuration is detected.
     async fn detect_cicd(&self, owner: &str, repo: &str) -> Result<Option<CiCdInfo>, SniffError>;
 
+    /// List recent workflow runs.
+    ///
+    /// Fetches actual CI/CD execution runs from the provider's API.
+    /// Returns up to `limit` recent runs. Providers that don't support
+    /// workflow runs return an empty vector.
+    ///
+    /// The default implementation returns an empty vector.
+    async fn list_workflow_runs(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _limit: usize,
+    ) -> Result<Vec<CiCdInfo>, SniffError> {
+        Ok(Vec::new())
+    }
+
     /// List other repositories in the same org/group.
     ///
     /// Useful for discovering related projects in the same organization.
@@ -154,7 +170,11 @@ pub trait RemoteRepoProvider: Send + Sync {
             .get_tags_and_releases(owner, repo)
             .await
             .unwrap_or_default();
-        let cicd = self.detect_cicd(owner, repo).await.unwrap_or(None);
+        // Try to fetch actual workflow runs first; fall back to presence detection
+        let cicd = match self.list_workflow_runs(owner, repo, 5).await {
+            Ok(runs) if !runs.is_empty() => runs,
+            _ => self.detect_cicd(owner, repo).await.unwrap_or(None).into_iter().collect(),
+        };
         let org_repos = self.list_org_repos(owner).await.unwrap_or_default();
         let key_urls = self.build_key_urls(owner, repo);
 
@@ -166,16 +186,238 @@ pub trait RemoteRepoProvider: Send + Sync {
             pull_requests,
             issues,
             tags_and_releases,
-            ci_cd: cicd.into_iter().collect(),
+            ci_cd: cicd,
             org_repos,
             key_urls,
         })
     }
 }
 
-// Compile-time assertion: the trait is object-safe
 #[cfg(test)]
-const _: () = {
-    const fn _assert_object_safe<T: ?Sized>() {}
-    _assert_object_safe::<dyn RemoteRepoProvider>();
-};
+mod tests {
+    use super::*;
+
+    // Compile-time assertion: the trait is object-safe.
+    const _: () = {
+        const fn _assert_object_safe<T: ?Sized>() {}
+        _assert_object_safe::<dyn RemoteRepoProvider>();
+    };
+
+    /// Minimal provider for exercising the `fetch_report` CI/CD fallback logic.
+    ///
+    /// `workflow_runs` is what `list_workflow_runs` yields (or a `RemoteApi`
+    /// error when `runs_fail` is set); `detected` is the presence-detection
+    /// fallback returned by `detect_cicd`.
+    struct FakeProvider {
+        workflow_runs: Vec<CiCdInfo>,
+        runs_fail: bool,
+        detected: Option<CiCdInfo>,
+    }
+
+    fn run_entry(name: &str) -> CiCdInfo {
+        CiCdInfo {
+            provider: "GitHub Actions".to_string(),
+            config_path: None,
+            name: name.to_string(),
+            status: "completed".to_string(),
+            conclusion: Some("success".to_string()),
+            html_url: None,
+            started_at: Some("2024-01-15T10:30:00Z".to_string()),
+            head_branch: Some("main".to_string()),
+            event: Some("push".to_string()),
+        }
+    }
+
+    fn presence_entry() -> CiCdInfo {
+        CiCdInfo {
+            provider: "GitHub Actions".to_string(),
+            config_path: Some(".github/workflows".to_string()),
+            name: "GitHub Actions".to_string(),
+            status: "detected".to_string(),
+            conclusion: None,
+            html_url: None,
+            started_at: None,
+            head_branch: None,
+            event: None,
+        }
+    }
+
+    fn api_error() -> SniffError {
+        SniffError::RemoteApi {
+            provider: "Fake".to_string(),
+            status: 500,
+            message: "boom".to_string(),
+        }
+    }
+
+    #[async_trait]
+    impl RemoteRepoProvider for FakeProvider {
+        fn provider(&self) -> GitProvider {
+            GitProvider::GitHub
+        }
+
+        async fn get_repo_metadata(
+            &self,
+            _owner: &str,
+            _repo: &str,
+        ) -> Result<RepoMetadata, SniffError> {
+            Ok(RepoMetadata {
+                name: "repo".to_string(),
+                full_name: "owner/repo".to_string(),
+                description: None,
+                private: false,
+                default_branch: "main".to_string(),
+                language: None,
+                stars: None,
+                forks: None,
+                open_issues: None,
+                archived: false,
+                created_at: None,
+                updated_at: None,
+                pushed_at: None,
+                license: None,
+                topics: vec![],
+                has_issues: None,
+                has_wiki: None,
+                homepage: None,
+                html_url: "https://github.com/owner/repo".to_string(),
+            })
+        }
+
+        async fn get_org_info(&self, _org: &str) -> Result<OrgInfo, SniffError> {
+            Err(api_error())
+        }
+
+        async fn list_documents(
+            &self,
+            _owner: &str,
+            _repo: &str,
+        ) -> Result<Vec<DocumentRef>, SniffError> {
+            Ok(Vec::new())
+        }
+
+        async fn get_file_content(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _path: &str,
+        ) -> Result<String, SniffError> {
+            Ok(String::new())
+        }
+
+        async fn list_pull_requests(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _state: PullRequestState,
+        ) -> Result<Vec<PullRequestInfo>, SniffError> {
+            Ok(Vec::new())
+        }
+
+        async fn list_issues(
+            &self,
+            _owner: &str,
+            _repo: &str,
+        ) -> Result<Vec<IssueInfo>, SniffError> {
+            Ok(Vec::new())
+        }
+
+        async fn get_tags_and_releases(
+            &self,
+            _owner: &str,
+            _repo: &str,
+        ) -> Result<TagsAndReleases, SniffError> {
+            Ok(TagsAndReleases::default())
+        }
+
+        async fn detect_cicd(
+            &self,
+            _owner: &str,
+            _repo: &str,
+        ) -> Result<Option<CiCdInfo>, SniffError> {
+            Ok(self.detected.clone())
+        }
+
+        async fn list_workflow_runs(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _limit: usize,
+        ) -> Result<Vec<CiCdInfo>, SniffError> {
+            if self.runs_fail {
+                Err(api_error())
+            } else {
+                Ok(self.workflow_runs.clone())
+            }
+        }
+
+        async fn list_org_repos(&self, _org: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
+            Ok(Vec::new())
+        }
+
+        fn build_key_urls(&self, _owner: &str, _repo: &str) -> KeyUrls {
+            KeyUrls {
+                repo: "https://github.com/owner/repo".to_string(),
+                homepage: None,
+                docs: None,
+                issues: None,
+                pull_requests: None,
+                wiki: None,
+                ci_cd: None,
+                insights: None,
+                releases: None,
+                settings: None,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_report_uses_workflow_runs_when_present() {
+        let provider = FakeProvider {
+            workflow_runs: vec![run_entry("CI")],
+            runs_fail: false,
+            detected: Some(presence_entry()),
+        };
+        let report = provider.fetch_report("owner", "repo").await.unwrap();
+        // Run-shaped entries win over the presence-detection fallback.
+        assert_eq!(report.ci_cd.len(), 1);
+        assert_eq!(report.ci_cd[0].name, "CI");
+        assert!(report.ci_cd[0].started_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_report_falls_back_to_detection_when_no_runs() {
+        let provider = FakeProvider {
+            workflow_runs: vec![],
+            runs_fail: false,
+            detected: Some(presence_entry()),
+        };
+        let report = provider.fetch_report("owner", "repo").await.unwrap();
+        assert_eq!(report.ci_cd.len(), 1);
+        assert_eq!(report.ci_cd[0].status, "detected");
+        assert!(report.ci_cd[0].started_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_report_falls_back_when_runs_fail() {
+        let provider = FakeProvider {
+            workflow_runs: vec![],
+            runs_fail: true,
+            detected: Some(presence_entry()),
+        };
+        let report = provider.fetch_report("owner", "repo").await.unwrap();
+        assert_eq!(report.ci_cd.len(), 1);
+        assert_eq!(report.ci_cd[0].status, "detected");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_report_empty_cicd_when_runs_fail_and_no_detection() {
+        let provider = FakeProvider {
+            workflow_runs: vec![],
+            runs_fail: true,
+            detected: None,
+        };
+        let report = provider.fetch_report("owner", "repo").await.unwrap();
+        assert!(report.ci_cd.is_empty());
+    }
+}

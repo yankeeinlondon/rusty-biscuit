@@ -15,3 +15,8 @@
 (call
   function: (identifier) @_fn3
   (#eq? @_fn3 "breakpoint")) @diagnostic.breakpoint-call
+
+; Detect print() calls
+(call
+  function: (identifier) @_fn4
+  (#eq? @_fn4 "print")) @diagnostic.print-call

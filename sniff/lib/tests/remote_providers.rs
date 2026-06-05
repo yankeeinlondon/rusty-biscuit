@@ -18,7 +18,7 @@ use sniff::remote::{
     BitbucketRemote, DocumentCategory, GitHubRemote, GitLabRemote, GitProvider, GitRemote,
     GiteaRemote, PullRequestState, RemoteRepoProvider,
 };
-use wiremock::matchers::{method, path, path_regex};
+use wiremock::matchers::{method, path, path_regex, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // =============================================================================
@@ -143,6 +143,34 @@ fn github_releases_fixture() -> serde_json::Value {
             "html_url": "https://github.com/test-owner/test-repo/releases/tag/v1.0.0"
         }
     ])
+}
+
+fn github_workflow_runs_fixture() -> serde_json::Value {
+    serde_json::json!({
+        "total_count": 2,
+        "workflow_runs": [
+            {
+                "id": 111,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "event": "push",
+                "head_branch": "main",
+                "html_url": "https://github.com/test-owner/test-repo/actions/runs/111",
+                "created_at": "2024-06-20T10:00:00Z"
+            },
+            {
+                "id": 112,
+                "name": "Lint",
+                "status": "in_progress",
+                "conclusion": null,
+                "event": "pull_request",
+                "head_branch": "feature",
+                "html_url": "https://github.com/test-owner/test-repo/actions/runs/112",
+                "created_at": "2024-06-20T11:00:00Z"
+            }
+        ]
+    })
 }
 
 // =============================================================================
@@ -547,6 +575,117 @@ mod github_tests {
         let cicd_info = cicd.unwrap();
         assert_eq!(cicd_info.provider, "GitHub Actions");
         assert_eq!(cicd_info.config_path, Some(".github/workflows".to_string()));
+    }
+
+    #[tokio::test]
+    async fn list_workflow_runs_success() {
+        let (server, provider) = setup_github_mock().await;
+
+        // The `.and(query_param(...))` matcher fails the request unless
+        // `per_page=5` is on the wire, so the `.expect(1)` (verified on drop)
+        // proves the limit is threaded into the request as `per_page`.
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/actions/runs"))
+            .and(query_param("per_page", "5"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(github_workflow_runs_fixture()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let runs = provider
+            .list_workflow_runs("test-owner", "test-repo", 5)
+            .await
+            .unwrap();
+
+        assert_eq!(runs.len(), 2);
+
+        // Completed run maps every field through `map_workflow_run`.
+        assert_eq!(runs[0].provider, "GitHub Actions");
+        assert_eq!(runs[0].name, "CI");
+        assert_eq!(runs[0].status, "completed");
+        assert_eq!(runs[0].conclusion, Some("success".to_string()));
+        assert_eq!(runs[0].head_branch, Some("main".to_string()));
+        assert_eq!(runs[0].event, Some("push".to_string()));
+        assert_eq!(runs[0].started_at, Some("2024-06-20T10:00:00Z".to_string()));
+        assert_eq!(
+            runs[0].html_url,
+            Some("https://github.com/test-owner/test-repo/actions/runs/111".to_string())
+        );
+
+        // In-flight run carries its status with no conclusion.
+        assert_eq!(runs[1].name, "Lint");
+        assert_eq!(runs[1].status, "in_progress");
+        assert_eq!(runs[1].conclusion, None);
+        assert_eq!(runs[1].event, Some("pull_request".to_string()));
+    }
+
+    #[tokio::test]
+    async fn list_workflow_runs_caps_results_at_limit() {
+        let (server, provider) = setup_github_mock().await;
+
+        // GitHub honors `per_page`, but a server that over-delivers (or ignores
+        // the page size) must not blow past `limit`. Respond with five runs to a
+        // `limit=2` request and assert `take(limit)` clamps the mapped vec to 2.
+        let over_limit = serde_json::json!({
+            "total_count": 5,
+            "workflow_runs": (0..5).map(|i| serde_json::json!({
+                "id": 200 + i,
+                "name": "CI",
+                "status": "completed",
+                "conclusion": "success",
+                "event": "push",
+                "head_branch": "main",
+                "html_url": format!("https://github.com/test-owner/test-repo/actions/runs/{}", 200 + i),
+                "created_at": "2024-06-20T10:00:00Z"
+            })).collect::<Vec<_>>()
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/actions/runs"))
+            .and(query_param("per_page", "2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(over_limit))
+            .mount(&server)
+            .await;
+
+        let runs = provider
+            .list_workflow_runs("test-owner", "test-repo", 2)
+            .await
+            .unwrap();
+
+        assert_eq!(runs.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn fetch_report_via_enum_includes_workflow_runs() {
+        // Regression: the production CLI dispatches through `GitRemote`, not
+        // `GitHubRemote` directly. If the enum fails to forward
+        // `list_workflow_runs`, `fetch_report` silently uses the trait default
+        // (empty vec) and falls back to presence detection — so the run-shaped
+        // CI/CD table never renders. This asserts the enum threads runs through.
+        let (server, provider) = setup_github_mock().await;
+        let remote = GitRemote::GitHub(provider);
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(github_repo_fixture()))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/actions/runs"))
+            .and(query_param("per_page", "5"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(github_workflow_runs_fixture()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let report = remote.fetch_report("test-owner", "test-repo").await.unwrap();
+
+        // Run-shaped entries (started_at populated) rather than presence detection.
+        assert_eq!(report.ci_cd.len(), 2);
+        assert_eq!(report.ci_cd[0].name, "CI");
+        assert_eq!(report.ci_cd[0].status, "completed");
+        assert!(report.ci_cd[0].started_at.is_some());
     }
 
     #[tokio::test]
@@ -2128,6 +2267,30 @@ mod unauth_fallback_tests {
                 other
             ),
         }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn github_list_workflow_runs_falls_back_to_unauthenticated_when_token_missing() {
+        remove_github_env_vars();
+        let (server, provider) = setup_github_mock_no_creds().await;
+
+        // With no credentials, the authenticated attempt short-circuits to
+        // MissingCredential; the provider must retry anonymously and surface
+        // the successful result rather than erroring.
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/actions/runs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(github_workflow_runs_fixture()))
+            .mount(&server)
+            .await;
+
+        let runs = provider
+            .list_workflow_runs("test-owner", "test-repo", 5)
+            .await
+            .expect("anonymous fallback should succeed when remote returns 200");
+
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].name, "CI");
     }
 
     // -----------------------------------------------------------------------

@@ -15,6 +15,11 @@ pub(crate) struct ShellBlockRegion {
     pub options: ErrorHandling,
     /// Optional timeout override for all commands in this block.
     pub timeout_override: Option<Duration>,
+    /// Exact leading whitespace of the `::shell-block` opener line, applied as
+    /// the indent prefix to the rendered block output so generated lines stay
+    /// nested under the container the directive appeared in. Empty for a
+    /// column-1 opener.
+    pub indent: String,
 }
 
 /// A single logical command within a shell block.

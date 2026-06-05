@@ -1,7 +1,6 @@
 use std::io::{IsTerminal, Write};
 use std::process::Child;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -444,15 +443,64 @@ fn kill_process_group(child: &mut Child) {
 #[cfg(not(unix))]
 fn kill_process_group(_child: &mut Child) {}
 
+/// Cooperative cancellation with an interruptible sleep for the wrap
+/// ticker threads.
+///
+/// A bare `AtomicBool` polled between fixed `thread::sleep` calls leaves
+/// teardown waiting out the in-flight sleep — up to ~1 s per ticker, paid
+/// on every non-interactive run at process exit. Backing the flag with a
+/// condvar lets [`TickerCancel::cancel`] wake a sleeping ticker
+/// immediately, so [`stop_timing_ticker`]'s `join()` returns at once.
+#[derive(Clone)]
+pub(crate) struct TickerCancel {
+    inner: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl TickerCancel {
+    pub(crate) fn new() -> Self {
+        Self {
+            inner: Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new())),
+        }
+    }
+
+    /// Request cancellation and wake any thread parked in [`Self::sleep`].
+    pub(crate) fn cancel(&self) {
+        let (lock, cvar) = &*self.inner;
+        *lock.lock().unwrap() = true;
+        cvar.notify_all();
+    }
+
+    /// `true` once [`Self::cancel`] has been called.
+    pub(crate) fn is_cancelled(&self) -> bool {
+        *self.inner.0.lock().unwrap()
+    }
+
+    /// Sleep up to `dur`, returning the instant `cancel` is called.
+    ///
+    /// ## Returns
+    ///
+    /// `true` if cancellation was observed (so the caller should stop), or
+    /// `false` if the full `dur` elapsed without cancellation.
+    pub(crate) fn sleep(&self, dur: Duration) -> bool {
+        let (lock, cvar) = &*self.inner;
+        let guard = lock.lock().unwrap();
+        if *guard {
+            return true;
+        }
+        let (guard, _timed_out) = cvar.wait_timeout(guard, dur).unwrap();
+        *guard
+    }
+}
+
 /// Signal a timing ticker thread to stop and join it.
 ///
 /// Shared by the flush-if-idle ticker and the prompt-timing monitor —
-/// both return the same `(done_flag, handle)` pair and need identical
+/// both return the same `(cancel, handle)` pair and need identical
 /// teardown. `None` is accepted so callers can pass through optional
 /// handles without an extra match.
-fn stop_timing_ticker(ticker: Option<(Arc<AtomicBool>, thread::JoinHandle<()>)>) {
-    if let Some((done, handle)) = ticker {
-        done.store(true, Ordering::Relaxed);
+fn stop_timing_ticker(ticker: Option<(TickerCancel, thread::JoinHandle<()>)>) {
+    if let Some((cancel, handle)) = ticker {
+        cancel.cancel();
         let _ = handle.join();
     }
 }

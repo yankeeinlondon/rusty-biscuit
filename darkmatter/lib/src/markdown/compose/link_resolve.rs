@@ -123,6 +123,11 @@ fn resolve_absolute(
     base_dir: Option<&Path>,
     options: &ComposeOptions,
 ) -> Option<std::path::PathBuf> {
+    if raw.starts_with("http://") || raw.starts_with("https://") {
+        trace!("resolve_absolute: skipping HTTP(S) URL '{}'", raw);
+        return None;
+    }
+
     trace!("resolve_absolute called with raw: '{}'", raw);
     if let Ok(mut file_ref) = biscuit_file::FileReference::new(raw) {
         // Add magic paths from options
@@ -524,5 +529,27 @@ mod tests {
             md.content()
         );
         assert_eq!(report.link_resolves_applied, 4);
+    }
+
+    #[test]
+    fn test_link_resolve_preserves_http_urls() {
+        let content = "[link](https://example.com/page) and ![img](http://cdn.example.com/img.png)";
+        let mut md = Markdown::new(content);
+        let options = ComposeOptions::new();
+        let mut report = ComposeReport::new();
+
+        link_resolve(&mut md, &options, &mut report).unwrap();
+
+        assert!(
+            md.content().contains("https://example.com/page"),
+            "HTTPS URL was modified. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains("http://cdn.example.com/img.png"),
+            "HTTP URL was modified. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_resolves_applied, 0);
     }
 }

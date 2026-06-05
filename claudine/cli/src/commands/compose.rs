@@ -421,15 +421,16 @@ fn run_compose_inner(
             &raw_hints,
             shared.explicit_provider(),
             shared.model.as_deref(),
+            shared.dry_run,
+            &source.resolved_path,
         )?
     };
 
     let mut env_overrides: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
-    super::wrap::composition::install_agent_env_for_composition(
-        &resolved_target,
-        &mut env_overrides,
-    );
+    if let Some(ref target) = resolved_target {
+        super::wrap::composition::install_agent_env_for_composition(target, &mut env_overrides);
+    }
 
     // ── Pre-flight shell approval ────────────────────────────────────
     //
@@ -456,10 +457,14 @@ fn run_compose_inner(
     let shared_approval_cache =
         std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
 
-    let approval_options = super::wrap::build_harness_shell_options_with_cache(
-        &source.resolved_path,
-        prep_context.source_repo_root.as_deref(),
-        Some(std::sync::Arc::clone(&shared_approval_cache)),
+    let approval_options = super::wrap::apply_composition_shell_overrides(
+        super::wrap::build_harness_shell_options_with_cache(
+            &source.resolved_path,
+            prep_context.source_repo_root.as_deref(),
+            Some(std::sync::Arc::clone(&shared_approval_cache)),
+        ),
+        shared.dry_run,
+        shared.yolo,
     );
 
     let preflight = {
@@ -491,10 +496,14 @@ fn run_compose_inner(
         // Engine polls this during rate-limit pause sleeps so Ctrl+C
         // surfaces as `LoopInterrupted` instead of waiting out the timer.
         interrupt_check: Some(crate::output::user_interrupt_observed),
+        pause_reset_margin: claudine::composition::resolve_pause_reset_margin_from_env(),
     };
 
+    // `--dry-run` bypasses the iteration engine entirely: a single
+    // composition + single render (Decision 4). Loop detection is skipped so
+    // a doc with `loop:` frontmatter renders once rather than iterating.
     let file_for_loop = file.clone();
-    if let Some(loop_result) =
+    if !shared.dry_run && let Some(loop_result) =
         run_loop_with_overrides(&source, set_overrides.as_ref(), loop_options, |ctx| {
             let prepared = {
                 let _span = info_span!("compose_prep.prepare_direct").entered();
@@ -520,7 +529,7 @@ fn run_compose_inner(
                 mode: CompositionMode::ChainedDocument,
                 file_ref: file_for_loop.clone(),
                 prepared,
-                resolved_target: Some(resolved_target.clone()),
+                resolved_target: resolved_target.clone(),
                 explicit_provider: shared.explicit_provider(),
                 excluded: shared.excluded(),
                 yolo: shared.yolo,
@@ -627,7 +636,7 @@ fn run_compose_inner(
         mode: CompositionMode::ChainedDocument,
         file_ref: file,
         prepared,
-        resolved_target: Some(resolved_target),
+        resolved_target,
         explicit_provider: shared.explicit_provider(),
         excluded: shared.excluded(),
         yolo: shared.yolo,
@@ -730,7 +739,16 @@ fn run_inline_compose_inner(
             source
         }
         Err(e) => {
-            if let Some(ref t) = term {
+            // Only a genuine reference-resolution failure means the file was
+            // not found. A file that resolved but failed to load/parse (e.g.
+            // malformed frontmatter) must not be reported as "no match" — its
+            // own typed error already names the file and the cause.
+            if let Some(ref t) = term
+                && matches!(
+                    e,
+                    CompositionError::FileNotFound(_) | CompositionError::InvalidReference(_)
+                )
+            {
                 claudine::harness::report::report_source_file(&file, std::path::Path::new(""), t);
             }
             return Err(e.into());
@@ -812,15 +830,16 @@ fn run_inline_compose_inner(
             &raw_hints,
             shared.explicit_provider(),
             shared.model.as_deref(),
+            shared.dry_run,
+            &source.resolved_path,
         )?
     };
 
     let mut env_overrides: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
-    super::wrap::composition::install_agent_env_for_composition(
-        &resolved_target,
-        &mut env_overrides,
-    );
+    if let Some(ref target) = resolved_target {
+        super::wrap::composition::install_agent_env_for_composition(target, &mut env_overrides);
+    }
 
     // ── Pre-flight shell approval ────────────────────────────────────
     //
@@ -843,10 +862,14 @@ fn run_inline_compose_inner(
     let shared_approval_cache =
         std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
 
-    let approval_options = super::wrap::build_harness_shell_options_with_cache(
-        &source.resolved_path,
-        prep_context.source_repo_root.as_deref(),
-        Some(std::sync::Arc::clone(&shared_approval_cache)),
+    let approval_options = super::wrap::apply_composition_shell_overrides(
+        super::wrap::build_harness_shell_options_with_cache(
+            &source.resolved_path,
+            prep_context.source_repo_root.as_deref(),
+            Some(std::sync::Arc::clone(&shared_approval_cache)),
+        ),
+        shared.dry_run,
+        shared.yolo,
     );
 
     let preflight = {
@@ -878,10 +901,17 @@ fn run_inline_compose_inner(
         // Engine polls this during rate-limit pause sleeps so Ctrl+C
         // surfaces as `LoopInterrupted` instead of waiting out the timer.
         interrupt_check: Some(crate::output::user_interrupt_observed),
+        pause_reset_margin: claudine::composition::resolve_pause_reset_margin_from_env(),
     };
 
+    // `--dry-run` bypasses the iteration engine entirely: a single
+    // composition + single render (Decision 4). Loop detection is skipped so
+    // a doc with `loop:` frontmatter renders once rather than iterating. The
+    // single-render path (below) reaches the post-preflight dry-run seam,
+    // which returns before the provider launches — so the source file is
+    // never mutated (Decision 2).
     let file_for_loop = file.clone();
-    if let Some(loop_result) =
+    if !shared.dry_run && let Some(loop_result) =
         run_loop_with_overrides(&source, set_overrides.as_ref(), loop_options, |ctx| {
             let prepared = {
                 let _span = info_span!("compose_prep.prepare_inline").entered();
@@ -907,7 +937,7 @@ fn run_inline_compose_inner(
                 mode: CompositionMode::InlineFrontmatterPrompt,
                 file_ref: file_for_loop.clone(),
                 prepared,
-                resolved_target: Some(resolved_target.clone()),
+                resolved_target: resolved_target.clone(),
                 explicit_provider: shared.explicit_provider(),
                 excluded: shared.excluded(),
                 yolo: shared.yolo,
@@ -1013,7 +1043,7 @@ fn run_inline_compose_inner(
         mode: CompositionMode::InlineFrontmatterPrompt,
         file_ref: file,
         prepared,
-        resolved_target: Some(resolved_target),
+        resolved_target,
         explicit_provider: shared.explicit_provider(),
         excluded: shared.excluded(),
         yolo: shared.yolo,
@@ -1448,10 +1478,10 @@ pub(crate) fn parse_composition_positionals(
 
 /// Return a stable type name for a `serde_json::Value`.
 ///
-/// Used by `inline-compose` to construct
+/// Used by `inline-compose` (and the sequence orchestrator) to construct
 /// [`CompositionError::PromptPropertyWrongType`] when the frontmatter
 /// `prompt` value is present but not a string.
-fn json_type_name(value: &serde_json::Value) -> &'static str {
+pub(crate) fn json_type_name(value: &serde_json::Value) -> &'static str {
     match value {
         serde_json::Value::Null => "null",
         serde_json::Value::Bool(_) => "boolean",

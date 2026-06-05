@@ -68,9 +68,11 @@ pub mod ctx;
 pub mod functions;
 pub mod lexer;
 pub mod parser;
+pub mod resolve_ctx;
 
 pub use ast::{BinaryOp, Expr};
 pub use ctx::CtxLookup;
+pub use resolve_ctx::ResolutionContext;
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseMode, Token,
 };
@@ -179,6 +181,13 @@ pub trait EvaluationLookup {
             Some(Value::Bool(b)) => b.to_string(),
             Some(v) => v.to_string(),
         }
+    }
+
+    /// Returns the document-relative resolution context for filesystem
+    /// functions. Defaults to `None` (filesystem functions then error or treat
+    /// paths as CWD-relative).
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        None
     }
 }
 
@@ -571,6 +580,11 @@ fn evaluate_function<L: EvaluationLookup>(
                 .iter()
                 .map(|arg| evaluate(arg, lookup))
                 .collect::<Result<_, _>>()?;
+            if let Some(ctx) = lookup.resolution_context()
+                && let Some(result) = functions::dispatch_fs(other, &evaluated, &ctx)
+            {
+                return result;
+            }
             functions::dispatch(other, &evaluated)
                 .unwrap_or_else(|| Err(format!("Unknown function: {name}")))
         }

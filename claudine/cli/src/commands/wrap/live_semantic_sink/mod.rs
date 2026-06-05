@@ -658,11 +658,27 @@ impl SemanticEventSink for LiveSemanticSink {
                 .map(String::from);
         }
 
-        // 3. Update structured summary's tool-name rollup.
-        if let SemanticEvent::ToolCall { name: Some(n), .. } = &event
-            && let Ok(mut details) = self.summary_details.lock()
-        {
-            details.record_tool_name(n);
+        // 3. Update structured summary's tool-name rollup and the
+        //    final-response accumulator. The accumulator captures only the
+        //    output text emitted after the last tool call: a `ToolCall`
+        //    resets it (dropping any narration that preceded the tool), and
+        //    `OutputText` appends to it. `inline-compose` writes this final
+        //    turn — never the full accumulated narration — into the body.
+        match &event {
+            SemanticEvent::ToolCall { name, .. } => {
+                if let Ok(mut details) = self.summary_details.lock() {
+                    if let Some(n) = name {
+                        details.record_tool_name(n);
+                    }
+                    details.reset_final_response();
+                }
+            }
+            SemanticEvent::OutputText { text, .. } => {
+                if let Ok(mut details) = self.summary_details.lock() {
+                    details.push_final_response(text);
+                }
+            }
+            _ => {}
         }
 
         // 4. Update shared watchdog state for subagent tracking.
@@ -1575,6 +1591,55 @@ mod tests {
         });
         let names = details.lock().unwrap().tool_names.clone();
         assert_eq!(names, vec!["bash".to_string()]);
+    }
+
+    #[test]
+    fn final_response_keeps_only_text_after_last_tool_call() {
+        // The final-response accumulator must drop interstitial narration
+        // emitted between tool calls and retain only the output text that
+        // follows the LAST tool call — the agent's closing answer that
+        // `inline-compose` writes into the document body.
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
+        let sink_details = details.clone();
+        let dispatch = Box::new(|_event: AgenticEvent, _meta: DispatchEventMeta| {});
+        let emit = {
+            let lines = lines.clone();
+            Box::new(move |line: &str| lines.lock().unwrap().push(line.to_string()))
+        };
+        let mut sink = LiveSemanticSink::new(
+            Provider::Claude,
+            EnvironmentContext::default(),
+            Path::new("/tmp"),
+            Verbosity::Normal,
+            sink_details,
+            dispatch,
+            emit,
+        );
+
+        let tool_call = |name: &str| SemanticEvent::ToolCall {
+            name: Some(name.to_string()),
+            id: None,
+            input: None,
+            extra: json!({}),
+        };
+        let output = |text: &str| SemanticEvent::OutputText {
+            text: text.to_string(),
+            extra: json!({}),
+        };
+
+        sink.on_semantic_event(output("Let me read the research documents. "));
+        sink.on_semantic_event(tool_call("read_file"));
+        sink.on_semantic_event(output("Now let me write the draft. "));
+        sink.on_semantic_event(tool_call("write_file"));
+        sink.on_semantic_event(output("# Final Body\n"));
+        sink.on_semantic_event(output("This is the closing answer."));
+
+        let final_response = details.lock().unwrap().final_response.clone();
+        assert_eq!(
+            final_response, "# Final Body\nThis is the closing answer.",
+            "only the output text after the last tool call should remain"
+        );
     }
 
     #[test]

@@ -213,6 +213,23 @@ pub(crate) fn run_structured_branch(
     }
 
     let exit = result.exit_code;
-    let response = result.assistant_text.clone();
+    // Inline composition writes the response into the document body, so it
+    // must be the agent's FINAL response only — the output text after the
+    // last tool call — never the running `assistant_text` accumulation,
+    // which includes interstitial narration between tool calls. Providers
+    // that do not stream `OutputText` (e.g. Codex, which recovers its last
+    // message post-hoc into `assistant_text`) yield an empty final-response
+    // accumulator, so fall back to `assistant_text` to preserve their
+    // behavior. Compose mode keeps using `assistant_text` verbatim.
+    let response = if is_inline {
+        let final_response = result.details.final_response.trim();
+        if final_response.is_empty() {
+            result.assistant_text.clone()
+        } else {
+            result.details.final_response.clone()
+        }
+    } else {
+        result.assistant_text.clone()
+    };
     Ok((exit, response, Some(result)))
 }

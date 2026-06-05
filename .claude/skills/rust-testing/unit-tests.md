@@ -195,7 +195,7 @@ For work that crosses process boundaries, emit a comparable wall-clock timestamp
 (e.g. epoch seconds) from each process and compare those instead of `Instant`.
 
 Note: this strategy detects *concurrency*, not *speed*. Absolute performance
-assertions (`assert!(elapsed < 1ms)`) belong in [benchmarks](./benchmarking.md),
+assertions (`assert!(elapsed < 1ms)`) belong in [benchmarks](./criterion.md),
 not unit tests — they fail unpredictably on loaded CI runners.
 
 ## Ignoring Tests

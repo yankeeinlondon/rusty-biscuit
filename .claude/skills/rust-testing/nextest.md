@@ -250,4 +250,4 @@ cargo nextest run && cargo test --doc
 
 - [Unit Tests](./unit-tests.md) - Writing tests
 - [Integration Tests](./integration-tests.md) - Testing public API
-- [Benchmarking](./benchmarking.md) - Performance testing
+- [Benchmarking](./criterion.md) - Performance testing

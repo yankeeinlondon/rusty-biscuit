@@ -59,7 +59,7 @@ commit yolo="true" agent="opencode" model="":
     else
         if [[ "{{ agent }}" == "opencode" ]]; then
             if [[ -z "{{ model }}" ]]; then
-                model="--model minimax/MiniMax-M2.7-highspeed"
+                model="--model minimax/MiniMax-M3"
             fi
         fi
     fi
@@ -94,7 +94,7 @@ _lint pkg:
     echo
 
     exit_code=0
-    cargo clippy -p {{ pkg }} -- -D warnings || exit_code=$?
+    cargo clippy -p {{ pkg }} --all-targets -- -D warnings || exit_code=$?
 
     duration=$SECONDS
     commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")

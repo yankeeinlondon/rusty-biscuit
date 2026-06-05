@@ -10,8 +10,12 @@
 
 use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, Utc};
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 use super::json_number;
+use super::resolve_ctx::{ResolutionContext, is_remote_url, normalize_path_arg};
+use crate::markdown::Markdown;
+use crate::markdown::schemas::DarkmatterSchemas;
 
 /// Tests whether the value is "empty" per the spec: `null`, empty string,
 /// empty array, or empty object. Numbers, booleans, and non-empty containers
@@ -352,6 +356,70 @@ fn parse_iso_datetime_to_date(s: &str, assume_utc: bool) -> Option<NaiveDate> {
         .map(|naive| naive.date())
 }
 
+/// English ordinal suffix for a day-of-month (1..=31). 11/12/13 are "th".
+fn ordinal_suffix(day: u32) -> &'static str {
+    match (day % 100, day % 10) {
+        (11..=13, _) => "th",
+        (_, 1) => "st",
+        (_, 2) => "nd",
+        (_, 3) => "rd",
+        _ => "th",
+    }
+}
+
+/// Joins non-empty parts with a single space (used for the optional year).
+fn join_nonempty(parts: &[String]) -> String {
+    parts
+        .iter()
+        .filter(|p| !p.is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Reformats an ISO date/datetime string into a named human format.
+///
+/// Supported formats (canonical name plus aliases): `"MMMM Do"`/`short`,
+/// `"MMMM Do [YYYY]"`/`short-optional`, `"MMMM Do YYYY"`, `"D MMMM [YYYY]"`,
+/// `"D MMMM YYYY"`, and `"ddd, MMMM Do, YYYY"`/`long`. The `[YYYY]` token
+/// includes the year only when it differs from the current year.
+pub fn date_fn(args: &[Value]) -> Result<Value, String> {
+    require_args("date", args, 2)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let iso = require_string("date", &args[0])?;
+    let fmt = require_string("date", &args[1])?;
+    let parsed = parse_date_or_datetime(iso, false)
+        .ok_or_else(|| format!("date() invalid ISO date or datetime: {iso:?}"))?;
+
+    let month = parsed.format("%B").to_string(); // "July"
+    let dow = parsed.format("%a").to_string(); // "Mon"
+    let day = parsed.day();
+    let day_ord = format!("{day}{}", ordinal_suffix(day));
+    let year = parsed.year();
+    let current_year = Local::now().year();
+    // Year token honoring the `[YYYY]` optional-year extension.
+    let opt_year = if year == current_year {
+        String::new()
+    } else {
+        year.to_string()
+    };
+
+    let out = match fmt {
+        "MMMM Do" | "short" => format!("{month} {day_ord}"),
+        "MMMM Do [YYYY]" | "short-optional" => {
+            join_nonempty(&[format!("{month} {day_ord}"), opt_year])
+        }
+        "MMMM Do YYYY" => format!("{month} {day_ord} {year}"),
+        "D MMMM [YYYY]" => join_nonempty(&[format!("{day} {month}"), opt_year]),
+        "D MMMM YYYY" => format!("{day} {month} {year}"),
+        "ddd, MMMM Do, YYYY" | "long" => format!("{dow}, {month} {day_ord}, {year}"),
+        other => return Err(format!("date() unknown format: {other:?}")),
+    };
+    Ok(Value::String(out))
+}
+
 /// `is_date(x)` — strict `YYYY-MM-DD` validator. Strings only.
 pub fn is_date(args: &[Value]) -> Result<Value, String> {
     require_args("is_date", args, 1)?;
@@ -503,6 +571,224 @@ pub fn is_this_year_utc(args: &[Value]) -> Result<Value, String> {
     Ok(Value::Bool(is_this_year_with(&args[0], today_utc(), true)))
 }
 
+/// Resolves a filepath argument to an absolute path using FileReference rules
+/// and the document-relative base dir.
+///
+/// ## Returns
+///
+/// - `Ok(Some(path))` when the reference resolves to a path.
+/// - `Ok(None)` when the reference is well-formed but resolves to nothing.
+/// - `Err` when the reference string itself is invalid.
+fn resolve_arg(raw: &str, ctx: &ResolutionContext) -> Result<Option<PathBuf>, String> {
+    let normalized = normalize_path_arg(raw);
+    let mut file_ref = biscuit_file::FileReference::new(&normalized)
+        .map_err(|e| format!("invalid file path {raw:?}: {e}"))?;
+    for (path, position) in &ctx.magic_paths {
+        file_ref = file_ref.add_magic_path(path, *position);
+    }
+    file_ref
+        .resolve_from(&ctx.base_dir)
+        .map_err(|e| format!("invalid file path {raw:?}: {e}"))
+}
+
+/// `absolute(file) -> file | Error::InvalidFilePath`
+pub fn absolute_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("absolute", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let raw = require_string("absolute", &args[0])?;
+    match resolve_arg(raw, ctx)? {
+        Some(p) => Ok(Value::String(p.to_string_lossy().to_string())),
+        None => Err(format!("absolute() invalid file path: {raw:?}")),
+    }
+}
+
+/// `file_exists(file) -> bool` — invalid paths return `false`, never error.
+pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("file_exists", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Bool(false));
+    }
+    let raw = match require_string("file_exists", &args[0]) {
+        Ok(s) => s,
+        Err(_) => return Ok(Value::Bool(false)),
+    };
+    // A remote URL "exists" when it was fetched successfully; a denied,
+    // unregistered, or failed fetch reads as non-existent (never errors).
+    if is_remote_url(raw) {
+        let exists = matches!(ctx.fetch_remote_text(raw), Ok(Some(_)));
+        return Ok(Value::Bool(exists));
+    }
+    let exists = match resolve_arg(raw, ctx) {
+        Ok(Some(p)) => p.exists(),
+        _ => false,
+    };
+    Ok(Value::Bool(exists))
+}
+
+/// Best-effort relative rendering: repo-root relative when inside the repo,
+/// else base_dir-relative, else `~`-aliased home path, else the absolute path.
+fn make_relative(abs: &Path, base_dir: &Path) -> String {
+    if let Some(repo) = crate::markdown::compose::find_git_root_from(base_dir)
+        && let Ok(stripped) = abs.strip_prefix(&repo)
+    {
+        return stripped.to_string_lossy().to_string();
+    }
+    if let Ok(stripped) = abs.strip_prefix(base_dir) {
+        return stripped.to_string_lossy().to_string();
+    }
+    if let Some(home) = dirs::home_dir()
+        && let Ok(stripped) = abs.strip_prefix(&home)
+    {
+        return format!("~/{}", stripped.to_string_lossy());
+    }
+    abs.to_string_lossy().to_string()
+}
+
+/// `relative(file) -> file | Error::InvalidFilePath`
+pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("relative", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let raw = require_string("relative", &args[0])?;
+    let abs = match resolve_arg(raw, ctx)? {
+        Some(p) => p,
+        None => return Err(format!("relative() invalid file path: {raw:?}")),
+    };
+    Ok(Value::String(make_relative(&abs, &ctx.base_dir)))
+}
+
+/// Loads a Markdown file via the resolution context. `Err` if the path is
+/// invalid or unreadable.
+fn load_markdown(raw: &str, ctx: &ResolutionContext, fname: &str) -> Result<Markdown, String> {
+    // HTTP(S) arguments read from the run's remote-fetch cache instead of disk,
+    // mirroring how `::file`/`::code` directives resolve remote targets.
+    if is_remote_url(raw) {
+        return match ctx.fetch_remote_text(raw)? {
+            Some(body) => Markdown::try_from_content(body)
+                .map_err(|e| format!("{fname}() failed to parse {raw:?}: {e}")),
+            None => Err(format!("{fname}() remote reads are not enabled for {raw:?}")),
+        };
+    }
+    let path = resolve_arg(raw, ctx)?.ok_or_else(|| format!("{fname}() invalid file path: {raw:?}"))?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("{fname}() invalid file path {raw:?}: {e}"))?;
+    Markdown::try_from_content(content).map_err(|e| format!("{fname}() failed to parse {raw:?}: {e}"))
+}
+
+/// `frontmatter(file)` → object; `frontmatter(file, prop)` → value | null.
+pub fn frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    if args.is_empty() || args.len() > 2 {
+        return Err("frontmatter() requires 1 or 2 arguments".to_string());
+    }
+    if matches!(args.first(), Some(Value::Null)) {
+        return Ok(Value::Null);
+    }
+    let raw = require_string("frontmatter", &args[0])?;
+    let md = load_markdown(raw, ctx, "frontmatter")?;
+    let map = md.frontmatter().as_map();
+    if args.len() == 1 {
+        let obj: serde_json::Map<String, Value> =
+            map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        return Ok(Value::Object(obj));
+    }
+    let prop = require_string("frontmatter", &args[1])?;
+    Ok(map.get(prop).cloned().unwrap_or(Value::Null))
+}
+
+/// `markdown_body_empty(file) -> bool | Error` — body has only whitespace.
+pub fn markdown_body_empty_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("markdown_body_empty", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let raw = require_string("markdown_body_empty", &args[0])?;
+    let md = load_markdown(raw, ctx, "markdown_body_empty")?;
+    Ok(Value::Bool(md.content().trim().is_empty()))
+}
+
+/// `markdown_title(file) -> string | null | Error` — frontmatter `title`,
+/// else first H1. Multiple H1s: first wins, warning to STDERR.
+pub fn markdown_title_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    require_args("markdown_title", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let raw = require_string("markdown_title", &args[0])?;
+    let md = load_markdown(raw, ctx, "markdown_title")?;
+    if let Some(t) = md.frontmatter().as_map().get("title").and_then(Value::as_str) {
+        return Ok(Value::String(t.to_string()));
+    }
+    let h1s: Vec<String> = md
+        .content()
+        .lines()
+        .filter_map(|l| l.strip_prefix("# ").map(|t| t.trim().to_string()))
+        .collect();
+    match h1s.as_slice() {
+        [] => Ok(Value::Null),
+        [single] => Ok(Value::String(single.clone())),
+        [first, ..] => {
+            eprintln!("markdown_title(): multiple H1 headings in {raw:?}; using the first");
+            Ok(Value::String(first.clone()))
+        }
+    }
+}
+
+/// `validate_schema(file)` / `validate_schema(file, obj)` -> bool | Error.
+/// Returns `true` when the document declares no `$schema`.
+///
+/// ## Notes
+///
+/// The two-argument form is accepted but currently validates the referenced
+/// document itself rather than the supplied object; validating an arbitrary
+/// object against the document's schema requires a dedicated
+/// [`DarkmatterSchemas`] entry point that does not yet exist.
+pub fn validate_schema_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
+    if args.is_empty() || args.len() > 2 {
+        return Err("validate_schema() requires 1 or 2 arguments".to_string());
+    }
+    if matches!(args.first(), Some(Value::Null)) {
+        return Ok(Value::Null);
+    }
+    let raw = require_string("validate_schema", &args[0])?;
+    let md = load_markdown(raw, ctx, "validate_schema")?;
+    // No `$schema` → always valid (per spec).
+    if !md.frontmatter().as_map().contains_key("$schema") {
+        return Ok(Value::Bool(true));
+    }
+    let schemas = DarkmatterSchemas::new();
+    let report = schemas
+        .validate(&md)
+        .map_err(|e| format!("validate_schema() error for {raw:?}: {e}"))?;
+    Ok(Value::Bool(report.valid))
+}
+
+/// Context-aware dispatch for filesystem/document functions.
+///
+/// ## Returns
+///
+/// `Some(result)` for names this dispatcher owns, or `None` for any other
+/// name (the caller then falls through to [`dispatch`]).
+pub fn dispatch_fs(
+    name: &str,
+    args: &[Value],
+    ctx: &ResolutionContext,
+) -> Option<Result<Value, String>> {
+    let result = match name {
+        "absolute" => absolute_fn(args, ctx),
+        "relative" => relative_fn(args, ctx),
+        "file_exists" | "fileexists" => file_exists_fn(args, ctx),
+        "frontmatter" => frontmatter_fn(args, ctx),
+        "markdown_body_empty" | "markdownbodyempty" => markdown_body_empty_fn(args, ctx),
+        "markdown_title" | "markdowntitle" => markdown_title_fn(args, ctx),
+        "validate_schema" | "validateschema" => validate_schema_fn(args, ctx),
+        _ => return None,
+    };
+    Some(result)
+}
+
 /// Dispatches an evaluated function call against the new helper library.
 ///
 /// Returns `Some(result)` when the name matches a helper in this module,
@@ -536,6 +822,8 @@ pub fn dispatch(name: &str, args: &[Value]) -> Option<Result<Value, String>> {
         "camelcase" | "camel_case" => camel_case,
         "pascalcase" | "pascal_case" => pascal_case,
         "titlecase" | "title_case" => title_case,
+        // Date formatting
+        "date" => date_fn,
         // Strict date validators
         "isdate" | "is_date" => is_date,
         "isdateutc" | "is_date_utc" => is_date_utc,
@@ -857,6 +1145,175 @@ mod tests {
         }
     }
 
+    mod fn_date_format {
+        use super::*;
+
+        #[test]
+        fn ordinal_suffix_covers_teens_and_units() {
+            assert_eq!(ordinal_suffix(1), "st");
+            assert_eq!(ordinal_suffix(2), "nd");
+            assert_eq!(ordinal_suffix(3), "rd");
+            assert_eq!(ordinal_suffix(4), "th");
+            assert_eq!(ordinal_suffix(11), "th");
+            assert_eq!(ordinal_suffix(12), "th");
+            assert_eq!(ordinal_suffix(13), "th");
+            assert_eq!(ordinal_suffix(21), "st");
+            assert_eq!(ordinal_suffix(22), "nd");
+            assert_eq!(ordinal_suffix(23), "rd");
+        }
+
+        #[test]
+        fn date_formats_known_patterns() {
+            let d = |iso: &str, fmt: &str| date_fn(&[json!(iso), json!(fmt)]).unwrap();
+            assert_eq!(d("2026-07-12", "MMMM Do"), json!("July 12th"));
+            assert_eq!(d("2026-07-12", "short"), json!("July 12th"));
+            assert_eq!(d("2026-07-12", "MMMM Do YYYY"), json!("July 12th 2026"));
+            assert_eq!(d("2021-07-12", "D MMMM YYYY"), json!("12 July 2021"));
+            assert_eq!(d("2021-07-12", "long"), json!("Mon, July 12th, 2021"));
+            // [YYYY] optional-year extension: omit year when it equals the current year.
+            let current_year = Local::now().format("%Y").to_string();
+            let same_year = format!("{current_year}-07-12");
+            assert_eq!(
+                date_fn(&[json!(same_year), json!("MMMM Do [YYYY]")]).unwrap(),
+                json!("July 12th")
+            );
+            assert_eq!(
+                date_fn(&[json!("1999-07-12"), json!("MMMM Do [YYYY]")]).unwrap(),
+                json!("July 12th 1999")
+            );
+        }
+
+        #[test]
+        fn date_errors_on_invalid_iso() {
+            let err = date_fn(&[json!("not-a-date"), json!("short")]);
+            assert!(err.is_err(), "expected error for invalid ISO input");
+        }
+
+        #[test]
+        fn date_errors_on_unknown_format() {
+            let err = date_fn(&[json!("2026-07-12"), json!("nope")]);
+            assert!(err.is_err(), "expected error for unknown format token");
+        }
+
+        #[test]
+        fn date_null_propagates() {
+            assert_eq!(date_fn(&[json!(null), json!("short")]).unwrap(), json!(null));
+        }
+
+        #[test]
+        fn date_dispatches_by_name() {
+            let result = dispatch("date", &[json!("2021-07-12"), json!("long")]);
+            assert_eq!(result.unwrap().unwrap(), json!("Mon, July 12th, 2021"));
+        }
+    }
+
+    mod fn_filesystem {
+        use super::*;
+
+        #[test]
+        fn dispatch_fs_returns_none_for_non_fs_names() {
+            let ctx = ResolutionContext::new(std::path::PathBuf::from("."));
+            assert!(dispatch_fs("lower", &[json!("x")], &ctx).is_none());
+        }
+
+        #[test]
+        fn absolute_and_file_exists_resolve_relative_to_base_dir() {
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::write(dir.path().join("a.md"), "# A\n").unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+
+            let abs = absolute_fn(&[json!("a.md")], &ctx).unwrap();
+            assert_eq!(
+                abs,
+                json!(dir.path().join("a.md").to_string_lossy().to_string())
+            );
+
+            assert_eq!(file_exists_fn(&[json!("a.md")], &ctx).unwrap(), json!(true));
+            assert_eq!(
+                file_exists_fn(&[json!("missing.md")], &ctx).unwrap(),
+                json!(false)
+            );
+            // Invalid path string → file_exists is false (never errors).
+            assert_eq!(
+                file_exists_fn(&[json!("\0bad")], &ctx).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn relative_returns_repo_or_cwd_relative_path() {
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+            std::fs::write(dir.path().join("sub/a.md"), "# A\n").unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let rel = relative_fn(&[json!("sub/a.md")], &ctx).unwrap();
+            assert_eq!(rel, json!("sub/a.md"));
+        }
+
+        #[test]
+        fn frontmatter_reads_whole_map_and_single_prop() {
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::write(
+                dir.path().join("d.md"),
+                "---\ntitle: Hi\nstatus: draft\n---\nBody\n",
+            )
+            .unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+
+            let whole = frontmatter_fn(&[json!("d.md")], &ctx).unwrap();
+            assert_eq!(whole["title"], json!("Hi"));
+
+            let one = frontmatter_fn(&[json!("d.md"), json!("status")], &ctx).unwrap();
+            assert_eq!(one, json!("draft"));
+
+            // Missing prop → null (not error).
+            let missing = frontmatter_fn(&[json!("d.md"), json!("nope")], &ctx).unwrap();
+            assert_eq!(missing, Value::Null);
+
+            // Invalid filepath → error.
+            assert!(frontmatter_fn(&[json!("does-not-exist.md")], &ctx).is_err());
+        }
+
+        #[test]
+        fn markdown_body_empty_and_title() {
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::write(dir.path().join("empty.md"), "---\ntitle: T\n---\n\n   \n").unwrap();
+            std::fs::write(dir.path().join("full.md"), "---\n---\n# Heading\n\nWords\n").unwrap();
+            std::fs::write(dir.path().join("fm_title.md"), "---\ntitle: FM\n---\n# H1\n").unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+
+            assert_eq!(
+                markdown_body_empty_fn(&[json!("empty.md")], &ctx).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                markdown_body_empty_fn(&[json!("full.md")], &ctx).unwrap(),
+                json!(false)
+            );
+            // Frontmatter title wins over H1.
+            assert_eq!(
+                markdown_title_fn(&[json!("fm_title.md")], &ctx).unwrap(),
+                json!("FM")
+            );
+            // No frontmatter title → first H1.
+            assert_eq!(
+                markdown_title_fn(&[json!("full.md")], &ctx).unwrap(),
+                json!("Heading")
+            );
+        }
+
+        #[test]
+        fn validate_schema_true_when_no_schema_property() {
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::write(dir.path().join("plain.md"), "---\ntitle: T\n---\nBody\n").unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            assert_eq!(
+                validate_schema_fn(&[json!("plain.md")], &ctx).unwrap(),
+                json!(true)
+            );
+        }
+    }
+
     mod fn_isdate_strict {
         use super::*;
 
@@ -985,5 +1442,71 @@ mod tests {
                 true
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod fn_remote_tests {
+    use super::*;
+    use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
+    use biscuit_file::file_reference::fetch::FetchPolicy;
+    use serde_json::json;
+    use std::time::Duration;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Builds a context whose remote-fetch runtime has already fetched `url`.
+    async fn ready_ctx(url: &str, allow: bool) -> ResolutionContext {
+        let policy = if allow {
+            FetchPolicy::deny_all().allow_host("127.0.0.1")
+        } else {
+            FetchPolicy::deny_all()
+        };
+        let rt = RemoteFetchRuntime::with_policy(policy);
+        rt.register_and_fetch(url::Url::parse(url).unwrap());
+        // Allow the eager fetch task to settle before reading point-of-use.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        ResolutionContext {
+            remote_fetch: Some(rt),
+            ..ResolutionContext::new(std::path::PathBuf::from("."))
+        }
+    }
+
+    #[tokio::test]
+    async fn frontmatter_title_and_exists_read_remote_url() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/doc.md"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "---\ntitle: Remote Title\nstatus: draft\n---\n# H1\n\nBody\n",
+            ))
+            .mount(&server)
+            .await;
+        let url = format!("{}/doc.md", server.uri());
+        let ctx = ready_ctx(&url, true).await;
+
+        assert_eq!(
+            frontmatter_fn(&[json!(url.clone()), json!("status")], &ctx).unwrap(),
+            json!("draft")
+        );
+        assert_eq!(
+            markdown_title_fn(&[json!(url.clone())], &ctx).unwrap(),
+            json!("Remote Title")
+        );
+        assert_eq!(
+            markdown_body_empty_fn(&[json!(url.clone())], &ctx).unwrap(),
+            json!(false)
+        );
+        assert_eq!(file_exists_fn(&[json!(url)], &ctx).unwrap(), json!(true));
+    }
+
+    #[tokio::test]
+    async fn file_exists_false_for_policy_denied_remote() {
+        let server = MockServer::start().await;
+        // No mock mounted and a deny-all policy: the fetch never reaches the
+        // network, so the URL is treated as non-existent.
+        let url = format!("{}/blocked.md", server.uri());
+        let ctx = ready_ctx(&url, false).await;
+        assert_eq!(file_exists_fn(&[json!(url)], &ctx).unwrap(), json!(false));
     }
 }
