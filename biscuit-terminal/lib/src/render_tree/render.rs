@@ -33,9 +33,9 @@
 use renderable::color::TerminalCodeContext;
 use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
-    ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HintNamespace, NodeKind,
-    ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
-    TerminalMermaidMode,
+    ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HintNamespace,
+    InheritedStyle, NodeKind, ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered,
+    Severity, TableColumnHints, TerminalMermaidMode,
 };
 use renderable::tree::{ValidationError, ValidationMode, validate};
 
@@ -99,7 +99,7 @@ pub fn render_terminal_node(
     let mut writer = Writer {
         opts,
         diagnostics: Vec::new(),
-        effective: Style::default(),
+        inherited: InheritedStyle::root(),
     };
 
     // Warning-severity validation findings escalate to an error under Strict
@@ -153,12 +153,13 @@ struct Writer<'a> {
     opts: &'a TerminalRenderOptions,
     diagnostics: Vec<Diagnostic>,
     /// The text appearance (`color`, `emphasis`) inherited from styled
-    /// ancestor blocks. Per Spec B D6 only these fields inherit; the
-    /// box-painting fields (`background`, `border`, `fill`) never do and are
-    /// kept cleared here. A styled node folds its own text appearance into
-    /// this before rendering its subtree (see [`Writer::render_styled`]) so
-    /// descendant paragraphs and inline spans see the ancestor color/emphasis.
-    effective: Style,
+    /// ancestor blocks, carried by the shared [`InheritedStyle`] resolver. Per
+    /// Spec B D6 only these fields inherit; the box-painting fields
+    /// (`background`, `border`) never do. A styled node folds its own text
+    /// appearance into this before rendering its subtree (see
+    /// [`Writer::render_styled`]) so descendant paragraphs and inline spans see
+    /// the ancestor color/emphasis.
+    inherited: InheritedStyle,
 }
 
 impl Writer<'_> {
@@ -199,17 +200,13 @@ impl Writer<'_> {
             .saturating_sub(overhead)
             .max(1);
 
-        // Fold this node's text appearance into the inherited `effective`
-        // style for the duration of its subtree, so descendant paragraphs and
-        // inline spans see the ancestor color/emphasis (Spec B D6). Only the
-        // inheriting fields are carried — the box-painting layers are cleared.
-        let prev_effective = std::mem::take(&mut self.effective);
-        let merged = style.inherited_from(&prev_effective);
-        self.effective = Style {
-            color: merged.color,
-            emphasis: merged.emphasis,
-            ..Style::default()
-        };
+        // Enter this node through the shared resolver: its text appearance is
+        // threaded into the child context for the duration of its subtree, so
+        // descendant paragraphs and inline spans see the ancestor
+        // color/emphasis (Spec B D6). The resolver carries only the inheriting
+        // fields forward — the box-painting layers are cleared.
+        let (child_ctx, _) = self.inherited.enter(Some(&style));
+        let prev = std::mem::replace(&mut self.inherited, child_ctx);
 
         let content = if overhead > 0 {
             self.render_kind_in_width(node, inner_width)
@@ -217,7 +214,7 @@ impl Writer<'_> {
             self.render_kind(node)
         };
 
-        self.effective = prev_effective;
+        self.inherited = prev;
         let content = content?;
 
         Ok(style::apply_style(
@@ -245,7 +242,7 @@ impl Writer<'_> {
         let mut sub = Writer {
             opts: &narrowed,
             diagnostics: Vec::new(),
-            effective: self.effective.clone(),
+            inherited: self.inherited.clone(),
         };
         let result = sub.render_kind(node);
         self.diagnostics.append(&mut sub.diagnostics);
@@ -290,7 +287,7 @@ impl Writer<'_> {
             let mut sub = Writer {
                 opts: &narrowed,
                 diagnostics: Vec::new(),
-                effective: self.effective.clone(),
+                inherited: self.inherited.clone(),
             };
             let rendered = sub.render_styled(node);
             self.diagnostics.append(&mut sub.diagnostics);
@@ -343,7 +340,8 @@ impl Writer<'_> {
                 }
             }
             NodeKind::Heading { depth, children } => {
-                let effective = heading_effective(depth.get()).inherited_from(&self.effective);
+                let effective =
+                    heading_effective(depth.get()).inherited_from(self.inherited.effective());
                 let markup = self.render_inline(children, &effective)?;
                 Ok(self.render_heading_line(depth.get(), &markup))
             }
@@ -352,7 +350,8 @@ impl Writer<'_> {
                 heading,
                 children,
             } => {
-                let effective = heading_effective(depth.get()).inherited_from(&self.effective);
+                let effective =
+                    heading_effective(depth.get()).inherited_from(self.inherited.effective());
                 let markup = self.render_inline(heading, &effective)?;
                 let heading_output = self.render_heading_line(depth.get(), &markup);
                 let body = self.render_blocks(children)?;
@@ -367,7 +366,7 @@ impl Writer<'_> {
                 // paragraph's own appearance (via `render_styled`) and any
                 // styled ancestor block, so a nested styled span restores the
                 // ancestor color/emphasis after it.
-                let effective = self.effective.clone();
+                let effective = self.inherited.effective().clone();
                 let markup = self.render_inline(children, &effective)?;
                 if let Some(hints) = node.attrs.progress_hints() {
                     // A progress bar is a single fixed-width glyph run; wrapping
@@ -545,7 +544,7 @@ impl Writer<'_> {
                 // call.
                 NodeKind::Text { value } => output.push_str(value),
                 kind if is_inline_kind(kind) => {
-                    let effective = self.effective.clone();
+                    let effective = self.inherited.effective().clone();
                     let markup = self.render_inline_node(child, &effective)?;
                     output.push_str(&markup);
                 }
@@ -663,7 +662,7 @@ impl Writer<'_> {
         let mut sub = Writer {
             opts: &narrowed,
             diagnostics: Vec::new(),
-            effective: self.effective.clone(),
+            inherited: self.inherited.clone(),
         };
         let result = sub.render_blocks(children);
         self.diagnostics.append(&mut sub.diagnostics);
@@ -1119,8 +1118,11 @@ impl Writer<'_> {
                     let item_style = item_child.attrs.style().filter(|s| !s.is_empty());
                     let render_effective = item_style
                         .as_ref()
-                        .map(|s| s.inherited_from(&self.effective));
-                    let effective = render_effective.as_ref().unwrap_or(&self.effective).clone();
+                        .map(|s| s.inherited_from(self.inherited.effective()));
+                    let effective = render_effective
+                        .as_ref()
+                        .unwrap_or_else(|| self.inherited.effective())
+                        .clone();
                     let markup = match &item_child.kind {
                         NodeKind::Paragraph { children } => {
                             self.render_inline(children, &effective)?
@@ -3285,7 +3287,7 @@ mod render_tree_tests {
     }
 
     #[test]
-    fn render_tree_layout_on_inline_node_warn_strictness() {
+    fn render_tree_layout_on_inline_node_is_a_validation_error() {
         use renderable::layout::Layout;
 
         let term = Terminal::new_optimistic(80);
@@ -3294,34 +3296,21 @@ mod render_tree_tests {
         text.attrs.set_layout(&Layout::default());
         let tree = RenderNode::root(vec![RenderNode::paragraph(vec![text])]);
 
-        let out = render_terminal_node(
-            &tree,
-            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
-        )
-        .expect("warn should succeed");
-        assert!(
-            out.diagnostics
-                .iter()
-                .any(|d| d.message.contains("block-level")),
-            "warn strictness should produce a diagnostic about block-level"
-        );
-        assert!(strip_escape_codes(&out.output).contains("hello"));
-
-        let out = render_terminal_node(
-            &tree,
-            &TerminalRenderOptions::new(&term, RenderStrictness::Lossy),
-        )
-        .expect("lossy should succeed");
-        assert!(strip_escape_codes(&out.output).contains("hello"));
-
-        let result = render_terminal_node(
-            &tree,
-            &TerminalRenderOptions::new(&term, RenderStrictness::Strict),
-        );
-        assert!(
-            matches!(result, Err(RenderError::InvalidTree { .. })),
-            "strict should escalate inline-layout warning to error"
-        );
+        // Layout on an inline node is an error-severity validation finding, so
+        // the validation gate rejects the tree before strictness is consulted —
+        // every strictness level fails identically.
+        for strictness in [
+            RenderStrictness::Warn,
+            RenderStrictness::Lossy,
+            RenderStrictness::Strict,
+        ] {
+            let result =
+                render_terminal_node(&tree, &TerminalRenderOptions::new(&term, strictness));
+            assert!(
+                matches!(result, Err(RenderError::InvalidTree { .. })),
+                "{strictness:?} should reject inline layout as an error"
+            );
+        }
     }
 
     #[test]
@@ -3595,7 +3584,7 @@ mod render_tree_tests {
         let mut writer = Writer {
             opts: &options,
             diagnostics: Vec::new(),
-            effective: Style::default(),
+            inherited: InheritedStyle::root(),
         };
         let out = writer.render(&cell).expect("render cell");
         assert!(

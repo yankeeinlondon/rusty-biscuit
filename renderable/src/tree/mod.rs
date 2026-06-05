@@ -26,17 +26,19 @@ mod diagnostic;
 mod document;
 mod error;
 pub mod graphics;
+mod inherit;
 mod node;
 pub mod render;
 mod source;
 mod validate;
 
 pub use attrs::{
-    CodeRenderHints, ColumnConditional, ColumnWidthKind, ColumnsHints, HintNamespace,
-    ListMarkerPolicy, ListRenderHints, NodeAttrs, ProgressHints, SequenceJoin, TableCellHints,
-    TableColumnHints, TableTerminalHints, TaskHints, TaskState,
+    CodeRenderHints, ColumnConditional, ColumnWidthKind, ColumnsHints, ComponentHints,
+    HintNamespace, ListMarkerPolicy, ListRenderHints, NodeAttrs, ProgressHints, SequenceJoin,
+    TableCellHints, TableColumnHints, TableHints, TableTerminalHints, TaskHints, TaskState,
 };
 pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
+pub use inherit::InheritedStyle;
 pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
 pub use error::{RenderError, RenderStrictness, Rendered};
 pub use graphics::horizontal_rule_svg;
