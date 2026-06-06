@@ -1,0 +1,154 @@
+//! Pre-cutover reference output for representative `style:` per-component cases.
+//!
+//! These snapshots are the parity *reference* (not a byte contract) the cutover
+//! is diffed against; intended diffs are re-accepted with a note in Phase 6.
+
+use biscuit_terminal::terminal::Terminal;
+use darkmatter::layout::DarkmatterPage;
+use darkmatter::markdown::Markdown;
+use darkmatter::style::{
+    BespokeStyleOverrides, ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides,
+    PageStyleOverrides, apply_bespoke_style, apply_color_style, apply_component_style,
+    apply_hr_style, apply_list_style, apply_page_style, from_frontmatter,
+};
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const TABLE_FIXTURE: &str = "| A | B |\n|---|---|\n| 1 | 2 |\n";
+
+const BLOCK_QUOTE_FIXTURE: &str = "> A quoted paragraph.\n";
+
+const LIST_FIXTURE: &str = "- Item one\n- Item two\n";
+
+const SIMPLE_DOC: &str = "# Hello\n\nSome prose.\n";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Build a Markdown document whose frontmatter carries the given `style:` block.
+fn with_style(style_yaml: &str, content: &str) -> Markdown {
+    let full = format!("---\nstyle:\n{}---\n\n{}", indent(style_yaml, 4), content);
+    Markdown::try_from_content(&full).expect("parse markdown with style frontmatter")
+}
+
+fn indent(text: &str, spaces: usize) -> String {
+    let prefix = " ".repeat(spaces);
+    text.lines()
+        .map(|line| {
+            if line.trim().is_empty() {
+                line.to_string()
+            } else {
+                format!("{}{}", prefix, line)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
+}
+
+/// Apply the full `style:` pipeline (page → component → list → hr → color →
+/// bespoke) with no CLI overrides.
+fn apply_all_styles(page: DarkmatterPage, md: &Markdown) -> DarkmatterPage {
+    let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
+
+    let page = apply_page_style(page, &style, PageStyleOverrides::default())
+        .expect("apply_page_style");
+    let page = apply_component_style(page, &style, ComponentStyleOverrides::default())
+        .expect("apply_component_style");
+    let page = apply_list_style(page, &style, ListStyleOverrides::default())
+        .expect("apply_list_style");
+    let page = apply_hr_style(page, &style, HrStyleOverrides::default())
+        .expect("apply_hr_style");
+    let page = apply_color_style(page, &style).expect("apply_color_style");
+    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        .expect("apply_bespoke_style")
+}
+
+/// Render `md` to terminal through a `DarkmatterPage` at the given width.
+fn render_terminal(md: &Markdown, width: u32) -> String {
+    let term = Terminal::new_optimistic(width);
+    let page = DarkmatterPage::new(&term);
+    let page = apply_all_styles(page, md);
+    page.render(md).expect("terminal render")
+}
+
+/// Render `md` to browser HTML through a `DarkmatterPage`.
+fn render_browser(md: &Markdown) -> String {
+    let term = Terminal::new_optimistic(80);
+    let page = DarkmatterPage::new(&term);
+    let page = apply_all_styles(page, md);
+    page.render_to_browser(md).expect("browser render")
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reference_centered_table() {
+    let md = with_style("table:\n  alignment: center\n", TABLE_FIXTURE);
+    insta::assert_snapshot!("ref_centered_table_terminal", render_terminal(&md, 80));
+    insta::assert_snapshot!("ref_centered_table_browser", render_browser(&md));
+}
+
+#[test]
+fn reference_table_max_width() {
+    let md = with_style("table:\n  max-width: 60ch\n", TABLE_FIXTURE);
+    insta::assert_snapshot!("ref_table_max_width_terminal", render_terminal(&md, 80));
+    insta::assert_snapshot!("ref_table_max_width_browser", render_browser(&md));
+}
+
+#[test]
+fn reference_block_quote_width_and_left() {
+    let md = with_style(
+        "block-quote:\n  max-width: 60ch\n  alignment: left\n",
+        BLOCK_QUOTE_FIXTURE,
+    );
+    insta::assert_snapshot!(
+        "ref_block_quote_width_and_left_terminal",
+        render_terminal(&md, 80)
+    );
+    insta::assert_snapshot!(
+        "ref_block_quote_width_and_left_browser",
+        render_browser(&md)
+    );
+}
+
+#[test]
+fn reference_list_left_margin() {
+    let md = with_style("ul:\n  left-margin: 4ch\n", LIST_FIXTURE);
+    insta::assert_snapshot!("ref_list_left_margin_terminal", render_terminal(&md, 80));
+    insta::assert_snapshot!("ref_list_left_margin_browser", render_browser(&md));
+}
+
+#[test]
+fn reference_page_background_pronounced() {
+    let md = with_style("page:\n  background: pronounced\n", SIMPLE_DOC);
+    insta::assert_snapshot!(
+        "ref_page_background_pronounced_terminal",
+        render_terminal(&md, 80)
+    );
+    insta::assert_snapshot!(
+        "ref_page_background_pronounced_browser",
+        render_browser(&md)
+    );
+}
+
+#[test]
+fn reference_page_margin_and_padding() {
+    let md = with_style(
+        "page:\n  left-margin: 2\n  right-margin: 2\n  top-padding: 1\n  bottom-padding: 1\n",
+        SIMPLE_DOC,
+    );
+    insta::assert_snapshot!(
+        "ref_page_margin_and_padding_terminal",
+        render_terminal(&md, 80)
+    );
+    insta::assert_snapshot!(
+        "ref_page_margin_and_padding_browser",
+        render_browser(&md)
+    );
+}
