@@ -1,9 +1,11 @@
 ---
-status: ready for review
+status: ready for planning and implementation
+reviewed: true
 date: 2026-06-06
 owner: ken
 parent: renderable/features/2026-06-04-css-box-architecture/spec.md
-depends-on: renderable/features/2026-06-06-tree-features/spec.md
+depends-on:
+    - renderable/features/2026-06-06-tree-features/spec.md
 origin: renderable/features/2026-06-04-css-box-architecture/review-1.md
 ---
 
@@ -47,6 +49,34 @@ This spec begins only after `tree-features` has:
 3. Re-baseline reviewed references and run complete verification.
 4. Add final architecture assertions and benchmark baselines.
 5. Update specifications, public docs, skills, and completion metadata.
+
+### Audit and disposition artifacts
+
+Each audit in this spec — the extension-hint inventory (section 1), the
+production-traversal inventory (section 2), and the Biscuit Terminal component
+assessment (section 8) — produces a durable record. Write each as a markdown
+artifact in this closeout feature directory so the acceptance criteria stay
+verifiable after the work lands:
+
+- `extension-hint-inventory.md`;
+- `traversal-inventory.md`;
+- `component-assessment.md`.
+
+Every row carries its disposition and a one-line rationale. These artifacts are
+the evidence for acceptance criteria 1, 3, and 10. A green test run alone does
+not satisfy them.
+
+### "Production path" definition
+
+Several scope boundaries below turn on whether a component is on the
+**production path**. For this spec that means: reachable from the Darkmatter
+document render pipeline (`Markdown -> Document -> target fold`) on the terminal
+or browser target. A component that is only constructed by ad-hoc callers or is
+a terminal-only utility — for example `FileSystem`, which the Darkmatter
+document pipeline never renders — is *not* on the production path and does not
+block the parent cutover even if it implements `TreeRenderable`. Required
+migrations (section 8) apply only to production-path components; everything else
+is an optional, separately specified follow-up.
 
 ### Separate component assessment
 
@@ -151,8 +181,39 @@ Choose this only if it materially simplifies the retained frame without
 compromising viewport-level behavior. Do not require Option B merely for
 conceptual purity.
 
+### Trade-offs and recommendation
+
+**Option A — retain the slim page frame.**
+
+- Pros: smallest change; keeps viewport-level concerns (terminal/page width,
+  outer page margin, full-page background, max-width centering, code-theme
+  contrast) in one assembler that is already correct; no risk to the
+  component-tree folds; the page frame is genuinely a different concern from
+  per-component box layout.
+- Cons: one node-like responsibility (the page) is not a `RenderNode`; readers
+  must understand the page frame as a documented exception to "everything is the
+  tree."
+
+**Option B — page as root box.**
+
+- Pros: conceptual uniformity — page geometry and paint become ordinary typed
+  attrs on a root box; no special-case assembler.
+- Cons: forces viewport-only behavior (terminal page width, max-width centering,
+  full-page background rows, `PageBackground::Pronounced`, browser page-wrapper
+  metadata and stylesheet assembly) through folds that were not designed for
+  page-frame concerns; risks regressions in the area the cutover most needs to
+  keep stable; "conceptual purity" is the only driver.
+
+**Recommendation: Option A.** The page frame is a viewport-level assembler, not
+a component, and Option A already satisfies the parent thesis ("policy is baked
+into node attrs; renderers fold") for everything *inside* the document tree.
+Adopt Option B only if the audit shows the retained frame cannot be reduced to
+the constrained responsibility list above without inspecting component node
+kinds or mutating component content. This is the one closeout decision that
+should be signed off before the parent is marked complete; see
+[Open Questions](#open-questions).
+
 Document the selected boundary in Darkmatter and renderable architecture docs.
-The parent architecture can close with Option A if its constraints are proven.
 
 ## 4. Reference and Behavioral Verification
 
@@ -181,7 +242,9 @@ Run:
 - cutover reference suites;
 - applicable browser computed-style/geometry coverage;
 - applicable real-terminal Level 2/3 box, width, color, and degradation
-  coverage following the repository testing skill.
+  coverage following the repository testing skill;
+- MarkdownPlus and portable Markdown degradation coverage for alpha paint,
+  typed text-layout, and browser attributes.
 
 Do not declare closeout while the dedicated cutover corpus is red.
 
@@ -196,6 +259,9 @@ Add tests that prove structure rather than merely snapshotting output:
 - first-class rendering performs zero extension-bag accesses;
 - browser fragment and streaming output agree for style and attributes;
 - final browser output requires no post-render mutation;
+- MarkdownPlus stays within its dialect policy (alpha CSS and supported
+  attributes only, never a second browser renderer) and portable Markdown drops
+  paint, geometry, and browser-only attributes;
 - `InheritedStyle` is the sole text-appearance inheritance contract.
 
 Where practical, use compile-time ownership and API removal as the strongest
@@ -236,8 +302,12 @@ Update:
 - the CSS Box Architecture parent metadata and acceptance checklist.
 
 Repair stale parent/child links so they point to actual active or completed
-directories. Move completed feature directories only after verification is
-green and links are updated consistently.
+directories. In particular, the parent's `child_specs` frontmatter still lists
+the superseded `2026-06-05-*` IDs and links to directories that no longer exist;
+update it to reference the actual `_completed/2026-06-04-*` sub-specs and add
+`tree-features` and this closeout as the concluding children. Move completed
+feature directories only after verification is green and links are updated
+consistently.
 
 The parent closeout must state which behavior is:
 
@@ -279,8 +349,8 @@ Darkmatter and already have an explicit specialization boundary.
 5. No post-render browser style or attribute mutation remains.
 6. Structural architecture tests cover the real styled Darkmatter entry points.
 7. The structural performance gate passes on the expanded production corpus.
-8. All required Level 1, cutover-reference, browser, and applicable
-   real-terminal verification is green.
+8. All required Level 1, cutover-reference, browser, MarkdownPlus/Markdown
+   degradation, and applicable real-terminal verification is green.
 9. Parent/child metadata, links, docs, examples, and skills describe the final
    architecture accurately.
 10. Every listed bespoke Biscuit Terminal component has a recorded disposition;
@@ -302,12 +372,56 @@ Darkmatter and already have an explicit specialization boundary.
 
 ## Deliverables
 
-- extension-hint inventory and dispositions;
-- production-traversal inventory and dispositions;
+- extension-hint inventory and dispositions (`extension-hint-inventory.md`);
+- production-traversal inventory and dispositions (`traversal-inventory.md`);
 - documented page-frame decision;
 - green verification record;
 - post-cutover benchmark record;
 - updated architecture and user documentation;
-- component assessment with follow-up links where required;
+- component assessment with follow-up links where required
+  (`component-assessment.md`);
 - completed CSS Box Architecture parent specification.
+
+## Open Questions
+
+These are the decisions a reviewer should confirm before closeout is
+implemented. Each has a recommendation; record the resolved outcome in the
+relevant audit artifact.
+
+### Q1 — `DarkmatterPage` page-frame boundary (Option A vs Option B)
+
+Treated in [Page-Frame Decision](#3-page-frame-decision) with a recommendation
+of **Option A**, conditional on the audit proving the retained frame stays
+within its constrained responsibility list. It is surfaced here because it is
+the one choice that gates marking the parent architecture complete.
+
+### Q2 — Disposition of Darkmatter directive metadata (`prompt` and peers)
+
+`tree-features` left `prompt` (and similar Darkmatter directive metadata)
+explicitly undecided: it "either maps to an agreed typed browser/data attribute
+or remains an uninterpreted Darkmatter extension hint." The hint audit
+(section 1) must resolve it, and the form is a genuine design choice.
+
+- **Option A — validated `data-*` attribute (e.g. `data-prompt`).**
+  - Pros: if the shared browser renderer emits it, the spec's own rule
+    *requires* it to be typed renderer input; a validated `data-*` entry is the
+    lowest-cost way to satisfy that with deterministic ordering and escaping.
+  - Cons: bakes a Darkmatter-specific concept into the shared `data-*` surface;
+    other packages see a `prompt` convention they do not use.
+- **Option B — dedicated typed field on `BrowserAttrs`.**
+  - Pros: most explicit; full type safety and validation for a known field.
+  - Cons: adds renderable surface for one package's concept; closest to the
+    "speculative HTML completeness" the dependency spec rejects.
+- **Option C — keep `prompt` as an opaque Darkmatter extension hint.**
+  - Pros: zero renderable surface; correct *iff* no shared renderer reads it.
+  - Cons: invalid if the browser renderer must emit `prompt` into output — the
+    audit rule forbids a shared renderer reading extension data for first-class
+    behavior.
+
+**Recommendation: Option A.** If the browser renderer must emit `prompt`, lower
+it to a validated `data-prompt` entry — this honors "renderer-interpreted values
+are typed input" without inventing package-specific renderable types. Choose
+Option C only if the audit confirms `prompt` is never read by a shared renderer
+and is pure Darkmatter package metadata; in that case it stays an opaque hint
+and the browser renderer must not consult it.
 

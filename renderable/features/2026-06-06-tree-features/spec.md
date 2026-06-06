@@ -1,5 +1,6 @@
 ---
-status: ready for review
+status: ready for planning and implementation
+reviewed: true
 date: 2026-06-06
 owner: ken
 parent: renderable/features/2026-06-04-css-box-architecture/spec.md
@@ -158,11 +159,25 @@ and free of floating-point serialization ambiguity. `0` is transparent and
 `255` is opaque. Construction validates or clamps only at explicit parsing
 boundaries; the stored type must not permit an out-of-range value.
 
+> **Reader note:** `Opacity`'s `Default` must be `OPAQUE` (255), not the
+> derived numeric default of `0`. The `PaintColor.opacity` field is
+> `#[serde(default, skip_serializing_if = "Opacity::is_opaque")]`, so an opaque
+> color elides the field on write and a missing field is filled by
+> `Default::default()` on read. If `Opacity` used the derived `Default` of `0`,
+> every elided (opaque) color would deserialize as fully transparent — a silent,
+> catastrophic "everything invisible" regression. Implement `Default` manually
+> (or with `#[serde(default = "Opacity::opaque")]`) and add a serde round-trip
+> test that an opaque `PaintColor` survives elision as opaque.
+
 Provide:
 
 - `Opacity::TRANSPARENT` and `Opacity::OPAQUE`;
 - `Opacity::from_u8` and a percentage conversion for Darkmatter's `/50`
-  syntax;
+  syntax. The percentage conversion maps `0% -> 0` and `100% -> 255` exactly
+  and rounds intermediate values to the nearest `u8`
+  (`(pct * 255 + 50) / 100`). The percentage round-trip is therefore lossy for
+  most values; this is documented and tested, and the canonical stored form is
+  the `u8`, not the percentage;
 - `From<Color> for PaintColor`, producing an opaque value;
 - `PaintColor::with_opacity`;
 - accessors for the underlying color and normalized CSS alpha.
@@ -201,6 +216,14 @@ discarded.
 The browser and MarkdownPlus lowering should share the color-to-CSS conversion
 instead of maintaining separate RGB-only helpers.
 
+> **Reader note:** the CSS alpha sink already exists. `renderable::stylesheet`
+> provides `CssColor::rgba(r, g, b, alpha)` (`alpha` as `0.0..=1.0`). The shared
+> `PaintColor`-to-CSS helper must build on `CssColor` rather than hand-format an
+> `rgba(...)` string, so escaping, precision, and keyword selection stay in one
+> place. `PaintColor`'s "normalized CSS alpha" accessor is the bridge: it
+> converts the stored `u8` opacity to the `0.0..=1.0` value `CssColor::rgba`
+> expects.
+
 ### 2. Mutable sparse-attribute access
 
 Add direct mutation helpers to `NodeAttrs`:
@@ -229,6 +252,13 @@ tree construction from serializing empty `Style` or `Layout` boxes.
 These methods are convenience over typed fields, not a new attribute layer:
 they must not access `NodeAttrs::data`, serialize values, or allocate lookup
 keys.
+
+The same lazy-allocate-then-retain-sparsity pattern applies to the new typed
+sparse groups introduced in sections 4 and 5 (`text_layout` and `browser`).
+Each of those fields should expose the equivalent `*_mut_or_default` accessor
+and participate in the chosen sparsity-restoration mechanism, so the
+policy-attach path in section 3 can construct every typed group through one
+uniform idiom.
 
 ### 3. Policy-aware Darkmatter tree construction
 
@@ -301,6 +331,31 @@ pub enum TextOverflow {
 }
 ```
 
+#### Node attribute placement
+
+`TextLayoutHints` attaches to a node as a **new typed sparse field on
+`NodeAttrs`**, mirroring the existing `style` / `layout` fields:
+
+```rust
+#[serde(default, skip_serializing_if = "Option::is_none")]
+pub text_layout: Option<Box<TextLayoutHints>>,
+```
+
+with `set_text_layout` / `text_layout` (clone) / `text_layout_ref` (borrowed
+hot path) accessors. It is **not** a `ComponentHints` variant and **not** a
+`NodeAttrs::data` namespace.
+
+> **Reader note:** `ComponentHints` is explicitly "at most one per node, matched
+> to the node's `NodeKind`" (`attrs.rs:704-728`). Width-dependent text intent is
+> orthogonal to the per-kind hint — a list-item node may carry both its list
+> semantics and a text-layout hint — so folding it into `ComponentHints` would
+> force a false mutual exclusion. `NodeAttrs::data` is rejected because the
+> structural performance gate asserts zero `renderable.*` extension-bag accesses
+> for first-class behavior (`attrs.rs:782-815`); a typed sparse field reads with
+> no `data` access and no key allocation, which is exactly what the gate
+> requires. Keeping it a peer of `style` / `layout` also lets it reuse the
+> mutable-access and sparsity-retention idiom from section 2.
+
 The final shape may use narrower per-component structs if one shared type would
 permit invalid combinations. It must cover the existing supported behavior:
 
@@ -340,8 +395,8 @@ example:
 pub struct BrowserAttrs {
     pub link: Option<LinkBrowserAttrs>,
     pub image: Option<ImageBrowserAttrs>,
-    pub data: BTreeMap<DataAttrName, String>,
-    pub aria: BTreeMap<AriaAttrName, String>,
+    pub data_attrs: BTreeMap<DataAttrName, String>,
+    pub aria_attrs: BTreeMap<AriaAttrName, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -357,6 +412,24 @@ pub struct ImageBrowserAttrs {
     pub decoding: Option<ImageDecoding>,
 }
 ```
+
+Like `text_layout`, `BrowserAttrs` attaches as a new typed sparse field on
+`NodeAttrs`:
+
+```rust
+#[serde(default, skip_serializing_if = "Option::is_none")]
+pub browser: Option<Box<BrowserAttrs>>,
+```
+
+with the same accessor and mutable-helper family, and the same prohibition
+against living in `NodeAttrs::data`.
+
+> **Reader note:** the inner `data_attrs` / `aria_attrs` maps are deliberately
+> **not** named `data`. `NodeAttrs::data` is the opaque extension bag the
+> performance gate watches; an inner `BrowserAttrs::data` field would invite
+> confusion between "HTML `data-*` attributes" (first-class, typed, gate-clean)
+> and "the extension bag" (untyped package metadata). The `_attrs` suffix keeps
+> the distinction unambiguous in both code and serialized output.
 
 The final type names and exact fields should cover current supported behavior,
 not speculative HTML completeness. Standard attributes with behavior or safety
@@ -410,7 +483,21 @@ Once the typed features and build path are active, delete:
 - `inject_link_image_attributes`, `apply_attribute_injections`, and associated
   post-render opening-tag mutation;
 - the `*_with_layout` entry-point split where it exists only to inject
-  component policy after tree construction.
+  component policy after tree construction;
+- `ComponentPolicy`'s retention of `StyleColor` color slots for the sole
+  purpose of surviving opacity to the HTML target (`layout/page.rs:35-43`).
+  Those slots lower to `PaintColor` during construction.
+
+> **Reader note:** the retention of darkmatter's `StyleColor` in
+> `ComponentPolicy::color` / `bg_color` (and the page color slots) exists *only*
+> because renderable `Style` could not carry alpha — its own docstring says so.
+> `PaintColor` removes that reason, so this collapse is the concrete proof that
+> the alpha representation is unified. `StyleColor` may persist *upstream* as a
+> `style:` v1 parser/input representation, but it must lower to `PaintColor` at
+> tree-build time and must never be retained on policy or component types as a
+> post-construction opacity carrier. Leaving the `ComponentPolicy` slots as
+> `StyleColor` would preserve exactly the dual representation this feature
+> exists to delete.
 
 Package-local extension hints may remain only for semantics that are genuinely
 package-specific and not part of this spec's first-class presentation model.
@@ -439,14 +526,23 @@ entry points with:
 
 The test must prove that first-class style, layout, semantic attributes, and
 width behavior perform no extension-bag access during construction or
-rendering. Criterion cases should retain trend visibility for the same corpus,
-but timing remains non-gating.
+rendering. Because `text_layout` and `browser` are typed sparse fields rather
+than `data` namespaces, reading them increments neither slot of the
+`(renderable_owned, extension)` counter, so the gate's `renderable_owned == 0`
+assertion holds by construction. To keep the assertion from passing vacuously,
+the expanded corpus must actually populate and fold each typed group (alpha
+paint, component policy, text-layout, and browser attrs); a corpus-coverage
+check should confirm the relevant typed fields are present before the fold runs.
+Criterion cases should retain trend visibility for the same corpus, but timing
+remains non-gating.
 
 ## Testing
 
 ### Renderable
 
-- `PaintColor` serde and opaque-default elision.
+- `PaintColor` serde and opaque-default elision, including that an opaque value
+  omits `opacity` on write and that a missing `opacity` deserializes back to
+  opaque (not transparent).
 - Exact conversion of `0`, representative intermediate values, and `255`.
 - Opaque `Color` construction is ergonomic in the replacement API.
 - the pre-`PaintColor` serialized `Style` shape is not accepted; a test or
@@ -486,6 +582,9 @@ but timing remains non-gating.
 - list-item alignment uses typed hints rather than `darkmatter.li`.
 - production entry points do not use component-policy `LayoutContext` fields,
   opacity hints, sentinel classes, or post-render style/attribute mutation.
+- component policy and component types no longer retain `StyleColor` color
+  slots; `style:` color/bg-color (including opacity) lowers to `PaintColor` at
+  construction.
 - existing `style:` v1 input remains accepted.
 
 ### Reference corpus
@@ -520,6 +619,13 @@ Level 1 suites after re-baselining; the cutover reference suite must be green.
 12. The complete Level 1 suites and cutover reference suite pass.
 13. No deprecated aliases, version-suffixed replacement types, parallel legacy
     fields, or old-tree serde migration code are introduced for this cutover.
+14. Typed width-dependent text intent and browser attributes are stored as
+    typed sparse `NodeAttrs` fields (peers of `style` / `layout`), not as
+    `NodeAttrs::data` namespaces or `ComponentHints` variants, and elide to
+    nothing when absent.
+15. No `StyleColor` (or other non-`PaintColor`) color slot is retained on
+    component policy or component types for the purpose of carrying opacity past
+    tree construction.
 
 ## Sequencing
 
