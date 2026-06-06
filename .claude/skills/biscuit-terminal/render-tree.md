@@ -98,15 +98,22 @@ The terminal tree renderer applies a block node's `renderable::layout::Layout`
 content-box width comes from `layout.width`: `Auto` fills
 `available − margin − padding − border`, `Fixed(tv)` resolves `tv` clamped to
 that cap, and `FitContent` renders once at the cap then re-renders at the
-measured widest line. It narrows the child render width accordingly, prefixes
-each line, block-aligns the component as a unit, and emits top/bottom margins as
-blank rows. The `padding` box is painted by `paint_text` with
-`Style.background`; the margin stays transparent. Drawn borders reserve only
-their glyph cells (one per vertical edge) — there is no implicit interior gap,
-so `Layout.padding` is the single source of inner spacing. `max_width` is
-**not** applied (Browser-only). Migrated components seed their own `Layout` onto
-the projected node, so layout flows through whether a component is rendered via
-the tree or composed bespoke.
+measured widest line. `padding` is resolved into cells **once** against the
+parent available width (so a `%` padding has a single basis) and threaded into
+the paint step; the content renders at exactly the content-box width and
+`padding` + `border` are painted **around** it (a `Fixed(n)` box keeps all `n`
+content columns — the border is not carved out of them). The box is then
+**block-placed within `available − margin`** for every width mode (`margin:auto`
+semantics): a sub-available `Fixed` / `FitContent` / `max_width`-capped box is
+centered/right-offset as a unit, while a box that fills the area centers its
+visible content. Top/bottom margins emit as blank rows. The `padding` box is
+painted by `paint_text` with `Style.background`; the margin stays transparent —
+padding cells are still reserved even with an empty `Style`. Drawn borders
+reserve only their glyph cells (one per vertical edge) — no implicit interior
+gap, so `Layout.padding` is the single source of inner spacing. `max_width` caps
+the content box and the capped box is block-placed (symmetric with the browser).
+Migrated components seed their own `Layout` onto the projected node, so layout
+flows through whether a component is rendered via the tree or composed bespoke.
 
 `LayoutTerminalExt` (`utils::layout`) — `apply_layout` / `apply_block_layout` /
 `available_width` — is the bespoke (non-tree) path's terminal layout
