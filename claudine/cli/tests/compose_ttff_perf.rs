@@ -9,11 +9,17 @@
 //! of `main()` itself. The threshold below is therefore an
 //! intentionally generous **perf gate**: it does not assert the spec's
 //! ideal 50 ms ceiling but it does fail loudly if a regression pushes
-//! the receipt banner past a usable feedback latency for a debug build.
+//! the execution header past a usable feedback latency for a debug build.
 //! The honest measurement of `main()` → first byte stays in
 //! `claudine compose --perf` traces; this test is the safety net
 //! guarding against accidental insertion of expensive work before the
-//! receipt banner.
+//! execution header.
+//!
+//! The receipt banner this test originally guarded was removed: the
+//! execution header (`Claudine ▸ …`) is now the first stderr line, so it
+//! must be resolved (which requires loading frontmatter + resolving the
+//! agent) before it can render. That is why the gate below is looser than
+//! the banner-era 50 ms ideal.
 //!
 //! The test is `#[ignore]`d by default because it requires the binary
 //! to be built and is sensitive to host load. Run explicitly with
@@ -28,12 +34,12 @@ use tempfile::tempdir;
 mod common;
 use common::{augmented_path, write_executable};
 
-/// Documented upper bound for the receipt banner.
+/// Documented upper bound for the execution header (first stderr byte).
 ///
-/// The spec's true target is ≤ 50 ms from `main()` entry; this gate
-/// adds spawn / dynamic-linker / OS scheduling overhead and applies to
-/// debug builds (which dominate local test runs and CI). Tightening
-/// this value as W0/W1 work matures is encouraged.
+/// This gate adds spawn / dynamic-linker / OS scheduling overhead and
+/// applies to debug builds (which dominate local test runs and CI).
+/// The header now requires frontmatter load + agent resolution before it
+/// can render, so it is intentionally generous.
 const TTFF_BUDGET: Duration = Duration::from_millis(1500);
 
 #[cfg(unix)]
@@ -43,7 +49,7 @@ fn compose_emits_first_stderr_byte_within_budget() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
-    // Goose binary that just exits 0 — the receipt banner must arrive
+    // Goose binary that just exits 0 — the execution header must arrive
     // long before the agent itself runs, so the agent body is irrelevant.
     write_executable(
         &path_dir.join("goose"),
@@ -92,11 +98,11 @@ exit 0
         "first stderr byte took {ttff:?}, budget {TTFF_BUDGET:?}.\n\
          If this regression is intentional, raise the budget *with the \
          spec rationale*; otherwise investigate which step now runs \
-         before the receipt banner in `run_compose_inner`.",
+         before the execution header in `run_compose_inner`.",
     );
     let received = String::from_utf8_lossy(&buf[..n]);
     assert!(
-        received.contains("→ Composing") || received.contains("Composing"),
-        "first stderr chunk should be the receipt banner; got: {received:?}",
+        received.contains("Claudine"),
+        "first stderr chunk should be the execution header; got: {received:?}",
     );
 }

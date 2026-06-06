@@ -1,10 +1,12 @@
-//! Level 1 integration tests for the `compose` / `inline-compose` receipt
-//! banner (W1 in `features/2026-05-09-perf/spec.md`).
+//! Level 1 integration tests for the `compose` / `inline-compose`
+//! execution header as the first user-facing signal.
 //!
-//! The banner — `→ Composing <file>…` — is the user's first signal that
-//! the command was accepted, emitted before any prep work runs. These
-//! tests pin its presence/order/suppression behaviour so a future change
-//! that drops it (or moves it after the execution header) fails CI.
+//! The old `→ Composing <file>…` receipt banner was removed: the
+//! execution line (`Claudine ▸ <Agent> … Compose … prompt sourced from
+//! <file>`) is now rendered up front — the moment the agent is resolved,
+//! before the expensive prepare/compose work — so it *is* the immediate
+//! feedback. These tests pin that the banner is gone and the header is the
+//! first line, and that `--silent` / `--quiet` behave as before.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
@@ -13,7 +15,9 @@ use tempfile::tempdir;
 mod common;
 use common::{augmented_path, strip_ansi, write_executable};
 
-const RECEIPT_TOKEN: &str = "→ Composing";
+/// The removed banner token — must never reappear.
+const BANNER_TOKEN: &str = "Composing";
+/// The execution header carries the compose badge.
 const HEADER_TOKEN: &str = "Compose";
 
 fn make_workspace_with_goose() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
@@ -61,7 +65,7 @@ exit 0
 
 #[cfg(unix)]
 #[test]
-fn compose_receipt_banner_appears_before_execution_header() {
+fn compose_execution_header_is_the_first_signal() {
     let (workspace, path_dir, md_file) = make_workspace_with_goose();
 
     let assert = cargo_bin_cmd!("claudine")
@@ -75,27 +79,38 @@ fn compose_receipt_banner_appears_before_execution_header() {
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let plain = strip_ansi(&stderr);
 
-    let receipt_pos = plain
-        .find(RECEIPT_TOKEN)
-        .unwrap_or_else(|| panic!("missing receipt banner; stderr:\n{plain}"));
+    assert!(
+        !plain.contains(BANNER_TOKEN),
+        "the `→ Composing` receipt banner must be gone; stderr:\n{plain}"
+    );
+
     let header_pos = plain
         .find(HEADER_TOKEN)
         .unwrap_or_else(|| panic!("missing execution header; stderr:\n{plain}"));
+    let claudine_pos = plain
+        .find("Claudine")
+        .unwrap_or_else(|| panic!("missing `Claudine` in header; stderr:\n{plain}"));
 
+    // The header is the first user-facing line: the first non-blank stderr
+    // line is the `Claudine ▸ …` execution line.
+    let first_nonblank = plain.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
     assert!(
-        receipt_pos < header_pos,
-        "receipt banner must appear before execution header.\n\
-         receipt_pos={receipt_pos} header_pos={header_pos}\nstderr:\n{plain}"
+        first_nonblank.contains("Claudine"),
+        "execution header must be the first non-blank stderr line; got: {first_nonblank:?}\nstderr:\n{plain}"
+    );
+    assert!(
+        claudine_pos <= header_pos,
+        "`Claudine` should lead the execution line; stderr:\n{plain}"
     );
     assert!(
         plain.contains("prompt.md"),
-        "receipt banner should include the file ref; stderr:\n{plain}"
+        "header should show the source file ref; stderr:\n{plain}"
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn compose_silent_suppresses_receipt_banner_and_header() {
+fn compose_silent_suppresses_the_execution_header() {
     let (workspace, path_dir, md_file) = make_workspace_with_goose();
 
     let assert = cargo_bin_cmd!("claudine")
@@ -110,18 +125,20 @@ fn compose_silent_suppresses_receipt_banner_and_header() {
     let plain = strip_ansi(&stderr);
 
     assert!(
-        !plain.contains(RECEIPT_TOKEN),
-        "--silent must suppress the receipt banner; stderr:\n{plain}"
+        !plain.contains(BANNER_TOKEN),
+        "--silent: no banner; stderr:\n{plain}"
+    );
+    assert!(
+        !plain.contains("Claudine \u{25b8}"),
+        "--silent must suppress the execution header; stderr:\n{plain}"
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn compose_quiet_keeps_receipt_banner() {
-    // Per spec W1, `--quiet` follows the existing execution header's
-    // detail rules; the receipt banner is still emitted so the user has
-    // immediate feedback that the command was accepted. Only `--silent`
-    // suppresses the banner.
+fn compose_quiet_keeps_the_execution_header() {
+    // `--quiet` suppresses env details and the prompt block but keeps the
+    // execution header so the user still gets immediate feedback.
     let (workspace, path_dir, md_file) = make_workspace_with_goose();
 
     let assert = cargo_bin_cmd!("claudine")
@@ -136,14 +153,18 @@ fn compose_quiet_keeps_receipt_banner() {
     let plain = strip_ansi(&stderr);
 
     assert!(
-        plain.contains(RECEIPT_TOKEN),
-        "--quiet must keep the receipt banner; stderr:\n{plain}"
+        !plain.contains(BANNER_TOKEN),
+        "--quiet: no banner; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("Claudine") && plain.contains(HEADER_TOKEN),
+        "--quiet must keep the execution header; stderr:\n{plain}"
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn inline_compose_receipt_banner_appears_before_execution_header() {
+fn inline_compose_execution_header_is_the_first_signal() {
     let (workspace, path_dir, md_file) = make_workspace_with_goose_inline();
 
     let assert = cargo_bin_cmd!("claudine")
@@ -157,23 +178,20 @@ fn inline_compose_receipt_banner_appears_before_execution_header() {
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let plain = strip_ansi(&stderr);
 
-    let receipt_pos = plain
-        .find(RECEIPT_TOKEN)
-        .unwrap_or_else(|| panic!("missing receipt banner; stderr:\n{plain}"));
-    let header_pos = plain
-        .find(HEADER_TOKEN)
-        .unwrap_or_else(|| panic!("missing execution header; stderr:\n{plain}"));
-
     assert!(
-        receipt_pos < header_pos,
-        "inline-compose receipt banner must appear before execution header.\n\
-         stderr:\n{plain}"
+        !plain.contains(BANNER_TOKEN),
+        "inline-compose: the receipt banner must be gone; stderr:\n{plain}"
+    );
+    let first_nonblank = plain.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+    assert!(
+        first_nonblank.contains("Claudine"),
+        "inline-compose execution header must be the first non-blank stderr line; got: {first_nonblank:?}\nstderr:\n{plain}"
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn inline_compose_silent_suppresses_receipt_banner() {
+fn inline_compose_silent_suppresses_the_execution_header() {
     let (workspace, path_dir, md_file) = make_workspace_with_goose_inline();
 
     let assert = cargo_bin_cmd!("claudine")
@@ -193,7 +211,11 @@ fn inline_compose_silent_suppresses_receipt_banner() {
     let plain = strip_ansi(&stderr);
 
     assert!(
-        !plain.contains(RECEIPT_TOKEN),
-        "--silent must suppress the inline-compose receipt banner; stderr:\n{plain}"
+        !plain.contains(BANNER_TOKEN),
+        "--silent: no banner; stderr:\n{plain}"
+    );
+    assert!(
+        !plain.contains("Claudine \u{25b8}"),
+        "--silent must suppress the inline-compose execution header; stderr:\n{plain}"
     );
 }

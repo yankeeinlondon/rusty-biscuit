@@ -763,6 +763,59 @@ pub(crate) fn install_agent_env_for_composition(
     env_overrides.insert("AGENT".to_string(), slug);
 }
 
+/// Render the one-line execution header for a composition run.
+///
+/// Shared by the up-front emit in `compose` / `inline-compose` (which
+/// resolves the agent eagerly so the line appears immediately) and the
+/// in-pipeline emit for callers that did not pre-render it.
+///
+/// Returns `false` without emitting when `provider` has no wrapper
+/// profile, so the caller leaves the header to the executor rather than
+/// silently dropping it.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_execution_header(
+    provider: Provider,
+    yolo: bool,
+    session_interactive: bool,
+    detail_requested: bool,
+    repo: bool,
+    is_inline: bool,
+    sequence: bool,
+    operation: Option<&str>,
+    file_ref: &str,
+    package_context: Option<claudine::composition::PackageContext>,
+    term: &Terminal,
+) -> bool {
+    let Some(profile) = profile::profile_for_provider(provider) else {
+        return false;
+    };
+    let compose_display = if is_inline {
+        crate::output::ComposeDisplay::InlineCompose
+    } else {
+        crate::output::ComposeDisplay::Compose
+    };
+    let header_env_plan = env::EnvPlan {
+        package_context,
+        ..Default::default()
+    };
+    crate::output::log_wrapper_header(
+        profile,
+        yolo,
+        !session_interactive,
+        session_interactive,
+        detail_requested,
+        repo,
+        Some(&compose_display),
+        sequence,
+        operation,
+        None, // no inline prompt text for compose
+        Some(file_ref),
+        &header_env_plan,
+        term,
+    );
+    true
+}
+
 /// Execute a composition request through the wrapper-grade pipeline.
 ///
 /// Handles provider selection, environment setup, harness detection from
@@ -1047,38 +1100,26 @@ pub(crate) fn execute_composition_request_inner(
 
     let effective_non_interactive = !request.session_interactive;
 
-    // -- Early header --------------------------------------------------------
-    // Emit the execution line as early as possible so the user sees feedback
-    // before expensive env/MCP/harness work begins.
+    // -- Header ----------------------------------------------------------
+    // `compose` / `inline-compose` resolve the agent eagerly and render
+    // the execution line up front (before the expensive prepare/compose
+    // work) so the user sees it immediately; `request.header_emitted` is
+    // set in that case and we must not re-emit. The in-pipeline emit below
+    // covers callers that did not pre-render — the dry-run-unresolved
+    // corner (agent only known after resolution here) and sequence steps.
 
-    let compose_display = if is_inline {
-        Some(crate::output::ComposeDisplay::InlineCompose)
-    } else {
-        Some(crate::output::ComposeDisplay::Compose)
-    };
-
-    // Show the original file reference (e.g., "@prompts/commit.md")
-    let compose_source_hint = request.file_ref.clone();
-
-    if !silent {
-        let header_env_plan = env::EnvPlan {
-            package_context: launch_workspace.package_context.clone(),
-            ..Default::default()
-        };
-
-        crate::output::log_wrapper_header(
-            profile,
+    if !silent && !request.header_emitted {
+        emit_execution_header(
+            provider,
             request.yolo,
-            effective_non_interactive,
             request.session_interactive,
             detail_requested,
             request.repo,
-            compose_display.as_ref(),
+            is_inline,
             request.sequence,
             request.operation.as_deref(),
-            None, // no inline prompt text for compose
-            Some(&compose_source_hint),
-            &header_env_plan,
+            &request.file_ref,
+            launch_workspace.package_context.clone(),
             &term,
         );
     }
@@ -1681,6 +1722,26 @@ pub(crate) fn execute_composition_request_inner(
         })?;
     }
 
+    // Emit the preflight-complete indicator for direct compose and
+    // inline-compose runs. This must sit *before* the dry-run seam below:
+    // dry-run returns early, so a completion message placed after it would
+    // never render for dry-run — leaving the "Starting pre-flight checks"
+    // spinner without its matching "complete" line. Sequence runs handle
+    // their own preflight messaging in the orchestrator
+    // (`wrap::sequence::execute_sequence`) and must not re-emit per step.
+    if !request.sequence && !silent && !quiet {
+        let compose_label = if is_inline {
+            "inline composition"
+        } else {
+            "composition"
+        };
+        let status = Status::from_prose(format!(
+            "<b>Preflight:</b> shell commands approved for this {compose_label}"
+        ))
+        .state(StatusState::Info);
+        log::message(&status.render(&term));
+    }
+
     // --dry-run seam: the full composition pipeline (compose, real shell
     // expansion, shell approval, harness pre-checks) has now run. Stop here —
     // before any provider launches — and emit the composed artifacts:
@@ -1717,26 +1778,10 @@ pub(crate) fn execute_composition_request_inner(
         return Ok(outcome);
     }
 
-    // Emit a single preflight-complete indicator for direct compose and
-    // inline-compose runs. Sequence runs handle their own preflight
-    // messaging in the orchestrator (`wrap::sequence::execute_sequence`)
-    // and must not re-emit per step.
-    if !request.sequence && !silent && !quiet {
-        let compose_label = if is_inline {
-            "inline composition"
-        } else {
-            "composition"
-        };
-        let status = Status::from_prose(format!(
-            "<b>Preflight:</b> shell commands approved for this {compose_label}"
-        ))
-        .state(StatusState::Info);
-        log::message(&status.render(&term));
-    }
-
     // -- Preflight output (env details + prompt block) ---------------------
-    // The header was already emitted early (right after profile lookup).
-    // Now emit the env details and prompt block with full env_plan.
+    // The execution header was already emitted (up front by compose /
+    // inline-compose, or above for callers that did not pre-render). Now
+    // emit the env details and prompt block with the full env_plan.
 
     // Detect the environment from the source repo root when available so
     // that git/repo metadata reflects the composition source, not the
