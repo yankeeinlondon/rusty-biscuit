@@ -3,6 +3,8 @@ created: 2026-05-26
 package: darkmatter
 component: schemas / format validators
 severity: usability
+reviewed: true
+status: ready for planning and implementation
 related_code:
   - darkmatter/lib/src/markdown/schemas/format.rs
   - darkmatter/lib/src/markdown/schemas/validate.rs
@@ -13,225 +15,267 @@ related_code:
 
 ## The Problem We Are Solving
 
-When a `compose` (or any darkmatter schema-validated) frontmatter property is
-declared as `file(required)` and the supplied path does not exist on disk,
-the error surfaced to the user is:
+When a `compose` or other Darkmatter schema-validated frontmatter property is
+declared as `file(required)` and the supplied reference does not resolve to an
+existing file, the user receives a generic JSON Schema format error:
 
-```
- MarkdownError: schema validation failed
+```text
+MarkdownError: schema validation failed
 ┃ /Users/ken/.claudine/worktrees/rusty-biscuit/renderable/prompts/implement-plan.md
-┃ invalid plan: "features/2026-05-26-block-extensions/plan.md" is not a "darkmatter-file"
+┃ invalid plan: "features/2026-05-26-block-extensions/plan.md" is not a valid "darkmatter-file" format
 Correct the frontmatter so it satisfies the declared $schema (or baseline schema).
 ```
 
-This wording strongly implies *the file was located but is not a valid
-darkmatter document* (i.e., bad frontmatter, wrong shape, not Markdown). In
-the failing case above the file simply does not exist — the user had a
-typo (`block-extensions` plural; the real directory is `block-extension`
-singular). Debugging followed the implied path: inspect the file's
-frontmatter, check the schema, dig into the validator — none of which is
-the actual problem.
+The message does not distinguish an invalid reference, a resolution failure,
+and a well-formed reference for which no file was found. In the observed case,
+the reference contained a typo (`block-extensions` plural instead of
+`block-extension` singular), but the format-oriented wording led debugging
+toward the target document's contents and schema instead of its path.
 
-The hint line ("Correct the frontmatter so it satisfies the declared
-$schema") reinforces the same wrong direction.
+The format name is also easy to overread. `darkmatter-file` does not parse the
+target as Markdown or validate its frontmatter. It verifies only that the value
+is a valid [`FileReference`][file-reference] and resolves to an existing regular
+file under `FileReference`'s current search semantics.
+
+### Affected Combined Constraint
+
+For `file(match(...))`, a missing file currently fails both validators:
+
+1. `format: darkmatter-file` reports a generic format mismatch.
+2. `x-darkmatter-match` reports that the same reference does not match the
+   configured globs.
+
+The second diagnostic is false precision: glob matching was never reached
+because the file did not resolve. Fixing only the format message would still
+leave users with a misleading second cause.
 
 ## Why the Message Reads This Way
 
-`darkmatter-file` is registered as a [`jsonschema`
-`Format`](https://docs.rs/jsonschema/latest/jsonschema/struct.ValidationOptions.html#method.with_format)
-in [`darkmatter/lib/src/markdown/schemas/format.rs:57-72`][format.rs]. The
-`Format` trait is a `fn(&str) -> bool`, so three structurally different
-failures collapse to a single `false`:
+`darkmatter-file` is registered through `ValidationOptions::with_format` in
+[`format.rs`][format.rs]. A custom JSON Schema format returns only `bool`, so
+the current validator collapses all failures to `false`:
 
 ```rust
 fn validate_file_reference(value: &str) -> bool {
     let Ok(reference) = FileReference::new(value) else {
-        return false;                                 // (1) parse failure
+        return false;
     };
     matches!(reference.resolve(), Ok(Some(path)) if path.exists())
-    //                            ^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^
-    //                            (2) unresolvable (3) does not exist
 }
 ```
 
-`jsonschema` then renders the failure with its default format-mismatch
-template — `"<value>" is not a "<format-name>"` — and
-[`build_problem`][validate.rs] in `validate.rs:236-262` passes that string
-through verbatim as `ValidationProblem::message`. The renderer in
-[`blocks.rs:232-235`][blocks.rs] formats it as `invalid <prop>: <message>`.
+The `jsonschema` crate then creates its standard
+`ValidationErrorKind::Format { format: "darkmatter-file" }` error.
+[`build_problem`][validate.rs] copies `err.to_string()` into
+`ValidationProblem::message`, and [`blocks.rs`][blocks.rs] renders that as
+`invalid <property>: <message>`.
 
-Nothing along this chain knows that the underlying failure was simply
-"file not found at the resolved path."
-
-This is also misleading in a second way: even on success the validator
-does *not* confirm the file is actually a darkmatter document (it does
-not parse frontmatter, does not check that it's Markdown). All it checks
-is `FileReference` parse → resolution → `path.exists()`. The format
-*name* `darkmatter-file` is overstating what the validator verifies.
+`FileReference::resolve()` has a relevant contract boundary: `Ok(Some(path))`
+contains an existing file, while `Ok(None)` means no candidate matched. It does
+not expose the candidate paths it searched. Therefore Darkmatter cannot
+truthfully display the attempted absolute path for a missing reference without
+adding a diagnostic API to `biscuit-file` or duplicating its resolution rules.
 
 ## What We Are Building
 
 ### Goal
 
-Replace the single bool-returning `Format` validator with an error path
-that distinguishes the three failure modes and produces messages a user
-can act on. The user should see *file not found at `<resolved-path>`*
-when the path doesn't exist, not a generic "is not a 'darkmatter-file'."
+Produce actionable, failure-specific diagnostics for `darkmatter-file` while
+preserving the public JSON Schema representation and `FileReference` resolution
+semantics. A missing file must be reported as a missing match, not as an invalid
+format or glob mismatch.
 
-### Non-Goals
+### Design Decision
 
-- **Do not expand what the validator checks.** Today it verifies
-  parseable-as-`FileReference` + resolves + path exists. Keep that
-  scope; do not start parsing the target file or asserting frontmatter
-  shape. (A future enhancement could verify Markdown/frontmatter, but
-  that is out of scope here — and naming would then need to be revisited
-  separately.)
-- **Do not change the `$schema` surface syntax.** `file(required)` in
-  the simplified schema must continue to compile to the same JSON
-  Schema fragment; only the validator's internal implementation and its
-  error reporting change.
-- **Do not change schemas that depend on the format string
-  `darkmatter-file`.** External consumers (if any) writing
-  `"format": "darkmatter-file"` directly continue to work.
+Keep `format: darkmatter-file` and enrich its error while mapping
+`jsonschema::ValidationError` into `ValidationProblem`.
+
+**Reader's note:** an earlier design replaced the format with a private
+`x-darkmatter-file` keyword. That would either break direct JSON Schemas that
+use `"format": "darkmatter-file"` or require recursively rewriting every
+schema and referenced subschema before compilation. The mapper already has the
+format kind and rejected instance value, so replacing the public schema
+contract is unnecessary.
+
+The implementation should centralize the check in `format.rs`, for example as
+a private helper returning a typed result:
+
+```rust
+fn resolve_file_reference(value: &str) -> Result<PathBuf, FileReferenceFailure>;
+```
+
+The existing bool format validator becomes a thin
+`resolve_file_reference(value).is_ok()` adapter. When `build_problem` sees a
+`ValidationErrorKind::Format` for `darkmatter-file` and a string instance, it
+reruns that helper only on the error path and substitutes the specific message.
+All other JSON Schema format errors retain `err.to_string()` unchanged.
+
+This performs a second resolution only for invalid values. That is preferable
+to changing the schema vocabulary or carrying mutable side-channel state out of
+the validator. If filesystem state changes between the two checks and the
+second check succeeds, retain the original generic format message rather than
+inventing a failure.
 
 ### Required Behavior Changes
 
-1. **Switch `darkmatter-file` from a `Format` to a `Keyword`.**
-   - Today `register_darkmatter_formats` in
-     [`format.rs:57`][format.rs] uses `options.with_format(...)` which
-     bottlenecks on `fn(&str) -> bool`.
-   - The same file already demonstrates the richer `Keyword` pattern
-     for `x-darkmatter-match` and `x-darkmatter-url-scheme`, both of
-     which produce `ValidationError::custom("...")` strings tailored to
-     the failure.
-   - A new `DarkmatterFileKeyword` (or equivalent) replaces the
-     `Format`. Register it via `with_keyword("format", ...)`-style
-     wiring **only when the format atom is `darkmatter-file`** — or
-     more cleanly: emit a sentinel keyword like `x-darkmatter-file`
-     from `simplified::convert` instead of `format: darkmatter-file`,
-     and register the `Keyword` factory for that. Either approach is
-     acceptable; the second avoids overloading the standard `format`
-     keyword and matches the existing `x-darkmatter-*` family.
-   - `simplified/convert.rs:359` (the site that emits
-     `format: darkmatter-file`) is the one place that needs updating
-     if we choose the sentinel-keyword approach.
+#### 1. Distinguish the three file-reference failure modes
 
-2. **Distinguish three failure modes with distinct messages.**
+Use these message contracts:
 
-   | Failure | Today's message | Replacement |
-   |---|---|---|
-   | `FileReference::new(value)` returns `Err` | `"<v>" is not a "darkmatter-file"` | `` `<v>` is not a valid file reference: <inner-error> `` |
-   | `reference.resolve()` returns `Ok(None)` or `Err(_)` | same | `` could not resolve file reference `<v>`: <inner-error> `` |
-   | `resolve()` returned a path but `path.exists()` is `false` | same | `` file not found: `<resolved-path>` (from reference `<v>`) `` |
+| Failure | Replacement message |
+|---|---|
+| `FileReference::new(value)` returns `Err(error)` | `` `<value>` is not a valid file reference: <error> `` |
+| `reference.resolve()` returns `Err(error)` | `` could not resolve file reference `<value>`: <error> `` |
+| `reference.resolve()` returns `Ok(None)` | `` no existing file matched reference `<value>` while resolving from `<cwd>` `` |
 
-   The resolved path is the most actionable piece of information when
-   the user typed a relative path — surface it.
+For the `Ok(None)` case, obtain `<cwd>` with `std::env::current_dir()` after the
+failed resolution. If it is unavailable, omit the `while resolving from ...`
+clause. Do not fabricate a candidate absolute path: `FileReference` may search
+multiple roots for implicit, magic, package, vault, and recursive references.
 
-3. **Preserve the rest of the error envelope.**
-   - The `MarkdownError: schema validation failed` header and the
-     bulleted `invalid <prop>: <message>` line in `blocks.rs` stay as
-     they are. Only `<message>` changes — it now carries the new
-     wording from item 2 instead of the upstream jsonschema template.
-   - `ValidationProblem::kind` remains `Invalid` for all three
-     sub-cases (do not introduce a fourth `ValidationProblemKind`
-     variant just to disambiguate file failures — the message carries
-     the disambiguation).
-   - Line/column attribution via `PositionMap` continues to work
-     because the path-to-frontmatter key wiring in
-     [`build_problem`][validate.rs] does not depend on the message
-     string.
+Messages must use the rejected instance string supplied by
+`ValidationError::instance()`. They must not parse the JSON pointer or rendered
+error text to recover the value.
 
-4. **Fix the hint line for file-not-found cases.**
-   - The current hint ("Correct the frontmatter so it satisfies the
-     declared $schema (or baseline schema)") is technically true but
-     reinforces the wrong mental model when the actual issue is a
-     missing file.
-   - Option A — leave the hint generic but make the bullet so explicit
-     ("file not found") that the hint can't mislead.
-   - Option B — render block in [`blocks.rs:241-245`][blocks.rs]
-     accepts a custom hint or omits it when any problem's message
-     begins with `file not found` (cheap heuristic).
-   - Preference: A. The hint is still correct in the broader sense;
-     the bullet just needs to be unambiguous.
+#### 2. Preserve the public schema contract
 
-### What Must Not Change
+- SimplifiedSchema `file(...)` atoms continue to compile to
+  `{"type":"string","format":"darkmatter-file"}` plus
+  `x-darkmatter-match` when requested.
+- Direct JSON Schemas using `"format": "darkmatter-file"` receive the same
+  improved diagnostics through Darkmatter's validator.
+- `register_darkmatter_formats`, `DARKMATTER_FILE_FORMAT`, and format validation
+  remain available with their current roles.
+- Built-in formats and the existing `x-darkmatter-url-scheme` keyword are not
+  affected.
 
-- The `file(required)` / `file(match(...))` / `file(required, match(...))`
-  surface syntax in simplified schemas.
-- The `FileReference` API and its resolution semantics. The fix is
-  purely about how validator failures are *reported*.
-- The two existing `x-darkmatter-*` keyword validators
-  (`x-darkmatter-match`, `x-darkmatter-url-scheme`). Those already
-  produce good custom messages and should be left alone.
-- The standalone behavior of `validate_file_reference` if it is kept
-  as a helper (private fn). Whether it returns `bool` or a richer
-  `Result` is an implementation detail of the new keyword.
+#### 3. Prevent duplicate or misleading glob diagnostics
+
+Refactor the `x-darkmatter-match` check to distinguish:
+
+- file resolved and matched the globs: valid;
+- file resolved but did not match the globs: emit the existing glob diagnostic;
+- file-reference parse, resolution, or no-match failure: treat the keyword as
+  valid and defer to `format: darkmatter-file`, which owns those diagnostics.
+
+This is an intentional narrowing of the keyword's responsibility. The keyword
+validates glob constraints; the format validates that the value resolves to a
+file. SimplifiedSchema always emits the format alongside the match keyword.
+
+Add a schema-build guard in `match_keyword_factory`: if the parent schema does
+not contain `"format": "darkmatter-file"`, reject the schema with a clear
+schema error. This prevents direct JSON Schema authors from using
+`x-darkmatter-match` alone and accidentally bypassing existence validation.
+
+#### 4. Preserve the error envelope
+
+- The `MarkdownError: schema validation failed` header remains unchanged.
+- `ValidationProblem::kind` remains `Invalid` for all file-reference failures.
+- JSON-pointer path, property attribution, line, column, and root-union arm
+  attribution remain unchanged.
+- The generic hint remains unchanged. Once the problem line says that no file
+  matched, the hint no longer obscures the cause.
+- Error messages continue to be escaped by the renderer through `Prose`; the
+  mapper stores plain text and must not add terminal markup or raw escape codes.
+
+### Non-Goals
+
+- Do not parse the target as Markdown or validate its frontmatter.
+- Do not change `FileReference` search order, supported reference forms, or
+  regular-file requirement.
+- Do not add a `biscuit-file` diagnostic/candidate API in this change.
+- Do not change the SimplifiedSchema `file(required)`, `file(match(...))`, or
+  `file(required, match(...))` syntax.
+- Do not add a new `ValidationProblemKind` variant.
+- Do not customize unrelated JSON Schema format diagnostics.
 
 ## Files Most Likely to Change
 
-- `darkmatter/lib/src/markdown/schemas/format.rs` — replace
-  `validate_file_reference` + `register_darkmatter_formats` with a
-  `Keyword` implementation that returns
-  `ValidationError::custom(...)` with one of the three messages above.
-- `darkmatter/lib/src/markdown/schemas/simplified/convert.rs:359` — if
-  going the sentinel-keyword route, emit
-  `"x-darkmatter-file": true` (or `<the value>`) instead of (or in
-  addition to) `"format": "darkmatter-file"`.
-- `darkmatter/lib/src/markdown/schemas/validate.rs` — no changes
-  required; `build_problem` already passes `err.to_string()` through.
-  Confirm that `ValidationError::custom` messages survive that round
-  trip cleanly (they do).
-- Tests in `darkmatter/lib/src/markdown/schemas/format.rs` (existing
-  `file_format_accepts_existing_file` / `file_format_rejects_missing_file`)
-  — extend to assert on the specific message text for each of the
-  three failure modes.
-- Any snapshot/golden tests under `darkmatter/lib/tests/` or
-  `darkmatter/lib/src/markdown/errors/blocks.rs` tests that capture
-  the old wording — update.
+- `darkmatter/lib/src/markdown/schemas/format.rs`
+  - Introduce the shared typed file-reference check.
+  - Keep the bool format adapter.
+  - Make glob validation defer file-reference failures.
+  - Require `x-darkmatter-match` to accompany `format: darkmatter-file`.
+- `darkmatter/lib/src/markdown/schemas/validate.rs`
+  - Specialize only `darkmatter-file` format messages in `build_problem`.
+  - Preserve the generic message if the rejected instance is not a string or
+    the diagnostic recheck no longer fails.
+- `darkmatter/lib/src/markdown/errors/blocks.rs`
+  - No behavior change expected; verify that the new plain messages render and
+    escape correctly.
+- `darkmatter/lib/tests/error_snapshots/markdown_error.rs` and schema tests
+  - Update snapshots that intentionally contain the old generic format text.
+
+`darkmatter/lib/src/markdown/schemas/simplified/convert.rs` should not change;
+its current output is part of the compatibility requirement.
+
+## Test Requirements
+
+Add focused tests for:
+
+1. An empty reference, `%`, an unclosed interpolation, or another stable parse
+   failure produces `is not a valid file reference` and includes the source
+   error.
+2. A syntactically valid reference with a resolution error, such as an unset
+   `{{ENV_VAR}}` or unconfigured `vault:` root, produces
+   `could not resolve file reference` and includes the source error.
+3. A well-formed missing relative file produces
+   `no existing file matched reference` and includes the reference and current
+   resolution directory.
+4. A missing absolute, magic, package, or recursive reference does not claim a
+   fabricated absolute candidate path.
+5. An existing file validates successfully.
+6. An existing file that violates `file(match(...))` emits only the glob
+   diagnostic.
+7. A missing file under `file(match(...))` emits only the file-reference
+   diagnostic.
+8. `x-darkmatter-match` without `format: darkmatter-file` fails schema
+   construction with an explanatory message.
+9. A direct JSON Schema using `format: darkmatter-file` receives the improved
+   message, proving this is not limited to SimplifiedSchema conversion.
+10. An unrelated format failure, such as `format: date`, retains the upstream
+    `jsonschema` message.
+11. Root-union validation and nested/array instance paths retain their existing
+    path and arm attribution.
+12. Error rendering escapes reference and source-error text and does not treat
+    it as `Prose` markup.
+
+Tests that mutate the process working directory or environment must use the
+repository's existing serialization/guard pattern and restore state on drop.
 
 ## Acceptance Criteria
 
-A composition like:
+For a missing relative reference, the rendered problem reads in substance:
 
-```sh
-c compose prompts/implement-plan.md \
-  plan=features/2026-05-26-block-extensions/plan.md \
-  phase=1 total_phases=4 -y --claude
-```
-
-(where the path has a typo and the file does not exist) produces an
-error whose bullet reads, in substance:
-
-```
- MarkdownError: schema validation failed
+```text
+MarkdownError: schema validation failed
 ┃ /…/prompts/implement-plan.md
-┃ invalid plan: file not found: `/…/features/2026-05-26-block-extensions/plan.md`
-┃                (from reference `features/2026-05-26-block-extensions/plan.md`)
+┃ invalid plan: no existing file matched reference `features/2026-05-26-block-extensions/plan.md`
+┃               while resolving from `/…/renderable`
 Correct the frontmatter so it satisfies the declared $schema (or baseline schema).
 ```
 
 Specifically:
 
-- The phrase `is not a "darkmatter-file"` no longer appears for the
-  file-not-found case.
-- The resolved absolute path is shown so the user can see where
-  resolution landed (and immediately notice the typo).
-- A malformed `FileReference` string produces a *different* message
-  ("is not a valid file reference") so the failure mode is
-  unambiguous.
-- Existing positive cases (file exists, resolves cleanly) still
-  validate without diagnostics.
-- All existing `format::tests` continue to pass; new assertions cover
-  the three distinct messages.
+- `is not a valid "darkmatter-file" format` no longer appears for
+  `darkmatter-file` failures reported through Darkmatter.
+- Parse, resolution, and no-match failures have distinct messages.
+- Missing files under `file(match(...))` do not also report a glob mismatch.
+- Existing files and genuine glob mismatches preserve current validation
+  behavior.
+- SimplifiedSchema output and direct `format: darkmatter-file` schemas remain
+  compatible.
+- Existing schema, error-rendering, and snapshot tests pass after intentional
+  expectation updates.
 
 ## References
 
-- Source of the misleading message: [`darkmatter/lib/src/markdown/schemas/format.rs:67-72`][format.rs]
-- Pass-through of upstream message: [`darkmatter/lib/src/markdown/schemas/validate.rs:236-262`][validate.rs]
-- Renderer that frames it: [`darkmatter/lib/src/markdown/errors/blocks.rs:200-245`][blocks.rs]
-- Pattern to mimic for custom messages: `DarkmatterMatchKeyword` and
-  `DarkmatterUrlSchemeKeyword` in the same `format.rs`.
+- Format registration and glob keyword: [`format.rs`][format.rs]
+- Validation-error mapping: [`validate.rs`][validate.rs]
+- Error envelope renderer: [`blocks.rs`][blocks.rs]
+- `FileReference` resolution contract: [`biscuit-file` file reference module][file-reference]
 
 [format.rs]: ../../../darkmatter/lib/src/markdown/schemas/format.rs
 [validate.rs]: ../../../darkmatter/lib/src/markdown/schemas/validate.rs
 [blocks.rs]: ../../../darkmatter/lib/src/markdown/errors/blocks.rs
+[file-reference]: ../../../biscuit-file/lib/src/file_reference/mod.rs
