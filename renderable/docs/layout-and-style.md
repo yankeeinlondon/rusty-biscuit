@@ -161,7 +161,10 @@ unit rules as margin), `width` to a `width` declaration (`Auto` omits it,
 `FitContent` → `width:fit-content`, `Fixed(tv)` → an explicit `width`),
 `max_width` to `max-width`, and alignment to `auto` margins **only when a
 `max_width` is present**. `word_wrap` becomes `white-space:nowrap` (`None`) or
-`overflow-wrap:break-word` (any wrapping variant).
+`overflow-wrap:break-word` (any wrapping variant). It also emits
+`box-sizing:content-box` on any node that lowers a non-default `width`,
+`padding`, or `border`, so a page's global `* { box-sizing:border-box }` reset
+cannot silently reinterpret the renderable content-box width contract.
 
 **Terminal** (`biscuit-terminal`, `render_tree::render::render_with_layout` and
 `LayoutTerminalExt`) resolves margins, `padding`, and the `width` modes to
@@ -171,15 +174,23 @@ resolving for `RenderTarget::Terminal`). It resolves the content-box width from
 `layout.width` — `Auto` fills `available − margin − padding − border`,
 `Fixed(tv)` resolves `tv` clamped to that cap, `FitContent` renders once at the
 cap then re-renders at the measured widest line — narrows the child render
-width accordingly, prefixes each line, block-aligns the component as a unit,
-and emits top/bottom margins as blank rows. The `padding` box is painted by
+width accordingly, renders the content at exactly the content-box width, and
+paints `padding` + `border` **around** it (a `Fixed(n)` box keeps all `n`
+content columns; the border is never carved out of them). It then **block-aligns
+the box within `available − margin`** for every width mode (`margin:auto`
+semantics): the painted box is `content_width + padding + border`, and when it
+is narrower than the area — a sub-available `Fixed` / `FitContent` box, or an
+`Auto` box capped by `max_width` — the alignment offset positions the whole box
+(center/right). A box that fills the area centers its visible content instead.
+Top/bottom margins emit as blank rows. The `padding` box is painted by
 `paint_text` with `Style.background`; the margin stays transparent. The legacy
 `LayoutTerminalExt` retains `apply_layout` / `apply_block_layout` for the
 bespoke (non-tree) component path.
 
-> The terminal renderer **does not apply `max_width`** — it is a Browser-only
-> property. `max_width` only influences the terminal path indirectly, by being
-> the precondition for browser block-alignment.
+> `max_width` caps the terminal content box just as it does in the browser, and
+> the capped box is block-placed within `available − margin`. There is no
+> separate terminal `max_width` rule beyond that cap-then-place — the property is
+> not a terminal no-op.
 
 **Markdown** deliberately **ignores** `Layout` entirely. Markdown body output
 is byte-identical whether or not a node carries a layout, and no diagnostic is
@@ -216,8 +227,8 @@ Known gaps and loose ends:
 - **`TerminalRenderContext::active_layout` is a dead field** — set by
   `with_layout`, never read. The terminal renderer reads `node.attrs.layout()`
   directly. The field is retained for API shape; remove it or wire a consumer.
-- **Terminal `max_width` is a silent no-op** (see §4) — consistent with the
-  spec, but a Browser/Terminal asymmetry a reader would not expect.
+- **Terminal `max_width` caps the content box and the capped box is
+  block-placed** (see §4) — symmetric with the browser, not a no-op.
 - **darkmatter's `LayoutContext` page-frame pass is retained.** `DarkmatterPage`
   now builds a `renderable::layout::Layout` (see §7) and the document body
   renders through the tree terminal renderer, but `apply_row_decoration` still

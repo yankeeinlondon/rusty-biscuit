@@ -198,6 +198,11 @@ uses CSS declarations, and underline variants, dim, blink, and inverse
 `radius` → `border-radius`, with `BorderSides::All` using shorthands and
 `Sides { .. }` emitting per-side declarations. `Layout.padding` lowers to
 `padding-*` and `Width` to a `width` declaration (`Auto` omits it, `FitContent`
-→ `width:fit-content`, `Fixed` → an explicit length). The Terminal renderer
-paints the `padding` box with `Style.background` and resolves all three `Width`
-modes.
+→ `width:fit-content`, `Fixed` → an explicit length). Any node lowering a
+non-default `width`, `padding`, or `border` also emits `box-sizing:content-box`,
+so a global `border-box` reset cannot reinterpret the width contract. The
+Terminal renderer paints the `padding` box with `Style.background`, resolves all
+three `Width` modes, and block-places the box (`content_width + padding +
+border`) within `available − margin` for every mode — `margin:auto` semantics —
+so a sub-available `Fixed` / `FitContent` / `max_width`-capped box is
+centered/right-offset as a unit.
