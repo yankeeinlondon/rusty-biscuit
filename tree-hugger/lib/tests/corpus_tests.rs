@@ -165,12 +165,12 @@ fn test_corpus_diagnostic_from_diagnostic() {
         rule: Some("unwrap-call".to_string()),
         context: None,
         metadata: Some(DiagnosticMetadata {
-            category: DiagnosticCategory::Suspicious,
+            category: DiagnosticCategory::Restriction,
             confidence: DiagnosticConfidence::High,
             source: DiagnosticSource::TreeSitterQuery,
             default_severity: DiagnosticSeverity::Warning,
             effective_severity: DiagnosticSeverity::Warning,
-            is_enabled_by_default: true,
+            is_enabled_by_default: false,
             requires_experimental_semantics: false,
         }),
     };

@@ -98,7 +98,7 @@ pub use transclusion::TransclusionError;
 pub use types::{
     ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePerfMetric,
     ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeStage, ComposeWarning,
-    SourceRange,
+    ShellCommandSpan, SourceRange, redact_shell_command,
 };
 
 // Internal re-exports for crate modules that still use TransclusionOptions
@@ -755,6 +755,7 @@ impl Markdown {
                             &options,
                             runtime,
                             &mut report,
+                            &mut perf,
                         )?;
                         if let Some(start) = op_start {
                             let kind = match operation {
@@ -845,6 +846,9 @@ impl Markdown {
             }
 
             report.max_transclusion_depth = runtime.transclusion.deepest_seen;
+            if perf.is_enabled() {
+                perf.set_capture_timings(options.context().capture_timings().to_vec());
+            }
             report.perf = perf.finish();
             Ok(report)
         })();
@@ -863,6 +867,7 @@ impl Markdown {
         options: &ComposeOptions,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
+        perf: &mut perf::PerfCollector,
     ) -> MarkdownResult<()> {
         match operation {
             // FrontmatterInterpolation is handled before EffectiveState build,
@@ -882,7 +887,7 @@ impl Markdown {
                 Ok(())
             }
             ComposeOperation::ShellExpansion => {
-                self.run_shell_expansion_stage(options, runtime, report)
+                self.run_shell_expansion_stage(options, runtime, report, perf)
             }
             ComposeOperation::ShellBlocks => {
                 let sb_ctx = self.source_context_for_errors();
@@ -1317,6 +1322,7 @@ impl Markdown {
         options: &ComposeOptions,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
+        perf: &mut perf::PerfCollector,
     ) -> MarkdownResult<()> {
         let directives =
             shell_expansion::parse_directives(&self.content, self.source_context_for_errors())?;
@@ -1335,8 +1341,19 @@ impl Markdown {
         let mut replacements = Vec::new();
 
         for directive in directives {
+            let span_start = perf.is_enabled().then(std::time::Instant::now);
             let execution =
                 execute_directive_detailed(&directive, options, &policy_paths, &mut runtime.shell)?;
+            if let Some(start) = span_start {
+                perf.record_shell_span(ShellCommandSpan {
+                    command_display: redact_shell_command(&directive.raw_command),
+                    command_hash: format!(
+                        "{:016x}",
+                        biscuit_hash::xx_hash(&directive.raw_command)
+                    ),
+                    elapsed: start.elapsed(),
+                });
+            }
             // Re-indent multi-line output to the directive's column so generated
             // lines stay nested under the surrounding list or block quote.
             let output = indent::indent_text(&execution.combined_output(), &directive.indent, None);

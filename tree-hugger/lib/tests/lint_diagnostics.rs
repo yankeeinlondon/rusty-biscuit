@@ -509,6 +509,75 @@ fn test_no_false_positive_unwrap_or() {
 }
 
 #[test]
+fn test_pub_use_reexport_not_flagged_as_unused_import() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "lib.rs",
+        "use std::io::Write;\npub use std::collections::HashMap;\npub(crate) use std::fmt::Debug;\n",
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let unused: Vec<String> = diagnostics
+        .iter()
+        .filter(|d| d.rule.as_deref() == Some("unused-import"))
+        .map(|d| d.message.clone())
+        .collect();
+
+    // A private `use` that is never referenced is a genuine unused import.
+    assert!(
+        unused.iter().any(|m| m.contains("Write")),
+        "private unused `use` should still be flagged, got: {unused:?}"
+    );
+    // `pub use` / `pub(crate) use` are re-exports, not unused imports.
+    assert!(
+        !unused.iter().any(|m| m.contains("HashMap")),
+        "pub use re-export should not be flagged, got: {unused:?}"
+    );
+    assert!(
+        !unused.iter().any(|m| m.contains("Debug")),
+        "pub(crate) use re-export should not be flagged, got: {unused:?}"
+    );
+}
+
+#[test]
+fn test_import_used_only_in_type_position_not_flagged() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "lib.rs",
+        "use std::fmt::Debug;\nuse std::collections::HashMap;\nuse std::io::Write;\n\
+         pub fn takes(value: Debug) -> Debug { value }\n\
+         pub struct Holder {\n    map: HashMap,\n}\n",
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let unused: Vec<String> = tree_file
+        .lint_diagnostics()
+        .iter()
+        .filter(|d| d.rule.as_deref() == Some("unused-import"))
+        .map(|d| d.message.clone())
+        .collect();
+
+    // `Debug` (parameter/return type) and `HashMap` (field type) are used.
+    assert!(
+        !unused.iter().any(|m| m.contains("Debug")),
+        "import used as a parameter/return type should not be flagged, got: {unused:?}"
+    );
+    assert!(
+        !unused.iter().any(|m| m.contains("HashMap")),
+        "import used as a field type should not be flagged, got: {unused:?}"
+    );
+    // `Write` is genuinely unused and must still be flagged.
+    assert!(
+        unused.iter().any(|m| m.contains("Write")),
+        "genuinely unused import should still be flagged, got: {unused:?}"
+    );
+}
+
+#[test]
 fn test_no_false_positive_eval_identifier() {
     let dir = TempDir::new().unwrap();
     let path = create_temp_file(

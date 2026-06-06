@@ -167,6 +167,17 @@ pub(crate) fn apply_symbol_filters(
         .collect()
 }
 
+/// Directories that hold test *data* rather than compiled source. Diagnostics on
+/// these are meaningless (a fixture's unused import is the point), so a default
+/// whole-package scan skips them. An explicit path/glob argument re-includes a
+/// file via last-match-wins, so targeting `tests/fixtures/x.rs` still works.
+const DEFAULT_EXCLUDE_GLOBS: &[&str] = &[
+    "**/fixtures/**",
+    "**/__fixtures__/**",
+    "**/snapshots/**",
+    "**/testdata/**",
+];
+
 pub(crate) fn collect_files(
     root: &Path,
     inputs: &[String],
@@ -217,6 +228,11 @@ pub(crate) fn collect_files(
     // inputs were glob patterns rather than concrete files.
     if inputs.is_empty() || !glob_inputs.is_empty() {
         let mut overrides = OverrideBuilder::new(root);
+        // Default excludes go first so a later explicit glob/path re-includes a
+        // targeted fixture file (gitignore last-match-wins).
+        for pattern in DEFAULT_EXCLUDE_GLOBS {
+            overrides.add(&format!("!{pattern}"))?;
+        }
         for input in &glob_inputs {
             overrides.add(input)?;
         }

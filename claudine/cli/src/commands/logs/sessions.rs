@@ -113,6 +113,21 @@ pub(super) fn render_session_detail(report: &SessionDetailReport) {
         "  <dim>Started</dim>   {started}    <dim>Ended</dim>  {end_label}    <dim>Duration</dim>  {duration}"
     )));
 
+    // PIDs
+    if session.claudine_pid.is_some() || session.agent_pid.is_some() {
+        let claudine_pid = session
+            .claudine_pid
+            .map(|pid| pid.to_string())
+            .unwrap_or_else(|| "—".to_string());
+        let agent_pid = session
+            .agent_pid
+            .map(|pid| pid.to_string())
+            .unwrap_or_else(|| "—".to_string());
+        log::data(&p(&format!(
+            "  <dim>Claudine PID</dim>  {claudine_pid}    <dim>Agent PID</dim>  {agent_pid}"
+        )));
+    }
+
     // Location
     let repo = repo_label(session.repo_org.as_deref(), session.repo_name.as_deref());
     let branch = session.branch.as_deref().unwrap_or("—");

@@ -314,7 +314,14 @@ impl GitRequest {
         }
     }
 
-    /// Branch + dirty status counts. No commits, no file details, no worktrees.
+    /// Branch + dirty yes/no flag. No per-category counts, no commits, no file
+    /// details, no worktrees.
+    ///
+    /// Currently produces the same field set as [`minimal`](Self::minimal):
+    /// both satisfy [`is_minimal`](Self::is_minimal), so detection takes the
+    /// dirty-flag-only path and leaves `staged_count` / `unstaged_count` /
+    /// `untracked_count` at `0`. Use a request that is *not* minimal (e.g. with
+    /// `commit_count > 0`) to populate per-category counts.
     pub fn summary() -> Self {
         Self {
             commit_count: 0,
@@ -390,6 +397,21 @@ impl GitRequest {
             && !self.include_file_changes
             && !self.include_worktrees
             && !self.refresh_remote_tracking
+    }
+
+    /// Whether this request needs repo metadata enrichment — remotes, git
+    /// config, local branches, and tracking status.
+    ///
+    /// Computing local branches walks `graph_ahead_behind` once per branch,
+    /// which dominates latency on repos with many branches. A pure file-change
+    /// query (`include_file_changes` with no commits, worktrees, or remote
+    /// refresh) maps changed files to packages and never renders any of that
+    /// metadata, so it must skip the walk — unlike [`is_minimal`], whose
+    /// contract treats `include_file_changes` as non-minimal.
+    ///
+    /// [`is_minimal`]: Self::is_minimal
+    pub fn wants_repo_metadata(&self) -> bool {
+        self.commit_count > 0 || self.include_worktrees || self.refresh_remote_tracking
     }
 
     pub fn max_remote_branches(mut self, limit: Option<usize>) -> Self {
@@ -614,6 +636,25 @@ mod tests {
 
         let with_changes = GitRequest::minimal().include_file_changes(true);
         assert!(!with_changes.is_minimal());
+    }
+
+    #[test]
+    fn git_request_wants_repo_metadata_flags() {
+        // A pure file-change query must NOT pull repo metadata (branches etc.),
+        // even though `include_file_changes` makes it non-minimal.
+        let changes_only = GitRequest::summary().include_file_changes(true);
+        assert!(!changes_only.is_minimal());
+        assert!(!changes_only.wants_repo_metadata());
+
+        // Plain summary and minimal want no metadata either.
+        assert!(!GitRequest::summary().wants_repo_metadata());
+        assert!(!GitRequest::minimal().wants_repo_metadata());
+
+        // full() (worktrees) and deep() (remote refresh) still render branches
+        // and remotes, so they must keep the metadata enrichment.
+        assert!(GitRequest::full().wants_repo_metadata());
+        assert!(GitRequest::deep().wants_repo_metadata());
+        assert!(GitRequest::minimal().commit_count(1).wants_repo_metadata());
     }
 
     #[test]

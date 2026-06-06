@@ -7,6 +7,7 @@ pub mod image_options;
 pub mod inline_content;
 pub mod list;
 pub mod mermaid;
+pub mod metrics_tree;
 pub mod pad;
 pub mod progress;
 pub mod prose;

@@ -291,6 +291,10 @@ Runs the full composition pipeline **up to but not including provider launch**, 
 
 See [Composition — Dry Run](../../../claudine/docs/topics/composition.md#dry-run) for the full reference.
 
+### `--perf`
+
+Opt-in flag (composition commands and the provider wrappers) that prints a **reconciling performance tree** to **stderr** after the run. The `Performance` headline is true wall-clock and equals the sum of its top-level `Structural` buckets (`pre-dispatch`, `prep phase`, `environment setup`, `agent execution`) plus a synthetic `unattributed` remainder — the headline can never contradict the body. Nested `Breakdown` rows itemize cost (Darkmatter composition stages, agent sub-timings) without double-counting; a percent column shows each row's share of wall-clock, a single `▇ HOT` marker flags the dominant leaf (≥20% of wall-clock), and `×N` annotates stages that ran more than once. Dry runs render `agent execution` as an `—` leaf. The report is stderr-only (never pollutes piped stdout) and is emitted even under `--silent`/`--quiet`. `sequence` aggregates one report across all steps. See [Composition — Performance Reporting](../../../claudine/docs/topics/composition.md#performance-reporting) for the full reference.
+
 **Positional Arguments:**
 - Exactly one file reference (supports `@` magic paths)
 - Zero or more `key=value` setters (overrides frontmatter)
@@ -301,7 +305,7 @@ See [Composition — Dry Run](../../../claudine/docs/topics/composition.md#dry-r
 - `-m, --model <MODEL>`
 - `-s, --system-prompt <PROMPT|FILE>`
 - `-t, --timeout <DURATION>`
-- `--dry-run`, `-q, --quiet`, `--silent`
+- `--dry-run`, `-q, --quiet`, `--silent`, `--perf`
 
 ---
 
@@ -387,6 +391,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `--dry-run` | Show what would be executed without launching the child |
 | `-q, --quiet` | Show only the header line; suppress env details |
 | `--silent` | Suppress all Claudine preflight output |
+| `--perf` | Print a reconciling performance tree to stderr after the run (see [`--perf`](#--perf)) |
 | `-- ...` | Force all remaining args to passthrough unchanged |
 
 ### Wrapper Behavior
@@ -399,7 +404,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 - Validates provider binary availability before spawn (with provider docs URL in errors).
 - Filters sensitive env vars whose names contain `API_KEY` or `TOKEN` unless explicitly included.
 - Reports removed env variable names to stderr (names only, sorted/unique).
-- Injects `AGENT`, `YOLO`, `INTERACTIVE`, `AGENT_PARAMS`, `CLAUDINE_SESSION_ID`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
+- Injects `AGENT`, `YOLO`, `INTERACTIVE`, `AGENT_PARAMS`, `CLAUDINE_SESSION_ID`, `CLAUDINE_PID`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
 - `--mcp` resolves repo defaults if `<repo>/.claudine/mcp.json` exists, otherwise user defaults; `--use` appends explicit IDs or aliases and also enables MCP mode.
 - Non-interactive Codex, Gemini, and OpenCode runs also strip catalog-resolvable `#tags` from the prompt and activate the matching servers.
 - Writes a synthetic JSONL summary event per session for reporting completeness.
@@ -537,5 +542,6 @@ Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` /
 | `INTERACTIVE` | Injected by wrapper: interactivity flag |
 | `AGENT_PARAMS` | Injected by wrapper: provider-specific args |
 | `CLAUDINE_SESSION_ID` | Injected by wrapper: session identifier |
+| `CLAUDINE_PID` | Injected by wrapper: Claudine's own process ID |
 | `PACKAGE_AREA` | Injected by wrapper: monorepo package area (when resolvable) |
 | `PACKAGE` | Injected by wrapper: monorepo package (when resolvable) |

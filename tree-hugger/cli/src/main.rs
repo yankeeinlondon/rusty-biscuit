@@ -1059,13 +1059,27 @@ fn main() -> Result<(), TreeHuggerError> {
                     render_options,
                 );
             } else {
+                // Multi-file lint scans hide clean files; a single explicit
+                // target still shows `(no diagnostics)` as confirmation.
+                let suppress_clean_lint =
+                    matches!(command_kind, CommandKind::Lint { .. }) && summaries.len() > 1;
+                let mut rendered_any = false;
                 for summary in &summaries {
-                    render_summary(
+                    rendered_any |= render_summary(
                         summary,
                         &command_kind,
                         &output_config,
                         display_root.as_deref(),
+                        suppress_clean_lint,
                     );
+                }
+                if suppress_clean_lint && !rendered_any {
+                    let msg = format!("No lint diagnostics in {} files.", summaries.len());
+                    if output_config.use_colors {
+                        println!("{}", msg.green());
+                    } else {
+                        println!("{msg}");
+                    }
                 }
             }
         }
@@ -1587,6 +1601,9 @@ fn import_symbols_from_index(index: &FileSymbolIndex) -> Vec<ImportSymbol> {
             language: index.language,
             file: index.file.clone(),
             source: import.source.clone(),
+            // The v2 ImportRecord carries no re-export marker; the `unused-import`
+            // lint runs on the v1 `imported_symbols()` path, which sets this.
+            is_reexport: false,
         })
         .collect()
 }
@@ -1673,13 +1690,8 @@ fn render_symbol_doc_comment(comment: Option<&str>, config: &OutputConfig, inden
     }
 }
 
-fn render_summary(
-    summary: &FileSummary,
-    command: &CommandKind,
-    config: &OutputConfig,
-    display_root: Option<&Path>,
-) {
-    // Render file header with optional hyperlink
+/// Prints the `path (Language)` file header, with an optional hyperlink.
+fn print_file_header(summary: &FileSummary, config: &OutputConfig, display_root: Option<&Path>) {
     let file_display = display_path(&summary.file, display_root);
     let header = if config.use_hyperlinks {
         hyperlink(&summary.file, 1, &file_display)
@@ -1696,47 +1708,75 @@ fn render_summary(
     } else {
         println!("{} ({})", header, summary.language);
     }
+}
 
+/// Renders one file's results, returning whether anything was printed.
+///
+/// When `suppress_clean_lint` is set (multi-file lint scans), a file with no
+/// visible diagnostics is skipped entirely — header included — so real findings
+/// are not buried under a `(no diagnostics)` line per clean file. A single-file
+/// lint still prints `(no diagnostics)` as explicit confirmation.
+fn render_summary(
+    summary: &FileSummary,
+    command: &CommandKind,
+    config: &OutputConfig,
+    display_root: Option<&Path>,
+    suppress_clean_lint: bool,
+) -> bool {
+    if let CommandKind::Lint {
+        lint_only,
+        syntax_only,
+        deny,
+        warn,
+        allow,
+        strict,
+        experimental_semantics,
+        ..
+    } = command
+    {
+        let registry = RuleRegistry::new();
+        let filtered = apply_lint_policy(
+            &summary.lint,
+            &registry,
+            deny,
+            warn,
+            allow,
+            *strict,
+            *experimental_semantics,
+        );
+        let has_visible = (!*syntax_only && !filtered.is_empty())
+            || (!*lint_only && !summary.syntax.is_empty());
+        if suppress_clean_lint && !has_visible {
+            return false;
+        }
+
+        print_file_header(summary, config, display_root);
+        render_diagnostics_filtered(
+            &filtered,
+            &summary.syntax,
+            &summary.file,
+            config,
+            *lint_only,
+            *syntax_only,
+        );
+        println!();
+        return true;
+    }
+
+    print_file_header(summary, config, display_root);
     match command {
         CommandKind::Imports => render_imports(&summary.imports, config),
         CommandKind::Functions | CommandKind::Types | CommandKind::Symbols => {
             render_symbols(&summary.symbols, config)
         }
-        CommandKind::Lint {
-            lint_only,
-            syntax_only,
-            deny,
-            warn,
-            allow,
-            strict,
-            experimental_semantics,
-            ..
-        } => {
-            let registry = RuleRegistry::new();
-            let filtered = apply_lint_policy(
-                &summary.lint,
-                &registry,
-                deny,
-                warn,
-                allow,
-                *strict,
-                *experimental_semantics,
-            );
-            render_diagnostics_filtered(
-                &filtered,
-                &summary.syntax,
-                &summary.file,
-                config,
-                *lint_only,
-                *syntax_only,
-            );
-        }
+        CommandKind::Lint { .. } => unreachable!("lint is handled above"),
         CommandKind::Classes { .. } => {
             // Classes are rendered separately
         }
     }
 
     println!();
+    true
 }
 
 fn render_rule_list(format: OutputFormat) -> Result<(), TreeHuggerError> {
@@ -2478,6 +2518,22 @@ fn apply_lint_policy(
             }
 
             if rule.requires_experimental_semantics && !experimental_semantics {
+                return None;
+            }
+
+            // Off-by-default rules (e.g. the `restriction` category) are silent
+            // unless explicitly opted in by a `--warn`/`--deny` selector that
+            // targets them. `--allow` only demotes severity and `--strict` only
+            // escalates warnings; neither enables a disabled rule. Experimental
+            // rules are exempt — they are gated above by `--experimental-semantics`.
+            let explicitly_enabled = warn
+                .iter()
+                .chain(deny.iter())
+                .any(|selector| selector.matches(&rule));
+            if !rule.requires_experimental_semantics
+                && !rule.enabled_by_default
+                && !explicitly_enabled
+            {
                 return None;
             }
 

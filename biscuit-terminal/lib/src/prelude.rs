@@ -14,6 +14,9 @@ pub use crate::components::mermaid::{
     MermaidConfig, MermaidDiagram, MermaidRenderError, MermaidRenderResult, MermaidTheme,
     QuadrantTheme,
 };
+pub use crate::components::metrics_tree::{
+    MetricMarker, MetricNode, MetricShare, MetricValue, MetricsTree,
+};
 pub use crate::components::pad::{PadLeft, PadRight};
 pub use crate::components::progress::Progress;
 pub use crate::components::prose::Prose;

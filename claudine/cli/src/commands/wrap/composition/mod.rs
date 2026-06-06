@@ -208,6 +208,10 @@ pub(crate) struct CompositionStreamResult {
     section_stream: super::section::SectionStream,
     /// Child-process telemetry for perf reporting.
     telemetry: exec::ProcessTelemetry,
+    /// Immediate child PID captured by the spawn operation, threaded
+    /// through to the synthetic summary event so `EventMeta.agent_pid`
+    /// carries the spawned child PID.
+    agent_pid: Option<u32>,
 }
 
 /// Mode-specific inputs for [`execute_without_harness`].
@@ -601,7 +605,11 @@ fn resolve_live_target_with_tty(
 /// and the no-TTY abort body (via [`agent_state_breakdown`] /
 /// [`invalid_agent_message`]) so the three surfaces cannot drift. Returns
 /// Prose **markup**; callers render it with their own terminal.
-fn agent_prompt_message(
+///
+/// The `sequence` orchestrator reuses this before its review screen so an
+/// invalid-scalar or zero-installed-list sequence shows the same pre-prompt
+/// message direct compose shows and the dry-run table predicts.
+pub(crate) fn agent_prompt_message(
     state: &AgentResolutionState,
     source_path: &std::path::Path,
 ) -> Option<String> {
@@ -632,9 +640,11 @@ fn picker_scope_for_state(state: &AgentResolutionState) -> Option<&[Provider]> {
 /// Build the picker plan for a prompting state, applying the per-state scope.
 ///
 /// Pure (no I/O): the live path and L1 tests both go through here so the
-/// scope contract is verifiable without a TTY.
+/// scope contract is verifiable without a TTY. The `sequence` review screen
+/// reuses this so its picker narrows `ListMultipleInstalled` to the same
+/// installed-from-list subset the direct compose picker offers.
 #[allow(clippy::result_large_err)]
-fn scoped_picker_plan_for_state(
+pub(crate) fn scoped_picker_plan_for_state(
     state: &AgentResolutionState,
     hints: &claudine::composition::EffectiveSelectionHints,
     snapshot: &claudine::composition::InstalledProviderSnapshot,
@@ -753,6 +763,59 @@ pub(crate) fn install_agent_env_for_composition(
     env_overrides.insert("AGENT".to_string(), slug);
 }
 
+/// Render the one-line execution header for a composition run.
+///
+/// Shared by the up-front emit in `compose` / `inline-compose` (which
+/// resolves the agent eagerly so the line appears immediately) and the
+/// in-pipeline emit for callers that did not pre-render it.
+///
+/// Returns `false` without emitting when `provider` has no wrapper
+/// profile, so the caller leaves the header to the executor rather than
+/// silently dropping it.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_execution_header(
+    provider: Provider,
+    yolo: bool,
+    session_interactive: bool,
+    detail_requested: bool,
+    repo: bool,
+    is_inline: bool,
+    sequence: bool,
+    operation: Option<&str>,
+    file_ref: &str,
+    package_context: Option<claudine::composition::PackageContext>,
+    term: &Terminal,
+) -> bool {
+    let Some(profile) = profile::profile_for_provider(provider) else {
+        return false;
+    };
+    let compose_display = if is_inline {
+        crate::output::ComposeDisplay::InlineCompose
+    } else {
+        crate::output::ComposeDisplay::Compose
+    };
+    let header_env_plan = env::EnvPlan {
+        package_context,
+        ..Default::default()
+    };
+    crate::output::log_wrapper_header(
+        profile,
+        yolo,
+        !session_interactive,
+        session_interactive,
+        detail_requested,
+        repo,
+        Some(&compose_display),
+        sequence,
+        operation,
+        None, // no inline prompt text for compose
+        Some(file_ref),
+        &header_env_plan,
+        term,
+    );
+    true
+}
+
 /// Execute a composition request through the wrapper-grade pipeline.
 ///
 /// Handles provider selection, environment setup, harness detection from
@@ -781,7 +844,6 @@ pub(crate) fn execute_composition_request_inner(
     startup_timings: Option<crate::perf::StartupTimings>,
     perf_enabled: bool,
 ) -> Result<SingleCompositionOutcome> {
-    let total_start = std::time::Instant::now();
     let mut perf_collector = if perf_enabled {
         startup_timings.map(|timings| {
             crate::perf::CommandPerfCollector::new_with_composition(
@@ -793,7 +855,10 @@ pub(crate) fn execute_composition_request_inner(
     } else {
         None
     };
-    let mut last_checkpoint = total_start;
+    // Local checkpoint origin for the env-setup sub-stage chain only. The
+    // headline is the threaded wall-clock baseline sampled at report build,
+    // not this mid-flight timer (TM-1).
+    let mut last_checkpoint = std::time::Instant::now();
     /// Helper to record a named sub-stage timing and reset the checkpoint.
     fn record_substage(
         collector: &mut Option<crate::perf::CommandPerfCollector>,
@@ -839,9 +904,7 @@ pub(crate) fn execute_composition_request_inner(
             iteration_signals: None,
         };
         if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&collector.into_report());
         }
         return Ok(outcome);
     }
@@ -1037,38 +1100,26 @@ pub(crate) fn execute_composition_request_inner(
 
     let effective_non_interactive = !request.session_interactive;
 
-    // -- Early header --------------------------------------------------------
-    // Emit the execution line as early as possible so the user sees feedback
-    // before expensive env/MCP/harness work begins.
+    // -- Header ----------------------------------------------------------
+    // `compose` / `inline-compose` resolve the agent eagerly and render
+    // the execution line up front (before the expensive prepare/compose
+    // work) so the user sees it immediately; `request.header_emitted` is
+    // set in that case and we must not re-emit. The in-pipeline emit below
+    // covers callers that did not pre-render — the dry-run-unresolved
+    // corner (agent only known after resolution here) and sequence steps.
 
-    let compose_display = if is_inline {
-        Some(crate::output::ComposeDisplay::InlineCompose)
-    } else {
-        Some(crate::output::ComposeDisplay::Compose)
-    };
-
-    // Show the original file reference (e.g., "@prompts/commit.md")
-    let compose_source_hint = request.file_ref.clone();
-
-    if !silent {
-        let header_env_plan = env::EnvPlan {
-            package_context: launch_workspace.package_context.clone(),
-            ..Default::default()
-        };
-
-        crate::output::log_wrapper_header(
-            profile,
+    if !silent && !request.header_emitted {
+        emit_execution_header(
+            provider,
             request.yolo,
-            effective_non_interactive,
             request.session_interactive,
             detail_requested,
             request.repo,
-            compose_display.as_ref(),
+            is_inline,
             request.sequence,
             request.operation.as_deref(),
-            None, // no inline prompt text for compose
-            Some(&compose_source_hint),
-            &header_env_plan,
+            &request.file_ref,
+            launch_workspace.package_context.clone(),
             &term,
         );
     }
@@ -1091,6 +1142,7 @@ pub(crate) fn execute_composition_request_inner(
         needs_repo_shadow_home,
         needs_mcp_shadow_home || needs_repo_shadow_home,
         launch_workspace.clone(),
+        perf_enabled,
     )?;
 
     // -- Operation env override -----------------------------------------------
@@ -1109,7 +1161,22 @@ pub(crate) fn execute_composition_request_inner(
             .insert(key.clone().into(), value.clone().into());
     }
 
-    record_substage(&mut perf_collector, &mut last_checkpoint, "child env build");
+    // `child env build` carries a measured breakdown (env sanitize / shadow
+    // home sync → repo root detect) so the substage's cost is itemized rather
+    // than opaque. The launch-child root is threaded through, so `repo root
+    // detect` is microsecond-scale local work and the shadow sync's filesystem
+    // linking is what remains; only the fallback (no supplied root) still pays
+    // the sniff git walk. The children are `Breakdown`, so they do not enter
+    // the substage's reconciliation (TR-1).
+    if let Some(c) = perf_collector.as_mut() {
+        let elapsed = last_checkpoint.elapsed();
+        c.mark_substage_with_children(
+            "child env build",
+            elapsed,
+            std::mem::take(&mut env_plan.perf_substages),
+        );
+        last_checkpoint = std::time::Instant::now();
+    }
 
     let mut effective_prompt = request.prepared.prompt.clone();
     let mut mcp_extra_args = Vec::new();
@@ -1189,10 +1256,12 @@ pub(crate) fn execute_composition_request_inner(
         if let Some(injector) = injector_for_provider(provider) {
             if !session.servers.is_empty() {
                 if needs_mcp_shadow_home && env_plan.shadow_home_path.is_none() {
-                    let (shadow_env, shadow_path) = super::repo_home::build_repo_home_env(
+                    let (shadow_env, shadow_path, _) = super::repo_home::build_repo_home_env(
                         provider,
                         env_plan.child_cwd.as_path(),
                         false,
+                        false,
+                        Some(env_plan.child_cwd.as_path()),
                     )?;
                     for (key, value) in shadow_env {
                         env_plan.env.insert(key, value);
@@ -1653,6 +1722,26 @@ pub(crate) fn execute_composition_request_inner(
         })?;
     }
 
+    // Emit the preflight-complete indicator for direct compose and
+    // inline-compose runs. This must sit *before* the dry-run seam below:
+    // dry-run returns early, so a completion message placed after it would
+    // never render for dry-run — leaving the "Starting pre-flight checks"
+    // spinner without its matching "complete" line. Sequence runs handle
+    // their own preflight messaging in the orchestrator
+    // (`wrap::sequence::execute_sequence`) and must not re-emit per step.
+    if !request.sequence && !silent && !quiet {
+        let compose_label = if is_inline {
+            "inline composition"
+        } else {
+            "composition"
+        };
+        let status = Status::from_prose(format!(
+            "<b>Preflight:</b> shell commands approved for this {compose_label}"
+        ))
+        .state(StatusState::Info);
+        log::message(&status.render(&term));
+    }
+
     // --dry-run seam: the full composition pipeline (compose, real shell
     // expansion, shell approval, harness pre-checks) has now run. Stop here —
     // before any provider launches — and emit the composed artifacts:
@@ -1684,33 +1773,15 @@ pub(crate) fn execute_composition_request_inner(
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&collector.into_report());
         }
         return Ok(outcome);
     }
 
-    // Emit a single preflight-complete indicator for direct compose and
-    // inline-compose runs. Sequence runs handle their own preflight
-    // messaging in the orchestrator (`wrap::sequence::execute_sequence`)
-    // and must not re-emit per step.
-    if !request.sequence && !silent && !quiet {
-        let compose_label = if is_inline {
-            "inline composition"
-        } else {
-            "composition"
-        };
-        let status = Status::from_prose(format!(
-            "<b>Preflight:</b> shell commands approved for this {compose_label}"
-        ))
-        .state(StatusState::Info);
-        log::message(&status.render(&term));
-    }
-
     // -- Preflight output (env details + prompt block) ---------------------
-    // The header was already emitted early (right after profile lookup).
-    // Now emit the env details and prompt block with full env_plan.
+    // The execution header was already emitted (up front by compose /
+    // inline-compose, or above for callers that did not pre-render). Now
+    // emit the env details and prompt block with the full env_plan.
 
     // Detect the environment from the source repo root when available so
     // that git/repo metadata reflects the composition source, not the
@@ -1891,9 +1962,7 @@ pub(crate) fn execute_composition_request_inner(
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&collector.into_report());
         }
         Ok(outcome)
     } else {
@@ -1991,9 +2060,7 @@ pub(crate) fn execute_composition_request_inner(
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
-            let total = total_start.elapsed();
-            let report = collector.into_report(total);
-            eprint!("{}", crate::perf::render_perf_report(&report));
+            crate::perf::emit_report(&collector.into_report());
         }
         Ok(outcome)
     }
@@ -2108,6 +2175,7 @@ fn execute_without_harness(
                     dispatch_context,
                     Some(&result.section_stream),
                     false,
+                    result.agent_pid,
                 );
             } else {
                 summary::emit_minimal_composition_summary(
@@ -2116,6 +2184,7 @@ fn execute_without_harness(
                     profile,
                     env_context,
                     dispatch_context,
+                    None,
                 );
             }
             Ok(agent_exit)
