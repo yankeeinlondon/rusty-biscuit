@@ -18,6 +18,7 @@ description: A record of novel things learned about how to best perform commits 
 - A staged file may have no actual diff (e.g. formatting that already matched). Committing it is harmless but unnecessary.
 - New files show as a diff against `/dev/null` under `git diff --staged` — that is normal; confirm staging with `git status --short`.
 - Review staged content with `git diff --staged` before committing — git will happily commit unresolved conflict markers.
+- `git diff --staged --find-renames --name-status -- <source-path>` (pathspec restricted to only the source side) shows only `D` (deletion) entries for staged renames, **not** `R`. Rename detection reconstructs pairs only when *both* sides are in the diff set; restricting the pathspec to the source half hides the rename. To verify that a staged move is actually a rename (vs. a delete + add), run the unfiltered `git diff --staged --find-renames --name-status` or include both old and new paths in the pathspec. A subagent who only sees `D` here may incorrectly conclude a rename is a pure deletion.
 
 ## Path-Limited Commits
 
