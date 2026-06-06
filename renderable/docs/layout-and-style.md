@@ -418,20 +418,19 @@ Known gaps:
 ## 7. darkmatter migration
 
 `DarkmatterPage` keeps its public builder API (`with_margin`, `with_padding`,
-`with_max_width`, alignment/fill setters) unchanged. Internally it now builds a
+`with_max_width`, alignment/fill setters) unchanged. Internally it builds a
 `renderable::layout::Layout` from its page settings rather than doing bespoke
 `PageMargin` arithmetic.
 
-The page-layout value types — `PageMargin`, `PagePadding`, `PageFill`,
-`PageAlignment` — are now `#[deprecated]` in favor of `renderable::layout`.
-They remain `pub` (the darkmatter CLI builds them from flags) and carry
-conversion bridges:
-
-- `From<PageMargin>` / `From<PagePadding>` → `renderable::layout::Edges`
-- `From<PageAlignment>` → `renderable::layout::Alignment`
-- `TryFrom<WidthUnit>` → `Length`, and `TryFrom<PageFill>` →
-  `Option<TargetValue<Length>>` for the width-cap meaning, with a separate
-  `PageFill::margin_contribution()` for the inset meaning.
+The darkmatter cutover is complete. The deprecated page-layout value types —
+`PageMargin`, `PagePadding`, `PageFill`, `PageAlignment`, `WidthUnit`, and
+`PageComponent::Lists` — and their conversion bridges have been **deleted**.
+`DarkmatterPage` now stores `renderable::layout::Edges`,
+`TargetValue<Length>`, and `ComponentPolicy` directly; `style:` frontmatter
+lowers straight into `renderable::layout::Layout` / `renderable::style::Style`
+via `ComponentPolicy`, and the render-tree folds perform all width, padding,
+alignment, and CSS resolution. `DarkmatterPage` survives as a slim,
+renderable-typed page frame.
 
 ### `style:` frontmatter status
 
