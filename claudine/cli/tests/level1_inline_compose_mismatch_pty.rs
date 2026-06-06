@@ -1,22 +1,18 @@
-//! L2 PTY / real-terminal capture tests for the inline-compose / sequence
+//! L1 PTY / real-terminal capture tests for the inline-compose / sequence
 //! mismatch diagnostic.
 //!
-//! These address the second High finding in
-//! `claudine/fixes/2026-06-06-inline-sequence/review-2.md`: the piped
-//! `assert_cmd` tests in `inline_compose_sequence_mismatch.rs` always exercise
-//! the non-TTY (YAML-withheld) branch, so they cannot prove that the real
-//! command, with a TTY error stream, (a) takes the TTY branch and emits the
-//! verbatim authored YAML, and (b) renders the styled diagnostic and the OSC 8
-//! document link.
+//! These prove the real `claudine` binary, with stderr attached to a PTY,
+//! (a) takes the TTY branch and emits the verbatim authored YAML, and
+//! (b) renders the styled diagnostic and the OSC 8 document link.
 //!
 //! Each test spawns the real `claudine` binary with stderr attached to a PTY so
 //! `std::io::stderr().is_terminal()` is true (TTY branch) and forces an
 //! optimistic color terminal (`FORCE_COLOR=1`) so the SGR + OSC 8 pipeline runs
-//! at full fidelity. Gated by `require_level!(Level::L2, pty_available(), …)` so
-//! they skip cleanly without a PTY and panic under `BISCUIT_TEST_LEVEL_REQUIRED=2`.
+//! at full fidelity. Gated by `require_level!(Level::L1, pty_available(), …)` so
+//! they skip cleanly without a PTY and panic under `BISCUIT_TEST_LEVEL_REQUIRED=1`.
 //!
 //! Exact YAML line-ending fidelity (LF vs CRLF, delimiter exclusion) is proved
-//! precisely by the L1 capture/render tests in
+//! precisely by the unit capture/render tests in
 //! `claudine/lib/src/composition/error.rs` and `…/composition/mismatch.rs`; a
 //! PTY rewrites `\n` to `\r\n` on output, so these tests assert per-line
 //! verbatim fragments rather than the exact multi-line payload.
@@ -100,8 +96,8 @@ fn run_mismatch_under_pty() -> (String, std::path::PathBuf) {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_mismatch_takes_tty_branch_with_verbatim_yaml() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_pty_mismatch_takes_tty_branch_with_verbatim_yaml() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let (transcript, _doc) = run_mismatch_under_pty();
 
     assert!(
@@ -144,8 +140,8 @@ fn level2_pty_mismatch_takes_tty_branch_with_verbatim_yaml() {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_mismatch_emits_sgr_and_osc8_link() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_pty_mismatch_emits_sgr_and_osc8_link() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let (transcript, doc) = run_mismatch_under_pty();
 
     // Styling fired: the status block border and inline `<cyan>` tags emit SGR

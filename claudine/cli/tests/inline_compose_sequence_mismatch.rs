@@ -8,7 +8,7 @@
 //! tests: `assert_cmd` pipes stderr (never a TTY), so every run exercises the
 //! non-TTY (YAML-withheld) branch. The real-terminal TTY full-diagnostic path
 //! (criteria 11, 13, 14 — verbatim YAML, SGR styling, OSC 8 link) is covered
-//! by the L2 PTY tests in `level2_inline_compose_mismatch_pty.rs`; the plain
+//! by the L1 PTY tests in `level1_inline_compose_mismatch_pty.rs`; the plain
 //! readability contract (criterion 16) is covered both here (raw stderr has no
 //! escape byte) and by the L1 render tests in
 //! `claudine/lib/src/composition/error.rs`.
@@ -485,7 +485,7 @@ fn rejection_has_no_side_effects() {
     // sentinel if composition (which never runs) reached it.
     let md_file = workspace.path().join("doc.md");
     let original = format!(
-        "---\nprompt: Do something\nsequence: []\n---\nBody $(touch {sentinel})\n",
+        "---\nprompt: Do something\nsequence: []\n---\n::shell touch {sentinel}\n",
         sentinel = shell_sentinel.display()
     );
     fs::write(&md_file, &original).unwrap();
