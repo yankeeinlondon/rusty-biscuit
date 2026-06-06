@@ -2253,9 +2253,17 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
     }
 
     let mut decls: Vec<String> = Vec::new();
+    // The renderable width contract is content-box: `width` is the content box
+    // and `padding` / `border` are added around it. A page stylesheet may ship a
+    // global `* { box-sizing: border-box }` reset, which would silently
+    // reinterpret the lowered `width` as a border-box width. Emitting
+    // `box-sizing:content-box` on every node that lowers a non-default width,
+    // padding, or border keeps the contract under any such reset.
+    let mut needs_content_box = false;
     if !inline && let Some(layout) = attrs.layout_ref() {
         let css = layout_to_css(layout);
         if !css.is_empty() {
+            needs_content_box |= layout_lowers_box(layout);
             decls.push(css);
         }
     }
@@ -2266,13 +2274,48 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
     if let Some(style) = attrs.style_ref().filter(|s| !s.is_empty()) {
         let css = style_css_declarations(style, !inline);
         if !css.is_empty() {
+            needs_content_box |= style_draws_border(style);
             decls.push(css);
         }
+    }
+    if needs_content_box {
+        // Prepend so the contract is set before the width/padding it governs.
+        decls.insert(0, "box-sizing:content-box".into());
     }
     if !decls.is_empty() {
         out.push(HtmlAttribute::Other("style".into(), decls.join(";")));
     }
     out
+}
+
+/// Whether a [`Layout`](crate::layout::Layout) lowers a non-default `width` or
+/// `padding` for the browser — the box-model declarations whose width contract
+/// is content-box. Mirrors the emission conditions in [`layout_to_css`].
+fn layout_lowers_box(layout: &crate::layout::Layout) -> bool {
+    use crate::layout::{Length, Width};
+    use crate::target::RenderTarget;
+    // The default `Edges` resolve to `Some(Length::Zero)` (not `None`), so a
+    // zero side is a no-op padding that does not widen the box.
+    let p = &layout.padding;
+    let padded = [&p.top, &p.right, &p.bottom, &p.left]
+        .into_iter()
+        .any(|tv| !matches!(tv.resolve(RenderTarget::Browser), None | Some(Length::Zero)));
+    let sized = match &layout.width {
+        Width::Auto => false,
+        Width::FitContent => true,
+        Width::Fixed(tv) => tv.resolve(RenderTarget::Browser).is_some(),
+    };
+    padded || sized
+}
+
+/// Whether a [`Style`](crate::style::Style) draws at least one border edge — the
+/// case where `border` widens the box and the content-box contract matters.
+fn style_draws_border(style: &crate::style::Style) -> bool {
+    use crate::style::BorderSides;
+    style
+        .border
+        .as_ref()
+        .is_some_and(|b| !matches!(b.sides, BorderSides::None))
 }
 
 /// Lowers the CSS-bearing layers of a [`Style`](crate::style::Style) to an
@@ -4031,6 +4074,57 @@ mod tests {
         };
         let css = style_css_declarations(&style, true);
         assert!(css.contains("border-style:solid"), "{css}");
+    }
+
+    #[test]
+    fn width_and_padding_emit_box_sizing_content_box() {
+        use crate::layout::{Edges, Layout, Length, TargetValue, Width};
+
+        // A node lowering an explicit `width` + `padding` must carry
+        // `box-sizing:content-box` so a global `border-box` reset cannot
+        // reinterpret the width contract.
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            padding: Edges::x(Length::ch(2)),
+            ..Default::default()
+        });
+        let out = html(&para);
+        assert!(out.contains("box-sizing:content-box"), "{out}");
+        assert!(out.contains("width:20ch"), "{out}");
+        assert!(out.contains("padding-left:2ch"), "{out}");
+    }
+
+    #[test]
+    fn border_emits_box_sizing_content_box() {
+        use crate::style::{Border, BorderSides, Style};
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_style(&Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let out = html(&para);
+        assert!(out.contains("box-sizing:content-box"), "{out}");
+        assert!(out.contains("border-style:solid"), "{out}");
+    }
+
+    #[test]
+    fn plain_node_omits_box_sizing() {
+        use crate::layout::{Edges, Layout, Length};
+
+        // Margin alone is a transparent outer layer with no width contract, so
+        // it must not drag in a `box-sizing` declaration.
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            margin: Edges::x(Length::ch(2)),
+            ..Default::default()
+        });
+        let out = html(&para);
+        assert!(!out.contains("box-sizing"), "{out}");
     }
 
     // ── RT-PROGRESS-001: browser progress ──────────────────────────────────
