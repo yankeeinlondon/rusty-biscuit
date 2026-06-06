@@ -156,19 +156,26 @@ Each renderer consumes `Layout` on its own terms.
 
 **Browser** (`renderable/src/tree/render/browser.rs`, `layout_to_css`) lowers a
 node's `Layout` to an inline `style` attribute: margins to `margin-*`, vertical
-sides (`top`/`bottom`) lowered to `lh` units, `max_width` to `max-width`, and
-alignment to `auto` margins **only when a `max_width` is present**. `word_wrap`
-becomes `white-space:nowrap` (`None`) or `overflow-wrap:break-word` (any
-wrapping variant).
+sides (`top`/`bottom`) lowered to `lh` units, `padding` to `padding-*` (same
+unit rules as margin), `width` to a `width` declaration (`Auto` omits it,
+`FitContent` → `width:fit-content`, `Fixed(tv)` → an explicit `width`),
+`max_width` to `max-width`, and alignment to `auto` margins **only when a
+`max_width` is present**. `word_wrap` becomes `white-space:nowrap` (`None`) or
+`overflow-wrap:break-word` (any wrapping variant).
 
 **Terminal** (`biscuit-terminal`, `render_tree::render::render_with_layout` and
-`LayoutTerminalExt`) resolves margins to whole cells against the available
-width via the shared `resolve_cells` helper (`Ch(n)`→`n`, `Percent(p)`→
-`round(width*p/100)`, `Zero`/`Css`/absent→`0`, resolving for
-`RenderTarget::Terminal`). It narrows the child render width by left+right
-margins, prefixes each line, block-aligns the component as a unit, and emits
-top/bottom margins as blank rows. The legacy `LayoutTerminalExt` retains
-`apply_layout` / `apply_block_layout` for the bespoke (non-tree) component path.
+`LayoutTerminalExt`) resolves margins, `padding`, and the `width` modes to
+whole cells against the available width via the shared `resolve_cells` helper
+(`Ch(n)`→`n`, `Percent(p)`→`round(width*p/100)`, `Zero`/`Css`/absent→`0`,
+resolving for `RenderTarget::Terminal`). It resolves the content-box width from
+`layout.width` — `Auto` fills `available − margin − padding − border`,
+`Fixed(tv)` resolves `tv` clamped to that cap, `FitContent` renders once at the
+cap then re-renders at the measured widest line — narrows the child render
+width accordingly, prefixes each line, block-aligns the component as a unit,
+and emits top/bottom margins as blank rows. The `padding` box is painted by
+`paint_text` with `Style.background`; the margin stays transparent. The legacy
+`LayoutTerminalExt` retains `apply_layout` / `apply_block_layout` for the
+bespoke (non-tree) component path.
 
 > The terminal renderer **does not apply `max_width`** — it is a Browser-only
 > property. `max_width` only influences the terminal path indirectly, by being
@@ -294,12 +301,14 @@ than being re-implemented per renderer.
   dashed / dotted line style, per-side selection, and **rounded corners** via
   `Border::radius` (any non-zero radius selects the light-arc corner set; a
   heavy or double border has no arc variant and keeps square corners).
-> Terminal/browser painting of the `padding` box, `Width::FitContent` band
-> sizing (`content_widest_line`), and `Background` tints is deferred to the
-> *renderer-folds* sub-spec. This vocabulary change fixes the types; the
-> renderers that lower `padding` / `width` land separately. Until then the
-> terminal `fit-content` realization must reproduce the former `Fill::Padded` /
-> `Indented` band sizing.
+> Terminal painting of the `padding` box, `Width` resolution (`Auto` /
+> `Fixed` / `FitContent`), and `Background` tints landed in the *renderer-folds*
+> sub-spec. `render_with_layout` resolves the content-box width and clamps it
+> against `available − margin − padding − border`; `FitContent` measures the
+> content's widest line then re-renders at that width. `paint_text` paints the
+> `padding` box with `Style.background`, and the implicit one-cell interior
+> border gap was removed so `Layout.padding` is the single source of inner
+> spacing.
 
 > **Code blocks are outside this `Style` primitive.** Syntax-highlighted code
 > panels are driven by darkmatter's `ThemePair` + `ColorMode`, not `Style`. As a
@@ -325,9 +334,14 @@ layers to CSS during fragment emission:
   selectors and the per-mode color), `opacity:0.6`, and a small CSS
   keyframe animation respectively.
 
-`border` lowering to CSS is **not yet wired** — the helper explicitly leaves
-that layer for a follow-up. The terminal target remains the only consumer of
-border glyphs today.
+`border` is lowered to CSS by `style_css_declarations`: `weight` maps to a
+`border-width` px step (`Thin`→1px, `Medium`→2px, `Thick`→3px), `line_style` to
+the matching `border-style` keyword (`Solid`/`Dashed`/`Dotted`/`Double`),
+`color` through the existing `PerMode`→CSS color path, and `radius` to
+`border-radius`. `BorderSides::All` emits the `border-*` shorthands;
+`BorderSides::Sides { .. }` emits per-side `border-{side}-{width,style,color}`
+for each enabled edge; `BorderSides::None` emits nothing. The terminal target
+also renders border glyphs.
 
 **Markdown** ignores `Style` entirely — Markdown body output is byte-identical
 whether or not a node carries a style, with no diagnostic.
@@ -378,18 +392,13 @@ blink) is unit-tested in `tree/render/browser.rs`'s test module.
 
 Known gaps:
 
-- **Browser `Style` lowering is partial.** Color, background, emphasis
+- **Browser `Style` lowering is complete.** Color, background, emphasis
   (the `<strong>` / `<em>` / `<s>` wrappers for inline, the equivalent
-  CSS for block), underline variants, dim, and blink are wired. The
-  box-painting `border` layer is intentionally **not** lowered yet
-  (`style_css_declarations` documents the gap explicitly). Adding it requires
-  defining the CSS semantics for the typed `Border` weight / line-style /
-  radius matrix. Lowering `padding` and `Width` (the box-model replacement for
-  the deleted `Fill` band) is *renderer-folds* work.
-- **`render_border` width mismatch.** The terminal border's top/bottom rule is
-  two columns narrower than the content row — the interior padding spaces are
-  not counted in the rule width. It affects square and rounded borders alike
-  and predates the `Style` migration; tracked for a separate fix.
+  CSS for block), underline variants, dim, and blink are wired, and the
+  box-painting `border` layer (weight / line-style / radius / per-side matrix)
+  now lowers to CSS via `style_css_declarations`. `padding` and `Width` (the
+  box-model replacement for the deleted `Fill` band) lower to `padding-*` and
+  `width` via `layout_to_css`.
 - **Darkmatter `style:` frontmatter is a separate policy layer.** Its v1
   schema is now wired through sub-spec #7 (see §7), but it applies page and
   component policy to `DarkmatterPage`; it does not mean Markdown frontmatter

@@ -190,10 +190,14 @@ or the typed slot struct.
 
 ## Browser Coverage
 
-Browser lowering currently covers `color`, `background`, and `emphasis`:
+Browser lowering covers `color`, `background`, `emphasis`, and `border`:
 inline bold/italic/strikethrough use semantic wrappers, block-level emphasis
 uses CSS declarations, and underline variants, dim, blink, and inverse
-(`filter:invert(1)`) lower to CSS.
-`border` is not lowered to Browser CSS yet; Terminal remains the only target
-that renders border glyphs. Terminal/browser painting of the `padding` box and
-`Width::FitContent` is deferred to the renderer-folds spec.
+(`filter:invert(1)`) lower to CSS. `border` lowers the full matrix — `weight` →
+`border-width` px step, `line_style` → `border-style`, `color` → `border-color`,
+`radius` → `border-radius`, with `BorderSides::All` using shorthands and
+`Sides { .. }` emitting per-side declarations. `Layout.padding` lowers to
+`padding-*` and `Width` to a `width` declaration (`Auto` omits it, `FitContent`
+→ `width:fit-content`, `Fixed` → an explicit length). The Terminal renderer
+paints the `padding` box with `Style.background` and resolves all three `Width`
+modes.
