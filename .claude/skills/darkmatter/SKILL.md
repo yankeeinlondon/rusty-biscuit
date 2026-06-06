@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 751ea2392b8b3231-d485d22058b46041
+hash: 751ea2392b8b3231-9d6c0450bcaf3373
 last_updated: 2026-06-06
 ---
 
@@ -181,8 +181,11 @@ the `biscuit-terminal` skill for terminal tree rendering.
   top-level `hr:` and inline `{ style: ... }` remain deprecated aliases.
 - The darkmatter cutover is complete: deprecated `PageMargin`, `PagePadding`,
   `PageAlignment`, `PageFill`, `WidthUnit`, and `PageComponent::Lists` have
-  been deleted. `style:` frontmatter lowers **directly** into
-  `renderable::layout::Layout` / `renderable::style::Style` via
-  `ComponentPolicy`; the renderer folds perform all width, padding, alignment,
-  and CSS resolution. `DarkmatterPage` survives as a slim, renderable-typed
-  page frame.
+  been deleted. `style:` frontmatter lowers **directly** into a per-component
+  `ComponentPolicy` — a `renderable::layout::Layout` plus `color` / `bg_color`
+  kept as `StyleColor` so opacity survives to the HTML target. The `decorate`
+  pass projects layout and color onto the render-tree nodes'
+  `renderable::style::Style` (opacity rides along as a `darkmatter.style`
+  render hint for the browser), and the renderer folds perform all width,
+  padding, alignment, and CSS resolution. `DarkmatterPage` survives as a slim,
+  renderable-typed page frame.

@@ -3,8 +3,9 @@
 //!
 //! [`DarkmatterPage`] owns a slim, renderable-typed page frame (margin, padding,
 //! page background, max width) and a per-component [`ComponentPolicy`] map
-//! (`layout` + optional `style`) populated from `style:` frontmatter. The page
-//! delegates to the render-tree terminal and HTML renderers; per-component
+//! (`layout` plus optional `color` / `bg_color`) populated from `style:`
+//! frontmatter. The page delegates to the render-tree terminal and HTML
+//! renderers; per-component
 //! width, padding, alignment, and color are written onto tree nodes by
 //! [`decorate_document`](crate::markdown::render_tree::decorate::decorate_document)
 //! and resolved by the shared renderer folds.
@@ -43,9 +44,10 @@
 //!
 //! ## Direct `style:` lowering
 //!
-//! `style:` frontmatter is lowered **directly** into `renderable::layout::Layout`
-//! and `renderable::style::Style` via [`ComponentPolicy`], with no
-//! down-conversion to deprecated types:
+//! `style:` frontmatter is lowered **directly** into a per-component
+//! [`ComponentPolicy`] — a `renderable::layout::Layout` plus colors retained as
+//! [`StyleColor`](crate::style::StyleColor) — with no down-conversion to
+//! deprecated types:
 //!
 //! - `align` → `Layout.alignment`
 //! - `fill: pad <len>` → `Layout.padding` (symmetric or aligned side)
@@ -53,7 +55,15 @@
 //! - `fill: max <len>` → `Layout.max_width`
 //! - `width <len>` → `Layout.width = Width::Fixed`
 //! - `margin-*` → `Layout.margin` (`Edges`)
-//! - `color`/`bg-color` → `ComponentPolicy.style` (`Style.color` / `Style.background`)
+//! - `color`/`bg-color` → `ComponentPolicy.color` / `ComponentPolicy.bg_color`,
+//!   kept as [`StyleColor`](crate::style::StyleColor) so Tailwind/hex opacity
+//!   survives to the HTML target
+//!
+//! The `Layout` and colors are projected onto each render-tree node's
+//! [`Style`](renderable::style::Style) by
+//! [`decorate_document`](crate::markdown::render_tree::decorate::decorate_document);
+//! the terminal `Style` carries the color only, while any opacity is emitted on
+//! the browser target via a `darkmatter.style` render hint.
 //!
 //! The deprecated `PageMargin`, `PagePadding`, `PageAlignment`, `PageFill`,
 //! `WidthUnit`, and `PageComponent::Lists` vocabulary has been removed.
