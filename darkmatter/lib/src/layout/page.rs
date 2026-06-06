@@ -1308,13 +1308,30 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> 
     // Build page-level wrapper styles. The page frame retains the authored
     // `Length`, so the browser emits the original unit (`%` percentages resolve
     // against the viewport, not the terminal-cell count the terminal resolves).
+    //
+    // Horizontal placement: when the author leaves both side margins at their
+    // default (zero), a `max-width`-capped frame centers in the viewport via
+    // `auto` side margins — the browser convention the spec retains for capped
+    // page content. Explicitly authored side margins are emitted verbatim and
+    // suppress auto-centering, mirroring the terminal frame's left/right margin
+    // placement so the two targets agree.
+    let center_frame =
+        length_is_zero(&ctx.page_margin.left) && length_is_zero(&ctx.page_margin.right);
+    let (ml_css, mr_css) = if center_frame {
+        ("auto".to_string(), "auto".to_string())
+    } else {
+        (
+            length_to_css_frame(&ctx.page_margin.left),
+            length_to_css_frame(&ctx.page_margin.right),
+        )
+    };
     let mut wrapper_styles = String::new();
     wrapper_styles.push_str(&format!(
         "margin: {mt} {mr} {mb} {ml}; ",
         mt = length_to_css_frame(&ctx.page_margin.top),
-        mr = length_to_css_frame(&ctx.page_margin.right),
+        mr = mr_css,
         mb = length_to_css_frame(&ctx.page_margin.bottom),
-        ml = length_to_css_frame(&ctx.page_margin.left)
+        ml = ml_css,
     ));
     wrapper_styles.push_str(&format!(
         "padding: {pt} {pr} {pb} {pl}; ",
@@ -2094,6 +2111,24 @@ mod tests {
         let html = page.render_to_browser(&md).unwrap();
         assert!(html.contains("<div class=\"darkmatter-page\""));
         assert!(html.contains("max-width: 100ch"));
+        // Default (zero) side margins center the capped frame via `auto` sides.
+        assert!(
+            html.contains("margin: 0ch auto 0ch auto"),
+            "max-width frame with default margins should center via auto sides: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_render_authored_side_margins_suppress_centering() {
+        let term = Terminal::new_optimistic(120);
+        // Explicit side margins are the author's horizontal placement; the frame
+        // keeps them verbatim instead of overriding with `auto` centering.
+        let page = DarkmatterPage::new(&term).with_margin_x(3).with_max_width(100);
+        let md: Markdown = "# Hello\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(html.contains("margin: 0ch 3ch 0ch 3ch"), "authored side margins must be preserved: {html}");
+        assert!(!html.contains("auto"), "authored side margins must suppress auto-centering: {html}");
     }
 
     #[test]
