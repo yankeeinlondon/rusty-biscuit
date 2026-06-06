@@ -488,3 +488,69 @@ geometry.
 
 Status: `BISCUIT_BROWSER_REQUIRED=1 cargo test -p darkmatter --test
 browser_render` — 14 passed.
+
+## Review 4 Resolutions (2026-06-06)
+
+Addresses [`review-4.md`](./review-4.md), the single High finding: the browser
+page frame no longer centered when `max-width` constrained the wrapper.
+
+- **Finding 1 — browser page `max-width` did not center the page frame.**
+  `wrap_browser_html` emitted the authored page margins verbatim, so the
+  default (zero) side margins left a `max-width`-capped `.darkmatter-page`
+  left-aligned in the viewport. The spec retains page-frame max-width
+  centering, so the wrapper now emits `auto` left/right margins when both side
+  margins are at their default. Explicitly authored side margins
+  (`with_margin`/`with_margin_x`/`page.margin`) are emitted verbatim and
+  suppress auto-centering, mirroring the terminal frame's left/right margin
+  placement so the two targets agree (`darkmatter/lib/src/layout/page.rs`,
+  `wrap_browser_html`).
+  - **Browser-tier used geometry.**
+    `browser_render::browser_page_max_width_centers_frame` renders
+    `page: max-width: 40ch` with default margins and asserts the wrapper's
+    computed `margin-left` == `margin-right` (equal, non-zero auto-resolved px
+    offsets from the viewport edges) and a positive used `max-width` px — the
+    centering the review flagged as having only declaration-level coverage.
+  - **L1 guards.** `browser_render_with_max_width` now asserts the
+    `margin: 0ch auto 0ch auto` centering string;
+    `browser_render_authored_side_margins_suppress_centering` proves authored
+    side margins are preserved and emit no `auto`.
+  - The `pronounced_background_snapshot` insta snapshot was updated for the
+    default-margin page frame's new `margin: 0ch auto 0ch auto` (centering)
+    line; only that margin declaration changed.
+
+Status: `BISCUIT_BROWSER_REQUIRED=1 cargo test -p darkmatter --test
+browser_render` — 15 passed; `cargo test -p darkmatter --lib` — all passed.
+
+## Review 5 Resolutions (2026-06-06)
+
+Addresses [`review-5.md`](./review-5.md), the single Medium finding:
+authoritative docs described a `ComponentPolicy.style` field that does not
+exist, hiding the implemented `StyleColor`-retention / opacity-hint path.
+
+- **Finding 1 — docs named a non-existent `ComponentPolicy.style` field.** The
+  implementation stores component colors as `ComponentPolicy.color` /
+  `ComponentPolicy.bg_color`, kept as `StyleColor` (not lowered into
+  `renderable::style::Style`) so Tailwind/hex **opacity** survives to the HTML
+  target; the `decorate` pass projects the `Color` onto each node's `Style` and
+  records opacity separately as a `darkmatter.style` render hint the browser
+  lowers to `rgba(...)` (`darkmatter/lib/src/layout/page.rs:31-44`,
+  `darkmatter/lib/src/markdown/render_tree/decorate.rs:151-202`). The
+  `page.rs` docstring already described this accurately; three other locations
+  contradicted it and were corrected:
+  - `darkmatter/lib/src/layout/mod.rs` — the `ComponentPolicy` map is now
+    described as `layout` plus optional `color` / `bg_color`, and the `style:`
+    lowering table maps `color`/`bg-color` to `ComponentPolicy.color` /
+    `ComponentPolicy.bg_color` (retained as `StyleColor`), with a note that the
+    `decorate` pass projects layout and color onto each node's `Style` and the
+    opacity rides the browser-only `darkmatter.style` hint.
+  - `renderable/docs/layout-and-style.md` (§7) — replaced the
+    "lowers straight into `renderable::style::Style` via `ComponentPolicy`"
+    claim with the `StyleColor`-retention + `decorate`-projection +
+    `darkmatter.style` opacity-hint description.
+  - `.claude/skills/darkmatter/SKILL.md` — same correction; `hash:` frontmatter
+    regenerated with `md hash`.
+
+Status: docs-only change. `cargo doc -p darkmatter --no-deps --lib` builds; the
+new intra-doc links (`crate::style::StyleColor`, `renderable::style::Style`)
+resolve. The two pre-existing `-D warnings` doc errors live in
+`markdown/mod.rs` and `schemas/mod.rs`, not in any file touched here.
