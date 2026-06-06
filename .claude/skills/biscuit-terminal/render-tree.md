@@ -91,14 +91,21 @@ table module's width-planning utilities (but not `Table::render()`).
 ## Layout
 
 The terminal tree renderer applies a block node's `renderable::layout::Layout`
-(read from `NodeAttrs::layout()`). It resolves each margin to whole cells
-against the available width via the shared `resolve_cells` helper
-(`Ch(n)`→`n`, `Percent(p)`→`round(width*p/100)`, `Zero`/`Css`/absent→`0`,
-resolving for `RenderTarget::Terminal`), narrows the child render width by
-left+right margins, prefixes each line, block-aligns the component as a unit,
-and emits top/bottom margins as blank rows. `max_width` is **not** applied
-(Browser-only). Migrated components seed their own `Layout` onto the
-projected node, so layout flows through whether a component is rendered via
+(read from `NodeAttrs::layout()`). It resolves margins, `padding`, and the
+`width` modes to whole cells against the available width via the shared
+`resolve_cells` helper (`Ch(n)`→`n`, `Percent(p)`→`round(width*p/100)`,
+`Zero`/`Css`/absent→`0`, resolving for `RenderTarget::Terminal`). The
+content-box width comes from `layout.width`: `Auto` fills
+`available − margin − padding − border`, `Fixed(tv)` resolves `tv` clamped to
+that cap, and `FitContent` renders once at the cap then re-renders at the
+measured widest line. It narrows the child render width accordingly, prefixes
+each line, block-aligns the component as a unit, and emits top/bottom margins as
+blank rows. The `padding` box is painted by `paint_text` with
+`Style.background`; the margin stays transparent. Drawn borders reserve only
+their glyph cells (one per vertical edge) — there is no implicit interior gap,
+so `Layout.padding` is the single source of inner spacing. `max_width` is
+**not** applied (Browser-only). Migrated components seed their own `Layout` onto
+the projected node, so layout flows through whether a component is rendered via
 the tree or composed bespoke.
 
 `LayoutTerminalExt` (`utils::layout`) — `apply_layout` / `apply_block_layout` /
