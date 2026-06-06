@@ -600,6 +600,56 @@ async fn browser_page_max_width_percent_computes_against_viewport() {
     }
 }
 
+/// Review-2 finding (High): a percentage **component** `max-width` (here a
+/// table) must resolve in the browser against the component's containing block —
+/// proving the component policy carries the authored `Length` onto the node and
+/// the browser fold preserves the percent rather than pre-resolving it to a cell
+/// count. The page-level percentage test above only exercises the
+/// `.darkmatter-page` wrapper; this targets a component node, the surface this
+/// feature moved layout onto.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_component_table_max_width_percent_resolves_against_container() {
+    if !require_browser() {
+        return;
+    }
+    let doc = style_page_doc(120, "table:\n  max-width: 50%", TABLE_MD);
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let table_max = harness
+        .computed_style("table", "max-width")
+        .await
+        .expect("computed style query");
+    assert!(
+        table_max != "none" && table_max != "<no-match>",
+        "browser must accept the component percentage max-width; got {table_max}",
+    );
+    // Chrome resolves a percentage max-width to a px used value against the
+    // table's containing block; assert that ratio is ~50% rather than a fixed
+    // cell count. Engines that report the literal percentage instead must at
+    // least preserve `50%` (proving the percent was not pre-resolved).
+    if table_max.ends_with("px") {
+        let container = harness
+            .computed_style("body", "width")
+            .await
+            .expect("computed style query");
+        let ratio = px(&table_max) / px(&container);
+        assert!(
+            (ratio - 0.5).abs() < 0.02,
+            "component max-width must resolve to ~50% of its containing block; \
+             got {table_max} of {container} (ratio {ratio})",
+        );
+    } else {
+        assert_eq!(
+            table_max, "50%",
+            "browser must preserve the authored percentage component max-width; got {table_max}",
+        );
+    }
+}
+
 /// A centered table (`alignment: center` + `max-width`) must compute equal,
 /// non-zero auto margins in a real browser.
 #[tokio::test]

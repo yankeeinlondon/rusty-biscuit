@@ -1273,7 +1273,7 @@ fn level2_tree_rich_image_node_paints_distinctive_pixels() {
 // Public post-cutover entry-point Level 2 coverage (review-1 finding 7)
 //
 // Every other test in this file drives the lower-level `render_terminal_document`
-// directly, or the decorated `DarkmatterPage::render` (legacy) path. None drove
+// directly, or the decorated `DarkmatterPage::render` path. None drove
 // the PUBLIC, post-flip terminal entry points users actually call —
 // `Markdown::as_terminal` and zero-config `DarkmatterPage::render` — through a
 // real terminal. Those entry points map options and wire the code renderer at an
@@ -1369,6 +1369,103 @@ fn level2_zero_config_page_render_renders_in_real_terminal() {
             frame.plain.contains(token),
             "zero-config page token {token:?} missing from real-terminal capture. plain:\n{}",
             frame.plain
+        );
+    }
+}
+
+/// Review-2 finding (High): percentage **page-frame** margin and max-width must
+/// resolve to the correct *visible* offset and content width in a real
+/// terminal, not just in-process. Level 1 covers the cell arithmetic
+/// (`page.rs::percent_frame_browser_emits_percent_terminal_resolves_cells`);
+/// this drives the resolved bytes through a real WezTerm pane so a regression in
+/// the decorated-frame offset/width is observable on the cell grid.
+///
+/// Built at the pane's true column width with `style.page.left-margin: 25%` and
+/// `style.page.max-width: 50%`, the captured paragraph rows must (a) begin at
+/// the 25%-of-width left offset and (b) cap their content at 50% of the
+/// post-margin width — mirroring [`length_to_cells`]'s `f32::round`.
+#[test]
+#[serial(level2_terminal)]
+fn level2_percent_page_frame_offset_and_width_in_real_terminal() {
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
+    }
+
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().unwrap();
+    let cols = harness
+        .pane_size()
+        .map(|s| s.cols as usize)
+        .unwrap_or(80)
+        .max(40);
+
+    // 25% left margin resolves against the full terminal width; 50% max-width
+    // resolves against the post-margin content width.
+    let expected_left = ((cols as f32) * 0.25).round() as usize;
+    let content_base = cols - expected_left;
+    let expected_max = ((content_base as f32) * 0.50).round() as usize;
+
+    let sentinel = "Sentinel_pct_frame";
+    let body = format!(
+        "---\nstyle:\n    page:\n        left-margin: 25%\n        max-width: 50%\n---\n\n\
+         {sentinel} lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod \
+         tempor incididunt ut labore et dolore magna aliqua ut enim ad minim veniam.\n"
+    );
+
+    let md = Markdown::try_from_content(&body).expect("parse markdown with style frontmatter");
+    let (style, _warnings) =
+        darkmatter::style::from_frontmatter(md.frontmatter()).expect("parse style frontmatter");
+    let term = Terminal::new_optimistic(cols as u32);
+    let page = darkmatter::style::apply_page_style(
+        DarkmatterPage::new(&term),
+        &style,
+        darkmatter::style::PageStyleOverrides::default(),
+    )
+    .expect("apply percentage page style");
+    let rendered = page.render(&md).expect("decorated percent frame must render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("percent_frame.ansi");
+    fs::write(&path, rendered).unwrap();
+
+    run_with_sentinel(harness, "clear");
+    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+
+    // The rendered paragraph is the sentinel row plus its wrapped continuations;
+    // every content row carries the resolved left margin as leading spaces.
+    let content_rows: Vec<&str> = frame
+        .plain
+        .lines()
+        .skip_while(|l| !l.contains(sentinel))
+        .take_while(|l| !l.trim().is_empty())
+        .collect();
+
+    assert!(
+        content_rows.len() >= 2,
+        "50% max-width ({expected_max} cols of {content_base}) must wrap the paragraph onto \
+         multiple rows; got {} row(s). plain:\n{}",
+        content_rows.len(),
+        frame.plain
+    );
+
+    for (i, row) in content_rows.iter().enumerate() {
+        let leading = row.chars().take_while(|c| *c == ' ').count();
+        assert_eq!(
+            leading, expected_left,
+            "row +{i} must begin at the 25% left offset ({expected_left} cols of {cols}); \
+             got {leading}. row: {row:?}"
+        );
+        let content_width = row.trim_end().chars().count() - leading;
+        assert!(
+            content_width <= expected_max,
+            "row +{i} content width {content_width} exceeds the 50% cap ({expected_max} cols of \
+             {content_base}). row: {row:?}"
         );
     }
 }
