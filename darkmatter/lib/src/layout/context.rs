@@ -38,11 +38,9 @@ pub(crate) struct LayoutContext {
     pub page_color: Option<StyleColor>,
     /// Page background color.
     pub page_bg_color: Option<StyleColor>,
-    /// Per-component foreground colors.
-    pub component_colors: std::collections::HashMap<PageComponent, StyleColor>,
-    /// Per-component background colors.
-    pub component_bg_colors: std::collections::HashMap<PageComponent, StyleColor>,
-    /// Per-component renderable policies from `style:` frontmatter.
+    /// Per-component renderable policies from `style:` frontmatter — the single
+    /// source of truth for per-component layout **and** colors (including
+    /// opacity).
     pub component_policies: std::collections::HashMap<PageComponent, ComponentPolicy>,
     /// Global hyperlink style from `style.hyperlinks.*`.
     pub hyperlink_style: Option<CommonStyle>,
@@ -140,8 +138,6 @@ impl LayoutContext {
         options_color_mode: ColorMode,
         page_color: Option<StyleColor>,
         page_bg_color: Option<StyleColor>,
-        component_colors: std::collections::HashMap<PageComponent, StyleColor>,
-        component_bg_colors: std::collections::HashMap<PageComponent, StyleColor>,
         component_policies: std::collections::HashMap<PageComponent, ComponentPolicy>,
         hyperlink_style: Option<CommonStyle>,
         local_hyperlink_style: Option<CommonStyle>,
@@ -170,9 +166,7 @@ impl LayoutContext {
             || page_max_width.is_some()
             || !component_policies.is_empty()
             || page_color.is_some()
-            || page_bg_color.is_some()
-            || !component_colors.is_empty()
-            || !component_bg_colors.is_empty();
+            || page_bg_color.is_some();
 
         // Per spec, page background resolution uses the *terminal's* detected
         // color mode (so `Subtle` picks a dark-vs-light surface based on the
@@ -214,8 +208,6 @@ impl LayoutContext {
             render_color_mode,
             page_color,
             page_bg_color,
-            component_colors,
-            component_bg_colors,
             component_policies,
             hyperlink_style,
             local_hyperlink_style,
@@ -232,10 +224,10 @@ impl LayoutContext {
     ///
     /// Returns the component-specific color when set, otherwise falls back
     /// to the page-level color.
-    #[allow(dead_code)]
     pub fn component_color(&self, component: PageComponent) -> Option<&StyleColor> {
-        self.component_colors
+        self.component_policies
             .get(&component)
+            .and_then(|p| p.color.as_ref())
             .or(self.page_color.as_ref())
     }
 
@@ -243,10 +235,10 @@ impl LayoutContext {
     ///
     /// Returns the component-specific color when set, otherwise falls back
     /// to the page-level color.
-    #[allow(dead_code)]
     pub fn component_bg_color(&self, component: PageComponent) -> Option<&StyleColor> {
-        self.component_bg_colors
+        self.component_policies
             .get(&component)
+            .and_then(|p| p.bg_color.as_ref())
             .or(self.page_bg_color.as_ref())
     }
 
@@ -271,15 +263,31 @@ impl LayoutContext {
         let fg = merged
             .as_ref()
             .and_then(|s| s.color.clone())
-            .or_else(|| self.component_colors.get(&PageComponent::Hyperlinks).cloned())
+            .or_else(|| self.policy_color(PageComponent::Hyperlinks))
             .or_else(|| self.page_color.clone());
         let bg = merged
             .as_ref()
             .and_then(|s| s.bg_color.clone())
-            .or_else(|| self.component_bg_colors.get(&PageComponent::Hyperlinks).cloned())
+            .or_else(|| self.policy_bg_color(PageComponent::Hyperlinks))
             .or_else(|| self.page_bg_color.clone());
 
         (fg, bg)
+    }
+
+    /// The component's own foreground color from its [`ComponentPolicy`] (no
+    /// page-level fallback), cloned.
+    fn policy_color(&self, component: PageComponent) -> Option<StyleColor> {
+        self.component_policies
+            .get(&component)
+            .and_then(|p| p.color.clone())
+    }
+
+    /// The component's own background color from its [`ComponentPolicy`] (no
+    /// page-level fallback), cloned.
+    fn policy_bg_color(&self, component: PageComponent) -> Option<StyleColor> {
+        self.component_policies
+            .get(&component)
+            .and_then(|p| p.bg_color.clone())
     }
 
     /// Resolve the effective hyperlink [`CommonStyle`] for a link.
@@ -309,8 +317,8 @@ impl LayoutContext {
         let merged = if is_local {
             self.local_image_style.as_ref().map(|local| {
                 let base = CommonStyle {
-                    color: self.component_colors.get(&PageComponent::Images).cloned(),
-                    bg_color: self.component_bg_colors.get(&PageComponent::Images).cloned(),
+                    color: self.policy_color(PageComponent::Images),
+                    bg_color: self.policy_bg_color(PageComponent::Images),
                     ..CommonStyle::default()
                 };
                 crate::style::bespoke::merge_common_style(&base, local)
@@ -322,12 +330,12 @@ impl LayoutContext {
         let fg = merged
             .as_ref()
             .and_then(|s| s.color.clone())
-            .or_else(|| self.component_colors.get(&PageComponent::Images).cloned())
+            .or_else(|| self.policy_color(PageComponent::Images))
             .or_else(|| self.page_color.clone());
         let bg = merged
             .as_ref()
             .and_then(|s| s.bg_color.clone())
-            .or_else(|| self.component_bg_colors.get(&PageComponent::Images).cloned())
+            .or_else(|| self.policy_bg_color(PageComponent::Images))
             .or_else(|| self.page_bg_color.clone());
 
         (fg, bg)
@@ -351,8 +359,6 @@ mod tests {
             render_color_mode: ColorMode::Dark,
             page_color: None,
             page_bg_color: None,
-            component_colors: HashMap::new(),
-            component_bg_colors: HashMap::new(),
             component_policies: HashMap::new(),
             hyperlink_style: None,
             local_hyperlink_style: None,
@@ -379,6 +385,20 @@ mod tests {
         }
     }
 
+    fn color_policy(color: StyleColor) -> ComponentPolicy {
+        ComponentPolicy {
+            color: Some(color),
+            ..ComponentPolicy::default()
+        }
+    }
+
+    fn bg_color_policy(color: StyleColor) -> ComponentPolicy {
+        ComponentPolicy {
+            bg_color: Some(color),
+            ..ComponentPolicy::default()
+        }
+    }
+
     #[test]
     fn needs_decoration_true_when_page_color_set() {
         let mut c = ctx(100, 80);
@@ -396,8 +416,8 @@ mod tests {
     #[test]
     fn needs_decoration_true_when_component_color_set() {
         let mut c = ctx(100, 80);
-        c.component_colors
-            .insert(PageComponent::Tables, red_style_color());
+        c.component_policies
+            .insert(PageComponent::Tables, color_policy(red_style_color()));
         assert!(c.needs_decoration());
     }
 
@@ -405,8 +425,8 @@ mod tests {
     fn component_color_inherits_from_page() {
         let mut c = ctx(100, 80);
         c.page_color = Some(red_style_color());
-        c.component_colors
-            .insert(PageComponent::Tables, blue_style_color());
+        c.component_policies
+            .insert(PageComponent::Tables, color_policy(blue_style_color()));
 
         assert_eq!(
             c.component_color(PageComponent::Tables),
@@ -422,8 +442,8 @@ mod tests {
     fn component_bg_color_inherits_from_page() {
         let mut c = ctx(100, 80);
         c.page_bg_color = Some(red_style_color());
-        c.component_bg_colors
-            .insert(PageComponent::Tables, blue_style_color());
+        c.component_policies
+            .insert(PageComponent::Tables, bg_color_policy(blue_style_color()));
 
         assert_eq!(
             c.component_bg_color(PageComponent::Tables),

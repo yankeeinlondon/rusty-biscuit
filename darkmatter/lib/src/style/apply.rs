@@ -17,7 +17,6 @@
 
 use biscuit_terminal::components::horizontal_rule::{RuleAlignment, RuleStyle, RuleWeight};
 use renderable::layout::{Length, TargetValue, Width};
-use renderable::style::PerMode;
 use thiserror::Error;
 
 use crate::layout::{DarkmatterPage, PageComponent};
@@ -528,30 +527,23 @@ pub fn apply_color_style(
 
 /// Apply `color` and `bg-color` from a [`CommonStyle`] onto `page` for a
 /// single component.
+///
+/// The [`StyleColor`](crate::style::StyleColor) is carried whole onto the
+/// component's [`ComponentPolicy`](crate::layout::ComponentPolicy), preserving
+/// its optional opacity for the HTML target (the terminal drops it).
 fn apply_common_color(
     page: DarkmatterPage,
     component: PageComponent,
     style: &CommonStyle,
 ) -> DarkmatterPage {
-    let mut policy = page.component_policy(component).cloned().unwrap_or_default();
-    let mut s = policy.style.take().unwrap_or_default();
-    let mut changed = false;
-
+    let mut page = page;
     if let Some(color) = style.color.clone() {
-        s.color = Some(TargetValue::universal(PerMode::universal(color.color)));
-        changed = true;
+        page = page.with_component_color(component, color);
     }
     if let Some(bg_color) = style.bg_color.clone() {
-        s.background = Some(TargetValue::universal(PerMode::universal(bg_color.color)));
-        changed = true;
+        page = page.with_component_bg_color(component, bg_color);
     }
-
-    if changed {
-        policy.style = Some(s);
-        page.with_component_policy(component, policy)
-    } else {
-        page
-    }
+    page
 }
 
 /// Apply parsed HR style (`style.hr.*`) onto a [`DarkmatterPage`] builder.
@@ -608,25 +600,13 @@ pub fn apply_hr_style(
     if !overrides.color
         && let Some(color) = hr.color.clone()
     {
-        let mut policy = page.component_policy(PageComponent::Hr)
-            .cloned()
-            .unwrap_or_default();
-        let mut s = policy.style.take().unwrap_or_default();
-        s.color = Some(TargetValue::universal(PerMode::universal(color.color)));
-        policy.style = Some(s);
-        page = page.with_component_policy(PageComponent::Hr, policy);
+        page = page.with_component_color(PageComponent::Hr, color);
     }
 
     if !overrides.bg_color
         && let Some(bg_color) = hr.bg_color.clone()
     {
-        let mut policy = page.component_policy(PageComponent::Hr)
-            .cloned()
-            .unwrap_or_default();
-        let mut s = policy.style.take().unwrap_or_default();
-        s.background = Some(TargetValue::universal(PerMode::universal(bg_color.color)));
-        policy.style = Some(s);
-        page = page.with_component_policy(PageComponent::Hr, policy);
+        page = page.with_component_bg_color(PageComponent::Hr, bg_color);
     }
 
     Ok(page)
@@ -966,19 +946,21 @@ mod tests {
     }
 
     #[test]
-    fn apply_lowers_color_to_style() {
+    fn apply_lowers_color_to_policy() {
         use renderable::color::{Color, Tailwind};
-        use renderable::style::PerMode;
         let page = apply_for_test("table:\n  color: red-500\n");
         let policy = page.component_policy(PageComponent::Tables).unwrap();
-        let style = policy.style.as_ref().unwrap();
-        let color = style.color.as_ref().unwrap();
-        assert_eq!(
-            color,
-            &renderable::layout::TargetValue::universal(PerMode::universal(Color::Tailwind(
-                Tailwind::Red500
-            )))
-        );
+        let color = policy.color.as_ref().unwrap();
+        assert_eq!(color.color, Color::Tailwind(Tailwind::Red500));
+        assert_eq!(color.opacity, None);
+    }
+
+    #[test]
+    fn apply_preserves_component_color_opacity() {
+        let page = apply_for_test("table:\n  bg-color: red-500/50\n");
+        let policy = page.component_policy(PageComponent::Tables).unwrap();
+        let bg = policy.bg_color.as_ref().unwrap();
+        assert_eq!(bg.opacity, Some(50), "component bg-color opacity must survive lowering");
     }
 
     #[test]

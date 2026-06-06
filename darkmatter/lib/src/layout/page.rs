@@ -29,10 +29,18 @@ use crate::markdown::block::{
 };
 
 /// The renderable policy a `style:`-configured [`PageComponent`] contributes.
+///
+/// This is the **single source of truth** for a component's `style:` layout and
+/// colors — there is no parallel per-component color map. `color` / `bg_color`
+/// are kept as [`StyleColor`] rather than lowered into a renderable
+/// [`Style`](renderable::style::Style) so Tailwind/hex **opacity** survives to
+/// the HTML target (where it lowers to `rgba(...)`); the terminal drops opacity,
+/// as documented in `docs/rendering/style.md`.
 #[derive(Debug, Clone, Default)]
 pub struct ComponentPolicy {
     pub layout: renderable::layout::Layout,
-    pub style: Option<renderable::style::Style>,
+    pub color: Option<StyleColor>,
+    pub bg_color: Option<StyleColor>,
 }
 
 /// A page-level layout primitive that owns layout state for darkmatter
@@ -82,8 +90,6 @@ pub struct DarkmatterPage {
     component_policies: HashMap<PageComponent, ComponentPolicy>,
     page_color: Option<StyleColor>,
     page_bg_color: Option<StyleColor>,
-    component_colors: HashMap<PageComponent, StyleColor>,
-    component_bg_colors: HashMap<PageComponent, StyleColor>,
     hr_kind: Option<HrKind>,
     hr_weight: Option<HrWeight>,
     hr_alignment: Option<HrAlignment>,
@@ -128,8 +134,6 @@ impl DarkmatterPage {
             component_policies: HashMap::new(),
             page_color: None,
             page_bg_color: None,
-            component_colors: HashMap::new(),
-            component_bg_colors: HashMap::new(),
             hr_kind: None,
             hr_weight: None,
             hr_alignment: None,
@@ -194,9 +198,27 @@ impl DarkmatterPage {
         self.page_background
     }
 
-    /// Configured max width, if any.
+    /// Configured max width resolved to terminal cells, if any.
+    ///
+    /// A percentage `max-width` resolves against the post-margin/post-padding
+    /// content width; the authored [`Length`](renderable::layout::Length) is
+    /// retained on the frame so the browser wrapper can emit it as `%`.
     pub fn max_width(&self) -> Option<u16> {
-        self.page_max_width.as_ref().map(tv_cells)
+        let content = self.frame_content_width();
+        self.page_max_width
+            .as_ref()
+            .map(|tv| length_to_cells(tv, content))
+    }
+
+    /// Terminal content width after horizontal page margins and padding are
+    /// removed. The percent base for `max-width`.
+    fn frame_content_width(&self) -> u16 {
+        let margin_x = length_to_cells(&self.page_margin.left, self.terminal_width)
+            .saturating_add(length_to_cells(&self.page_margin.right, self.terminal_width));
+        let padding_x = length_to_cells(&self.page_padding.left, self.terminal_width)
+            .saturating_add(length_to_cells(&self.page_padding.right, self.terminal_width));
+        self.terminal_width
+            .saturating_sub(margin_x.saturating_add(padding_x))
     }
 
     /// Whether line numbers are enabled for code blocks.
@@ -215,18 +237,6 @@ impl DarkmatterPage {
         &self.component_policies
     }
 
-    /// All component foreground colors.
-    #[allow(dead_code)]
-    pub(crate) fn component_colors(&self) -> &HashMap<PageComponent, StyleColor> {
-        &self.component_colors
-    }
-
-    /// All component background colors.
-    #[allow(dead_code)]
-    pub(crate) fn component_bg_colors(&self) -> &HashMap<PageComponent, StyleColor> {
-        &self.component_bg_colors
-    }
-
     /// Configured page foreground color, if any.
     pub fn page_color(&self) -> Option<&StyleColor> {
         self.page_color.as_ref()
@@ -242,8 +252,9 @@ impl DarkmatterPage {
     /// Returns the component-specific color when set, otherwise falls back
     /// to the page-level color.
     pub fn color_for(&self, component: PageComponent) -> Option<&StyleColor> {
-        self.component_colors
+        self.component_policies
             .get(&component)
+            .and_then(|p| p.color.as_ref())
             .or(self.page_color.as_ref())
     }
 
@@ -252,8 +263,9 @@ impl DarkmatterPage {
     /// Returns the component-specific color when set, otherwise falls back
     /// to the page-level color.
     pub fn bg_color_for(&self, component: PageComponent) -> Option<&StyleColor> {
-        self.component_bg_colors
+        self.component_policies
             .get(&component)
+            .and_then(|p| p.bg_color.as_ref())
             .or(self.page_bg_color.as_ref())
     }
 
@@ -365,12 +377,13 @@ impl DarkmatterPage {
     fn rebuild_layout(&mut self) {
         use renderable::layout::{Length, Edges as RMargin, TargetValue};
 
+        // Percent sides resolve against the captured terminal width so the
+        // cell mirror stays meaningful; vertical sides are always `Ch` rows.
+        let base = self.terminal_width;
         let sum = |a: &TargetValue<Length>, b: &TargetValue<Length>| {
-            let cells = |tv: &TargetValue<Length>| match tv {
-                TargetValue::Universal(Length::Ch(n)) => *n,
-                _ => 0,
-            };
-            TargetValue::universal(Length::ch(cells(a) + cells(b)))
+            TargetValue::universal(Length::ch(u32::from(
+                length_to_cells(a, base).saturating_add(length_to_cells(b, base)),
+            )))
         };
         self.layout.margin = RMargin {
             top: sum(&self.page_margin.top, &self.page_padding.top),
@@ -508,36 +521,24 @@ impl DarkmatterPage {
     }
 
     /// Set the foreground color for a single [`PageComponent`].
+    ///
+    /// Upserts onto the component's [`ComponentPolicy`] — the single source of
+    /// truth — preserving any layout already configured for it.
     pub fn with_component_color(mut self, component: PageComponent, color: StyleColor) -> Self {
-        self.component_colors.insert(component, color);
+        self.component_policies.entry(component).or_default().color = Some(color);
         self
     }
 
     /// Set the background color for a single [`PageComponent`].
+    ///
+    /// Upserts onto the component's [`ComponentPolicy`], preserving its layout.
     pub fn with_component_bg_color(mut self, component: PageComponent, color: StyleColor) -> Self {
-        self.component_bg_colors.insert(component, color);
+        self.component_policies.entry(component).or_default().bg_color = Some(color);
         self
     }
 
     /// Set the renderable [`ComponentPolicy`] for a single [`PageComponent`].
     pub fn with_component_policy(mut self, component: PageComponent, policy: ComponentPolicy) -> Self {
-        if let Some(ref style) = policy.style {
-            if let Some(ref color) = style.color {
-                if let Some(sc) = target_value_color_to_style_color(color) {
-                    self.component_colors.insert(component, sc);
-                }
-            } else {
-                self.component_colors.remove(&component);
-            }
-            if let Some(ref bg) = style.background {
-                if let Some(sc) = target_value_color_to_style_color(bg) {
-                    self.component_bg_colors.insert(component, sc);
-                }
-            } else {
-                self.component_bg_colors.remove(&component);
-            }
-        }
-
         self.component_policies.insert(component, policy);
         self
     }
@@ -749,8 +750,6 @@ impl DarkmatterPage {
             self.options.color_mode,
             self.page_color.clone(),
             self.page_bg_color.clone(),
-            self.component_colors.clone(),
-            self.component_bg_colors.clone(),
             self.component_policies.clone(),
             self.hyperlink_style.clone(),
             self.local_hyperlink_style.clone(),
@@ -849,8 +848,6 @@ impl DarkmatterPage {
             self.options.color_mode,
             self.page_color.clone(),
             self.page_bg_color.clone(),
-            self.component_colors.clone(),
-            self.component_bg_colors.clone(),
             self.component_policies.clone(),
             self.hyperlink_style.clone(),
             self.local_hyperlink_style.clone(),
@@ -905,8 +902,6 @@ impl DarkmatterPage {
             && self.component_policies.is_empty()
             && self.page_color.is_none()
             && self.page_bg_color.is_none()
-            && self.component_colors.is_empty()
-            && self.component_bg_colors.is_empty()
             && self.hyperlink_style.is_none()
             && self.local_hyperlink_style.is_none()
             && self.local_image_style.is_none()
@@ -925,8 +920,10 @@ impl DarkmatterPage {
     /// combined horizontal margin + padding meets or exceeds the terminal
     /// width.
     pub fn validate_horizontal_space(&self) -> Result<(), PageRenderError> {
-        let margin_x = tv_cells(&self.page_margin.left).saturating_add(tv_cells(&self.page_margin.right));
-        let padding_x = tv_cells(&self.page_padding.left).saturating_add(tv_cells(&self.page_padding.right));
+        let margin_x = length_to_cells(&self.page_margin.left, self.terminal_width)
+            .saturating_add(length_to_cells(&self.page_margin.right, self.terminal_width));
+        let padding_x = length_to_cells(&self.page_padding.left, self.terminal_width)
+            .saturating_add(length_to_cells(&self.page_padding.right, self.terminal_width));
         let required = margin_x.saturating_add(padding_x);
         if required >= self.terminal_width {
             Err(PageRenderError::MarginsExceedTerminalWidth {
@@ -1100,26 +1097,67 @@ fn apply_row_decoration(body: &str, ctx: &LayoutContext) -> String {
     output
 }
 
-/// Extract whole terminal cells from a page-frame [`TargetValue<Length>`].
+/// Resolve a page-frame [`TargetValue<Length>`] to whole terminal cells against
+/// `base`.
 ///
-/// Only [`Length::Ch`] carries cells; every other variant (including
-/// [`Length::Zero`]) resolves to `0` for the page-frame path where builders
-/// always write absolute `Ch` values.
-fn tv_cells(tv: &renderable::layout::TargetValue<renderable::layout::Length>) -> u16 {
+/// The page frame retains the authored [`Length`](renderable::layout::Length)
+/// so the browser can emit percentages natively (see [`length_to_css_frame`]);
+/// the terminal resolves them here. [`Length::Percent`] resolves against `base`
+/// (the terminal width for margins/padding, the post-margin/padding content
+/// width for `max-width`) with the same rounding as the apply layer.
+/// [`Length::Css`] is rejected before reaching the frame, so it maps to `0`.
+pub(crate) fn length_to_cells(
+    tv: &renderable::layout::TargetValue<renderable::layout::Length>,
+    base: u16,
+) -> u16 {
+    use renderable::layout::{Length, TargetValue};
     match tv {
-        renderable::layout::TargetValue::Universal(renderable::layout::Length::Ch(n)) => {
-            u16::try_from(*n).unwrap_or(u16::MAX)
+        TargetValue::Universal(Length::Zero) => 0,
+        TargetValue::Universal(Length::Ch(n)) => u16::try_from(*n).unwrap_or(u16::MAX),
+        TargetValue::Universal(Length::Percent(p)) => {
+            (f32::from(base) * (p / 100.0))
+                .round()
+                .clamp(0.0, f32::from(u16::MAX)) as u16
         }
         _ => 0,
     }
 }
 
-/// Whether every side of `edges` resolves to zero cells.
+/// Whether a page-frame [`TargetValue<Length>`] contributes no space —
+/// [`Length::Zero`], a zero-cell `Ch`, or a `0%` percent. A positive percent is
+/// **not** zero even though it has no fixed cell count.
+pub(crate) fn length_is_zero(
+    tv: &renderable::layout::TargetValue<renderable::layout::Length>,
+) -> bool {
+    use renderable::layout::{Length, TargetValue};
+    match tv {
+        TargetValue::Universal(Length::Zero) => true,
+        TargetValue::Universal(Length::Ch(n)) => *n == 0,
+        TargetValue::Universal(Length::Percent(p)) => *p == 0.0,
+        _ => true,
+    }
+}
+
+/// Lower a page-frame [`TargetValue<Length>`] to a CSS length string for the
+/// browser wrapper — `0`, `{n}ch`, or `{p}%`.
+pub(crate) fn length_to_css_frame(
+    tv: &renderable::layout::TargetValue<renderable::layout::Length>,
+) -> String {
+    use renderable::layout::{Length, TargetValue};
+    match tv {
+        TargetValue::Universal(Length::Zero) => "0".to_string(),
+        TargetValue::Universal(Length::Ch(n)) => format!("{n}ch"),
+        TargetValue::Universal(Length::Percent(p)) => format!("{p}%"),
+        _ => "0".to_string(),
+    }
+}
+
+/// Whether every side of `edges` contributes no space (see [`length_is_zero`]).
 fn edges_is_zero(edges: &renderable::layout::Edges) -> bool {
-    tv_cells(&edges.top) == 0
-        && tv_cells(&edges.right) == 0
-        && tv_cells(&edges.bottom) == 0
-        && tv_cells(&edges.left) == 0
+    length_is_zero(&edges.top)
+        && length_is_zero(&edges.right)
+        && length_is_zero(&edges.bottom)
+        && length_is_zero(&edges.left)
 }
 
 /// Saturating cast from u32 terminal width to u16, clamped to `u16::MAX`.
@@ -1275,27 +1313,6 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> 
     output.push_str("</div>\n");
 
     output
-}
-
-fn target_value_color_to_style_color(
-    tv: &renderable::layout::TargetValue<renderable::style::PerMode<renderable::color::Color>>,
-) -> Option<StyleColor> {
-    match tv {
-        renderable::layout::TargetValue::Universal(renderable::style::PerMode::Universal(color)) => {
-            Some(StyleColor {
-                color: *color,
-                opacity: None,
-            })
-        }
-        renderable::layout::TargetValue::Universal(renderable::style::PerMode::Adaptive {
-            light,
-            ..
-        }) => Some(StyleColor {
-            color: *light,
-            opacity: None,
-        }),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
@@ -2691,6 +2708,46 @@ mod tests {
         assert!(
             html.contains("rgba(") && html.contains("0.5"),
             "opacity should produce rgba CSS; got: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_component_opacity_preserved_as_rgba() {
+        // Review-1 finding 1: a component `bg-color` with Tailwind opacity must
+        // survive the cutover path to the browser as `rgba(...)` — the renderable
+        // `Style` cannot carry opacity, so the browser entry point splices it in.
+        let term = Terminal::new_optimistic(120);
+        let semi = StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: Some(50),
+        };
+        let page = DarkmatterPage::new(&term)
+            .with_component_bg_color(PageComponent::BlockQuotes, semi);
+        let md: Markdown = "> Quote\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains("rgba(") && html.contains("0.5"),
+            "component bg-color opacity must lower to rgba on the browser path; got: {html}"
+        );
+    }
+
+    #[test]
+    fn terminal_component_opacity_dropped_but_color_kept() {
+        // The terminal drops opacity (documented) yet still paints the color.
+        let term = Terminal::new_optimistic(80);
+        let semi = StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: Some(50),
+        };
+        let page = DarkmatterPage::new(&term)
+            .with_component_bg_color(PageComponent::BlockQuotes, semi);
+        let md: Markdown = "> Quote\n".into();
+
+        let out = page.render(&md).unwrap();
+        assert!(
+            out.contains("\x1b[48;2;"),
+            "terminal should emit a 24-bit background SGR (opacity dropped); got: {out:?}"
         );
     }
 
