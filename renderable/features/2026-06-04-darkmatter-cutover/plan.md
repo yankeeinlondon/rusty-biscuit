@@ -1,3 +1,13 @@
+---
+source_files_during_phase_1:
+  - darkmatter/lib/tests/cutover_reference.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - darkmatter
+---
+
 # darkmatter Cutover Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan phase-by-phase. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -39,7 +49,7 @@ The deleted `LayoutContext` math moves to the fold; capture the current `style:`
 **Files:**
 - Create: `darkmatter/lib/tests/cutover_reference.rs`
 
-- [ ] **Step 1: Write reference snapshots of representative `style:` cases**
+- [x] **Step 1: Write reference snapshots of representative `style:` cases**
 
 ```rust
 //! Pre-cutover reference output for representative `style:` per-component cases.
@@ -61,12 +71,12 @@ fn reference_centered_table() {
 // and a page margin+padding case.
 ```
 
-- [ ] **Step 2: Generate the snapshots**
+- [x] **Step 2: Generate the snapshots**
 
 Run: `cargo test -p darkmatter --test cutover_reference` then `cargo insta accept`
 Expected: snapshots written. These are the baseline.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add darkmatter/lib/tests/cutover_reference.rs darkmatter/lib/tests/snapshots
