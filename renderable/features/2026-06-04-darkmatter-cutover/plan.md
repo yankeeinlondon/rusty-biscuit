@@ -424,3 +424,40 @@ git commit -m "docs(darkmatter): mark Migration deferral done; document direct s
 - **Order is load-bearing:** build the new path (Phases 2–5) and prove parity before deleting the old types and allows (Phase 6). The reference snapshots (Phase 1) make every intended diff visible.
 - **Parity is a reference:** the `LayoutContext` math moving into the fold will shift some cells/CSS; re-baseline those deliberately (Phase 6 step 4), don't force byte equality.
 - **Keep:** `DarkmatterPage`, `PageComponent` (minus `Lists`), `PageBackground`, `StyleColor`, and the sub-spec-#7 bespoke knobs (`page.stylesheet`/`meta`/`code.theme`, hyperlink/image local-style) — none are deprecated layout types.
+
+---
+
+## Review 1 Resolutions (2026-06-06)
+
+Addresses [`review-1.md`](./review-1.md). Decisions taken with the user: **darkmatter
+opacity channel** (not extending the renderable IR) and **retain `Length`
+per-target** on the page frame.
+
+- **Finding 1 — component color opacity lost + retired side-channel remained.**
+  - `ComponentPolicy` now carries `color` / `bg_color` as `StyleColor` (opacity
+    preserved) — the single source of truth. Replaced the `style: Option<Style>`
+    field; deleted the duplicate `component_colors` / `component_bg_colors` maps
+    from `DarkmatterPage` and `LayoutContext` (plus their accessors and
+    `from_page` params).
+  - `decorate.rs` records a `darkmatter.style` `rgba(...)` hint for any
+    opacity-bearing component color; the browser entry point
+    (`render_tree_html_with_layout`) splices it into the rendered element's inline
+    `style` (CSS source order wins over the fold's opaque `rgb(...)`). Terminal
+    still drops opacity (documented). Verified in a real browser
+    (`browser_render::browser_component_blockquote_bg_opacity_computes_rgba` →
+    `rgba(255, 0, 0, 0.5)`).
+- **Finding 2 — browser component layout/style only source-tested.** Added
+  `ChromeHarness` computed-style tests in `browser_render.rs`: blockquote bg
+  opacity (rgba), table fg color (rgb), percentage page `max-width` resolved by
+  the browser, centered-table equal auto margins, and list `left-margin` px.
+- **Finding 3 — page frame stored renderable types but collapsed to cells.** The
+  frame now retains the authored `Length`; the terminal resolves it
+  (`length_to_cells`, percent base = terminal/content width) and the browser
+  wrapper emits the native unit (`length_to_css_frame` → `%` / `ch`). `apply.rs`
+  stores `Length` instead of pre-resolving to `u16`; `max-width = 0` validation
+  is preserved at apply time.
+
+Status: `darkmatter` lib (3495) + integration (`layout_snapshots`,
+`style_frontmatter`, `cutover_reference`, `browser_render`) and `darkmatter-cli`
+suites green; clippy clean. `docs/rendering/style.md` updated (Length retention,
+`ComponentPolicy` single-source-of-truth color storage).
