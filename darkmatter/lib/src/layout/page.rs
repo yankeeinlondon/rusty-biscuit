@@ -53,8 +53,9 @@ pub struct ComponentPolicy {
 /// The builder is consuming (`self -> Self`) for ergonomic chaining. With no
 /// builder calls, [`DarkmatterPage::render`] is byte-for-byte equivalent to
 /// [`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal) with
-/// default options — both route through the render-tree terminal document
-/// renderer. (The decorated layout path still uses the legacy serializer.)
+/// default options. Both the zero-config and decorated layout paths route
+/// through the render-tree terminal document renderer; the decorated path
+/// additionally applies row decoration (margins, padding, background fill).
 ///
 /// ## Examples
 ///
@@ -761,14 +762,15 @@ impl DarkmatterPage {
 
     /// Render the given markdown document through the page layout.
     ///
-    /// Derives [`TerminalOptions`] from the page state, delegates to the
-    /// existing terminal renderer, then applies row decoration (margins,
-    /// padding, background fill) when any layout setting is non-default.
+    /// Derives [`TerminalOptions`] from the page state, folds the document
+    /// through the render-tree terminal renderer, then applies row decoration
+    /// (margins, padding, background fill) when any layout setting is
+    /// non-default.
     ///
     /// When all layout fields are at their defaults, this is byte-for-byte
-    /// equivalent to `Markdown::as_terminal(default)` — the zero-config path
-    /// routes through the render-tree terminal document renderer. Decorated
-    /// layouts still use the legacy serializer.
+    /// equivalent to `Markdown::as_terminal(default)`. The decorated path
+    /// threads a `LayoutContext` into the same render-tree terminal renderer
+    /// and then decorates the rendered rows.
     ///
     /// ## Errors
     ///
