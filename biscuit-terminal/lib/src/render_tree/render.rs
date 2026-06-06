@@ -3365,13 +3365,13 @@ mod render_tree_tests {
             &tree,
             &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
         )
-        .expect("render");
-        let plain = strip_escape_codes(&out.output);
-        let line = plain.lines().next().unwrap_or("");
-        assert!(
-            line.starts_with(' '),
-            "center-aligned content with max_width should have leading space, got: {line:?}"
-        );
+        .expect("render")
+        .output;
+        // The `max_width: 10` box is sub-available, so center alignment places
+        // the 10-cell box within the 80-cell width: (80 − 10) / 2 = 35. (A loose
+        // `starts_with(' ')` would also pass the old content-centering model;
+        // the exact offset pins the box-placement behavior.)
+        assert_eq!(lead_spaces_of_line_with(&out, "hi"), 35);
     }
 
     #[test]
