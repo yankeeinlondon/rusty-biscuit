@@ -472,3 +472,179 @@ fn sanitized_real_mermaid_retains_diagram_geometry() {
         "sanitized real Mermaid SVG still carries active markup:\n{html}",
     );
 }
+
+// ---------------------------------------------------------------------------
+// Review-1 findings 1 & 3: component layout / style is browser-observable, so
+// it must be verified through a real browser (computed style), not just HTML
+// source substrings. These drive the decorated `DarkmatterPage::render_to_browser`
+// path — the one that lowers `style:` per-component layout and colors.
+// ---------------------------------------------------------------------------
+
+/// Builds full-page HTML from `style:` frontmatter through the decorated browser
+/// path, wrapped for the harness.
+fn style_page_doc(width: u32, style_yaml: &str, body: &str) -> String {
+    use biscuit_terminal::terminal::Terminal;
+    use darkmatter::layout::DarkmatterPage;
+    use darkmatter::style::{
+        ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides, PageStyleOverrides,
+        apply_color_style, apply_component_style, apply_hr_style, apply_list_style,
+        apply_page_style, from_frontmatter,
+    };
+
+    let indented: String = style_yaml
+        .lines()
+        .map(|l| {
+            if l.trim().is_empty() {
+                l.to_string()
+            } else {
+                format!("    {l}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let full = format!("---\nstyle:\n{indented}\n---\n\n{body}");
+    let md = Markdown::try_from_content(&full).expect("parse markdown with style frontmatter");
+    let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
+
+    let term = Terminal::new_optimistic(width);
+    let page = DarkmatterPage::new(&term);
+    let page = apply_page_style(page, &style, PageStyleOverrides::default()).unwrap();
+    let page = apply_component_style(page, &style, ComponentStyleOverrides::default()).unwrap();
+    let page = apply_list_style(page, &style, ListStyleOverrides::default()).unwrap();
+    let page = apply_color_style(page, &style).unwrap();
+    let page = apply_hr_style(page, &style, HrStyleOverrides::default()).unwrap();
+    let body_html = page.render_to_browser(&md).expect("browser render");
+    wrap_fragment(&body_html, "#ffffff")
+}
+
+/// Parses a `"<n>px"` computed length to `f64` (`0.0` when not px-shaped).
+fn px(value: &str) -> f64 {
+    value.trim_end_matches("px").parse().unwrap_or(0.0)
+}
+
+const TABLE_MD: &str = "| a | b |\n|---|---|\n| 1 | 2 |\n";
+
+/// A component `bg-color` with opacity must compute, in a real browser, to the
+/// `rgba(...)` form — the regression the render tree's `Color`-typed `Style`
+/// cannot represent and the browser entry point splices back in.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_component_blockquote_bg_opacity_computes_rgba() {
+    if !require_browser() {
+        return;
+    }
+    let doc = style_page_doc(120, "block-quote:\n  bg-color: '#ff000080'", "> Quote\n");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let bg = harness
+        .computed_style("blockquote", "background-color")
+        .await
+        .expect("computed style query");
+    assert_eq!(
+        bg, "rgba(255, 0, 0, 0.5)",
+        "component bg-color opacity must compute to rgba in a real browser; got {bg}",
+    );
+}
+
+/// A component `color` must compute to the declared `rgb(...)` in a real browser.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_component_table_color_computes_rgb() {
+    if !require_browser() {
+        return;
+    }
+    let doc = style_page_doc(120, "table:\n  color: '#ff0000'", TABLE_MD);
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let color = harness
+        .computed_style("table", "color")
+        .await
+        .expect("computed style query");
+    assert_eq!(
+        color, "rgb(255, 0, 0)",
+        "component color must compute to rgb in a real browser; got {color}",
+    );
+}
+
+/// A percentage page `max-width` must be accepted by the browser and resolved
+/// against the viewport (computed to a non-zero px used value), proving the
+/// frame retains the authored `Length` rather than a pre-resolved cell count.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_page_max_width_percent_computes_against_viewport() {
+    if !require_browser() {
+        return;
+    }
+    let doc = style_page_doc(120, "page:\n  max-width: 50%", "Hello world\n");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let max_width = harness
+        .computed_style(".darkmatter-page", "max-width")
+        .await
+        .expect("computed style query");
+    assert!(
+        max_width != "none" && max_width != "<no-match>" && (max_width.ends_with("px") || max_width.ends_with('%')),
+        "browser must accept and compute percentage max-width; got {max_width}",
+    );
+    if max_width.ends_with("px") {
+        assert!(px(&max_width) > 0.0, "resolved max-width must be positive; got {max_width}");
+    }
+}
+
+/// A centered table (`alignment: center` + `max-width`) must compute equal,
+/// non-zero auto margins in a real browser.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_table_center_alignment_computes_equal_margins() {
+    if !require_browser() {
+        return;
+    }
+    let doc = style_page_doc(120, "table:\n  alignment: center\n  max-width: 20ch", TABLE_MD);
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let left = harness
+        .computed_style("table", "margin-left")
+        .await
+        .expect("computed style query");
+    let right = harness
+        .computed_style("table", "margin-right")
+        .await
+        .expect("computed style query");
+    assert_eq!(left, right, "centered table must have equal auto margins; got {left} / {right}");
+    assert!(px(&left) > 0.0, "centered table margins must be non-zero; got {left}");
+}
+
+/// A list `left-margin` must compute to a non-zero px margin in a real browser.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_list_left_margin_computes() {
+    if !require_browser() {
+        return;
+    }
+    let doc = style_page_doc(120, "ul:\n  left-margin: 4ch", "- item one\n- item two\n");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let margin_left = harness
+        .computed_style("ul", "margin-left")
+        .await
+        .expect("computed style query");
+    assert!(
+        margin_left.ends_with("px") && px(&margin_left) > 0.0,
+        "list left-margin must compute to a non-zero px margin; got {margin_left}",
+    );
+}
