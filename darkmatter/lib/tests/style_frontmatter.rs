@@ -228,8 +228,10 @@ fn cli_flag_overrides_frontmatter_left_margin() {
 }
 
 #[test]
-fn percent_margin_resolves_against_terminal_width() {
-    // Spec test #3: `style.page.left-margin: 10%` at 80-col terminal = 8.
+fn percent_margin_retained_and_resolved_per_target() {
+    // Spec test #3 (revised for review-1 finding 3): `style.page.left-margin:
+    // 10%`. The page frame retains the authored `Length`; the terminal resolves
+    // it (10% of 80 = 8 cells) and the browser emits `10%` against the viewport.
     let yaml = "---\nstyle:\n    page:\n        left-margin: 10%\n---\n\n# Doc\n";
     let md = Markdown::try_from_content(yaml).expect("parse markdown");
     let (style, _w) = from_frontmatter(md.frontmatter()).expect("parse style");
@@ -237,7 +239,17 @@ fn percent_margin_resolves_against_terminal_width() {
     let page = page_with_width(80);
     let applied = apply_page_style(page, &style, PageStyleOverrides::default())
         .expect("apply_page_style should succeed");
-    assert_eq!(edge_ch(&applied.page_margin().left), 8);
+
+    // Browser: the percent survives to CSS.
+    let html = applied.render_to_browser(&md).expect("browser render");
+    assert!(html.contains("10%"), "browser must emit percent margin; got: {html}");
+
+    // Terminal: the percent resolves to an 8-cell left margin.
+    let out = applied.render(&md).expect("terminal render");
+    assert!(
+        out.lines().any(|l| l.starts_with("        ")),
+        "terminal must resolve 10% of 80 to an 8-cell left margin; got: {out:?}"
+    );
 }
 
 #[test]

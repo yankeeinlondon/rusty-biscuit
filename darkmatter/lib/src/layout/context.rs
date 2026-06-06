@@ -2,7 +2,7 @@
 //! state and the captured terminal dimensions.
 
 use super::PageRenderError;
-use super::page::ComponentPolicy;
+use super::page::{ComponentPolicy, length_is_zero, length_to_cells};
 use super::types::{
     PageBackground, PageComponent,
 };
@@ -102,22 +102,13 @@ pub(crate) const PAGE_BG_PRONOUNCED_LIGHT: BackgroundColor = BackgroundColor {
     b: 25,
 };
 
-/// Extract whole terminal cells from a page-frame [`TargetValue<Length>`].
-fn tv_cells(tv: &renderable::layout::TargetValue<renderable::layout::Length>) -> u16 {
-    match tv {
-        renderable::layout::TargetValue::Universal(renderable::layout::Length::Ch(n)) => {
-            u16::try_from(*n).unwrap_or(u16::MAX)
-        }
-        _ => 0,
-    }
-}
-
-/// Whether every side of `edges` resolves to zero cells.
+/// Whether every side of `edges` contributes no space (see
+/// [`length_is_zero`]).
 fn edges_is_zero(edges: &renderable::layout::Edges) -> bool {
-    tv_cells(&edges.top) == 0
-        && tv_cells(&edges.right) == 0
-        && tv_cells(&edges.bottom) == 0
-        && tv_cells(&edges.left) == 0
+    length_is_zero(&edges.top)
+        && length_is_zero(&edges.right)
+        && length_is_zero(&edges.bottom)
+        && length_is_zero(&edges.left)
 }
 
 impl LayoutContext {
@@ -143,8 +134,10 @@ impl LayoutContext {
         local_hyperlink_style: Option<CommonStyle>,
         local_image_style: Option<CommonStyle>,
     ) -> Result<Self, PageRenderError> {
-        let margin_x = tv_cells(&page_margin.left).saturating_add(tv_cells(&page_margin.right));
-        let padding_x = tv_cells(&page_padding.left).saturating_add(tv_cells(&page_padding.right));
+        let margin_x = length_to_cells(&page_margin.left, terminal_width)
+            .saturating_add(length_to_cells(&page_margin.right, terminal_width));
+        let padding_x = length_to_cells(&page_padding.left, terminal_width)
+            .saturating_add(length_to_cells(&page_padding.right, terminal_width));
         let required = margin_x.saturating_add(padding_x);
         if required >= terminal_width {
             return Err(PageRenderError::MarginsExceedTerminalWidth {
@@ -154,7 +147,8 @@ impl LayoutContext {
         }
 
         let content_width = terminal_width.saturating_sub(required);
-        let effective_width = match page_max_width.as_ref().map(tv_cells) {
+        // A percentage `max-width` resolves against the content width.
+        let effective_width = match page_max_width.as_ref().map(|tv| length_to_cells(tv, content_width)) {
             Some(0) => return Err(PageRenderError::MaxWidthZero),
             Some(mw) => content_width.min(mw),
             None => content_width,

@@ -250,21 +250,19 @@ pub fn apply_page_style(
         return Ok(page);
     };
 
-    let terminal_width = page.terminal_width();
     let mut page = page;
 
-    // Resolve & apply horizontal margins (percent base = terminal width).
+    // Store horizontal margins as the authored `Length` so the frame resolves
+    // percentages per target (terminal cells vs. browser `%`).
     if !overrides.margin_left
         && let Some(len) = page_style.left_margin.as_ref()
     {
-        let value = lower_horizontal(len, terminal_width, "left-margin")?;
-        page = page.with_margin_left(value);
+        page = page.with_margin_left_length(horizontal_length(len, "left-margin")?);
     }
     if !overrides.margin_right
         && let Some(len) = page_style.right_margin.as_ref()
     {
-        let value = lower_horizontal(len, terminal_width, "right-margin")?;
-        page = page.with_margin_right(value);
+        page = page.with_margin_right_length(horizontal_length(len, "right-margin")?);
     }
 
     // Vertical margins (already u16 row counts in the schema).
@@ -279,18 +277,16 @@ pub fn apply_page_style(
         page = page.with_margin_bottom(rows);
     }
 
-    // Horizontal padding (percent base = terminal width).
+    // Horizontal padding — authored `Length`, resolved per target.
     if !overrides.padding_left
         && let Some(len) = page_style.left_padding.as_ref()
     {
-        let value = lower_horizontal(len, terminal_width, "left-padding")?;
-        page = page.with_padding_left(value);
+        page = page.with_padding_left_length(horizontal_length(len, "left-padding")?);
     }
     if !overrides.padding_right
         && let Some(len) = page_style.right_padding.as_ref()
     {
-        let value = lower_horizontal(len, terminal_width, "right-padding")?;
-        page = page.with_padding_right(value);
+        page = page.with_padding_right_length(horizontal_length(len, "right-padding")?);
     }
 
     // Vertical padding.
@@ -312,10 +308,10 @@ pub fn apply_page_style(
         page = page.with_page_background(bg);
     }
 
-    // Max width — percent resolves against the post-margin / post-padding
-    // content width using the page's current state (which already reflects
-    // CLI flags applied earlier in the integration order, plus any
-    // frontmatter values applied above).
+    // Max width — stored as the authored `Length`. Percent resolves against the
+    // post-margin / post-padding content width; the resolved value is validated
+    // here (a percent that rounds to zero cells is rejected) while the `Length`
+    // itself is retained so the browser can emit it as `%`.
     if !overrides.max_width
         && let Some(len) = page_style.max_width.as_ref()
     {
@@ -323,7 +319,7 @@ pub fn apply_page_style(
         if resolved == 0 {
             return Err(StyleApplyError::InvalidMaxWidth);
         }
-        page = page.with_max_width(resolved);
+        page = page.with_max_width_length(horizontal_length(len, "max-width")?);
     }
 
     // Alignment broadcasts to every page component not already claimed by a
@@ -769,17 +765,14 @@ fn apply_common_style(
     }
 }
 
-/// Lower a horizontal [`Length`] onto a `u16` cell count using `base` as the
-/// percent denominator.
-fn lower_horizontal(
-    length: &Length,
-    base: u16,
-    field: &'static str,
-) -> Result<u16, StyleApplyError> {
+/// Validate a horizontal page-frame [`Length`] for storage, rejecting CSS units.
+///
+/// `Zero` / `Ch` / `Percent` pass through unchanged so the frame can resolve
+/// them per target; [`Length::Css`] is rejected (terminal layout has no CSS
+/// length).
+fn horizontal_length(length: &Length, field: &'static str) -> Result<Length, StyleApplyError> {
     match length {
-        Length::Zero => Ok(0),
-        Length::Ch(n) => Ok(u16::try_from(*n).unwrap_or(u16::MAX)),
-        Length::Percent(p) => Ok(resolve_percent(*p, base)),
+        Length::Zero | Length::Ch(_) | Length::Percent(_) => Ok(length.clone()),
         Length::Css(_) => Err(StyleApplyError::InvalidCssLength { field }),
     }
 }
@@ -796,8 +789,8 @@ fn lower_max_width(length: &Length, page: &DarkmatterPage) -> Result<u16, StyleA
         Length::Ch(n) => Ok(u16::try_from(*n).unwrap_or(u16::MAX)),
         Length::Percent(p) => {
             let terminal_width = page.terminal_width();
-            let consumed = edges_horizontal_ch(page.page_margin())
-                .saturating_add(edges_horizontal_ch(page.page_padding()));
+            let consumed = edges_horizontal_ch(page.page_margin(), terminal_width)
+                .saturating_add(edges_horizontal_ch(page.page_padding(), terminal_width));
             let content = terminal_width.saturating_sub(consumed);
             Ok(resolve_percent(*p, content))
         }
@@ -805,15 +798,16 @@ fn lower_max_width(length: &Length, page: &DarkmatterPage) -> Result<u16, StyleA
     }
 }
 
-/// Sum the horizontal sides of renderable [`Edges`] as whole terminal cells.
-fn edges_horizontal_ch(edges: &renderable::layout::Edges) -> u16 {
-    let ch = |tv: &renderable::layout::TargetValue<renderable::layout::Length>| match tv {
-        renderable::layout::TargetValue::Universal(renderable::layout::Length::Ch(n)) => {
-            u16::try_from(*n).unwrap_or(u16::MAX)
-        }
+/// Sum the horizontal sides of renderable [`Edges`] as whole terminal cells,
+/// resolving any percent side against `base` (the terminal width).
+fn edges_horizontal_ch(edges: &renderable::layout::Edges, base: u16) -> u16 {
+    use renderable::layout::{Length, TargetValue};
+    let cells = |tv: &TargetValue<Length>| match tv {
+        TargetValue::Universal(Length::Ch(n)) => u16::try_from(*n).unwrap_or(u16::MAX),
+        TargetValue::Universal(Length::Percent(p)) => resolve_percent(*p, base),
         _ => 0,
     };
-    ch(&edges.left).saturating_add(ch(&edges.right))
+    cells(&edges.left).saturating_add(cells(&edges.right))
 }
 
 /// Resolve a percent value against `base`, clamped to `u16` with rounding.
@@ -1043,14 +1037,19 @@ mod tests {
     }
 
     #[test]
-    fn length_percent_resolves_against_terminal_width_for_margin() {
-        // 10% of 80 = 8.
+    fn percent_margin_is_retained_as_length_not_resolved() {
+        // The page frame now retains the authored `Length`; the terminal
+        // resolves the percent (10% of 80 = 8) and the browser emits `10%`.
         let style = style_with_page(PageStyle {
             left_margin: Some(Length::Percent(10.0)),
             ..PageStyle::default()
         });
         let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
-        assert_eq!(edge_ch(&out.page_margin().left), 8);
+        assert_eq!(
+            out.page_margin().left,
+            renderable::layout::TargetValue::universal(Length::Percent(10.0)),
+            "horizontal percent margin must be stored as a Length, not pre-resolved to cells",
+        );
     }
 
     #[test]

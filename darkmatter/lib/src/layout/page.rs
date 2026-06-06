@@ -552,6 +552,47 @@ impl DarkmatterPage {
         self
     }
 
+    // ---------- Length-typed frame setters (apply layer) ----------
+    //
+    // The `style:` apply layer stores the authored `Length` directly so the
+    // page frame can resolve percentages per target (terminal cells vs. browser
+    // `%`). The `u16` builders above remain the cell-only public API.
+
+    /// Set the left margin to an authored [`Length`](renderable::layout::Length).
+    pub(crate) fn with_margin_left_length(mut self, len: renderable::layout::Length) -> Self {
+        self.page_margin.left = renderable::layout::TargetValue::universal(len);
+        self.rebuild_layout();
+        self
+    }
+
+    /// Set the right margin to an authored [`Length`](renderable::layout::Length).
+    pub(crate) fn with_margin_right_length(mut self, len: renderable::layout::Length) -> Self {
+        self.page_margin.right = renderable::layout::TargetValue::universal(len);
+        self.rebuild_layout();
+        self
+    }
+
+    /// Set the left padding to an authored [`Length`](renderable::layout::Length).
+    pub(crate) fn with_padding_left_length(mut self, len: renderable::layout::Length) -> Self {
+        self.page_padding.left = renderable::layout::TargetValue::universal(len);
+        self.rebuild_layout();
+        self
+    }
+
+    /// Set the right padding to an authored [`Length`](renderable::layout::Length).
+    pub(crate) fn with_padding_right_length(mut self, len: renderable::layout::Length) -> Self {
+        self.page_padding.right = renderable::layout::TargetValue::universal(len);
+        self.rebuild_layout();
+        self
+    }
+
+    /// Cap the content width at an authored [`Length`](renderable::layout::Length).
+    pub(crate) fn with_max_width_length(mut self, len: renderable::layout::Length) -> Self {
+        self.page_max_width = Some(renderable::layout::TargetValue::universal(len));
+        self.rebuild_layout();
+        self
+    }
+
     /// Enable line numbers in code blocks.
     pub fn use_line_numbers(mut self) -> Self {
         self.line_numbers = true;
@@ -1001,24 +1042,26 @@ fn apply_row_decoration(body: &str, ctx: &LayoutContext) -> String {
     let bg = ctx.background_color;
     let reset = "\x1b[0m";
 
-    // Build repeated cell strings.
-    let margin_left = " ".repeat(tv_cells(&ctx.page_margin.left) as usize);
-    let margin_right = " ".repeat(tv_cells(&ctx.page_margin.right) as usize);
-    let padding_left = " ".repeat(tv_cells(&ctx.page_padding.left) as usize);
-    let padding_right = " ".repeat(tv_cells(&ctx.page_padding.right) as usize);
+    // Build repeated cell strings. Percent sides resolve against the captured
+    // terminal width; vertical sides are `Ch` rows.
+    let base = ctx.terminal_width;
+    let margin_left = " ".repeat(length_to_cells(&ctx.page_margin.left, base) as usize);
+    let margin_right = " ".repeat(length_to_cells(&ctx.page_margin.right, base) as usize);
+    let padding_left = " ".repeat(length_to_cells(&ctx.page_padding.left, base) as usize);
+    let padding_right = " ".repeat(length_to_cells(&ctx.page_padding.right, base) as usize);
 
     let bg_open = bg.as_ref().map(|c| c.ansi_bg());
     let bg_reset = bg.as_ref().map(|_| reset);
 
     // Top margin: transparent empty rows.
-    for _ in 0..tv_cells(&ctx.page_margin.top) {
+    for _ in 0..length_to_cells(&ctx.page_margin.top, base) {
         output.push_str(&margin_left);
         output.push_str(&margin_right);
         output.push('\n');
     }
 
     // Top padding: bg-filled rows.
-    for _ in 0..tv_cells(&ctx.page_padding.top) {
+    for _ in 0..length_to_cells(&ctx.page_padding.top, base) {
         output.push_str(&margin_left);
         if let Some(ref open) = bg_open {
             output.push_str(open);
@@ -1069,7 +1112,7 @@ fn apply_row_decoration(body: &str, ctx: &LayoutContext) -> String {
     }
 
     // Bottom padding: bg-filled rows.
-    for _ in 0..tv_cells(&ctx.page_padding.bottom) {
+    for _ in 0..length_to_cells(&ctx.page_padding.bottom, base) {
         output.push_str(&margin_left);
         if let Some(open) = &bg_open {
             output.push_str(open);
@@ -1088,7 +1131,7 @@ fn apply_row_decoration(body: &str, ctx: &LayoutContext) -> String {
     }
 
     // Bottom margin: transparent empty rows.
-    for _ in 0..tv_cells(&ctx.page_margin.bottom) {
+    for _ in 0..length_to_cells(&ctx.page_margin.bottom, base) {
         output.push_str(&margin_left);
         output.push_str(&margin_right);
         output.push('\n');
@@ -1145,10 +1188,12 @@ pub(crate) fn length_to_css_frame(
 ) -> String {
     use renderable::layout::{Length, TargetValue};
     match tv {
-        TargetValue::Universal(Length::Zero) => "0".to_string(),
+        // `0ch` (not bare `0`) preserves byte-parity with the historical
+        // cell-only wrapper, whose zero sides already serialized as `0ch`.
+        TargetValue::Universal(Length::Zero) => "0ch".to_string(),
         TargetValue::Universal(Length::Ch(n)) => format!("{n}ch"),
         TargetValue::Universal(Length::Percent(p)) => format!("{p}%"),
-        _ => "0".to_string(),
+        _ => "0ch".to_string(),
     }
 }
 
@@ -1258,21 +1303,23 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> 
         }
     }
 
-    // Build page-level wrapper styles.
+    // Build page-level wrapper styles. The page frame retains the authored
+    // `Length`, so the browser emits the original unit (`%` percentages resolve
+    // against the viewport, not the terminal-cell count the terminal resolves).
     let mut wrapper_styles = String::new();
     wrapper_styles.push_str(&format!(
-        "margin: {mt}ch {mr}ch {mb}ch {ml}ch; ",
-        mt = tv_cells(&ctx.page_margin.top),
-        mr = tv_cells(&ctx.page_margin.right),
-        mb = tv_cells(&ctx.page_margin.bottom),
-        ml = tv_cells(&ctx.page_margin.left)
+        "margin: {mt} {mr} {mb} {ml}; ",
+        mt = length_to_css_frame(&ctx.page_margin.top),
+        mr = length_to_css_frame(&ctx.page_margin.right),
+        mb = length_to_css_frame(&ctx.page_margin.bottom),
+        ml = length_to_css_frame(&ctx.page_margin.left)
     ));
     wrapper_styles.push_str(&format!(
-        "padding: {pt}ch {pr}ch {pb}ch {pl}ch; ",
-        pt = tv_cells(&ctx.page_padding.top),
-        pr = tv_cells(&ctx.page_padding.right),
-        pb = tv_cells(&ctx.page_padding.bottom),
-        pl = tv_cells(&ctx.page_padding.left)
+        "padding: {pt} {pr} {pb} {pl}; ",
+        pt = length_to_css_frame(&ctx.page_padding.top),
+        pr = length_to_css_frame(&ctx.page_padding.right),
+        pb = length_to_css_frame(&ctx.page_padding.bottom),
+        pl = length_to_css_frame(&ctx.page_padding.left)
     ));
 
     if let Some(bg) = ctx.background_color {
@@ -1295,14 +1342,21 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> 
         wrapper_styles.push_str(&format!("background-color: {bg_color}; "));
     }
 
-    // Use a very large max-width (terminal_width) when no max-width is set,
-    // otherwise use the effective width.
-    let max_width_ch = if ctx.effective_width < ctx.terminal_width {
-        ctx.effective_width
-    } else {
-        ctx.terminal_width
+    // When a `max-width` is configured, emit its authored `Length` (a `%`
+    // resolves against the viewport in the browser). With none set, fall back to
+    // the resolved content width so the wrapper still caps to the frame.
+    let max_width_css = match page.page_max_width() {
+        Some(tv) => length_to_css_frame(tv),
+        None => {
+            let ch = if ctx.effective_width < ctx.terminal_width {
+                ctx.effective_width
+            } else {
+                ctx.terminal_width
+            };
+            format!("{ch}ch")
+        }
     };
-    wrapper_styles.push_str(&format!("max-width: {mw}ch;", mw = max_width_ch));
+    wrapper_styles.push_str(&format!("max-width: {max_width_css};"));
 
     // Start the wrapper div.
     output.push_str("<div class=\"darkmatter-page\" style=\"");
@@ -2983,6 +3037,43 @@ mod tests {
         // page-frame margin/padding are renderable Edges, not PageMargin/PagePadding
         let _: &renderable::layout::Edges = page.page_margin();
         let _: &renderable::layout::Edges = page.page_padding();
+    }
+
+    #[test]
+    fn length_to_cells_resolves_percent_against_base() {
+        use renderable::layout::{Length, TargetValue};
+        assert_eq!(length_to_cells(&TargetValue::universal(Length::Percent(10.0)), 80), 8);
+        assert_eq!(length_to_cells(&TargetValue::universal(Length::ch(4)), 80), 4);
+        assert_eq!(length_to_cells(&TargetValue::universal(Length::Zero), 80), 0);
+    }
+
+    #[test]
+    fn length_to_css_frame_emits_authored_unit() {
+        use renderable::layout::{Length, TargetValue};
+        assert_eq!(length_to_css_frame(&TargetValue::universal(Length::Percent(50.0))), "50%");
+        assert_eq!(length_to_css_frame(&TargetValue::universal(Length::ch(12))), "12ch");
+        assert_eq!(length_to_css_frame(&TargetValue::universal(Length::Zero)), "0ch");
+    }
+
+    #[test]
+    fn percent_frame_browser_emits_percent_terminal_resolves_cells() {
+        // Review-1 finding 3: the page frame retains the authored `Length`.
+        use renderable::layout::Length;
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_margin_left_length(Length::Percent(10.0))
+            .with_max_width_length(Length::Percent(50.0));
+        let md: Markdown = "Hello world\n".into();
+
+        // Browser: authored percentages survive to CSS (resolve against viewport).
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(html.contains("max-width: 50%"), "browser must emit percent max-width; got: {html}");
+        assert!(html.contains("10%"), "browser must emit percent margin; got: {html}");
+
+        // Terminal: percentages resolve to cells. content = 80 - 8 (10% margin) = 72;
+        // max-width = 50% of 72 = 36.
+        assert_eq!(page.max_width(), Some(36), "terminal must resolve percent max-width to cells");
+        page.render(&md).expect("decorated percent frame must render on the terminal");
     }
 
     #[test]

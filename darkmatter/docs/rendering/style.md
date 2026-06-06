@@ -222,21 +222,29 @@ The `style.page.*` subset is fully wired through `DarkmatterPage` for both termi
 
 `Length::Css(_)` (e.g. `10px`) is **not** valid for page-level terminal layout; it raises `StyleApplyError::InvalidCssLength`.
 
-### Length Lowering
+### Length Retention (per-target)
 
-`apply_page_style` converts `renderable::layout::Length` values to the concrete cell/row counts that `DarkmatterPage` expects:
+`apply_page_style` stores the authored `renderable::layout::Length` **directly**
+on the slim page frame (`Edges` / `TargetValue<Length>`); it does **not**
+pre-resolve percentages to cells. Each target then resolves the same `Length`:
 
-| Length variant | Page-level lowering |
-|---|---|
-| `Length::Zero` | `0` |
-| `Length::Ch(n)` | `u16::try_from(n).unwrap_or(u16::MAX)` |
-| `Length::Percent(p)` | Resolved at apply time with rounded cell counts. Validation (`0.0..=100.0`) is already enforced by the parser. |
-| `Length::Css(_)` | Returns `StyleApplyError::InvalidCssLength`. CSS units have no terminal equivalent. |
+| Length variant | Terminal | Browser wrapper |
+|---|---|---|
+| `Length::Zero` | `0` cells | `0ch` |
+| `Length::Ch(n)` | `n` cells | `{n}ch` |
+| `Length::Percent(p)` | `round(base * p / 100)` cells | `{p}%` (resolves against the viewport) |
+| `Length::Css(_)` | rejected at apply time (`InvalidCssLength`) | — |
 
-Percent resolution uses two different base widths depending on the field:
+So `style.page.left-margin: 10%` becomes `8` cells on an 80-col terminal but
+`margin-left: 10%` in the browser. The terminal percent base depends on the
+field:
 
-- **Horizontal margins and padding** resolve against the captured terminal width (`DarkmatterPage::new(&term)` captures it at construction time).
-- **`max-width`** resolves against the **content width** after final page margin and padding values are known — including any CLI overrides. This ensures page `max-width` composes predictably with margins. A resolved `max-width` of `0` cells is rejected because `DarkmatterPage` treats `max_width = 0` as invalid.
+- **Horizontal margins and padding** resolve against the captured terminal width
+  (`DarkmatterPage::new(&term)` captures it at construction time).
+- **`max-width`** resolves against the **content width** after final page margin
+  and padding values are known — including any CLI overrides. A `max-width` that
+  resolves to `0` cells is still rejected at apply time (`InvalidMaxWidth`), even
+  though the `Length` itself is retained for the browser.
 
 ### Example
 
@@ -350,7 +358,7 @@ Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax (top-l
 
 ## Component-Level Style (Sub-Spec #3)
 
-`style.table.*`, `style.images.*`, and `style.block-quote.*` lower directly into per-component [`ComponentPolicy`](crate::layout::ComponentPolicy) (`layout` + optional `style`) via `apply_component_style`. Each bucket maps to a dedicated `PageComponent` variant:
+`style.table.*`, `style.images.*`, and `style.block-quote.*` lower directly into per-component [`ComponentPolicy`](crate::layout::ComponentPolicy) via `apply_component_style`. `ComponentPolicy` is the **single source of truth** for a component's `style:` layout and colors: a `renderable::layout::Layout` plus optional `color` / `bg_color` carried as [`StyleColor`](crate::style::StyleColor) (so opacity survives to HTML — see [Color & Background-Color](#color--background-color-sub-spec-5)). There is no parallel per-component color map. Each bucket maps to a dedicated `PageComponent` variant:
 
 | Bucket | `PageComponent` variant |
 |---|---|
@@ -654,21 +662,29 @@ The schema already reserved `style.hyperlinks.color` and `style.hyperlinks.bg-co
 
 | Routing | Detail |
 |---|---|
-| Color storage | `DarkmatterPage` component color maps (wired sub-spec #5) |
+| Color storage | `ComponentPolicy.color` / `bg_color` on `DarkmatterPage` (wired sub-spec #5) |
 | Browser selector | `a` (wired sub-spec #5) |
 | Terminal rendering | Wraps link label text with foreground/background SGR while preserving existing OSC8 hyperlink sequences (wired sub-spec #5) |
 | Full layout and `local-style` | Wired in sub-spec #7 (see [Bespoke Knobs](#bespoke-knobs-sub-spec-7)) |
 
 ### Color Storage and Inheritance
 
-`DarkmatterPage` is extended with four color maps:
+Page color lives in two `DarkmatterPage` fields; component color lives on each
+component's `ComponentPolicy` — the single source of truth, with no parallel
+color map:
 
 ```rust
 page_color: Option<StyleColor>,
 page_bg_color: Option<StyleColor>,
-component_colors: HashMap<PageComponent, StyleColor>,
-component_bg_colors: HashMap<PageComponent, StyleColor>,
+// per component, inside `component_policies: HashMap<PageComponent, ComponentPolicy>`:
+struct ComponentPolicy { layout: Layout, color: Option<StyleColor>, bg_color: Option<StyleColor> }
 ```
+
+`StyleColor` carries optional opacity, which the renderable `Color`-typed
+`Style` cannot represent. The terminal drops it; the browser entry point reads a
+`darkmatter.style` hint `decorate_document` records and splices the `rgba(...)`
+declaration onto the rendered element (CSS source order wins over the opaque
+`rgb(...)` the fold emits).
 
 Page color is **inheritance**: `style.page.color` and `style.page.bg-color` are written onto the document root node so they inherit to all descendants. A component-level value overrides the page-level value for that component via `decorate_document`. If neither exists, no color rule or SGR is emitted.
 
@@ -875,7 +891,7 @@ pub enum HrAlignment {
 
 ### PageComponent::Hr
 
-Sub-spec #6 adds `PageComponent::Hr` to the `PageComponent` enum. This enables the sub-spec #5 color/bg-color mechanism to honor `style.hr.color` and `style.hr.bg-color` through `DarkmatterPage`'s existing component color maps.
+Sub-spec #6 adds `PageComponent::Hr` to the `PageComponent` enum. This enables the sub-spec #5 color/bg-color mechanism to honor `style.hr.color` and `style.hr.bg-color` through the `Hr` component's `ComponentPolicy.color` / `bg_color`.
 
 HR foreground color maps to the rule stroke/fill color. Background color applies to the HR component's bounding line/box through the same wrapper mechanism used for other `PageComponent` variants.
 
@@ -972,7 +988,7 @@ Every `---` horizontal rule in the document renders as a thick, centered, wave-p
 
 ## Bespoke Knobs (Sub-Spec #7)
 
-Sub-spec #7 wires the remaining v1 schema keys that do not simply lower a `CommonStyle` bucket onto the existing page/component layout and color maps. These are the "bespoke knobs": page stylesheet, page meta, code-block theme, hyperlink styling (including local-link overrides), and local image style overrides.
+Sub-spec #7 wires the remaining v1 schema keys that do not simply lower a `CommonStyle` bucket onto a component's `ComponentPolicy` (layout + colors). These are the "bespoke knobs": page stylesheet, page meta, code-block theme, hyperlink styling (including local-link overrides), and local image style overrides.
 
 After this sub-spec ships, `ACTIVE_STYLE_WIRING_SUB_SPEC` advances to `7` and no valid v1 schema key emits `KnownButInactive`.
 
