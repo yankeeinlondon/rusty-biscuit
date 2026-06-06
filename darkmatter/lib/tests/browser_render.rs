@@ -524,6 +524,26 @@ fn px(value: &str) -> f64 {
 
 const TABLE_MD: &str = "| a | b |\n|---|---|\n| 1 | 2 |\n";
 
+/// Reads the table's *used* pixel width as a ratio of its containing block
+/// (`.darkmatter-page`) — the observable geometry a percentage width is supposed
+/// to control. Chrome resolves a percentage `width` to a px used value, so this
+/// reads applied layout rather than a serialized declaration.
+async fn used_table_ratio(harness: &mut ChromeHarness) -> f64 {
+    let table = harness
+        .computed_style("table", "width")
+        .await
+        .expect("computed style query");
+    let page = harness
+        .computed_style(".darkmatter-page", "width")
+        .await
+        .expect("computed style query");
+    assert!(
+        table.ends_with("px") && page.ends_with("px"),
+        "expected px used widths from the browser; got table {table}, page {page}",
+    );
+    px(&table) / px(&page)
+}
+
 /// A component `bg-color` with opacity must compute, in a real browser, to the
 /// `rgba(...)` form — the regression the render tree's `Color`-typed `Style`
 /// cannot represent and the browser entry point splices back in.
@@ -600,52 +620,47 @@ async fn browser_page_max_width_percent_computes_against_viewport() {
     }
 }
 
-/// Review-2 finding (High): a percentage **component** `max-width` (here a
-/// table) must resolve in the browser against the component's containing block —
-/// proving the component policy carries the authored `Length` onto the node and
-/// the browser fold preserves the percent rather than pre-resolving it to a cell
-/// count. The page-level percentage test above only exercises the
-/// `.darkmatter-page` wrapper; this targets a component node, the surface this
-/// feature moved layout onto.
+/// Review-2 finding (High) — "add a browser-tier computed-style test for a
+/// percentage-width table or blockquote, asserting its used width relative to
+/// its containing block" — tightened by Review-3 finding 1: the assertion must
+/// verify *used geometry*, not a serialized declaration.
+///
+/// The earlier attempt used `max-width: 50%`, which Chrome reports verbatim as
+/// the literal `50%` from `getComputedStyle` — proving only that the percent
+/// round tripped. A table cannot be made to *bind* a percentage `max-width`
+/// either: the component lowers to `white-space: nowrap`, so its min-content
+/// equals its max-content and `max-width` can never shrink it, while an explicit
+/// `width` alongside `max-width` is rejected as a configuration conflict. So a
+/// percentage **`width`** — exactly what Review-2 named — is the observable
+/// vehicle: the browser resolves it to a px used value against the containing
+/// block.
+///
+/// This drives a real headless Chromium and asserts the table's used pixel width
+/// is ~50% of its containing block (`.darkmatter-page`) at **two different**
+/// container sizes. A value pre-resolved to a fixed cell count would track only
+/// one container; holding at 50% across both proves the authored `Length` was
+/// carried onto the node and resolved live against the containing block.
 #[tokio::test]
 #[serial(browser)]
-async fn browser_component_table_max_width_percent_resolves_against_container() {
+async fn browser_component_table_width_percent_resolves_against_container() {
     if !require_browser() {
         return;
     }
-    let doc = style_page_doc(120, "table:\n  max-width: 50%", TABLE_MD);
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
-    harness.render_html(&doc).await.expect("render html");
 
-    let table_max = harness
-        .computed_style("table", "max-width")
-        .await
-        .expect("computed style query");
-    assert!(
-        table_max != "none" && table_max != "<no-match>",
-        "browser must accept the component percentage max-width; got {table_max}",
-    );
-    // Chrome resolves a percentage max-width to a px used value against the
-    // table's containing block; assert that ratio is ~50% rather than a fixed
-    // cell count. Engines that report the literal percentage instead must at
-    // least preserve `50%` (proving the percent was not pre-resolved).
-    if table_max.ends_with("px") {
-        let container = harness
-            .computed_style("body", "width")
-            .await
-            .expect("computed style query");
-        let ratio = px(&table_max) / px(&container);
+    // Two distinct containing-block widths (set via the page frame). A live
+    // percentage tracks each; a pre-resolved fixed width could match at most one.
+    for page_max in ["40ch", "80ch"] {
+        let style = format!("page:\n  max-width: {page_max}\ntable:\n  width: 50%");
+        let doc = style_page_doc(120, &style, TABLE_MD);
+        harness.render_html(&doc).await.expect("render html");
+        let ratio = used_table_ratio(&mut harness).await;
         assert!(
             (ratio - 0.5).abs() < 0.02,
-            "component max-width must resolve to ~50% of its containing block; \
-             got {table_max} of {container} (ratio {ratio})",
-        );
-    } else {
-        assert_eq!(
-            table_max, "50%",
-            "browser must preserve the authored percentage component max-width; got {table_max}",
+            "percentage component width must resolve to ~50% of its containing \
+             block (page max-width {page_max}); got ratio {ratio}",
         );
     }
 }
