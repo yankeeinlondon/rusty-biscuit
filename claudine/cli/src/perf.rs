@@ -595,6 +595,19 @@ fn build_context_capture_node(
     ))
 }
 
+/// Cap a `::shell` command display for the perf tree so a verbose command does
+/// not dominate the label column. `MetricsTree` also truncates to the terminal
+/// width, but that cap floats with the terminal; this fixed cap keeps the shell
+/// row readable even on a wide terminal where the component would not trim.
+fn truncate_command(command: &str) -> String {
+    const MAX_COMMAND_CHARS: usize = 56;
+    if command.chars().count() <= MAX_COMMAND_CHARS {
+        return command.to_string();
+    }
+    let kept: String = command.chars().take(MAX_COMMAND_CHARS - 1).collect();
+    format!("{kept}…")
+}
+
 /// One compose-stage `Breakdown` leaf, carrying `calls` where `> 1` (DM-1) and,
 /// for the shell-expansion stage, the redacted per-directive spans as children
 /// (DM-3) so the dominant `::shell` command — not just the aggregate — can be
@@ -615,7 +628,7 @@ fn stage_leaf(
             .iter()
             .map(|span| {
                 PerfNode::leaf(
-                    format!("shell · {}", span.command_display),
+                    format!("shell · {}", truncate_command(&span.command_display)),
                     span.elapsed,
                     NodeRole::Breakdown,
                 )
@@ -1170,6 +1183,7 @@ pub(crate) fn render_perf_report(report: &CommandPerfReport) -> String {
     use biscuit_terminal::components::block_quote::BlockQuote;
     use biscuit_terminal::components::metrics_tree::MetricsTree;
     use biscuit_terminal::components::renderable::TerminalRenderable as _;
+    use biscuit_terminal::terminal::Terminal;
     use biscuit_terminal::utils::color::{Color, Tailwind};
 
     let mut tree = build_perf_tree(report, report.placement);
@@ -1203,12 +1217,20 @@ pub(crate) fn render_perf_report(report: &CommandPerfReport) -> String {
     // column (P-4), the share column (P-2), and the single HOT marker (P-3);
     // claudine only projects its tree and chooses the highlighted row.
     let metrics = MetricsTree::new(to_metric_node(&tree, wall, true, dry_run)).with_notes(notes);
-    let rendered = metrics.render_optimistic(None);
+
+    // Render at the real terminal width minus the `▌ ` border so MetricsTree
+    // caps its label column to exactly what survives inside the BlockQuote;
+    // otherwise a long `::shell` label inflates the shared column and every row
+    // wraps onto two lines (the `render_optimistic(None)` 80-col assumption hid
+    // this until a verbose command appeared). The border is 2 columns wide.
+    let term_width = Terminal::default().width();
+    let inner_width = term_width.saturating_sub(2);
+    let rendered = metrics.render_optimistic(Some(inner_width));
 
     let mut block = BlockQuote::from(rendered)
         .with_left_block_color(Color::Tailwind(Tailwind::Yellow400))
         .with_border("▌ ")
-        .render_optimistic(None);
+        .render_optimistic(Some(term_width));
     if !block.ends_with('\n') {
         block.push('\n');
     }
