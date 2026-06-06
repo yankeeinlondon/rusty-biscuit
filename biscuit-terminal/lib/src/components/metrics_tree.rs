@@ -297,13 +297,20 @@ impl MetricsTree {
             }
             // Pad the mantissa and unit to their column widths BEFORE wrapping
             // in markup: widths were computed from the bare strings, so any tag
-            // counted into them would skew the value column. The unit is dimmed
-            // to separate it visually from the mantissa; trailing pad spaces sit
-            // inside the `<dim>` harmlessly (dimming whitespace is invisible).
+            // counted into them would skew the value column.
             let num = format!("{:>num_w$}", row.num);
-            let unit = format!("<dim>{:<unit_w$}</dim>", row.unit);
+            // Microsecond units read grey rather than dim — at µs granularity the
+            // row is negligible, and grey keeps the suffix legible where dim can
+            // wash out entirely. `us` is the ASCII fold of `µs`. Coarser units
+            // stay dim. The trailing pad spaces sit inside the tag harmlessly.
+            let unit_tag = if matches!(row.unit.as_str(), "µs" | "us") {
+                "grey"
+            } else {
+                "dim"
+            };
+            let unit = format!("<{unit_tag}>{:<unit_w$}</{unit_tag}>", row.unit);
             // A hot row's whole value (mantissa and unit) reads red so the
-            // dominant cost is scannable. The dim unit nests inside the red so
+            // dominant cost is scannable. The styled unit nests inside the red so
             // the markup stays well-formed (`<red>…<dim>…</dim>…</red>`).
             let value = if row.hot {
                 format!("<red>{num}{unit}</red>")
@@ -452,14 +459,17 @@ fn collect_rows(
 }
 
 /// Format a duration using the most readable unit for the magnitude.
+///
+/// Every unit carries exactly one decimal place so the mantissae line up in the
+/// value column regardless of magnitude.
 fn fmt_duration(d: Duration) -> String {
     let micros = d.as_micros();
     if micros < 1_000 {
-        format!("{}µs", micros)
+        format!("{:.1}µs", micros as f64)
     } else if micros < 1_000_000 {
         format!("{:.1}ms", micros as f64 / 1_000.0)
     } else {
-        format!("{:.2}s", d.as_secs_f64())
+        format!("{:.1}s", d.as_secs_f64())
     }
 }
 
@@ -849,7 +859,50 @@ mod tests {
         assert!(plain.contains("+- "), "ASCII connector missing:\n{plain}");
         assert!(plain.contains("# HOT"), "ASCII marker missing:\n{plain}");
         assert!(plain.contains("x2"), "ASCII calls missing:\n{plain}");
-        assert!(plain.contains("900us"), "ASCII duration unit missing:\n{plain}");
+        assert!(plain.contains("900.0us"), "ASCII duration unit missing:\n{plain}");
+    }
+
+    #[test]
+    fn microsecond_unit_renders_grey_not_dim() {
+        // µs units read grey; coarser units stay dim. Assert the µs row carries a
+        // foreground-color SGR (grey is a web color → `38;...`) on its unit,
+        // distinct from the bare `\x1b[2m` dim used for ms.
+        let root = MetricNode::branch(
+            "Total",
+            MetricValue::Duration(Duration::from_millis(100)),
+            MetricShare::Full,
+            vec![
+                MetricNode::leaf(
+                    "fast",
+                    MetricValue::Duration(Duration::from_micros(45)),
+                    MetricShare::Of(0.01),
+                ),
+                MetricNode::leaf(
+                    "slow",
+                    MetricValue::Duration(Duration::from_millis(60)),
+                    MetricShare::Of(0.6),
+                ),
+            ],
+        );
+        let colored = MetricsTree::new(root).render_optimistic(Some(80));
+        let micro_line = colored
+            .lines()
+            .find(|l| strip_ansi(l).contains("fast"))
+            .expect("µs row present");
+        let ms_line = colored
+            .lines()
+            .find(|l| strip_ansi(l).contains("slow"))
+            .expect("ms row present");
+        // The µs unit is a foreground color (grey), not the plain dim attribute.
+        assert!(
+            micro_line.contains("38;"),
+            "µs unit must carry a grey fg-color SGR:\n{micro_line:?}"
+        );
+        // The ms unit still uses dim.
+        assert!(
+            ms_line.contains("\u{1b}[2m"),
+            "ms unit must stay dim:\n{ms_line:?}"
+        );
     }
 
     #[test]
