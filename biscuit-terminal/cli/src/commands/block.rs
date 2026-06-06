@@ -109,6 +109,10 @@ pub struct BlockArgs {
     #[arg(long)]
     pub width: Option<String>,
 
+    /// Maximum content-box width, in columns; caps the resolved width.
+    #[arg(long = "max-width")]
+    pub max_width: Option<u32>,
+
     /// Horizontal placement of a sub-available box within the terminal width.
     #[arg(long, value_enum)]
     pub align: Option<AlignArg>,
@@ -215,6 +219,10 @@ impl BlockArgs {
                     Width::Fixed(TargetValue::universal(Length::ch(cells)))
                 }
             };
+            touched = true;
+        }
+        if let Some(mw) = self.max_width {
+            layout.max_width = Some(TargetValue::universal(Length::ch(mw)));
             touched = true;
         }
         if let Some(align) = self.align {
