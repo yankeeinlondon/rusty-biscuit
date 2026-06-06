@@ -1,3 +1,57 @@
+---
+source_files_during_phase_1:
+  - biscuit-terminal/lib/src/render_tree/render.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - biscuit-terminal/lib/src/render_tree/style.rs
+  - biscuit-terminal/lib/src/render_tree/render.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - biscuit-terminal/lib/src/render_tree/style.rs
+  - biscuit-terminal/lib/src/render_tree/render.rs
+  - biscuit-terminal/lib/src/components/block_quote.rs
+  - biscuit-terminal/lib/src/components/status_block.rs
+  - biscuit-terminal/cli/tests/level2_render_tree_style.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - biscuit-terminal/lib/src/render_tree/render.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - renderable/src/tree/render/browser.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - renderable/src/tree/render/browser.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages_during_phase_6:
+  - renderable
+source_files_during_phase_7: []
+docs_updated_during_phase_7:
+  - renderable/docs/layout-and-style.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/renderable/style.md
+  - .claude/skills/biscuit-terminal/render-tree.md
+packages_during_phase_7:
+  - renderable
+  - biscuit-terminal
+packages:
+  - biscuit-terminal
+  - biscuit-terminal-cli
+  - renderable
+---
+
 # Renderer Folds Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -34,7 +88,7 @@ Expected: clean; `Layout { padding, width, .. }`, `Background::subtle`, `NodeAtt
 **Files:**
 - Modify: `biscuit-terminal/lib/src/render_tree/render.rs` (`render_with_layout`)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `render.rs` tests (use the existing terminal test harness — render a styled node at a fixed `available_width` and strip ANSI to count columns):
 
@@ -80,12 +134,12 @@ In `render.rs` tests (use the existing terminal test harness — render a styled
 
 Provide `render_block_with_layout`, `max_line_cols`, `content_box_cols` helpers (build a one-node `Document`, set the layout via `set_layout`, render through the terminal fold at `available_width`, strip ANSI).
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test -p biscuit-terminal width_fixed width_auto fixed_width_is_clamped`
 Expected: FAIL — `width` not honored (only `Auto` exists today).
 
-- [ ] **Step 3: Implement `width` resolution**
+- [x] **Step 3: Implement `width` resolution**
 
 In `render_with_layout`, after computing margins, resolve the content-box width from `layout.width` (the field added by style-vocabulary). `Auto` keeps today's `available − margin_lr`; `Fixed(n)` resolves `n` (cells / `%` of available); `FitContent` is Task 4. Then clamp:
 
@@ -108,7 +162,7 @@ if let Some(mw) = &layout.max_width {
 
 Thread `content_width` as the inner render width (as `max_width` does today) and keep the alignment offset computed against `available − margin` and the *painted box* width (`content_width + padding_lr + border_lr`).
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cargo test -p biscuit-terminal width_fixed width_auto fixed_width_is_clamped`
 Expected: PASS.
@@ -128,7 +182,7 @@ git commit -m "feat(biscuit-terminal): resolve Layout width modes with content-b
 - Modify: `biscuit-terminal/lib/src/render_tree/style.rs` (`paint_text` / `apply_style`)
 - Modify: `biscuit-terminal/lib/src/render_tree/render.rs` (pass `padding` into the paint step)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
     #[test]
@@ -150,16 +204,16 @@ git commit -m "feat(biscuit-terminal): resolve Layout width modes with content-b
 
 Add `render_block_with_layout_and_style`, `leading_unstyled_spaces`, `has_background_run_of_width` helpers (operate on the raw ANSI string — assert SGR presence semantically, not by byte equality, per the L2 capture rule).
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test -p biscuit-terminal padding_is_painted`
 Expected: FAIL — padding not rendered.
 
-- [ ] **Step 3: Implement padding painting**
+- [x] **Step 3: Implement padding painting**
 
 Pass `layout.padding` (resolved to cells) into `paint_text`. In `paint_text`, after computing the background SGR, build each output line as: top/bottom padding rows (full painted width), then for content rows: `left_padding` painted spaces + content padded to `content_width` + `right_padding` painted spaces — all inside the single background SGR run. Reuse the existing widest-line/band machinery (it already pads each line to a width and wraps it in the SGR); the change is that the pad amount is now `padding` + content-to-`content_width`, and the painted band is `content_width + padding_lr`. The margin (transparent) is still applied outside, in `render.rs`.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cargo test -p biscuit-terminal padding_is_painted`
 Expected: PASS.
@@ -180,7 +234,7 @@ Per the architect's review: the implicit one-cell interior space inside drawn ve
 **Files:**
 - Modify: `biscuit-terminal/lib/src/render_tree/style.rs` (`render_border`, `border_horizontal_overhead`)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
     #[test]
@@ -198,16 +252,30 @@ Per the architect's review: the implicit one-cell interior space inside drawn ve
     }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test -p biscuit-terminal border_reserves_only_drawn_cells`
 Expected: FAIL — overhead is currently `2 per side` (edge + interior space) and the row has an implicit space.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `border_horizontal_overhead`, return `u32::from(left) + u32::from(right)` (one cell per drawn vertical edge, **not** `* 2`). In `render_border`, stop inserting the interior space — wrap content directly with the edge glyphs. Update the border doc comment to say inner spacing is `Layout.padding`.
 
-- [ ] **Step 4: Run to verify pass + check border regressions**
+> **Migration follow-through (per spec §4 / AC4):** removing the gap means the
+> left-bordered components that relied on it must express their inner space as
+> `Layout.padding`. Implemented alongside Step 3:
+> - `paint_text` now reserves `padding` cells even with no `background` (ragged
+>   right edge, so left-only padding adds no trailing whitespace).
+> - `BlockQuote` and `StatusBlock` projections add `padding.left = 1ch` so the
+>   `│ `/`┃ ` gap survives via padding.
+> - `render_with_layout` measures alignment slack against `content_width +
+>   padding_lr` **only when the padding is painted** (node carries a `Style`),
+>   fixing a latent 1-cell center/right offset for painted padded boxes.
+> - The 7 `BlockQuote` browser characterization tests now accept the
+>   `<blockquote style=…>` opening tag (a layout is recorded on the node), and
+>   the obsolete `--fill-band` L2 cases (a removed `Fill` flag) were deleted.
+
+- [x] **Step 4: Run to verify pass + check border regressions**
 
 Run: `cargo test -p biscuit-terminal border`
 Expected: PASS; the `render_border width mismatch` known gap (top/bottom rule two columns narrow) should now align — verify the top/bottom rule width equals the content row width.
@@ -226,7 +294,7 @@ git commit -m "feat(biscuit-terminal): border reserves only drawn cells; padding
 **Files:**
 - Modify: `biscuit-terminal/lib/src/render_tree/render.rs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
     #[test]
@@ -250,16 +318,29 @@ git commit -m "feat(biscuit-terminal): border reserves only drawn cells; padding
     }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test -p biscuit-terminal fit_content`
 Expected: FAIL — `FitContent` currently falls back to `Auto` (Task 1).
 
-- [ ] **Step 3: Implement the bounded measure pass**
+> **Executor note (architecture finding):** under the post-`Fill` terminal
+> architecture, `FitContent` is *observationally equivalent* to `Auto` for
+> these cases — a true fail-first test is impossible. The painted background
+> band (`paint_text`) and `render_border` already hug the content's widest
+> line, and the `Auto` alignment basis (`content_width == available − margin`)
+> already places a shrunk box correctly. The tests are therefore correct
+> characterization/regression guards for AC2/AC3 (they verify FitContent sizes
+> the box to the widest line and centers it within the available width), and
+> they pass before and after the implementation. The bounded two-pass is still
+> implemented per AC2: it makes the resolved `content_width` the *natural*
+> content width (rather than the full cap) and keeps placement correct once
+> shrunk, which is required for spec compliance and future-proofs the field.
+
+- [x] **Step 3: Implement the bounded measure pass**
 
 Per the architect's refinement (bounded, not unbounded): when `layout.width == FitContent`, render the content once at `auto_cap` (the largest permitted content box), measure the widest visible line (`max(visible_width(line))`), then `content_width = measured.min(auto_cap).min(max_width?)`. If `content_width` differs from `auto_cap`, re-render the content at `content_width` (so wrapping reflows to the final box). Place via the existing alignment offset.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cargo test -p biscuit-terminal fit_content`
 Expected: PASS.
@@ -278,7 +359,7 @@ git commit -m "feat(biscuit-terminal): FitContent width via bounded measure-then
 **Files:**
 - Modify: `renderable/src/tree/render/browser.rs` (`layout_to_css`)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `browser.rs` tests:
 
@@ -302,16 +383,16 @@ In `browser.rs` tests:
     }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test -p renderable layout_to_css_emits`
 Expected: FAIL — `padding`/`width` not emitted.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `layout_to_css`, after the margin block, emit `padding-{top,right,bottom,left}` from `layout.padding` (vertical → `lh`, horizontal → `css_len`, mirroring margin), and emit `width` per `layout.width`: `Auto` → nothing; `FitContent` → `width:fit-content`; `Fixed(tv)` → `width:{css_len(tv)}`.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cargo test -p renderable layout_to_css`
 Expected: PASS (new + existing margin/max-width/alignment tests).
@@ -330,7 +411,7 @@ git commit -m "feat(renderable): browser layout_to_css lowers padding and width"
 **Files:**
 - Modify: `renderable/src/tree/render/browser.rs` (`style_css_declarations`)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
     #[test]
@@ -360,12 +441,12 @@ git commit -m "feat(renderable): browser layout_to_css lowers padding and width"
     }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test -p renderable border_lowers border_all_sides`
 Expected: FAIL — `border` is currently ignored.
 
-- [ ] **Step 3: Implement the border lowering**
+- [x] **Step 3: Implement the border lowering**
 
 In `style_css_declarations`, replace the "border intentionally ignored" branch with a lowering of `style.border`:
 - `weight` → `border-width` px step (`Thin`=1px, `Medium`=2px, `Thick`=3px),
@@ -374,7 +455,7 @@ In `style_css_declarations`, replace the "border intentionally ignored" branch w
 - `sides`: `All` → `border-*` shorthands; `Sides{..}` → per-side `border-{side}-{width,style,color}` for each enabled side; `None` → emit nothing,
 - `radius` → `border-radius` via `css_len`.
 
-- [ ] **Step 4: Run to verify pass + update the doc note**
+- [x] **Step 4: Run to verify pass + update the doc note**
 
 Run: `cargo test -p renderable border`
 Expected: PASS.
@@ -393,7 +474,7 @@ git commit -m "feat(renderable): browser lowers the full Border matrix to CSS"
 **Files:**
 - Modify: `.claude/skills/renderable/{style,layout}.md`, `.claude/skills/biscuit-terminal/*` (terminal box rendering), `renderable/docs/layout-and-style.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 - `layout-and-style.md`: the "border and fill not lowered to Browser" note → border is now lowered; fill no longer exists; document terminal `padding`/`width`/`FitContent` rendering and the removed implicit border gap.
 - Skills: describe terminal padding painting + width modes and browser `padding`/`width`/`border` lowering.
@@ -401,16 +482,18 @@ git commit -m "feat(renderable): browser lowers the full Border matrix to CSS"
 Run: `rg -n 'border.*not.*lowered|fill.*not.*lowered|implicit.*space' renderable/docs .claude/skills/renderable`
 Expected: no stale claims.
 
-- [ ] **Step 2: Regenerate skill hashes**
+- [x] **Step 2: Regenerate skill hashes**
 
-`md hash` each edited skill file; update its `hash:` frontmatter.
+`md hash` each edited skill file; update its `hash:` frontmatter. (No-op: the
+edited skill files — `style.md`, `render-tree.md` — carry no `hash:`
+frontmatter property.)
 
-- [ ] **Step 3: Perf gate + L2 checks**
+- [x] **Step 3: Perf gate + L2 checks**
 
 Run: `cargo test -p renderable fold_does_zero` (the tree-attrs structural gate — folds use `*_ref`, must stay green).
 Run the biscuit-terminal L2 styling suite if present: `cargo test -p biscuit-terminal --test level2_render_tree_style` (or the harness recipe). Confirm padding/border render in a real terminal.
 
-- [ ] **Step 4: Whole-crate build + test, re-baseline reference snapshots**
+- [x] **Step 4: Whole-crate build + test, re-baseline reference snapshots**
 
 Run: `cargo build -p renderable -p biscuit-terminal && cargo test -p renderable -p biscuit-terminal`
 Then `cargo insta review`: accept intended box-model diffs (padding now painted, border gap removed, fit-content sizing) with a note; investigate any unexpected diff.
