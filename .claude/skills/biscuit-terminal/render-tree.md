@@ -102,7 +102,12 @@ measured widest line. `padding` is resolved into cells **once** against the
 parent available width (so a `%` padding has a single basis) and threaded into
 the paint step; the content renders at exactly the content-box width and
 `padding` + `border` are painted **around** it (a `Fixed(n)` box keeps all `n`
-content columns — the border is not carved out of them). The box is then
+content columns — the border is not carved out of them). The resolved
+content-box width is passed to the paint layer as a **floor**: a background band
+or bordered interior fills the full resolved width even when the text is
+narrower, so a `Fixed`/`Auto` box paints all its columns rather than shrinking to
+the widest line (`FitContent` already measured that line, so the floor is a
+no-op there; a left-only border with no background stays ragged). The box is then
 **block-placed within `available − margin`** for every width mode (`margin:auto`
 semantics): a sub-available `Fixed` / `FitContent` / `max_width`-capped box is
 centered/right-offset as a unit, while a box that fills the area centers its

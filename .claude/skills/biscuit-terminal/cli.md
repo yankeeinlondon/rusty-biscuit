@@ -200,6 +200,7 @@ Options:
   (painted by `--bg`/`--fill`)
 - `--margin`: Transparent horizontal margin, in columns
 - `--width`: Content-box width — `auto`, `fit` (fit-content), or a column count
+- `--max-width`: Cap the resolved content-box width, in columns
 - `--align`: Place a sub-available box — `left`, `center`, `right`
 
 ## Progress Command
