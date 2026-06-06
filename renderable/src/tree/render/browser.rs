@@ -2286,8 +2286,8 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
 /// `false` (an inline node) those three layers are left to the semantic
 /// wrappers applied by [`wrap_style_emphasis`].
 ///
-/// `border` and `fill` are intentionally ignored until the broader Browser
-/// Style box-painting work defines those semantics.
+/// `border` lowers to the CSS `border-*` matrix via [`lower_border`]. The
+/// deleted `fill` field no longer exists; a painted box is `background`.
 fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> String {
     use crate::color::ColorMode;
     use crate::target::RenderTarget;
@@ -2341,7 +2341,82 @@ fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> S
             decls.push("text-decoration-line:line-through".into());
         }
     }
+    if let Some(border) = style.border.as_ref() {
+        lower_border(border, resolve_color, &mut decls);
+    }
     decls.join(";")
+}
+
+/// Lowers a [`Border`](crate::style::Border) to inline CSS declarations.
+///
+/// `weight` maps to a pixel `border-width` (`Thin`→`1px`, `Medium`→`2px`,
+/// `Thick`→`3px`); `line_style` to the matching `border-style` keyword; and
+/// `color` through the shared `PerMode` → CSS color path.
+/// [`BorderSides::All`] emits the `border-{width,style,color}` shorthands;
+/// [`BorderSides::Sides`] emits only the enabled per-side `border-{side}-*`
+/// declarations; [`BorderSides::None`] emits no edges. `radius` lowers to
+/// `border-radius` regardless of which sides are drawn.
+///
+/// [`BorderSides::All`]: crate::style::BorderSides::All
+/// [`BorderSides::Sides`]: crate::style::BorderSides::Sides
+/// [`BorderSides::None`]: crate::style::BorderSides::None
+fn lower_border(
+    border: &crate::style::Border,
+    resolve_color: impl Fn(
+        &crate::layout::TargetValue<crate::style::PerMode<crate::color::Color>>,
+    ) -> Option<String>,
+    decls: &mut Vec<String>,
+) {
+    use crate::style::{BorderLineStyle, BorderSides, BorderWeight};
+    use crate::target::RenderTarget;
+
+    let width = match border.weight {
+        BorderWeight::Thin => "1px",
+        BorderWeight::Medium => "2px",
+        BorderWeight::Thick => "3px",
+    };
+    let line_style = match border.line_style {
+        BorderLineStyle::Solid => "solid",
+        BorderLineStyle::Dashed => "dashed",
+        BorderLineStyle::Dotted => "dotted",
+        BorderLineStyle::Double => "double",
+    };
+    let color = border.color.as_ref().and_then(resolve_color);
+
+    match border.sides {
+        BorderSides::All => {
+            decls.push(format!("border-width:{width}"));
+            decls.push(format!("border-style:{line_style}"));
+            if let Some(color) = &color {
+                decls.push(format!("border-color:{color}"));
+            }
+        }
+        BorderSides::None => {}
+        BorderSides::Sides {
+            top,
+            right,
+            bottom,
+            left,
+        } => {
+            for (enabled, side) in [
+                (top, "top"),
+                (right, "right"),
+                (bottom, "bottom"),
+                (left, "left"),
+            ] {
+                if enabled {
+                    decls.push(format!("border-{side}-width:{width}"));
+                    decls.push(format!("border-{side}-style:{line_style}"));
+                    if let Some(color) = &color {
+                        decls.push(format!("border-{side}-color:{color}"));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(len) = border.radius.as_ref().and_then(|r| r.resolve(RenderTarget::Browser)) {
+        decls.push(format!("border-radius:{}", css_len(len, false)));
+    }
 }
 
 /// Wraps `fragment` in semantic emphasis tags (`<strong>`, `<em>`, `<s>`) for
@@ -2386,27 +2461,34 @@ fn wrap_style_emphasis(
 /// Lowers a [`Layout`](crate::layout::Layout) to an inline CSS declaration
 /// string for the browser target.
 ///
-/// Edges sides are resolved with [`TargetValue::resolve`] for
-/// [`RenderTarget::Browser`]. Vertical sides (`top` / `bottom`) lower a
-/// [`Length::Ch`] to `lh` (line-height units); horizontal sides lower it to
-/// `ch`. A `max_width` adds `margin-left` / `margin-right: auto` per the
-/// node's [`Alignment`]. [`WordWrap::None`] adds `white-space:nowrap`; any
-/// wrapping variant adds `overflow-wrap:break-word`.
+/// `margin` and `padding` edge sides are resolved with
+/// [`TargetValue::resolve`] for [`RenderTarget::Browser`]. Vertical sides
+/// (`top` / `bottom`) lower a [`Length::Ch`] to `lh` (line-height units);
+/// horizontal sides lower it to `ch`. [`Width::FitContent`] emits
+/// `width:fit-content` and [`Width::Fixed`] emits an explicit `width`;
+/// [`Width::Auto`] omits the property. A `max_width` adds `margin-left` /
+/// `margin-right: auto` per the node's [`Alignment`]. [`WordWrap::None`] adds
+/// `white-space:nowrap`; any wrapping variant adds `overflow-wrap:break-word`.
+/// Lowers a [`Length`](crate::layout::Length) to a CSS dimension. A
+/// [`Length::Ch`] becomes `lh` (line-height units) when `vertical`, otherwise
+/// `ch`; the other variants are target-independent.
+fn css_len(len: &crate::layout::Length, vertical: bool) -> String {
+    use crate::layout::Length;
+    match len {
+        Length::Zero => "0".into(),
+        Length::Ch(n) if vertical => format!("{n}lh"),
+        Length::Ch(n) => format!("{n}ch"),
+        Length::Percent(p) => format!("{p}%"),
+        Length::Css(sizing) => sizing.to_string(),
+    }
+}
+
 fn layout_to_css(layout: &crate::layout::Layout) -> String {
-    use crate::layout::{Alignment, Length, TargetValue, WordWrap};
+    use crate::layout::{Alignment, Length, TargetValue, Width, WordWrap};
     use crate::target::RenderTarget;
 
     fn resolve(tv: &TargetValue<Length>) -> Option<&Length> {
         tv.resolve(RenderTarget::Browser)
-    }
-    fn css_len(len: &Length, vertical: bool) -> String {
-        match len {
-            Length::Zero => "0".into(),
-            Length::Ch(n) if vertical => format!("{n}lh"),
-            Length::Ch(n) => format!("{n}ch"),
-            Length::Percent(p) => format!("{p}%"),
-            Length::Css(sizing) => sizing.to_string(),
-        }
     }
 
     let m = &layout.margin;
@@ -2422,6 +2504,28 @@ fn layout_to_css(layout: &crate::layout::Layout) -> String {
     }
     if let Some(l) = resolve(&m.right) {
         decls.push(format!("margin-right:{}", css_len(l, false)));
+    }
+    let p = &layout.padding;
+    if let Some(l) = resolve(&p.top) {
+        decls.push(format!("padding-top:{}", css_len(l, true)));
+    }
+    if let Some(l) = resolve(&p.bottom) {
+        decls.push(format!("padding-bottom:{}", css_len(l, true)));
+    }
+    if let Some(l) = resolve(&p.left) {
+        decls.push(format!("padding-left:{}", css_len(l, false)));
+    }
+    if let Some(l) = resolve(&p.right) {
+        decls.push(format!("padding-right:{}", css_len(l, false)));
+    }
+    match &layout.width {
+        Width::Auto => {}
+        Width::FitContent => decls.push("width:fit-content".into()),
+        Width::Fixed(tv) => {
+            if let Some(l) = resolve(tv) {
+                decls.push(format!("width:{}", css_len(l, false)));
+            }
+        }
     }
     if let Some(mw) = layout.max_width.as_ref().and_then(resolve) {
         decls.push(format!("max-width:{}", css_len(mw, false)));
@@ -3843,6 +3947,90 @@ mod tests {
             html.contains("1lh"),
             "vertical Ch margin must lower to lh: {html}"
         );
+    }
+
+    #[test]
+    fn layout_to_css_emits_padding() {
+        use crate::layout::{Edges, Layout, Length};
+
+        let css = layout_to_css(&Layout {
+            padding: Edges::x(Length::ch(3)),
+            ..Default::default()
+        });
+        assert!(
+            css.contains("padding-left:3ch") && css.contains("padding-right:3ch"),
+            "{css}"
+        );
+    }
+
+    #[test]
+    fn layout_to_css_emits_width_modes() {
+        use crate::layout::{Layout, Length, TargetValue, Width};
+
+        assert!(
+            layout_to_css(&Layout {
+                width: Width::FitContent,
+                ..Default::default()
+            })
+            .contains("width:fit-content")
+        );
+        let fixed = layout_to_css(&Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(60))),
+            ..Default::default()
+        });
+        assert!(fixed.contains("width:60ch"), "{fixed}");
+        // Auto omits an explicit width.
+        assert!(!layout_to_css(&Layout::default()).contains("width:"));
+    }
+
+    #[test]
+    fn border_lowers_full_matrix() {
+        use crate::color::{Color, Tailwind};
+        use crate::layout::{Length, TargetValue};
+        use crate::style::{
+            Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style,
+        };
+
+        let style = Style {
+            border: Some(Border {
+                weight: BorderWeight::Thick,
+                line_style: BorderLineStyle::Dashed,
+                sides: BorderSides::Sides {
+                    top: false,
+                    right: false,
+                    bottom: false,
+                    left: true,
+                },
+                radius: Some(TargetValue::universal(Length::ch(1))),
+                color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+                    Tailwind::Indigo500,
+                )))),
+            }),
+            ..Default::default()
+        };
+        let css = style_css_declarations(&style, true);
+        assert!(css.contains("border-left-style:dashed"), "{css}");
+        assert!(css.contains("border-left-width:"), "{css}");
+        assert!(css.contains("border-radius:"), "{css}");
+        assert!(
+            css.contains("border-left-color:") || css.contains("border-color:"),
+            "{css}"
+        );
+    }
+
+    #[test]
+    fn border_all_sides_uses_shorthand() {
+        use crate::style::{Border, BorderSides, Style};
+
+        let style = Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let css = style_css_declarations(&style, true);
+        assert!(css.contains("border-style:solid"), "{css}");
     }
 
     // ── RT-PROGRESS-001: browser progress ──────────────────────────────────
