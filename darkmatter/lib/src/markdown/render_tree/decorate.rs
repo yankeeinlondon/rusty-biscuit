@@ -149,6 +149,12 @@ fn apply_lone_image_layout(node: &mut RenderNode, ctx: &LayoutContext, _alt: &st
 }
 
 /// Sets the node's [`Style`] foreground / background from the component colors.
+///
+/// The renderable [`Style`] carries the `Color` only (opacity is not
+/// representable), which the terminal renderer consumes — and which drops
+/// opacity by design. Any opacity is additionally recorded as a
+/// `darkmatter.style` hint so the browser entry point can emit `rgba(...)`; see
+/// [`set_component_opacity_hints`].
 fn apply_component_color(node: &mut RenderNode, ctx: &LayoutContext, component: PageComponent) {
     let fg = ctx.component_color(component);
     let bg = ctx.component_bg_color(component);
@@ -158,6 +164,41 @@ fn apply_component_color(node: &mut RenderNode, ctx: &LayoutContext, component: 
     let mut style = node.attrs.style().unwrap_or_default();
     set_style_colors(&mut style, fg, bg);
     node.attrs.set_style(&style);
+    set_component_opacity_hints(node, fg, bg);
+}
+
+/// The `darkmatter.style` hint namespace carrying the HTML-only `rgba(...)` form
+/// of opacity-bearing component colors.
+const STYLE_OPACITY_NS: HintNamespace = HintNamespace("darkmatter.style");
+
+/// Records the `rgba(...)` CSS of any opacity-bearing component color as a
+/// `darkmatter.style` hint (`color` / `background-color`).
+///
+/// The render tree's `Color`-typed [`Style`] cannot carry opacity, so the
+/// browser entry point reads this hint and merges the `rgba(...)` declaration
+/// onto the rendered element — see
+/// [`inject_component_color_opacity`](super::entrypoints). The terminal path
+/// ignores it (terminal drops opacity, as documented in
+/// `docs/rendering/style.md`).
+fn set_component_opacity_hints(
+    node: &mut RenderNode,
+    fg: Option<&StyleColor>,
+    bg: Option<&StyleColor>,
+) {
+    if let Some(css) = fg
+        .filter(|c| c.opacity.is_some())
+        .and_then(crate::style::color::lower_to_css)
+    {
+        node.attrs
+            .set_hint(STYLE_OPACITY_NS, "color", serde_json::json!(css));
+    }
+    if let Some(css) = bg
+        .filter(|c| c.opacity.is_some())
+        .and_then(crate::style::color::lower_to_css)
+    {
+        node.attrs
+            .set_hint(STYLE_OPACITY_NS, "background-color", serde_json::json!(css));
+    }
 }
 
 /// Applies hyperlink / image inline colors to link / image nodes.
@@ -367,8 +408,6 @@ mod tests {
             crate::markdown::highlighting::ColorMode::Dark,
             page.page_color().cloned(),
             page.page_bg_color().cloned(),
-            page.component_colors().clone(),
-            page.component_bg_colors().clone(),
             page.component_policies().clone(),
             page.hyperlink_style().cloned(),
             page.local_hyperlink_style().cloned(),

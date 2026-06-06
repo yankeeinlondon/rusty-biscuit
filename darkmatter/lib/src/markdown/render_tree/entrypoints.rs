@@ -336,11 +336,141 @@ pub(crate) fn render_tree_html_with_layout(
         apply_hr_defaults(&mut doc.root, defaults);
     }
     super::decorate::decorate_document(&mut doc.root, ctx);
+    let style_merges = inject_component_color_opacity(&mut doc.root);
     let injections = inject_link_image_attributes(&mut doc.root, options);
     let browser_opts = browser_options_from_html_options(options);
     let rendered = render_browser_document_html(&doc, &browser_opts)?;
     let output = apply_attribute_injections(rendered.output, &injections);
+    let output = apply_style_merges(output, &style_merges);
     Ok(output)
+}
+
+/// The `darkmatter.style` hint namespace [`decorate`](super::decorate) writes the
+/// HTML-only `rgba(...)` form of opacity-bearing component colors to.
+const STYLE_OPACITY_NS: HintNamespace = HintNamespace("darkmatter.style");
+
+/// Sentinel-class prefix for [`inject_component_color_opacity`]. Like
+/// [`ATTR_INJECTION_SENTINEL_PREFIX`] it is a 1:1 post-render handle, here used
+/// to locate the rendered element whose inline `style` must gain an `rgba(...)`
+/// declaration.
+const STYLE_MERGE_SENTINEL_PREFIX: &str = "__dm-style-merge-";
+
+/// One pending inline-style merge: a sentinel class on a folded component node
+/// and the `rgba(...)` declarations to splice into that node's rendered `style`.
+struct StyleMerge {
+    sentinel: String,
+    decls: String,
+}
+
+/// Collects the opacity-bearing component colors [`decorate`](super::decorate)
+/// recorded as `darkmatter.style` hints, attaching a sentinel class to each
+/// carrier node so [`apply_style_merges`] can splice the `rgba(...)`
+/// declarations into the element's rendered inline `style`.
+///
+/// The render tree's `Color`-typed [`Style`](renderable::style::Style) cannot
+/// represent opacity, so the fold emits the opaque `rgb(...)` form; appending the
+/// `rgba(...)` declaration last lets CSS source order win without the fold
+/// knowing about alpha. Terminal output is unaffected (it drops opacity).
+fn inject_component_color_opacity(root: &mut RenderNode) -> Vec<StyleMerge> {
+    let mut merges = Vec::new();
+    collect_style_merges(root, &mut merges);
+    merges
+}
+
+/// Recursively gathers `darkmatter.style` color/background-color hints into
+/// [`StyleMerge`]s, tagging each carrier node with a unique sentinel class.
+fn collect_style_merges(node: &mut RenderNode, merges: &mut Vec<StyleMerge>) {
+    let mut decls: Vec<String> = Vec::new();
+    if let Some(css) = node
+        .attrs
+        .get_hint(STYLE_OPACITY_NS, "color")
+        .and_then(|v| v.as_str())
+    {
+        decls.push(format!("color:{css}"));
+    }
+    if let Some(css) = node
+        .attrs
+        .get_hint(STYLE_OPACITY_NS, "background-color")
+        .and_then(|v| v.as_str())
+    {
+        decls.push(format!("background-color:{css}"));
+    }
+    if !decls.is_empty() {
+        let sentinel = format!("{STYLE_MERGE_SENTINEL_PREFIX}{}", merges.len());
+        node.attrs.classes.push(sentinel.clone());
+        merges.push(StyleMerge {
+            sentinel,
+            decls: decls.join(";"),
+        });
+    }
+
+    if let Some(children) = node.children_mut() {
+        for child in children {
+            collect_style_merges(child, merges);
+        }
+    }
+}
+
+/// Splices each [`StyleMerge`]'s `rgba(...)` declarations into the rendered
+/// element bearing its sentinel class, then removes the sentinel.
+///
+/// The sentinel class is unique and appears exactly once. Its enclosing tag is
+/// bounded by the nearest preceding `<` and following `>` (attribute values
+/// never contain either, as the writer escapes them), so the merge is scoped to
+/// that one opening tag.
+fn apply_style_merges(mut html: String, merges: &[StyleMerge]) -> String {
+    for merge in merges {
+        let Some(token_pos) = html.find(&merge.sentinel) else {
+            continue;
+        };
+        let Some(tag_start) = html[..token_pos].rfind('<') else {
+            continue;
+        };
+        let Some(rel_end) = html[token_pos..].find('>') else {
+            continue;
+        };
+        // Include the closing `>` so the merge can splice a fresh `style`
+        // attribute just inside it when the element has none.
+        let tag_end = token_pos + rel_end + 1;
+
+        let tag = &html[tag_start..tag_end];
+        let merged = strip_sentinel_class(&merge_decls_into_tag(tag, &merge.decls), &merge.sentinel);
+        html.replace_range(tag_start..tag_end, &merged);
+    }
+    html
+}
+
+/// Appends `decls` to the tag's `style="…"` attribute (creating one when
+/// absent). CSS source order makes these later declarations win over any opaque
+/// color the fold already emitted.
+fn merge_decls_into_tag(tag: &str, decls: &str) -> String {
+    const STYLE: &str = "style=\"";
+    if let Some(rel) = tag.find(STYLE) {
+        let value_start = rel + STYLE.len();
+        if let Some(rel_close) = tag[value_start..].find('"') {
+            let value_end = value_start + rel_close;
+            let existing = &tag[value_start..value_end];
+            let mut merged = String::with_capacity(tag.len() + decls.len() + 1);
+            merged.push_str(&tag[..value_end]);
+            if !existing.is_empty() {
+                merged.push(';');
+            }
+            merged.push_str(decls);
+            merged.push_str(&tag[value_end..]);
+            return merged;
+        }
+    }
+    // No `style` attribute: splice one in just before the closing `>`.
+    let insert_at = tag.rfind('>').unwrap_or(tag.len());
+    format!("{} style=\"{decls}\"{}", &tag[..insert_at], &tag[insert_at..])
+}
+
+/// Removes the sentinel token from the tag's `class` attribute, leaving only the
+/// element's real classes.
+fn strip_sentinel_class(tag: &str, sentinel: &str) -> String {
+    tag.replace(&format!(" {sentinel}"), "")
+        .replace(&format!("{sentinel} "), "")
+        .replace(sentinel, "")
 }
 
 /// Validates every fenced code block's DSL directive in a folded [`Document`],
@@ -1072,6 +1202,56 @@ mod tests {
         };
         let result = render_tree_terminal(&md, &opts).expect("terminal render");
         assert!(result.output.contains("Heading"));
+    }
+
+    // ---- Browser component-color opacity overlay (review-1 finding 1) ----
+
+    #[test]
+    fn merge_decls_appends_into_existing_style() {
+        let tag = r#"<blockquote class="x" style="background-color:rgb(239,68,68)">"#;
+        let merged = merge_decls_into_tag(tag, "background-color:rgba(239,68,68,0.5)");
+        assert_eq!(
+            merged,
+            r#"<blockquote class="x" style="background-color:rgb(239,68,68);background-color:rgba(239,68,68,0.5)">"#,
+            "rgba must be appended last so CSS source order wins"
+        );
+    }
+
+    #[test]
+    fn merge_decls_creates_style_when_absent() {
+        let tag = r#"<table class="x">"#;
+        let merged = merge_decls_into_tag(tag, "color:rgba(0,0,0,0.5)");
+        assert_eq!(merged, r#"<table class="x" style="color:rgba(0,0,0,0.5)">"#);
+    }
+
+    #[test]
+    fn strip_sentinel_class_removes_only_the_sentinel() {
+        assert_eq!(
+            strip_sentinel_class(r#"<table class="real __dm-style-merge-0">"#, "__dm-style-merge-0"),
+            r#"<table class="real">"#,
+        );
+        assert_eq!(
+            strip_sentinel_class(r#"<table class="__dm-style-merge-0">"#, "__dm-style-merge-0"),
+            r#"<table class="">"#,
+        );
+    }
+
+    #[test]
+    fn apply_style_merges_scopes_to_the_sentinel_element() {
+        let html = concat!(
+            r#"<p class="other" style="color:rgb(0,0,0)">x</p>"#,
+            r#"<blockquote class="__dm-style-merge-0" style="background-color:rgb(239,68,68)">q</blockquote>"#,
+        )
+        .to_string();
+        let merges = vec![StyleMerge {
+            sentinel: "__dm-style-merge-0".to_string(),
+            decls: "background-color:rgba(239,68,68,0.5)".to_string(),
+        }];
+        let out = apply_style_merges(html, &merges);
+        assert!(out.contains("background-color:rgba(239,68,68,0.5)"), "rgba spliced: {out}");
+        assert!(!out.contains("__dm-style-merge-0"), "sentinel stripped: {out}");
+        // The unrelated paragraph is untouched.
+        assert!(out.contains(r#"<p class="other" style="color:rgb(0,0,0)">x</p>"#));
     }
 
     #[test]
@@ -2148,8 +2328,6 @@ mod tests {
             crate::markdown::highlighting::ColorMode::Dark,
             None,
             None,
-            HashMap::new(),
-            HashMap::new(),
             policies,
             None,
             None,
@@ -2241,7 +2419,6 @@ mod tests {
         local_image_style: Option<crate::style::schema::CommonStyle>,
     ) -> crate::layout::LayoutContext {
         use crate::layout::{LayoutContext, PageBackground};
-        use std::collections::HashMap;
 
         LayoutContext::from_page(
             80,
@@ -2253,8 +2430,6 @@ mod tests {
             crate::markdown::highlighting::ColorMode::Dark,
             None,
             None,
-            HashMap::new(),
-            HashMap::new(),
             policies,
             hyperlink_style,
             None,
