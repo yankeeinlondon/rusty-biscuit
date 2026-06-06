@@ -4,9 +4,10 @@
 //! decisions — OSC8 support, double-underline degradation — happen here,
 //! never in the parser.
 
-use renderable::color::{BasicColor, Color};
 use renderable::style::UnderlineStyle;
 
+use crate::discovery::detection::ColorDepth;
+use crate::render_tree::style::color_sgr;
 use crate::terminal::Terminal;
 
 use super::ir::{ProseDocument, ProseNode, ProseStyle};
@@ -157,78 +158,23 @@ fn style_to_ops(style: &ProseStyle, term: Option<&Terminal>) -> Vec<(StyleLayer,
             ops.push((StyleLayer::Underline, open));
         }
     }
-    if let Some(fg) = &style.fg {
-        ops.push((StyleLayer::Foreground, fg_escape(fg)));
+    // Colors degrade through the shared capability-aware path so a declared
+    // color (basic, RGB, web, or Tailwind) is emitted at the terminal's depth —
+    // truecolor, 256-cube, 16-color fallback, or nothing under no-color. When
+    // `term` is absent (optimistic render) we assume full truecolor. Skipping
+    // the op entirely under no-color keeps `StyleState` from emitting a reset
+    // for a layer that was never opened.
+    let depth = term.map_or(ColorDepth::TrueColor, |t| t.color_depth);
+    if let Some(fg) = &style.fg
+        && let Some(open) = color_sgr(*fg, &depth, false)
+    {
+        ops.push((StyleLayer::Foreground, open));
     }
-    if let Some(bg) = &style.bg {
-        ops.push((StyleLayer::Background, bg_escape(bg)));
+    if let Some(bg) = &style.bg
+        && let Some(open) = color_sgr(*bg, &depth, true)
+    {
+        ops.push((StyleLayer::Background, open));
     }
 
     ops
-}
-
-/// Foreground SGR opening escape for a color.
-fn fg_escape(color: &Color) -> String {
-    match color {
-        Color::BasicColor(c) => basic_fg(*c).to_string(),
-        other => match other.to_rgb() {
-            Some((r, g, b)) => format!("\x1b[38;2;{};{};{}m", r, g, b),
-            None => "\x1b[39m".to_string(),
-        },
-    }
-}
-
-/// Background SGR opening escape for a color.
-fn bg_escape(color: &Color) -> String {
-    match color {
-        Color::BasicColor(c) => basic_bg(*c).to_string(),
-        other => match other.to_rgb() {
-            Some((r, g, b)) => format!("\x1b[48;2;{};{};{}m", r, g, b),
-            None => "\x1b[49m".to_string(),
-        },
-    }
-}
-
-/// ANSI foreground code for a 16-color basic color.
-fn basic_fg(c: BasicColor) -> &'static str {
-    match c {
-        BasicColor::Black => "\x1b[30m",
-        BasicColor::Red => "\x1b[31m",
-        BasicColor::Green => "\x1b[32m",
-        BasicColor::Yellow => "\x1b[33m",
-        BasicColor::Blue => "\x1b[34m",
-        BasicColor::Magenta => "\x1b[35m",
-        BasicColor::Cyan => "\x1b[36m",
-        BasicColor::White => "\x1b[37m",
-        BasicColor::BrightBlack => "\x1b[90m",
-        BasicColor::BrightRed => "\x1b[91m",
-        BasicColor::BrightGreen => "\x1b[92m",
-        BasicColor::BrightYellow => "\x1b[93m",
-        BasicColor::BrightBlue => "\x1b[94m",
-        BasicColor::BrightMagenta => "\x1b[95m",
-        BasicColor::BrightCyan => "\x1b[96m",
-        BasicColor::BrightWhite => "\x1b[97m",
-    }
-}
-
-/// ANSI background code for a 16-color basic color.
-fn basic_bg(c: BasicColor) -> &'static str {
-    match c {
-        BasicColor::Black => "\x1b[40m",
-        BasicColor::Red => "\x1b[41m",
-        BasicColor::Green => "\x1b[42m",
-        BasicColor::Yellow => "\x1b[43m",
-        BasicColor::Blue => "\x1b[44m",
-        BasicColor::Magenta => "\x1b[45m",
-        BasicColor::Cyan => "\x1b[46m",
-        BasicColor::White => "\x1b[47m",
-        BasicColor::BrightBlack => "\x1b[100m",
-        BasicColor::BrightRed => "\x1b[101m",
-        BasicColor::BrightGreen => "\x1b[102m",
-        BasicColor::BrightYellow => "\x1b[103m",
-        BasicColor::BrightBlue => "\x1b[104m",
-        BasicColor::BrightMagenta => "\x1b[105m",
-        BasicColor::BrightCyan => "\x1b[106m",
-        BasicColor::BrightWhite => "\x1b[107m",
-    }
 }
