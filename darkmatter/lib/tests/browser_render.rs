@@ -691,6 +691,49 @@ async fn browser_table_center_alignment_computes_equal_margins() {
     assert!(px(&left) > 0.0, "centered table margins must be non-zero; got {left}");
 }
 
+/// Review-4 finding (High) — "Browser page max-width centering". A page
+/// `max-width` with the default (zero) side margins must center the page frame
+/// (`.darkmatter-page`) in the viewport. Earlier coverage checked only the
+/// `max-width` *declaration*; this asserts the *used geometry*: equal, non-zero
+/// left/right offsets and a positive used max-width in a real browser.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_page_max_width_centers_frame() {
+    if !require_browser() {
+        return;
+    }
+    let doc = style_page_doc(120, "page:\n  max-width: 40ch", "Hello world\n");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    // The wrapper's used side margins (auto-resolved to px) are its offsets from
+    // the body/viewport edges. Equal + non-zero proves the frame is centered.
+    let left = harness
+        .computed_style(".darkmatter-page", "margin-left")
+        .await
+        .expect("computed style query");
+    let right = harness
+        .computed_style(".darkmatter-page", "margin-right")
+        .await
+        .expect("computed style query");
+    assert_eq!(
+        left, right,
+        "max-width page frame must center via equal auto side offsets; got {left} / {right}",
+    );
+    assert!(px(&left) > 0.0, "centered page frame side offsets must be non-zero; got {left}");
+
+    let max_width = harness
+        .computed_style(".darkmatter-page", "max-width")
+        .await
+        .expect("computed style query");
+    assert!(
+        max_width.ends_with("px") && px(&max_width) > 0.0,
+        "page max-width must resolve to a positive used px width; got {max_width}",
+    );
+}
+
 /// A list `left-margin` must compute to a non-zero px margin in a real browser.
 #[tokio::test]
 #[serial(browser)]
