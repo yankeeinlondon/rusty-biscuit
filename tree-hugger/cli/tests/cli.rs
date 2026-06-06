@@ -1291,7 +1291,11 @@ fn test_lint_scan_hides_clean_files_and_excludes_fixtures() {
     std::fs::write(root.join("src/dirty.rs"), "fn run() {\n    dbg!(1);\n}\n").unwrap();
     // Fixture: an unused import that must be excluded from the default scan.
     std::fs::create_dir_all(root.join("tests/fixtures")).unwrap();
-    std::fs::write(root.join("tests/fixtures/sample.rs"), "use std::io::Write;\n").unwrap();
+    std::fs::write(
+        root.join("tests/fixtures/sample.rs"),
+        "use std::io::Write;\n",
+    )
+    .unwrap();
 
     hug_cmd()
         .current_dir(root)
@@ -1315,7 +1319,11 @@ fn test_lint_explicit_fixture_path_overrides_default_exclude() {
     )
     .unwrap();
     std::fs::create_dir_all(root.join("tests/fixtures")).unwrap();
-    std::fs::write(root.join("tests/fixtures/sample.rs"), "use std::io::Write;\n").unwrap();
+    std::fs::write(
+        root.join("tests/fixtures/sample.rs"),
+        "use std::io::Write;\n",
+    )
+    .unwrap();
 
     // Naming the fixture explicitly re-includes it despite the default exclude
     // (`unused-import` is off by default, so opt in to get a visible signal).
@@ -1527,4 +1535,292 @@ fn test_lint_json_reports_unavailable_oxlint_metadata() {
 
     assert_eq!(metadata["tool_name"], "oxlint");
     assert_eq!(metadata["tool_available"], false);
+}
+
+// ============================================================================
+// God-files command tests (Phase 6)
+// ============================================================================
+
+#[test]
+fn test_god_files_help() {
+    hug_cmd()
+        .args(["god-files", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Identify oversized source files"))
+        .stdout(predicate::str::contains("--high-risk"));
+}
+
+#[test]
+fn test_god_files_json_output() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let content = "x = 1\n".repeat(1000);
+    std::fs::write(dir.path().join("big.py"), content).unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .args(["god-files", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let arr = json.as_array().expect("json array");
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["relative_path"], "big.py");
+    assert_eq!(arr[0]["risk"], "High");
+    assert!(arr[0]["effective_sloc"].as_u64().unwrap() >= 1000);
+    // A cleanly-parsed file carries no diagnostic note.
+    assert!(arr[0].get("note").is_none());
+}
+
+#[test]
+fn test_god_files_high_risk_filters_json() {
+    // `--high-risk` must filter the JSON payload, not only the rendered report.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("high.py"), "x = 1\n".repeat(1000)).unwrap();
+    std::fs::write(dir.path().join("moderate.py"), "x = 1\n".repeat(500)).unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .args(["god-files", "--high-risk", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let arr = json.as_array().expect("json array");
+    assert_eq!(arr.len(), 1, "only the high-risk file should be emitted");
+    assert_eq!(arr[0]["relative_path"], "high.py");
+    assert_eq!(arr[0]["risk"], "High");
+    assert!(
+        !arr.iter().any(|a| a["risk"] == "Moderate"),
+        "no moderate-risk records may appear under --high-risk"
+    );
+}
+
+#[test]
+fn test_god_files_plain_output() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let content = "x = 1\n".repeat(1000);
+    std::fs::write(dir.path().join("big.py"), content).unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .args(["god-files", "--plain"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8_lossy(&output);
+    assert!(
+        !stdout.contains('\x1b'),
+        "plain output must not contain ANSI escape codes"
+    );
+    // Report heading reports both band counts (spec §5.3).
+    assert!(stdout.contains("There are 0 files with moderate risk of being considered god files"));
+    assert!(stdout.contains("There are 1 files with high risk of being considered god files"));
+    // High-risk section heading and the file item.
+    assert!(stdout.contains("High risk"));
+    assert!(stdout.contains("the big.py file is 1000 lines of code"));
+}
+
+#[test]
+fn test_god_files_high_risk_suppresses_moderate_section() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let high_content = "x = 1\n".repeat(1000);
+    let moderate_content = "x = 1\n".repeat(500);
+    std::fs::write(dir.path().join("high.py"), high_content).unwrap();
+    std::fs::write(dir.path().join("moderate.py"), moderate_content).unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .args(["god-files", "--high-risk", "--plain"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8_lossy(&output);
+    // Report heading still carries both band counts.
+    assert!(stdout.contains("There are 1 files with moderate risk of being considered god files"));
+    assert!(stdout.contains("There are 1 files with high risk of being considered god files"));
+    // High body present.
+    assert!(stdout.contains("the high.py file is 1000 lines of code"));
+    // The moderate section heading and its body are both suppressed (spec §5.1).
+    assert!(
+        !stdout.contains("Moderate risk"),
+        "moderate section heading should be absent with --high-risk"
+    );
+    assert!(
+        !stdout.contains("moderate.py"),
+        "moderate body should be suppressed with --high-risk"
+    );
+}
+
+#[test]
+fn test_god_files_empty_scan() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .args(["god-files", "--plain"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8_lossy(&output);
+    // Both counts are visible as 0/0 (spec §7).
+    assert!(stdout.contains("There are 0 files with moderate risk of being considered god files"));
+    assert!(stdout.contains("There are 0 files with high risk of being considered god files"));
+    // Both risk sections are omitted for empty scans.
+    assert!(
+        !stdout.contains("High risk"),
+        "empty scan should omit the high-risk section heading"
+    );
+    assert!(
+        !stdout.contains("Moderate risk"),
+        "empty scan should omit the moderate-risk section heading"
+    );
+    assert!(
+        !stdout.contains("lines of code"),
+        "empty scan should list no files"
+    );
+}
+
+#[test]
+fn test_god_files_osc8_links_to_scan_root() {
+    // Regression: the OSC8 target must resolve against the *scan root*, not the
+    // process working directory. Scan an explicit directory from a different
+    // CWD and confirm the hyperlink points at the scanned file.
+    let scan_dir = tempfile::TempDir::new().unwrap();
+    let cwd_dir = tempfile::TempDir::new().unwrap();
+    let content = "x = 1\n".repeat(1000);
+    std::fs::write(scan_dir.path().join("big.py"), content).unwrap();
+
+    let scan_suffix = scan_dir
+        .path()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.rsplit('.').next())
+        .expect("scan dir name suffix");
+
+    let output = hug_cmd()
+        .current_dir(cwd_dir.path())
+        .env("CLICOLOR_FORCE", "1")
+        .args(["god-files", scan_dir.path().to_str().unwrap()])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8_lossy(&output);
+    // An OSC8 file hyperlink is emitted, targeting the scan root.
+    assert!(stdout.contains("\x1b]8;;file://"), "expected an OSC8 file link");
+    assert!(
+        stdout.contains(scan_suffix),
+        "OSC8 target should point at the scan root, got: {stdout:?}"
+    );
+}
+
+#[test]
+fn test_god_files_unparseable_note() {
+    let dir = tempfile::TempDir::new().unwrap();
+    // >400 physical lines with an invalid UTF-8 byte so TreeFile::new fails and
+    // the candidate falls back to physical-line banding with a diagnostic note.
+    let mut content = Vec::new();
+    for _ in 0..600 {
+        content.extend_from_slice(b"x = 1\n");
+    }
+    content[3] = 0xFF;
+    std::fs::write(dir.path().join("broken.py"), &content).unwrap();
+
+    // Plain output surfaces the note.
+    let plain = hug_cmd()
+        .current_dir(dir.path())
+        .args(["god-files", "--plain"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plain = String::from_utf8_lossy(&plain);
+    assert!(plain.contains("note:"), "plain output should show the note");
+    assert!(plain.contains("could not parse"));
+
+    // JSON carries the structured note field.
+    let json_out = hug_cmd()
+        .current_dir(dir.path())
+        .args(["god-files", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&json_out).unwrap();
+    let arr = json.as_array().expect("json array");
+    assert_eq!(arr.len(), 1);
+    assert!(
+        arr[0]["note"].as_str().is_some_and(|s| s.contains("could not parse")),
+        "json should carry the diagnostic note"
+    );
+}
+
+#[test]
+fn test_god_files_nonexistent_dir_errors() {
+    // A missing scan root is an invocation error, not a successful empty scan.
+    let dir = tempfile::TempDir::new().unwrap();
+    let missing = dir.path().join("does-not-exist");
+
+    hug_cmd()
+        .args(["god-files", missing.to_str().unwrap(), "--plain"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("does not exist"));
+}
+
+#[test]
+fn test_god_files_file_valued_dir_errors() {
+    // A scan root that resolves to a file (not a directory) must error rather
+    // than silently report 0/0.
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("not_a_dir.py");
+    std::fs::write(&file, "x = 1\n".repeat(1000)).unwrap();
+
+    hug_cmd()
+        .args(["god-files", file.to_str().unwrap(), "--plain"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a directory"));
+}
+
+#[test]
+fn test_god_files_default_dir() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let content = "x = 1\n".repeat(1000);
+    std::fs::write(dir.path().join("big.py"), content).unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .args(["god-files", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let arr = json.as_array().expect("json array");
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["relative_path"], "big.py");
 }

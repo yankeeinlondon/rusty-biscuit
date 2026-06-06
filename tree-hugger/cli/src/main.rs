@@ -4,10 +4,12 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+use biscuit_terminal::discovery::detection::ColorDepth;
+use biscuit_terminal::prelude::{Prose, Terminal, TerminalRenderable, WordWrap, strip_escape_codes};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
+use clap_complete::Shell;
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
 use clap_complete::env::{CompleteEnv, Shells};
-use clap_complete::Shell;
 use owo_colors::{OwoColorize, Style};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
@@ -19,12 +21,13 @@ use tree_hugger::cache::{
     PersistentCache, SymbolSnapshot,
 };
 use tree_hugger::{
-    CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo,
-    FileSummary, FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
+    CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary,
+    FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
     ProgrammingLanguage, RuleRegistry, RuleSelector, SchemaVersion, SourceContext, SymbolInfo,
     SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError, TypeMetadata, VariantInfo,
     find_git_root, find_package_root,
 };
+use tree_hugger::god_files::{GodAnalysis, GodFiles, RefactorHint, RiskBand, SymbolBlock};
 mod import_format;
 mod prelude;
 mod scanner;
@@ -32,7 +35,6 @@ mod scanner;
 use import_format::*;
 use prelude::*;
 use scanner::*;
-
 
 #[derive(Parser, Debug)]
 #[command(
@@ -252,6 +254,18 @@ struct CompletionsArgs {
     shell: Shell,
 }
 
+/// Arguments for the god-files command
+#[derive(clap::Args, Debug, Clone)]
+struct GodFilesArgs {
+    /// Directory to scan (defaults to current directory)
+    #[arg(value_name = "DIR", value_hint = ValueHint::DirPath)]
+    dir: Option<PathBuf>,
+
+    /// Show only high-risk files
+    #[arg(long)]
+    high_risk: bool,
+}
+
 #[derive(Subcommand, Debug, Clone)]
 enum Command {
     /// List functions in the file(s)
@@ -288,6 +302,8 @@ Examples:
   hug completions powershell >> $PROFILE
 ")]
     Completions(CompletionsArgs),
+    /// Identify oversized source files that are strong candidates for refactoring
+    GodFiles(GodFilesArgs),
 }
 
 impl Command {
@@ -300,7 +316,7 @@ impl Command {
             | Self::Imports(args) => &args.filters,
             Self::Lint(args) => &args.filters,
             Self::Classes(args) => &args.filters,
-            Self::Completions(_) => &[],
+            Self::Completions(_) | Self::GodFiles(_) => &[],
         }
     }
 
@@ -309,7 +325,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.exported,
             Self::Classes(args) => args.exported,
-            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) => false,
+            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => false,
         }
     }
 
@@ -318,7 +334,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.prelude,
             Self::Classes(args) => args.prelude,
-            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) => false,
+            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => false,
         }
     }
 
@@ -344,7 +360,7 @@ impl Command {
                 static_only: args.static_only,
                 instance_only: args.instance_only,
             }),
-            Self::Completions(_) => None,
+            Self::Completions(_) | Self::GodFiles(_) => None,
         }
     }
 }
@@ -513,17 +529,26 @@ struct OutputConfig {
 
 static SOURCE_LINE_CACHE: OnceLock<Mutex<HashMap<PathBuf, Vec<String>>>> = OnceLock::new();
 
+/// Whether `CLICOLOR_FORCE` requests colored output regardless of TTY.
+///
+/// Follows the common convention: any value other than unset or `0` forces
+/// color on. Lets non-interactive callers (and tests) opt into styled output.
+fn color_forced() -> bool {
+    std::env::var("CLICOLOR_FORCE").is_ok_and(|value| value != "0")
+}
+
 impl OutputConfig {
     fn new(format: OutputFormat, show_comments: bool) -> Self {
         match format {
             OutputFormat::Pretty => {
-                // Check NO_COLOR environment variable and TTY
+                // Color is enabled for an interactive TTY (honoring NO_COLOR),
+                // or forced on regardless of TTY by CLICOLOR_FORCE.
                 let no_color = std::env::var("NO_COLOR").is_ok();
                 let is_tty = std::io::stdout().is_terminal();
-                let use_colors = !no_color && is_tty;
+                let use_colors = color_forced() || (!no_color && is_tty);
                 Self {
                     use_colors,
-                    use_hyperlinks: use_colors && is_tty,
+                    use_hyperlinks: use_colors,
                     show_comments,
                 }
             }
@@ -838,6 +863,52 @@ fn main() -> Result<(), TreeHuggerError> {
     let pkg_root = find_package_root(&root_dir, &git_root);
     let display_root = Some(git_root.clone());
 
+    // Handle god-files command early (separate analysis pipeline)
+    if let Command::GodFiles(args) = &cli.command {
+        let dir = args.dir.as_deref().unwrap_or_else(|| Path::new("."));
+        // Reject an invalid scan root up front. A missing path or a non-directory
+        // is an invocation error, not a successful empty scan; collapsing it into
+        // a 0/0 report would hide CI/configuration mistakes.
+        if !dir.is_dir() {
+            let reason = if dir.exists() {
+                "god-files scan path is not a directory"
+            } else {
+                "god-files scan directory does not exist"
+            };
+            return Err(TreeHuggerError::Io {
+                path: dir.to_path_buf(),
+                source: std::io::Error::other(reason),
+            });
+        }
+        let god_files = GodFiles::new(dir);
+        let analyses = god_files.analysis();
+
+        match output_format {
+            OutputFormat::Json => {
+                // `--high-risk` filters the emitted set for every output format,
+                // not just the rendered report (spec §5.1).
+                let emitted: Vec<&GodAnalysis> = if args.high_risk {
+                    analyses
+                        .iter()
+                        .filter(|a| a.risk == RiskBand::High)
+                        .collect()
+                } else {
+                    analyses.iter().collect()
+                };
+                let json =
+                    serde_json::to_string_pretty(&emitted).map_err(|source| TreeHuggerError::Io {
+                        path: PathBuf::from("<stdout>"),
+                        source: std::io::Error::other(source),
+                    })?;
+                println!("{json}");
+            }
+            OutputFormat::Pretty | OutputFormat::Plain => {
+                render_god_files(analyses, &output_config, args.high_risk);
+            }
+        }
+        return Ok(());
+    }
+
     let command_kind = cli.command.kind().expect("completions already handled");
     let analysis_options = AnalysisOptions::from_command(&command_kind);
 
@@ -903,8 +974,7 @@ fn main() -> Result<(), TreeHuggerError> {
         let project_id = pkg_root
             .to_string_lossy()
             .replace(['/', '\\', ':', ' ', '.'], "_");
-        Some(PersistentCache::default_cache(
-            &project_id, true))
+        Some(PersistentCache::default_cache(&project_id, true))
     };
 
     // Handle classes command separately due to different output structure
@@ -1137,14 +1207,8 @@ fn current_dir() -> Result<PathBuf, TreeHuggerError> {
 }
 
 /// Directory names skipped when completing filter paths (build/dep output).
-const COMPLETION_SKIPPED_DIRS: &[&str] = &[
-    "target",
-    "node_modules",
-    "dist",
-    "build",
-    "vendor",
-    ".git",
-];
+const COMPLETION_SKIPPED_DIRS: &[&str] =
+    &["target", "node_modules", "dist", "build", "vendor", ".git"];
 
 /// Dynamic completer for FILTER positionals.
 ///
@@ -1744,8 +1808,8 @@ fn render_summary(
             *strict,
             *experimental_semantics,
         );
-        let has_visible = (!*syntax_only && !filtered.is_empty())
-            || (!*lint_only && !summary.syntax.is_empty());
+        let has_visible =
+            (!*syntax_only && !filtered.is_empty()) || (!*lint_only && !summary.syntax.is_empty());
         if suppress_clean_lint && !has_visible {
             return false;
         }
@@ -2503,8 +2567,7 @@ fn apply_lint_policy(
 ) -> Vec<LintDiagnostic> {
     use tree_hugger::rule_registry::apply_policy;
 
-    lint
-        .iter()
+    lint.iter()
         .cloned()
         .filter_map(|mut diagnostic| {
             let rule_id = diagnostic.rule.as_deref()?;
@@ -2991,5 +3054,283 @@ fn render_field_section(
         }
 
         render_symbol_doc_comment(field.doc_comment.as_deref(), config, "        ");
+    }
+}
+
+// ============================================================================
+// God-files rendering
+// ============================================================================
+
+/// Build the [`Terminal`] used to render the god-files report.
+///
+/// A non-styling terminal (no color, no OSC8) is used for `--plain`/`--json`
+/// so `Prose` emits clean, escape-free bytes; the styled path detects real
+/// capabilities so color and hyperlink degradation are capability-aware.
+fn god_terminal(config: &OutputConfig) -> Terminal {
+    if !config.use_colors {
+        Terminal::builder()
+            .is_tty(false)
+            .color_depth(ColorDepth::None)
+            .osc_link_support(false)
+            .build()
+    } else if color_forced() {
+        // Forced color may run without a real TTY (CI, captured output, tests);
+        // an optimistic terminal guarantees full color + OSC8 capabilities.
+        Terminal::new_optimistic(120)
+    } else {
+        Terminal::new()
+    }
+}
+
+/// Render a single line of `Prose` markup at a fixed indentation.
+///
+/// Indentation is applied outside the markup so leading whitespace is never
+/// consumed by the markup parser, and word-wrap is disabled to preserve the
+/// report's hand-laid columns. `plain` strips any residual escapes (emphasis
+/// SGR is not gated by color depth) so `--plain`/`--json` output is clean.
+fn prose_line(term: &Terminal, plain: bool, indent: usize, markup: &str) {
+    let rendered = Prose::new(markup)
+        .with_word_wrap(WordWrap::None)
+        .render(term);
+    let rendered = if plain {
+        strip_escape_codes(rendered)
+    } else {
+        rendered
+    };
+    println!("{}{}", " ".repeat(indent), rendered);
+}
+
+/// Build a percent-encoded `file://` URL for an absolute path.
+fn file_url(absolute_path: &str) -> String {
+    const FILE_URL_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'/').remove(b':');
+    let encoded = utf8_percent_encode(absolute_path, FILE_URL_ENCODE_SET);
+    format!("file://{encoded}")
+}
+
+/// Render the full god-files report via biscuit-terminal `Prose`.
+fn render_god_files(analyses: &[GodAnalysis], config: &OutputConfig, high_risk_only: bool) {
+    let term = god_terminal(config);
+    let plain = !config.use_colors;
+
+    let high_count = analyses.iter().filter(|a| a.risk == RiskBand::High).count();
+    let moderate_count = analyses
+        .iter()
+        .filter(|a| a.risk == RiskBand::Moderate)
+        .count();
+
+    // Report heading: two count lines, always printed (including the 0/0 case
+    // for an empty scan), so the band totals are always visible.
+    prose_line(
+        &term,
+        plain,
+        0,
+        &format!(
+            "- There are <yellow>{moderate_count}</yellow> files with moderate risk of being considered _god files_"
+        ),
+    );
+    prose_line(
+        &term,
+        plain,
+        0,
+        &format!(
+            "- There are <red>{high_count}</red> files with <b>high risk</b> of being considered _god files_"
+        ),
+    );
+
+    // High-risk section (omitted entirely when empty).
+    if high_count > 0 {
+        println!();
+        prose_line(&term, plain, 0, "<b><uu>High risk</uu></b>");
+        for analysis in analyses.iter().filter(|a| a.risk == RiskBand::High) {
+            render_god_analysis(&term, plain, analysis);
+        }
+    }
+
+    // Moderate-risk section. Suppressed in full (heading and bodies) under
+    // `--high-risk`; otherwise omitted only when empty.
+    if !high_risk_only && moderate_count > 0 {
+        println!();
+        prose_line(&term, plain, 0, "<b><uu>Moderate risk</uu></b>");
+        for analysis in analyses.iter().filter(|a| a.risk == RiskBand::Moderate) {
+            render_god_analysis(&term, plain, analysis);
+        }
+    }
+}
+
+/// Render a single god-file analysis.
+fn render_god_analysis(term: &Terminal, plain: bool, analysis: &GodAnalysis) {
+    let color = match analysis.risk {
+        RiskBand::High => "red",
+        RiskBand::Moderate => "yellow",
+    };
+
+    let rel = Prose::escape_text(&analysis.relative_path.display().to_string());
+    let label = if term.osc_link_support {
+        let url = file_url(analysis.file.raw());
+        format!("<a href={}>{rel}</a>", Prose::quoted_attr(&url))
+    } else {
+        rel
+    };
+
+    prose_line(
+        term,
+        plain,
+        0,
+        &format!(
+            "- the {label} file is <b><{color}>{sloc}</{color}></b> lines of code",
+            sloc = analysis.effective_sloc
+        ),
+    );
+
+    // Diagnostic note for degraded (e.g. unparseable) analyses.
+    if let Some(note) = &analysis.note {
+        prose_line(
+            term,
+            plain,
+            2,
+            &format!("- <dim>note: {}</dim>", Prose::escape_text(note)),
+        );
+    }
+
+    // Largest blocks.
+    if !analysis.blocks.is_empty() {
+        prose_line(
+            term,
+            plain,
+            2,
+            "- the largest blocks in this file are composed by these symbols:",
+        );
+        for block in &analysis.blocks {
+            render_symbol_block(term, plain, block);
+        }
+        if analysis.blocks_truncated > 0 {
+            prose_line(
+                term,
+                plain,
+                4,
+                &format!("- <dim>…and {} more</dim>", analysis.blocks_truncated),
+            );
+        }
+    }
+
+    // Compact signals line.
+    prose_line(
+        term,
+        plain,
+        2,
+        &format!(
+            "- <dim>top-level symbols: {tl} · max depth: {depth} · imports: {imports} · TODO/FIXME: {todo} · comments: {density:.0}%</dim>",
+            tl = analysis.top_level_symbol_count,
+            depth = analysis.max_nesting_depth,
+            imports = analysis.import_fan_out,
+            todo = analysis.todo_fixme_count,
+            density = analysis.comment_density * 100.0,
+        ),
+    );
+
+    // Refactor hints.
+    for hint in &analysis.refactor_hints {
+        prose_line(
+            term,
+            plain,
+            2,
+            &format!("- <dim>{}</dim>", format_refactor_hint(hint)),
+        );
+    }
+}
+
+/// Render a single symbol block line plus any container call-out.
+fn render_symbol_block(term: &Terminal, plain: bool, block: &SymbolBlock) {
+    let kind = block.kind.to_string();
+    let kind_markup = match color_tag_for_kind(block.kind) {
+        Some(tag) => format!("<{tag}>{kind}</{tag}>"),
+        None => kind,
+    };
+    let name = Prose::escape_text(&block.name);
+
+    let members = match &block.many_members {
+        Some(callout) => format!("  ({} members)", callout.member_count),
+        None => String::new(),
+    };
+    let doc = match &block.doc_summary {
+        Some(summary) => format!(" <dim>— {}</dim>", Prose::escape_text(summary)),
+        None => String::new(),
+    };
+
+    prose_line(
+        term,
+        plain,
+        4,
+        &format!(
+            "- {kind_markup} <b>{name}</b>  <dim>[{start}–{end}]</dim>  {sloc} sloc{members}{doc}",
+            start = block.start_line,
+            end = block.end_line,
+            sloc = block.sloc,
+        ),
+    );
+
+    if let Some(callout) = &block.many_members {
+        for member in &callout.members {
+            let m_kind = member.kind.to_string();
+            let m_kind_markup = match color_tag_for_kind(member.kind) {
+                Some(tag) => format!("<{tag}>{m_kind}</{tag}>"),
+                None => m_kind,
+            };
+            let m_name = Prose::escape_text(&member.name);
+            prose_line(
+                term,
+                plain,
+                6,
+                &format!("- {m_kind_markup} {m_name}  {} sloc", member.sloc),
+            );
+        }
+        let remaining = callout.member_count.saturating_sub(callout.members.len());
+        if remaining > 0 {
+            prose_line(term, plain, 6, &format!("- <dim>…and {remaining} more</dim>"));
+        }
+    }
+}
+
+/// Prose color tag for a symbol kind, mirroring [`style_for_kind`].
+fn color_tag_for_kind(kind: SymbolKind) -> Option<&'static str> {
+    match kind {
+        SymbolKind::Function | SymbolKind::Method => Some("green"),
+        SymbolKind::Type | SymbolKind::Class | SymbolKind::Interface => Some("magenta"),
+        SymbolKind::Enum | SymbolKind::Field => Some("cyan"),
+        SymbolKind::Trait | SymbolKind::Namespace | SymbolKind::Module => Some("yellow"),
+        SymbolKind::Variable | SymbolKind::Parameter => Some("blue"),
+        SymbolKind::Macro => Some("red"),
+        SymbolKind::Constant => Some("bright-blue"),
+        SymbolKind::Unknown => None,
+    }
+}
+
+/// Format a refactor hint as a short human-readable sentence (spec §5.3).
+fn format_refactor_hint(hint: &RefactorHint) -> String {
+    match hint {
+        RefactorHint::DominatedBySingleSymbol { name, share } => {
+            format!(
+                "likely refactor: `{}` holds {:.0}% of the code — split by responsibility",
+                Prose::escape_text(name),
+                share * 100.0
+            )
+        }
+        RefactorHint::ManyUnrelatedTopLevel { count } => {
+            format!("likely refactor: {count} unrelated top-level symbols — split by responsibility")
+        }
+        RefactorHint::DeeplyNested { depth } => {
+            format!("likely refactor: deeply nested (depth {depth}) — extract / flatten")
+        }
+        RefactorHint::HighCoupling { import_fan_out } => {
+            format!(
+                "likely refactor: high coupling ({import_fan_out} imports) — expect wide refactor blast radius"
+            )
+        }
+        RefactorHint::LowCodeDensity { comment_density } => {
+            format!(
+                "likely refactor: low code density ({:.0}% comments) — mostly comments/docs",
+                comment_density * 100.0
+            )
+        }
     }
 }
