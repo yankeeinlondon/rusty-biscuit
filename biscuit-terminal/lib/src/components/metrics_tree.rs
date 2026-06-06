@@ -257,21 +257,41 @@ impl MetricsTree {
     ///
     /// Connectors and glyphs fold to ASCII when `unicode` is false; the visible
     /// column widths are computed from the pre-markup strings so styling never
-    /// shifts alignment.
-    fn build_markup(&self, unicode: bool) -> String {
+    /// shifts alignment. `available_width` is the visible width the row must fit
+    /// (already net of any outer border); the label column is capped to it so a
+    /// single long label cannot push the value column past the wrap point.
+    fn build_markup(&self, unicode: bool, available_width: usize) -> String {
         let glyphs = Glyphs::for_terminal(unicode);
 
         let mut rows = Vec::new();
         collect_rows(&self.root, String::new(), String::new(), true, unicode, &glyphs, &mut rows);
 
-        let label_w = rows.iter().map(|r| r.label.chars().count()).max().unwrap_or(0);
+        let raw_label_w = rows.iter().map(|r| r.label.chars().count()).max().unwrap_or(0);
         let num_w = rows.iter().map(|r| r.num.chars().count()).max().unwrap_or(0);
         let unit_w = rows.iter().map(|r| r.unit.chars().count()).max().unwrap_or(0);
         let share_w = rows.iter().map(|r| r.share.chars().count()).max().unwrap_or(0);
 
+        // The right-hand columns are fixed: two-space gap, value (mantissa +
+        // unit), two-space gap, share, then the widest row decoration (calls /
+        // hot marker / note). Cap the label column so even the longest label
+        // leaves room for them on one line — otherwise one verbose label (a
+        // `::shell` command, say) inflates the shared column and every row's
+        // value wraps. `MIN_LABEL_W` keeps labels legible on absurdly narrow
+        // widths rather than collapsing to the ellipsis.
+        const MIN_LABEL_W: usize = 8;
+        let decoration_w = rows
+            .iter()
+            .map(|r| row_decoration_width(r, &glyphs, &self.highlight_label))
+            .max()
+            .unwrap_or(0);
+        let fixed_cols = 2 + num_w + unit_w + 2 + share_w + decoration_w;
+        let max_label_w = available_width.saturating_sub(fixed_cols).max(MIN_LABEL_W);
+        let label_w = raw_label_w.min(max_label_w);
+
         let mut body = String::new();
         for row in &rows {
-            let mut label = format!("{:<label_w$}", row.label);
+            let truncated = truncate_to_width(&row.label, label_w, unicode);
+            let mut label = format!("{truncated:<label_w$}");
             if row.emphasize {
                 label = format!("<b>{label}</b>");
             }
@@ -467,13 +487,52 @@ fn split_unit(value: &str) -> (String, String) {
     (value[..boundary].to_string(), value[boundary..].to_string())
 }
 
+/// Visible width of the trailing decorations appended after a row's share cell:
+/// the run-count multiplier, the hot marker, and the dim note. Mirrors exactly
+/// what `build_markup` emits so the label cap reserves the right amount.
+fn row_decoration_width(row: &RenderRow, glyphs: &Glyphs, highlight_label: &str) -> usize {
+    let mut width = 0;
+    if let Some(calls) = row.calls.filter(|c| *c > 1) {
+        // "  {times}{calls}"
+        width += 2 + glyphs.times.chars().count() + calls.to_string().chars().count();
+    }
+    if row.hot {
+        // " {highlight} {label}"
+        width += 1 + glyphs.highlight.chars().count() + 1 + highlight_label.chars().count();
+    }
+    if let Some(note) = &row.note {
+        // " {note}"
+        width += 1 + note.chars().count();
+    }
+    width
+}
+
+/// Truncate a label to at most `max` visible chars, appending an ellipsis when
+/// it overflows. The connector prefix sits at the head of `label`, so trimming
+/// the tail keeps the tree structure intact. Plain text only — called before
+/// any Prose markup is wrapped around the result.
+fn truncate_to_width(label: &str, max: usize, unicode: bool) -> String {
+    if label.chars().count() <= max {
+        return label.to_string();
+    }
+    let ellipsis = if unicode { "…" } else { "..." };
+    let ellipsis_w = ellipsis.chars().count();
+    if max <= ellipsis_w {
+        return label.chars().take(max).collect();
+    }
+    let kept: String = label.chars().take(max - ellipsis_w).collect();
+    format!("{kept}{ellipsis}")
+}
+
 impl TerminalRenderable for MetricsTree {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
-        Prose::new(self.build_markup(true)).render_optimistic(term_width)
+        let width = term_width.unwrap_or(80) as usize;
+        Prose::new(self.build_markup(true, width)).render_optimistic(term_width)
     }
 
     fn render(&self, term: &Terminal) -> String {
-        Prose::new(self.build_markup(term.supports_unicode)).render(term)
+        let width = term.width() as usize;
+        Prose::new(self.build_markup(term.supports_unicode, width)).render(term)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -542,6 +601,49 @@ mod tests {
             ],
         )
         .emphasized()
+    }
+
+    #[test]
+    fn long_label_does_not_overflow_or_wrap_other_rows() {
+        // A single verbose label (e.g. a `::shell` command) must be truncated so
+        // it cannot inflate the shared label column and push every row's value
+        // past the wrap point. Regression for the perf tree rendering every row
+        // on two lines once a long command appeared.
+        let long = "shell · sniff repo staged-files -v --plain --on-error \"No staged files; nothing to do\"";
+        let root = MetricNode::branch(
+            "Performance",
+            MetricValue::Duration(Duration::from_millis(100)),
+            MetricShare::Full,
+            vec![
+                MetricNode::leaf(
+                    long,
+                    MetricValue::Duration(Duration::from_millis(80)),
+                    MetricShare::Of(0.8),
+                ),
+                MetricNode::leaf(
+                    "short",
+                    MetricValue::Duration(Duration::from_millis(20)),
+                    MetricShare::Of(0.2),
+                ),
+            ],
+        );
+        let width = 80usize;
+        let plain = strip_ansi(&MetricsTree::new(root).render_optimistic(Some(width as u32)));
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert!(
+                line.chars().count() <= width,
+                "row exceeds available width ({} cols):\n{line:?}",
+                line.chars().count()
+            );
+        }
+        // The long label is trimmed with an ellipsis but its value stays on the
+        // same row (no wrap), and the short row keeps its full value too.
+        let long_row = plain
+            .lines()
+            .find(|l| l.contains("shell ·"))
+            .expect("long row present");
+        assert!(long_row.contains('…'), "long label should be truncated:\n{long_row}");
+        assert!(long_row.contains("80.0ms"), "long row value wrapped away:\n{long_row}");
     }
 
     #[test]
