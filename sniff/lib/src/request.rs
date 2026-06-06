@@ -314,7 +314,14 @@ impl GitRequest {
         }
     }
 
-    /// Branch + dirty status counts. No commits, no file details, no worktrees.
+    /// Branch + dirty yes/no flag. No per-category counts, no commits, no file
+    /// details, no worktrees.
+    ///
+    /// Currently produces the same field set as [`minimal`](Self::minimal):
+    /// both satisfy [`is_minimal`](Self::is_minimal), so detection takes the
+    /// dirty-flag-only path and leaves `staged_count` / `unstaged_count` /
+    /// `untracked_count` at `0`. Use a request that is *not* minimal (e.g. with
+    /// `commit_count > 0`) to populate per-category counts.
     pub fn summary() -> Self {
         Self {
             commit_count: 0,
