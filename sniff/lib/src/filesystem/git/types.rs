@@ -694,10 +694,17 @@ impl GitRepo {
             (status, Vec::new())
         };
 
-        let remotes = if is_minimal {
-            Vec::new()
-        } else {
+        // Remotes, config, branches, and tracking are repo metadata that a pure
+        // file-change query never renders. Gating them on `wants_repo_metadata`
+        // (rather than `is_minimal`) lets a `summary().include_file_changes`
+        // request skip the per-branch `graph_ahead_behind` walk that otherwise
+        // dominates latency on repos with many local branches.
+        let wants_metadata = request.wants_repo_metadata();
+
+        let remotes = if wants_metadata {
             super::remote_refresh::get_remotes(&self.repo, request.include_remote_branch_details)
+        } else {
+            Vec::new()
         };
 
         let worktrees = if request.include_worktrees {
@@ -706,22 +713,22 @@ impl GitRepo {
             HashMap::new()
         };
 
-        let config = if is_minimal {
-            GitConfig::default()
-        } else {
+        let config = if wants_metadata {
             self.config()
+        } else {
+            GitConfig::default()
         };
 
-        let branches = if is_minimal {
-            Vec::new()
-        } else {
+        let branches = if wants_metadata {
             super::remote_refresh::get_local_branches(&self.repo, current_branch.as_deref())
+        } else {
+            Vec::new()
         };
 
-        let tracking = if is_minimal {
-            Vec::new()
-        } else {
+        let tracking = if wants_metadata {
             super::remote_refresh::get_tracking_status(&self.repo, current_branch.as_deref())
+        } else {
+            Vec::new()
         };
 
         if request.refresh_remote_tracking {
