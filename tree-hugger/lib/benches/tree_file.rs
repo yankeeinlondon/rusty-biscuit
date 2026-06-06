@@ -25,9 +25,7 @@ fn rust_source() -> String {
 fn python_source() -> String {
     let mut out = String::from("import os\nimport sys\n\n");
     for i in 0..100 {
-        out.push_str(&format!(
-            "def function_{i}(x):\n    return x + {i}\n\n"
-        ));
+        out.push_str(&format!("def function_{i}(x):\n    return x + {i}\n\n"));
     }
     out.push_str("class MyClass:\n    def __init__(self):\n        self.field = ''\n");
     out
@@ -40,7 +38,9 @@ fn javascript_source() -> String {
             "export function function_{i}(x) {{\n    return x + {i};\n}}\n\n"
         ));
     }
-    out.push_str("export class MyClass {\n    constructor() {\n        this.field = '';\n    }\n}\n");
+    out.push_str(
+        "export class MyClass {\n    constructor() {\n        this.field = '';\n    }\n}\n",
+    );
     out
 }
 
@@ -107,9 +107,7 @@ fn bench_symbols_rust(c: &mut Criterion) {
     let file = parse_temp(&source, ".rs");
     let mut group = c.benchmark_group("symbols");
     group.throughput(Throughput::Bytes(source.len() as u64));
-    group.bench_function("rust", |b| {
-        b.iter(|| black_box(&file).symbols().unwrap())
-    });
+    group.bench_function("rust", |b| b.iter(|| black_box(&file).symbols().unwrap()));
     group.finish();
 }
 
@@ -140,9 +138,7 @@ fn bench_lint_diagnostics_rust(c: &mut Criterion) {
     let file = parse_temp(&source, ".rs");
     let mut group = c.benchmark_group("lint");
     group.throughput(Throughput::Bytes(source.len() as u64));
-    group.bench_function("rust", |b| {
-        b.iter(|| black_box(&file).lint_diagnostics())
-    });
+    group.bench_function("rust", |b| b.iter(|| black_box(&file).lint_diagnostics()));
     group.finish();
 }
 

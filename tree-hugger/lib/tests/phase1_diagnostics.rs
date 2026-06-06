@@ -149,8 +149,10 @@ fn test_registry_lookup_by_alias() {
     // unreachable-code is an alias for dead-code
     let rule = registry.get("dead-code").unwrap();
     assert_eq!(rule.id, "dead-code");
-    assert!(rule.aliases.contains(&"unreachable-code".to_string()),
-        "dead-code should have unreachable-code as an alias");
+    assert!(
+        rule.aliases.contains(&"unreachable-code".to_string()),
+        "dead-code should have unreachable-code as an alias"
+    );
 }
 
 #[test]
@@ -173,7 +175,9 @@ fn test_registry_default_severity() {
 #[test]
 fn test_registry_validation_passes() {
     let registry = RuleRegistry::new();
-    registry.validate().expect("built-in registry should be valid");
+    registry
+        .validate()
+        .expect("built-in registry should be valid");
 }
 
 // ============================================================================
