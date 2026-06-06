@@ -461,3 +461,30 @@ Status: `darkmatter` lib (3495) + integration (`layout_snapshots`,
 `style_frontmatter`, `cutover_reference`, `browser_render`) and `darkmatter-cli`
 suites green; clippy clean. `docs/rendering/style.md` updated (Length retention,
 `ComponentPolicy` single-source-of-truth color storage).
+
+## Review 3 Resolutions (2026-06-06)
+
+Addresses [`review-3.md`](./review-3.md), the single High finding: the
+browser-tier percentage test checked the `max-width` *declaration*, not used
+geometry.
+
+- **Finding 1 — percentage component test verified serialization, not the used
+  width.** Chrome reports `getComputedStyle(table).max-width` verbatim as `50%`,
+  so the old assertion only proved the percent round tripped. Two design
+  realities make a *binding* percentage `max-width` unobservable on a table:
+  the component lowers to `white-space: nowrap` (so min-content == max-content
+  and `max-width` can never shrink it), and supplying an explicit `width`
+  alongside `max-width` is rejected as a `ComponentWidthConflict`. So the test
+  now uses a percentage **`width`** — exactly what review-2 named ("a
+  percentage-width table … asserting its used width relative to its containing
+  block") — which the browser resolves to a px used value.
+  - `browser_render::browser_component_table_width_percent_resolves_against_container`
+    renders `table: width: 50%` at two different containing-block sizes (page
+    `max-width` `40ch` then `80ch`) and asserts the table's used pixel width is
+    ~50% of `.darkmatter-page` in both. Holding at 50% across two containers
+    proves the authored `Length` was carried onto the node and resolved live
+    against the containing block, not pre-resolved to a fixed cell count. The
+    used-geometry read is centralized in a `used_table_ratio` helper.
+
+Status: `BISCUIT_BROWSER_REQUIRED=1 cargo test -p darkmatter --test
+browser_render` — 14 passed.
