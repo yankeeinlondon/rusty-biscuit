@@ -44,14 +44,14 @@ pub fn capture_frontmatter_yaml(original_text: &str) -> Option<String> {
     let mut lines = original_text.split_inclusive('\n');
 
     let opening = lines.next()?;
-    if trim_line_ending(opening) != "---" {
+    if opening.trim() != "---" {
         return None;
     }
 
     let yaml_start = opening.len();
     let mut offset = yaml_start;
     for line in lines {
-        if trim_line_ending(line) == "---" {
+        if line.trim() == "---" {
             // `offset` is the start of the closing delimiter line; the interior
             // YAML is everything between the opening line and here. Strip the
             // single delimiter-adjacent line-ending so the closing `---`'s
@@ -75,10 +75,6 @@ fn strip_final_line_ending(text: &str) -> &str {
     } else {
         text
     }
-}
-
-fn trim_line_ending(line: &str) -> &str {
-    line.trim_end_matches(['\r', '\n'])
 }
 
 #[cfg(test)]
@@ -222,5 +218,34 @@ alias: *seq";
     #[test]
     fn capture_returns_none_without_closing_delimiter() {
         assert_eq!(capture_frontmatter_yaml("---\nprompt: x\nbody\n"), None);
+    }
+
+    #[test]
+    fn capture_accepts_padded_opening_delimiter() {
+        // The parser recognizes ` --- ` (surrounding whitespace) as a valid
+        // opening delimiter, so the capture helper must match that behavior.
+        let text = " --- \nprompt: x\nsequence: []\n---\nbody\n";
+        assert_eq!(
+            capture_frontmatter_yaml(text).as_deref(),
+            Some("prompt: x\nsequence: []"),
+        );
+    }
+
+    #[test]
+    fn capture_accepts_padded_closing_delimiter() {
+        let text = "---\nprompt: x\nsequence: []\n --- \nbody\n";
+        assert_eq!(
+            capture_frontmatter_yaml(text).as_deref(),
+            Some("prompt: x\nsequence: []"),
+        );
+    }
+
+    #[test]
+    fn capture_accepts_both_padded_delimiters() {
+        let text = " --- \nprompt: x\n --- \nbody\n";
+        assert_eq!(
+            capture_frontmatter_yaml(text).as_deref(),
+            Some("prompt: x"),
+        );
     }
 }
