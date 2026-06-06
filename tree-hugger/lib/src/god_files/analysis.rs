@@ -579,29 +579,25 @@ struct BlocksResult {
 /// A symbol span as `(start_byte, end_byte, start_line, end_line)`.
 type SpanBytes = (usize, usize, usize, usize);
 
-/// Returns the preferred byte span for a symbol record: body span first,
-/// then declaration span, then name span.
+/// Returns the full declaration byte span for a symbol record, falling back to
+/// the name span only when no declaration span was recorded.
+///
+/// The declaration span covers the complete symbol block — the declaration line
+/// plus its body — which is what block SLOC, displayed line ranges, and
+/// ownership containment all require. The body span alone omits the declaration
+/// line, under-counting a symbol by one or more lines and collapsing a multiline
+/// declaration without a recognized body down to its name token.
 fn record_span_bytes(rec: &SymbolRecord) -> Option<SpanBytes> {
-    if let Some(span) = &rec.source.body_span {
-        return Some((
-            span.start_byte as usize,
-            span.end_byte as usize,
-            span.start.line as usize,
-            span.end.line as usize,
-        ));
-    }
-    if let Some(span) = rec.source.name_span.as_ref() {
-        return Some((
-            span.start_byte as usize,
-            span.end_byte as usize,
-            span.start.line as usize,
-            span.end.line as usize,
-        ));
-    }
     let span = &rec.source.declaration_span;
-    if span.start_byte == 0 && span.end_byte == 0 {
-        return None;
+    if span.start_byte != 0 || span.end_byte != 0 {
+        return Some((
+            span.start_byte as usize,
+            span.end_byte as usize,
+            span.start.line as usize,
+            span.end.line as usize,
+        ));
     }
+    let span = rec.source.name_span.as_ref()?;
     Some((
         span.start_byte as usize,
         span.end_byte as usize,
@@ -1674,5 +1670,148 @@ x = 1
         let depth = compute_max_nesting_depth(&records);
         // outer contains inner contains deepest.
         assert!(depth >= 3, "expected depth >= 3, got {}", depth);
+    }
+
+    // ========================================================================
+    // Per-language comment classification (Level 1)
+    //
+    // Every supported language must subtract comment-only lines from effective
+    // SLOC and keep mixed code+comment lines as code. The regression that
+    // motivated these: Perl's comments query was empty, so `# comment` lines
+    // were counted as code and inflated effective SLOC.
+    // ========================================================================
+
+    /// `(extension, source, expected_comment_only, expected_effective)`. Each
+    /// source carries comment-only lines and at least one line mixing code with
+    /// a trailing comment, which must count as code.
+    const COMMENT_CLASSIFICATION_CASES: &[(&str, &str, usize, usize)] = &[
+        ("rs", "// alpha\n// beta\nfn helper() {}\nconst VALUE: i32 = 1; // trailing\n", 2, 2),
+        ("go", "// alpha\n// beta\npackage main\nvar value = 1 // trailing\n", 2, 2),
+        ("py", "# alpha\n# beta\nx = 1\ny = 2  # trailing\n", 2, 2),
+        ("pl", "# alpha\n# beta\nmy $x = 1;\nmy $y = 2; # trailing\n", 2, 2),
+        ("sh", "# alpha\n# beta\nx=1\ny=2 # trailing\n", 2, 2),
+        ("zsh", "# alpha\n# beta\nx=1\ny=2 # trailing\n", 2, 2),
+        ("lua", "-- alpha\n-- beta\nlocal x = 1\nlocal y = 2 -- trailing\n", 2, 2),
+        ("c", "// alpha\n// beta\nint helper(void) { return 0; }\nint value = 1; // trailing\n", 2, 2),
+        ("cpp", "// alpha\n// beta\nint helper(void) { return 0; }\nint value = 1; // trailing\n", 2, 2),
+        ("cs", "// alpha\n// beta\nint x = 1;\nint y = 2; // trailing\n", 2, 2),
+        ("java", "// alpha\n// beta\nclass Helper {}\nint value = 1; // trailing\n", 2, 2),
+        ("js", "// alpha\n// beta\nlet x = 1;\nlet y = 2; // trailing\n", 2, 2),
+        ("ts", "// alpha\n// beta\nlet x = 1;\nlet y = 2; // trailing\n", 2, 2),
+        ("scala", "// alpha\n// beta\nval x = 1\nval y = 2 // trailing\n", 2, 2),
+        ("swift", "// alpha\n// beta\nlet x = 1\nlet y = 2 // trailing\n", 2, 2),
+        // PHP comments only parse inside `<?php`; the opening tag is one code line.
+        ("php", "<?php\n// alpha\n// beta\n$x = 1;\n$y = 2; // trailing\n", 2, 3),
+    ];
+
+    #[test]
+    fn comment_only_lines_excluded_for_every_language() {
+        let dir = TempDir::new().unwrap();
+        for (ext, source, expected_comment_only, expected_effective) in COMMENT_CLASSIFICATION_CASES
+        {
+            let path = temp_file(&dir, &format!("case.{ext}"), source);
+            let tree_file = TreeFile::new(&path)
+                .unwrap_or_else(|e| panic!("{ext}: TreeFile::new failed: {e}"));
+            let metrics = compute_sloc_metrics(tree_file.source(), Some(&tree_file));
+
+            assert_eq!(
+                metrics.comment_only_lines, *expected_comment_only,
+                "{ext}: comment-only lines miscounted (effective={}, physical={})",
+                metrics.effective_sloc, metrics.physical_lines
+            );
+            assert_eq!(
+                metrics.effective_sloc, *expected_effective,
+                "{ext}: effective SLOC miscounted (comment_only={}, blank={})",
+                metrics.comment_only_lines, metrics.blank_lines
+            );
+        }
+    }
+
+    #[test]
+    fn perl_comment_only_file_is_dropped() {
+        // Public-boundary reproduction of the Perl false positive: a 450-line
+        // file of `# comment` lines has zero effective SLOC and must not be
+        // reported. Before the comments query fix, every line counted as code
+        // and surfaced a spurious moderate-risk god file.
+        let dir = TempDir::new().unwrap();
+        let comment_only = "# comment line\n".repeat(450);
+        temp_file(&dir, "comments_only.pl", &comment_only);
+
+        let god_files = GodFiles::new(dir.path());
+        assert!(
+            god_files.analysis().is_empty(),
+            "comment-only Perl file must be dropped (0 effective SLOC)"
+        );
+    }
+
+    // ========================================================================
+    // Declaration-span block boundaries (Level 1)
+    //
+    // Block SLOC and displayed ranges use the full declaration span (the
+    // declaration line plus body), not the body span alone.
+    // ========================================================================
+
+    #[test]
+    fn block_includes_declaration_line_at_floor() {
+        // `edge` has a one-line declaration plus 14 effective body lines: 15
+        // SLOC total, exactly at MIN_BLOCK_SLOC. Measuring the body alone (14)
+        // drops it below the floor; the full declaration span keeps it.
+        assert_eq!(MIN_BLOCK_SLOC, 15, "test assumes the floor is 15");
+        let dir = TempDir::new().unwrap();
+        let mut source = String::from("def edge():\n");
+        for i in 0..14 {
+            source.push_str(&format!("    x{i} = {i}\n"));
+        }
+        let path = temp_file(&dir, "floor.py", &source);
+
+        let tree_file = TreeFile::new(&path).unwrap();
+        let records = tree_file.symbol_records().unwrap();
+        let comment_ranges = tree_file.comment_ranges().unwrap_or_default();
+        let result = compute_symbol_blocks(tree_file.source(), &records, &comment_ranges);
+
+        let edge = result
+            .blocks
+            .iter()
+            .find(|b| b.name == "edge")
+            .unwrap_or_else(|| {
+                panic!(
+                    "edge block missing; got {:?}",
+                    result.blocks.iter().map(|b| (&b.name, b.sloc)).collect::<Vec<_>>()
+                )
+            });
+        assert_eq!(edge.sloc, 15, "block SLOC must span the declaration line");
+        // Displayed range starts at the declaration, not the first body line.
+        // TextPoint lines are 1-based, so the `def edge():` line is line 1.
+        assert_eq!(edge.start_line, 1, "start line must be the `def` line");
+    }
+
+    #[test]
+    fn multiline_declaration_without_body_uses_declaration_span() {
+        // A multiline type alias has no body block, so `body_span` is None and
+        // the declaration would collapse to its name token under the old
+        // body-first policy. `record_span_bytes` must report the full
+        // declaration span instead.
+        let source = "type LongAlias =\n  | \"a\"\n  | \"b\"\n  | \"c\";\n";
+        let dir = TempDir::new().unwrap();
+        let path = temp_file(&dir, "alias.ts", source);
+
+        let tree_file = TreeFile::new(&path).unwrap();
+        let records = tree_file.symbol_records().unwrap();
+        let alias = records
+            .iter()
+            .find(|r| r.identity.name == "LongAlias")
+            .expect("LongAlias record present");
+
+        assert!(
+            alias.source.body_span.is_none(),
+            "precondition: type alias has no recognized body span"
+        );
+        let (_, _, start_line, end_line) =
+            record_span_bytes(alias).expect("declaration span present");
+        assert!(
+            end_line > start_line,
+            "multiline declaration must not collapse to a single name line \
+             (start={start_line}, end={end_line})"
+        );
     }
 }
