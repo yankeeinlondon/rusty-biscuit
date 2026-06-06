@@ -1121,10 +1121,12 @@ pub(crate) fn execute_composition_request_inner(
     }
 
     // `child env build` carries a measured breakdown (env sanitize / shadow
-    // home sync → repo root detect) so the substage's cost — dominated by the
-    // sniff git walk under `--repo` — is itemized rather than opaque. The
-    // children are `Breakdown`, so they do not enter the substage's
-    // reconciliation (TR-1).
+    // home sync → repo root detect) so the substage's cost is itemized rather
+    // than opaque. The launch-child root is threaded through, so `repo root
+    // detect` is microsecond-scale local work and the shadow sync's filesystem
+    // linking is what remains; only the fallback (no supplied root) still pays
+    // the sniff git walk. The children are `Breakdown`, so they do not enter
+    // the substage's reconciliation (TR-1).
     if let Some(c) = perf_collector.as_mut() {
         let elapsed = last_checkpoint.elapsed();
         c.mark_substage_with_children(
@@ -1218,6 +1220,7 @@ pub(crate) fn execute_composition_request_inner(
                         env_plan.child_cwd.as_path(),
                         false,
                         false,
+                        Some(env_plan.child_cwd.as_path()),
                     )?;
                     for (key, value) in shadow_env {
                         env_plan.env.insert(key, value);

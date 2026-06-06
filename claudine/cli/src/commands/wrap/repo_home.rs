@@ -166,18 +166,30 @@ fn is_volatile_state_file(file_name: &OsStr) -> bool {
         || name.ends_with(".sqlite-journal")
 }
 
-pub fn needs_shadow_home(provider: Provider, cwd: &Path, repo_only: bool) -> bool {
+pub fn needs_shadow_home(
+    provider: Provider,
+    cwd: &Path,
+    repo_only: bool,
+    effective_root: Option<&Path>,
+) -> bool {
     repo_only
         || matches!(provider, Provider::Codex)
-            && codex_repo_prompts_source(&resolve_repo_root(cwd)).is_some()
+            && {
+                let repo_root = effective_root
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| resolve_repo_root(cwd));
+                codex_repo_prompts_source(&repo_root).is_some()
+            }
 }
 
 /// Measured breakdown of [`build_repo_home_env`], for `--perf`.
 ///
 /// `total` is the whole shadow-HOME materialization; `repo_root_detect` is the
-/// sniff git walk (`resolve_repo_root`) that dominates it — under `--repo` this
-/// is the single most expensive operation in `child env build`. Only produced
-/// when the caller passes `perf = true`.
+/// time spent obtaining the repo root used for Codex prompt materialization.
+/// When the caller supplies an `effective_root` this is microsecond-scale
+/// local work (a clone); when no root is supplied it falls back to the
+/// `resolve_repo_root` sniff git walk that previously dominated the stage.
+/// Only produced when the caller passes `perf = true`.
 #[derive(Debug, Clone, Copy)]
 pub struct RepoHomeTimings {
     pub total: std::time::Duration,
@@ -190,6 +202,7 @@ pub fn build_repo_home_env(
     cwd: &Path,
     repo_only: bool,
     perf: bool,
+    effective_root: Option<&Path>,
 ) -> Result<(
     HashMap<OsString, OsString>,
     Option<PathBuf>,
@@ -202,7 +215,9 @@ pub fn build_repo_home_env(
     manager.sync_shadow_home(repo_only)?;
 
     let repo_root_start = perf.then(std::time::Instant::now);
-    let repo_root = resolve_repo_root(cwd);
+    let repo_root = effective_root
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| resolve_repo_root(cwd));
     let repo_root_detect = repo_root_start.map(|t| t.elapsed());
     materialize_repo_scoped_resources(
         provider,
@@ -379,8 +394,21 @@ fn remove_existing_path(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use super::*;
+    use serial_test::serial;
     use tempfile::TempDir;
+
+    fn init_git_repo(path: &Path) -> bool {
+        Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .current_dir(path)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
 
     #[test]
     fn volatile_state_files_match_live_dbs_only() {
@@ -578,5 +606,147 @@ mod tests {
         materialize_root_level_state(Provider::Claude, &user_home, &shadow_home_root).unwrap();
 
         assert_eq!(fs::read_link(&dest).unwrap(), source);
+    }
+
+    #[test]
+    fn needs_shadow_home_supplied_effective_root_used_for_codex_detection() {
+        let tmp = TempDir::new().unwrap();
+        let with_prompts = tmp.path().join("with-prompts");
+        let without_prompts = tmp.path().join("without-prompts");
+        fs::create_dir_all(with_prompts.join(".codex/prompts")).unwrap();
+        fs::create_dir_all(&without_prompts).unwrap();
+
+        // When the supplied effective root contains prompts, Codex needs a
+        // shadow home even if cwd lives somewhere without prompts.
+        assert!(
+            needs_shadow_home(Provider::Codex, &without_prompts, false, Some(&with_prompts)),
+            "expected true when effective_root has codex prompts"
+        );
+
+        // When the supplied effective root lacks prompts, Codex does not need
+        // a shadow home (repo_only is false).
+        assert!(
+            !needs_shadow_home(Provider::Codex, &with_prompts, false, Some(&without_prompts)),
+            "expected false when effective_root has no codex prompts"
+        );
+
+        // Non-Codex providers are never affected by repo-local prompt detection.
+        assert!(
+            !needs_shadow_home(Provider::Claude, &with_prompts, false, Some(&with_prompts)),
+            "expected false for non-Codex regardless of effective_root"
+        );
+    }
+
+    #[test]
+    fn needs_shadow_home_repo_only_short_circuits_regardless_of_effective_root() {
+        let tmp = TempDir::new().unwrap();
+        let empty = tmp.path().join("empty");
+        fs::create_dir_all(&empty).unwrap();
+
+        // repo_only=true forces shadow home for every provider.
+        assert!(needs_shadow_home(Provider::Codex, &empty, true, Some(&empty)));
+        assert!(needs_shadow_home(Provider::Claude, &empty, true, Some(&empty)));
+        assert!(needs_shadow_home(Provider::OpenCode, &empty, true, None));
+    }
+
+    /// Proves that `build_repo_home_env` materializes Codex repo prompts from
+    /// the supplied `effective_root` even when `cwd` points to a different
+    /// directory (or repo). This is the core Phase 3/4 contract: the caller
+    /// threads a pre-resolved launch-child root through the shadow-HOME API
+    /// so the redundant `resolve_repo_root(cwd)` sniff walk is skipped.
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn build_repo_home_env_uses_supplied_effective_root_not_cwd() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = tmp.path().join("home");
+        let launch_repo = tmp.path().join("launch-repo");
+        let source_repo = tmp.path().join("source-repo");
+
+        fs::create_dir_all(fake_home.join(".codex")).unwrap();
+        fs::create_dir_all(launch_repo.join(".claude/commands")).unwrap();
+        fs::create_dir_all(source_repo.join(".claude/commands")).unwrap();
+        fs::write(launch_repo.join(".claude/commands/launch.md"), "launch").unwrap();
+        fs::write(source_repo.join(".claude/commands/source.md"), "source").unwrap();
+
+        let old_home = std::env::var_os("HOME");
+        unsafe { std::env::set_var("HOME", &fake_home) };
+
+        let (_env, shadow_path, _timings) = build_repo_home_env(
+            Provider::Codex,
+            &source_repo, // cwd points to source repo (simulates metadata root)
+            false,
+            false,
+            Some(&launch_repo), // effective_root is launch repo (simulates child_cwd)
+        )
+        .unwrap();
+
+        // Restore HOME so later tests see a clean environment.
+        match old_home {
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
+        let shadow_path = shadow_path.expect("shadow home path must be returned");
+        let prompts_dir = shadow_path.join("prompts");
+
+        // Prompt materialization must follow effective_root (launch repo),
+        // not cwd (source repo).
+        assert!(
+            fs::symlink_metadata(prompts_dir.join("launch.md")).is_ok(),
+            "expected launch.md from effective_root in shadow home"
+        );
+        assert!(
+            fs::symlink_metadata(prompts_dir.join("source.md")).is_err(),
+            "expected source.md from cwd NOT in shadow home"
+        );
+    }
+
+    /// Proves that `build_repo_home_env(..., None)` falls back to the legacy
+    /// `resolve_repo_root(cwd)` behavior, which walks up to the *git root* — not
+    /// the literal `cwd`. The repo-local prompt lives at the repository root,
+    /// while `cwd` is a nested subdirectory with no `.claude/commands` of its
+    /// own. The prompt only materializes if `resolve_repo_root` ascends to the
+    /// root, so this fails if the fallback degrades to `cwd.to_path_buf()`.
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn build_repo_home_env_fallback_resolves_repo_root_from_nested_cwd() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = tmp.path().join("home");
+        let repo = tmp.path().join("repo");
+        let nested_cwd = repo.join("crate/src/deep");
+
+        fs::create_dir_all(fake_home.join(".codex")).unwrap();
+        fs::create_dir_all(repo.join(".claude/commands")).unwrap();
+        fs::create_dir_all(&nested_cwd).unwrap();
+        fs::write(repo.join(".claude/commands/review.md"), "review").unwrap();
+
+        if !init_git_repo(&repo) {
+            // Skip when git is unavailable: without a detectable repo root the
+            // fallback cannot distinguish itself from direct cwd reuse.
+            return;
+        }
+
+        let old_home = std::env::var_os("HOME");
+        unsafe { std::env::set_var("HOME", &fake_home) };
+
+        // cwd is a nested subdir with no .claude/commands; only repo-root
+        // resolution can locate the root-level prompt.
+        let (_env, shadow_path, _timings) =
+            build_repo_home_env(Provider::Codex, &nested_cwd, false, false, None).unwrap();
+
+        match old_home {
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
+        let shadow_path = shadow_path.expect("shadow home path must be returned");
+        let prompts_dir = shadow_path.join("prompts");
+
+        assert!(
+            fs::symlink_metadata(prompts_dir.join("review.md")).is_ok(),
+            "expected root-level review.md to materialize via resolve_repo_root from nested cwd"
+        );
     }
 }

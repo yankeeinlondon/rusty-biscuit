@@ -27,10 +27,12 @@ pub(crate) struct EnvPlan {
     pub(crate) warnings: Vec<String>,
     pub(crate) shadow_home_path: Option<PathBuf>,
     /// Measured breakdown of the child-env build cost, for `--perf`. Empty
-    /// unless the caller requested perf timing; the dominant cost is the
-    /// shadow-HOME `repo root detect` sniff git walk (~hundreds of ms under
-    /// `--repo`). The caller attaches these as `Breakdown` children of the
-    /// `child env build` substage.
+    /// unless the caller requested perf timing; when no effective root is
+    /// supplied the dominant cost is the shadow-HOME `repo root detect` sniff
+    /// git walk (~hundreds of ms under `--repo`). When the caller threads a
+    /// known root through `build_child_env_with_launch`, that cost collapses
+    /// to microseconds. The caller attaches these as `Breakdown` children of
+    /// the `child env build` substage.
     pub(crate) perf_substages: Vec<crate::perf::SubstageTiming>,
 }
 
@@ -91,8 +93,11 @@ pub(crate) fn build_child_env_with_launch(
 ) -> Result<EnvPlan> {
     // `child env build` is dominated by the shadow-HOME branch under `--repo`;
     // when perf is requested we time `env sanitize` and `shadow home sync` so
-    // the substage breakdown points at the real cost (the sniff git walk inside
-    // the shadow sync, not the env work).
+    // the substage breakdown points at the real cost. On the production path the
+    // already-resolved launch-child root is threaded through, so `repo root
+    // detect` collapses to microseconds and the shadow sync's filesystem linking
+    // is what remains; only the fallback (no supplied root) still pays the sniff
+    // git walk.
     let sanitize_start = perf.then(std::time::Instant::now);
     let include_set = validate_include_names(include)?;
     let auto_include: HashSet<String> = profile
@@ -158,15 +163,28 @@ pub(crate) fn build_child_env_with_launch(
     warnings.extend(launch_ctx.warnings.iter().cloned());
 
     let mut shadow_home_path = None;
-    let needs_shadow_home =
-        force_shadow_home || repo_home::needs_shadow_home(provider, &launch_ctx.child_cwd, repo);
+    let needs_shadow_home = force_shadow_home
+        || repo_home::needs_shadow_home(
+            provider,
+            &launch_ctx.child_cwd,
+            repo,
+            Some(launch_ctx.child_cwd.as_path()),
+        );
 
     let mut shadow_breakdown: Option<repo_home::RepoHomeTimings> = None;
 
     // Use a shadow HOME when repo-only isolation is requested, or when Codex
     // needs repo-local prompt overlay because custom prompts are user-scoped.
+    // The already-resolved launch-child root is passed through so the shadow-HOME
+    // pipeline does not re-run repo-root detection.
     if needs_shadow_home {
-        match repo_home::build_repo_home_env(provider, &launch_ctx.child_cwd, repo, perf) {
+        match repo_home::build_repo_home_env(
+            provider,
+            &launch_ctx.child_cwd,
+            repo,
+            perf,
+            Some(launch_ctx.child_cwd.as_path()),
+        ) {
             Ok((shadow_env, shadow_path, timings)) => {
                 for (key, value) in shadow_env {
                     env.insert(key, value);
@@ -233,7 +251,9 @@ pub(crate) fn build_child_env_with_launch(
 /// Returns empty when perf was not requested (`sanitize_elapsed` is `None`).
 /// `shadow home sync` is only present when the shadow-HOME branch ran (i.e.
 /// under `--repo` or a Codex prompt overlay); it carries `repo root detect`
-/// as its own child, which is the sniff git walk that dominates the substage.
+/// as its own child, which is either microsecond-scale local work when a
+/// known root was supplied or the sniff git walk that dominates the substage
+/// when falling back.
 fn build_env_perf_substages(
     sanitize_elapsed: Option<std::time::Duration>,
     shadow: Option<repo_home::RepoHomeTimings>,
@@ -1120,6 +1140,79 @@ mod tests {
             .parse()
             .expect("CLAUDINE_PID must parse as u32");
         assert_eq!(pid, std::process::id());
+    }
+
+    /// Regression for the source-repo vs launch-repo split through the real
+    /// env wiring. When a composed source document lives in one repo (its
+    /// enclosing git root becomes `repo_root`, the metadata anchor) but the
+    /// user launched from a different repo (`child_cwd`), Codex shadow-HOME
+    /// prompt materialization must follow `child_cwd`, NOT the source
+    /// metadata root. This exercises `build_child_env_with_launch` ->
+    /// `needs_shadow_home` -> `build_repo_home_env`, so a future change that
+    /// accidentally threads `repo_root`/source metadata into the shadow-HOME
+    /// call is caught here even if the low-level `repo_home` tests stay green.
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn build_child_env_codex_shadow_home_uses_child_cwd_not_source_repo_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake_home = tmp.path().join("home");
+        let launch_repo = tmp.path().join("launch-repo");
+        let source_repo = tmp.path().join("source-repo");
+
+        fs::create_dir_all(fake_home.join(".codex")).unwrap();
+        fs::create_dir_all(launch_repo.join(".claude/commands")).unwrap();
+        fs::create_dir_all(source_repo.join(".claude/commands")).unwrap();
+        fs::write(launch_repo.join(".claude/commands/launch.md"), "launch").unwrap();
+        fs::write(source_repo.join(".claude/commands/source.md"), "source").unwrap();
+
+        let profile = profile_for_provider(claudine::provider::Provider::Codex).unwrap();
+        // repo_root (metadata) follows the source document's repo; child_cwd
+        // (where the spawned provider runs) follows the launch repo.
+        let launch_ctx = LaunchWorkspaceContext {
+            launch_cwd: launch_repo.clone(),
+            repo_root: Some(source_repo.clone()),
+            child_cwd: launch_repo.clone(),
+            package_context: None,
+            warnings: Vec::new(),
+        };
+
+        let old_home = std::env::var_os("HOME");
+        unsafe { std::env::set_var("HOME", &fake_home) };
+
+        let plan = build_child_env_with_launch(
+            profile,
+            claudine::provider::Provider::Codex,
+            &[],
+            false,
+            false,
+            &[],
+            &[],
+            false,
+            false,
+            launch_ctx,
+            false,
+        );
+
+        match old_home {
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
+        let plan = plan.unwrap();
+        let shadow_path = plan
+            .shadow_home_path
+            .expect("Codex repo-local prompts must trigger a shadow home");
+        let prompts_dir = shadow_path.join("prompts");
+
+        assert!(
+            fs::symlink_metadata(prompts_dir.join("launch.md")).is_ok(),
+            "shadow prompts must come from child_cwd (launch repo)"
+        );
+        assert!(
+            fs::symlink_metadata(prompts_dir.join("source.md")).is_err(),
+            "shadow prompts must NOT come from the source metadata repo_root"
+        );
     }
 
     fn sanitize_env_for_test(
