@@ -216,7 +216,7 @@ The `style.page.*` subset is fully wired through `DarkmatterPage` for both termi
 | `top-padding`        | non-negative integer                            |                                                             |
 | `bottom-padding`     | non-negative integer                            |                                                             |
 | `max-width`          | `Nch`, `N%`, or `0` (`0` rejected at apply-time) | Percent resolves against post-margin / post-padding content width |
-| `alignment`          | `left` \| `center` \| `right`                    | Broadcasts to every `PageComponent` via `use_alignment_for_all` (table/image/list/code/block-quote) |
+| `alignment`          | `left` \| `center` \| `right`                    | Broadcasts to every `PageComponent` via `ComponentPolicy` (table/image/list/code/block-quote) |
 | `background`         | `transparent` \| `subtle` \| `pronounced`        | Maps to `PageBackground` enum                               |
 | `stylesheet`, `meta`, `code` | See [Bespoke Knobs (Sub-Spec #7)](#bespoke-knobs-sub-spec-7) | `stylesheet` and `meta` are HTML-only; `code.theme` applies to both targets |
 
@@ -236,7 +236,7 @@ The `style.page.*` subset is fully wired through `DarkmatterPage` for both termi
 Percent resolution uses two different base widths depending on the field:
 
 - **Horizontal margins and padding** resolve against the captured terminal width (`DarkmatterPage::new(&term)` captures it at construction time).
-- **`max-width`** resolves against the **content width** after final page margin and padding values are known — including any CLI overrides. This matches `LayoutContext` component-fill semantics and ensures page `max-width` composes predictably with margins. A resolved `max-width` of `0` cells is rejected because `DarkmatterPage` treats `max_width = 0` as invalid.
+- **`max-width`** resolves against the **content width** after final page margin and padding values are known — including any CLI overrides. This ensures page `max-width` composes predictably with margins. A resolved `max-width` of `0` cells is rejected because `DarkmatterPage` treats `max_width = 0` as invalid.
 
 ### Example
 
@@ -350,7 +350,7 @@ Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax (top-l
 
 ## Component-Level Style (Sub-Spec #3)
 
-`style.table.*`, `style.images.*`, and `style.block-quote.*` lower onto the same `DarkmatterPage` builder used by page-level style, via `apply_component_style`. Each bucket maps to a dedicated `PageComponent` variant:
+`style.table.*`, `style.images.*`, and `style.block-quote.*` lower directly into per-component [`ComponentPolicy`](crate::layout::ComponentPolicy) (`layout` + optional `style`) via `apply_component_style`. Each bucket maps to a dedicated `PageComponent` variant:
 
 | Bucket | `PageComponent` variant |
 |---|---|
@@ -360,26 +360,26 @@ Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax (top-l
 
 Three knobs are live on each of the three buckets:
 
-- `width` — fixed width as `Nch`, `N%`, or `0`. Maps to `PageFill::Explicit(unit)` via `DarkmatterPage`'s `with_fill` builder.
-- `max-width` — upper bound as `Nch`, `N%`, or `0`. Maps to `PageFill::Max(unit)` via `DarkmatterPage`'s `with_fill` builder.
-- `alignment` — `left` \| `center` \| `right`. Maps to `use_alignment(component, alignment)` on the `DarkmatterPage` builder.
+- `width` — fixed width as `Nch`, `N%`, or `0`. Maps to `Layout.width = Width::Fixed`.
+- `max-width` — upper bound as `Nch`, `N%`, or `0`. Maps to `Layout.max_width`.
+- `alignment` — `left` \| `center` \| `right`. Maps to `Layout.alignment`.
 
 `Length::Css(_)` (e.g. `10px`) is **not** valid in component fill fields; `apply_component_style` returns `StyleApplyError::ComponentInvalidCssLength { bucket, field }`.
 
 ### Length Lowering
 
-`apply_component_style` converts `renderable::layout::Length` to `renderable::layout::WidthUnit` for component fill:
+`apply_component_style` lowers `renderable::layout::Length` directly into `Layout` fields, with no down-conversion:
 
-| Length variant | Component fill lowering |
+| Length variant | Component layout lowering |
 |---|---|
-| `Length::Zero` | `WidthUnit::Fixed(0)` |
-| `Length::Ch(n)` | `WidthUnit::Fixed(u16)` via saturating cast |
-| `Length::Percent(p)` | `WidthUnit::Percent(p)` |
+| `Length::Zero` | `Length::Zero` (cloned) |
+| `Length::Ch(n)` | `Length::Ch(n)` (cloned) |
+| `Length::Percent(p)` | `Length::Percent(p)` (cloned) |
 | `Length::Css(_)` | Returns `StyleApplyError::ComponentInvalidCssLength { bucket, field }`. CSS units have no terminal equivalent. |
 
 ### Width vs. Max-Width Exclusivity
 
-`width` and `max-width` are mutually exclusive **within the same bucket** because `DarkmatterPage` exposes a single `PageFill` slot per component. Setting both raises:
+`width` and `max-width` are mutually exclusive **within the same bucket** in the v1 schema to keep CLI precedence predictable. Setting both raises:
 
 ```text
 `style.{bucket}.width` and `style.{bucket}.max-width` are mutually exclusive
@@ -481,33 +481,17 @@ The `color` and `bg-color` knobs on `style.table`, `style.images`, and `style.bl
 
 ## List-Level Style (Sub-Spec #4)
 
-`style.ul.*`, `style.ol.*`, and `style.li.*` map onto three new `PageComponent` variants — `Ul`, `Ol`, `Li` — that replace the deprecated `PageComponent::Lists`. Each bucket supports `width`, `max-width`, and `alignment` via the same lowering pipeline as sub-spec #3, plus a bespoke `ul.left-margin` indent channel.
+`style.ul.*`, `style.ol.*`, and `style.li.*` map onto three `PageComponent` variants — `Ul`, `Ol`, `Li`. Each bucket supports `width`, `max-width`, and `alignment` via the same direct lowering as sub-spec #3, plus a bespoke `ul.left-margin` indent channel.
 
 ### PageComponent Split
 
-| Bucket | `PageComponent` variant | Deprecated predecessor |
-|---|---|---|
-| `style.ul.*` | `PageComponent::Ul` | `PageComponent::Lists` |
-| `style.ol.*` | `PageComponent::Ol` | `PageComponent::Lists` |
-| `style.li.*` | `PageComponent::Li` | `PageComponent::Lists` |
+| Bucket | `PageComponent` variant |
+|---|---|
+| `style.ul.*` | `PageComponent::Ul` |
+| `style.ol.*` | `PageComponent::Ol` |
+| `style.li.*` | `PageComponent::Li` |
 
-`PageComponent::Lists` is retained for one release cycle as a **broadcast/fallback** variant:
-
-```rust
-#[deprecated(note = "use PageComponent::{Ul, Ol, Li}")]
-Lists,
-```
-
-New renderer code must use `Ul`, `Ol`, or `Li`. When a concrete list variant has no value, the renderer falls back to the deprecated `Lists` entry. `PageComponent::ALL` includes only the concrete variants (`Images`, `BlockQuotes`, `Tables`, `CodeBlocks`, `Ul`, `Ol`, `Li`), not `Lists`.
-
-`PageComponent::LISTS` provides the three concrete list components in broadcast order:
-
-```rust
-impl PageComponent {
-    /// Concrete list components in broadcast order.
-    pub const LISTS: [PageComponent; 3] = [Self::Ul, Self::Ol, Self::Li];
-}
-```
+`PageComponent::ALL` includes all concrete variants (`Images`, `BlockQuotes`, `Tables`, `CodeBlocks`, `Ul`, `Ol`, `Li`, `Hyperlinks`, `Hr`).
 
 ### Tag-to-Component Mapping
 
@@ -521,11 +505,11 @@ The pulldown-cmark event stream distinguishes list kinds at render time:
 
 ### Live Knobs
 
-Three knobs are live on each of the three list buckets, using the same lowering as sub-spec #3:
+Three knobs are live on each of the three list buckets, using the same direct lowering as sub-spec #3:
 
-- `width` — fixed width as `Nch`, `N%`, or `0`. Maps to `PageFill::Explicit(unit)`.
-- `max-width` — upper bound as `Nch`, `N%`, or `0`. Maps to `PageFill::Max(unit)`.
-- `alignment` — `left` | `center` | `right`. Maps to `use_alignment(component, alignment)`.
+- `width` — fixed width as `Nch`, `N%`, or `0`. Maps to `Layout.width = Width::Fixed`.
+- `max-width` — upper bound as `Nch`, `N%`, or `0`. Maps to `Layout.max_width`.
+- `alignment` — `left` | `center` | `right`. Maps to `Layout.alignment`.
 
 Plus the bespoke `ul.left-margin` indent channel (see below).
 
@@ -537,12 +521,7 @@ Plus the bespoke `ul.left-margin` indent channel (see below).
 
 ### ul.left-margin: Independent Indent Channel
 
-`style.ul.left-margin` applies as a list-specific left indent that can coexist with `style.ul.width` or `style.ul.max-width`. It is **not** stored as `PageFill::Indent` — the single `PageFill` slot per component cannot represent both indent and width simultaneously. Instead, `DarkmatterPage`/`LayoutContext` expose a dedicated list-indent facility:
-
-- `with_list_left_margin(PageComponent::Ul, WidthUnit)` — builder method accepting only `PageComponent::Ul` in this sub-spec.
-- `LayoutContext::list_left_margin(PageComponent)` — retrieval at render time.
-
-Calling `with_list_left_margin` with `Ol`, `Li`, or a non-list component returns a clear apply error.
+`style.ul.left-margin` applies as a list-specific left indent that can coexist with `style.ul.width` or `style.ul.max-width`. It is stored as `ComponentPolicy.layout.margin.left` for `PageComponent::Ul` — an independent indent channel that does not conflict with width or max-width.
 
 ### Indent and Width Stacking Order
 
@@ -559,7 +538,7 @@ This means `left-margin: 4ch` plus `max-width: 40` produces a 4-cell offset and 
 | Field | Resolution base |
 |---|---|
 | `ul.left-margin: N%` | Page content width (after page margin/padding and page max-width are known) |
-| `ul`/`ol`/`li` `width`, `max-width` | Same helper as sub-spec #3: fixed `ch` values saturate to `u16`; percentages resolve against content width in `LayoutContext` |
+| `ul`/`ol`/`li` `width`, `max-width` | Same helper as sub-spec #3: `Length` values are cloned directly into `Layout.width` / `Layout.max_width`; the renderer fold resolves them at render time. |
 
 `Length::Css(_)` fails with `StyleApplyError` for all list length fields.
 
@@ -574,9 +553,8 @@ This means `left-margin: 4ch` plus `max-width: 40` produces a 4-cell offset and 
 | `Ul` | `ul` |
 | `Ol` | `ol` |
 | `Li` | `li` |
-| `Lists` (deprecated) | `ul, ol` |
 
-Generated CSS emits deprecated `Lists` selectors **before** concrete variant selectors so that granular list styles win by normal CSS cascade when both are present.
+Per-component browser CSS comes from the renderable browser fold lowering each node's `Layout`/`Style` attributes; no bespoke component CSS blocks are emitted.
 
 ### CLI Flags
 
@@ -692,7 +670,7 @@ component_colors: HashMap<PageComponent, StyleColor>,
 component_bg_colors: HashMap<PageComponent, StyleColor>,
 ```
 
-Page color is **inheritance**: `style.page.color` and `style.page.bg-color` fill component defaults in `LayoutContext`. A component-level value overrides the page-level value for that component. If neither exists, no color rule or SGR is emitted.
+Page color is **inheritance**: `style.page.color` and `style.page.bg-color` are written onto the document root node so they inherit to all descendants. A component-level value overrides the page-level value for that component via `decorate_document`. If neither exists, no color rule or SGR is emitted.
 
 There is no explicit inheritance clearing in v1 — the parser does not accept `"reset"`, so a component cannot opt out of page-level color. This keeps the implementation aligned with the accepted schema. A future parser extension may add a dedicated clear/reset value if documents need it.
 
