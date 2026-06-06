@@ -586,6 +586,103 @@ fn assert_table_styled<H: TerminalHarness>(harness: &mut H) {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Render-tree box model: padding, width modes, alignment, border adjacency
+// ---------------------------------------------------------------------------
+//
+// `bt block` exposes the `Layout` box model (`--padding`, `--margin`, `--width`,
+// `--align`) so the renderer-folds box behavior is observable in a real
+// terminal. The cell geometry and SGR are pinned by Level-1 tests in
+// `render_tree::render`; these confirm the user-visible result on the screen.
+
+/// The first plain capture row carrying `needle` (skipping the command echo
+/// `echo_marker`), paired with its leading-space count.
+fn row_leading_spaces(frame: &CapturedFrame, echo_marker: &str, needle: &str) -> Option<usize> {
+    frame
+        .plain
+        .lines()
+        .find(|plain| !plain.contains(echo_marker) && plain.contains(needle))
+        .map(|line| line.len() - line.trim_start().len())
+}
+
+/// Whether a capture string carries a background SGR escape (basic blue,
+/// truecolor semicolon, or truecolor colon form).
+fn has_background(s: &str) -> bool {
+    s.contains("\x1b[44m") || s.contains("\x1b[48;2;") || s.contains("\x1b[48:2:")
+}
+
+/// Asserts `bt block --bg ... --padding 1` paints the padding cells: a
+/// background band reaches the terminal and the padding reserves a cell before
+/// the content. Needs a styling-capable terminal (WezTerm / Kitty). A per-row
+/// index check is avoided because a multi-row painted band desynchronizes the
+/// `plain`/`raw` line mapping in some terminals' capture.
+fn assert_block_painted_padding<H: TerminalHarness>(harness: &mut H) {
+    let frame = capture_bt(harness, "bt block \"padglyph\" --bg blue --padding 1");
+    // The painted band reached the terminal (the background SGR survives).
+    assert!(
+        has_background(&frame.raw),
+        "expected a painted background band in the capture.\nraw:\n{}",
+        frame.raw,
+    );
+    // Padding reserves a cell: the content row shows a space immediately before
+    // the text (the left padding column), widening the box beyond the content.
+    assert!(
+        frame.plain.lines().any(|l| l.contains(" padglyph")),
+        "expected the left padding column before the content.\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+/// Asserts border interior spacing is owned by `padding`: a bordered block with
+/// no padding renders the content adjacent to the drawn edge (`│snug`), while
+/// adding `--padding 1` restores the one-cell gap (`│ roomy`).
+fn assert_block_border_adjacency<H: TerminalHarness>(harness: &mut H) {
+    let snug = capture_bt(harness, "bt block \"snug\" --border all");
+    assert!(
+        snug.plain.contains("│snug"),
+        "a no-padding border must sit adjacent to its content.\nplain:\n{}",
+        snug.plain,
+    );
+
+    let roomy = capture_bt(harness, "bt block \"roomy\" --border all --padding 1");
+    assert!(
+        roomy.plain.contains("│ roomy"),
+        "--padding 1 must restore the one-cell border gap.\nplain:\n{}",
+        roomy.plain,
+    );
+}
+
+/// Asserts a sub-available `Fixed` box is placed within the terminal width by
+/// `--align`: right pushes the box further than center, which pushes further
+/// than left (which stays flush). Geometry only — a tmux text capture suffices.
+///
+/// Each alignment uses a distinct needle because the captures accumulate in the
+/// shared pane; a shared needle would always match the first (left) row.
+fn assert_block_alignment_placement<H: TerminalHarness>(harness: &mut H) {
+    let left = capture_bt(harness, "bt block \"leftmark\" --width 20 --align left");
+    let left_lead = row_leading_spaces(&left, "bt block", "leftmark")
+        .unwrap_or_else(|| panic!("left-aligned row missing.\nplain:\n{}", left.plain));
+    let center = capture_bt(harness, "bt block \"centermark\" --width 20 --align center");
+    let center_lead = row_leading_spaces(&center, "bt block", "centermark")
+        .unwrap_or_else(|| panic!("center-aligned row missing.\nplain:\n{}", center.plain));
+    let right = capture_bt(harness, "bt block \"rightmark\" --width 20 --align right");
+    let right_lead = row_leading_spaces(&right, "bt block", "rightmark")
+        .unwrap_or_else(|| panic!("right-aligned row missing.\nplain:\n{}", right.plain));
+
+    assert!(
+        left_lead <= 1,
+        "left placement should be flush left, got {left_lead} lead"
+    );
+    assert!(
+        center_lead > left_lead,
+        "center placement should indent past left ({center_lead} vs {left_lead})"
+    );
+    assert!(
+        right_lead > center_lead,
+        "right placement should indent past center ({right_lead} vs {center_lead})"
+    );
+}
+
 #[test]
 #[serial(level2_terminal)]
 fn level2_render_tree_style_in_wezterm() {
@@ -608,6 +705,9 @@ fn level2_render_tree_style_in_wezterm() {
     assert_progress_slot_colors(harness);
     assert_table_striped(harness);
     assert_table_styled(harness);
+    assert_block_painted_padding(harness);
+    assert_block_border_adjacency(harness);
+    assert_block_alignment_placement(harness);
 }
 
 #[test]
@@ -632,6 +732,9 @@ fn level2_render_tree_style_in_kitty() {
     assert_progress_slot_colors(harness);
     assert_table_striped(harness);
     assert_table_styled(harness);
+    assert_block_painted_padding(harness);
+    assert_block_border_adjacency(harness);
+    assert_block_alignment_placement(harness);
 }
 
 #[test]
@@ -716,4 +819,9 @@ fn level2_render_tree_style_in_tmux() {
         "expected no raw escape bytes in the tmux styled-table capture. plain:\n{}",
         frame.plain,
     );
+
+    // Box-model geometry relays faithfully through tmux: border interior gap is
+    // owned by padding, and `--align` places a sub-available box.
+    assert_block_border_adjacency(harness);
+    assert_block_alignment_placement(harness);
 }

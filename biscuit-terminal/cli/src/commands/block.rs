@@ -3,7 +3,7 @@ use crate::commands::shared::{detect_terminal_honoring_force_color, print_exampl
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use clap::Args as ClapArgs;
-use renderable::layout::{Length, TargetValue};
+use renderable::layout::{Alignment, Edges, Layout, Length, TargetValue, Width};
 use renderable::style::{Background, Border, BorderSides, PerMode, Style, TextEmphasis};
 use renderable::tree::{RenderNode, RenderStrictness};
 
@@ -18,6 +18,17 @@ pub enum FillArg {
     Subtle,
     /// A strong, clearly visible tint.
     Pronounced,
+}
+
+/// Horizontal placement of the block within the available width.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum AlignArg {
+    /// Flush left (default).
+    Left,
+    /// Centered within the available width.
+    Center,
+    /// Flush right.
+    Right,
 }
 
 /// Which sides a `--border` is drawn on.
@@ -85,6 +96,22 @@ pub struct BlockArgs {
     /// Corner radius, in columns; any non-zero value rounds the corners.
     #[arg(long = "border-radius")]
     pub border_radius: Option<u32>,
+
+    /// Padding reserved inside the box, in columns, on all four sides.
+    #[arg(long)]
+    pub padding: Option<u32>,
+
+    /// Transparent horizontal margin, in columns, on the left and right.
+    #[arg(long)]
+    pub margin: Option<u32>,
+
+    /// Content-box width: `auto`, `fit` (fit-content), or a column count.
+    #[arg(long)]
+    pub width: Option<String>,
+
+    /// Horizontal placement of a sub-available box within the terminal width.
+    #[arg(long, value_enum)]
+    pub align: Option<AlignArg>,
 }
 
 impl BlockArgs {
@@ -160,6 +187,47 @@ impl BlockArgs {
 
         Ok(style)
     }
+
+    /// Builds the node [`Layout`] from the box-model flags, or `None` when no
+    /// layout flag is set (so the default render path is unchanged).
+    fn build_layout(&self) -> color_eyre::Result<Option<Layout>> {
+        let mut layout = Layout::default();
+        let mut touched = false;
+
+        if let Some(p) = self.padding {
+            layout.padding = Edges::all(Length::ch(p));
+            touched = true;
+        }
+        if let Some(m) = self.margin {
+            layout.margin = Edges::x(Length::ch(m));
+            touched = true;
+        }
+        if let Some(width) = &self.width {
+            layout.width = match width.as_str() {
+                "auto" => Width::Auto,
+                "fit" | "fit-content" => Width::FitContent,
+                other => {
+                    let cells: u32 = other.parse().map_err(|_| {
+                        color_eyre::eyre::eyre!(
+                            "--width expects `auto`, `fit`, or a column count, got {other:?}"
+                        )
+                    })?;
+                    Width::Fixed(TargetValue::universal(Length::ch(cells)))
+                }
+            };
+            touched = true;
+        }
+        if let Some(align) = self.align {
+            layout.alignment = match align {
+                AlignArg::Left => Alignment::Left,
+                AlignArg::Center => Alignment::Center,
+                AlignArg::Right => Alignment::Right,
+            };
+            touched = true;
+        }
+
+        Ok(touched.then_some(layout))
+    }
 }
 
 impl Run for BlockArgs {
@@ -187,6 +255,9 @@ impl Run for BlockArgs {
 
         let mut node = RenderNode::paragraph(vec![RenderNode::text(text)]);
         node.attrs.set_style(&style);
+        if let Some(layout) = style_args.build_layout()? {
+            node.attrs.set_layout(&layout);
+        }
         let root = RenderNode::root(vec![node]);
 
         let term = detect_terminal_honoring_force_color();
