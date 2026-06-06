@@ -1035,14 +1035,17 @@ impl CommandPerfCollector {
 }
 
 /// Format a duration using the most readable unit for the magnitude.
+///
+/// One decimal place at every unit so durations read consistently with the
+/// `--perf` tree's value column.
 fn fmt_duration(d: Duration) -> String {
     let micros = d.as_micros();
     if micros < 1_000 {
-        format!("{}µs", micros)
+        format!("{:.1}µs", micros as f64)
     } else if micros < 1_000_000 {
         format!("{:.1}ms", micros as f64 / 1_000.0)
     } else {
-        format!("{:.2}s", d.as_secs_f64())
+        format!("{:.1}s", d.as_secs_f64())
     }
 }
 
@@ -1820,17 +1823,17 @@ mod tests {
             .find(|l| l.contains("Performance"))
             .unwrap_or_else(|| panic!("missing title; got:\n{plain}"));
         assert!(
-            title_line.contains("1.60s") && title_line.contains("100%"),
-            "headline must read 1.60s @ 100%; got: {title_line:?}"
+            title_line.contains("1.6s") && title_line.contains("100%"),
+            "headline must read 1.6s @ 100%; got: {title_line:?}"
         );
 
-        // Microsecond row renders with its value.
+        // Microsecond row renders with its value (one decimal place).
         let micro_line = lines
             .iter()
             .find(|l| l.contains("target resolution"))
             .unwrap_or_else(|| panic!("missing target resolution row; got:\n{plain}"));
         assert!(
-            micro_line.contains("45µs"),
+            micro_line.contains("45.0µs"),
             "microsecond value missing; got: {micro_line:?}"
         );
 
@@ -1840,7 +1843,7 @@ mod tests {
             .find(|l| l.contains("stream + prompt delivery"))
             .unwrap_or_else(|| panic!("missing long label row; got:\n{plain}"));
         assert!(
-            long_label.contains("delivery ") && long_label.contains("19µs"),
+            long_label.contains("delivery ") && long_label.contains("19.0µs"),
             "long label collided with or dropped its value; got: {long_label:?}"
         );
 
@@ -1887,16 +1890,16 @@ mod tests {
 
     #[test]
     fn fmt_duration_sub_second() {
-        assert_eq!(fmt_duration(Duration::from_micros(420)), "420µs");
+        assert_eq!(fmt_duration(Duration::from_micros(420)), "420.0µs");
         assert_eq!(fmt_duration(Duration::from_millis(5)), "5.0ms");
         assert_eq!(fmt_duration(Duration::from_millis(18)), "18.0ms");
     }
 
     #[test]
     fn fmt_duration_second_and_above() {
-        assert_eq!(fmt_duration(Duration::from_millis(1200)), "1.20s");
-        assert_eq!(fmt_duration(Duration::from_secs_f64(2.333)), "2.33s");
-        assert_eq!(fmt_duration(Duration::from_secs(12)), "12.00s");
+        assert_eq!(fmt_duration(Duration::from_millis(1200)), "1.2s");
+        assert_eq!(fmt_duration(Duration::from_secs_f64(2.333)), "2.3s");
+        assert_eq!(fmt_duration(Duration::from_secs(12)), "12.0s");
     }
 
     // --- Phase 3: PerfNode tree model + TR-1 reconciliation -----------------
