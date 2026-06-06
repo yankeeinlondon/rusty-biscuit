@@ -4,6 +4,36 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/style/apply.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/layout/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/render_tree/decorate.rs
+  - darkmatter/lib/src/layout/context.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/layout/mod.rs
+  - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+  - darkmatter/cli/tests/level2_layout.rs
+  - darkmatter/lib/tests/snapshots/cutover_reference__ref_centered_table_terminal.snap
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_7:
+  - darkmatter/lib/src/layout/mod.rs
+  - darkmatter/lib/src/style/apply.rs
+  - darkmatter/lib/src/layout/error.rs
+  - darkmatter/lib/src/markdown/output/code_block.rs
+  - darkmatter/lib/src/style/schema/lists.rs
+  - darkmatter/cli/tests/cli.rs
+docs_updated_during_phase_7:
+  - darkmatter/docs/rendering/style.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/darkmatter/SKILL.md
 packages:
   - darkmatter
 ---
@@ -91,7 +121,7 @@ git commit -m "test(darkmatter): capture pre-cutover style: parity reference"
 - Modify: `darkmatter/lib/src/style/apply.rs`
 - Modify: `darkmatter/lib/src/layout/page.rs` (store `HashMap<PageComponent, ComponentPolicy>`; replace the deprecated builder setters)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
     #[test]
@@ -116,12 +146,12 @@ git commit -m "test(darkmatter): capture pre-cutover style: parity reference"
     }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test -p darkmatter apply_lowers`
 Expected: FAIL — no `ComponentPolicy` / `component_policy`.
 
-- [ ] **Step 3: Add `ComponentPolicy` + the policy map; rewrite the apply functions**
+- [x] **Step 3: Add `ComponentPolicy` + the policy map; rewrite the apply functions**
 
 In `page.rs`:
 
@@ -149,17 +179,17 @@ Delete `map_alignment`, `lower_length_to_fill`, `lower_length_to_width_unit`, an
 
 > Page-level `style.page.*` (margin/padding/background/max-width) feeds the **page frame** (Phase 5), not a `ComponentPolicy`.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cargo test -p darkmatter apply_lowers`
 Expected: PASS.
 
-- [ ] **Step 5: Build (deprecated builder setters now unused on the per-component path)**
+- [x] **Step 5: Build (deprecated builder setters now unused on the per-component path)**
 
 Run: `cargo build -p darkmatter 2>&1 | rg "deprecated|unused" | head`
 Expected: per-component `use_alignment`/`with_fill` calls are gone from `apply.rs`. Leave the deprecated *types* in place for now (deleted in Phase 6); they just have no per-component callers.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add darkmatter/lib/src/style/apply.rs darkmatter/lib/src/layout/page.rs
@@ -174,7 +204,7 @@ git commit -m "feat(darkmatter): lower style: per-component policy directly to r
 - Modify: `darkmatter/lib/src/markdown/render_tree/decorate.rs`
 - Modify: `darkmatter/lib/src/layout/context.rs` (delete per-component methods)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
     #[test]
@@ -187,18 +217,18 @@ git commit -m "feat(darkmatter): lower style: per-component policy directly to r
     }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test -p darkmatter decorate_writes_component_layout`
 Expected: FAIL (decorate still queries `LayoutContext`).
 
-- [ ] **Step 3: Rewrite decorate + delete the per-component context math**
+- [x] **Step 3: Rewrite decorate + delete the per-component context math**
 
 In `decorate.rs`: keep `component_for(NodeKind) → PageComponent`; for each block look up its `ComponentPolicy` and write `policy.layout` (and `policy.style` if `Some`) onto the node via `set_layout`/`set_style`. Remove all calls to `resolve_component_width`, `alignment_padding`, `component_side_padding`, `component_fill`, `component_alignment`, and the inline `cells()` math — the renderer fold does it. Replace darkmatter's bespoke inheritance push-down with `renderable::tree::InheritedStyle`.
 
 In `context.rs`: delete `resolve_component_width`, `alignment_padding`, `component_side_padding`, `component_fill`, `component_alignment`, `list_left_margin`, the `alignments`/`fills`/`list_left_margins` fields, and `resolve_width_unit`. (Keep the page-frame fields for Phase 5.)
 
-- [ ] **Step 4: Run to verify pass + diff against the reference**
+- [x] **Step 4: Run to verify pass + diff against the reference**
 
 Run: `cargo test -p darkmatter decorate_writes_component_layout`
 Expected: PASS.
@@ -206,7 +236,7 @@ Expected: PASS.
 Run: `cargo test -p darkmatter --test cutover_reference`
 Expected: terminal snapshots may now differ (fold math vs the old `LayoutContext` math). Do **not** accept yet — inspect each diff; it should be the same layout intent. Real regressions are fixed here; intended diffs are accepted in Phase 6.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add darkmatter/lib/src/markdown/render_tree/decorate.rs darkmatter/lib/src/layout/context.rs
@@ -357,7 +387,7 @@ git commit -m "refactor(darkmatter): delete deprecated Page* vocabulary and all 
 **Files:**
 - Modify: `darkmatter/lib/src/layout/mod.rs` (the "Migration deferral (Spec A)" section), `.claude/skills/darkmatter/*` (deferral note), `darkmatter/docs/rendering/style.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 - `layout/mod.rs`: rewrite the "Migration deferral (Spec A)" module doc — the deferral is **done**; describe the direct `style:` → `Layout`/`Style` lowering and the slim page frame.
 - darkmatter skill: replace the "Migration deferral" note; state `Page*` are gone and `style:` lowers to attrs.
@@ -366,11 +396,11 @@ git commit -m "refactor(darkmatter): delete deprecated Page* vocabulary and all 
 Run: `rg -n 'PageFill|PageAlignment|Migration deferral|deprecated layout' darkmatter/docs .claude/skills/darkmatter darkmatter/lib/src/layout/mod.rs`
 Expected: no stale claims (the deferral note now reads as done).
 
-- [ ] **Step 2: Regenerate skill hashes**
+- [x] **Step 2: Regenerate skill hashes**
 
 `md hash` each edited darkmatter skill file; update its `hash:` frontmatter.
 
-- [ ] **Step 3: Whole-crate verification**
+- [x] **Step 3: Whole-crate verification**
 
 Run: `cargo build -p darkmatter -p biscuit-terminal -p renderable && cargo test -p darkmatter`
 Expected: clean build, suites green (with the Phase 6 re-baselined references).
@@ -379,7 +409,7 @@ Run the tree-attrs perf gate to confirm darkmatter's fold still does zero render
 Run: `cargo test -p renderable fold_does_zero`
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add darkmatter/lib/src/layout/mod.rs .claude/skills/darkmatter darkmatter/docs
