@@ -646,12 +646,16 @@ impl TreeRenderable for BlockQuote {
         let mut node = RenderNode::block_quote(children);
         // The left border's inner gap is `Layout::padding` now — the terminal
         // tree renderer no longer inserts an implicit space inside the border —
-        // so reserve one cell on the node to reproduce the `│ ` gap. This is
-        // always recorded (even for the default layout). The intrinsic
-        // word-wrap baseline is applied by the renderer's block-quote branch,
-        // not read from the node, so carrying it on the node is harmless.
+        // so reserve one cell to reproduce the `│ ` gap. This is the
+        // component's *default*: a caller that configured its own left padding
+        // (through `layout_mut`) keeps it, so a larger / percentage / per-target
+        // gap is not silently clobbered. The intrinsic word-wrap baseline is
+        // applied by the renderer's block-quote branch, not read from the node,
+        // so carrying the layout on the node is harmless.
         let mut node_layout = self.layout.clone();
-        node_layout.padding.left = TargetValue::universal(Length::ch(1));
+        if node_layout.padding.left == TargetValue::universal(Length::Zero) {
+            node_layout.padding.left = TargetValue::universal(Length::ch(1));
+        }
         node.attrs.set_layout(&node_layout);
         if !self.style.is_empty() {
             node.attrs.set_style(&self.style);
@@ -716,6 +720,35 @@ mod tests {
         );
         let result = quote.render_optimistic(None);
         assert_eq!(strip_ansi(&result), "│ Direct content");
+    }
+
+    #[test]
+    fn render_tree_seeds_default_left_padding_gap() {
+        // With no caller-configured padding the projection reserves the 1ch
+        // gap that replaces the border's old implicit interior space.
+        let quote = BlockQuote::from("Hello world");
+        let node = quote.render_tree();
+        let layout = node.attrs.layout_ref().expect("layout recorded");
+        assert_eq!(
+            layout.padding.left,
+            TargetValue::universal(Length::ch(1)),
+            "default left padding gap must be seeded"
+        );
+    }
+
+    #[test]
+    fn render_tree_preserves_caller_left_padding() {
+        // A caller that deliberately set a wider left padding keeps it — the
+        // default 1ch gap must not clobber an explicit configuration.
+        let mut quote = BlockQuote::from("Hello world");
+        quote.layout_mut().padding.left = TargetValue::universal(Length::ch(4));
+        let node = quote.render_tree();
+        let layout = node.attrs.layout_ref().expect("layout recorded");
+        assert_eq!(
+            layout.padding.left,
+            TargetValue::universal(Length::ch(4)),
+            "explicit caller left padding must survive projection"
+        );
     }
 
     // =========================================================================

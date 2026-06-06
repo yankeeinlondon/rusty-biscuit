@@ -271,6 +271,53 @@ impl Writer<'_> {
         result
     }
 
+    /// Renders `node`'s content within `content_width` and paints its `Style`
+    /// text appearance, `padding` band, and border around it.
+    ///
+    /// `padding` is supplied pre-resolved (cells, parent basis) so a `%` padding
+    /// is never re-resolved against the narrowed content width. The content is
+    /// rendered at exactly `content_width`; the caller has already reserved the
+    /// padding and border around it in the width budget, so the paint step adds
+    /// those cells back. Padding is reserved and painted even when the node
+    /// carries no non-empty `Style` — transparent CSS padding still occupies
+    /// cells.
+    fn render_painted(
+        &mut self,
+        node: &RenderNode,
+        content_width: u32,
+        padding: style::Padding,
+    ) -> Result<String, RenderError> {
+        let Some(style) = node.attrs.style_ref().filter(|s| !s.is_empty()) else {
+            let content = self.render_kind_in_width(node, content_width)?;
+            return Ok(style::apply_style_with_padding(
+                &content,
+                &Style::default(),
+                &self.opts.context.terminal,
+                content_width,
+                padding,
+            ));
+        };
+
+        // Enter this node through the shared resolver: its text appearance is
+        // threaded into the child context for the duration of its subtree, so
+        // descendant paragraphs and inline spans see the ancestor
+        // color/emphasis (Spec B D6). The resolver carries only the inheriting
+        // fields forward — the box-painting layers are cleared.
+        let (child_ctx, _) = self.inherited.enter(Some(style));
+        let prev = std::mem::replace(&mut self.inherited, child_ctx);
+        let content = self.render_kind_in_width(node, content_width);
+        self.inherited = prev;
+        let content = content?;
+
+        Ok(style::apply_style_with_padding(
+            &content,
+            style,
+            &self.opts.context.terminal,
+            content_width,
+            padding,
+        ))
+    }
+
     /// Renders a node's content within the constraints of a [`Layout`].
     ///
     /// The horizontal margins reduce the available render width; the rendered
@@ -287,16 +334,29 @@ impl Writer<'_> {
         let top = resolve_cells(&layout.margin.top, available);
         let bottom = resolve_cells(&layout.margin.bottom, available);
 
-        // Largest permitted content box: the space left after the horizontal
-        // margins and padding. Clamp to at least 1: a width-0 sub-render is
-        // degenerate for the downstream components (matching `render_columns`'s
-        // `.max(1)`). Border overhead is intentionally *not* subtracted here —
-        // `render_styled` narrows the inner render width again by the border's
-        // horizontal overhead, so subtracting it here too would double-count.
-        let padding_lr = resolve_cells(&layout.padding.left, available)
-            + resolve_cells(&layout.padding.right, available);
+        // Resolve `padding` into cells **once**, against the parent available
+        // width. The painted box (`style.rs`) reuses these exact counts, so a
+        // `%` padding has a single, stable basis and is never re-resolved
+        // against the narrowed content width.
+        let padding = self.resolve_padding(node);
+        let padding_lr = padding.left + padding.right;
+
+        // Drawn vertical border edges, reserved around the content box. The
+        // paint step adds these glyph cells back, so the content renders at
+        // exactly `content_width` and the border is added *around* it (a
+        // `Fixed(n)` box keeps all `n` content columns).
+        let border_lr = node
+            .attrs
+            .style_ref()
+            .filter(|s| !s.is_empty())
+            .map_or(0, style::border_horizontal_overhead);
+
+        // Largest permitted content box: the space left after margin, padding,
+        // and border are reserved (CSS box-order clamp:
+        // `margin + border + padding + used ≤ available`). Clamp to at least 1:
+        // a width-0 sub-render is degenerate for downstream components.
         let auto_cap = available
-            .saturating_sub(left + right + padding_lr)
+            .saturating_sub(left + right + padding_lr + border_lr)
             .max(1);
 
         // Resolve the content-box width from `layout.width`. `Auto` fills the
@@ -319,50 +379,30 @@ impl Writer<'_> {
         if let Some(mw) = &layout.max_width {
             let cap = resolve_cells(mw, available);
             if cap > 0 {
-                content_width = content_width.min(cap);
+                content_width = content_width.min(cap).max(1);
             }
         }
-        let content = {
-            let mut narrowed = self.opts.clone();
-            narrowed.context.available_width = content_width;
-            narrowed.context.width = content_width;
-            narrowed.context.terminal.fixed_width = Some(content_width);
-            let mut sub = Writer {
-                opts: &narrowed,
-                diagnostics: Vec::new(),
-                inherited: self.inherited.clone(),
-            };
-            let rendered = sub.render_styled(node);
-            self.diagnostics.append(&mut sub.diagnostics);
-            rendered?
-        };
 
-        // Alignment offset: extra left padding when the content is narrower
-        // than the space available between the horizontal margins. The painted
-        // box includes the `padding` cells only when the node carries a `Style`
-        // (the same condition under which `render_styled` paints the padding
-        // band); the rendered `widest` then includes them, so the slack must be
-        // measured against `content_width + padding_lr` or the box lands
-        // `padding_lr` cells short of flush on center/right alignment. An
-        // unpainted padded node reserves the padding in its width budget but
-        // never emits the cells, so its content centers within `content_width`.
-        let painted_padding = if node.attrs.style_ref().is_some_and(|s| !s.is_empty()) {
-            padding_lr
-        } else {
-            0
-        };
+        // Render the content at exactly `content_width` and paint the `Style`,
+        // `padding` band, and border around it. Padding is reserved and painted
+        // even when the node carries no `Style`.
+        let content = self.render_painted(node, content_width, padding)?;
+
+        // Place the painted box within the content area between the margins
+        // (`available − margin`). The painted box is `content_width` plus the
+        // reserved padding and border. When that box is narrower than the area
+        // — a sub-available `Fixed` / `FitContent` box, or an `Auto` box capped
+        // by `max_width` — the alignment offset positions the whole box. When
+        // the box fills the area, the offset instead centers the visible
+        // content within it (an `Auto` block whose short content is centered).
+        let box_width = content_width + padding_lr + border_lr;
+        let align_area = available.saturating_sub(left + right);
         let widest = content.split('\n').map(visible_width).max().unwrap_or(0);
-        // `FitContent` shrinks the box below the cap, so its placement basis is
-        // the whole content area between the margins (`available − margin`) — the
-        // shrunk box is then centered/right-aligned within it. `Auto`/`Fixed`
-        // align content within their own resolved box (`content_width`), which
-        // for `Auto` already equals `available − margin − padding`.
-        let align_basis = if matches!(layout.width, renderable::layout::Width::FitContent) {
-            available.saturating_sub(left + right)
+        let slack = if box_width < align_area {
+            align_area - box_width
         } else {
-            content_width + painted_padding
+            align_area.saturating_sub(widest)
         };
-        let slack = align_basis.saturating_sub(widest);
         let align_offset = match layout.alignment {
             Alignment::Left => 0,
             Alignment::Center => slack / 2,
@@ -3388,10 +3428,14 @@ mod render_tree_tests {
             plain.contains("content"),
             "nested content should still be rendered"
         );
-        let max_line = plain.lines().map(|l| l.len()).max().unwrap_or(0);
-        assert!(
-            max_line <= 34,
-            "inner 2ch margins + max_width 30 should keep lines <= 34, got {max_line}"
+        // `max_width: 30` caps the box; right alignment then places that
+        // sub-available box at the right edge of the content area between the
+        // margins. align_area = 80 − 2 − 2 = 76; slack = 76 − 30 = 46; the box's
+        // left edge lands at left-margin(2) + 46 = 48.
+        assert_eq!(
+            lead_spaces_of_line_with(&out.output, "content"),
+            48,
+            "right-aligned max_width box is pushed to the right edge of the area"
         );
     }
 
@@ -3413,9 +3457,10 @@ mod render_tree_tests {
     fn render_tree_width_fixed_sets_content_box() {
         use renderable::layout::{Alignment, Layout, Length, TargetValue, Width};
 
-        // available 80; Fixed(20) center → "hi" is centered within the 20-cell
-        // content box: (20 - 2) / 2 = 9 leading spaces. With the default `Auto`
-        // the box would fill 80 and the lead would be 39.
+        // available 80; Fixed(20) center → the 20-cell box is centered within
+        // the available width (`margin:auto` semantics): (80 - 20) / 2 = 30
+        // leading spaces place the box's left edge, and "hi" sits at it. With
+        // the default `Auto` the box would fill 80 and the lead would be 0.
         let term = Terminal::new_optimistic(80);
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
         para.attrs.set_layout(&Layout {
@@ -3430,7 +3475,7 @@ mod render_tree_tests {
         )
         .expect("render")
         .output;
-        assert_eq!(lead_spaces_of_line_with(&out, "hi"), 9);
+        assert_eq!(lead_spaces_of_line_with(&out, "hi"), 30);
     }
 
     #[test]
@@ -3459,21 +3504,141 @@ mod render_tree_tests {
 
     #[test]
     fn render_tree_fixed_width_is_clamped_by_available_minus_margin_padding() {
-        use renderable::layout::{Alignment, Edges, Layout, Length, TargetValue, Width};
+        use renderable::layout::{Edges, Layout, Length, TargetValue, Width};
 
-        // Fixed(100) asks for more than the box can hold: it clamps to
-        // available − 2*margin − 2*padding = 80 − 20 − 10 = 50. Centering "x"
-        // within 50 → (50 - 1) / 2 = 24, plus the 10ch left margin = 34. The
-        // padding subtraction is what distinguishes this from a 60-cell box
-        // (which would yield 39).
+        // Fixed(100) asks for more than the box can hold: the content box clamps
+        // to available − 2*margin − 2*padding = 80 − 20 − 10 = 50, so wrapping
+        // content reflows to at most 50 columns. The padding subtraction is the
+        // discriminator — without it the cap would be 60. (Lead is no longer a
+        // proxy: a box that fills its content area has no placement slack.)
+        let plain = render_block_with_layout_wrapped(
+            "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi",
+            Layout {
+                margin: Edges::x(Length::ch(10)),
+                padding: Edges::x(Length::ch(5)),
+                width: Width::Fixed(TargetValue::universal(Length::ch(100))),
+                ..Layout::default()
+            },
+            80,
+        );
+        assert!(
+            content_box_cols(&plain) <= 50,
+            "Fixed(100) must clamp the content box to 50 (available − margin − padding): {plain:?}"
+        );
+    }
+
+    /// Renders a single `"hi"` paragraph carrying `layout` at `available` and
+    /// returns the leading-space alignment offset of the content line — the
+    /// position of the painted box's left edge within the content area.
+    fn alignment_lead(layout: renderable::layout::Layout, available: u32) -> usize {
+        let term = Terminal::new_optimistic(available);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&layout);
+        let tree = RenderNode::root(vec![para]);
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render")
+        .output;
+        lead_spaces_of_line_with(&out, "hi")
+    }
+
+    #[test]
+    fn render_tree_fixed_alignment_places_box() {
+        use renderable::layout::{Alignment, Layout, Length, TargetValue, Width};
+        // A 20-cell `Fixed` box (no margin) is placed within the 80-cell area:
+        // left flush (0), centered ((80−20)/2 = 30), right flush (80−20 = 60).
+        let fixed = |a| Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            alignment: a,
+            ..Layout::default()
+        };
+        assert_eq!(alignment_lead(fixed(Alignment::Left), 80), 0);
+        assert_eq!(alignment_lead(fixed(Alignment::Center), 80), 30);
+        assert_eq!(alignment_lead(fixed(Alignment::Right), 80), 60);
+    }
+
+    #[test]
+    fn render_tree_capped_auto_alignment_places_box() {
+        use renderable::layout::{Alignment, Layout, Length, TargetValue};
+        // `Auto` capped by `max_width: 20` is sub-available, so it is placed like
+        // a 20-cell box — the defect the review flagged for capped `Auto`.
+        let capped = |a| Layout {
+            max_width: Some(TargetValue::universal(Length::ch(20))),
+            alignment: a,
+            ..Layout::default()
+        };
+        assert_eq!(alignment_lead(capped(Alignment::Left), 80), 0);
+        assert_eq!(alignment_lead(capped(Alignment::Center), 80), 30);
+        assert_eq!(alignment_lead(capped(Alignment::Right), 80), 60);
+    }
+
+    #[test]
+    fn render_tree_fit_content_alignment_places_box() {
+        use renderable::layout::{Alignment, Layout, Width};
+        // `FitContent` shrinks the box to the 2-cell content, then places it:
+        // left (0), centered ((80−2)/2 = 39), right (80−2 = 78).
+        let fit = |a| Layout {
+            width: Width::FitContent,
+            alignment: a,
+            ..Layout::default()
+        };
+        assert_eq!(alignment_lead(fit(Alignment::Left), 80), 0);
+        assert_eq!(alignment_lead(fit(Alignment::Center), 80), 39);
+        assert_eq!(alignment_lead(fit(Alignment::Right), 80), 78);
+    }
+
+    #[test]
+    fn render_tree_percent_padding_resolves_against_parent_width() {
+        use renderable::layout::{Edges, Layout, Length};
+        // 10% horizontal padding at available 80 resolves to 8 cells per side,
+        // against the parent width — once. The buggy double-resolution would
+        // re-resolve against the narrowed 64-cell content box and yield 6. With
+        // no background the left padding shows as 8 leading spaces before the
+        // content, which also proves padding is reserved with an empty `Style`.
+        let layout = Layout {
+            padding: Edges::x(Length::Percent(10.0)),
+            ..Layout::default()
+        };
+        assert_eq!(alignment_lead(layout, 80), 8);
+    }
+
+    #[test]
+    fn render_tree_transparent_padding_reserves_cells_without_style() {
+        use renderable::layout::{Edges, Layout, Length};
+        // A node with `padding` but no `Style` still reserves the cells: the
+        // left padding renders as leading spaces even though nothing is painted.
+        let layout = Layout {
+            padding: Edges::x(Length::ch(4)),
+            ..Layout::default()
+        };
+        assert_eq!(alignment_lead(layout, 80), 4);
+    }
+
+    #[test]
+    fn render_tree_border_is_added_around_fixed_content_box() {
+        use renderable::layout::{Alignment, Layout, Length, TargetValue, Width};
+        use renderable::style::{Border, BorderSides, Style};
+        // The border is added *around* the `Fixed(20)` content box rather than
+        // carved out of it, so the box is 22 cells wide (20 content + 2 drawn
+        // edges). Centered in 80 the box's left edge lands at (80 − 22) / 2 = 29
+        // — one cell tighter than the borderless box (lead 30), the difference
+        // being the reserved border. (Old code subtracted the border from the
+        // content, shrinking it to 18 and mis-placing the box.)
         let term = Terminal::new_optimistic(80);
-        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("ab")]);
         para.attrs.set_layout(&Layout {
-            margin: Edges::x(Length::ch(10)),
-            padding: Edges::x(Length::ch(5)),
-            width: Width::Fixed(TargetValue::universal(Length::ch(100))),
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
             alignment: Alignment::Center,
             ..Layout::default()
+        });
+        para.attrs.set_style(&Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Border::default()
+            }),
+            ..Style::default()
         });
         let tree = RenderNode::root(vec![para]);
         let out = render_terminal_node(
@@ -3482,7 +3647,7 @@ mod render_tree_tests {
         )
         .expect("render")
         .output;
-        assert_eq!(lead_spaces_of_line_with(&out, "x"), 34);
+        assert_eq!(lead_spaces_of_line_with(&out, "ab"), 29);
     }
 
     /// Builds a one-paragraph document, records `layout` and `style` on it, and
