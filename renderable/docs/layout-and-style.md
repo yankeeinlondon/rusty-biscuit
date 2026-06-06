@@ -427,9 +427,13 @@ The darkmatter cutover is complete. The deprecated page-layout value types —
 `PageComponent::Lists` — and their conversion bridges have been **deleted**.
 `DarkmatterPage` now stores `renderable::layout::Edges`,
 `TargetValue<Length>`, and `ComponentPolicy` directly; `style:` frontmatter
-lowers straight into `renderable::layout::Layout` / `renderable::style::Style`
-via `ComponentPolicy`, and the render-tree folds perform all width, padding,
-alignment, and CSS resolution. `DarkmatterPage` survives as a slim,
+lowers straight into the per-component `ComponentPolicy` — a
+`renderable::layout::Layout` plus `color` / `bg_color` retained as `StyleColor`
+(so Tailwind/hex opacity survives to the HTML target). The `decorate` pass then
+projects layout and color onto the render-tree nodes' `renderable::style::Style`
+(opacity is carried separately as a `darkmatter.style` render hint the browser
+entry point lowers to `rgba(...)`), and the render-tree folds perform all width,
+padding, alignment, and CSS resolution. `DarkmatterPage` survives as a slim,
 renderable-typed page frame.
 
 ### `style:` frontmatter status
