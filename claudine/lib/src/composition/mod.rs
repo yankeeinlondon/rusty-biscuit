@@ -21,6 +21,7 @@ pub mod loop_actions;
 pub mod loop_config;
 pub mod loop_engine;
 pub mod loop_expression;
+pub mod mismatch;
 pub mod preflight;
 mod prepare;
 mod resolve;
@@ -52,6 +53,7 @@ pub use loop_engine::{
     LoopIterationOutput, execute_loop, execute_loop_with_config,
 };
 pub use loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
+pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
 pub use prepare::{
     PrepareOptions, parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
