@@ -796,6 +796,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: html, escaping, security_
 
+- [memchr](https://github.com/BurntSushi/memchr) _v2.7_ [📄](https://docs.rs/memchr)
+
+    _Fast substring and byte search routines (memmem, memchr, memrchr) with SIMD acceleration. Used by `tree-hugger` for zero-allocation newline counting during god-file candidate screening._
+
+    _Tags: text-processing, performance, search_
+
 - [regex](https://github.com/rust-lang/regex) _v1.11_ [📄](https://docs.rs/regex)
 
     _Fast regular expression engine with Unicode support and linear-time guarantees._

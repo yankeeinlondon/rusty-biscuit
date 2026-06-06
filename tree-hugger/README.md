@@ -66,6 +66,7 @@ classified as:
 - `imports` - list imported symbols
 - `classes` - list classes with members (static/instance partitioning)
 - `lint` - run lint and syntax diagnostics
+- `god-files` - identify oversized source files that are strong candidates for refactoring
 
 ### Options
 
