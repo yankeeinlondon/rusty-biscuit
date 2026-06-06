@@ -22,3 +22,11 @@ The **Remote Signal** daemon process is meant to compliment the Claudine CLI by 
 - [tonic](../docs/research/tonic.md) - provides the **gRPC** foundation used to communicate between 
 - [Plumtree](../docs/research/plumtree.md) - provides the foundation of the gossip network communication
 - [foca](../docs/research/foca.md)
+- [flume]()
+- [parking-lot]()
+- [redb]()
+- [duckdb](../docs/research/remote-signal/duckdb.md)
+- [tonic](../docs/research/remote-signal/tonic.md) and [tonic-stream]()
+- [mdns-sd]()
+- [bech32]()
+- [ed25519-dalek]()
