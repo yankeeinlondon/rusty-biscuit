@@ -568,6 +568,9 @@ pub(crate) fn execute_sequence(
             prep_launch_context: Some(prep_context.launch_context.clone()),
             prep_env_context: Some(prep_context.env_context.clone()),
             prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+            // Sequence steps render their header in-pipeline: per-step
+            // prep already ran up front, so the executor's emit is timely.
+            header_emitted: false,
         };
 
         let step_result = super::composition::execute_composition_request_inner(

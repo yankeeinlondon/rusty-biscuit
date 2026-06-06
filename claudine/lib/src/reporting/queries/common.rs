@@ -329,7 +329,9 @@ pub(crate) fn load_sessions(
             COALESCE(SUM(output_tokens), 0),
             COALESCE(SUM(total_tokens), 0),
             COALESCE(SUM(cache_read_tokens), 0),
-            COALESCE(SUM(cost_usd), 0)
+            COALESCE(SUM(cost_usd), 0),
+            MAX(claudine_pid),
+            MAX(agent_pid)
         FROM events
         "#,
     ) + " GROUP BY session_key ORDER BY MIN(timestamp) DESC";
@@ -363,6 +365,8 @@ pub(crate) fn load_sessions(
             row.get::<_, i64>(23)?,
             row.get::<_, i64>(24)?,
             row.get::<_, f64>(25)?,
+            row.get::<_, Option<i64>>(26)?,
+            row.get::<_, Option<i64>>(27)?,
         ))
     })?;
 
@@ -395,6 +399,8 @@ pub(crate) fn load_sessions(
             total_tokens,
             total_cache_read_tokens,
             total_cost_usd,
+            claudine_pid,
+            agent_pid,
         ) = row?;
         let started_at = parse_timestamp(&started_at)?;
         let ended_at = parse_timestamp(&ended_at)?;
@@ -426,6 +432,8 @@ pub(crate) fn load_sessions(
             total_tokens: total_tokens.max(0) as u64,
             total_cache_read_tokens: total_cache_read_tokens.max(0) as u64,
             total_cost_usd: total_cost_usd.max(0.0),
+            claudine_pid: claudine_pid.and_then(|v| v.try_into().ok()),
+            agent_pid: agent_pid.and_then(|v| v.try_into().ok()),
         });
     }
 

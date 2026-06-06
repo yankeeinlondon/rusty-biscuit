@@ -42,7 +42,7 @@ let plan = DetectionPlan::new()
     .without_network()                   // Skip entirely
     .filesystem(
         FilesystemRequest::new()
-            .git(GitRequest::summary())  // Branch + dirty counts
+            .git(GitRequest::summary())  // Branch + dirty flag
             .repo(RepoRequest::structure()) // Workspace tools only
             .without_docs()
     );
@@ -86,9 +86,10 @@ let result = detect_with_config(config)?;
 | `DetectionPlan` | `new()` (default full) | Composes all four domains (os, hardware, network, filesystem) |
 
 **Git preset cheat sheet:**
-- `summary()` -- branch + dirty counts only (no commits, no worktrees)
+- `minimal()` / `summary()` -- branch + dirty *flag* only (no per-category counts, no commits, no worktrees). The two presets are currently byte-identical.
 - `full()` -- 10 commits, per-file change stats, worktrees; no unified diffs, no network
 - `deep()` -- adds full unified diffs, remote refresh, branch details, and per-commit containment
+- **Every** preset (including `minimal`) runs a working-tree status walk -- there is no "repo root without status" request level; use the Tier-3 `GitRepo::discover().repo_root()` handle for that.
 
 ## Key Types
 

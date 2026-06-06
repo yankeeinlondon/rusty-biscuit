@@ -35,6 +35,15 @@ pub struct EnvironmentContext {
     /// Monorepo package inferred by the wrapper, if available.
     #[serde(default)]
     pub package: Option<String>,
+
+    /// Claudine's own process ID, captured once at wrapper startup.
+    ///
+    /// Populated for every wrapper-emitted record by reading `CLAUDINE_PID`
+    /// from the environment (set in the child env by the wrapper, or set in
+    /// the wrapper's own env at startup). Older JSONL lines that pre-date
+    /// this field deserialize as `None` via `#[serde(default)]`.
+    #[serde(default)]
+    pub claudine_pid: Option<u32>,
 }
 
 /// Operating system identification.
@@ -283,6 +292,7 @@ impl From<sniff::SniffResult> for EnvironmentContext {
             primary_language,
             package_area: None,
             package: None,
+            claudine_pid: None,
         }
     }
 }
@@ -363,6 +373,18 @@ fn apply_wrapper_package_context(
     context.package = lookup("PACKAGE")
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+
+    // `CLAUDINE_PID` is stamped onto the child environment by
+    // `wrap::env::build_child_env_with_launch` before the provider is
+    // spawned. When this code runs inside the wrapper process itself,
+    // the env var has not yet been set in our own process env — fall
+    // back to `std::process::id()` so wrapper-side detection produces
+    // the same value the child will see. Inside a hook handler (a
+    // descendant of the spawned provider) the env var is already
+    // present and we use it directly.
+    context.claudine_pid = lookup("CLAUDINE_PID")
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .or_else(|| Some(std::process::id()));
 }
 
 fn lookup_env_var(name: &str) -> Option<String> {
@@ -498,5 +520,51 @@ mod tests {
 
         assert!(ctx.package_area.is_none());
         assert!(ctx.package.is_none());
+    }
+
+    /// Phase 3 — `CLAUDINE_PID` env var is honored when present.
+    #[test]
+    fn wrapper_package_context_reads_claudine_pid_from_env() {
+        let mut ctx = EnvironmentContext::default();
+        apply_wrapper_package_context(&mut ctx, &|name| match name {
+            "CLAUDINE_PID" => Some("12345".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(ctx.claudine_pid, Some(12345));
+    }
+
+    /// Phase 3 — when `CLAUDINE_PID` is unset, the helper falls back to
+    /// `std::process::id()` so wrapper-side detection still produces a PID.
+    #[test]
+    fn wrapper_package_context_falls_back_to_process_id() {
+        let mut ctx = EnvironmentContext::default();
+        apply_wrapper_package_context(&mut ctx, &|_| None);
+
+        assert_eq!(ctx.claudine_pid, Some(std::process::id()));
+    }
+
+    /// Phase 3 — `claudine_pid` MUST round-trip through serde.
+    #[test]
+    fn claudine_pid_round_trips_json() {
+        let ctx = EnvironmentContext {
+            claudine_pid: Some(99_876),
+            ..EnvironmentContext::default()
+        };
+        let json = serde_json::to_value(&ctx).unwrap();
+        assert_eq!(json["claudine_pid"], 99_876);
+
+        let back: EnvironmentContext = serde_json::from_value(json).unwrap();
+        assert_eq!(back.claudine_pid, Some(99_876));
+    }
+
+    /// Phase 3 — legacy JSONL without `claudine_pid` MUST deserialize as `None`.
+    #[test]
+    fn claudine_pid_defaults_to_none_on_deserialize() {
+        let json = serde_json::json!({
+            "os": { "os_type": "macos" }
+        });
+        let ctx: EnvironmentContext = serde_json::from_value(json).unwrap();
+        assert!(ctx.claudine_pid.is_none());
     }
 }

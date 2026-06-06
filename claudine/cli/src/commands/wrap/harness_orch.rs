@@ -558,6 +558,7 @@ pub(crate) fn execute_harness_attempt(
         let api_duration_ms = stream_result.data.duration_ms;
         let perf = Some(stream_result.telemetry.into_agent_perf(api_duration_ms));
         let termination = stream_result.termination;
+        let captured_agent_pid = stream_result.agent_pid;
         let mut summary = stream_result.data;
         if let Some(codex_output) = structured_codex_output {
             codex_output.apply_to_summary(&mut summary);
@@ -596,6 +597,7 @@ pub(crate) fn execute_harness_attempt(
             detail_requested,
             &summary_details.lock().unwrap().clone(),
             Some(&section_stream),
+            captured_agent_pid,
         );
 
         let effective_response = {
