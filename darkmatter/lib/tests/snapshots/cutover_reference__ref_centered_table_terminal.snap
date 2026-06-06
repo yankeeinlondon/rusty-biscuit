@@ -2,8 +2,8 @@
 source: darkmatter/lib/tests/cutover_reference.rs
 expression: "render_terminal(&md, 80)"
 ---
-┌───┬───┐
-│ A │ B │
-├───┼───┤
-│ 1 │ 2 │
-└───┴───┘
+                                   ┌───┬───┐
+                                   │ A │ B │
+                                   ├───┼───┤
+                                   │ 1 │ 2 │
+                                   └───┴───┘

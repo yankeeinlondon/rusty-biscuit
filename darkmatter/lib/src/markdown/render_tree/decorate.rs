@@ -1,4 +1,4 @@
-//! Lowers a [`LayoutContext`]'s per-component layout / color settings onto a
+//! Lowers per-component `style:` settings from a [`LayoutContext`] onto a
 //! folded render tree.
 //!
 //! The decorated-layout terminal path
@@ -6,24 +6,14 @@
 //! folds a [`Markdown`](crate::markdown::Markdown) document, then runs this pass
 //! to project each [`PageComponent`]'s alignment, fill width, and colors onto
 //! the matching tree node's [`Layout`] / [`Style`]. The shared terminal tree
-//! renderer then applies those attributes (left margin = alignment offset +
-//! side padding; `max_width` = the component's resolved fill width).
-//!
-//! Page-level framing (margins, padding, background, vertical rhythm) is **not**
-//! handled here — the [`DarkmatterPage`](crate::layout::DarkmatterPage)
-//! row-decoration post-pass wraps the rendered body string for that.
+//! renderer then applies those attributes.
 
-// `PageComponent` / `PageFill` are the deprecated page-layout enums that remain
-// the internal storage for `LayoutContext`; deprecation is suppressed here while
-// the bespoke layout types coexist with `renderable::layout` (matching
-// `layout/context.rs`).
-#![allow(deprecated)]
-
-use renderable::layout::{Alignment, Length, Edges, TargetValue};
+use renderable::layout::{Alignment, Length, TargetValue};
 use renderable::style::{PerMode, Style};
+use renderable::target::RenderTarget;
 use renderable::tree::{HintNamespace, NodeKind, RenderNode};
 
-use crate::layout::{LayoutContext, PageAlignment, PageComponent};
+use crate::layout::{LayoutContext, PageComponent};
 use crate::style::StyleColor;
 
 /// Walks `root`, decorating every node that maps to a [`PageComponent`].
@@ -53,10 +43,13 @@ fn apply_page_color(root: &mut RenderNode, ctx: &LayoutContext) {
 /// Recursively decorates `node` and its descendants.
 fn decorate_node(node: &mut RenderNode, ctx: &LayoutContext) {
     if let Some(component) = component_for(&node.kind) {
-        apply_component_layout(node, ctx, component);
+        // Layout is block-only; inline nodes (e.g. Image) must not carry it.
+        if !matches!(node.kind, NodeKind::Image { .. }) {
+            apply_component_layout(node, ctx, component);
+        }
         apply_component_color(node, ctx, component);
         if matches!(node.kind, NodeKind::ListItem { .. }) {
-            apply_list_item_alignment(node, ctx);
+            apply_list_item_alignment(node, ctx, component);
         }
     } else if let Some(alt) = lone_image_alt(node) {
         // A paragraph whose only content is an image is the block-level image
@@ -116,152 +109,54 @@ fn component_for(kind: &NodeKind) -> Option<PageComponent> {
     }
 }
 
-/// Sets the node's [`Layout`] from the component's resolved fill + alignment,
-/// mirroring the legacy `for_terminal_with_layout` model.
-///
-/// The component body is capped to [`resolve_component_width`] (which already
-/// folds in `Indent` / `Pad` / `Max` / `Explicit`). The left offset is computed
-/// per component family — the legacy renderer treats them differently:
-///
-/// - **Code / Table / Image** (legacy `apply_component_layout`): `Pad` / `Indent`
-///   left offset is [`component_side_padding`]'s left; `Full` / `Max` /
-///   `Explicit` use [`alignment_padding`] (zero when left-aligned).
-/// - **Block quote** (legacy streaming path): [`alignment_padding`] only.
-/// - **Lists** (`Ul` / `Ol` / `Li`, legacy streaming path): the list-left-margin
-///   plus [`alignment_padding`] of `(body + margin)`.
-///
-/// The offset is baked into the left margin and the node is left-aligned, so the
-/// shared renderer positions the band exactly where the legacy renderer did.
-///
-/// [`resolve_component_width`]: LayoutContext::resolve_component_width
-/// [`alignment_padding`]: LayoutContext::alignment_padding
-/// [`component_side_padding`]: LayoutContext::component_side_padding
+/// Writes the component's [`ComponentPolicy`](crate::layout::ComponentPolicy)
+/// `layout` onto the node. The renderer fold resolves widths, padding, and
+/// alignment — no width math is done here.
 fn apply_component_layout(node: &mut RenderNode, ctx: &LayoutContext, component: PageComponent) {
-    let width = match ctx.resolve_component_width(component) {
-        Ok(w) => w,
-        // A malformed percent etc. degrades to no layout rather than failing
-        // the whole render; the body still renders at the page width.
-        Err(_) => return,
-    };
-
-    let (left, body_width) = match component {
-        // Lists: the left-margin shifts the whole list right and narrows its
-        // body; (margin + body) aligns as one block.
-        PageComponent::Ul | PageComponent::Ol | PageComponent::Li => {
-            let left_margin = list_left_margin_cols(ctx, component);
-            let body = width.min(ctx.effective_width.saturating_sub(left_margin));
-            let block = body.saturating_add(left_margin);
-            let align = ctx.alignment_padding(component, block);
-            (left_margin.saturating_add(align), body)
-        }
-        // Block quotes: alignment offset only (the bar provides the indent for
-        // `Indent`, already folded into `width`).
-        PageComponent::BlockQuotes => (ctx.alignment_padding(component, width), width),
-        // Code / Table / Image: `Pad` / `Indent` use the side padding; otherwise
-        // the alignment offset against the rendered width.
-        _ => (block_component_left_pad(ctx, component, width), width),
-    };
-
-    // Nothing to do when the body fills the full effective width with no offset:
-    // that is the renderer's default and pinning a Layout would be redundant.
-    if left == 0 && body_width >= ctx.effective_width {
+    let Some(policy) = ctx.component_policies.get(&component) else {
         return;
-    }
-
-    let mut layout = node.attrs.layout().unwrap_or_default();
-    layout.margin = Edges {
-        left: cells(left),
-        ..layout.margin
     };
-    // The offset is baked into the left margin above, so the node is
-    // left-aligned; setting the typed alignment too would double the offset.
-    layout.alignment = Alignment::Left;
-    layout.max_width = Some(TargetValue::universal(Length::ch(u32::from(body_width))));
-    node.attrs.set_layout(&layout);
+
+    let default = renderable::layout::Layout::default();
+    if policy.layout != default {
+        node.attrs.set_layout(&policy.layout);
+    }
 }
 
 /// Lifts the Images-component layout onto a lone-image paragraph.
 ///
-/// Mirrors legacy `apply_component_layout(PageComponent::Images)`: for `Pad` /
-/// `Indent` fills the left offset is the side padding; for `Full` / `Max` /
-/// `Explicit` with a non-Left alignment the offset is computed against the
-/// **rendered placeholder width** (`▉ IMAGE[{alt}]`), not the fill width — legacy
-/// centers / right-aligns the placeholder text itself. The `Image` node is
-/// inline (the renderer ignores its `Layout`), so the offset is baked into the
-/// wrapping paragraph's left margin.
-fn apply_lone_image_layout(node: &mut RenderNode, ctx: &LayoutContext, alt: &str) {
-    use crate::layout::{PageAlignment, PageFill};
-    use biscuit_terminal::utils::UnicodeWidthStr;
-
+/// The renderer fold handles alignment and width for the paragraph node;
+/// no bespoke placeholder-width math is needed.
+fn apply_lone_image_layout(node: &mut RenderNode, ctx: &LayoutContext, _alt: &str) {
     let component = PageComponent::Images;
-    let left = match ctx.component_fill(component) {
-        PageFill::Pad(_) | PageFill::Indent(_) => ctx
-            .component_side_padding(component)
-            .map(|(l, _)| l)
-            .unwrap_or(0),
-        PageFill::Full | PageFill::Max(_) | PageFill::Explicit(_) => {
-            if ctx.component_alignment(component) == PageAlignment::Left {
-                0
-            } else {
-                // `▉ IMAGE[{alt}]` — the placeholder's visible width is what the
-                // legacy renderer aligns against.
-                let placeholder = format!("▉ IMAGE[{alt}]");
-                let visible = UnicodeWidthStr::width(placeholder.as_str()) as u16;
-                ctx.alignment_padding(component, visible)
-            }
-        }
-    };
-
-    if left == 0 {
+    let Some(policy) = ctx.component_policies.get(&component) else {
         return;
-    }
-    let mut layout = node.attrs.layout().unwrap_or_default();
-    layout.margin = Edges {
-        left: cells(left),
-        ..layout.margin
     };
-    layout.alignment = Alignment::Left;
-    node.attrs.set_layout(&layout);
-}
 
-/// Computes the left offset for a Code / Table / Image component, mirroring the
-/// legacy `apply_component_layout`: `Pad` / `Indent` use the side padding's left,
-/// otherwise the alignment offset against the rendered `width`.
-fn block_component_left_pad(ctx: &LayoutContext, component: PageComponent, width: u16) -> u16 {
-    use crate::layout::PageFill;
-    match ctx.component_fill(component) {
-        PageFill::Pad(_) | PageFill::Indent(_) => ctx
-            .component_side_padding(component)
-            .map(|(l, _)| l)
-            .unwrap_or(0),
-        PageFill::Full | PageFill::Max(_) | PageFill::Explicit(_) => {
-            ctx.alignment_padding(component, width)
-        }
-    }
-}
+    // Only apply alignment and box offset (padding/margin) to the wrapping
+    // paragraph.  max_width / width cap the *paragraph* content box, which
+    // would force the alt-text fallback to wrap — image width constraints are
+    // handled by the renderer's own image path, not by the paragraph layout.
+    let mut layout = renderable::layout::Layout::default();
+    layout.alignment = policy.layout.alignment;
+    layout.padding = policy.layout.padding.clone();
+    layout.margin = policy.layout.margin.clone();
 
-/// Returns the list-left-margin (in columns) for an unordered list, else 0.
-///
-/// Mirrors legacy, which applies `style.ul.left-margin` to [`PageComponent::Ul`]
-/// only and resolves it against `effective_width`.
-fn list_left_margin_cols(ctx: &LayoutContext, component: PageComponent) -> u16 {
-    if component != PageComponent::Ul {
-        return 0;
+    let default = renderable::layout::Layout::default();
+    if layout != default {
+        node.attrs.set_layout(&layout);
     }
-    ctx.list_left_margin(component)
-        .and_then(|unit| unit.resolve(ctx.effective_width).ok())
-        .unwrap_or(0)
 }
 
 /// Sets the node's [`Style`] foreground / background from the component colors.
 fn apply_component_color(node: &mut RenderNode, ctx: &LayoutContext, component: PageComponent) {
-    let fg = ctx.component_color(component).cloned();
-    let bg = ctx.component_bg_color(component).cloned();
+    let fg = ctx.component_color(component);
+    let bg = ctx.component_bg_color(component);
     if fg.is_none() && bg.is_none() {
         return;
     }
     let mut style = node.attrs.style().unwrap_or_default();
-    set_style_colors(&mut style, fg.as_ref(), bg.as_ref());
+    set_style_colors(&mut style, fg, bg);
     node.attrs.set_style(&style);
 }
 
@@ -374,25 +269,50 @@ fn inline_plain_text(node: &RenderNode) -> String {
 /// item so the shared renderer lifts the marker onto its own line and left-pads
 /// the body block.
 ///
-/// The pad is the resolved left offset
-/// ([`alignment_padding`](LayoutContext::alignment_padding) of the `Li`
-/// component width), precomputed here so the renderer stays free of darkmatter's
-/// page-layout types. `Left`-aligned lists (the default) set no hint, so the
-/// renderer keeps its inline rendering byte-for-byte.
-fn apply_list_item_alignment(node: &mut RenderNode, ctx: &LayoutContext) {
-    let alignment = ctx.component_alignment(PageComponent::Li);
-    let label = match alignment {
-        PageAlignment::Left => return,
-        PageAlignment::Center => "center",
-        PageAlignment::Right => "right",
+/// The pad is computed from the component's [`ComponentPolicy`] layout
+/// (`max_width` / `width` / `alignment`), precomputed here so the renderer
+/// stays free of darkmatter's page-layout types. `Left`-aligned lists (the
+/// default) set no hint, so the renderer keeps its inline rendering byte-for-byte.
+fn apply_list_item_alignment(node: &mut RenderNode, ctx: &LayoutContext, component: PageComponent) {
+    let Some(policy) = ctx.component_policies.get(&component) else {
+        return;
     };
-    let li_width = ctx
-        .resolve_component_width(PageComponent::Li)
-        .unwrap_or(ctx.effective_width);
-    let pad = ctx.alignment_padding(PageComponent::Li, li_width);
+
+    let label = match policy.layout.alignment {
+        Alignment::Left => return,
+        Alignment::Center => "center",
+        Alignment::Right => "right",
+    };
+
+    let available = ctx.effective_width as u32;
+    let width = match &policy.layout.width {
+        renderable::layout::Width::Fixed(tv) => resolve_length(tv, available),
+        _ => match &policy.layout.max_width {
+            Some(mw) => resolve_length(mw, available),
+            None => available,
+        },
+    };
+
+    let surplus = available.saturating_sub(width);
+    let pad = match policy.layout.alignment {
+        Alignment::Left => 0,
+        Alignment::Center => surplus / 2,
+        Alignment::Right => surplus,
+    };
+
     let ns = HintNamespace("darkmatter.li");
     node.attrs.set_hint(ns, "alignment", serde_json::json!(label));
     node.attrs.set_hint(ns, "pad", serde_json::json!(pad));
+}
+
+/// Resolves a [`TargetValue<Length>`] to whole cells against `width`.
+fn resolve_length(tv: &TargetValue<Length>, width: u32) -> u32 {
+    match tv.resolve(RenderTarget::Terminal) {
+        Some(Length::Zero) | None => 0,
+        Some(Length::Ch(n)) => *n,
+        Some(Length::Percent(p)) => ((width as f32) * p / 100.0).round() as u32,
+        Some(Length::Css(_)) => 0,
+    }
 }
 
 /// Whether a link URL targets a local file (heuristic shared with legacy).
@@ -414,11 +334,83 @@ fn set_style_colors(style: &mut Style, fg: Option<&StyleColor>, bg: Option<&Styl
     }
 }
 
-/// Builds a universal [`TargetValue<Length>`] for `n` character cells.
-fn cells(n: u16) -> TargetValue<Length> {
-    if n == 0 {
-        TargetValue::universal(Length::Zero)
-    } else {
-        TargetValue::universal(Length::ch(u32::from(n)))
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markdown::Markdown;
+
+    const TABLE_MD: &str = "| A | B |\n|---|---|\n| 1 | 2 |\n";
+
+    fn decorate_for_test(md_content: &str, style_yaml: &str) -> RenderNode {
+        let full = format!("---\nstyle:\n{}---\n\n{}", indent(style_yaml, 4), md_content);
+        let md = Markdown::try_from_content(&full).expect("parse markdown with style frontmatter");
+        let (mut doc, _diags) = super::super::to_render_document(&md);
+
+        // Build a LayoutContext with the component policies from the style.
+        let (style, _warnings) = crate::style::from_frontmatter(md.frontmatter()).expect("parse style");
+        let term = biscuit_terminal::terminal::Terminal::new_optimistic(80);
+        let page = crate::layout::DarkmatterPage::new(&term);
+        let page = crate::style::apply_page_style(page, &style, crate::style::PageStyleOverrides::default()).unwrap();
+        let page = crate::style::apply_component_style(page, &style, crate::style::ComponentStyleOverrides::default()).unwrap();
+        let page = crate::style::apply_list_style(page, &style, crate::style::ListStyleOverrides::default()).unwrap();
+        let page = crate::style::apply_color_style(page, &style).unwrap();
+        let page = crate::style::apply_hr_style(page, &style, crate::style::HrStyleOverrides::default()).unwrap();
+        let page = crate::style::apply_bespoke_style(page, &style, crate::style::BespokeStyleOverrides::default(), None).unwrap();
+
+        let ctx = crate::layout::LayoutContext::from_page(
+            80,
+            page.page_margin().clone(),
+            page.page_padding().clone(),
+            page.page_background(),
+            page.page_max_width().cloned(),
+            &biscuit_terminal::discovery::detection::ColorMode::Dark,
+            crate::markdown::highlighting::ColorMode::Dark,
+            page.page_color().cloned(),
+            page.page_bg_color().cloned(),
+            page.component_colors().clone(),
+            page.component_bg_colors().clone(),
+            page.component_policies().clone(),
+            page.hyperlink_style().cloned(),
+            page.local_hyperlink_style().cloned(),
+            page.local_image_style().cloned(),
+        )
+        .expect("layout context");
+
+        decorate_document(&mut doc.root, &ctx);
+        doc.root
+    }
+
+    fn indent(text: &str, spaces: usize) -> String {
+        let prefix = " ".repeat(spaces);
+        text.lines()
+            .map(|line| {
+                if line.trim().is_empty() {
+                    line.to_string()
+                } else {
+                    format!("{}{}", prefix, line)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n"
+    }
+
+    fn find_node<'a>(node: &'a RenderNode, predicate: &dyn Fn(&RenderNode) -> bool) -> Option<&'a RenderNode> {
+        if predicate(node) {
+            return Some(node);
+        }
+        for child in node.children() {
+            if let Some(found) = find_node(child, predicate) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn decorate_writes_component_layout_onto_nodes() {
+        let doc = decorate_for_test(TABLE_MD, "table:\n  alignment: center\n");
+        let table = find_node(&doc, &|n| matches!(n.kind, NodeKind::Table { .. })).unwrap();
+        assert_eq!(table.attrs.layout_ref().unwrap().alignment, Alignment::Center);
     }
 }

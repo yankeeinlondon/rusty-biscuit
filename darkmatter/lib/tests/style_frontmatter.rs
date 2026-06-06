@@ -3,13 +3,11 @@
 //! field in the spec's acceptance criteria, plus end-to-end
 //! `apply_page_style` lowering onto a `DarkmatterPage`.
 
-#![allow(deprecated)]
-
 use std::fs;
 use std::path::PathBuf;
 
 use biscuit_terminal::terminal::Terminal;
-use darkmatter::layout::{DarkmatterPage, PageAlignment, PageBackground, PageComponent};
+use darkmatter::layout::{DarkmatterPage, PageBackground, PageComponent};
 use darkmatter::markdown::Markdown;
 use darkmatter::style::warning::StyleWarningKind;
 use darkmatter::markdown::highlighting::ThemePair;
@@ -17,7 +15,7 @@ use darkmatter::style::{
     BespokeStyleOverrides, PageStyleOverrides, StyleFrontmatter, apply_bespoke_style,
     apply_page_style, from_frontmatter, into_strict,
 };
-use renderable::layout::{Alignment, Length};
+use renderable::layout::{Alignment, Length, TargetValue};
 
 /// Locate the fixture relative to `CARGO_MANIFEST_DIR` so the test is
 /// independent of where it's invoked from.
@@ -105,6 +103,14 @@ fn page_with_width(width: u32) -> DarkmatterPage {
     DarkmatterPage::new(&term)
 }
 
+/// Extract whole terminal cells from a page-frame [`TargetValue<Length>`].
+fn edge_ch(tv: &TargetValue<Length>) -> u16 {
+    match tv {
+        TargetValue::Universal(Length::Ch(n)) => u16::try_from(*n).unwrap_or(u16::MAX),
+        _ => 0,
+    }
+}
+
 #[test]
 fn fixture_applies_expected_page_margins() {
     // Acceptance criterion: `md style-prop.md` honors page-level margins.
@@ -115,21 +121,21 @@ fn fixture_applies_expected_page_margins() {
     let applied = apply_page_style(page, &style, PageStyleOverrides::default())
         .expect("apply_page_style should succeed");
 
-    let m = applied.margin();
+    let m = applied.page_margin();
     assert_eq!(
-        m.left, 2,
+        edge_ch(&m.left), 2,
         "left margin should come from style.page.left-margin"
     );
     assert_eq!(
-        m.right, 4,
+        edge_ch(&m.right), 4,
         "right margin should come from style.page.right-margin"
     );
     assert_eq!(
-        m.top, 1,
+        edge_ch(&m.top), 1,
         "top margin should come from style.page.top-margin"
     );
     assert_eq!(
-        m.bottom, 0,
+        edge_ch(&m.bottom), 0,
         "bottom margin should come from style.page.bottom-margin"
     );
 }
@@ -209,13 +215,13 @@ fn cli_flag_overrides_frontmatter_left_margin() {
 
     let applied = apply_page_style(page, &style, overrides).expect("apply");
     assert_eq!(
-        applied.margin().left,
+        edge_ch(&applied.page_margin().left),
         7,
         "CLI override must win over frontmatter"
     );
     // The other frontmatter fields still apply.
     assert_eq!(
-        applied.margin().right,
+        edge_ch(&applied.page_margin().right),
         4,
         "non-overridden frontmatter field should still apply"
     );
@@ -231,7 +237,7 @@ fn percent_margin_resolves_against_terminal_width() {
     let page = page_with_width(80);
     let applied = apply_page_style(page, &style, PageStyleOverrides::default())
         .expect("apply_page_style should succeed");
-    assert_eq!(applied.margin().left, 8);
+    assert_eq!(edge_ch(&applied.page_margin().left), 8);
 }
 
 #[test]
@@ -267,9 +273,10 @@ fn page_alignment_broadcasts_to_all_components() {
         .expect("apply_page_style should succeed");
 
     for component in PageComponent::ALL {
+        let policy = applied.component_policy(component);
         assert_eq!(
-            applied.alignment_for(component),
-            PageAlignment::Center,
+            policy.map(|p| p.layout.alignment),
+            Some(Alignment::Center),
             "alignment should broadcast to {:?}",
             component
         );

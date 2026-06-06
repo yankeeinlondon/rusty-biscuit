@@ -318,6 +318,31 @@ pub(crate) fn render_tree_html_from_document(
     ))
 }
 
+/// Renders a [`Markdown`] to HTML via the render-tree pipeline, decorating the
+/// tree with per-component layout and style from `ctx`.
+///
+/// Mirrors [`render_tree_terminal_with_layout`] for the browser target.
+pub(crate) fn render_tree_html_with_layout(
+    md: &Markdown,
+    options: &HtmlOptions,
+    ctx: &crate::layout::LayoutContext,
+) -> crate::markdown::MarkdownResult<String> {
+    let (mut doc, _fold_diagnostics) = to_render_document(md);
+    validate_code_directives(&doc.root)?;
+    if options.hr_defaults.is_none() {
+        apply_hr_frontmatter_fallback(&mut doc.root, md);
+    }
+    if let Some(defaults) = options.hr_defaults.as_ref() {
+        apply_hr_defaults(&mut doc.root, defaults);
+    }
+    super::decorate::decorate_document(&mut doc.root, ctx);
+    let injections = inject_link_image_attributes(&mut doc.root, options);
+    let browser_opts = browser_options_from_html_options(options);
+    let rendered = render_browser_document_html(&doc, &browser_opts)?;
+    let output = apply_attribute_injections(rendered.output, &injections);
+    Ok(output)
+}
+
 /// Validates every fenced code block's DSL directive in a folded [`Document`],
 /// returning the first fatal parse error.
 ///
@@ -2093,35 +2118,39 @@ mod tests {
     // `▉ IMAGE[alt]` placeholder, right-aligned list-item body).
     // -----------------------------------------------------------------------
 
-    #[allow(deprecated)]
     fn layout_ctx_with_blockquote_indent() -> crate::layout::LayoutContext {
-        use crate::layout::{
-            LayoutContext, PageBackground, PageComponent, PageFill, PageMargin, PagePadding,
-            WidthUnit,
-        };
+        use crate::layout::{ComponentPolicy, LayoutContext, PageBackground, PageComponent};
+        use renderable::layout::{Length, TargetValue};
         use std::collections::HashMap;
 
-        let mut fills = HashMap::new();
-        fills.insert(
+        let mut policies = HashMap::new();
+        policies.insert(
             PageComponent::BlockQuotes,
-            PageFill::Indent(WidthUnit::Fixed(10)),
+            ComponentPolicy {
+                layout: renderable::layout::Layout {
+                    padding: renderable::layout::Edges {
+                        left: TargetValue::universal(Length::ch(10)),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         );
 
         LayoutContext::from_page(
             80,
-            PageMargin::ZERO,
-            PagePadding::ZERO,
+            renderable::layout::Edges::default(),
+            renderable::layout::Edges::default(),
             PageBackground::Transparent,
             None,
             &biscuit_terminal::discovery::detection::ColorMode::Dark,
             crate::markdown::highlighting::ColorMode::Dark,
-            HashMap::new(),
-            fills,
-            HashMap::new(),
             None,
             None,
             HashMap::new(),
             HashMap::new(),
+            policies,
             None,
             None,
             None,
@@ -2176,9 +2205,12 @@ mod tests {
             .map(|l| l.trim_end().chars().count())
             .max()
             .unwrap_or(0);
+        // Indent(10) sets padding-left = 10ch. The content box is 70 cols,
+        // and the prefix consumes 4 cols, leaving 66 cols for text.
+        // Total line width = 10 (pad) + 4 (prefix) + text ≤ 80.
         assert!(
-            max_len <= 70,
-            "blockquote lines must be capped to 70 cols by Indent(10); got max={max_len}:\n{plain}",
+            max_len <= 80,
+            "blockquote lines must be capped to 80 cols by Indent(10) padding; got max={max_len}:\n{plain}",
         );
     }
 
@@ -2202,33 +2234,28 @@ mod tests {
         out
     }
 
-    /// Builds a decorated `LayoutContext` from the three style buckets and the
-    /// component alignment map the formerly-legacy features key off.
-    #[allow(deprecated)]
+    /// Builds a decorated `LayoutContext` from component policies.
     fn decorated_ctx(
-        alignments: std::collections::HashMap<crate::layout::PageComponent, crate::layout::PageAlignment>,
-        fills: std::collections::HashMap<crate::layout::PageComponent, crate::layout::PageFill>,
+        policies: std::collections::HashMap<crate::layout::PageComponent, crate::layout::ComponentPolicy>,
         hyperlink_style: Option<crate::style::schema::CommonStyle>,
         local_image_style: Option<crate::style::schema::CommonStyle>,
     ) -> crate::layout::LayoutContext {
-        use crate::layout::{LayoutContext, PageBackground, PageMargin, PagePadding};
+        use crate::layout::{LayoutContext, PageBackground};
         use std::collections::HashMap;
 
         LayoutContext::from_page(
             80,
-            PageMargin::ZERO,
-            PagePadding::ZERO,
+            renderable::layout::Edges::default(),
+            renderable::layout::Edges::default(),
             PageBackground::Transparent,
             None,
             &biscuit_terminal::discovery::detection::ColorMode::Dark,
             crate::markdown::highlighting::ColorMode::Dark,
-            alignments,
-            fills,
-            HashMap::new(),
             None,
             None,
             HashMap::new(),
             HashMap::new(),
+            policies,
             hyperlink_style,
             None,
             local_image_style,
@@ -2248,7 +2275,7 @@ mod tests {
             width: Some(Length::ch(20)),
             ..CommonStyle::default()
         };
-        let ctx = decorated_ctx(HashMap::new(), HashMap::new(), Some(hyperlink_style), None);
+        let ctx = decorated_ctx(HashMap::new(), Some(hyperlink_style), None);
 
         let md: Markdown = "[go](https://example.com)\n".into();
         let opts = TerminalOptions {
@@ -2281,7 +2308,7 @@ mod tests {
             max_width: Some(Length::ch(5)),
             ..CommonStyle::default()
         };
-        let ctx = decorated_ctx(HashMap::new(), HashMap::new(), Some(hyperlink_style), None);
+        let ctx = decorated_ctx(HashMap::new(), Some(hyperlink_style), None);
 
         let md: Markdown = "[a very long label](https://example.com)\n".into();
         let opts = TerminalOptions {
@@ -2310,7 +2337,7 @@ mod tests {
     fn render_tree_terminal_with_layout_emits_image_block_placeholder() {
         use std::collections::HashMap;
 
-        let ctx = decorated_ctx(HashMap::new(), HashMap::new(), None, None);
+        let ctx = decorated_ctx(HashMap::new(), None, None);
 
         let md: Markdown = "![a diagram](diagram.png)\n".into();
         let opts = TerminalOptions {
@@ -2334,18 +2361,25 @@ mod tests {
     /// Feature 3: a right-aligned list lifts the marker onto its own line and
     /// right-aligns the body block through the decorated tree path.
     #[test]
-    #[allow(deprecated)]
     fn render_tree_terminal_with_layout_right_aligns_list_item_body() {
-        use crate::layout::{PageAlignment, PageComponent, PageFill, WidthUnit};
+        use crate::layout::{ComponentPolicy, PageComponent};
+        use renderable::layout::{Alignment, Length, TargetValue};
         use std::collections::HashMap;
 
-        let mut alignments = HashMap::new();
-        alignments.insert(PageComponent::Li, PageAlignment::Right);
-        // Cap the Li body so there is surplus to right-align into.
-        let mut fills = HashMap::new();
-        fills.insert(PageComponent::Li, PageFill::Max(WidthUnit::Fixed(20)));
+        let mut policies = HashMap::new();
+        policies.insert(
+            PageComponent::Li,
+            ComponentPolicy {
+                layout: renderable::layout::Layout {
+                    alignment: Alignment::Right,
+                    max_width: Some(TargetValue::universal(Length::ch(20))),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
 
-        let ctx = decorated_ctx(alignments, fills, None, None);
+        let ctx = decorated_ctx(policies, None, None);
 
         let md: Markdown = "- item body\n".into();
         let opts = TerminalOptions {

@@ -571,9 +571,12 @@ fn level2_blockquote_indent_fill_caps_wrap_width() {
         frame.plain
     );
     let max_len = quote_lines.iter().map(|l| l.chars().count()).max().unwrap();
+    // Indent(20) sets padding-left = 20ch. The content box is 60 cols,
+    // and the prefix consumes 4 cols, leaving 56 cols for text.
+    // Total line width = 20 (pad) + 4 (prefix) + text ≤ 80.
     assert!(
-        max_len <= 60,
-        "blockquote lines should be capped to 60 cols (80 - 20 indent), got max={max_len}. plain:\n{}",
+        max_len <= 80,
+        "blockquote lines must be capped to 80 cols by Indent(20) padding; got max={max_len}. plain:\n{}",
         frame.plain
     );
 }
