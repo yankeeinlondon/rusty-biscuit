@@ -31,24 +31,67 @@ use crate::utils::color::color_terminal::color_code;
 /// The SGR sequence that resets every attribute.
 pub(crate) const SGR_RESET: &str = "\x1b[0m";
 
+/// Resolved padding in whole terminal cells.
+///
+/// Padding is painted *inside* the background run by [`paint_text`] (CSS box
+/// model: `padding` is covered by `background`). The transparent margin, by
+/// contrast, is applied outside the painted box by the layout fold in
+/// `render.rs` and is never painted.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Padding {
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+    pub left: u32,
+}
+
+impl Padding {
+    /// No padding on any side.
+    pub(crate) const ZERO: Self = Self {
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+    };
+
+    /// Whether every side is zero.
+    fn is_zero(&self) -> bool {
+        self.top == 0 && self.right == 0 && self.bottom == 0 && self.left == 0
+    }
+}
+
 /// Applies a node's [`Style`] to already-rendered terminal `content`.
 ///
-/// The text-appearance layers (`color`, `background`, `emphasis`) wrap each
-/// line; [`Border`] draws a box around the result. `available_width` is the
-/// width the `content` was rendered within (already reduced by any border
-/// overhead — see [`border_horizontal_overhead`]); it is retained for the
-/// padding-box painting restored in *renderer-folds* and is not consulted by
-/// the current text layers.
+/// Equivalent to [`apply_style_with_padding`] with no padding. Kept for callers
+/// (headings, the style unit tests) that paint a [`Style`] with no box padding.
 pub(crate) fn apply_style(
     content: &str,
     style: &Style,
     term: &Terminal,
+    available_width: u32,
+) -> String {
+    apply_style_with_padding(content, style, term, available_width, Padding::ZERO)
+}
+
+/// Applies a node's [`Style`] and painted `padding` to rendered `content`.
+///
+/// The text-appearance layers (`color`, `background`, `emphasis`) and the
+/// painted padding box are lowered by [`paint_text`]; [`Border`] then draws a
+/// box around the padded result (CSS order: content → padding/background →
+/// border). `available_width` is the width the `content` was rendered within
+/// (already reduced by any border overhead — see [`border_horizontal_overhead`])
+/// and is not consulted by the current layers.
+pub(crate) fn apply_style_with_padding(
+    content: &str,
+    style: &Style,
+    term: &Terminal,
     _available_width: u32,
+    padding: Padding,
 ) -> String {
     let depth = &term.color_depth;
     let mode: RenderColorMode = (&term.color_mode).into();
 
-    let painted = paint_text(content, style, depth, mode, term);
+    let painted = paint_text(content, style, depth, mode, term, padding);
     match &style.border {
         Some(border) => render_border(&painted, border, depth, mode),
         None => painted,
@@ -57,29 +100,34 @@ pub(crate) fn apply_style(
 
 /// The horizontal columns a [`Style`]'s border adds around its content.
 ///
-/// A drawn left or right edge consumes two columns each (the edge glyph plus
-/// one space of interior padding). The renderer subtracts this from the inner
-/// width before rendering the content so the bordered block stays within the
-/// available width.
+/// A drawn left or right edge consumes one column each — the edge glyph only.
+/// There is no implicit interior space: inner spacing is owned entirely by
+/// [`Layout::padding`](renderable::layout::Layout). The renderer subtracts this
+/// from the inner width before rendering the content so the bordered block
+/// stays within the available width.
 pub(crate) fn border_horizontal_overhead(style: &Style) -> u32 {
     let Some(border) = &style.border else {
         return 0;
     };
     let (_, right, _, left) = resolve_sides(&border.sides);
-    u32::from(left) * 2 + u32::from(right) * 2
+    u32::from(left) + u32::from(right)
 }
 
-/// Wraps each line of `content` with the text-appearance layers.
+/// Wraps each line of `content` with the text-appearance layers and paints the
+/// `padding` box.
 ///
-/// The background is the explicit [`Style::background`] color; the former
-/// per-component fill band is intentionally not reproduced here — it returns
-/// via `padding` + `background` in *renderer-folds*.
+/// The background is the explicit [`Style::background`] color. When `padding` is
+/// non-zero the content is painted as a rectangular band — `top`/`bottom`
+/// painted rows above and below, and `left`/`right` painted columns inside each
+/// content row — reusing the band-pad machinery the deleted `Fill` used to
+/// supply. With no padding each line is wrapped individually (no band fill).
 fn paint_text(
     content: &str,
     style: &Style,
     depth: &ColorDepth,
     mode: RenderColorMode,
     term: &Terminal,
+    padding: Padding,
 ) -> String {
     // The opening SGR run: emphasis first, then foreground and background so a
     // single `\x1b[0m` at the end of the line clears the whole run.
@@ -87,6 +135,7 @@ fn paint_text(
     if let Some(fg) = style.color.as_ref().and_then(|c| resolve_color(c, mode)) {
         open.push_str(&color_sgr(fg, depth, false).unwrap_or_default());
     }
+    let mut has_background = false;
     if let Some(bg) = style
         .background
         .as_ref()
@@ -94,24 +143,77 @@ fn paint_text(
         .and_then(|c| color_sgr(c, depth, true))
     {
         open.push_str(&bg);
+        has_background = true;
     }
 
-    if open.is_empty() {
+    // Nothing to do: no appearance run and no padding cells to reserve.
+    if open.is_empty() && padding.is_zero() {
         return content.to_string();
     }
-    let mut out = String::new();
-    for (idx, line) in content.split('\n').enumerate() {
-        if idx > 0 {
-            out.push('\n');
+
+    if padding.is_zero() {
+        let mut out = String::new();
+        for (idx, line) in content.split('\n').enumerate() {
+            if idx > 0 {
+                out.push('\n');
+            }
+            if line.is_empty() {
+                continue;
+            }
+            out.push_str(&open);
+            out.push_str(line);
+            out.push_str(SGR_RESET);
         }
-        if line.is_empty() {
-            continue;
-        }
-        out.push_str(&open);
-        out.push_str(line);
-        out.push_str(SGR_RESET);
+        return out;
     }
-    out
+
+    // Padded box. With a `background` the box is painted as a rectangle: every
+    // row is widened to a uniform `widest` and `top`/`bottom` emit full-width
+    // painted blank rows, so the background fills a solid block (reviving the
+    // band-pad machinery the deleted `Fill` used to supply). Without a
+    // background the right edge stays ragged — left/right padding reserve only
+    // the requested cells and no stray trailing whitespace is emitted, which is
+    // what the left-bordered components (`BlockQuote`, `StatusBlock`) need to
+    // restore their `│ `/`┃ ` inner gap via `Layout::padding`.
+    let lines: Vec<&str> = content.split('\n').collect();
+    let widest = lines.iter().copied().map(visible_width).max().unwrap_or(0);
+    let left_pad = " ".repeat(padding.left as usize);
+    let right_pad = " ".repeat(padding.right as usize);
+
+    let wrap = |inner: String| -> String {
+        if open.is_empty() {
+            inner
+        } else {
+            format!("{open}{inner}{SGR_RESET}")
+        }
+    };
+
+    let blank_row = if has_background {
+        wrap(" ".repeat((widest + padding.left + padding.right) as usize))
+    } else {
+        String::new()
+    };
+
+    let mut out: Vec<String> =
+        Vec::with_capacity(lines.len() + (padding.top + padding.bottom) as usize);
+    for _ in 0..padding.top {
+        out.push(blank_row.clone());
+    }
+    for line in &lines {
+        let extend = if has_background {
+            widest.saturating_sub(visible_width(line))
+        } else {
+            0
+        };
+        out.push(wrap(format!(
+            "{left_pad}{line}{}{right_pad}",
+            " ".repeat(extend as usize),
+        )));
+    }
+    for _ in 0..padding.bottom {
+        out.push(blank_row.clone());
+    }
+    out.join("\n")
 }
 
 /// The opening SGR run for a [`Style`]'s text-appearance layers.
@@ -377,7 +479,9 @@ fn border_glyphs(weight: BorderWeight, line_style: BorderLineStyle, rounded: boo
 /// Each enabled side is drawn with the glyph set selected by the border's
 /// weight and line style; a corner is drawn only where its two sides meet.
 /// The border color, when set, is degraded to `depth` and applied to the
-/// glyphs.
+/// glyphs. The edge glyphs hug the content directly — any inner spacing is the
+/// painted [`Layout::padding`](renderable::layout::Layout) band already baked
+/// into `content`, not an implicit space inside the border.
 fn render_border(
     content: &str,
     border: &Border,
@@ -405,9 +509,10 @@ fn render_border(
     let lines: Vec<&str> = content.split('\n').collect();
     let widest = lines.iter().copied().map(visible_width).max().unwrap_or(0);
 
-    // The interior is the content padded to a uniform width, plus one space of
-    // padding inside each drawn vertical edge.
-    let interior = widest + u32::from(left) + u32::from(right);
+    // The interior is the content padded to a uniform width — no implicit space
+    // inside the drawn edges. Inner spacing, when wanted, comes from the painted
+    // `Layout::padding` band already baked into `content`.
+    let interior = widest;
 
     let mut out: Vec<String> = Vec::with_capacity(lines.len() + 2);
 
@@ -427,12 +532,10 @@ fn render_border(
         let mut row = String::new();
         if left {
             row.push_str(&paint(&glyphs.vertical.to_string()));
-            row.push(' ');
         }
         row.push_str(line);
         row.push_str(&" ".repeat(pad as usize));
         if right {
-            row.push(' ');
             row.push_str(&paint(&glyphs.vertical.to_string()));
         }
         out.push(row);
@@ -635,9 +738,8 @@ mod tests {
     #[test]
     fn border_rules_match_content_row_width() {
         // Regression: the top/bottom rules must be exactly as wide as the
-        // content row so the corners line up with the vertical edges. The
-        // content row adds one space of padding inside each edge, so the
-        // horizontal run has to cover that padding too.
+        // content row so the corners line up with the vertical edges. With no
+        // implicit interior gap the edges hug the content directly.
         let style = Style {
             border: Some(Border {
                 sides: BorderSides::All,
@@ -657,8 +759,8 @@ mod tests {
             widths[2], widths[1],
             "bottom rule must match content row width, got {widths:?}"
         );
-        // │ + space + 11 + space + │ = 15 columns.
-        assert_eq!(widths[1], 15, "got {widths:?}");
+        // │ + 11 + │ = 13 columns (no interior gap).
+        assert_eq!(widths[1], 13, "got {widths:?}");
     }
 
     #[test]
@@ -771,6 +873,7 @@ mod tests {
 
     #[test]
     fn border_overhead_counts_drawn_vertical_edges() {
+        // One column per drawn vertical edge — no implicit interior gap.
         let all = Style {
             border: Some(Border {
                 sides: BorderSides::All,
@@ -778,7 +881,7 @@ mod tests {
             }),
             ..Style::default()
         };
-        assert_eq!(border_horizontal_overhead(&all), 4);
+        assert_eq!(border_horizontal_overhead(&all), 2);
 
         let left_only = Style {
             border: Some(Border {
@@ -792,9 +895,27 @@ mod tests {
             }),
             ..Style::default()
         };
-        assert_eq!(border_horizontal_overhead(&left_only), 2);
+        assert_eq!(border_horizontal_overhead(&left_only), 1);
 
         assert_eq!(border_horizontal_overhead(&Style::default()), 0);
+    }
+
+    #[test]
+    fn border_reserves_only_drawn_cells_no_implicit_gap() {
+        // A left+right border with no padding: content sits directly inside the
+        // edges with no implicit interior space.
+        let style = Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Border::default()
+            }),
+            ..Style::default()
+        };
+        assert_eq!(border_horizontal_overhead(&style), 2);
+        let out = apply_style("ab", &style, &truecolor_term(), 20);
+        let row = out.split('\n').find(|l| l.contains("ab")).unwrap();
+        // `│ab│` — the glyphs hug the content, no space between edge and text.
+        assert!(row.contains("│ab│"), "no implicit interior space, got {row:?}");
     }
 
     #[test]

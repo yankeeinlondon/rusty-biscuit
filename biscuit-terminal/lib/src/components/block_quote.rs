@@ -21,7 +21,7 @@ use crate::{
     utils::{
         block_constraint::{split_lines, visible_width, wrap_lines},
         color::{Color, Tailwind},
-        layout::{Layout, LayoutTerminalExt},
+        layout::{Layout, LayoutTerminalExt, Length},
     },
 };
 
@@ -644,12 +644,15 @@ impl TreeRenderable for BlockQuote {
         }
 
         let mut node = RenderNode::block_quote(children);
-        // A block quote carries an intrinsic word-wrap default, so compare
-        // against the component's own baseline rather than `Layout::default()`
-        // — only a caller-customized layout is recorded on the node.
-        if self.layout != Self::default().layout {
-            node.attrs.set_layout(&self.layout);
-        }
+        // The left border's inner gap is `Layout::padding` now — the terminal
+        // tree renderer no longer inserts an implicit space inside the border —
+        // so reserve one cell on the node to reproduce the `│ ` gap. This is
+        // always recorded (even for the default layout). The intrinsic
+        // word-wrap baseline is applied by the renderer's block-quote branch,
+        // not read from the node, so carrying it on the node is harmless.
+        let mut node_layout = self.layout.clone();
+        node_layout.padding.left = TargetValue::universal(Length::ch(1));
+        node.attrs.set_layout(&node_layout);
         if !self.style.is_empty() {
             node.attrs.set_style(&self.style);
         }
@@ -1182,7 +1185,7 @@ mod tests {
         let rendered =
             render_browser_node(&node, &BrowserRenderOptions::default()).expect("browser render");
         let html = rendered.output.render();
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
         assert!(html.contains("Quoted text"));
     }
 
@@ -1278,7 +1281,7 @@ mod tests {
     fn test_browser_renderable_fragment_contains_blockquote() {
         let quote = BlockQuote::from("Quoted text");
         let html = BrowserRenderable::render_html_fragment(&quote).render();
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
         assert!(html.contains("Quoted text"));
     }
 
@@ -1289,7 +1292,7 @@ mod tests {
             Some("Shakespeare"),
         );
         let html = BrowserRenderable::render_html_fragment(&quote).render();
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
         assert!(html.contains("To be or not to be"));
         assert!(html.contains("— Shakespeare"));
         // Attribution becomes a second paragraph inside the blockquote.
@@ -1301,7 +1304,7 @@ mod tests {
         let prose = Prose::new("<b>bold content</b>");
         let quote = BlockQuote::from(prose);
         let html = BrowserRenderable::render_html_fragment(&quote).render();
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
         // Prose styling is flattened to plain text by `render_tree`.
         assert!(html.contains("bold content"));
     }
@@ -1310,7 +1313,7 @@ mod tests {
     fn test_browser_renderable_empty_fragment() {
         let quote = BlockQuote::from("");
         let html = BrowserRenderable::render_html_fragment(&quote).render();
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
     }
 
     #[test]
@@ -1320,7 +1323,7 @@ mod tests {
         let html = page.render();
         assert!(html.contains("<html"));
         assert!(html.contains("<body>"));
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
         assert!(html.contains("Quoted text"));
     }
 
@@ -1339,7 +1342,7 @@ mod tests {
         let html = page.render();
         // PageOptions wire through to the rolled-up CSS, and the fragment is
         // preserved inside the body.
-        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("<blockquote"));
         assert!(html.contains("Quoted text"));
     }
 

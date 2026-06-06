@@ -273,6 +273,16 @@ impl StatusBlock {
                 }),
                 ..Style::default()
             });
+            // The thick left border's inner gap is `padding` now — the terminal
+            // tree renderer no longer inserts an implicit space inside the
+            // border — so reserve one cell to reproduce the `┃ ` gap.
+            node.attrs.set_layout(&Layout {
+                padding: Edges {
+                    left: TargetValue::universal(Length::ch(1)),
+                    ..Edges::default()
+                },
+                ..Layout::default()
+            });
             children.push(node);
         }
 

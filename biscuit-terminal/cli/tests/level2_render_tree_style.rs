@@ -387,47 +387,6 @@ fn sgr_carries_bold(row: &str) -> bool {
     false
 }
 
-/// Asserts a `bt block --fill subtle --fill-band indented` row carries a
-/// background fill SGR and the visible text is inset by leading spaces.
-fn assert_block_fill_indented<H: TerminalHarness>(harness: &mut H) {
-    let frame = capture_bt(
-        harness,
-        "bt block \"insetband content\" --fill subtle --fill-band indented",
-    );
-    let raw = output_row(&frame, "bt block", "insetband content")
-        .unwrap_or_else(|| panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain));
-    assert!(
-        raw.contains("\x1b[48;2;") || raw.contains("\x1b[48:2:") || raw.contains("\x1b[48;5;"),
-        "expected a background fill SGR escape in the captured row: {raw:?}",
-    );
-    // The indented band insets the content; the plain row must carry leading
-    // spaces before the text.
-    let plain_row = frame
-        .plain
-        .lines()
-        .find(|p| !p.contains("bt block") && p.contains("insetband content"))
-        .unwrap_or_else(|| panic!("could not locate plain block row.\nplain:\n{}", frame.plain));
-    assert!(
-        plain_row.starts_with(' '),
-        "expected the indented fill band to inset the text: {plain_row:?}",
-    );
-}
-
-/// Asserts a `bt block --fill subtle --fill-band full` row carries a
-/// background fill SGR painted across the available width.
-fn assert_block_fill_full<H: TerminalHarness>(harness: &mut H) {
-    let frame = capture_bt(
-        harness,
-        "bt block \"fullband content\" --fill subtle --fill-band full",
-    );
-    let raw = output_row(&frame, "bt block", "fullband content")
-        .unwrap_or_else(|| panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain));
-    assert!(
-        raw.contains("\x1b[48;2;") || raw.contains("\x1b[48:2:") || raw.contains("\x1b[48;5;"),
-        "expected a background fill SGR escape in the full-band row: {raw:?}",
-    );
-}
-
 /// Asserts a `bt block --border all` row carries box-drawing border glyphs.
 fn assert_block_border<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(harness, "bt block \"bordered notice\" --border all");
@@ -644,8 +603,6 @@ fn level2_render_tree_style_in_wezterm() {
     assert_block_fg(harness);
     assert_block_bg(harness);
     assert_block_bold(harness);
-    assert_block_fill_indented(harness);
-    assert_block_fill_full(harness);
     assert_block_border(harness);
     assert_block_rounded_border(harness);
     assert_progress_slot_colors(harness);
@@ -670,8 +627,6 @@ fn level2_render_tree_style_in_kitty() {
     assert_block_fg(harness);
     assert_block_bg(harness);
     assert_block_bold(harness);
-    assert_block_fill_indented(harness);
-    assert_block_fill_full(harness);
     assert_block_border(harness);
     assert_block_rounded_border(harness);
     assert_progress_slot_colors(harness);

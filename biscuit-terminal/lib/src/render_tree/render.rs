@@ -200,6 +200,11 @@ impl Writer<'_> {
             .saturating_sub(overhead)
             .max(1);
 
+        // The painted padding box. `render_with_layout` already subtracted the
+        // horizontal padding from the content width, so painting it back here
+        // reconstitutes the full box without double-counting.
+        let padding = self.resolve_padding(node);
+
         // Enter this node through the shared resolver: its text appearance is
         // threaded into the child context for the duration of its subtree, so
         // descendant paragraphs and inline spans see the ancestor
@@ -217,12 +222,29 @@ impl Writer<'_> {
         self.inherited = prev;
         let content = content?;
 
-        Ok(style::apply_style(
+        Ok(style::apply_style_with_padding(
             &content,
             style,
             &self.opts.context.terminal,
             inner_width,
+            padding,
         ))
+    }
+
+    /// Resolves a node's [`Layout`](renderable::layout::Layout) padding into
+    /// whole terminal cells, against the current available width. Returns
+    /// [`style::Padding::ZERO`] when the node carries no layout.
+    fn resolve_padding(&self, node: &RenderNode) -> style::Padding {
+        let available = self.opts.context.available_width;
+        match node.attrs.layout_ref() {
+            Some(layout) => style::Padding {
+                top: resolve_cells(&layout.padding.top, available),
+                right: resolve_cells(&layout.padding.right, available),
+                bottom: resolve_cells(&layout.padding.bottom, available),
+                left: resolve_cells(&layout.padding.left, available),
+            },
+            None => style::Padding::ZERO,
+        }
     }
 
     /// Renders a single node by kind within a constrained width.
@@ -265,10 +287,31 @@ impl Writer<'_> {
         let top = resolve_cells(&layout.margin.top, available);
         let bottom = resolve_cells(&layout.margin.bottom, available);
 
-        // Render the content within the width left after horizontal margins.
-        // Clamp to at least 1: a width-0 sub-render is degenerate for the
-        // downstream components (matching `render_columns`'s `.max(1)`).
-        let mut content_width = available.saturating_sub(left + right).max(1);
+        // Largest permitted content box: the space left after the horizontal
+        // margins and padding. Clamp to at least 1: a width-0 sub-render is
+        // degenerate for the downstream components (matching `render_columns`'s
+        // `.max(1)`). Border overhead is intentionally *not* subtracted here —
+        // `render_styled` narrows the inner render width again by the border's
+        // horizontal overhead, so subtracting it here too would double-count.
+        let padding_lr = resolve_cells(&layout.padding.left, available)
+            + resolve_cells(&layout.padding.right, available);
+        let auto_cap = available
+            .saturating_sub(left + right + padding_lr)
+            .max(1);
+
+        // Resolve the content-box width from `layout.width`. `Auto` fills the
+        // cap; `Fixed` resolves the requested length, clamped down to the cap;
+        // `FitContent` runs a bounded measure pass — render once at the cap,
+        // measure the widest visible line, and shrink to it.
+        let mut content_width = match &layout.width {
+            renderable::layout::Width::Auto => auto_cap,
+            renderable::layout::Width::Fixed(tv) => {
+                resolve_cells(tv, available).min(auto_cap).max(1)
+            }
+            renderable::layout::Width::FitContent => {
+                self.measure_fit_content(node, auto_cap)?.min(auto_cap).max(1)
+            }
+        };
 
         // Apply max_width cap if declared. The resolved cap further narrows
         // the available width so children receive a reduced inner width and
@@ -295,9 +338,31 @@ impl Writer<'_> {
         };
 
         // Alignment offset: extra left padding when the content is narrower
-        // than the space available between the horizontal margins.
+        // than the space available between the horizontal margins. The painted
+        // box includes the `padding` cells only when the node carries a `Style`
+        // (the same condition under which `render_styled` paints the padding
+        // band); the rendered `widest` then includes them, so the slack must be
+        // measured against `content_width + padding_lr` or the box lands
+        // `padding_lr` cells short of flush on center/right alignment. An
+        // unpainted padded node reserves the padding in its width budget but
+        // never emits the cells, so its content centers within `content_width`.
+        let painted_padding = if node.attrs.style_ref().is_some_and(|s| !s.is_empty()) {
+            padding_lr
+        } else {
+            0
+        };
         let widest = content.split('\n').map(visible_width).max().unwrap_or(0);
-        let slack = content_width.saturating_sub(widest);
+        // `FitContent` shrinks the box below the cap, so its placement basis is
+        // the whole content area between the margins (`available − margin`) — the
+        // shrunk box is then centered/right-aligned within it. `Auto`/`Fixed`
+        // align content within their own resolved box (`content_width`), which
+        // for `Auto` already equals `available − margin − padding`.
+        let align_basis = if matches!(layout.width, renderable::layout::Width::FitContent) {
+            available.saturating_sub(left + right)
+        } else {
+            content_width + painted_padding
+        };
+        let slack = align_basis.saturating_sub(widest);
         let align_offset = match layout.alignment {
             Alignment::Left => 0,
             Alignment::Center => slack / 2,
@@ -324,6 +389,36 @@ impl Writer<'_> {
             out.push('\n');
         }
         Ok(out)
+    }
+
+    /// Measures the natural content-box width for a [`Width::FitContent`] node.
+    ///
+    /// Renders the node's content once at `cap` — the largest permitted
+    /// content box — and returns the widest visible line. This is the bounded
+    /// measurement pass: `cap` (not an unbounded width) caps the throwaway
+    /// render, so wrapping content cannot blow up the measured width. The
+    /// caller clamps the result under `max_width` and the cap, then re-renders
+    /// the content at the resolved width.
+    ///
+    /// The pass renders the node's *content* (via [`Self::render_kind`]) rather
+    /// than its painted box, so the measured width excludes the `padding` and
+    /// `border` that the painted box adds around it. Diagnostics from this
+    /// throwaway pass are discarded — the caller's final content render
+    /// re-emits them.
+    ///
+    /// [`Width::FitContent`]: renderable::layout::Width::FitContent
+    fn measure_fit_content(&self, node: &RenderNode, cap: u32) -> Result<u32, RenderError> {
+        let mut narrowed = self.opts.clone();
+        narrowed.context.available_width = cap;
+        narrowed.context.width = cap;
+        narrowed.context.terminal.fixed_width = Some(cap);
+        let mut sub = Writer {
+            opts: &narrowed,
+            diagnostics: Vec::new(),
+            inherited: self.inherited.clone(),
+        };
+        let rendered = sub.render_kind(node)?;
+        Ok(rendered.split('\n').map(visible_width).max().unwrap_or(0))
     }
 
     /// Renders a single block-level node by its [`NodeKind`], without applying
@@ -3300,6 +3395,264 @@ mod render_tree_tests {
         );
     }
 
+    /// Counts the leading spaces of the first rendered line that carries
+    /// `needle`, after stripping ANSI escapes. The alignment offset (slack on
+    /// the resolved content box) shows up as this lead, so it is a stable proxy
+    /// for the content-box width the renderer resolved.
+    fn lead_spaces_of_line_with(out: &str, needle: &str) -> usize {
+        let plain = strip_escape_codes(out);
+        let line = plain
+            .lines()
+            .find(|l| l.contains(needle))
+            .unwrap_or_else(|| panic!("no line containing {needle:?} in:\n{plain}"))
+            .to_string();
+        line.len() - line.trim_start().len()
+    }
+
+    #[test]
+    fn render_tree_width_fixed_sets_content_box() {
+        use renderable::layout::{Alignment, Layout, Length, TargetValue, Width};
+
+        // available 80; Fixed(20) center → "hi" is centered within the 20-cell
+        // content box: (20 - 2) / 2 = 9 leading spaces. With the default `Auto`
+        // the box would fill 80 and the lead would be 39.
+        let term = Terminal::new_optimistic(80);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            alignment: Alignment::Center,
+            ..Layout::default()
+        });
+        let tree = RenderNode::root(vec![para]);
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render")
+        .output;
+        assert_eq!(lead_spaces_of_line_with(&out, "hi"), 9);
+    }
+
+    #[test]
+    fn render_tree_width_auto_fills_after_margin() {
+        use renderable::layout::{Alignment, Edges, Layout, Length};
+
+        // Auto + 5ch horizontal margins on available 80: the content box fills
+        // the remaining 70 cells, so centering "x" yields (70 - 1) / 2 = 34
+        // plus the 5ch left margin = 39 leading spaces.
+        let term = Terminal::new_optimistic(80);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_layout(&Layout {
+            margin: Edges::x(Length::ch(5)),
+            alignment: Alignment::Center,
+            ..Layout::default()
+        });
+        let tree = RenderNode::root(vec![para]);
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render")
+        .output;
+        assert_eq!(lead_spaces_of_line_with(&out, "x"), 39);
+    }
+
+    #[test]
+    fn render_tree_fixed_width_is_clamped_by_available_minus_margin_padding() {
+        use renderable::layout::{Alignment, Edges, Layout, Length, TargetValue, Width};
+
+        // Fixed(100) asks for more than the box can hold: it clamps to
+        // available − 2*margin − 2*padding = 80 − 20 − 10 = 50. Centering "x"
+        // within 50 → (50 - 1) / 2 = 24, plus the 10ch left margin = 34. The
+        // padding subtraction is what distinguishes this from a 60-cell box
+        // (which would yield 39).
+        let term = Terminal::new_optimistic(80);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_layout(&Layout {
+            margin: Edges::x(Length::ch(10)),
+            padding: Edges::x(Length::ch(5)),
+            width: Width::Fixed(TargetValue::universal(Length::ch(100))),
+            alignment: Alignment::Center,
+            ..Layout::default()
+        });
+        let tree = RenderNode::root(vec![para]);
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render")
+        .output;
+        assert_eq!(lead_spaces_of_line_with(&out, "x"), 34);
+    }
+
+    /// Builds a one-paragraph document, records `layout` and `style` on it, and
+    /// renders it through the terminal fold at `width`, returning the raw
+    /// (SGR-bearing) output.
+    fn render_block_with_layout_and_style(
+        text: &str,
+        layout: renderable::layout::Layout,
+        style: Style,
+        width: u32,
+    ) -> String {
+        let term = Terminal::new_optimistic(width);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text(text)]);
+        para.attrs.set_layout(&layout);
+        para.attrs.set_style(&style);
+        let tree = RenderNode::root(vec![para]);
+        render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render")
+        .output
+    }
+
+    /// Counts the leading spaces of a raw line that appear *before* any SGR
+    /// escape. The transparent margin is emitted as raw spaces ahead of the
+    /// painted box, so this is a stable proxy for "margin is not painted".
+    fn leading_unstyled_spaces(line: &str) -> usize {
+        let mut count = 0;
+        for ch in line.chars() {
+            if ch == ' ' {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        count
+    }
+
+    /// Whether the raw `line` contains a contiguous painted background run of at
+    /// least `n` visible cells. SGR sequences are parsed (rather than matched
+    /// byte-for-byte, per the L2 capture rule): a `48;…` / basic background code
+    /// opens the run, a `0`/`49` reset closes it, and the visible cells between
+    /// are counted.
+    fn has_background_run_of_width(line: &str, n: usize) -> bool {
+        let chars: Vec<char> = line.chars().collect();
+        let mut idx = 0;
+        let mut bg_active = false;
+        let mut run = 0usize;
+        let mut max = 0usize;
+        while idx < chars.len() {
+            if chars[idx] == '\x1b' && chars.get(idx + 1) == Some(&'[') {
+                let start = idx + 2;
+                let mut j = start;
+                while j < chars.len() && !chars[j].is_ascii_alphabetic() {
+                    j += 1;
+                }
+                if chars.get(j) == Some(&'m') {
+                    let params: String = chars[start..j].iter().collect();
+                    if let Some(on) = sgr_sets_background(&params) {
+                        bg_active = on;
+                        if !on {
+                            run = 0;
+                        }
+                    }
+                }
+                idx = j + 1;
+                continue;
+            }
+            if bg_active {
+                run += 1;
+                max = max.max(run);
+            }
+            idx += 1;
+        }
+        max >= n
+    }
+
+    /// Interprets an SGR parameter string: `Some(true)` if it opens a
+    /// background, `Some(false)` if it resets one, `None` if it is irrelevant.
+    fn sgr_sets_background(params: &str) -> Option<bool> {
+        let parts: Vec<&str> = params.split(';').collect();
+        // A leading `0` (or empty `\x1b[m`) is a full reset.
+        if params.is_empty() || parts.first() == Some(&"0") {
+            return Some(false);
+        }
+        // `48` opens an extended background; `49` resets it. RGB/256 components
+        // that follow `48` are skipped because `48` is matched first.
+        for part in &parts {
+            match *part {
+                "48" => return Some(true),
+                "49" => return Some(false),
+                _ => {
+                    if let Ok(code) = part.parse::<u16>()
+                        && ((40..=47).contains(&code) || (100..=107).contains(&code))
+                    {
+                        return Some(true);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn render_tree_padding_is_painted_with_background_margin_is_not() {
+        use renderable::layout::{Edges, Layout, Length};
+        use renderable::style::{Background, Style};
+
+        // margin 2 (transparent) + padding 3 (painted) + content, background
+        // subtle. The 2 leading margin cells carry no background SGR; the
+        // padding cells plus content do.
+        let layout = Layout {
+            margin: Edges::x(Length::ch(2)),
+            padding: Edges::x(Length::ch(3)),
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 40);
+        let first = out.lines().find(|l| l.contains("hi")).expect("line with hi");
+        assert_eq!(
+            leading_unstyled_spaces(first),
+            2,
+            "margin must stay transparent: {first:?}"
+        );
+        assert!(
+            has_background_run_of_width(first, 3 + 2 + 3),
+            "padding + content must be painted: {first:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_padding_top_bottom_paint_blank_rows() {
+        use renderable::layout::{Edges, Layout, Length};
+        use renderable::style::{Background, Style};
+
+        // Vertical padding of 1 paints a blank background row above and below
+        // the content row.
+        let layout = Layout {
+            padding: Edges::all(Length::ch(1)),
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 40);
+        let lines: Vec<&str> = out.lines().collect();
+        let content_idx = lines
+            .iter()
+            .position(|l| l.contains("hi"))
+            .expect("content line");
+        // A painted blank row sits directly above and below the content row.
+        let band = 1 + 2 + 1; // left pad + "hi" + right pad
+        assert!(content_idx >= 1, "expected a padding row above: {lines:?}");
+        assert!(
+            has_background_run_of_width(lines[content_idx - 1], band),
+            "top padding row painted: {:?}",
+            lines[content_idx - 1]
+        );
+        assert!(
+            has_background_run_of_width(lines[content_idx + 1], band),
+            "bottom padding row painted: {:?}",
+            lines.get(content_idx + 1)
+        );
+    }
+
     #[test]
     fn render_tree_layout_on_inline_node_is_a_validation_error() {
         use renderable::layout::Layout;
@@ -3857,6 +4210,126 @@ mod render_tree_tests {
         assert!(
             tree_out.contains("\x1b[1m"),
             "bold SGR missing: {tree_out:?}"
+        );
+    }
+
+    /// Builds a one-paragraph document, records `layout` on it, and renders it
+    /// through the terminal fold at `width` with prose wrapping enabled (so a
+    /// reflowed `FitContent` box is observable), returning the ANSI-stripped
+    /// output.
+    fn render_block_with_layout_wrapped(
+        text: &str,
+        layout: renderable::layout::Layout,
+        width: u32,
+    ) -> String {
+        let term = Terminal::new_optimistic(width);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text(text)]);
+        para.attrs.set_layout(&layout);
+        let tree = RenderNode::root(vec![para]);
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.wrap_prose = true;
+        let out = render_terminal_node(&tree, &opts).expect("render").output;
+        strip_escape_codes(&out)
+    }
+
+    /// The widest content-box column count: the maximum trimmed visible width
+    /// over all rendered lines. Trimming strips the alignment lead, leaving the
+    /// box width.
+    fn content_box_cols(plain: &str) -> usize {
+        plain
+            .lines()
+            .map(|l| visible_width(l.trim()))
+            .max()
+            .unwrap_or(0) as usize
+    }
+
+    #[test]
+    fn render_tree_fit_content_sizes_box_to_widest_line() {
+        use renderable::layout::{Alignment, Layout, Width};
+        use renderable::style::{Background, Style};
+
+        // Two lines; FitContent shrinks the painted box to the widest line
+        // ("there" = 5) instead of filling the available width, then centers
+        // that shrunk box within the available 40 cells. The painted-band
+        // width is the discriminator: an `Auto` fallback would paint the full
+        // 40-cell band and place it flush-left.
+        let layout = Layout {
+            width: Width::FitContent,
+            alignment: Alignment::Center,
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi\nthere", layout, style, 40);
+        let line = out
+            .lines()
+            .find(|l| l.contains("there"))
+            .expect("line with content");
+        assert!(
+            has_background_run_of_width(line, 5),
+            "painted band must fit the widest line: {line:?}"
+        );
+        assert!(
+            !has_background_run_of_width(line, 8),
+            "painted band must not fill the available width: {line:?}"
+        );
+        assert!(
+            leading_unstyled_spaces(line) > 0,
+            "FitContent box must be centered within the available width: {line:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_fit_content_shrinks_below_max_width() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+        use renderable::style::{Background, Style};
+
+        // A generous `max_width` is only a ceiling: FitContent still shrinks the
+        // painted box to the 2-cell content, not the 20-cell cap.
+        let layout = Layout {
+            width: Width::FitContent,
+            max_width: Some(TargetValue::universal(Length::ch(20))),
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 40);
+        let line = out
+            .lines()
+            .find(|l| l.contains("hi"))
+            .expect("line with content");
+        assert!(
+            has_background_run_of_width(line, 2),
+            "painted band must fit the content: {line:?}"
+        );
+        assert!(
+            !has_background_run_of_width(line, 5),
+            "painted band must shrink below max_width: {line:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_fit_content_is_capped_by_max_width() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+
+        // Short words so the box can reflow to the cap; max_width 3 caps the
+        // FitContent box below its natural single-line width (13 cells).
+        let plain = render_block_with_layout_wrapped(
+            "a b c d e f g",
+            Layout {
+                width: Width::FitContent,
+                max_width: Some(TargetValue::universal(Length::ch(3))),
+                ..Layout::default()
+            },
+            80,
+        );
+        assert!(
+            content_box_cols(&plain) <= 3,
+            "max_width must cap the FitContent box: {plain:?}"
         );
     }
 }
