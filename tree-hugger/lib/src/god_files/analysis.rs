@@ -500,16 +500,18 @@ fn line_overlaps_comment(line: &str, line_start_byte: usize, coverage: &[bool]) 
 }
 
 /// Count TODO/FIXME/HACK/XXX markers inside comment text.
+///
+/// Counts every case-insensitive marker occurrence, not the number of comment
+/// nodes containing a marker: a single block comment with `TODO`, `FIXME`,
+/// `HACK`, and `XXX` reports 4, and a marker repeated within one comment is
+/// counted each time.
 fn count_todo_fixme(source: &str, comment_ranges: &[(usize, usize)]) -> usize {
     let mut count = 0usize;
     for (start, end) in comment_ranges {
         if let Some(text) = source.get(*start..*end) {
             let upper = text.to_uppercase();
             for marker in ["TODO", "FIXME", "HACK", "XXX"] {
-                if upper.contains(marker) {
-                    count += 1;
-                    break;
-                }
+                count += upper.matches(marker).count();
             }
         }
     }
@@ -743,16 +745,23 @@ fn compute_max_nesting_depth(records: &[SymbolRecord]) -> usize {
     // Sort by start_byte ascending, and for ties put wider spans first.
     spans.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
 
-    // Longest strictly-nested chain ending at each span.
-    let mut depths = vec![1usize; spans.len()];
+    // Symbol spans are laminar (AST-derived: any two are disjoint or one
+    // contains the other), so a single sweep with a stack of enclosing spans
+    // yields the deepest chain in O(n). The stack holds the current ancestor
+    // chain bottom-to-top; each entry strictly contains the one above it.
+    // Containment matches the sort tie-break (strict on start, so equal-start
+    // spans are siblings rather than nested).
+    let mut stack: Vec<(u32, u32)> = Vec::new();
     let mut max_depth = 1usize;
-    for i in 1..spans.len() {
-        for j in (0..i).rev() {
-            if spans[j].0 < spans[i].0 && spans[j].1 >= spans[i].1 {
-                depths[i] = depths[i].max(depths[j] + 1);
+    for &(start, end) in &spans {
+        while let Some(&(top_start, top_end)) = stack.last() {
+            if top_start < start && top_end >= end {
+                break;
             }
+            stack.pop();
         }
-        max_depth = max_depth.max(depths[i]);
+        max_depth = max_depth.max(stack.len() + 1);
+        stack.push((start, end));
     }
     max_depth
 }
@@ -1484,6 +1493,17 @@ x = 1
     }
 
     #[test]
+    fn todo_fixme_counts_every_marker_in_one_comment() {
+        // A single block comment carrying several distinct markers plus a
+        // repeat must count every occurrence (case-insensitive), not collapse
+        // to one per comment node.
+        let source = "/* TODO refactor; fixme the leak; HACK retry; xxx legacy; todo again */";
+        let comment_ranges = vec![(0, source.len())];
+        // TODO/todo ×2, FIXME ×1, HACK ×1, XXX ×1 = 5
+        assert_eq!(count_todo_fixme(source, &comment_ranges), 5);
+    }
+
+    #[test]
     fn comment_density_clamped() {
         let source = "# comment\n";
         let ranges = vec![(0, 10)];
@@ -1741,6 +1761,61 @@ x = 1
         assert!(
             god_files.analysis().is_empty(),
             "comment-only Perl file must be dropped (0 effective SLOC)"
+        );
+    }
+
+    #[test]
+    fn perl_pod_only_file_is_dropped() {
+        // Perl POD is documentation, not code, but the grammar parses it as a
+        // separate `pod_statement` rather than a hash comment. A 450-line POD
+        // block must contribute zero effective SLOC and be dropped, not surface
+        // as a spurious moderate-risk god file.
+        let dir = TempDir::new().unwrap();
+        let mut content = String::from("=pod\n\n");
+        for i in 0..450 {
+            content.push_str(&format!("Documentation paragraph line {i}.\n\n"));
+        }
+        content.push_str("=cut\n");
+        temp_file(&dir, "pod_only.pl", &content);
+
+        let god_files = GodFiles::new(dir.path());
+        assert!(
+            god_files.analysis().is_empty(),
+            "POD-only Perl file must be dropped (0 effective SLOC)"
+        );
+    }
+
+    #[test]
+    fn perl_pod_excluded_from_effective_sloc() {
+        // POD documentation lines are comment-only; the surrounding `my` lines
+        // are the only effective code.
+        let source = "my $x = 1;\n=pod\n\nDocumentation.\nMore docs.\n\n=cut\nmy $y = 2;\n";
+        let dir = TempDir::new().unwrap();
+        let path = temp_file(&dir, "mixed_pod.pl", source);
+
+        let tree_file = TreeFile::new(&path).unwrap();
+        let metrics = compute_sloc_metrics(tree_file.source(), Some(&tree_file));
+        assert_eq!(
+            metrics.effective_sloc, 2,
+            "only the two `my` lines are code (comment_only={}, blank={})",
+            metrics.comment_only_lines, metrics.blank_lines
+        );
+    }
+
+    #[test]
+    fn perl_pod_todo_markers_are_counted() {
+        // Debt markers inside POD documentation are still debt signals, so the
+        // POD range must reach `count_todo_fixme`.
+        let source = "=pod\n\nTODO document this. FIXME handle the edge case.\n\n=cut\n";
+        let dir = TempDir::new().unwrap();
+        let path = temp_file(&dir, "pod_markers.pl", source);
+
+        let tree_file = TreeFile::new(&path).unwrap();
+        let ranges = tree_file.comment_ranges().unwrap();
+        assert_eq!(
+            count_todo_fixme(tree_file.source(), &ranges),
+            2,
+            "TODO and FIXME inside POD must both count"
         );
     }
 
