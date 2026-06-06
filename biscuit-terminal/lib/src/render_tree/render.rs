@@ -222,11 +222,12 @@ impl Writer<'_> {
         self.inherited = prev;
         let content = content?;
 
+        // No `Layout` width mode here, so the box hugs its content (`None`).
         Ok(style::apply_style_with_padding(
             &content,
             style,
             &self.opts.context.terminal,
-            inner_width,
+            None,
             padding,
         ))
     }
@@ -293,7 +294,7 @@ impl Writer<'_> {
                 &content,
                 &Style::default(),
                 &self.opts.context.terminal,
-                content_width,
+                Some(content_width),
                 padding,
             ));
         };
@@ -313,7 +314,7 @@ impl Writer<'_> {
             &content,
             style,
             &self.opts.context.terminal,
-            content_width,
+            Some(content_width),
             padding,
         ))
     }
@@ -1106,7 +1107,6 @@ impl Writer<'_> {
             &format!("{prefix}{title}"),
             &heading_style,
             &self.opts.context.terminal,
-            self.opts.context.available_width,
         )
     }
 
@@ -3650,6 +3650,175 @@ mod render_tree_tests {
         assert_eq!(lead_spaces_of_line_with(&out, "ab"), 29);
     }
 
+    #[test]
+    fn render_tree_fixed_background_paints_full_content_box() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+        use renderable::style::{Background, Style};
+        // A `Fixed(20)` box with short content paints its full 20-cell band, not
+        // the 2-cell text. The painted-band width is the discriminator the review
+        // flagged: the box width must follow the resolved content box.
+        let layout = Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 80);
+        let line = out.lines().find(|l| l.contains("hi")).expect("content line");
+        assert_eq!(
+            background_run_width(line),
+            20,
+            "Fixed(20) background must paint all 20 cells: {line:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_fixed_border_encloses_full_content_box() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+        use renderable::style::{Border, BorderSides, Style};
+        // The direct analogue of the `bt block hi --width 20 --border all`
+        // reproduction: the border encloses 20 content cells (box width 22), not
+        // the 2-cell text.
+        let layout = Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            ..Layout::default()
+        };
+        let style = Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Border::default()
+            }),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 80);
+        assert_eq!(
+            bordered_box_width(&out),
+            22,
+            "Fixed(20) + border must enclose 20 content cells (20 + 2 edges): {out:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_auto_background_fills_available_width() {
+        use renderable::layout::{Layout, Width};
+        use renderable::style::{Background, Style};
+        // An `Auto` box fills the available content width, so its background
+        // spans the whole 40-cell area even with 2-cell content.
+        let layout = Layout {
+            width: Width::Auto,
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 40);
+        let line = out.lines().find(|l| l.contains("hi")).expect("content line");
+        assert_eq!(
+            background_run_width(line),
+            40,
+            "Auto background must fill the 40-cell available width: {line:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_auto_border_encloses_available_width() {
+        use renderable::layout::{Layout, Width};
+        use renderable::style::{Border, BorderSides, Style};
+        // An `Auto` box with a border fills available − 2 edges = 38 content
+        // cells, so the drawn box is the full 40-cell width.
+        let layout = Layout {
+            width: Width::Auto,
+            ..Layout::default()
+        };
+        let style = Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Border::default()
+            }),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 40);
+        assert_eq!(
+            bordered_box_width(&out),
+            40,
+            "Auto + border must enclose available − 2 edges = 38 cells: {out:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_capped_auto_background_paints_cap() {
+        use renderable::layout::{Layout, Length, TargetValue};
+        use renderable::style::{Background, Style};
+        // `Auto` capped by `max_width: 20` paints a 20-cell band — the cap is the
+        // content box, and the painted box follows it.
+        let layout = Layout {
+            max_width: Some(TargetValue::universal(Length::ch(20))),
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 80);
+        let line = out.lines().find(|l| l.contains("hi")).expect("content line");
+        assert_eq!(
+            background_run_width(line),
+            20,
+            "max_width-capped Auto background must paint the 20-cell cap: {line:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_fit_content_background_matches_widest_line() {
+        use renderable::layout::{Layout, Width};
+        use renderable::style::{Background, Style};
+        // `FitContent` shrinks the box to the widest line ("there" = 5), so the
+        // painted band is exactly 5 — the floor is a no-op for FitContent.
+        let layout = Layout {
+            width: Width::FitContent,
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi\nthere", layout, style, 40);
+        for line in out.lines().filter(|l| l.contains("hi") || l.contains("there")) {
+            assert_eq!(
+                background_run_width(line),
+                5,
+                "FitContent band must match the widest line (5): {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_tree_fixed_background_multiline_is_uniform() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+        use renderable::style::{Background, Style};
+        // Two lines of differing length inside a `Fixed(20)` box are each painted
+        // to a uniform 20-cell band, so the background is a solid rectangle.
+        let layout = Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi\nthere", layout, style, 80);
+        for line in out.lines().filter(|l| l.contains("hi") || l.contains("there")) {
+            assert_eq!(
+                background_run_width(line),
+                20,
+                "every content row of a Fixed(20) box paints 20 cells: {line:?}"
+            );
+        }
+    }
+
     /// Builds a one-paragraph document, records `layout` and `style` on it, and
     /// renders it through the terminal fold at `width`, returning the raw
     /// (SGR-bearing) output.
@@ -3688,11 +3857,19 @@ mod render_tree_tests {
     }
 
     /// Whether the raw `line` contains a contiguous painted background run of at
-    /// least `n` visible cells. SGR sequences are parsed (rather than matched
-    /// byte-for-byte, per the L2 capture rule): a `48;…` / basic background code
-    /// opens the run, a `0`/`49` reset closes it, and the visible cells between
-    /// are counted.
+    /// least `n` visible cells.
     fn has_background_run_of_width(line: &str, n: usize) -> bool {
+        background_run_width(line) >= n
+    }
+
+    /// The widest contiguous painted background run on `line`, in visible cells.
+    ///
+    /// SGR sequences are parsed (rather than matched byte-for-byte, per the L2
+    /// capture rule): a `48;…` / basic background code opens the run, a `0`/`49`
+    /// reset closes it, and the visible cells between are counted. This is the
+    /// exact painted-band width — the discriminator for a fixed/auto box that
+    /// must paint its full resolved width rather than shrink to its text.
+    fn background_run_width(line: &str) -> usize {
         let chars: Vec<char> = line.chars().collect();
         let mut idx = 0;
         let mut bg_active = false;
@@ -3723,7 +3900,23 @@ mod render_tree_tests {
             }
             idx += 1;
         }
-        max >= n
+        max
+    }
+
+    /// The visible width of the bordered box drawn around `needle`'s content,
+    /// measured from the top rule of the rendered output.
+    ///
+    /// Strips ANSI escapes and returns the visible width of the first line that
+    /// is a horizontal border rule (begins with a corner glyph). The interior
+    /// (content columns) is this width minus the two drawn vertical edges.
+    fn bordered_box_width(out: &str) -> usize {
+        let plain = strip_escape_codes(out);
+        let rule = plain
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with('┌') || l.starts_with('┏') || l.starts_with('╔') || l.starts_with('╭'))
+            .unwrap_or_else(|| panic!("no top border rule in:\n{plain}"));
+        visible_width(rule) as usize
     }
 
     /// Interprets an SGR parameter string: `Some(true)` if it opens a

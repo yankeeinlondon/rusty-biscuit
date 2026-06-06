@@ -62,15 +62,11 @@ impl Padding {
 
 /// Applies a node's [`Style`] to already-rendered terminal `content`.
 ///
-/// Equivalent to [`apply_style_with_padding`] with no padding. Kept for callers
-/// (headings, the style unit tests) that paint a [`Style`] with no box padding.
-pub(crate) fn apply_style(
-    content: &str,
-    style: &Style,
-    term: &Terminal,
-    available_width: u32,
-) -> String {
-    apply_style_with_padding(content, style, term, available_width, Padding::ZERO)
+/// Equivalent to [`apply_style_with_padding`] with no padding and a
+/// content-hugging box. Kept for callers (headings, the style unit tests) that
+/// paint a [`Style`] whose box hugs its content.
+pub(crate) fn apply_style(content: &str, style: &Style, term: &Terminal) -> String {
+    apply_style_with_padding(content, style, term, None, Padding::ZERO)
 }
 
 /// Applies a node's [`Style`] and painted `padding` to rendered `content`.
@@ -78,22 +74,35 @@ pub(crate) fn apply_style(
 /// The text-appearance layers (`color`, `background`, `emphasis`) and the
 /// painted padding box are lowered by [`paint_text`]; [`Border`] then draws a
 /// box around the padded result (CSS order: content → padding/background →
-/// border). `available_width` is the width the `content` was rendered within
-/// (already reduced by any border overhead — see [`border_horizontal_overhead`])
-/// and is not consulted by the current layers.
+/// border).
+///
+/// `content_box` is the resolved content-box width when a [`Layout`] width mode
+/// fixed it (`Some`), or `None` when the box should hug its content. A `Some`
+/// width is the **floor** for the visible box: the painted background band and
+/// the bordered interior fill it even when the content is narrower, so a
+/// `Fixed(20)` or filling `Auto` box paints all of its resolved columns rather
+/// than shrinking to the widest text line. `FitContent` passes its already-
+/// measured width, so the floor is a no-op there.
+///
+/// [`Layout`]: renderable::layout::Layout
 pub(crate) fn apply_style_with_padding(
     content: &str,
     style: &Style,
     term: &Terminal,
-    _available_width: u32,
+    content_box: Option<u32>,
     padding: Padding,
 ) -> String {
     let depth = &term.color_depth;
     let mode: RenderColorMode = (&term.color_mode).into();
 
-    let painted = paint_text(content, style, depth, mode, term, padding);
+    let painted = paint_text(content, style, depth, mode, term, padding, content_box);
     match &style.border {
-        Some(border) => render_border(&painted, border, depth, mode),
+        // The border wraps the padded band, so its interior floor includes the
+        // horizontal padding already baked into `painted`.
+        Some(border) => {
+            let interior_floor = content_box.map(|w| w + padding.left + padding.right);
+            render_border(&painted, border, depth, mode, interior_floor)
+        }
         None => painted,
     }
 }
@@ -121,6 +130,12 @@ pub(crate) fn border_horizontal_overhead(style: &Style) -> u32 {
 /// painted rows above and below, and `left`/`right` painted columns inside each
 /// content row — reusing the band-pad machinery the deleted `Fill` used to
 /// supply. With no padding each line is wrapped individually (no band fill).
+///
+/// `content_box` floors the painted band width: a `Some(w)` widens the
+/// background band to `w` columns even when the text is narrower, so a fixed- or
+/// auto-width box paints its full resolved width. The floor only widens the
+/// *background* band — with no background the right edge stays ragged, which the
+/// left-bordered components (`BlockQuote`, `StatusBlock`) rely on.
 fn paint_text(
     content: &str,
     style: &Style,
@@ -128,6 +143,7 @@ fn paint_text(
     mode: RenderColorMode,
     term: &Terminal,
     padding: Padding,
+    content_box: Option<u32>,
 ) -> String {
     // The opening SGR run: emphasis first, then foreground and background so a
     // single `\x1b[0m` at the end of the line clears the whole run.
@@ -151,7 +167,20 @@ fn paint_text(
         return content.to_string();
     }
 
-    if padding.is_zero() {
+    let lines: Vec<&str> = content.split('\n').collect();
+    let measured = lines.iter().copied().map(visible_width).max().unwrap_or(0);
+    // Floor the band at the resolved content box so a fixed/auto box paints its
+    // full width; `None` (content-hugging) leaves the band at the widest line.
+    let widest = content_box.map_or(measured, |w| measured.max(w));
+
+    // A floored background paints a uniform rectangle even with no padding, so a
+    // `Fixed`/`Auto` box fills every resolved column. Without that floor (no
+    // background, or a content-hugging `None` box) the no-padding path wraps each
+    // line individually so the right edge stays ragged — the color/emphasis runs
+    // and the left-bordered components' (`BlockQuote`, `StatusBlock`) `│ `/`┃ `
+    // gap rely on it.
+    let band_fill = has_background && content_box.is_some();
+    if padding.is_zero() && !band_fill {
         let mut out = String::new();
         for (idx, line) in content.split('\n').enumerate() {
             if idx > 0 {
@@ -167,7 +196,7 @@ fn paint_text(
         return out;
     }
 
-    // Padded box. With a `background` the box is painted as a rectangle: every
+    // Painted box. With a `background` the box is painted as a rectangle: every
     // row is widened to a uniform `widest` and `top`/`bottom` emit full-width
     // painted blank rows, so the background fills a solid block (reviving the
     // band-pad machinery the deleted `Fill` used to supply). Without a
@@ -175,8 +204,6 @@ fn paint_text(
     // the requested cells and no stray trailing whitespace is emitted, which is
     // what the left-bordered components (`BlockQuote`, `StatusBlock`) need to
     // restore their `│ `/`┃ ` inner gap via `Layout::padding`.
-    let lines: Vec<&str> = content.split('\n').collect();
-    let widest = lines.iter().copied().map(visible_width).max().unwrap_or(0);
     let left_pad = " ".repeat(padding.left as usize);
     let right_pad = " ".repeat(padding.right as usize);
 
@@ -482,11 +509,19 @@ fn border_glyphs(weight: BorderWeight, line_style: BorderLineStyle, rounded: boo
 /// glyphs. The edge glyphs hug the content directly — any inner spacing is the
 /// painted [`Layout::padding`](renderable::layout::Layout) band already baked
 /// into `content`, not an implicit space inside the border.
+///
+/// `interior_floor` is the resolved content box (plus its horizontal padding)
+/// when a [`Layout`](renderable::layout::Layout) fixed the width: the bordered
+/// interior fills it even when the content is narrower, so a `Fixed`/`Auto` box
+/// encloses its full resolved width. `None` hugs the content. The floor only
+/// widens the interior when a right edge (or a top/bottom rule) makes it
+/// observable — a left-only bar stays ragged.
 fn render_border(
     content: &str,
     border: &Border,
     depth: &ColorDepth,
     mode: RenderColorMode,
+    interior_floor: Option<u32>,
 ) -> String {
     let (top, right, bottom, left) = resolve_sides(&border.sides);
     if !(top || right || bottom || left) {
@@ -507,12 +542,14 @@ fn render_border(
     };
 
     let lines: Vec<&str> = content.split('\n').collect();
-    let widest = lines.iter().copied().map(visible_width).max().unwrap_or(0);
+    let measured = lines.iter().copied().map(visible_width).max().unwrap_or(0);
 
     // The interior is the content padded to a uniform width — no implicit space
     // inside the drawn edges. Inner spacing, when wanted, comes from the painted
-    // `Layout::padding` band already baked into `content`.
-    let interior = widest;
+    // `Layout::padding` band already baked into `content`. A fixed/auto box
+    // floors the interior at its resolved width so the edges enclose every
+    // resolved column rather than shrinking to the widest text line.
+    let interior = interior_floor.map_or(measured, |w| measured.max(w));
 
     let mut out: Vec<String> = Vec::with_capacity(lines.len() + 2);
 
@@ -525,7 +562,7 @@ fn render_border(
         // Pad the content to a uniform width only when a right edge needs the
         // alignment; a left-only bar would otherwise emit trailing whitespace.
         let pad = if right {
-            widest.saturating_sub(visible_width(line))
+            interior.saturating_sub(visible_width(line))
         } else {
             0
         };
@@ -596,7 +633,7 @@ mod tests {
             )))),
             ..Style::default()
         };
-        let out = apply_style("hello", &style, &truecolor_term(), 10);
+        let out = apply_style("hello", &style, &truecolor_term());
         assert!(out.contains("\x1b[38;2;255;0;0m"));
         assert!(out.contains("hello"));
         assert!(out.ends_with(SGR_RESET));
@@ -612,7 +649,7 @@ mod tests {
             )))),
             ..Style::default()
         };
-        let out = apply_style("x", &style, &term, 5);
+        let out = apply_style("x", &style, &term);
         assert!(out.contains("\x1b[38;5;196m"), "got {out:?}");
     }
 
@@ -626,7 +663,7 @@ mod tests {
             )))),
             ..Style::default()
         };
-        let out = apply_style("x", &style, &term, 5);
+        let out = apply_style("x", &style, &term);
         assert!(out.contains("\x1b[31m"), "got {out:?}");
     }
 
@@ -640,7 +677,7 @@ mod tests {
             )))),
             ..Style::default()
         };
-        let out = apply_style("x", &style, &term, 5);
+        let out = apply_style("x", &style, &term);
         assert_eq!(out, "x");
     }
 
@@ -655,7 +692,7 @@ mod tests {
             ))),
             ..Style::default()
         };
-        let out = apply_style("x", &style, &term, 5);
+        let out = apply_style("x", &style, &term);
         // Dark terminal resolves to the white branch (fg code 37).
         assert!(out.contains("\x1b[37m"), "got {out:?}");
     }
@@ -670,7 +707,7 @@ mod tests {
             },
             ..Style::default()
         };
-        let out = apply_style("x", &style, &truecolor_term(), 5);
+        let out = apply_style("x", &style, &truecolor_term());
         assert!(out.contains("\x1b[1m"));
         assert!(out.contains("\x1b[3m"));
     }
@@ -684,7 +721,7 @@ mod tests {
             },
             ..Style::default()
         };
-        let out = apply_style("x", &style, &truecolor_term(), 5);
+        let out = apply_style("x", &style, &truecolor_term());
         assert!(out.contains("\x1b[7m"), "got {out:?}");
         assert!(out.ends_with(SGR_RESET));
     }
@@ -701,7 +738,7 @@ mod tests {
             },
             ..Style::default()
         };
-        let out = apply_style("x", &style, &term, 5);
+        let out = apply_style("x", &style, &term);
         assert!(out.contains(UnderlineStyle::Straight.sgr_open()));
         assert!(!out.contains("\x1b[4:2m"));
     }
@@ -714,7 +751,7 @@ mod tests {
             ))),
             ..Style::default()
         };
-        let out = apply_style("x", &style, &truecolor_term(), 5);
+        let out = apply_style("x", &style, &truecolor_term());
         assert!(out.contains("\x1b[44m"), "got {out:?}");
     }
 
@@ -727,7 +764,7 @@ mod tests {
             }),
             ..Style::default()
         };
-        let out = apply_style("hi", &style, &truecolor_term(), 4);
+        let out = apply_style("hi", &style, &truecolor_term());
         let lines: Vec<&str> = out.split('\n').collect();
         assert_eq!(lines.len(), 3);
         assert!(lines[0].starts_with('┌') && lines[0].ends_with('┐'));
@@ -747,7 +784,7 @@ mod tests {
             }),
             ..Style::default()
         };
-        let out = apply_style("hello world", &style, &truecolor_term(), 15);
+        let out = apply_style("hello world", &style, &truecolor_term());
         let lines: Vec<&str> = out.split('\n').collect();
         assert_eq!(lines.len(), 3);
         let widths: Vec<u32> = lines.iter().copied().map(visible_width).collect();
@@ -773,7 +810,7 @@ mod tests {
             }),
             ..Style::default()
         };
-        let out = apply_style("the quick brown fox", &style, &truecolor_term(), 23);
+        let out = apply_style("the quick brown fox", &style, &truecolor_term());
         let lines: Vec<&str> = out.split('\n').collect();
         let widths: Vec<u32> = lines.iter().copied().map(visible_width).collect();
         assert_eq!(widths[0], widths[1], "got {widths:?}");
@@ -794,7 +831,7 @@ mod tests {
             }),
             ..Style::default()
         };
-        let out = apply_style("a\nbb", &style, &truecolor_term(), 6);
+        let out = apply_style("a\nbb", &style, &truecolor_term());
         for line in out.split('\n') {
             assert!(line.starts_with('│'), "got {line:?}");
         }
@@ -818,7 +855,7 @@ mod tests {
             }),
             ..Style::default()
         };
-        let out = apply_style("x", &style, &truecolor_term(), 3);
+        let out = apply_style("x", &style, &truecolor_term());
         let lines: Vec<&str> = out.split('\n').collect();
         assert!(
             lines[0].starts_with('╭') && lines[0].ends_with('╮'),
@@ -842,7 +879,7 @@ mod tests {
             }),
             ..Style::default()
         };
-        let out = apply_style("x", &style, &truecolor_term(), 3);
+        let out = apply_style("x", &style, &truecolor_term());
         assert!(out.split('\n').next().unwrap().starts_with('┌'));
     }
 
@@ -867,7 +904,7 @@ mod tests {
             }),
             ..Style::default()
         };
-        let out = apply_style("x", &style, &truecolor_term(), 3);
+        let out = apply_style("x", &style, &truecolor_term());
         assert!(out.contains("\x1b[32m┌"), "got {out:?}");
     }
 
@@ -912,7 +949,7 @@ mod tests {
             ..Style::default()
         };
         assert_eq!(border_horizontal_overhead(&style), 2);
-        let out = apply_style("ab", &style, &truecolor_term(), 20);
+        let out = apply_style("ab", &style, &truecolor_term());
         let row = out.split('\n').find(|l| l.contains("ab")).unwrap();
         // `│ab│` — the glyphs hug the content, no space between edge and text.
         assert!(row.contains("│ab│"), "no implicit interior space, got {row:?}");
@@ -926,7 +963,7 @@ mod tests {
             )))),
             ..Style::default()
         };
-        let out = apply_style("x", &style, &truecolor_term(), 5);
+        let out = apply_style("x", &style, &truecolor_term());
         assert!(out.contains("\x1b[38;2;"), "got {out:?}");
     }
 }
