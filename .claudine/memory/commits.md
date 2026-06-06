@@ -12,6 +12,7 @@ description: A record of novel things learned about how to best perform commits 
 - When viewing history, use `git log` directly. `sniff git commits` is not a valid command in this repo.
 - Conventional commit scopes and subjects in this repo use lowercase after the colon, for example `docs(darkmatter): update parser notes`.
 - For documentation restructuring in `.claude/` or skill files, prefer a `docs(<area>): ...` prefix.
+- **Misfiled planning artifacts are deleted, not moved to `_completed/`.** When a `plan.md`/`spec.md` lives in a package area's `features/` or `fixes/` directory but its frontmatter `area:` field names a *different* package (e.g. a `biscuit-test-harness` plan sitting under `renderable/fixes/`), clean it up as a single-file deletion with a `chore(<host-area>): remove misfiled <area> <artifact>` message — do NOT move it into the host area's `_completed/`, because that would canonize the misfile. The `_completed/` move is reserved for plans/specs whose `area:` matches their directory.
 
 ## Check What Will Be Committed
 
