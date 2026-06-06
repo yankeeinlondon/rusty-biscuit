@@ -93,6 +93,42 @@ impl TreeFile {
         })
     }
 
+    /// Returns the source text of the parsed file.
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    /// Returns the byte ranges of all comment nodes detected by the comments
+    /// query for this file's language.
+    ///
+    /// ## Returns
+    /// Returns a list of `(start_byte, end_byte)` ranges covering comment nodes.
+    /// Returns an empty vector if no comments query is available.
+    ///
+    /// ## Errors
+    /// Returns an error if the comments query fails to compile.
+    pub fn comment_ranges(&self) -> Result<Vec<(usize, usize)>, TreeHuggerError> {
+        let query = query_for(self.grammar_ref(), QueryKind::Comments)?;
+        if query.pattern_count() == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut cursor = QueryCursor::new();
+        let root = self.tree.root_node();
+        let mut ranges = Vec::new();
+        let mut matches = cursor.matches(query.as_ref(), root, self.source.as_bytes());
+        matches.advance();
+
+        while let Some(query_match) = matches.get() {
+            for capture in query_match.captures {
+                ranges.push((capture.node.start_byte(), capture.node.end_byte()));
+            }
+            matches.advance();
+        }
+
+        Ok(ranges)
+    }
+
     /// Returns a reference to the grammar this file was parsed with for query
     /// compilation.
     fn grammar_ref(&self) -> GrammarRef<'_> {
