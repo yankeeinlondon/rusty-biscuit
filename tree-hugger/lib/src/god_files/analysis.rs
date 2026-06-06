@@ -1692,6 +1692,87 @@ x = 1
         assert!(depth >= 3, "expected depth >= 3, got {}", depth);
     }
 
+    /// Synthetic flat record with a disjoint declaration span; nothing nests.
+    fn flat_record(start_byte: u32) -> SymbolRecord {
+        use crate::shared::{
+            AnalysisPass, DocsFacet, IdentityFacet, ProvenanceFacet, SchemaVersion, SemanticFacet,
+            SourceFacet, SymbolId, SymbolKindData, TextPoint, TextSpan, TypeFacet, VisibilityFacet,
+        };
+        SymbolRecord {
+            schema_version: SchemaVersion::V2_0,
+            id: SymbolId(String::new()),
+            language: ProgrammingLanguage::Rust,
+            kind: SymbolKindV2::Function,
+            identity: IdentityFacet {
+                name: String::new(),
+                display_name: String::new(),
+                qualified_name: None,
+                module_path: None,
+                stable_key: String::new(),
+            },
+            source: SourceFacet {
+                declaration_span: TextSpan {
+                    start: TextPoint::default(),
+                    end: TextPoint::default(),
+                    start_byte,
+                    end_byte: start_byte + 5,
+                },
+                ..SourceFacet::default()
+            },
+            visibility: VisibilityFacet::default(),
+            docs: DocsFacet::default(),
+            attributes: Vec::new(),
+            modifiers: Vec::new(),
+            type_info: TypeFacet::default(),
+            relations: Default::default(),
+            semantics: SemanticFacet::default(),
+            provenance: ProvenanceFacet {
+                extractor: String::new(),
+                extractor_version: String::new(),
+                parse_pass: AnalysisPass::Parse.as_str().to_string(),
+                created_at_epoch_ms: 0,
+                updated_at_epoch_ms: 0,
+            },
+            kind_data: SymbolKindData::Unknown,
+            extensions: Default::default(),
+        }
+    }
+
+    /// Performance regression for review-7: `compute_max_nesting_depth` was
+    /// `O(symbols^2)` (each span compared against every prior span), so a flat
+    /// file with tens of thousands of symbols — exactly the large files this
+    /// command targets — stalled for over a minute. The stack sweep is
+    /// `O(n log n)`.
+    ///
+    /// This is the bounded CI guard the review calls for: the ceiling is
+    /// calibrated to the symbol count, so a reintroduced quadratic path blows
+    /// past it without parsing a giant fixture. The old DP did ~2.5B
+    /// comparisons at 50k symbols (tens of seconds in debug); the linear sweep
+    /// is sub-millisecond, leaving a ~1000x margin that absorbs CI load. A
+    /// wall-clock *ratio* across sizes is too noisy under parallel test
+    /// execution to assert here — track the precise slope with a Criterion
+    /// benchmark instead.
+    #[test]
+    fn nesting_depth_stays_near_linear_on_flat_symbols() {
+        use std::time::{Duration, Instant};
+
+        let flat: Vec<SymbolRecord> = (0..50_000).map(|i| flat_record(i * 10)).collect();
+
+        // Min over repeats: robust to scheduler noise under parallel test runs.
+        let mut best = Duration::MAX;
+        for _ in 0..3 {
+            let start = Instant::now();
+            let depth = compute_max_nesting_depth(&flat);
+            best = best.min(start.elapsed());
+            assert_eq!(depth, 1, "disjoint flat spans must have nesting depth 1");
+        }
+
+        assert!(
+            best < Duration::from_secs(2),
+            "50k flat symbols took {best:?}; expected sub-second (quadratic regression?)"
+        );
+    }
+
     // ========================================================================
     // Per-language comment classification (Level 1)
     //
