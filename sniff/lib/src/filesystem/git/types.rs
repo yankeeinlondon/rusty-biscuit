@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -474,12 +474,22 @@ fn extract_remote_host(url: &str) -> Option<&str> {
 /// ```
 pub struct GitRepo {
     /// Pure-Rust handle backing discovery and all git queries.
-    gix: gix::Repository,
+    ///
+    /// Wrapped in [`RefCell`] so object-cache sizing (a mutating operation on
+    /// the gix handle) can be deferred to the first object-intensive call.
+    gix: RefCell<gix::Repository>,
     repo_root: PathBuf,
+    /// Path to this repository's git directory (the `.git` dir or, for a linked
+    /// worktree, its per-worktree git directory).
+    git_dir: PathBuf,
+    /// Path to the common git directory shared across all worktrees.
+    common_dir: PathBuf,
     /// Cached ref decorations to avoid recomputing on every commit query.
     ref_decorations: RefCell<Option<HashMap<gix::ObjectId, Vec<RefDecoration>>>>,
     /// Cached git config so disk reads happen at most once per instance.
     config_cache: OnceLock<GitConfig>,
+    /// Whether the object cache has already been sized for this handle.
+    cache_configured: Cell<bool>,
 }
 
 impl std::fmt::Debug for GitRepo {
@@ -491,13 +501,22 @@ impl std::fmt::Debug for GitRepo {
 }
 
 impl GitRepo {
+    /// Sizes the object cache once, before the first object-intensive operation.
+    fn ensure_cache(&self) {
+        if !self.cache_configured.get() {
+            super::open::configure_cache(&mut self.gix.borrow_mut());
+            self.cache_configured.set(true);
+        }
+    }
+
     /// Returns cached ref decorations, computing them once on first access.
     pub(crate) fn ref_decorations(
         &self,
     ) -> std::cell::Ref<'_, HashMap<gix::ObjectId, Vec<RefDecoration>>> {
         // If not yet computed, compute and cache
         if self.ref_decorations.borrow().is_none() {
-            let decorations = super::discovery::collect_ref_decorations(&self.gix);
+            self.ensure_cache();
+            let decorations = super::discovery::collect_ref_decorations(&self.gix.borrow());
             *self.ref_decorations.borrow_mut() = Some(decorations);
         }
         std::cell::Ref::map(self.ref_decorations.borrow(), |opt| opt.as_ref().unwrap())
@@ -527,11 +546,16 @@ impl GitRepo {
             .workdir()
             .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?
             .to_path_buf();
+        let git_dir = gix.git_dir().to_path_buf();
+        let common_dir = gix.common_dir().to_path_buf();
         Ok(Some(Self {
-            gix,
+            gix: RefCell::new(gix),
             repo_root,
+            git_dir,
+            common_dir,
             ref_decorations: RefCell::new(None),
             config_cache: OnceLock::new(),
+            cache_configured: Cell::new(false),
         }))
     }
 
@@ -543,28 +567,32 @@ impl GitRepo {
     /// Path to this repository's git directory (the `.git` dir or, for a linked
     /// worktree, its per-worktree git directory).
     pub fn git_dir(&self) -> &Path {
-        self.gix.git_dir()
+        &self.git_dir
     }
 
     /// Path to the common git directory shared across all worktrees.
     pub fn common_dir(&self) -> &Path {
-        self.gix.common_dir()
+        &self.common_dir
     }
 
     /// HEAD commit id as a full hex SHA, or `None` for an unborn HEAD.
     pub fn head_id(&self) -> Option<String> {
-        self.gix.head_id().ok().map(|id| id.to_string())
+        self.gix.borrow().head_id().ok().map(|id| id.to_string())
     }
 
     /// Whether HEAD is detached (points directly at a commit).
     pub fn is_detached_head(&self) -> bool {
-        self.gix.head().map(|h| h.is_detached()).unwrap_or(false)
+        self.gix
+            .borrow()
+            .head()
+            .map(|h| h.is_detached())
+            .unwrap_or(false)
     }
 
     /// Current branch name (`None` for detached or unborn HEAD).
     pub fn current_branch(&self) -> Option<String> {
-        let head = self
-            .gix
+        let repo = self.gix.borrow();
+        let head = repo
             .head()
             .map_err(|e| {
                 debug!(error = %e, "could not read HEAD");
@@ -582,13 +610,17 @@ impl GitRepo {
 
     /// Whether the working directory is a linked worktree.
     pub fn in_worktree(&self) -> bool {
-        self.gix.worktree().is_some_and(|wt| !wt.is_main())
+        self.gix.borrow().worktree().is_some_and(|wt| !wt.is_main())
     }
 
     /// Base repository root when inside a worktree.
     pub fn base_repo_root(&self) -> Option<PathBuf> {
         if self.in_worktree() {
-            self.gix.common_dir().parent().map(Path::to_path_buf)
+            self.gix
+                .borrow()
+                .common_dir()
+                .parent()
+                .map(Path::to_path_buf)
         } else {
             None
         }
@@ -596,7 +628,7 @@ impl GitRepo {
 
     /// Organization and repository name parsed from the preferred remote URL.
     pub fn org_and_repo(&self) -> (Option<String>, Option<String>) {
-        let remotes = super::remote_refresh::get_remotes(&self.gix, false);
+        let remotes = super::remote_refresh::get_remotes(&self.gix.borrow(), false);
         preferred_remote(&remotes)
             .and_then(|r| r.url.as_deref())
             .map(parse_org_repo)
@@ -605,25 +637,31 @@ impl GitRepo {
 
     /// File-level working tree status (staged, modified, untracked).
     pub fn file_changes(&self) -> Result<Vec<FileChange>> {
-        let (_status, changes) = super::status::get_repo_status_with_changes(&self.gix, false)?;
+        let (_status, changes) =
+            super::status::get_repo_status_with_changes(&self.gix.borrow(), false)?;
         Ok(changes)
     }
 
     /// Aggregated working tree status.
     pub fn repo_status(&self) -> Result<RepoStatus> {
-        let (status, _changes) = super::status::get_repo_status_with_changes(&self.gix, false)?;
+        let (status, _changes) =
+            super::status::get_repo_status_with_changes(&self.gix.borrow(), false)?;
         Ok(status)
     }
 
     /// Recent commits from HEAD.
     pub fn recent_commits(&self, count: usize) -> Vec<CommitInfo> {
         let decorations = self.ref_decorations();
-        super::discovery::get_recent_commits_with_decorations(&self.gix, count, Some(&*decorations))
+        super::discovery::get_recent_commits_with_decorations(
+            &self.gix.borrow(),
+            count,
+            Some(&*decorations),
+        )
     }
 
     /// Configured remotes.
     pub fn remotes(&self, include_details: bool) -> Vec<RemoteInfo> {
-        super::remote_refresh::get_remotes(&self.gix, include_details)
+        super::remote_refresh::get_remotes(&self.gix.borrow(), include_details)
     }
 
     /// Linked worktrees.
@@ -635,26 +673,51 @@ impl GitRepo {
     /// is enforced for every worktree; failures are propagated rather than
     /// silently omitted.
     pub fn worktrees(&self) -> Result<HashMap<String, WorktreeInfo>> {
-        super::remote_refresh::get_worktrees(&self.gix)
+        self.ensure_cache();
+        super::remote_refresh::get_worktrees(&self.gix.borrow())
     }
 
     /// Git user configuration.
     pub fn config(&self) -> GitConfig {
         self.config_cache
-            .get_or_init(|| super::remote_refresh::get_git_config(&self.gix))
+            .get_or_init(|| super::remote_refresh::get_git_config(&self.gix.borrow()))
             .clone()
     }
 
     /// Local branch information.
+    ///
+    /// Errors are suppressed: corrupt or unreadable repositories report empty
+    /// branch lists. For error propagation, use [`Self::try_branches`].
     pub fn branches(&self) -> Vec<LocalBranchInfo> {
+        self.try_branches().unwrap_or_default()
+    }
+
+    /// Fallible local branch information.
+    ///
+    /// Propagates permission, I/O, and corruption failures as
+    /// [`SniffError::Git`] rather than suppressing them.
+    pub fn try_branches(&self) -> Result<Vec<LocalBranchInfo>> {
+        self.ensure_cache();
         let current = self.current_branch();
-        super::remote_refresh::get_local_branches(&self.gix, current.as_deref())
+        super::remote_refresh::get_local_branches_fallible(&self.gix.borrow(), current.as_deref())
     }
 
     /// Per-remote tracking status (ahead/behind).
+    ///
+    /// Errors are suppressed: corrupt or unreadable repositories report empty
+    /// tracking lists. For error propagation, use [`Self::try_tracking_status`].
     pub fn tracking_status(&self) -> Vec<RemoteTrackingStatus> {
+        self.try_tracking_status().unwrap_or_default()
+    }
+
+    /// Fallible per-remote tracking status.
+    ///
+    /// Propagates permission, I/O, and corruption failures as
+    /// [`SniffError::Git`] rather than suppressing them.
+    pub fn try_tracking_status(&self) -> Result<Vec<RemoteTrackingStatus>> {
+        self.ensure_cache();
         let current = self.current_branch();
-        super::remote_refresh::get_tracking_status(&self.gix, current.as_deref())
+        super::remote_refresh::get_tracking_status_fallible(&self.gix.borrow(), current.as_deref())
     }
 
     /// Full detection — equivalent to `detect_git()` but reuses
@@ -691,21 +754,25 @@ impl GitRepo {
         let is_minimal = request.is_minimal();
 
         if request.refresh_remote_tracking {
-            super::remote_refresh::refresh_remote_tracking_refs(&self.gix, 2);
+            super::remote_refresh::refresh_remote_tracking_refs(&self.gix.borrow(), 2);
         }
 
         let mut recent = if request.commit_count > 0 {
-            super::discovery::get_recent_commits(&self.gix, request.commit_count)
+            self.ensure_cache();
+            super::discovery::get_recent_commits(&self.gix.borrow(), request.commit_count)
         } else {
             Vec::new()
         };
 
         let (mut status, file_changes) = if request.include_file_changes {
-            super::status::get_repo_status_with_changes(&self.gix, request.include_file_diffs)?
+            super::status::get_repo_status_with_changes(
+                &self.gix.borrow(),
+                request.include_file_diffs,
+            )?
         } else if is_minimal {
             // minimal()/summary() only render the dirty flag — short-circuit on
             // the first change instead of counting every file.
-            let is_dirty = super::status::is_repo_dirty(&self.gix)?;
+            let is_dirty = super::status::is_repo_dirty(&self.gix.borrow())?;
             let status = RepoStatus {
                 is_dirty,
                 staged_count: 0,
@@ -718,7 +785,7 @@ impl GitRepo {
             (status, Vec::new())
         } else {
             let (is_dirty, staged, unstaged, untracked) =
-                super::status::get_repo_status_counts_detailed(&self.gix)?;
+                super::status::get_repo_status_counts_detailed(&self.gix.borrow())?;
             let status = RepoStatus {
                 is_dirty,
                 staged_count: staged,
@@ -739,13 +806,17 @@ impl GitRepo {
         let wants_metadata = request.wants_repo_metadata();
 
         let remotes = if wants_metadata {
-            super::remote_refresh::get_remotes(&self.gix, request.include_remote_branch_details)
+            super::remote_refresh::get_remotes(
+                &self.gix.borrow(),
+                request.include_remote_branch_details,
+            )
         } else {
             Vec::new()
         };
 
         let worktrees = if request.include_worktrees {
-            super::remote_refresh::get_worktrees(&self.gix)?
+            self.ensure_cache();
+            super::remote_refresh::get_worktrees(&self.gix.borrow())?
         } else {
             HashMap::new()
         };
@@ -757,13 +828,13 @@ impl GitRepo {
         };
 
         let branches = if wants_metadata {
-            super::remote_refresh::get_local_branches(&self.gix, current_branch.as_deref())
+            self.try_branches()?
         } else {
             Vec::new()
         };
 
         let tracking = if wants_metadata {
-            super::remote_refresh::get_tracking_status(&self.gix, current_branch.as_deref())
+            self.try_tracking_status()?
         } else {
             Vec::new()
         };
@@ -771,8 +842,9 @@ impl GitRepo {
         if request.refresh_remote_tracking {
             status.is_behind = super::remote_refresh::summarize_behind_status(&tracking);
             if request.include_commit_remote_containment {
+                self.ensure_cache();
                 super::remote_refresh::populate_recent_commit_remotes(
-                    &self.gix,
+                    &self.gix.borrow(),
                     &mut recent,
                     request.max_remote_branches,
                 );

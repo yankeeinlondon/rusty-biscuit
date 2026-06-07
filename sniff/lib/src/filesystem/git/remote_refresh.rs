@@ -12,8 +12,8 @@ use tracing::{debug, warn};
 
 use super::discovery::resolve_base_branch;
 use super::status::get_repo_status_counts;
-use crate::SniffError;
 use super::types::*;
+use crate::SniffError;
 
 /// gix equivalent of git2's `graph_ahead_behind`: `(commits reachable from
 /// `local` but not `upstream`, commits reachable from `upstream` but not
@@ -39,6 +39,7 @@ fn count_reachable_excluding(
     let walk = repo
         .rev_walk(Some(tip))
         .with_hidden(Some(hide))
+        .use_commit_graph(Some(true))
         .all()
         .map_err(|e| SniffError::git("revwalk", e))?;
     let mut count = 0;
@@ -137,9 +138,7 @@ fn platform_extra_system_config_path() -> Option<&'static std::path::Path> {
     None
 }
 
-fn extra_system_config_at(
-    path: Option<&std::path::Path>,
-) -> Option<gix::config::File<'static>> {
+fn extra_system_config_at(path: Option<&std::path::Path>) -> Option<gix::config::File<'static>> {
     let path = path?;
     if !path.exists() {
         return None;
@@ -147,26 +146,25 @@ fn extra_system_config_at(
     gix::config::File::from_path_no_includes(path.to_path_buf(), gix::config::Source::System).ok()
 }
 
-/// Gets all local branches with commit hashes and ahead/behind counts.
+/// Fallible local branch enumeration.
 ///
-/// For each branch, resolves the tip commit's short hash and computes
-/// ahead/behind relative to the current branch's HEAD. The current branch
-/// itself gets ahead=0, behind=0.
-pub(crate) fn get_local_branches(
+/// Propagates ref-store, ref-iteration, and peel failures as
+/// [`SniffError::Git`] rather than returning empty or partial data.
+pub(crate) fn get_local_branches_fallible(
     repo: &gix::Repository,
     current_branch: Option<&str>,
-) -> Vec<LocalBranchInfo> {
+) -> crate::Result<Vec<LocalBranchInfo>> {
     let mut branches = Vec::new();
 
     // HEAD commit OID for ahead/behind calculations.
     let head_oid = repo.head_id().ok().map(|id| id.detach());
 
-    let Ok(platform) = repo.references() else {
-        return branches;
-    };
-    let Ok(iter) = platform.local_branches() else {
-        return branches;
-    };
+    let platform = repo
+        .references()
+        .map_err(|e| SniffError::git("references", e))?;
+    let iter = platform
+        .local_branches()
+        .map_err(|e| SniffError::git("local_branches", e))?;
 
     for reference in iter.flatten() {
         let full = reference.name().as_bstr().to_str_lossy().into_owned();
@@ -178,18 +176,19 @@ pub(crate) fn get_local_branches(
 
         // Tip commit of the branch (peeling through annotated tags is a no-op
         // for a branch ref, but keeps behavior uniform).
-        let tip = reference.into_fully_peeled_id().ok().map(|id| id.detach());
+        let tip = reference
+            .into_fully_peeled_id()
+            .map_err(|e| SniffError::git("peel", e))?
+            .detach();
 
-        let short_hash = tip
-            .map(|oid| {
-                let id = oid.to_string();
-                id[..8.min(id.len())].to_string()
-            })
-            .unwrap_or_default();
+        let short_hash = {
+            let id = tip.to_string();
+            id[..8.min(id.len())].to_string()
+        };
 
-        let (ahead, behind) = match (is_current, tip, head_oid) {
+        let (ahead, behind) = match (is_current, Some(tip), head_oid) {
             (true, _, _) => (0, 0),
-            (false, Some(tip), Some(head)) => ahead_behind(repo, tip, head).unwrap_or((0, 0)),
+            (false, Some(tip), Some(head)) => ahead_behind(repo, tip, head)?,
             _ => (0, 0),
         };
 
@@ -201,37 +200,30 @@ pub(crate) fn get_local_branches(
         });
     }
 
-    branches
+    Ok(branches)
 }
 
-/// Gets tracking status (ahead/behind) for each remote.
+/// Fallible tracking status enumeration.
 ///
-/// `ahead` is push-relevant: it counts commits reachable from the local
-/// branch that are not reachable from **any** `refs/remotes/<remote>/*`
-/// ref. This matches what `git push` would actually transmit, so a
-/// merge-forward from `origin/main` into a feature branch is not
-/// double-counted when `origin/<branch>` happens to be stale.
-///
-/// `behind` is the standard graph count: commits reachable from
-/// `refs/remotes/<remote>/<branch>` that the local branch does not yet
-/// have.
-pub(crate) fn get_tracking_status(
+/// Propagates ref-store, ref-iteration, and peel failures as
+/// [`SniffError::Git`] rather than returning empty or partial data.
+pub(crate) fn get_tracking_status_fallible(
     repo: &gix::Repository,
     current_branch: Option<&str>,
-) -> Vec<RemoteTrackingStatus> {
+) -> crate::Result<Vec<RemoteTrackingStatus>> {
     let mut tracking = Vec::new();
 
     let Some(branch_name) = current_branch else {
-        return tracking;
+        return Ok(tracking);
     };
 
-    let Ok(local_ref) = repo.find_reference(&format!("refs/heads/{branch_name}")) else {
-        return tracking;
-    };
-    let Ok(local_id) = local_ref.into_fully_peeled_id() else {
-        return tracking;
-    };
-    let local = local_id.detach();
+    let local_ref = repo
+        .find_reference(&format!("refs/heads/{branch_name}"))
+        .map_err(|e| SniffError::git("find_reference", e))?;
+    let local = local_ref
+        .into_fully_peeled_id()
+        .map_err(|e| SniffError::git("peel", e))?
+        .detach();
 
     for remote_name in repo.remote_names() {
         let remote_name = remote_name.to_string();
@@ -245,8 +237,8 @@ pub(crate) fn get_tracking_status(
         let remote = remote_id.detach();
 
         // behind: commits on the remote-tracking branch the local does not have.
-        let behind = count_reachable_excluding(repo, remote, local).unwrap_or(0);
-        let ahead = push_relevant_ahead(repo, local, &remote_name).unwrap_or(0);
+        let behind = count_reachable_excluding(repo, remote, local)?;
+        let ahead = push_relevant_ahead(repo, local, &remote_name)?;
 
         tracking.push(RemoteTrackingStatus {
             remote: remote_name,
@@ -255,7 +247,7 @@ pub(crate) fn get_tracking_status(
         });
     }
 
-    tracking
+    Ok(tracking)
 }
 
 /// Count commits reachable from `local` that are not reachable from any
@@ -286,6 +278,7 @@ fn push_relevant_ahead(
     let walk = repo
         .rev_walk(Some(local))
         .with_hidden(hidden)
+        .use_commit_graph(Some(true))
         .all()
         .map_err(|e| SniffError::git("revwalk", e))?;
     let mut count = 0;
@@ -461,6 +454,7 @@ pub(crate) fn populate_recent_commit_remotes(
             .sorting(gix::revision::walk::Sorting::ByCommitTime(
                 gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
             ))
+            .use_commit_graph(Some(true))
             .all()
         else {
             continue;
@@ -596,7 +590,9 @@ pub(crate) fn get_worktrees(
 ) -> crate::Result<HashMap<String, WorktreeInfo>> {
     use rayon::prelude::*;
 
-    let proxies = repo.worktrees().map_err(|e| SniffError::git("worktrees", e))?;
+    let proxies = repo
+        .worktrees()
+        .map_err(|e| SniffError::git("worktrees", e))?;
 
     // Base branch name and tip for ahead/behind: the main worktree's HEAD,
     // falling back to "main"/"master".
@@ -608,7 +604,9 @@ pub(crate) fn get_worktrees(
     let mut worktree_paths: Vec<(String, PathBuf)> = Vec::new();
     for proxy in proxies {
         let name = proxy.id().to_str_lossy().into_owned();
-        let path = proxy.base().map_err(|e| SniffError::git("worktree_base", e))?;
+        let path = proxy
+            .base()
+            .map_err(|e| SniffError::git("worktree_base", e))?;
         worktree_paths.push((name, path));
     }
 
@@ -621,7 +619,8 @@ pub(crate) fn get_worktrees(
         .par_iter()
         .map(|(name, worktree_path)| {
             let base = base_sync.to_thread_local();
-            let worktree_repo = super::open::trusted_open(worktree_path)?;
+            let mut worktree_repo = super::open::trusted_open(worktree_path)?;
+            super::open::configure_cache(&mut worktree_repo);
 
             let branch = worktree_repo
                 .head_name()
@@ -996,7 +995,8 @@ mod tests {
         let b = commit_detached_at(&repo, "b.txt", "b", "b", &[a], 100);
 
         // Point HEAD at B so the walk starts from the remote tip.
-        repo.reference("refs/heads/main", b, true, "set main").unwrap();
+        repo.reference("refs/heads/main", b, true, "set main")
+            .unwrap();
         repo.set_head("refs/heads/main").unwrap();
 
         // Fake remote pointing at B.
@@ -1118,7 +1118,10 @@ mod tests {
                 path.to_path_buf(),
                 gix::config::Source::System,
             );
-            assert!(file.is_ok(), "Git for Windows gitconfig must parse when present");
+            assert!(
+                file.is_ok(),
+                "Git for Windows gitconfig must parse when present"
+            );
         } else {
             assert!(
                 extra_system_config().is_none(),
@@ -1209,13 +1212,9 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[test]
     fn extra_system_config_fallback_reads_all_12_keys() {
-        // Isolate from the host's global gitconfig so the extra-system fallback
-        // is the only source for these keys.
-        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = ENV_LOCK.lock().unwrap();
-
         let dir = TempDir::new().unwrap();
         let repo = Repository::init(dir.path()).unwrap();
         let sig = git2::Signature::now("Test", "test@example.com").unwrap();
@@ -1257,30 +1256,22 @@ mod tests {
         )
         .unwrap();
 
-        // Point HOME to an empty directory and GIT_CONFIG_GLOBAL to a nonexistent
-        // file so gix sees no system/global config.
+        // Isolate from host config: point HOME to an empty directory,
+        // GIT_CONFIG_GLOBAL to a nonexistent file, and GIT_CONFIG_SYSTEM to an
+        // empty file so gix sees no system/global config.
         let fake_home = TempDir::new().unwrap();
-        let original_home = std::env::var_os("HOME");
-        let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
-        unsafe {
-            std::env::set_var("HOME", fake_home.path());
-            std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
-        }
+        let empty_system = fake_home.path().join("system.gitconfig");
+        std::fs::write(&empty_system, "").unwrap();
+
+        let _home_guard = test_toolkit::EnvGuard::set_safe("HOME", fake_home.path());
+        let _global_guard = test_toolkit::EnvGuard::set_safe("GIT_CONFIG_GLOBAL", "/dev/null");
+        let _system_guard = test_toolkit::EnvGuard::set_safe("GIT_CONFIG_SYSTEM", &empty_system);
 
         let gix_repo = gix::open(repo.workdir().unwrap()).unwrap();
         let file = extra_system_config_at(Some(&extra_path));
         assert!(file.is_some());
 
         let config = get_git_config_with_extra(&gix_repo, file);
-
-        match original_home {
-            Some(h) => unsafe { std::env::set_var("HOME", h) },
-            None => unsafe { std::env::remove_var("HOME") },
-        }
-        match original_global {
-            Some(g) => unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", g) },
-            None => unsafe { std::env::remove_var("GIT_CONFIG_GLOBAL") },
-        }
 
         assert_eq!(config.user_name.as_deref(), Some("Extra Name"));
         assert_eq!(config.user_email.as_deref(), Some("extra@sniff.test"));
@@ -1355,7 +1346,14 @@ mod tests {
         let tree_id = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
         let second = repo
-            .commit(Some("HEAD"), &sig, &sig, "Second", &tree, &[&repo.find_commit(initial).unwrap()])
+            .commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "Second",
+                &tree,
+                &[&repo.find_commit(initial).unwrap()],
+            )
             .unwrap();
 
         // Corrupt the initial commit object (make writable first — git creates
@@ -1412,7 +1410,14 @@ mod tests {
         let tree_id = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
         let second = repo
-            .commit(Some("HEAD"), &sig, &sig, "Second", &tree, &[&repo.find_commit(initial).unwrap()])
+            .commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "Second",
+                &tree,
+                &[&repo.find_commit(initial).unwrap()],
+            )
             .unwrap();
 
         // Corrupt the initial commit object so merge-base cannot read it.
@@ -1490,6 +1495,80 @@ mod tests {
         assert!(
             result.is_err(),
             "corrupt object must cause merge-conflict probe to return an error, not false"
+        );
+    }
+
+    #[test]
+    fn corrupt_ref_branch_enumeration_propagates_error() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "content\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial", &tree, &[])
+            .unwrap();
+
+        // Corrupt the packed-refs file (if any) by creating a malformed one
+        // that gix will fail to parse when listing refs.
+        let packed_refs = dir.path().join(".git").join("packed-refs");
+        std::fs::write(
+            &packed_refs,
+            "# pack-refs with: peeled fully-peeled\n^garbage\n",
+        )
+        .unwrap();
+
+        let gix_repo = gix::open(dir.path()).unwrap();
+        let result = get_local_branches_fallible(&gix_repo, Some("main"));
+        assert!(
+            result.is_err(),
+            "corrupt refs must cause branch enumeration to return an error, not empty vec"
+        );
+    }
+
+    #[test]
+    fn corrupt_ref_tracking_status_propagates_error() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "content\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial", &tree, &[])
+            .unwrap();
+
+        // Set up a remote-tracking ref so tracking status has something to query.
+        repo.reference(
+            "refs/remotes/origin/main",
+            repo.head().unwrap().target().unwrap(),
+            false,
+            "remote",
+        )
+        .unwrap();
+
+        // Corrupt the packed-refs file to break ref iteration.
+        let packed_refs = dir.path().join(".git").join("packed-refs");
+        std::fs::write(
+            &packed_refs,
+            "# pack-refs with: peeled fully-peeled\n^garbage\n",
+        )
+        .unwrap();
+
+        let gix_repo = gix::open(dir.path()).unwrap();
+        let result = get_tracking_status_fallible(&gix_repo, Some("main"));
+        assert!(
+            result.is_err(),
+            "corrupt refs must cause tracking status to return an error, not empty vec"
         );
     }
 }
