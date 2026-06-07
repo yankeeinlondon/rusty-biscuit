@@ -145,9 +145,10 @@ and proving equal-or-better performance against a same-host Criterion baseline.
     baseline. The `just bench -- ...` wrapper mangles the positional filter
     (quoting quirk); the working invocation is
     `cargo bench -p sniff --bench perf -- --save-baseline git2 git_ops`
-    (verified). Committed numbers used reduced sampling
-    (`--measurement-time 3 --warm-up-time 1 --sample-size 10`) on a shared
-    host; high-variance rows are flagged in `baselines/git2.md`.
+    (verified). Both `git2` and `gix` baselines were ultimately recaptured
+    back-to-back on the same host with identical bench-harness sampling (no CLI
+    overrides); the final no-regression comparison lives in `baselines/gix.md`
+    and shows every `git_ops` ID faster under `gix` (p < 0.05).
 - [x] Create `baselines/git2.md` containing each benchmark's lower, estimate,
   and upper timing plus OS, CPU, Rust version, Git commit, power mode, and any
   benchmark whose confidence interval exceeds +/-10%.
