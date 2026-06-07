@@ -2278,25 +2278,55 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
             decls.push(css);
         }
     }
-    // Validated `inline_style` (browser-only author CSS, already merged over
-    // frontmatter defaults upstream) lowers last so its declarations win over
-    // the derived `Layout` / `Style` CSS in source order — a single `style`
-    // attribute, never a second conflicting one. It is a validated
-    // `CssStyle`, so no unparsed CSS can be injected here.
-    if let Some(browser) = attrs.browser_ref()
-        && let Some(inline_style) = &browser.inline_style
-    {
-        decls.extend(css_style_declarations(inline_style));
-    }
     if needs_content_box {
         // Prepend so the contract is set before the width/padding it governs.
         decls.insert(0, "box-sizing:content-box".into());
+    }
+    // Validated `inline_style` (browser-only author CSS, already merged over
+    // frontmatter defaults upstream) is the author's per-node intent: it
+    // *replaces* the derived `Layout` / `Style` declaration for any property it
+    // sets, then its remaining declarations append last. Replacing — rather than
+    // appending a shadowing duplicate — keeps the overridden frontmatter value
+    // out of the attribute entirely (the spec's per-node-wins contract). Derived
+    // declarations whose property `inline_style` does not set are untouched, so
+    // intentional internal pairs (e.g. an explicit margin plus an `auto`
+    // centering margin) are preserved. It is a validated `CssStyle`, so no
+    // unparsed CSS can be injected here.
+    let inline_decls: Vec<String> = attrs
+        .browser_ref()
+        .and_then(|browser| browser.inline_style.as_ref())
+        .map(css_style_declarations)
+        .unwrap_or_default();
+    if !inline_decls.is_empty() {
+        let overridden: std::collections::HashSet<String> =
+            inline_decls.iter().map(|d| css_property_of(d)).collect();
+        let mut merged: Vec<String> = decls
+            .into_iter()
+            .flat_map(|group| {
+                group
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|decl| !overridden.contains(&css_property_of(decl)))
+            .collect();
+        merged.extend(inline_decls);
+        decls = merged;
     }
     if !decls.is_empty() {
         out.push(HtmlAttribute::Other("style".into(), decls.join(";")));
     }
     push_browser_attributes(&mut out, attrs);
     out
+}
+
+/// The property name of a `name:value` CSS declaration (the text before the
+/// first `:`, trimmed). Used to let a validated `inline_style` override the
+/// derived `Layout` / `Style` declaration for the same property.
+fn css_property_of(decl: &str) -> String {
+    decl.split(':').next().unwrap_or("").trim().to_string()
 }
 
 /// Lowers a validated [`CssStyle`](crate::stylesheet::CssStyle) to compact
