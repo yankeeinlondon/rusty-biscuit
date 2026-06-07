@@ -118,8 +118,11 @@ fn get_git_config_with_extra(
 /// Parse the platform-specific system gitconfig that gix's standard search does
 /// not include, for use as a lowest-precedence fallback.
 fn extra_system_config() -> Option<gix::config::File<'static>> {
-    static CACHE: std::sync::OnceLock<Option<gix::config::File<'static>>> = std::sync::OnceLock::new();
-    CACHE.get_or_init(|| extra_system_config_at(platform_extra_system_config_path())).clone()
+    static CACHE: std::sync::OnceLock<Option<gix::config::File<'static>>> =
+        std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| extra_system_config_at(platform_extra_system_config_path()))
+        .clone()
 }
 
 #[cfg(target_os = "macos")]
