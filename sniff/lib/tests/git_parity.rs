@@ -20,7 +20,7 @@ use tempfile::TempDir;
 use sniff::SniffError;
 use sniff::filesystem::detect_git_with_request;
 use sniff::filesystem::git::{
-    DeltaKind, FileAction, FileStatus, GitHostingProvider, GitRepo, get_commit_files,
+    DeltaKind, FileAction, FileStatus, GitHostingProvider, GitRepo, RefKind, get_commit_files,
     merge_conflicts_at,
 };
 use sniff::request::GitRequest;
@@ -514,6 +514,49 @@ fn cli_facing_apis_surface_open_failure_instead_of_absence() {
         sniff::filesystem::commits_for_branch_at(p, "main", 5).is_err(),
         "commits_for_branch_at"
     );
+}
+
+#[test]
+fn ref_decorations_match_git2_for_branches_and_tags() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+
+    // A second local branch and a lightweight tag, both at HEAD.
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("feature", &head, false).unwrap();
+    repo.tag_lightweight("v1.0", head.as_object(), false)
+        .unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let commits = handle.recent_commits(2);
+    let head_sha = head.id().to_string();
+    let head_commit = commits
+        .iter()
+        .find(|c| c.sha == head_sha)
+        .expect("HEAD commit present");
+
+    let names: Vec<&str> = head_commit.refs.iter().map(|r| r.name.as_str()).collect();
+    assert!(names.contains(&"main"), "got: {names:?}");
+    assert!(names.contains(&"feature"), "got: {names:?}");
+    assert!(names.contains(&"v1.0"), "got: {names:?}");
+
+    // The active branch is `main`, and it sorts first (HEAD decoration).
+    assert_eq!(head_commit.refs[0].name, "main");
+    let main = head_commit.refs.iter().find(|r| r.name == "main").unwrap();
+    assert!(main.is_head, "main should be the HEAD branch");
+    assert_eq!(main.kind, RefKind::LocalBranch);
+
+    let feature = head_commit
+        .refs
+        .iter()
+        .find(|r| r.name == "feature")
+        .unwrap();
+    assert!(!feature.is_head);
+    assert_eq!(feature.kind, RefKind::LocalBranch);
+
+    let tag = head_commit.refs.iter().find(|r| r.name == "v1.0").unwrap();
+    assert_eq!(tag.kind, RefKind::Tag);
+    assert!(!tag.is_head);
 }
 
 // ---------------------------------------------------------------------------
