@@ -153,10 +153,16 @@ pub fn render_browser_document(
 ) -> Result<Rendered<HtmlPage>, RenderError> {
     let mut writer = gate(&doc.root, opts)?;
 
-    // The document body is the root's children rendered as page fragments.
-    // A non-`Root` top-level node renders as a single wrapping fragment.
+    // The document body is the root's children rendered as page fragments. When
+    // the root carries a non-empty `Style` (e.g. a page-level foreground), it is
+    // rendered as its own wrapping `<div>` so the style is emitted and inherits
+    // to every descendant through CSS — otherwise the root style would be
+    // silently discarded. A non-`Root` top-level node always renders as a single
+    // wrapping fragment.
     let fragments = match &doc.root.kind {
-        NodeKind::Root { children } => writer.render_each(children)?,
+        NodeKind::Root { children } if root_style_is_empty(&doc.root) => {
+            writer.render_each(children)?
+        }
         _ => vec![writer.render(&doc.root)?],
     };
 
@@ -218,11 +224,12 @@ pub fn render_browser_document_html(
         buf: String::new(),
     };
 
-    // The body is the root's children streamed in order; a non-`Root`
-    // top-level node streams as a single wrapping element — mirroring
-    // `render_browser_document`'s body construction.
+    // The body is the root's children streamed in order; a styled root streams
+    // as its own wrapping `<div>` so a page-level style inherits to descendants,
+    // and a non-`Root` top-level node streams as a single wrapping element —
+    // mirroring `render_browser_document`'s body construction.
     match &doc.root.kind {
-        NodeKind::Root { children } => {
+        NodeKind::Root { children } if root_style_is_empty(&doc.root) => {
             for child in children {
                 writer.write(child)?;
             }
@@ -2087,6 +2094,15 @@ impl StreamWriter<'_> {
 /// without building fragments. An `<h1>` is produced by a depth-1
 /// [`NodeKind::Heading`] or by a depth-1 [`NodeKind::Section`]'s heading; the
 /// scan is document-order and descends container children.
+/// Whether the document root carries no renderable [`Style`](crate::style::Style).
+///
+/// When `true` the document folds emit the root's children directly as page
+/// fragments; when `false` the root is rendered as its own wrapping `<div>` so
+/// its style is emitted and inherits to every descendant.
+fn root_style_is_empty(root: &RenderNode) -> bool {
+    root.attrs.style_ref().is_none_or(|s| s.is_empty())
+}
+
 fn tree_first_h1_text(root: &RenderNode) -> Option<String> {
     match &root.kind {
         NodeKind::Heading { depth, children } if depth.get() == 1 => {
@@ -3778,6 +3794,62 @@ mod tests {
         let html = rendered.output.render();
         assert!(html.contains("<body><p>Body</p></body>"), "{html}");
         assert!(!html.contains("Ignored"), "{html}");
+    }
+
+    /// Builds a `Document` whose root carries a foreground `Style`.
+    fn doc_with_root_color() -> Document {
+        use crate::style::{PaintColor, PerMode, Style};
+        let mut root = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("Body")])]);
+        root.attrs.set_style(&Style {
+            color: Some(crate::layout::TargetValue::universal(PerMode::universal(
+                PaintColor::new(crate::color::Color::Tailwind(crate::color::Tailwind::Red500)),
+            ))),
+            ..Style::default()
+        });
+        Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root,
+        }
+    }
+
+    #[test]
+    fn document_root_foreground_wraps_body_for_inheritance() {
+        // Review-1 finding 3: a styled root must be rendered as a wrapping
+        // element so its foreground is emitted and inherits to descendants —
+        // not silently discarded. Both document folds must agree.
+        let doc = doc_with_root_color();
+        let opts = BrowserRenderOptions::default();
+
+        let via_page = render_browser_document(&doc, &opts)
+            .expect("render")
+            .output
+            .render();
+        let direct = render_browser_document_html(&doc, &opts)
+            .expect("render")
+            .output;
+
+        for (label, html) in [("fragment", &via_page), ("direct", &direct)] {
+            assert!(
+                html.contains("<body><div style=\"color:rgb(251, 44, 54)\"><p>Body</p></div></body>"),
+                "{label}: root foreground must wrap the body in an inheriting div; got:\n{html}"
+            );
+        }
+        assert_eq!(via_page, direct, "both folds must emit identical HTML");
+    }
+
+    #[test]
+    fn document_unstyled_root_emits_children_directly() {
+        // No-regression guard: an unstyled root still streams its children with
+        // no extra wrapping div.
+        let doc = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root: RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("Body")])]),
+        };
+        let opts = BrowserRenderOptions::default();
+        let html = render_browser_document_html(&doc, &opts).expect("render").output;
+        assert!(html.contains("<body><p>Body</p></body>"), "{html}");
     }
 
     // ── render_browser_document_html: direct document-string renderer ────────
