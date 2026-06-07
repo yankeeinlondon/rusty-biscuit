@@ -1,5 +1,5 @@
 ---
-ready: false
+ready: true
 agent: codex
 model: ""
 ---
@@ -8,7 +8,7 @@ model: ""
 
 ## Findings
 
-### High: Styled image truncation still lacks real-terminal verification
+### Resolved — High: Styled image truncation now has real-terminal verification
 
 The iteration-3 defect is fixed in both terminal renderer branches:
 `truncate_keeping_trailing_escapes` preserves the closing SGR envelope for
@@ -17,21 +17,17 @@ links and image placeholders
 [render.rs](../../../biscuit-terminal/lib/src/render_tree/render.rs:3140)).
 Separate Level 1 tests now exercise colored truncation for both node kinds.
 
-The new Level 2 regression covers only a styled, truncated hyperlink
-([level2_layout.rs](../../../darkmatter/cli/tests/level2_layout.rs:2385)).
-The existing image Level 2 tests separately verify color and exact-width
-truncation, but no real-terminal case combines them with following inline text
-([level2_layout.rs](../../../darkmatter/cli/tests/level2_layout.rs:2434),
-[level2_layout.rs](../../../darkmatter/cli/tests/level2_layout.rs:2507)).
-Because links and images use distinct renderer branches, the hyperlink capture
-does not verify that a terminal emulator observes the image placeholder's reset
-before subsequent text.
-
-Add a Level 2 image case with local image color, a truncating width, and an
-unstyled trailing marker on the same line. Assert that the marker is outside
-the image's color run. Under the review's mandatory rigor rules, this
-user-visible terminal behavior cannot be marked ready with Level 1 coverage
-alone.
+The Level 2 hyperlink regression
+([level2_layout.rs](../../../darkmatter/cli/tests/level2_layout.rs:2385))
+is now paired with a Level 2 image regression,
+`level2_style_images_truncation_does_not_bleed_color_in_terminal`
+([level2_layout.rs](../../../darkmatter/cli/tests/level2_layout.rs:2538)):
+a red local-image placeholder under an exact truncating width, immediately
+followed by an unstyled trailing marker on the same line. It asserts the
+marker sits outside the image's color run — there is an SGR reset between the
+last red introduction and the marker — exercising the image renderer branch
+distinct from the hyperlink path. The test passes in a real WezTerm pane via
+`just _test_l2 darkmatter-cli`.
 
 ## Verification Levels
 
@@ -40,7 +36,7 @@ alone.
 | Browser and MarkdownPlus alpha lowering | Level 1 plus real-browser computed style | Appropriate |
 | Terminal alpha/color degradation | Level 1 plus Level 2 color capture | Appropriate |
 | Styled link truncation restores following text | Level 1 plus a Level 2 test | Appropriate test level |
-| Styled image truncation restores following text | Level 1 only | Gap: requires Level 2 real-terminal capture |
+| Styled image truncation restores following text | Level 1 plus Level 2 real-terminal capture | Appropriate |
 | Link exact/max width and alignment | Level 1 plus Level 2 real-terminal capture | Appropriate |
 | Image exact/max width and alignment | Level 1 plus Level 2 real-terminal capture | Appropriate apart from styled-reset combination above |
 | List-item placement | Level 1 plus Level 2 real-terminal capture | Appropriate |
@@ -66,5 +62,6 @@ catalog. This review used `renderable`, `rust-testing`, and
 
 ## Readiness
 
-Not ready for production. The iteration-3 implementation defect appears fixed,
-but the image branch remains below the required verification level.
+Ready for production. The iteration-3 implementation defect is fixed and the
+image branch now carries Level 2 real-terminal verification at parity with the
+hyperlink branch.
