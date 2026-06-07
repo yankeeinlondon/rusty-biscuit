@@ -9,10 +9,11 @@
 use std::path::{Path, PathBuf};
 
 use super::discovery::{
-    DeltaKind, get_commit_by_sha, get_commit_files, get_commits_for_branch, get_commits_for_path,
+    DeltaKind, get_commit_by_sha_fallible, get_commit_files_fallible,
+    get_commits_for_branch_fallible, get_commits_for_path_fallible,
 };
 use super::open;
-use super::status::detect_merge_conflicts;
+use super::status::detect_merge_conflicts_fallible;
 use super::types::{CommitInfo, GitHostingProvider};
 use crate::Result;
 
@@ -53,7 +54,7 @@ pub fn commit_by_sha_at(path: &Path, sha: &str) -> Result<Option<CommitInfo>> {
     let Some(repo) = open_gix(path)? else {
         return Ok(None);
     };
-    Ok(get_commit_by_sha(&repo, sha))
+    get_commit_by_sha_fallible(&repo, sha, None)
 }
 
 /// Files changed by the commit with the given full `sha`, paired with the
@@ -70,7 +71,7 @@ pub fn commit_files_at(path: &Path, sha: &str) -> Result<Vec<(PathBuf, DeltaKind
     let Ok(oid) = gix::ObjectId::from_hex(sha.as_bytes()) else {
         return Ok(Vec::new());
     };
-    Ok(get_commit_files(&repo, oid))
+    get_commit_files_fallible(&repo, oid)
 }
 
 /// Recent commits touching `path_prefix`, newest first.
@@ -84,9 +85,10 @@ pub fn commits_for_path_at(
     path_prefix: &str,
     count: usize,
 ) -> Result<Vec<CommitInfo>> {
-    Ok(open_gix(path)?
-        .map(|repo| get_commits_for_path(&repo, path_prefix, count))
-        .unwrap_or_default())
+    let Some(repo) = open_gix(path)? else {
+        return Ok(Vec::new());
+    };
+    get_commits_for_path_fallible(&repo, path_prefix, count, None)
 }
 
 /// Recent commits on `branch`, newest first.
@@ -96,9 +98,10 @@ pub fn commits_for_path_at(
 /// Trust/ownership, permission, I/O, and corruption failures surface as
 /// [`SniffError::Git`].
 pub fn commits_for_branch_at(path: &Path, branch: &str, count: usize) -> Result<Vec<CommitInfo>> {
-    Ok(open_gix(path)?
-        .map(|repo| get_commits_for_branch(&repo, branch, count))
-        .unwrap_or_default())
+    let Some(repo) = open_gix(path)? else {
+        return Ok(Vec::new());
+    };
+    get_commits_for_branch_fallible(&repo, branch, count)
 }
 
 /// Paths of files in an unmerged (merge-conflict) state, empty when none.
@@ -108,9 +111,10 @@ pub fn commits_for_branch_at(path: &Path, branch: &str, count: usize) -> Result<
 /// Trust/ownership, permission, I/O, and corruption failures surface as
 /// [`SniffError::Git`]; genuine repository absence yields an empty list.
 pub fn merge_conflicts_at(path: &Path) -> Result<Vec<PathBuf>> {
-    Ok(open_gix(path)?
-        .map(|repo| detect_merge_conflicts(&repo))
-        .unwrap_or_default())
+    let Some(repo) = open_gix(path)? else {
+        return Ok(Vec::new());
+    };
+    detect_merge_conflicts_fallible(&repo)
 }
 
 /// Preferred remote URL for the repository: `origin` if present, otherwise the

@@ -170,7 +170,8 @@ pub(crate) fn get_local_branches_fallible(
         .local_branches()
         .map_err(|e| SniffError::git("local_branches", e))?;
 
-    for reference in iter.flatten() {
+    for reference in iter {
+        let reference = reference.map_err(|e| SniffError::git("local_branches", e))?;
         let full = reference.name().as_bstr().to_str_lossy().into_owned();
         let Some(name) = full.strip_prefix("refs/heads/") else {
             continue;
@@ -270,16 +271,20 @@ fn push_relevant_ahead(
     remote_name: &str,
 ) -> crate::Result<usize> {
     let prefix = format!("refs/remotes/{remote_name}/");
-    let hidden: Vec<gix::ObjectId> = match repo.references() {
-        Ok(platform) => match platform.prefixed(prefix.as_str()) {
-            Ok(iter) => iter
-                .flatten()
-                .filter_map(|r| r.into_fully_peeled_id().ok().map(|id| id.detach()))
-                .collect(),
-            Err(_) => Vec::new(),
-        },
-        Err(_) => Vec::new(),
-    };
+    let platform = repo
+        .references()
+        .map_err(|e| SniffError::git("references", e))?;
+    let iter = platform
+        .prefixed(prefix.as_str())
+        .map_err(|e| SniffError::git("prefixed", e))?;
+    let mut hidden: Vec<gix::ObjectId> = Vec::new();
+    for reference in iter {
+        let reference = reference.map_err(|e| SniffError::git("references", e))?;
+        let id = reference
+            .into_fully_peeled_id()
+            .map_err(|e| SniffError::git("peel", e))?;
+        hidden.push(id.detach());
+    }
 
     let walk = repo
         .rev_walk(Some(local))
@@ -1534,6 +1539,57 @@ mod tests {
         assert!(
             result.is_err(),
             "corrupt refs must cause branch enumeration to return an error, not empty vec"
+        );
+    }
+
+    #[test]
+    fn corrupt_ref_item_branch_enumeration_propagates_error() {
+        // A malformed loose ref: enumerating refs/heads succeeds, but reading
+        // this individual item fails *during iteration* (not at construction).
+        // The previous `iter.flatten()` silently dropped such items.
+        let (dir, repo) = setup_repo();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+
+        let bad_ref = dir.path().join(".git").join("refs").join("heads").join("bad");
+        std::fs::write(&bad_ref, "not-a-valid-ref\n").unwrap();
+
+        let gix_repo = open_gix(&dir);
+        let result = get_local_branches_fallible(&gix_repo, Some(&branch));
+        assert!(
+            result.is_err(),
+            "a ref item that fails during iteration must propagate, not be dropped"
+        );
+    }
+
+    #[test]
+    fn corrupt_remote_ref_peel_tracking_status_propagates_error() {
+        // The current branch and its origin tracking ref are valid, so the
+        // behind-count lookup succeeds and `push_relevant_ahead` is reached.
+        // A second remote-tracking ref points at a missing object: peeling it
+        // inside `push_relevant_ahead` must propagate rather than be swallowed
+        // into an empty hidden-ref set.
+        let (dir, repo) = setup_repo();
+        repo.remote("origin", "https://example.com/repo").unwrap();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let head = repo.head().unwrap().target().unwrap();
+        add_fake_remote(&repo, "origin", &branch, head);
+
+        let stale = dir
+            .path()
+            .join(".git")
+            .join("refs")
+            .join("remotes")
+            .join("origin")
+            .join("stale");
+        std::fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        // A syntactically valid SHA that names no object → peel fails.
+        std::fs::write(&stale, "1111111111111111111111111111111111111111\n").unwrap();
+
+        let gix_repo = open_gix(&dir);
+        let result = get_tracking_status_fallible(&gix_repo, Some(&branch));
+        assert!(
+            result.is_err(),
+            "a remote-ref peel failure inside push_relevant_ahead must propagate"
         );
     }
 

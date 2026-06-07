@@ -179,11 +179,11 @@ impl SniffError {
     /// the backend error as its source.
     pub(crate) fn git(
         operation: &'static str,
-        source: impl std::error::Error + Send + Sync + 'static,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     ) -> Self {
         SniffError::Git {
             operation,
-            source: Box::new(source),
+            source: source.into(),
         }
     }
 }

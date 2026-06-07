@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
 
-use crate::Result;
 use crate::request::GitRequest;
+use crate::{Result, SniffError};
 
 use super::types::*;
 
@@ -34,9 +34,24 @@ pub fn detect_git_with_request(path: &Path, request: &GitRequest) -> Result<Opti
 /// Collects all refs (branches, remote tracking, tags) pointing to each commit.
 ///
 /// Returns a HashMap from commit OID to a vector of ref decorations.
+///
+/// Errors are suppressed: corrupt or unreadable ref stores yield an empty map.
+/// For error propagation, use [`collect_ref_decorations_fallible`].
 pub(crate) fn collect_ref_decorations(
     repo: &gix::Repository,
 ) -> HashMap<gix::ObjectId, Vec<RefDecoration>> {
+    collect_ref_decorations_fallible(repo).unwrap_or_default()
+}
+
+/// Fallible variant of [`collect_ref_decorations`].
+///
+/// Propagates ref-store, ref-iteration, and peel failures as [`SniffError::Git`]
+/// rather than returning a partial or empty map. The HEAD lookup that marks the
+/// active branch stays best-effort: a detached or unreadable HEAD simply leaves
+/// no decoration flagged as `is_head`.
+pub(crate) fn collect_ref_decorations_fallible(
+    repo: &gix::Repository,
+) -> Result<HashMap<gix::ObjectId, Vec<RefDecoration>>> {
     let mut decorations: HashMap<gix::ObjectId, Vec<RefDecoration>> = HashMap::new();
 
     // Short name of the branch HEAD points to (None when HEAD is detached), so
@@ -51,21 +66,20 @@ pub(crate) fn collect_ref_decorations(
         .flatten()
         .map(|full| full.shorten().to_string());
 
-    let Ok(platform) = repo.references() else {
-        return decorations;
-    };
-    let Ok(iter) = platform.all() else {
-        return decorations;
-    };
+    let platform = repo
+        .references()
+        .map_err(|e| SniffError::git("references", e))?;
+    let iter = platform.all().map_err(|e| SniffError::git("references", e))?;
 
-    for reference in iter.flatten() {
+    for reference in iter {
+        let reference = reference.map_err(|e| SniffError::git("references", e))?;
         let full_name = reference.name().as_bstr().to_string();
 
         // Peel through annotated tags to the commit the ref ultimately names.
-        let Ok(id) = reference.into_fully_peeled_id() else {
-            continue;
-        };
-        let oid = id.detach();
+        let oid = reference
+            .into_fully_peeled_id()
+            .map_err(|e| SniffError::git("peel", e))?
+            .detach();
 
         // Determine ref kind and display name
         let (kind, display_name) = if let Some(branch) = full_name.strip_prefix("refs/heads/") {
@@ -111,7 +125,7 @@ pub(crate) fn collect_ref_decorations(
         });
     }
 
-    decorations
+    Ok(decorations)
 }
 
 /// Gets the last N commits from HEAD using a gix revwalk.
@@ -262,49 +276,69 @@ impl DeltaKind {
 /// then peels to a commit and builds a `CommitInfo` with ref decorations.
 ///
 /// Returns `None` if the SHA doesn't resolve to a valid commit.
+///
+/// Errors are suppressed: a corrupt object or ref store also yields `None`. For
+/// error propagation, use [`get_commit_by_sha_fallible`].
 pub fn get_commit_by_sha(repo: &gix::Repository, sha_prefix: &str) -> Option<CommitInfo> {
     get_commit_by_sha_with_decorations(repo, sha_prefix, None)
 }
 
 /// Look up a single commit by SHA with optional pre-computed ref decorations.
+///
+/// Errors are suppressed; see [`get_commit_by_sha_fallible`] for the fallible
+/// variant.
 pub(crate) fn get_commit_by_sha_with_decorations(
     repo: &gix::Repository,
     sha_prefix: &str,
     ref_decorations: Option<&HashMap<gix::ObjectId, Vec<RefDecoration>>>,
 ) -> Option<CommitInfo> {
-    let id = repo
-        .rev_parse_single(sha_prefix)
-        .map_err(|e| {
-            debug!(sha = sha_prefix, error = %e, "could not resolve SHA");
-            e
-        })
-        .ok()?;
-    let commit = id
-        .object()
-        .map_err(|e| {
-            debug!(sha = sha_prefix, error = %e, "could not resolve object");
-            e
-        })
-        .ok()?
-        .into_commit();
+    get_commit_by_sha_fallible(repo, sha_prefix, ref_decorations)
+        .ok()
+        .flatten()
+}
 
-    let decorations = ref_decorations
-        .cloned()
-        .unwrap_or_else(|| collect_ref_decorations(repo));
+/// Fallible variant of [`get_commit_by_sha`].
+///
+/// `Ok(None)` covers the legitimately-empty cases: a SHA that does not resolve
+/// to any object, or one that names a non-commit. Object-decode, author, time,
+/// message, and ref-decoration failures propagate as [`SniffError::Git`] rather
+/// than collapsing into "commit not found".
+pub(crate) fn get_commit_by_sha_fallible(
+    repo: &gix::Repository,
+    sha_prefix: &str,
+    ref_decorations: Option<&HashMap<gix::ObjectId, Vec<RefDecoration>>>,
+) -> Result<Option<CommitInfo>> {
+    // A SHA that does not resolve is "no commit matches" — Ok(None).
+    let Ok(id) = repo.rev_parse_single(sha_prefix) else {
+        debug!(sha = sha_prefix, "could not resolve SHA");
+        return Ok(None);
+    };
+    let object = id.object().map_err(|e| SniffError::git("object", e))?;
+    // A SHA naming a tree/blob is "no commit matches", not corruption.
+    let Ok(commit) = object.try_into_commit() else {
+        return Ok(None);
+    };
+
+    let decorations = match ref_decorations {
+        Some(d) => d.clone(),
+        None => collect_ref_decorations_fallible(repo)?,
+    };
     let oid = id.detach();
     let refs = decorations.get(&oid).cloned().unwrap_or_default();
 
-    let author = commit.author().ok()?;
-    let time = commit.time().ok()?;
-    let message = commit.message_raw().ok()?;
-    Some(CommitInfo {
+    let author = commit.author().map_err(|e| SniffError::git("author", e))?;
+    let time = commit.time().map_err(|e| SniffError::git("commit_time", e))?;
+    let message = commit
+        .message_raw()
+        .map_err(|e| SniffError::git("message", e))?;
+    Ok(Some(CommitInfo {
         sha: oid.to_string(),
         message: String::from_utf8_lossy(message.trim()).to_string(),
         author: author.name.to_string(),
         timestamp: DateTime::from_timestamp(time.seconds, 0).unwrap_or_default(),
         remotes: None,
         refs,
-    })
+    }))
 }
 
 /// Convert a byte path from `gix` to a `PathBuf` using an explicit lossy
@@ -321,18 +355,14 @@ fn lossy_path(bytes: &gix::bstr::BStr) -> PathBuf {
 /// pairs — matching the existing output contract.
 ///
 /// Returns path-ordered `(relative_path, DeltaKind)` pairs.
+///
+/// Errors are suppressed: a missing/corrupt commit, tree, or parent yields an
+/// empty list. For error propagation, use [`get_commit_files_fallible`].
 pub fn get_commit_files(
     repo: &gix::Repository,
     commit_id: gix::ObjectId,
 ) -> Vec<(PathBuf, DeltaKind)> {
-    let mut cache = match repo.diff_resource_cache_for_tree_diff() {
-        Ok(c) => c,
-        Err(e) => {
-            debug!(%commit_id, error = %e, "could not create diff resource cache");
-            return Vec::new();
-        }
-    };
-    get_commit_files_with_cache(repo, commit_id, &mut cache)
+    get_commit_files_fallible(repo, commit_id).unwrap_or_default()
 }
 
 /// Like [`get_commit_files`], but reuses an existing diff resource cache.
@@ -342,58 +372,60 @@ pub fn get_commit_files(
 /// function for each commit. The cache should be cleared periodically
 /// (e.g., with [`gix::diff::blob::Platform::clear_resource_cache`]) to
 /// avoid unbounded growth when walking large histories.
+///
+/// Errors are suppressed; see [`get_commit_files_with_cache_fallible`].
 pub fn get_commit_files_with_cache(
     repo: &gix::Repository,
     commit_id: gix::ObjectId,
     cache: &mut gix::diff::blob::Platform,
 ) -> Vec<(PathBuf, DeltaKind)> {
-    let commit = match repo.find_object(commit_id) {
-        Ok(o) => match o.try_into_commit() {
-            Ok(c) => c,
-            Err(e) => {
-                debug!(%commit_id, error = %e, "object is not a commit");
-                return Vec::new();
-            }
-        },
-        Err(e) => {
-            debug!(%commit_id, error = %e, "could not find commit");
-            return Vec::new();
-        }
-    };
-    let tree = match commit.tree() {
-        Ok(t) => t,
-        Err(e) => {
-            debug!(%commit_id, error = %e, "could not get commit tree");
-            return Vec::new();
-        }
-    };
+    get_commit_files_with_cache_fallible(repo, commit_id, cache).unwrap_or_default()
+}
 
-    let parent_tree = commit.parent_ids().next().and_then(|parent_id| {
-        match repo.find_object(parent_id.detach()) {
-            Ok(o) => match o.try_into_commit() {
-                Ok(parent_commit) => parent_commit.tree().ok(),
-                Err(e) => {
-                    debug!(%commit_id, error = %e, "parent object is not a commit");
-                    None
-                }
-            },
-            Err(e) => {
-                debug!(%commit_id, error = %e, "could not find parent object");
-                None
-            }
+/// Fallible variant of [`get_commit_files`].
+///
+/// A missing or corrupt commit, tree, parent commit, parent tree, or diff
+/// failure propagates as [`SniffError::Git`] rather than producing an empty or
+/// partial change list.
+pub(crate) fn get_commit_files_fallible(
+    repo: &gix::Repository,
+    commit_id: gix::ObjectId,
+) -> Result<Vec<(PathBuf, DeltaKind)>> {
+    let mut cache = repo
+        .diff_resource_cache_for_tree_diff()
+        .map_err(|e| SniffError::git("diff", e))?;
+    get_commit_files_with_cache_fallible(repo, commit_id, &mut cache)
+}
+
+/// Fallible variant of [`get_commit_files_with_cache`].
+pub(crate) fn get_commit_files_with_cache_fallible(
+    repo: &gix::Repository,
+    commit_id: gix::ObjectId,
+    cache: &mut gix::diff::blob::Platform,
+) -> Result<Vec<(PathBuf, DeltaKind)>> {
+    let commit = repo
+        .find_object(commit_id)
+        .map_err(|e| SniffError::git("object", e))?
+        .try_into_commit()
+        .map_err(|e| SniffError::git("object", e))?;
+    let tree = commit.tree().map_err(|e| SniffError::git("tree", e))?;
+
+    let parent_tree = match commit.parent_ids().next() {
+        Some(parent_id) => {
+            let parent_commit = repo
+                .find_object(parent_id.detach())
+                .map_err(|e| SniffError::git("object", e))?
+                .try_into_commit()
+                .map_err(|e| SniffError::git("object", e))?;
+            Some(parent_commit.tree().map_err(|e| SniffError::git("tree", e))?)
         }
-    });
+        None => None,
+    };
 
     let empty_tree = repo.empty_tree();
     let old_tree = parent_tree.as_ref().unwrap_or(&empty_tree);
 
-    let mut platform = match old_tree.changes() {
-        Ok(p) => p,
-        Err(e) => {
-            debug!(%commit_id, error = %e, "could not create tree diff platform");
-            return Vec::new();
-        }
-    };
+    let mut platform = old_tree.changes().map_err(|e| SniffError::git("diff", e))?;
 
     platform.options(|opts| {
         opts.track_path().track_rewrites(None);
@@ -401,42 +433,45 @@ pub fn get_commit_files_with_cache(
 
     let mut result: Vec<(PathBuf, DeltaKind)> = Vec::new();
 
-    if let Err(e) = platform.for_each_to_obtain_tree_with_cache(
-        &tree,
-        cache,
-        |change| -> std::result::Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
-            if change.entry_mode().is_tree() {
-                return Ok(std::ops::ControlFlow::Continue(()));
-            }
-            let path = lossy_path(change.location());
-            if path.as_os_str().is_empty() {
-                return Ok(std::ops::ControlFlow::Continue(()));
-            }
-            result.push((path, DeltaKind::from_gix_change_attached(&change)));
-            Ok(std::ops::ControlFlow::Continue(()))
-        },
-    ) {
-        debug!(%commit_id, error = %e, "tree diff with cache failed");
-    }
+    platform
+        .for_each_to_obtain_tree_with_cache(
+            &tree,
+            cache,
+            |change| -> std::result::Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
+                if change.entry_mode().is_tree() {
+                    return Ok(std::ops::ControlFlow::Continue(()));
+                }
+                let path = lossy_path(change.location());
+                if path.as_os_str().is_empty() {
+                    return Ok(std::ops::ControlFlow::Continue(()));
+                }
+                result.push((path, DeltaKind::from_gix_change_attached(&change)));
+                Ok(std::ops::ControlFlow::Continue(()))
+            },
+        )
+        .map_err(|e| SniffError::git("diff", e))?;
 
     // gix diff yields path-ordered results in the common case, but
     // explicit sort keeps the contract regardless of internal ordering.
     result.sort_by(|a, b| a.0.cmp(&b.0));
-    result
+    Ok(result)
 }
 
 /// Returns `true` if the commit `oid` touches any file whose path starts with
 /// `path_prefix`.
+///
+/// Propagates object/tree/diff failures as [`SniffError::Git`] so a corrupt
+/// commit is not silently treated as "does not touch the path".
 fn commit_touches_path(
     repo: &gix::Repository,
     cache: &mut gix::diff::blob::Platform,
     oid: gix::ObjectId,
     path_prefix: &str,
-) -> bool {
-    let files = get_commit_files_with_cache(repo, oid, cache);
-    files
+) -> Result<bool> {
+    let files = get_commit_files_with_cache_fallible(repo, oid, cache)?;
+    Ok(files
         .iter()
-        .any(|(p, _)| p.to_string_lossy().starts_with(path_prefix))
+        .any(|(p, _)| p.to_string_lossy().starts_with(path_prefix)))
 }
 
 /// Get recent commits that touch files under a specific path prefix.
@@ -445,6 +480,9 @@ fn commit_touches_path(
 /// and includes commits where at least one changed file starts with `path_prefix`.
 ///
 /// Ref decorations are collected once and reused for all matching commits.
+///
+/// Errors are suppressed: a corrupt revwalk, object, or ref store yields an
+/// empty list. For error propagation, use [`get_commits_for_path_fallible`].
 pub fn get_commits_for_path(
     repo: &gix::Repository,
     path_prefix: &str,
@@ -454,64 +492,71 @@ pub fn get_commits_for_path(
 }
 
 /// Get recent commits for a path with optional pre-computed ref decorations.
+///
+/// Errors are suppressed; see [`get_commits_for_path_fallible`].
 pub(crate) fn get_commits_for_path_with_decorations(
     repo: &gix::Repository,
     path_prefix: &str,
     count: usize,
     ref_decorations: Option<&HashMap<gix::ObjectId, Vec<RefDecoration>>>,
 ) -> Vec<CommitInfo> {
+    get_commits_for_path_fallible(repo, path_prefix, count, ref_decorations).unwrap_or_default()
+}
+
+/// Fallible variant of [`get_commits_for_path`].
+///
+/// An unborn HEAD (no history) is `Ok(empty)`. Revwalk, object, author, time,
+/// message, ref-decoration, and per-commit diff failures propagate as
+/// [`SniffError::Git`] rather than silently skipping commits.
+pub(crate) fn get_commits_for_path_fallible(
+    repo: &gix::Repository,
+    path_prefix: &str,
+    count: usize,
+    ref_decorations: Option<&HashMap<gix::ObjectId, Vec<RefDecoration>>>,
+) -> Result<Vec<CommitInfo>> {
     let mut commits = Vec::new();
 
+    // An unborn HEAD has no history to walk — a legitimate empty result.
     let Ok(head) = repo.head_id() else {
-        return commits;
+        return Ok(commits);
     };
 
-    let Ok(walk) = repo
+    let walk = repo
         .rev_walk(Some(head))
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
         .use_commit_graph(Some(true))
         .all()
-    else {
-        return commits;
+        .map_err(|e| SniffError::git("revwalk", e))?;
+
+    let decorations = match ref_decorations {
+        Some(d) => d.clone(),
+        None => collect_ref_decorations_fallible(repo)?,
     };
 
-    let cached = ref_decorations.cloned();
-    let decorations = cached.unwrap_or_else(|| collect_ref_decorations(repo));
-
-    let mut diff_cache = match repo.diff_resource_cache_for_tree_diff() {
-        Ok(c) => c,
-        Err(_) => return commits,
-    };
+    let mut diff_cache = repo
+        .diff_resource_cache_for_tree_diff()
+        .map_err(|e| SniffError::git("diff", e))?;
 
     for info_result in walk {
         if commits.len() >= count {
             break;
         }
-        let Ok(info) = info_result else {
-            continue;
-        };
+        let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
 
-        if !commit_touches_path(repo, &mut diff_cache, info.id, path_prefix) {
+        if !commit_touches_path(repo, &mut diff_cache, info.id, path_prefix)? {
             continue;
         }
 
-        let Ok(commit) = info.object() else {
-            continue;
-        };
-
+        let commit = info.object().map_err(|e| SniffError::git("object", e))?;
         let refs = decorations.get(&info.id).cloned().unwrap_or_default();
 
-        let Ok(author) = commit.author() else {
-            continue;
-        };
-        let Ok(time) = commit.time() else {
-            continue;
-        };
-        let Ok(message) = commit.message_raw() else {
-            continue;
-        };
+        let author = commit.author().map_err(|e| SniffError::git("author", e))?;
+        let time = commit.time().map_err(|e| SniffError::git("commit_time", e))?;
+        let message = commit
+            .message_raw()
+            .map_err(|e| SniffError::git("message", e))?;
 
         commits.push(CommitInfo {
             sha: info.id.to_string(),
@@ -523,7 +568,7 @@ pub(crate) fn get_commits_for_path_with_decorations(
         });
     }
 
-    commits
+    Ok(commits)
 }
 
 /// Get the last N commits walked from a named branch's tip.
@@ -548,6 +593,19 @@ pub fn get_commits_for_branch(
     branch_name: &str,
     count: usize,
 ) -> Vec<CommitInfo> {
+    get_commits_for_branch_fallible(repo, branch_name, count).unwrap_or_default()
+}
+
+/// Fallible variant of [`get_commits_for_branch`].
+///
+/// A branch that cannot be resolved is `Ok(empty)`. Revwalk, object, author,
+/// time, message, and ref-decoration failures propagate as [`SniffError::Git`]
+/// rather than silently skipping commits.
+pub(crate) fn get_commits_for_branch_fallible(
+    repo: &gix::Repository,
+    branch_name: &str,
+    count: usize,
+) -> Result<Vec<CommitInfo>> {
     let mut commits = Vec::new();
 
     let start_oid = repo
@@ -562,40 +620,30 @@ pub fn get_commits_for_branch(
 
     let Some(oid) = start_oid else {
         debug!(branch = %branch_name, "could not resolve branch ref for commit walk");
-        return commits;
+        return Ok(commits);
     };
 
-    let Ok(walk) = repo
+    let walk = repo
         .rev_walk(Some(oid))
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
         .all()
-    else {
-        return commits;
-    };
+        .map_err(|e| SniffError::git("revwalk", e))?;
 
-    let decorations = collect_ref_decorations(repo);
+    let decorations = collect_ref_decorations_fallible(repo)?;
 
     for info_result in walk.take(count) {
-        let Ok(info) = info_result else {
-            continue;
-        };
-        let Ok(commit) = info.object() else {
-            continue;
-        };
+        let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
+        let commit = info.object().map_err(|e| SniffError::git("object", e))?;
 
         let refs = decorations.get(&info.id).cloned().unwrap_or_default();
 
-        let Ok(author) = commit.author() else {
-            continue;
-        };
-        let Ok(time) = commit.time() else {
-            continue;
-        };
-        let Ok(message) = commit.message_raw() else {
-            continue;
-        };
+        let author = commit.author().map_err(|e| SniffError::git("author", e))?;
+        let time = commit.time().map_err(|e| SniffError::git("commit_time", e))?;
+        let message = commit
+            .message_raw()
+            .map_err(|e| SniffError::git("message", e))?;
 
         commits.push(CommitInfo {
             sha: info.id.to_string(),
@@ -607,5 +655,5 @@ pub fn get_commits_for_branch(
         });
     }
 
-    commits
+    Ok(commits)
 }

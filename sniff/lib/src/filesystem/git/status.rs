@@ -950,11 +950,21 @@ pub(crate) fn get_repo_status_counts_detailed(
 /// Returns the relative paths of files that have merge conflict markers
 /// in the index (i.e., are in an unmerged state from a merge, rebase,
 /// cherry-pick, or revert).
+///
+/// Errors are suppressed: a corrupt or unreadable index yields an empty list.
+/// For error propagation, use [`detect_merge_conflicts_fallible`].
 pub fn detect_merge_conflicts(repo: &gix::Repository) -> Vec<PathBuf> {
-    let index = match repo.index_or_empty() {
-        Ok(idx) => idx,
-        Err(_) => return Vec::new(),
-    };
+    detect_merge_conflicts_fallible(repo).unwrap_or_default()
+}
+
+/// Fallible variant of [`detect_merge_conflicts`].
+///
+/// An index-read failure propagates as [`SniffError::Git`] rather than being
+/// reported as "no conflicts".
+pub(crate) fn detect_merge_conflicts_fallible(repo: &gix::Repository) -> Result<Vec<PathBuf>> {
+    let index = repo
+        .index_or_empty()
+        .map_err(|e| crate::SniffError::git("index", e))?;
 
     let mut conflicted = Vec::new();
     let mut seen = HashSet::new();
@@ -967,7 +977,7 @@ pub fn detect_merge_conflicts(repo: &gix::Repository) -> Vec<PathBuf> {
             }
         }
     }
-    conflicted
+    Ok(conflicted)
 }
 
 #[cfg(test)]
