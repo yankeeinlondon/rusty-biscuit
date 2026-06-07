@@ -1558,6 +1558,78 @@ fn test_commit_file_with_message(repo_path: &Path, relative: &str, content: &str
         .unwrap();
 }
 
+/// Overwrite the loose object file for `sha` with garbage so any decode fails.
+/// Git creates objects read-only, so make the file writable first.
+fn corrupt_loose_object(repo_path: &Path, sha: &str) {
+    let obj_path = repo_path
+        .join(".git")
+        .join("objects")
+        .join(&sha[..2])
+        .join(&sha[2..]);
+    let mut perms = std::fs::metadata(&obj_path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o644);
+    }
+    #[cfg(not(unix))]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&obj_path, perms).unwrap();
+    std::fs::write(&obj_path, b"garbage").unwrap();
+}
+
+/// Flip the trailing checksum byte of the index so a read detects the mismatch.
+fn corrupt_index(repo_path: &Path) {
+    let index_path = repo_path.join(".git").join("index");
+    let mut bytes = std::fs::read(&index_path).unwrap();
+    let len = bytes.len();
+    assert!(len >= 20, "index must have a trailing checksum to corrupt");
+    bytes[len - 1] = bytes[len - 1].wrapping_add(1);
+    std::fs::write(&index_path, bytes).unwrap();
+}
+
+/// A corrupt index must surface as a CLI failure through `repo has-merge-conflict`,
+/// not be reported as a clean "no conflicts" result.
+#[test]
+fn test_repo_has_merge_conflict_surfaces_corrupt_index() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    corrupt_index(&path);
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "has-merge-conflict",
+        ])
+        .assert()
+        .failure();
+}
+
+/// A corrupt commit object must surface as a CLI failure through `repo hash`,
+/// not be reported as "commit not found".
+#[test]
+fn test_repo_hash_surfaces_corrupt_commit_object() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let repo = git2::Repository::open(&path).unwrap();
+    let sha = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    corrupt_loose_object(&path, &sha);
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "hash", &sha])
+        .assert()
+        .failure();
+}
+
 /// Stage a file in the test repo (no commit).
 fn test_stage_file(repo_path: &Path, relative: &str, content: &str) {
     let full = repo_path.join(relative);
