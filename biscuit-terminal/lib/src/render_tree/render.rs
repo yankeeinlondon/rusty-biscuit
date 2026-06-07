@@ -1046,24 +1046,18 @@ impl Writer<'_> {
                 // node). A successfully rendered inline image is left unstyled —
                 // color has no meaning for a raster cell.
                 let fallback = || {
-                    // Typed `text_layout` pads/truncates the *alt text* to its
-                    // resolved field, inside the placeholder brackets — the
-                    // legacy serializer padded the whole `▉ IMAGE[..]` string; the
-                    // tree path shapes only the alt. The source alt stays intact
-                    // in the tree (`Image.alt`); only this projection is shaped.
-                    let shaped_alt = match node.attrs.text_layout_ref() {
-                        Some(hints) => self.apply_text_layout(alt.to_string(), hints),
-                        None => alt.to_string(),
+                    // Build the complete placeholder from the intact source alt;
+                    // the tree's `Image.alt` is never mutated, only this
+                    // projection.
+                    let placeholder = match self.opts.context.image_placeholder {
+                        ImagePlaceholder::Bracket => format!("[{alt}]"),
+                        ImagePlaceholder::Block => format!("▉ IMAGE[{alt}]"),
                     };
-                    let inner = match self.opts.context.image_placeholder {
-                        ImagePlaceholder::Bracket => format!("[{shaped_alt}]"),
-                        ImagePlaceholder::Block => format!("▉ IMAGE[{shaped_alt}]"),
-                    };
-                    match node.attrs.style_ref().filter(|s| !s.is_empty()) {
+                    let styled = match node.attrs.style_ref().filter(|s| !s.is_empty()) {
                         Some(img_style) => {
                             let img_effective = img_style.inherited_from(effective);
                             if img_effective == *effective {
-                                inner
+                                placeholder
                             } else {
                                 let open = style::text_appearance_sgr(&img_effective, term);
                                 let close = format!(
@@ -1071,10 +1065,19 @@ impl Writer<'_> {
                                     style::SGR_RESET,
                                     style::text_appearance_sgr(effective, term),
                                 );
-                                format!("{open}{inner}{close}")
+                                format!("{open}{placeholder}{close}")
                             }
                         }
-                        None => inner,
+                        None => placeholder,
+                    };
+                    // Typed `text_layout` shapes the *complete visible
+                    // placeholder* — brackets or `▉ IMAGE[..]` framing included —
+                    // so `width` establishes the exact rendered placeholder
+                    // width per the spec, not the bare alt run. Mirrors the link
+                    // path, which shapes the styled label after its SGR wrap.
+                    match node.attrs.text_layout_ref() {
+                        Some(hints) => self.apply_text_layout(styled, hints),
+                        None => styled,
                     }
                 };
                 match self.opts.context.graphics_mode {
@@ -3115,7 +3118,7 @@ mod render_tree_tests {
     }
 
     #[test]
-    fn render_tree_image_text_layout_truncates_alt_placeholder() {
+    fn render_tree_image_text_layout_truncates_complete_placeholder() {
         use renderable::layout::{Length, TargetValue};
         let mut image = RenderNode::image("pic.png", None, "a very long alt text");
         image.attrs.set_text_layout(&TextLayoutHints {
@@ -3126,12 +3129,54 @@ mod render_tree_tests {
         let node = RenderNode::paragraph(vec![image]);
         let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
         let stripped = strip_escape_codes(&out.output);
-        // `text_layout` shapes the *alt text* inside the placeholder brackets:
-        // the alt is truncated to 10 columns with an ellipsis, then wrapped in
-        // `[...]`, so the placeholder is the shaped alt plus the two brackets.
-        assert_eq!(visible_width(&stripped), 12, "{stripped:?}");
-        assert!(stripped.ends_with("…]"), "{stripped:?}");
+        // `text_layout` shapes the *complete bracket placeholder*: the whole
+        // `[a very long alt text]` is truncated to the 10-column cap, so the
+        // visible placeholder fills exactly the field — framing included.
+        assert_eq!(visible_width(&stripped), 10, "{stripped:?}");
+        assert!(stripped.ends_with('…'), "{stripped:?}");
         assert!(stripped.starts_with("[a very"), "{stripped:?}");
+    }
+
+    #[test]
+    fn render_tree_image_text_layout_exact_width_includes_bracket_framing() {
+        use renderable::layout::{Alignment, Length, TargetValue};
+        // A six-column exact width must produce a six-column *visible*
+        // placeholder — the brackets count toward the field, not on top of it.
+        let mut image = RenderNode::image("pic.png", None, "ab");
+        image.attrs.set_text_layout(&TextLayoutHints {
+            width: Some(TargetValue::universal(Length::ch(6))),
+            // Right alignment pads on the left so the assertion is robust to any
+            // trailing-whitespace trimming in block rendering.
+            alignment: Alignment::Right,
+            ..Default::default()
+        });
+        let node = RenderNode::paragraph(vec![image]);
+        let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+        assert_eq!(visible_width(&stripped), 6, "{stripped:?}");
+        assert!(stripped.ends_with("[ab]"), "{stripped:?}");
+    }
+
+    #[test]
+    fn render_tree_image_text_layout_exact_width_includes_block_framing() {
+        use renderable::layout::{Alignment, Length, TargetValue};
+        use super::super::options::ImagePlaceholder;
+        // The block placeholder `▉ IMAGE[ab]` is 11 columns wide; a 16-column
+        // exact width pads it (right-aligned) to fill the field, framing
+        // included, rather than padding only the alt inside the brackets.
+        let mut image = RenderNode::image("pic.png", None, "ab");
+        image.attrs.set_text_layout(&TextLayoutHints {
+            width: Some(TargetValue::universal(Length::ch(16))),
+            alignment: Alignment::Right,
+            ..Default::default()
+        });
+        let node = RenderNode::paragraph(vec![image]);
+        let mut opts = no_osc_opts(60);
+        opts.context.image_placeholder = ImagePlaceholder::Block;
+        let out = render_terminal_node(&node, &opts).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+        assert_eq!(visible_width(&stripped), 16, "{stripped:?}");
+        assert!(stripped.ends_with("▉ IMAGE[ab]"), "{stripped:?}");
     }
 
     #[test]
