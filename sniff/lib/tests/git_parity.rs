@@ -608,6 +608,134 @@ fn cli_facing_apis_surface_open_failure_instead_of_absence() {
     );
 }
 
+/// Overwrite the loose object file for `sha` with garbage so any read/decode of
+/// it fails. Git creates objects read-only, so make the file writable first.
+fn corrupt_loose_object(repo_path: &Path, sha: &str) {
+    let obj_path = repo_path
+        .join(".git")
+        .join("objects")
+        .join(&sha[..2])
+        .join(&sha[2..]);
+    let mut perms = fs::metadata(&obj_path).unwrap().permissions();
+    #[cfg(unix)]
+    perms.set_mode(0o644);
+    #[cfg(not(unix))]
+    perms.set_readonly(false);
+    fs::set_permissions(&obj_path, perms).unwrap();
+    fs::write(&obj_path, b"garbage").unwrap();
+}
+
+/// Flip the trailing checksum byte of the index so a read detects the mismatch.
+fn corrupt_index(repo_path: &Path) {
+    let index_path = repo_path.join(".git").join("index");
+    let mut bytes = fs::read(&index_path).unwrap();
+    let len = bytes.len();
+    assert!(len >= 20, "index must have a trailing checksum to corrupt");
+    bytes[len - 1] = bytes[len - 1].wrapping_add(1);
+    fs::write(&index_path, bytes).unwrap();
+}
+
+/// The SHA of the `main` tip via a fresh git2 handle.
+fn head_sha(repo: &Repository) -> String {
+    repo.head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string()
+}
+
+#[test]
+fn commit_by_sha_at_surfaces_corrupt_commit_object() {
+    // A corrupt commit object the SHA resolves to must surface as an error, not
+    // be reported as "commit not found".
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+    let sha = head_sha(&repo);
+
+    corrupt_loose_object(dir.path(), &sha);
+
+    assert!(
+        sniff::filesystem::commit_by_sha_at(dir.path(), &sha).is_err(),
+        "corrupt commit object must surface through commit_by_sha_at"
+    );
+}
+
+#[test]
+fn commit_files_at_surfaces_corrupt_commit_object() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+    let sha = head_sha(&repo);
+
+    corrupt_loose_object(dir.path(), &sha);
+
+    assert!(
+        sniff::filesystem::commit_files_at(dir.path(), &sha).is_err(),
+        "corrupt commit object must surface through commit_files_at"
+    );
+}
+
+#[test]
+fn commit_files_at_surfaces_corrupt_parent_commit() {
+    // The tip is intact but its parent is corrupt: computing the tip's file
+    // changes diffs against the parent tree, so the corruption must surface.
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+    let tip = repo.head().unwrap().peel_to_commit().unwrap();
+    let parent = tip.parent(0).unwrap().id().to_string();
+    let tip_sha = tip.id().to_string();
+
+    corrupt_loose_object(dir.path(), &parent);
+
+    assert!(
+        sniff::filesystem::commit_files_at(dir.path(), &tip_sha).is_err(),
+        "corrupt parent commit must surface through commit_files_at"
+    );
+}
+
+#[test]
+fn commits_for_branch_at_surfaces_corrupt_ancestor() {
+    // The tip resolves fine, but the revwalk reaches a corrupt ancestor: the
+    // failure must surface rather than truncating history.
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 3);
+    let root = git2_head_shas(&repo).last().unwrap().clone();
+
+    corrupt_loose_object(dir.path(), &root);
+
+    assert!(
+        sniff::filesystem::commits_for_branch_at(dir.path(), "main", 10).is_err(),
+        "corrupt ancestor must surface through commits_for_branch_at"
+    );
+}
+
+#[test]
+fn commits_for_path_at_surfaces_corrupt_ancestor() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 3);
+    let root = git2_head_shas(&repo).last().unwrap().clone();
+
+    corrupt_loose_object(dir.path(), &root);
+
+    assert!(
+        sniff::filesystem::commits_for_path_at(dir.path(), "", 10).is_err(),
+        "corrupt ancestor must surface through commits_for_path_at"
+    );
+}
+
+#[test]
+fn merge_conflicts_at_surfaces_corrupt_index() {
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 1);
+
+    corrupt_index(dir.path());
+
+    assert!(
+        sniff::filesystem::merge_conflicts_at(dir.path()).is_err(),
+        "corrupt index must surface through merge_conflicts_at"
+    );
+}
+
 #[test]
 fn ref_decorations_match_git2_for_branches_and_tags() {
     let dir = TempDir::new().unwrap();
