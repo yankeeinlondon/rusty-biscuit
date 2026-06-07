@@ -94,7 +94,7 @@ packages:
 
 These deviate from `docs/specs/2026-06-07-biscuit-icon-design.md` based on real-codebase findings; the spec will be synced to match once confirmed:
 
-1. **No `image` cargo feature.** `biscuit-terminal` (a core dependency for terminal rendering via `Prose`) already depends on `resvg` and rasterizes SVG inside `TerminalImage`. Gating image rendering behind a feature would not remove `resvg` from the tree. Image-protocol rendering is therefore a runtime decision (`term.image_support != ImageSupport::None` and no glyph available), not a compile-time feature.
+1. **`image` cargo feature.** The design gates image-protocol terminal rendering behind an optional `image` feature (off by default). `biscuit-terminal` still brings in `resvg` transitively, but the feature controls whether `Icon`'s terminal ladder attempts `TerminalImage` at all. This keeps the default terminal path cheap and explicit.
 2. **The `iconify` crate is not used.** Our stored-body + local-assembly model needs icon bodies and `viewBox`; the `iconify` proc-macro returns full SVG strings and accepts only literals. The Iconify JSON API (`GET https://api.iconify.design/{prefix}.json?icons={name}`) returns `{ icons: { name: { body, width?, height? } }, width?, height? }`, which is exactly what we store. One `reqwest` client serves both the dev asset-population step and the Phase-2 runtime lookup.
 
 ---
