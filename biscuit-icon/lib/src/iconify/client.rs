@@ -60,9 +60,9 @@ struct CollectionMeta {
 struct SearchResponse {
     icons: Vec<String>,
     #[serde(default)]
-    total: usize,
+    _total: usize,
     #[serde(default)]
-    limit: usize,
+    _limit: usize,
 }
 
 impl IconifyClient {

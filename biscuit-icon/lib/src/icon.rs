@@ -97,13 +97,14 @@ impl Icon {
         // the async runtime thread with spawn_blocking.
         let id_owned = id.to_string();
         let path = cache.path().to_path_buf();
+        let prefix_get = prefix.clone();
+        let name_get = name.clone();
         let cached = tokio::task::spawn_blocking(move || {
-            let c = crate::cache::IconCache::open_at(&path)?;
-            c.get(&prefix, &name)
+            let c = crate::cache::IconCache::open_at(&path).map_err(|e| IconError::Cache(e.to_string()))?;
+            c.get(&prefix_get, &name_get).map_err(|e| IconError::Cache(e.to_string()))
         })
         .await
-        .map_err(|e| IconError::Cache(e.to_string()))?
-        .map_err(IconError::Cache)?;
+        .map_err(|e| IconError::Cache(e.to_string()))??;
 
         if let Some(body) = cached {
             return Ok(Icon::from_network(&id_owned, body));
@@ -113,12 +114,11 @@ impl Icon {
         let path = cache.path().to_path_buf();
         let body_for_cache = body.clone();
         tokio::task::spawn_blocking(move || {
-            let c = crate::cache::IconCache::open_at(&path)?;
-            c.put(&prefix, &name, &body_for_cache)
+            let c = crate::cache::IconCache::open_at(&path).map_err(|e| IconError::Cache(e.to_string()))?;
+            c.put(&prefix, &name, &body_for_cache).map_err(|e| IconError::Cache(e.to_string()))
         })
         .await
-        .map_err(|e| IconError::Cache(e.to_string()))?
-        .map_err(IconError::Cache)?;
+        .map_err(|e| IconError::Cache(e.to_string()))??;
 
         Ok(Icon::from_network(&id_owned, body))
     }
@@ -209,7 +209,6 @@ impl Icon {
 impl TerminalRenderable for Icon {
     fn render(&self, term: &Terminal) -> String {
         use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::discovery::detection::ImageSupport;
 
         if self.nerd_font && let Some(c) = self.nerd_font_char() {
             return Prose::new(c.to_string()).render(term);
@@ -218,9 +217,12 @@ impl TerminalRenderable for Icon {
             return Prose::new(c.to_string()).render(term);
         }
         #[cfg(feature = "image")]
-        if term.image_support != ImageSupport::None {
-            if let Ok(s) = self.render_image(term) {
-                return s;
+        {
+            use biscuit_terminal::discovery::detection::ImageSupport;
+            if term.image_support != ImageSupport::None {
+                if let Ok(s) = self.render_image(term) {
+                    return s;
+                }
             }
         }
         Prose::new(self.id.clone()).render(term)

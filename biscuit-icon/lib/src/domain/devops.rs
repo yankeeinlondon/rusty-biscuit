@@ -3,6 +3,7 @@ use strum_macros::{Display, EnumIter, EnumString};
 use crate::body::IconBody;
 use crate::domain::DomainIcon;
 use crate::domain::generated::body_for;
+use crate::glyph::Glyph;
 
 /// DevOps and source-control icons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display, EnumIter, EnumString)]
@@ -36,6 +37,13 @@ impl DomainIcon for DevOps {
 
     fn body(self) -> IconBody {
         body_for(self.iconify_id())
+    }
+
+    fn glyph(self) -> Option<Glyph> {
+        Some(match self {
+            DevOps::Github => Glyph::nerd('\u{f09b}'),
+            _ => return None,
+        })
     }
 }
 

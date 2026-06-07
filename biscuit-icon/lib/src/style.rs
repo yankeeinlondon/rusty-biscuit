@@ -220,8 +220,9 @@ mod tests {
     fn malicious_color_is_escaped() {
         let style = Style { color: Some("red\" onload=alert(1)".into()), ..Style::default() };
         let svg = style.assemble(&body());
-        assert!(!svg.contains("onload="));
+        // The quote must be escaped so the attribute cannot be broken out of.
         assert!(svg.contains("&quot;"));
+        assert!(!svg.contains("style=\"color: red\" onload"));
     }
 
     #[test]
