@@ -2382,6 +2382,55 @@ fn level2_style_hyperlinks_exact_width_truncates_label_in_terminal() {
     );
 }
 
+/// Regression (review-3): truncating a colored hyperlink label must keep its
+/// closing SGR reset, so inline text following the truncated link does not
+/// inherit the link's color in a real terminal.
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_hyperlinks_truncation_does_not_bleed_color_in_terminal() {
+    // A red link with an exact 8-cell width truncates, immediately followed by
+    // an unstyled trailing marker on the same line.
+    let body = "---\nstyle:\n  hyperlinks:\n    color: red-500\n    width: 8\n---\n\n\
+        [A very long hyperlink label](https://example.com) ZZTRAIL\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    let red_semi = "38;2;251;44;54";
+    let red_colon = "38:2::251:44:54";
+    assert!(
+        frame.raw.contains(red_semi) || frame.raw.contains(red_colon),
+        "expected the link's red foreground SGR in the capture. raw len={}",
+        frame.raw.len()
+    );
+
+    // The trailing marker must not sit inside the link's red run: there must be
+    // an SGR reset (or default-foreground) between the last red introduction and
+    // the marker. WezTerm reconstructs SGR per cell, so a leaked color would
+    // wrap the marker cells with red and no intervening reset.
+    let trail_pos = frame
+        .raw
+        .find("ZZTRAIL")
+        .unwrap_or_else(|| panic!("trailing marker missing in raw capture. plain:\n{}", frame.plain));
+    let before = &frame.raw[..trail_pos];
+    let red_idx = before
+        .rfind(red_semi)
+        .or_else(|| before.rfind(red_colon))
+        .unwrap_or_else(|| {
+            panic!("link's red SGR must precede the trailing marker. raw:\n{}", frame.raw)
+        });
+    let between = &before[red_idx..];
+    assert!(
+        between.contains("\x1b[0m")
+            || between.contains("\x1b[m")
+            || between.contains("\x1b[39m"),
+        "trailing text inherits the truncated link color: no reset between the \
+         red SGR and the marker. raw:\n{}",
+        frame.raw
+    );
+}
+
 /// `style.images.local-style.color` + `bg-color` must color a local image's
 /// fallback alt text in a real terminal. Remote images must not pick this up.
 #[test]
