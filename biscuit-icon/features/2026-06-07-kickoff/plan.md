@@ -1,3 +1,83 @@
+---
+source_files_during_phase_0:
+  - Cargo.toml
+  - biscuit-icon/lib/Cargo.toml
+  - biscuit-icon/lib/src/lib.rs
+  - biscuit-icon/lib/src/error.rs
+  - biscuit-icon/lib/src/body.rs
+  - biscuit-icon/lib/src/glyph.rs
+  - biscuit-icon/lib/src/icon.rs
+  - biscuit-icon/lib/src/style.rs
+  - biscuit-icon/lib/src/render.rs
+  - biscuit-icon/lib/src/cache/mod.rs
+  - biscuit-icon/lib/src/domain/mod.rs
+  - biscuit-icon/lib/src/iconify/mod.rs
+  - biscuit-icon/cli/Cargo.toml
+  - biscuit-icon/cli/src/main.rs
+  - biscuit-icon/justfile
+docs_updated_during_phase_0: []
+docs_created_during_phase_0:
+  - biscuit-icon/just.md
+skills_files_updated_during_phase_0: []
+source_files_during_phase_1:
+  - biscuit-icon/lib/Cargo.toml
+  - biscuit-icon/lib/src/lib.rs
+  - biscuit-icon/lib/src/body.rs
+  - biscuit-icon/lib/src/style.rs
+  - biscuit-icon/lib/src/glyph.rs
+  - biscuit-icon/lib/src/icon.rs
+  - biscuit-icon/lib/src/render.rs
+  - biscuit-icon/lib/src/iconify/mod.rs
+  - biscuit-icon/lib/src/iconify/client.rs
+  - biscuit-icon/lib/src/domain/mod.rs
+  - biscuit-icon/lib/src/domain/os.rs
+  - biscuit-icon/lib/src/domain/emoji.rs
+  - biscuit-icon/lib/src/domain/arrow.rs
+  - biscuit-icon/lib/src/domain/data.rs
+  - biscuit-icon/lib/src/domain/file.rs
+  - biscuit-icon/lib/src/domain/hardware.rs
+  - biscuit-icon/lib/src/domain/timing.rs
+  - biscuit-icon/lib/src/domain/button.rs
+  - biscuit-icon/lib/src/domain/control.rs
+  - biscuit-icon/lib/src/domain/network.rs
+  - biscuit-icon/lib/src/domain/devops.rs
+  - biscuit-icon/lib/src/domain/actors.rs
+  - biscuit-icon/lib/src/domain/nav.rs
+  - biscuit-icon/lib/src/domain/sport.rs
+  - biscuit-icon/lib/src/domain/brand.rs
+  - biscuit-icon/lib/src/domain/social.rs
+  - biscuit-icon/lib/src/domain/generated.rs
+  - biscuit-icon/lib/src/bin/populate_assets.rs
+  - biscuit-icon/lib/tests/embedded.rs
+  - biscuit-icon/assets/icons/** # 129 generated + committed icon-body SVGs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - biscuit-icon/lib/src/cache/mod.rs
+  - biscuit-icon/lib/src/cache/store.rs
+  - biscuit-icon/lib/src/icon.rs
+  - biscuit-icon/lib/tests/iconify_lookup.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - biscuit-icon/cli/Cargo.toml
+  - biscuit-icon/cli/src/main.rs
+  - biscuit-icon/cli/src/args.rs
+  - biscuit-icon/cli/src/commands.rs
+  - biscuit-icon/cli/tests/cli.rs
+docs_updated_during_phase_3:
+  - biscuit-icon/README.md
+  - docs/dependencies.md
+docs_created_during_phase_3:
+  - biscuit-icon/docs/dependencies.md
+skills_files_updated_during_phase_3: []
+packages:
+  - biscuit-icon
+  - biscuit-icon-cli
+---
+
 # biscuit-icon Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
