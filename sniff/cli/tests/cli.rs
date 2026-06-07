@@ -5572,12 +5572,7 @@ fn test_repo_area_inside_package_returns_package_name() {
     let (_dir, path) = create_cli_monorepo();
     let inside_pkg_a = path.join("pkg-a/lib/src");
     let assert = cargo_bin_cmd!("sniff")
-        .args([
-            "--base",
-            inside_pkg_a.to_str().unwrap(),
-            "repo",
-            "area",
-        ])
+        .args(["--base", inside_pkg_a.to_str().unwrap(), "repo", "area"])
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
@@ -5589,12 +5584,7 @@ fn test_repo_area_at_area_dir_returns_area_name() {
     let (_dir, path) = create_cli_monorepo();
     let area_dir = path.join("pkg-a");
     let assert = cargo_bin_cmd!("sniff")
-        .args([
-            "--base",
-            area_dir.to_str().unwrap(),
-            "repo",
-            "area",
-        ])
+        .args(["--base", area_dir.to_str().unwrap(), "repo", "area"])
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
