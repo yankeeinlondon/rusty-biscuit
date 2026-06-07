@@ -178,6 +178,38 @@ pub fn visible_width(content: &str) -> u32 {
     width
 }
 
+/// Splits `content` into its visible body and the run of trailing escape
+/// sequences that follow the last visible character.
+///
+/// The trailing run is exactly the closing envelope a styled inline node
+/// appends after its visible label — an SGR reset plus ancestor-style restore,
+/// and any OSC8 link close. Truncators ([`truncate`]) keep only the visible
+/// prefix and discard the cut tail, which would strip this run and leak the
+/// node's color into following content. Callers split it off, truncate the
+/// body, then re-append it. Returns `(body, trailing)` with
+/// `format!("{body}{trailing}") == content`.
+pub fn split_trailing_escapes(content: &str) -> (&str, &str) {
+    let bytes = content.as_bytes();
+    let mut idx = 0usize;
+    let mut last_visible_end = 0usize;
+
+    while idx < content.len() {
+        if bytes[idx] == 0x1b {
+            idx = escape_sequence_end(content, idx);
+            continue;
+        }
+
+        let ch = match content[idx..].chars().next() {
+            Some(ch) => ch,
+            None => break,
+        };
+        idx += ch.len_utf8();
+        last_visible_end = idx;
+    }
+
+    content.split_at(last_visible_end)
+}
+
 pub fn split_at_visible_width(content: &str, width: u32) -> (String, String) {
     if width == 0 {
         return (String::new(), content.to_string());
@@ -684,6 +716,31 @@ mod tests {
         let ballot_x = "\u{2717}"; // ✗
         let width = visible_width(ballot_x);
         assert_eq!(width, 1, "Ballot X should have width 1, got {}", width);
+    }
+
+    #[test]
+    fn split_trailing_escapes_separates_closing_envelope() {
+        let content = "\x1b[31mred text\x1b[0m";
+        let (body, trailing) = split_trailing_escapes(content);
+        assert_eq!(body, "\x1b[31mred text");
+        assert_eq!(trailing, "\x1b[0m");
+        assert_eq!(format!("{body}{trailing}"), content);
+    }
+
+    #[test]
+    fn split_trailing_escapes_handles_osc8_and_sgr_close() {
+        let content = "\x1b]8;;url\x1b\\\x1b[31mlink\x1b[0m\x1b]8;;\x1b\\";
+        let (body, trailing) = split_trailing_escapes(content);
+        assert_eq!(body, "\x1b]8;;url\x1b\\\x1b[31mlink");
+        assert_eq!(trailing, "\x1b[0m\x1b]8;;\x1b\\");
+    }
+
+    #[test]
+    fn split_trailing_escapes_no_trailing_run() {
+        let content = "\x1b[31mred";
+        let (body, trailing) = split_trailing_escapes(content);
+        assert_eq!(body, content);
+        assert_eq!(trailing, "");
     }
 
     #[test]

@@ -56,7 +56,9 @@ use crate::components::table::{
     ColumnType, Conditional, Table, TableCellContent, TableColumn, TableWidthPlan, VerticalAlign,
 };
 use crate::discovery::detection::ColorDepth;
-use crate::utils::block_constraint::{split_lines, visible_width, wrap_lines};
+use crate::utils::block_constraint::{
+    split_lines, split_trailing_escapes, visible_width, wrap_lines,
+};
 use crate::utils::layout::{Alignment, WordWrap};
 use crate::utils::word_wrap::truncate;
 
@@ -901,7 +903,7 @@ impl Writer<'_> {
         if let Some(cap) = cap
             && visible_width(&content) > cap
         {
-            content = truncate(content, &ELLIPSIS.to_string(), &cap);
+            content = truncate_keeping_trailing_escapes(&content, cap);
         }
         // Exact `width` field: pad shorter content per alignment; truncate
         // longer content only when the overflow policy asks for it.
@@ -909,7 +911,7 @@ impl Writer<'_> {
             let now = visible_width(&content);
             if now > field {
                 if hints.overflow == TextOverflow::Truncate {
-                    content = truncate(content, &ELLIPSIS.to_string(), &field);
+                    content = truncate_keeping_trailing_escapes(&content, field);
                 }
             } else if now < field {
                 let pad = (field - now) as usize;
@@ -2118,6 +2120,25 @@ pub(crate) fn resolve_cells(
     }
 }
 
+/// Truncates `content` to `width` visible columns with an ellipsis while
+/// keeping the trailing escape envelope.
+///
+/// A styled link or image label is `open + visible + close`, where `close` is
+/// the SGR reset that restores the ancestor appearance. Plain [`truncate`]
+/// keeps only the visible prefix and drops the cut tail — including that
+/// trailing `close` — so the node's color would bleed into following content.
+/// Splitting the trailing escape run off, truncating the body, and re-appending
+/// it preserves the reset regardless of where the cut lands. When `content`
+/// already fits, this is a no-op.
+fn truncate_keeping_trailing_escapes(content: &str, width: u32) -> String {
+    let (body, trailing) = split_trailing_escapes(content);
+    format!(
+        "{}{}",
+        truncate(body, &ELLIPSIS.to_string(), &width),
+        trailing
+    )
+}
+
 /// The inherited text appearance for a heading's inline content.
 ///
 /// A heading's declared emphasis (bold for depths 1-3, italic for 4-5) seeds
@@ -3090,6 +3111,47 @@ mod render_tree_tests {
         assert_eq!(stripped, "[A very …](https://example.com)");
         // The visible label is exactly the 8-column cap.
         assert_eq!(visible_width("A very …"), 8);
+    }
+
+    #[test]
+    fn render_tree_link_text_layout_truncation_preserves_style_reset() {
+        use renderable::color::BasicColor;
+        use renderable::layout::{Length, TargetValue};
+        // A colored link truncated by `max_width` must still emit its closing
+        // SGR reset; otherwise the truncated tail (which carries the reset) is
+        // dropped and the link's color leaks into the following inline text.
+        let mut link = RenderNode::link(
+            "https://example.com",
+            None,
+            vec![RenderNode::text("A very long hyperlink label")],
+        );
+        link.attrs.set_style(&fg_style(BasicColor::Red));
+        link.attrs.set_text_layout(&TextLayoutHints {
+            max_width: Some(TargetValue::universal(Length::ch(8))),
+            overflow: TextOverflow::Truncate,
+            ..Default::default()
+        });
+        let para = RenderNode::paragraph(vec![link, RenderNode::text(" tail")]);
+        let out = render_terminal_node(&para, &no_osc_opts(60)).expect("render");
+        assert_no_color_bleed(&out.output, "tail");
+    }
+
+    #[test]
+    fn render_tree_image_text_layout_truncation_preserves_style_reset() {
+        use renderable::color::BasicColor;
+        use renderable::layout::{Length, TargetValue};
+        // A colored image placeholder truncated by `max_width` must likewise
+        // keep its closing reset so the following inline text is not colored.
+        let mut image = RenderNode::image("pic.png", None, "a very long alt text");
+        image.attrs.set_style(&fg_style(BasicColor::Red));
+        image.attrs.set_text_layout(&TextLayoutHints {
+            max_width: Some(TargetValue::universal(Length::ch(10))),
+            overflow: TextOverflow::Truncate,
+            ..Default::default()
+        });
+        let para = RenderNode::paragraph(vec![image, RenderNode::text(" tail")]);
+        let out = render_terminal_node(&para, &no_osc_opts(60)).expect("render");
+        assert_no_color_bleed(&out.output, "tail");
     }
 
     #[test]
@@ -4356,6 +4418,20 @@ mod render_tree_tests {
         // The bordered block stays within the available width.
         let widest = plain.split('\n').map(visible_width).max().unwrap_or(0);
         assert!(widest <= 80, "bordered block overflowed: {widest}");
+    }
+
+    /// Asserts the run of `raw` preceding the first occurrence of `marker`
+    /// closes any opened SGR color with a reset, so a styled-and-truncated
+    /// inline node does not bleed its color into the following text.
+    #[cfg(test)]
+    fn assert_no_color_bleed(raw: &str, marker: &str) {
+        let pos = raw
+            .find(marker)
+            .unwrap_or_else(|| panic!("marker {marker:?} not found in {raw:?}"));
+        assert!(
+            raw[..pos].contains(style::SGR_RESET),
+            "expected an SGR reset before {marker:?}, got: {raw:?}"
+        );
     }
 
     /// Builds a universal foreground-color [`Style`] for a [`BasicColor`].
