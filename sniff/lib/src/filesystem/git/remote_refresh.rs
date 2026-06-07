@@ -118,7 +118,8 @@ fn get_git_config_with_extra(
 /// Parse the platform-specific system gitconfig that gix's standard search does
 /// not include, for use as a lowest-precedence fallback.
 fn extra_system_config() -> Option<gix::config::File<'static>> {
-    extra_system_config_at(platform_extra_system_config_path())
+    static CACHE: std::sync::OnceLock<Option<gix::config::File<'static>>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| extra_system_config_at(platform_extra_system_config_path())).clone()
 }
 
 #[cfg(target_os = "macos")]
@@ -228,13 +229,15 @@ pub(crate) fn get_tracking_status_fallible(
     for remote_name in repo.remote_names() {
         let remote_name = remote_name.to_string();
         let remote_ref_name = format!("refs/remotes/{remote_name}/{branch_name}");
-        let Ok(remote_ref) = repo.find_reference(&remote_ref_name) else {
-            continue;
+        let remote_ref = match repo.find_reference(&remote_ref_name) {
+            Ok(r) => r,
+            Err(gix::reference::find::existing::Error::NotFound { .. }) => continue,
+            Err(e) => return Err(SniffError::git("find_reference", e)),
         };
-        let Ok(remote_id) = remote_ref.into_fully_peeled_id() else {
-            continue;
-        };
-        let remote = remote_id.detach();
+        let remote = remote_ref
+            .into_fully_peeled_id()
+            .map_err(|e| SniffError::git("peel", e))?
+            .detach();
 
         // behind: commits on the remote-tracking branch the local does not have.
         let behind = count_reachable_excluding(repo, remote, local)?;

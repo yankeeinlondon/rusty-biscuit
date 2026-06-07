@@ -515,7 +515,6 @@ impl GitRepo {
     ) -> std::cell::Ref<'_, HashMap<gix::ObjectId, Vec<RefDecoration>>> {
         // If not yet computed, compute and cache
         if self.ref_decorations.borrow().is_none() {
-            self.ensure_cache();
             let decorations = super::discovery::collect_ref_decorations(&self.gix.borrow());
             *self.ref_decorations.borrow_mut() = Some(decorations);
         }
@@ -590,22 +589,28 @@ impl GitRepo {
     }
 
     /// Current branch name (`None` for detached or unborn HEAD).
+    ///
+    /// Reads `.git/HEAD` directly and checks for the loose branch ref file
+    /// so a corrupt packed-refs file cannot suppress the branch name. The
+    /// active checkout branch is always stored as a loose ref, so the file
+    /// check is sufficient.
     pub fn current_branch(&self) -> Option<String> {
-        let repo = self.gix.borrow();
-        let head = repo
-            .head()
+        let head_path = self.git_dir.join("HEAD");
+        let contents = std::fs::read_to_string(&head_path)
             .map_err(|e| {
-                debug!(error = %e, "could not read HEAD");
+                debug!(path = %head_path.display(), error = %e, "could not read HEAD");
                 e
             })
             .ok()?;
-        if head.is_unborn() {
-            return None;
+        let line = contents.trim();
+        let name = line.strip_prefix("ref: refs/heads/")?.to_string();
+        // Unborn HEAD names a branch that does not yet have a ref file.
+        let branch_ref_path = self.git_dir.join("refs").join("heads").join(&name);
+        if branch_ref_path.is_file() {
+            Some(name)
+        } else {
+            None
         }
-        // `referent_name` is `None` for a detached HEAD.
-        let name = head.referent_name()?;
-        let name = std::str::from_utf8(name.as_bstr().as_ref()).ok()?;
-        Some(name.strip_prefix("refs/heads/").unwrap_or(name).to_string())
     }
 
     /// Whether the working directory is a linked worktree.
@@ -1261,6 +1266,7 @@ fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn setup_repo() -> (TempDir, git2::Repository) {
@@ -1270,7 +1276,7 @@ mod tests {
         let file_path = dir.path().join("test.txt");
         std::fs::write(&file_path, "content\n").unwrap();
         let mut index = repo.index().unwrap();
-        index.add_path(std::path::Path::new("test.txt")).unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
         index.write().unwrap();
         let tree_id = index.write_tree().unwrap();
         {
@@ -1279,6 +1285,15 @@ mod tests {
                 .unwrap();
         }
         (dir, repo)
+    }
+
+    fn corrupt_packed_refs(repo_path: &Path) {
+        let packed_refs = repo_path.join(".git").join("packed-refs");
+        std::fs::write(
+            &packed_refs,
+            "# pack-refs with: peeled fully-peeled\n^garbage\n",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1293,5 +1308,85 @@ mod tests {
 
         assert_eq!(config1.user_email, config2.user_email);
         assert_eq!(config1.user_name, config2.user_name);
+    }
+
+    #[test]
+    fn corrupt_ref_try_branches_propagates_error() {
+        let (dir, _repo) = setup_repo();
+        corrupt_packed_refs(dir.path());
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        assert!(
+            git_repo.try_branches().is_err(),
+            "corrupt refs must propagate through try_branches"
+        );
+    }
+
+    #[test]
+    fn corrupt_ref_try_tracking_status_propagates_error() {
+        let (dir, repo) = setup_repo();
+        // Configure a remote so the tracking walk has to look up a
+        // remote-tracking ref. The corrupt packed-refs file causes the
+        // lookup to fail instead of returning an empty Ok result.
+        repo.remote("origin", "https://example.com/repo").unwrap();
+        corrupt_packed_refs(dir.path());
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        assert!(
+            git_repo.try_tracking_status().is_err(),
+            "corrupt refs must propagate through try_tracking_status"
+        );
+    }
+
+    #[test]
+    fn corrupt_ref_detect_with_request_propagates_error() {
+        let (dir, _repo) = setup_repo();
+        corrupt_packed_refs(dir.path());
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        assert!(
+            git_repo.detect_with_request(&GitRequest::full()).is_err(),
+            "corrupt refs must propagate through detect_with_request"
+        );
+    }
+
+    #[test]
+    fn branches_convenience_suppresses_errors_to_empty_vec() {
+        let (dir, _repo) = setup_repo();
+        corrupt_packed_refs(dir.path());
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        assert!(
+            git_repo.branches().is_empty(),
+            "infallible branches() must suppress errors to an empty vec"
+        );
+    }
+
+    #[test]
+    fn tracking_status_convenience_suppresses_errors_to_empty_vec() {
+        let (dir, repo) = setup_repo();
+        repo.remote("origin", "https://example.com/repo").unwrap();
+        corrupt_packed_refs(dir.path());
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        assert!(
+            git_repo.tracking_status().is_empty(),
+            "infallible tracking_status() must suppress errors to an empty vec"
+        );
     }
 }
