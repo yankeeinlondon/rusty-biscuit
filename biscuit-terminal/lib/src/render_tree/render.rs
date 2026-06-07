@@ -1046,11 +1046,20 @@ impl Writer<'_> {
                 // node). A successfully rendered inline image is left unstyled —
                 // color has no meaning for a raster cell.
                 let fallback = || {
-                    let inner = match self.opts.context.image_placeholder {
-                        ImagePlaceholder::Bracket => format!("[{alt}]"),
-                        ImagePlaceholder::Block => format!("▉ IMAGE[{alt}]"),
+                    // Typed `text_layout` pads/truncates the *alt text* to its
+                    // resolved field, inside the placeholder brackets — the
+                    // legacy serializer padded the whole `▉ IMAGE[..]` string; the
+                    // tree path shapes only the alt. The source alt stays intact
+                    // in the tree (`Image.alt`); only this projection is shaped.
+                    let shaped_alt = match node.attrs.text_layout_ref() {
+                        Some(hints) => self.apply_text_layout(alt.to_string(), hints),
+                        None => alt.to_string(),
                     };
-                    let styled = match node.attrs.style_ref().filter(|s| !s.is_empty()) {
+                    let inner = match self.opts.context.image_placeholder {
+                        ImagePlaceholder::Bracket => format!("[{shaped_alt}]"),
+                        ImagePlaceholder::Block => format!("▉ IMAGE[{shaped_alt}]"),
+                    };
+                    match node.attrs.style_ref().filter(|s| !s.is_empty()) {
                         Some(img_style) => {
                             let img_effective = img_style.inherited_from(effective);
                             if img_effective == *effective {
@@ -1066,13 +1075,6 @@ impl Writer<'_> {
                             }
                         }
                         None => inner,
-                    };
-                    // Typed `text_layout` pads/truncates the alt-text placeholder
-                    // to its resolved field. The source alt text stays intact in
-                    // the tree (`Image.alt`); only this projection is shaped.
-                    match node.attrs.text_layout_ref() {
-                        Some(hints) => self.apply_text_layout(styled, hints),
-                        None => styled,
                     }
                 };
                 match self.opts.context.graphics_mode {
@@ -1418,27 +1420,16 @@ impl Writer<'_> {
         };
         let full_prefix = format!("{prefix}{check_marker}");
 
-        // A typed `text_layout` on the list item is the successor to the
-        // `darkmatter.li` pad hint: it lifts the marker to its own line and
-        // left-pads the body block per its resolved alignment, keeping the
-        // marker structurally separate from the body placement. The bodies are
-        // rendered, the widest visible line measured, and the alignment pad
-        // derived within the resolved field (`width`/`max_width`, capped by the
-        // available width). A `Left`/no-slack alignment yields no pad and falls
-        // through to the inline rendering below.
+        // A typed `text_layout` on the list item lifts the marker to its own
+        // line and left-pads the body *block* per its resolved alignment, keeping
+        // the marker structurally separate from the body placement. The body
+        // block occupies its resolved field (`width`/`max_width`, capped by the
+        // available width); that field-wide block is then positioned within the
+        // available width — so the pad is the surplus between the available width
+        // and the field, not between the field and the rendered content. A
+        // `Left`/no-field alignment yields no pad and falls through to the inline
+        // rendering below.
         if let Some(hints) = node.attrs.text_layout_ref() {
-            let mut bodies = Vec::with_capacity(item_children.len());
-            let mut widest = 0u32;
-            for child in item_children {
-                let body = match &child.kind {
-                    NodeKind::Paragraph { children } => {
-                        self.render_inline(children, &Style::default())?
-                    }
-                    _ => self.render(child)?,
-                };
-                widest = widest.max(body.split('\n').map(visible_width).max().unwrap_or(0));
-                bodies.push(body);
-            }
             let available = self.opts.context.available_width;
             let field = hints
                 .width
@@ -1448,43 +1439,26 @@ impl Writer<'_> {
                 .filter(|cells| *cells > 0)
                 .unwrap_or(available)
                 .min(available);
-            let slack = field.saturating_sub(widest);
+            let surplus = available.saturating_sub(field);
             let pad = match hints.alignment {
                 Alignment::Left => 0,
-                Alignment::Center => slack / 2,
-                Alignment::Right => slack,
+                Alignment::Center => surplus / 2,
+                Alignment::Right => surplus,
             };
             if pad > 0 {
                 let mut out = full_prefix.clone();
-                for body in &bodies {
+                for child in item_children {
+                    let body = match &child.kind {
+                        NodeKind::Paragraph { children } => {
+                            self.render_inline(children, &Style::default())?
+                        }
+                        _ => self.render(child)?,
+                    };
                     out.push('\n');
-                    out.push_str(&indent_block(body, pad));
+                    out.push_str(&indent_block(&body, pad));
                 }
                 return Ok(out);
             }
-        }
-
-        // A decorated right/center-aligned list item lifts its marker to its own
-        // line and left-pads the body block, matching the legacy
-        // `for_terminal_with_layout` model (the marker stays in the list's
-        // column; the body shifts as one block). Gated strictly on the
-        // `darkmatter.li` hint the decoration pass sets — the default path never
-        // sets it, so its inline rendering below is byte-unchanged.
-        if let Some(pad) = list_item_align_pad(node) {
-            // The marker keeps its trailing space and stays in the list's
-            // column (legacy emits `"- "` / `"1. "` on its own line).
-            let mut out = full_prefix.clone();
-            for child in item_children {
-                out.push('\n');
-                let body = match &child.kind {
-                    NodeKind::Paragraph { children } => {
-                        self.render_inline(children, &Style::default())?
-                    }
-                    _ => self.render(child)?,
-                };
-                out.push_str(&indent_block(&body, pad));
-            }
-            return Ok(out);
         }
 
         let mut out = String::new();
@@ -2210,21 +2184,6 @@ fn prefix_first_line(prefix: &str, body: &str) -> String {
         out.push_str(line);
     }
     out
-}
-
-/// The left pad (in cells) for a decorated non-left-aligned list item, or
-/// `None` for the default inline rendering.
-///
-/// Reads the `darkmatter.li` `pad` hint the darkmatter decoration pass sets for
-/// `Center` / `Right`-aligned lists; the pad is the precomputed left offset
-/// (`alignment_padding(Li, li_width)`). A missing or non-positive hint means the
-/// item renders inline (the default-path contract).
-fn list_item_align_pad(node: &RenderNode) -> Option<u32> {
-    let pad = node
-        .attrs
-        .get_hint(HintNamespace("darkmatter.li"), "pad")?
-        .as_u64()?;
-    (pad > 0).then_some(pad as u32)
 }
 
 /// Applies recognized semantic classes as direct SGR escapes.
@@ -3167,9 +3126,11 @@ mod render_tree_tests {
         let node = RenderNode::paragraph(vec![image]);
         let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
         let stripped = strip_escape_codes(&out.output);
-        // The bracketed placeholder is capped to 10 columns with an ellipsis.
-        assert_eq!(visible_width(&stripped), 10, "{stripped:?}");
-        assert!(stripped.ends_with('…'), "{stripped:?}");
+        // `text_layout` shapes the *alt text* inside the placeholder brackets:
+        // the alt is truncated to 10 columns with an ellipsis, then wrapped in
+        // `[...]`, so the placeholder is the shaped alt plus the two brackets.
+        assert_eq!(visible_width(&stripped), 12, "{stripped:?}");
+        assert!(stripped.ends_with("…]"), "{stripped:?}");
         assert!(stripped.starts_with("[a very"), "{stripped:?}");
     }
 
