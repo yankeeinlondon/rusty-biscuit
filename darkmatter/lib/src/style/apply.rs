@@ -487,11 +487,11 @@ pub fn apply_color_style(
 
     // Page-level inherited colors.
     if let Some(page_style) = style.page.as_ref() {
-        if let Some(color) = page_style.color.clone() {
-            page = page.with_page_color(color);
+        if let Some(color) = page_style.color.as_ref() {
+            page = page.with_page_color(color.to_paint_color());
         }
-        if let Some(bg_color) = page_style.bg_color.clone() {
-            page = page.with_page_bg_color(bg_color);
+        if let Some(bg_color) = page_style.bg_color.as_ref() {
+            page = page.with_page_bg_color(bg_color.to_paint_color());
         }
     }
 
@@ -524,20 +524,21 @@ pub fn apply_color_style(
 /// Apply `color` and `bg-color` from a [`CommonStyle`] onto `page` for a
 /// single component.
 ///
-/// The [`StyleColor`](crate::style::StyleColor) is carried whole onto the
-/// component's [`ComponentPolicy`](crate::layout::ComponentPolicy), preserving
-/// its optional opacity for the HTML target (the terminal drops it).
+/// The [`StyleColor`](crate::style::StyleColor) is lowered to an alpha-bearing
+/// [`PaintColor`](renderable::style::PaintColor) at this boundary so the
+/// component policy stores the unified paint representation and opacity survives
+/// the render tree without a side channel.
 fn apply_common_color(
     page: DarkmatterPage,
     component: PageComponent,
     style: &CommonStyle,
 ) -> DarkmatterPage {
     let mut page = page;
-    if let Some(color) = style.color.clone() {
-        page = page.with_component_color(component, color);
+    if let Some(color) = style.color.as_ref() {
+        page = page.with_component_color(component, color.to_paint_color());
     }
-    if let Some(bg_color) = style.bg_color.clone() {
-        page = page.with_component_bg_color(component, bg_color);
+    if let Some(bg_color) = style.bg_color.as_ref() {
+        page = page.with_component_bg_color(component, bg_color.to_paint_color());
     }
     page
 }
@@ -594,15 +595,15 @@ pub fn apply_hr_style(
     }
 
     if !overrides.color
-        && let Some(color) = hr.color.clone()
+        && let Some(color) = hr.color.as_ref()
     {
-        page = page.with_component_color(PageComponent::Hr, color);
+        page = page.with_component_color(PageComponent::Hr, color.to_paint_color());
     }
 
     if !overrides.bg_color
-        && let Some(bg_color) = hr.bg_color.clone()
+        && let Some(bg_color) = hr.bg_color.as_ref()
     {
-        page = page.with_component_bg_color(PageComponent::Hr, bg_color);
+        page = page.with_component_bg_color(PageComponent::Hr, bg_color.to_paint_color());
     }
 
     Ok(page)
@@ -1943,30 +1944,26 @@ mod tests {
         let starting = page(80)
             .with_hr_alignment(HrAlignment::Left)
             .with_hr_width("30ch")
-            .with_component_color(PageComponent::Hr, crate::style::color::StyleColor {
-                color: renderable::color::Color::Tailwind(renderable::color::Tailwind::Green500),
-                opacity: None,
-            })
-            .with_component_bg_color(PageComponent::Hr, crate::style::color::StyleColor {
-                color: renderable::color::Color::Tailwind(renderable::color::Tailwind::Yellow500),
-                opacity: None,
-            });
+            .with_component_color(PageComponent::Hr, renderable::style::PaintColor::new(
+                renderable::color::Color::Tailwind(renderable::color::Tailwind::Green500),
+            ))
+            .with_component_bg_color(PageComponent::Hr, renderable::style::PaintColor::new(
+                renderable::color::Color::Tailwind(renderable::color::Tailwind::Yellow500),
+            ));
         let out = apply_hr_style(starting, &style, overrides).unwrap();
         assert_eq!(out.hr_alignment(), Some(HrAlignment::Left));
         assert_eq!(out.hr_width(), Some("30ch"));
         assert_eq!(
             out.color_for(PageComponent::Hr),
-            Some(&crate::style::color::StyleColor {
-                color: renderable::color::Color::Tailwind(renderable::color::Tailwind::Green500),
-                opacity: None,
-            })
+            Some(&renderable::style::PaintColor::new(
+                renderable::color::Color::Tailwind(renderable::color::Tailwind::Green500),
+            ))
         );
         assert_eq!(
             out.bg_color_for(PageComponent::Hr),
-            Some(&crate::style::color::StyleColor {
-                color: renderable::color::Color::Tailwind(renderable::color::Tailwind::Yellow500),
-                opacity: None,
-            })
+            Some(&renderable::style::PaintColor::new(
+                renderable::color::Color::Tailwind(renderable::color::Tailwind::Yellow500),
+            ))
         );
     }
 

@@ -21,8 +21,6 @@ use crate::markdown::output::html::HtmlOptions;
 use crate::markdown::output::terminal::{
     ColorDepth, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode, TerminalOptions,
 };
-use crate::style::StyleColor;
-use crate::style::color::lower_to_css;
 use crate::style::schema::hr::{HrAlignment, HrKind, HrWeight};
 use crate::markdown::block::{
     hr_alignment_to_string, hr_kind_to_string, hr_weight_to_string,
@@ -32,15 +30,15 @@ use crate::markdown::block::{
 ///
 /// This is the **single source of truth** for a component's `style:` layout and
 /// colors — there is no parallel per-component color map. `color` / `bg_color`
-/// are kept as [`StyleColor`] rather than lowered into a renderable
-/// [`Style`](renderable::style::Style) so Tailwind/hex **opacity** survives to
-/// the HTML target (where it lowers to `rgba(...)`); the terminal drops opacity,
-/// as documented in `docs/rendering/style.md`.
+/// are stored as alpha-bearing [`PaintColor`] so opacity survives through the
+/// render tree to the browser target; the terminal target drops opacity, as
+/// documented in `docs/rendering/style.md`. [`StyleColor`] is lowered to
+/// [`PaintColor`] at the parser/apply boundary (`style/apply.rs`).
 #[derive(Debug, Clone, Default)]
 pub struct ComponentPolicy {
     pub layout: renderable::layout::Layout,
-    pub color: Option<StyleColor>,
-    pub bg_color: Option<StyleColor>,
+    pub color: Option<renderable::style::PaintColor>,
+    pub bg_color: Option<renderable::style::PaintColor>,
 }
 
 /// A page-level layout primitive that owns layout state for darkmatter
@@ -89,8 +87,8 @@ pub struct DarkmatterPage {
     page_max_width: Option<renderable::layout::TargetValue<renderable::layout::Length>>,
     line_numbers: bool,
     component_policies: HashMap<PageComponent, ComponentPolicy>,
-    page_color: Option<StyleColor>,
-    page_bg_color: Option<StyleColor>,
+    page_color: Option<renderable::style::PaintColor>,
+    page_bg_color: Option<renderable::style::PaintColor>,
     hr_kind: Option<HrKind>,
     hr_weight: Option<HrWeight>,
     hr_alignment: Option<HrAlignment>,
@@ -239,12 +237,12 @@ impl DarkmatterPage {
     }
 
     /// Configured page foreground color, if any.
-    pub fn page_color(&self) -> Option<&StyleColor> {
+    pub fn page_color(&self) -> Option<&renderable::style::PaintColor> {
         self.page_color.as_ref()
     }
 
     /// Configured page background color, if any.
-    pub fn page_bg_color(&self) -> Option<&StyleColor> {
+    pub fn page_bg_color(&self) -> Option<&renderable::style::PaintColor> {
         self.page_bg_color.as_ref()
     }
 
@@ -252,7 +250,7 @@ impl DarkmatterPage {
     ///
     /// Returns the component-specific color when set, otherwise falls back
     /// to the page-level color.
-    pub fn color_for(&self, component: PageComponent) -> Option<&StyleColor> {
+    pub fn color_for(&self, component: PageComponent) -> Option<&renderable::style::PaintColor> {
         self.component_policies
             .get(&component)
             .and_then(|p| p.color.as_ref())
@@ -263,7 +261,7 @@ impl DarkmatterPage {
     ///
     /// Returns the component-specific color when set, otherwise falls back
     /// to the page-level color.
-    pub fn bg_color_for(&self, component: PageComponent) -> Option<&StyleColor> {
+    pub fn bg_color_for(&self, component: PageComponent) -> Option<&renderable::style::PaintColor> {
         self.component_policies
             .get(&component)
             .and_then(|p| p.bg_color.as_ref())
@@ -344,7 +342,7 @@ impl DarkmatterPage {
             has_any = true;
         }
         if let Some(color) = self.color_for(PageComponent::Hr)
-            && let Some(css) = lower_to_css(color)
+            && let Some(css) = crate::style::color::paint_to_css_string(color)
         {
             attrs.color = Some(css);
             has_any = true;
@@ -510,13 +508,13 @@ impl DarkmatterPage {
     }
 
     /// Set the page foreground color.
-    pub fn with_page_color(mut self, color: StyleColor) -> Self {
+    pub fn with_page_color(mut self, color: renderable::style::PaintColor) -> Self {
         self.page_color = Some(color);
         self
     }
 
     /// Set the page background color.
-    pub fn with_page_bg_color(mut self, color: StyleColor) -> Self {
+    pub fn with_page_bg_color(mut self, color: renderable::style::PaintColor) -> Self {
         self.page_bg_color = Some(color);
         self
     }
@@ -525,7 +523,11 @@ impl DarkmatterPage {
     ///
     /// Upserts onto the component's [`ComponentPolicy`] — the single source of
     /// truth — preserving any layout already configured for it.
-    pub fn with_component_color(mut self, component: PageComponent, color: StyleColor) -> Self {
+    pub fn with_component_color(
+        mut self,
+        component: PageComponent,
+        color: renderable::style::PaintColor,
+    ) -> Self {
         self.component_policies.entry(component).or_default().color = Some(color);
         self
     }
@@ -533,7 +535,11 @@ impl DarkmatterPage {
     /// Set the background color for a single [`PageComponent`].
     ///
     /// Upserts onto the component's [`ComponentPolicy`], preserving its layout.
-    pub fn with_component_bg_color(mut self, component: PageComponent, color: StyleColor) -> Self {
+    pub fn with_component_bg_color(
+        mut self,
+        component: PageComponent,
+        color: renderable::style::PaintColor,
+    ) -> Self {
         self.component_policies.entry(component).or_default().bg_color = Some(color);
         self
     }
@@ -1351,13 +1357,13 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> 
     }
 
     // Page-level foreground color from style frontmatter.
-    if let Some(color) = ctx.page_color.as_ref().and_then(lower_to_css) {
+    if let Some(color) = ctx.page_color.as_ref().and_then(crate::style::color::paint_to_css_string) {
         wrapper_styles.push_str(&format!("color: {color}; "));
     }
 
     // Page-level background color from style frontmatter takes precedence
     // over the computed PageBackground color.
-    if let Some(bg_color) = ctx.page_bg_color.as_ref().and_then(lower_to_css) {
+    if let Some(bg_color) = ctx.page_bg_color.as_ref().and_then(crate::style::color::paint_to_css_string) {
         wrapper_styles.push_str(&format!("background-color: {bg_color}; "));
     }
 
@@ -2557,21 +2563,15 @@ mod tests {
 
     // ---------- Phase 1: color API tests ----------
 
-    use crate::style::StyleColor;
     use renderable::color::{Color, Tailwind};
+    use renderable::style::PaintColor;
 
-    fn red_color() -> StyleColor {
-        StyleColor {
-            color: Color::Tailwind(Tailwind::Red500),
-            opacity: None,
-        }
+    fn red_color() -> PaintColor {
+        PaintColor::new(Color::Tailwind(Tailwind::Red500))
     }
 
-    fn blue_color() -> StyleColor {
-        StyleColor {
-            color: Color::Tailwind(Tailwind::Blue500),
-            opacity: None,
-        }
+    fn blue_color() -> PaintColor {
+        PaintColor::new(Color::Tailwind(Tailwind::Blue500))
     }
 
     #[test]
@@ -2788,10 +2788,11 @@ mod tests {
     #[test]
     fn browser_opacity_preserved_as_rgba() {
         let term = Terminal::new_optimistic(120);
-        let semi = StyleColor {
+        let semi = crate::style::StyleColor {
             color: Color::Tailwind(Tailwind::Red500),
             opacity: Some(50),
-        };
+        }
+        .to_paint_color();
         let page = DarkmatterPage::new(&term).with_page_color(semi);
         let md: Markdown = "# Hello\n".into();
 
@@ -2808,10 +2809,11 @@ mod tests {
         // survive the cutover path to the browser as `rgba(...)` — the renderable
         // `Style` cannot carry opacity, so the browser entry point splices it in.
         let term = Terminal::new_optimistic(120);
-        let semi = StyleColor {
+        let semi = crate::style::StyleColor {
             color: Color::Tailwind(Tailwind::Red500),
             opacity: Some(50),
-        };
+        }
+        .to_paint_color();
         let page = DarkmatterPage::new(&term)
             .with_component_bg_color(PageComponent::BlockQuotes, semi);
         let md: Markdown = "> Quote\n".into();
@@ -2827,10 +2829,11 @@ mod tests {
     fn terminal_component_opacity_dropped_but_color_kept() {
         // The terminal drops opacity (documented) yet still paints the color.
         let term = Terminal::new_optimistic(80);
-        let semi = StyleColor {
+        let semi = crate::style::StyleColor {
             color: Color::Tailwind(Tailwind::Red500),
             opacity: Some(50),
-        };
+        }
+        .to_paint_color();
         let page = DarkmatterPage::new(&term)
             .with_component_bg_color(PageComponent::BlockQuotes, semi);
         let md: Markdown = "> Quote\n".into();
@@ -2845,10 +2848,11 @@ mod tests {
     #[test]
     fn terminal_opacity_dropped_from_sgr() {
         let term = Terminal::new_optimistic(80);
-        let semi = StyleColor {
+        let semi = crate::style::StyleColor {
             color: Color::Tailwind(Tailwind::Red500),
             opacity: Some(50),
-        };
+        }
+        .to_paint_color();
         let page = DarkmatterPage::new(&term).with_page_color(semi);
         let md: Markdown = "# Hello\n".into();
 
@@ -2864,18 +2868,15 @@ mod tests {
     fn browser_css_special_colors_passthrough() {
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term)
-            .with_component_color(PageComponent::Tables, StyleColor {
-                color: Color::Tailwind(Tailwind::Transparent),
-                opacity: None,
-            })
-            .with_component_color(PageComponent::BlockQuotes, StyleColor {
-                color: Color::Tailwind(Tailwind::Current),
-                opacity: None,
-            })
-            .with_component_bg_color(PageComponent::Images, StyleColor {
-                color: Color::Tailwind(Tailwind::Inherit),
-                opacity: None,
-            });
+            .with_component_color(PageComponent::Tables, PaintColor::new(
+                Color::Tailwind(Tailwind::Transparent),
+            ))
+            .with_component_color(PageComponent::BlockQuotes, PaintColor::new(
+                Color::Tailwind(Tailwind::Current),
+            ))
+            .with_component_bg_color(PageComponent::Images, PaintColor::new(
+                Color::Tailwind(Tailwind::Inherit),
+            ));
         let md: Markdown = "# Hello\n\n> Quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
@@ -2891,10 +2892,9 @@ mod tests {
         let page = DarkmatterPage::new(&term)
             .with_component_color(PageComponent::Ul, red_color())
             .with_component_color(PageComponent::Ol, blue_color())
-            .with_component_color(PageComponent::Li, StyleColor {
-                color: Color::Tailwind(Tailwind::Green500),
-                opacity: None,
-            });
+            .with_component_color(PageComponent::Li, PaintColor::new(
+                Color::Tailwind(Tailwind::Green500),
+            ));
         let md: Markdown = "- one\n\n1. two\n".into();
 
         let html = page.render_to_browser(&md).unwrap();

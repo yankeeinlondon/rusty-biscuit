@@ -7,7 +7,6 @@ use super::types::{
     PageBackground, PageComponent,
 };
 use crate::markdown::highlighting::ColorMode;
-use crate::style::StyleColor;
 use crate::style::schema::CommonStyle;
 
 /// Resolved layout state used during terminal rendering.
@@ -35,9 +34,9 @@ pub(crate) struct LayoutContext {
     /// Color mode passed to the markdown renderer (may be inverted for Pronounced).
     pub render_color_mode: ColorMode,
     /// Page foreground color.
-    pub page_color: Option<StyleColor>,
+    pub page_color: Option<renderable::style::PaintColor>,
     /// Page background color.
-    pub page_bg_color: Option<StyleColor>,
+    pub page_bg_color: Option<renderable::style::PaintColor>,
     /// Per-component renderable policies from `style:` frontmatter — the single
     /// source of truth for per-component layout **and** colors (including
     /// opacity).
@@ -127,8 +126,8 @@ impl LayoutContext {
         page_max_width: Option<renderable::layout::TargetValue<renderable::layout::Length>>,
         terminal_color_mode: &biscuit_terminal::discovery::detection::ColorMode,
         options_color_mode: ColorMode,
-        page_color: Option<StyleColor>,
-        page_bg_color: Option<StyleColor>,
+        page_color: Option<renderable::style::PaintColor>,
+        page_bg_color: Option<renderable::style::PaintColor>,
         component_policies: std::collections::HashMap<PageComponent, ComponentPolicy>,
         hyperlink_style: Option<CommonStyle>,
         local_hyperlink_style: Option<CommonStyle>,
@@ -218,7 +217,7 @@ impl LayoutContext {
     ///
     /// Returns the component-specific color when set, otherwise falls back
     /// to the page-level color.
-    pub fn component_color(&self, component: PageComponent) -> Option<&StyleColor> {
+    pub fn component_color(&self, component: PageComponent) -> Option<&renderable::style::PaintColor> {
         self.component_policies
             .get(&component)
             .and_then(|p| p.color.as_ref())
@@ -229,7 +228,7 @@ impl LayoutContext {
     ///
     /// Returns the component-specific color when set, otherwise falls back
     /// to the page-level color.
-    pub fn component_bg_color(&self, component: PageComponent) -> Option<&StyleColor> {
+    pub fn component_bg_color(&self, component: PageComponent) -> Option<&renderable::style::PaintColor> {
         self.component_policies
             .get(&component)
             .and_then(|p| p.bg_color.as_ref())
@@ -241,7 +240,10 @@ impl LayoutContext {
     /// For local links (`is_local == true`), merges `local_hyperlink_style`
     /// over `hyperlink_style` and uses the resulting color fields. For remote
     /// links, uses the global `hyperlinks` component color.
-    pub fn hyperlink_color(&self, is_local: bool) -> (Option<StyleColor>, Option<StyleColor>) {
+    pub fn hyperlink_color(
+        &self,
+        is_local: bool,
+    ) -> (Option<renderable::style::PaintColor>, Option<renderable::style::PaintColor>) {
         let merged = if is_local {
             self.local_hyperlink_style.as_ref().map(|local| {
                 if let Some(base) = self.hyperlink_style.as_ref() {
@@ -256,12 +258,14 @@ impl LayoutContext {
 
         let fg = merged
             .as_ref()
-            .and_then(|s| s.color.clone())
+            .and_then(|s| s.color.as_ref())
+            .map(|c| c.to_paint_color())
             .or_else(|| self.policy_color(PageComponent::Hyperlinks))
             .or_else(|| self.page_color.clone());
         let bg = merged
             .as_ref()
-            .and_then(|s| s.bg_color.clone())
+            .and_then(|s| s.bg_color.as_ref())
+            .map(|c| c.to_paint_color())
             .or_else(|| self.policy_bg_color(PageComponent::Hyperlinks))
             .or_else(|| self.page_bg_color.clone());
 
@@ -270,7 +274,7 @@ impl LayoutContext {
 
     /// The component's own foreground color from its [`ComponentPolicy`] (no
     /// page-level fallback), cloned.
-    fn policy_color(&self, component: PageComponent) -> Option<StyleColor> {
+    fn policy_color(&self, component: PageComponent) -> Option<renderable::style::PaintColor> {
         self.component_policies
             .get(&component)
             .and_then(|p| p.color.clone())
@@ -278,7 +282,7 @@ impl LayoutContext {
 
     /// The component's own background color from its [`ComponentPolicy`] (no
     /// page-level fallback), cloned.
-    fn policy_bg_color(&self, component: PageComponent) -> Option<StyleColor> {
+    fn policy_bg_color(&self, component: PageComponent) -> Option<renderable::style::PaintColor> {
         self.component_policies
             .get(&component)
             .and_then(|p| p.bg_color.clone())
@@ -307,28 +311,22 @@ impl LayoutContext {
     /// For local images (`is_local == true`), merges `local_image_style`
     /// over the global `style.images.*` colors. For remote images, uses the
     /// global `images` component color.
-    pub fn image_color(&self, is_local: bool) -> (Option<StyleColor>, Option<StyleColor>) {
-        let merged = if is_local {
-            self.local_image_style.as_ref().map(|local| {
-                let base = CommonStyle {
-                    color: self.policy_color(PageComponent::Images),
-                    bg_color: self.policy_bg_color(PageComponent::Images),
-                    ..CommonStyle::default()
-                };
-                crate::style::bespoke::merge_common_style(&base, local)
-            })
-        } else {
-            None
-        };
+    pub fn image_color(
+        &self,
+        is_local: bool,
+    ) -> (Option<renderable::style::PaintColor>, Option<renderable::style::PaintColor>) {
+        // Local images merge `local_image_style` colors over the Images
+        // component policy; remote images use the Images policy only.
+        let local = if is_local { self.local_image_style.as_ref() } else { None };
 
-        let fg = merged
-            .as_ref()
-            .and_then(|s| s.color.clone())
+        let fg = local
+            .and_then(|s| s.color.as_ref())
+            .map(|c| c.to_paint_color())
             .or_else(|| self.policy_color(PageComponent::Images))
             .or_else(|| self.page_color.clone());
-        let bg = merged
-            .as_ref()
-            .and_then(|s| s.bg_color.clone())
+        let bg = local
+            .and_then(|s| s.bg_color.as_ref())
+            .map(|c| c.to_paint_color())
             .or_else(|| self.policy_bg_color(PageComponent::Images))
             .or_else(|| self.page_bg_color.clone());
 
@@ -362,31 +360,25 @@ mod tests {
 
     // ---------- Phase 1: color context tests ----------
 
-    use crate::style::StyleColor;
     use renderable::color::{Color, Tailwind};
+    use renderable::style::PaintColor;
 
-    fn red_style_color() -> StyleColor {
-        StyleColor {
-            color: Color::Tailwind(Tailwind::Red500),
-            opacity: None,
-        }
+    fn red_paint() -> PaintColor {
+        PaintColor::new(Color::Tailwind(Tailwind::Red500))
     }
 
-    fn blue_style_color() -> StyleColor {
-        StyleColor {
-            color: Color::Tailwind(Tailwind::Blue500),
-            opacity: None,
-        }
+    fn blue_paint() -> PaintColor {
+        PaintColor::new(Color::Tailwind(Tailwind::Blue500))
     }
 
-    fn color_policy(color: StyleColor) -> ComponentPolicy {
+    fn color_policy(color: PaintColor) -> ComponentPolicy {
         ComponentPolicy {
             color: Some(color),
             ..ComponentPolicy::default()
         }
     }
 
-    fn bg_color_policy(color: StyleColor) -> ComponentPolicy {
+    fn bg_color_policy(color: PaintColor) -> ComponentPolicy {
         ComponentPolicy {
             bg_color: Some(color),
             ..ComponentPolicy::default()
@@ -396,14 +388,14 @@ mod tests {
     #[test]
     fn needs_decoration_true_when_page_color_set() {
         let mut c = ctx(100, 80);
-        c.page_color = Some(red_style_color());
+        c.page_color = Some(red_paint());
         assert!(c.needs_decoration());
     }
 
     #[test]
     fn needs_decoration_true_when_page_bg_color_set() {
         let mut c = ctx(100, 80);
-        c.page_bg_color = Some(red_style_color());
+        c.page_bg_color = Some(red_paint());
         assert!(c.needs_decoration());
     }
 
@@ -411,41 +403,41 @@ mod tests {
     fn needs_decoration_true_when_component_color_set() {
         let mut c = ctx(100, 80);
         c.component_policies
-            .insert(PageComponent::Tables, color_policy(red_style_color()));
+            .insert(PageComponent::Tables, color_policy(red_paint()));
         assert!(c.needs_decoration());
     }
 
     #[test]
     fn component_color_inherits_from_page() {
         let mut c = ctx(100, 80);
-        c.page_color = Some(red_style_color());
+        c.page_color = Some(red_paint());
         c.component_policies
-            .insert(PageComponent::Tables, color_policy(blue_style_color()));
+            .insert(PageComponent::Tables, color_policy(blue_paint()));
 
         assert_eq!(
             c.component_color(PageComponent::Tables),
-            Some(&blue_style_color())
+            Some(&blue_paint())
         );
         assert_eq!(
             c.component_color(PageComponent::Images),
-            Some(&red_style_color())
+            Some(&red_paint())
         );
     }
 
     #[test]
     fn component_bg_color_inherits_from_page() {
         let mut c = ctx(100, 80);
-        c.page_bg_color = Some(red_style_color());
+        c.page_bg_color = Some(red_paint());
         c.component_policies
-            .insert(PageComponent::Tables, bg_color_policy(blue_style_color()));
+            .insert(PageComponent::Tables, bg_color_policy(blue_paint()));
 
         assert_eq!(
             c.component_bg_color(PageComponent::Tables),
-            Some(&blue_style_color())
+            Some(&blue_paint())
         );
         assert_eq!(
             c.component_bg_color(PageComponent::Images),
-            Some(&red_style_color())
+            Some(&red_paint())
         );
     }
 }

@@ -9,12 +9,11 @@
 //! renderer then applies those attributes.
 
 use renderable::layout::{Alignment, Length, TargetValue};
-use renderable::style::{PerMode, Style};
+use renderable::style::{PaintColor, PerMode, Style};
 use renderable::target::RenderTarget;
 use renderable::tree::{HintNamespace, NodeKind, RenderNode};
 
 use crate::layout::{LayoutContext, PageComponent};
-use crate::style::StyleColor;
 
 /// Walks `root`, decorating every node that maps to a [`PageComponent`].
 ///
@@ -150,11 +149,10 @@ fn apply_lone_image_layout(node: &mut RenderNode, ctx: &LayoutContext, _alt: &st
 
 /// Sets the node's [`Style`] foreground / background from the component colors.
 ///
-/// The renderable [`Style`] carries the `Color` only (opacity is not
-/// representable), which the terminal renderer consumes — and which drops
-/// opacity by design. Any opacity is additionally recorded as a
-/// `darkmatter.style` hint so the browser entry point can emit `rgba(...)`; see
-/// [`set_component_opacity_hints`].
+/// [`PaintColor`] carries the alpha channel directly into [`Style`], so the
+/// browser renderer lowers it to `rgba(...)` without any side-channel hint.
+/// The terminal renderer resolves [`PaintColor::color`](PaintColor::color) and
+/// intentionally ignores the alpha.
 fn apply_component_color(node: &mut RenderNode, ctx: &LayoutContext, component: PageComponent) {
     let fg = ctx.component_color(component);
     let bg = ctx.component_bg_color(component);
@@ -164,41 +162,6 @@ fn apply_component_color(node: &mut RenderNode, ctx: &LayoutContext, component: 
     let mut style = node.attrs.style().unwrap_or_default();
     set_style_colors(&mut style, fg, bg);
     node.attrs.set_style(&style);
-    set_component_opacity_hints(node, fg, bg);
-}
-
-/// The `darkmatter.style` hint namespace carrying the HTML-only `rgba(...)` form
-/// of opacity-bearing component colors.
-const STYLE_OPACITY_NS: HintNamespace = HintNamespace("darkmatter.style");
-
-/// Records the `rgba(...)` CSS of any opacity-bearing component color as a
-/// `darkmatter.style` hint (`color` / `background-color`).
-///
-/// The render tree's `Color`-typed [`Style`] cannot carry opacity, so the
-/// browser entry point reads this hint and merges the `rgba(...)` declaration
-/// onto the rendered element — see
-/// [`inject_component_color_opacity`](super::entrypoints). The terminal path
-/// ignores it (terminal drops opacity, as documented in
-/// `docs/rendering/style.md`).
-fn set_component_opacity_hints(
-    node: &mut RenderNode,
-    fg: Option<&StyleColor>,
-    bg: Option<&StyleColor>,
-) {
-    if let Some(css) = fg
-        .filter(|c| c.opacity.is_some())
-        .and_then(crate::style::color::lower_to_css)
-    {
-        node.attrs
-            .set_hint(STYLE_OPACITY_NS, "color", serde_json::json!(css));
-    }
-    if let Some(css) = bg
-        .filter(|c| c.opacity.is_some())
-        .and_then(crate::style::color::lower_to_css)
-    {
-        node.attrs
-            .set_hint(STYLE_OPACITY_NS, "background-color", serde_json::json!(css));
-    }
 }
 
 /// Applies hyperlink / image inline colors to link / image nodes.
@@ -365,13 +328,13 @@ fn is_local_link(url: &str) -> bool {
 }
 
 /// Sets the foreground / background colors on a [`Style`] from
-/// [`StyleColor`]s, leaving the other appearance layers untouched.
-fn set_style_colors(style: &mut Style, fg: Option<&StyleColor>, bg: Option<&StyleColor>) {
+/// [`PaintColor`]s, leaving the other appearance layers untouched.
+fn set_style_colors(style: &mut Style, fg: Option<&PaintColor>, bg: Option<&PaintColor>) {
     if let Some(color) = fg {
-        style.color = Some(TargetValue::universal(PerMode::universal(color.color)));
+        style.color = Some(TargetValue::universal(PerMode::universal(*color)));
     }
     if let Some(color) = bg {
-        style.background = Some(TargetValue::universal(PerMode::universal(color.color)));
+        style.background = Some(TargetValue::universal(PerMode::universal(*color)));
     }
 }
 
