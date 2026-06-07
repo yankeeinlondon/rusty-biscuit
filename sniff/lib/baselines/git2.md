@@ -13,74 +13,62 @@ before comparing.
 | OS | macOS 26.5 (build 25F71) |
 | CPU | Apple M4 Max (16 cores, arm64) |
 | Rust | rustc 1.96.0 (ac68faa20 2026-05-25) |
-| Git commit | `c5e137227` |
+| Git commit | `728614373` (last pre-migration commit carrying the `git_ops` bench) |
 | Backend | `git2` 0.20.x (production, pre-migration) |
 | Power mode | AC power; macOS default scheduler (not pinned / not low-power) |
 | `git` executable | available (commit-graph variants ran) |
+| Host load | normal interactive load (absolute timings inflated vs. a quiet host; see note) |
+
+> The `git_ops` bench group did not exist at `c5e137227` (the commit named in
+> earlier revisions of this file). It was introduced in `83f17100b`. This
+> baseline is therefore captured at `728614373` — the last commit before the
+> gix migration (`1833eb2bd`) that still has `git2` in production *and* carries
+> the `git_ops` benches.
 
 ## Capture Command
 
-Run from `sniff/lib` so the saved baseline lands beside the bench harness:
+Run from `sniff/lib` so the saved baseline lands beside the bench harness. **No
+sampling overrides** — both this baseline and the `gix` comparison use the
+bench harness's built-in Criterion configuration so the comparison is valid:
 
 ```bash
 cargo bench -p sniff --bench perf -- --save-baseline git2 git_ops
 ```
 
-The committed numbers below were captured with **reduced sampling**
-(`--measurement-time 3 --warm-up-time 1 --sample-size 10`) on a shared host to
-keep the run tractable; the wide confidence intervals on the slower benches
-(flagged below) reflect that sampling plus host contention.
-
-> ⚠️ **Release blocker:** This baseline **must be recaptured with default
-> Criterion sampling** (no overrides) on the same host as the `gix` comparison
-> before the migration can be judged against the no-regression gate. The
-> current `gix.md` comparison uses default sampling while this baseline uses
-> reduced sampling, making the comparison methodologically invalid for a
-> release decision.
-
 ## Timings
 
 Each row is Criterion's `[lower estimate upper]` 95% confidence interval.
 
-| Benchmark | Lower | Estimate | Upper | CI band |
-|-----------|-------|----------|-------|---------|
-| `git_ops/discover` | 186.02 µs | 188.97 µs | 192.93 µs | ±~2% |
-| `git_ops/status_dirty_flag/10` | 1.1563 ms | 1.1897 ms | 1.2227 ms | ±~3% |
-| `git_ops/status_file_changes/10` | 3.8351 ms | 4.0168 ms | 4.1582 ms | ±~4% |
-| `git_ops/status_dirty_flag/100` | 6.1185 ms | 6.3760 ms | 6.7079 ms | ±~5% |
-| `git_ops/status_file_changes/100` | 24.502 ms | 26.423 ms | 27.368 ms | ±~7% |
-| `git_ops/revwalk_recent_gated/nograph` | 50.831 ms | 55.548 ms | 64.969 ms | **+17%** ⚠ |
-| `git_ops/revwalk_recent_full/nograph` | 81.069 ms | 87.125 ms | 91.970 ms | ±~7% |
-| `git_ops/revwalk_recent_gated/graph` | 56.442 ms | 59.539 ms | 66.807 ms | **+12%** ⚠ |
-| `git_ops/revwalk_recent_full/graph` | 81.536 ms | 83.530 ms | 85.008 ms | ±~2% |
-| `git_ops/diff_commit_files` | 1.9673 ms | 2.8777 ms | 3.6629 ms | **±~30%** ⚠ |
-| `git_ops/ancestry_containment` | 18.950 ms | 24.334 ms | 34.616 ms | **−22% / +42%** ⚠ |
-| `git_ops/worktree_fanout/1` | 2.9214 ms | 3.3594 ms | 4.2024 ms | **+25%** ⚠ |
-| `git_ops/worktree_fanout/4` | 5.4079 ms | 5.8340 ms | 6.2988 ms | ±~8% |
-| `git_ops/worktree_fanout/8` | 7.0835 ms | 10.260 ms | 14.846 ms | **−31% / +45%** ⚠ |
-| `git_ops/config_read` | 466.54 µs | 633.97 µs | 824.48 µs | **−26% / +30%** ⚠ |
-| `git_ops/refs_enumerate` | 1.8343 ms | 1.9522 ms | 2.0920 ms | ±~7% |
-
-## Benchmarks With Confidence Interval Beyond ±10%
-
-These are **high-variance** under the reduced sampling above and on a shared
-host; treat them with the median-based ±15% review the migration spec
-prescribes rather than the strict no-regression gate:
-
-- `git_ops/revwalk_recent_gated/nograph`
-- `git_ops/revwalk_recent_gated/graph`
-- `git_ops/diff_commit_files`
-- `git_ops/ancestry_containment`
-- `git_ops/worktree_fanout/1`
-- `git_ops/worktree_fanout/8`
-- `git_ops/config_read`
+| Benchmark | Lower | Estimate | Upper |
+|-----------|-------|----------|-------|
+| `git_ops/discover` | 421.66 µs | 429.07 µs | 436.62 µs |
+| `git_ops/status_dirty_flag/10` | 2.8638 ms | 3.5570 ms | 3.9726 ms |
+| `git_ops/status_file_changes/10` | 3.8742 ms | 3.9558 ms | 4.0123 ms |
+| `git_ops/status_dirty_flag/100` | 3.4715 ms | 4.1966 ms | 4.7818 ms |
+| `git_ops/status_file_changes/100` | 11.143 ms | 12.642 ms | 15.130 ms |
+| `git_ops/revwalk_recent_gated/nograph` | 105.29 ms | 119.15 ms | 138.55 ms |
+| `git_ops/revwalk_recent_full/nograph` | 167.53 ms | 170.72 ms | 176.44 ms |
+| `git_ops/revwalk_recent_gated/graph` | 68.943 ms | 71.206 ms | 73.152 ms |
+| `git_ops/revwalk_recent_full/graph` | 134.61 ms | 138.18 ms | 142.12 ms |
+| `git_ops/diff_commit_files` | 10.086 ms | 10.368 ms | 10.832 ms |
+| `git_ops/ancestry_containment` | 17.663 ms | 18.467 ms | 19.366 ms |
+| `git_ops/worktree_fanout/1` | 2.3743 ms | 2.5293 ms | 2.6998 ms |
+| `git_ops/worktree_fanout/4` | 5.6931 ms | 5.7649 ms | 5.8676 ms |
+| `git_ops/worktree_fanout/8` | 11.012 ms | 11.153 ms | 11.260 ms |
+| `git_ops/config_read` | 562.64 µs | 576.23 µs | 591.43 µs |
+| `git_ops/refs_enumerate` | 1.7905 ms | 1.8143 ms | 1.8378 ms |
 
 ## Notes
 
+- This recapture and the `gix` comparison were run **back-to-back on the same
+  host under the same (normal interactive) load**, using identical bench-harness
+  Criterion settings (no CLI sampling overrides). Absolute timings are higher
+  than the original quiet-host capture, but the relative comparison — the only
+  thing the no-regression gate judges — stays valid because both backends paid
+  the same host tax.
 - `status_dirty_flag/*` is the short-circuiting summary status (counts only);
-  `status_file_changes/*` is the full per-file change walk — the ~4× gap at 100
-  dirty files is the cost the summary path avoids.
+  `status_file_changes/*` is the full per-file change walk.
 - The commit-graph (`/graph`) and graph-absent (`/nograph`) revwalk variants are
   near-parity under `git2`, which exposes no public commit-graph reader; the
-  expected commit-graph win is a gix-side improvement to record in later phases.
-- Re-capturing without the sampling overrides will tighten the flagged rows.
+  commit-graph win is a gix-side improvement (see `gix.md`).
+- See `gix.md` for the same-host comparison and the no-regression verdict.

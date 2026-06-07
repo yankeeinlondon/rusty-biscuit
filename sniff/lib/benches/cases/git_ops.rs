@@ -177,7 +177,15 @@ fn register_diff(c: &mut Criterion) {
 
     let fixture = fixtures::deep_history_repo(DIFF_DEPTH, false).expect("graph-absent fixture");
     let git2_repo = Repository::discover(fixture.path()).expect("discover diff fixture");
-    let gix_repo = gix::open(fixture.path()).expect("open diff fixture with gix");
+    let mut gix_repo = gix::open(fixture.path()).expect("open diff fixture with gix");
+    // Production sizes the object cache before diffing many commits (see
+    // `open::configure_cache`, applied in every `recent_commits` entry point).
+    // libgit2 enables its ODB cache by default, so an un-sized gix handle here
+    // would measure a path production never takes and report a false regression.
+    if let Ok(index) = gix_repo.index_or_empty() {
+        let size = gix_repo.compute_object_cache_size_for_tree_diffs(&index);
+        gix_repo.object_cache_size_if_unset(size);
+    }
     let shas = commit_shas(&git2_repo);
     group.throughput(Throughput::Elements(shas.len() as u64));
 
