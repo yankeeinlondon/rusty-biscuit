@@ -133,6 +133,48 @@ Steps:
 - **`policy`** — content freshness policy (coming soon)
 - **`blast_radius`** — list of source files that trigger re-generation when changed
 
+### Inline-Compose / Sequence Mismatch
+
+A document that authors **both** a non-null `prompt` and a non-null `sequence`
+defines an *inline sequence*: each sequence state is meant to invoke an
+inline-compose operation using the `prompt`. Running such a document with
+`inline-compose` would execute the prompt once, ignoring the sequence — so
+`inline-compose` rejects it and directs the user to `claudine sequence`
+instead.
+
+```yaml
+prompt: |-
+  How do you say "{{state.name}}" in Italian?
+sequence:
+  - name: Hello
+  - name: Goodbye
+```
+
+Detection rules:
+
+- The mismatch triggers when the **authored** frontmatter has a `prompt` key
+  whose value is not `null` **and** a `sequence` key whose value is not `null`.
+  Value type and validity are never inspected — empty strings, empty lists,
+  scalars, mappings, and other wrong-type-but-non-null values all count.
+- `prompt: null`, `sequence: null`, or an absent key does **not** trigger the
+  mismatch; ordinary `inline-compose` validation continues.
+- Detection reads authored frontmatter only. Command-line `key=value` overrides
+  and `--set` neither create nor suppress the mismatch.
+
+The check runs **before** prompt-property validation, schema processing,
+override application, composition, provider selection, and execution, so it is
+fully fail-fast: no shell commands run, no provider launches, and the source
+file is never mutated. Malformed frontmatter retains its existing
+`FrontmatterParse` diagnostic, which takes precedence because no reliable
+frontmatter keys are available to inspect.
+
+The diagnostic identifies the resolved document (OSC8-linked when supported),
+names both `prompt` and `sequence`, points to `claudine sequence`, and notes the
+upcoming `sections` feature. When the error output stream is a TTY it also
+echoes the authored frontmatter YAML verbatim; when stderr is not a TTY the YAML
+is withheld (to avoid exposing frontmatter) and the diagnostic says so. There is
+no flag to reveal the YAML in non-TTY output.
+
 ## Provider Selection
 
 Provider selection behaves differently in **TTY** (interactive terminal) and **non-TTY** (piped or CI) modes. In both modes, explicit `--<provider>` flags always win unconditionally.
