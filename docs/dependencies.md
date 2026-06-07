@@ -544,9 +544,9 @@ This is a Rust workspace with the following modules:
 
 ### Git
 
-- [git2](https://github.com/rust-lang/git2-rs) _v0.20.3_ [📄](https://docs.rs/git2)
+- [gix](https://github.com/GitoxideLabs/gitoxide) _v0.84.0_ [📄](https://docs.rs/gix)
 
-    _Threadsafe and memory-safe Rust bindings to libgit2 for interoperating with git repositories._
+    _Pure-Rust Git repository inspection library (status, diff, history, refs, remotes, config, worktrees)._
 
     _Tags: git, vcs, development-tools_
 
