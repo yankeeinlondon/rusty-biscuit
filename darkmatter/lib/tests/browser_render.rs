@@ -773,6 +773,61 @@ async fn browser_local_image_per_node_css_overrides_frontmatter() {
     );
 }
 
+/// Review-1 finding 3: a page-level `color` must inherit, in a real browser, to
+/// descendant text — proving the foreground rides the root node (rendered as a
+/// wrapping div) rather than being copied onto each component. A component with
+/// no color of its own computes the inherited page color.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_page_color_inherits_to_descendants() {
+    if !require_browser() {
+        return;
+    }
+    let doc = style_page_doc(120, "page:\n  color: red-500", "A paragraph of text.\n\n# Heading\n");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    // red-500 = rgb(251, 44, 54). Both the paragraph and the heading inherit it
+    // from the root wrapper — neither carries its own color declaration.
+    for selector in ["p", "h1"] {
+        let color = harness
+            .computed_style(selector, "color")
+            .await
+            .expect("computed style query");
+        assert_eq!(
+            color, "rgb(251, 44, 54)",
+            "{selector} must inherit the page foreground in a real browser; got {color}",
+        );
+    }
+}
+
+/// Review-1 finding 3: with only a page color set, a component (table) must not
+/// carry a copied color — it computes the inherited page color, and removing the
+/// per-component copy is observable as a single inherited value.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_page_color_not_copied_onto_component() {
+    if !require_browser() {
+        return;
+    }
+    let doc = style_page_doc(120, "page:\n  color: red-500", TABLE_MD);
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let color = harness
+        .computed_style("table", "color")
+        .await
+        .expect("computed style query");
+    assert_eq!(
+        color, "rgb(251, 44, 54)",
+        "table must inherit the page color (not a copied per-component value); got {color}",
+    );
+}
+
 /// A list `left-margin` must compute to a non-zero px margin in a real browser.
 #[tokio::test]
 #[serial(browser)]

@@ -691,7 +691,7 @@ side channel. The terminal reads `PaintColor::color` and ignores the alpha; the
 browser fold lowers the pair straight to `rgb(...)` (opaque) / `rgba(...)`
 (alpha) — there is no `darkmatter.style` hint and no post-render HTML rewrite.
 
-Page color is **inheritance**: `style.page.color` and `style.page.bg-color` are baked onto the document root node during the context-aware fold so they inherit to all descendants via `renderable`'s `InheritedStyle`. A component-level value overrides the page-level value for that component (page color is never copied onto component nodes). If neither exists, no color rule or SGR is emitted.
+Page **foreground** is **inheritance**: `style.page.color` is baked onto the document root node during the context-aware fold so it inherits to all descendants via `renderable`'s `InheritedStyle` (in the browser the styled root renders as a wrapping `<div>` whose `color` cascades). `style.page.bg-color` is **not** baked onto the root — background deliberately does not inherit — so it is painted by the page frame instead: the browser page wrapper and the terminal row decoration. A component-level value overrides the page-level value for that component (page color is never copied onto component nodes). If neither exists, no color rule or SGR is emitted.
 
 There is no explicit inheritance clearing in v1 — the parser does not accept `"reset"`, so a component cannot opt out of page-level color. This keeps the implementation aligned with the accepted schema. A future parser extension may add a dedicated clear/reset value if documents need it.
 

@@ -2776,15 +2776,29 @@ mod tests {
     }
 
     #[test]
-    fn browser_page_color_emits_wrapper_css() {
+    fn browser_page_color_emits_inheriting_root_div() {
+        // Review-1 finding 3: the page foreground rides the render tree's root
+        // node, which the browser fold renders as a wrapping `<div>` so the color
+        // inherits to descendants via CSS — it is NOT emitted on the
+        // `.darkmatter-page` frame (where it would be a duplicate declaration).
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term).with_page_color(red_color());
         let md: Markdown = "# Hello\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
         assert!(
-            html.contains("color: rgb("),
-            "page color should emit CSS on wrapper; got: {html}"
+            html.contains("<div style=\"color:rgb("),
+            "page color should ride a wrapping root <div>; got: {html}"
+        );
+        // The page frame itself must not carry the foreground color.
+        let frame = html
+            .split_once("class=\"darkmatter-page\" style=\"")
+            .and_then(|(_, rest)| rest.split_once('"'))
+            .map(|(style, _)| style)
+            .unwrap_or("");
+        assert!(
+            !frame.contains("color:"),
+            "page foreground must not be duplicated on the page frame; frame style: {frame}"
         );
     }
 

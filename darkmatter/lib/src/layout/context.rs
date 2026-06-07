@@ -41,9 +41,9 @@ pub(crate) struct LayoutContext {
     pub background_color: Option<BackgroundColor>,
     /// Color mode passed to the markdown renderer (may be inverted for Pronounced).
     pub render_color_mode: ColorMode,
-    /// Page-level foreground color (for wrapper CSS).
-    pub page_color: Option<renderable::style::PaintColor>,
-    /// Page-level background color (for wrapper CSS).
+    /// Page-level background color. Painted by the page frame (browser wrapper /
+    /// terminal row decoration); the page foreground is not held here — it rides
+    /// the render tree's root node and inherits from there.
     pub page_bg_color: Option<renderable::style::PaintColor>,
 }
 
@@ -203,7 +203,6 @@ impl LayoutContext {
             has_layout,
             background_color,
             render_color_mode,
-            page_color,
             page_bg_color,
         })
     }
@@ -228,7 +227,6 @@ mod tests {
             has_layout: true,
             background_color: None,
             render_color_mode: ColorMode::Dark,
-            page_color: None,
             page_bg_color: None,
         }
     }
@@ -242,8 +240,21 @@ mod tests {
 
     #[test]
     fn needs_decoration_true_when_page_color_set() {
-        let mut c = ctx(100, 80);
-        c.page_color = Some(red_paint());
+        // A page foreground forces the decorated path (so the page frame wraps the
+        // body) even though the color itself now rides the tree root.
+        use biscuit_terminal::discovery::detection::ColorMode as DetectMode;
+        let c = LayoutContext::from_page(
+            80,
+            renderable::layout::Edges::default(),
+            renderable::layout::Edges::default(),
+            PageBackground::Transparent,
+            None,
+            &DetectMode::Dark,
+            ColorMode::Dark,
+            Some(red_paint()),
+            None,
+        )
+        .expect("from_page");
         assert!(c.needs_decoration());
     }
 

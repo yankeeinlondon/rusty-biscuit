@@ -859,7 +859,10 @@ mod structural_tests {
     // ── page colors on root ────────────────────────────────────────────────
 
     #[test]
-    fn context_fold_attaches_page_color_to_root() {
+    fn context_fold_attaches_page_foreground_to_root_only() {
+        // Only the page foreground rides the root (it inherits via
+        // `InheritedStyle`); the page background does not inherit and is painted
+        // by the page frame, so it must NOT be copied onto the root.
         let policies = empty_policies();
         let mut ctx = ctx_for(&policies);
         ctx.page_color = Some(PaintColor::new(renderable::color::Color::Tailwind(
@@ -871,7 +874,33 @@ mod structural_tests {
         let doc = fold_test("hello\n", &ctx);
         let style = doc.root.attrs.style().expect("root has style");
         assert!(style.color.is_some(), "page foreground on root");
-        assert!(style.background.is_some(), "page background on root");
+        assert!(
+            style.background.is_none(),
+            "page background must not be copied onto the root"
+        );
+    }
+
+    #[test]
+    fn context_fold_does_not_copy_page_color_onto_components() {
+        // Review-1 finding 3: with only a page color set (no table-specific
+        // color), a component node must NOT carry a copied page color — the page
+        // foreground reaches it through root inheritance, not a per-node copy.
+        let policies = empty_policies();
+        let mut ctx = ctx_for(&policies);
+        ctx.page_color = Some(PaintColor::new(renderable::color::Color::Tailwind(
+            renderable::color::Tailwind::Red500,
+        )));
+        ctx.page_bg_color = Some(PaintColor::new(renderable::color::Color::Tailwind(
+            renderable::color::Tailwind::Blue500,
+        )));
+        let doc = fold_test("| A | B |\n|---|---|\n| 1 | 2 |\n", &ctx);
+        let table = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Table { .. }))
+            .expect("table node");
+        assert!(
+            table.attrs.style_ref().is_none_or(|s| s.is_empty()),
+            "page color must not be copied onto the table component; got {:?}",
+            table.attrs.style_ref()
+        );
     }
 
     // ── HR defaults ────────────────────────────────────────────────────────
