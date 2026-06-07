@@ -67,4 +67,23 @@ mod tests {
         let out = crate::domain::Os::Finder.icon().render(&term);
         assert!(out.contains("hugeicons:apple-finder"));
     }
+
+    #[test]
+    fn tree_renders_to_terminal_through_shared_adapter() {
+        use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
+        use renderable::tree::TreeRenderable;
+
+        let icon = crate::domain::Os::Apple.icon();
+        let tree = icon.render_tree();
+        let opts = TerminalRenderOptions::default();
+        let rendered = render_terminal_node(&tree, &opts).unwrap();
+
+        // The tree projection emits an inline SVG HTML node; when folded to
+        // terminal via the shared adapter it must contain the SVG markup.
+        assert!(
+            rendered.output.contains("<svg"),
+            "expected SVG in tree-rendered terminal output; got: {}",
+            rendered.output
+        );
+    }
 }
