@@ -513,8 +513,11 @@ impl GitRepo {
     pub(crate) fn ref_decorations(
         &self,
     ) -> std::cell::Ref<'_, HashMap<gix::ObjectId, Vec<RefDecoration>>> {
-        // If not yet computed, compute and cache
+        // If not yet computed, compute and cache. Collecting decorations peels
+        // refs (object decoding), so size the object cache first — this is the
+        // lazy alternative to sizing it unconditionally at open time.
         if self.ref_decorations.borrow().is_none() {
+            self.ensure_cache();
             let decorations = super::discovery::collect_ref_decorations(&self.gix.borrow());
             *self.ref_decorations.borrow_mut() = Some(decorations);
         }

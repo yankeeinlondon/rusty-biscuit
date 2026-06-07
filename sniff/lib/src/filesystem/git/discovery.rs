@@ -36,7 +36,6 @@ pub fn detect_git_with_request(path: &Path, request: &GitRequest) -> Result<Opti
 /// Returns a HashMap from commit OID to a vector of ref decorations.
 pub(crate) fn collect_ref_decorations(
     repo: &gix::Repository,
-    ensure_cache: &mut dyn FnMut(),
 ) -> HashMap<gix::ObjectId, Vec<RefDecoration>> {
     let mut decorations: HashMap<gix::ObjectId, Vec<RefDecoration>> = HashMap::new();
 
@@ -61,12 +60,6 @@ pub(crate) fn collect_ref_decorations(
 
     for reference in iter.flatten() {
         let full_name = reference.name().as_bstr().to_string();
-
-        // Annotated tags are the only ref kind that needs object decoding to
-        // peel; size the object cache lazily when the first tag is seen.
-        if full_name.starts_with("refs/tags/") {
-            ensure_cache();
-        }
 
         // Peel through annotated tags to the commit the ref ultimately names.
         let Ok(id) = reference.into_fully_peeled_id() else {
@@ -151,10 +144,8 @@ pub(crate) fn get_recent_commits_with_decorations(
     };
 
     // Collect ref decorations once for all commits (if not provided).
-    // Phase 6 will port `collect_ref_decorations` to gix; until then we
-    // open a temporary git2 handle for the same repository.
     let cached = ref_decorations.cloned();
-    let decorations = cached.unwrap_or_else(|| collect_ref_decorations(repo, &mut || ()));
+    let decorations = cached.unwrap_or_else(|| collect_ref_decorations(repo));
 
     for info_result in walk.take(count) {
         let Ok(info) = info_result else {
@@ -487,7 +478,7 @@ pub(crate) fn get_commits_for_path_with_decorations(
     };
 
     let cached = ref_decorations.cloned();
-    let decorations = cached.unwrap_or_else(|| collect_ref_decorations(repo, &mut || ()));
+    let decorations = cached.unwrap_or_else(|| collect_ref_decorations(repo));
 
     let mut diff_cache = match repo.diff_resource_cache_for_tree_diff() {
         Ok(c) => c,
