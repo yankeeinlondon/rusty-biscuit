@@ -224,6 +224,14 @@ instead of maintaining separate RGB-only helpers.
 > converts the stored `u8` opacity to the `0.0..=1.0` value `CssColor::rgba`
 > expects.
 
+CSS keyword behavior must remain explicit. `transparent`, `currentColor`, and
+`inherit` continue to lower as keywords; their stored opacity is ignored
+because CSS cannot apply a color-channel alpha to `currentColor` or `inherit`
+without changing semantics, and `transparent` is already fully transparent.
+`DefaultForeground`, `DefaultBackground`, and `Reset` continue to produce no
+browser color declaration. Do not substitute element-level `opacity`, which
+would affect descendants and the whole box rather than one paint channel.
+
 ### 2. Mutable sparse-attribute access
 
 Add direct mutation helpers to `NodeAttrs`:
@@ -318,6 +326,7 @@ the unresolved operation, for example:
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TextLayoutHints {
     pub width: Option<TargetValue<Length>>,
+    pub max_width: Option<TargetValue<Length>>,
     pub alignment: Alignment,
     pub overflow: TextOverflow,
 }
@@ -359,10 +368,17 @@ hot path) accessors. It is **not** a `ComponentHints` variant and **not** a
 The final shape may use narrower per-component structs if one shared type would
 permit invalid combinations. It must cover the existing supported behavior:
 
-- hyperlink-label width, alignment, and truncation;
-- image alt/placeholder width and alignment without replacing the source alt
-  text;
+- hyperlink-label exact width, maximum width, alignment, padding, and
+  truncation;
+- image alt/placeholder exact width, maximum width, alignment, padding, and
+  truncation without replacing the source alt text;
 - list-item body alignment relative to the marker and resolved item width.
+
+`width` and `max_width` are not interchangeable: `width` establishes an exact
+resolved field width and pads shorter content according to `alignment`;
+`max_width` only truncates content that exceeds the cap and leaves shorter
+content unchanged. When both are present, `width` is the requested field width
+subject to the `max_width` cap.
 
 The tree retains semantic source content. For example, an image node keeps its
 real `alt` value while a typed image render hint requests the terminal block
@@ -395,6 +411,7 @@ example:
 pub struct BrowserAttrs {
     pub link: Option<LinkBrowserAttrs>,
     pub image: Option<ImageBrowserAttrs>,
+    pub inline_style: Option<CssStyle>,
     pub data_attrs: BTreeMap<DataAttrName, String>,
     pub aria_attrs: BTreeMap<AriaAttrName, String>,
 }
@@ -436,18 +453,29 @@ not speculative HTML completeness. Standard attributes with behavior or safety
 semantics are typed. Extensible `data-*` and `aria-*` attributes use validated
 name types with deterministic ordering.
 
-Do not expose a general `BTreeMap<String, String>` for arbitrary attributes.
-The API must prevent bypassing typed URL/style policy with fields such as
-`onclick`, arbitrary `style`, or a replacement `href`/`src`.
+`inline_style` is a validated `renderable::stylesheet::CssStyle`, not a raw CSS
+string. It preserves the existing structured-link/image
+`style='…'` behavior and the merged `CommonStyle` overlay without permitting
+unparsed CSS injection. Add same-version serde for `CssStyle` as its canonical
+declaration string (deserialize through `CssStyle::try_from`) or introduce an
+equivalent validated serializable wrapper; do not expose its private declaration
+storage merely to derive serde.
+
+Do not expose a general `BTreeMap<String, String>` for arbitrary HTML
+attributes. The API must prevent bypassing typed URL/style policy with fields
+such as `onclick`, a raw `style`, or a replacement `href`/`src`.
 
 Darkmatter lowers directives while constructing the tree:
 
 - `class` appends to `NodeAttrs::classes`;
 - `target`, `rel`, and other supported standard fields become typed link attrs;
 - supported image fields become typed image attrs;
+- structured per-link/image CSS and frontmatter `CommonStyle` overlays merge
+  into `inline_style`, preserving the existing rule that per-node declarations
+  win property-by-property over frontmatter defaults;
 - `data-*` and `aria-*` become validated entries;
-- package-specific metadata such as `prompt` either maps to an agreed typed
-  browser/data attribute or remains an uninterpreted Darkmatter extension hint.
+- `prompt` lowers to the validated `data-prompt` entry, matching the existing
+  public browser contract.
 
 An extension hint must not be read by the shared browser renderer. If the
 renderer interprets a value, that value belongs in typed renderer input.
@@ -554,6 +582,8 @@ remains non-gating.
 - validation accepts typed text-layout hints only on compatible node kinds.
 - browser attrs validate placement, standard enum values, and `data-*` /
   `aria-*` names.
+- `CssStyle`/the validated inline-style wrapper round-trips through the tree's
+  same-version serde shape, and raw invalid CSS cannot be constructed.
 - fragment and streaming browser folds emit identical typed attributes.
 - unsafe or reserved arbitrary attributes cannot be constructed through the
   validated extension maps.
@@ -579,6 +609,8 @@ remains non-gating.
 - local/remote hyperlink and image policy is attached during construction.
 - structured link/image directives are present as typed browser attrs on the
   initial tree.
+- structured and frontmatter inline CSS is present as validated `inline_style`
+  with per-node declarations winning over frontmatter defaults.
 - list-item alignment uses typed hints rather than `darkmatter.li`.
 - production entry points do not use component-policy `LayoutContext` fields,
   opacity hints, sentinel classes, or post-render style/attribute mutation.

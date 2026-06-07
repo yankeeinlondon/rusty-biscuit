@@ -70,13 +70,14 @@ not satisfy them.
 
 Several scope boundaries below turn on whether a component is on the
 **production path**. For this spec that means: reachable from the Darkmatter
-document render pipeline (`Markdown -> Document -> target fold`) on the terminal
-or browser target. A component that is only constructed by ad-hoc callers or is
-a terminal-only utility — for example `FileSystem`, which the Darkmatter
-document pipeline never renders — is *not* on the production path and does not
-block the parent cutover even if it implements `TreeRenderable`. Required
-migrations (section 8) apply only to production-path components; everything else
-is an optional, separately specified follow-up.
+document render pipeline (`Markdown -> Document -> target fold`) on Terminal,
+Browser, Markdown, or MarkdownPlus. A component that is only constructed by
+ad-hoc callers or is a terminal-only utility — for example `FileSystem`, which
+the Darkmatter document pipeline never renders — is *not* on the production
+path and does not block the parent cutover even if it implements
+`TreeRenderable`. Required migrations (section 8) apply only to
+production-path components; everything else is an optional, separately
+specified follow-up.
 
 ### Separate component assessment
 
@@ -384,9 +385,8 @@ Darkmatter and already have an explicit specialization boundary.
 
 ## Open Questions
 
-These are the decisions a reviewer should confirm before closeout is
-implemented. Each has a recommendation; record the resolved outcome in the
-relevant audit artifact.
+This is the decision a reviewer should confirm before closeout is implemented.
+Record the resolved outcome in the relevant audit artifact.
 
 ### Q1 — `DarkmatterPage` page-frame boundary (Option A vs Option B)
 
@@ -394,34 +394,4 @@ Treated in [Page-Frame Decision](#3-page-frame-decision) with a recommendation
 of **Option A**, conditional on the audit proving the retained frame stays
 within its constrained responsibility list. It is surfaced here because it is
 the one choice that gates marking the parent architecture complete.
-
-### Q2 — Disposition of Darkmatter directive metadata (`prompt` and peers)
-
-`tree-features` left `prompt` (and similar Darkmatter directive metadata)
-explicitly undecided: it "either maps to an agreed typed browser/data attribute
-or remains an uninterpreted Darkmatter extension hint." The hint audit
-(section 1) must resolve it, and the form is a genuine design choice.
-
-- **Option A — validated `data-*` attribute (e.g. `data-prompt`).**
-  - Pros: if the shared browser renderer emits it, the spec's own rule
-    *requires* it to be typed renderer input; a validated `data-*` entry is the
-    lowest-cost way to satisfy that with deterministic ordering and escaping.
-  - Cons: bakes a Darkmatter-specific concept into the shared `data-*` surface;
-    other packages see a `prompt` convention they do not use.
-- **Option B — dedicated typed field on `BrowserAttrs`.**
-  - Pros: most explicit; full type safety and validation for a known field.
-  - Cons: adds renderable surface for one package's concept; closest to the
-    "speculative HTML completeness" the dependency spec rejects.
-- **Option C — keep `prompt` as an opaque Darkmatter extension hint.**
-  - Pros: zero renderable surface; correct *iff* no shared renderer reads it.
-  - Cons: invalid if the browser renderer must emit `prompt` into output — the
-    audit rule forbids a shared renderer reading extension data for first-class
-    behavior.
-
-**Recommendation: Option A.** If the browser renderer must emit `prompt`, lower
-it to a validated `data-prompt` entry — this honors "renderer-interpreted values
-are typed input" without inventing package-specific renderable types. Choose
-Option C only if the audit confirms `prompt` is never read by a shared renderer
-and is pure Darkmatter package metadata; in that case it stays an opaque hint
-and the browser renderer must not consult it.
 
