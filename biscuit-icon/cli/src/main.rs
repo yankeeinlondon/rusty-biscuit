@@ -25,23 +25,25 @@ async fn main() {
         return;
     }
 
-    init_tracing(cli.verbose);
+    init_tracing(cli.debug);
 
     // Resolve the default `icons` command when none is given.
-    let command = cli.command.unwrap_or(Commands::Icons { filter: cli.filter, from: None });
+    let command = cli
+        .command
+        .unwrap_or(Commands::Icons { filter: cli.filter, from: cli.from });
 
-    if let Err(err) = commands::run(command).await {
-        eprintln!("\x1b[31m\x1b[1mError:\x1b[0m {err}");
+    if let Err(err) = commands::run(command, cli.nerd).await {
+        render_error(&err, cli.verbose);
         std::process::exit(1);
     }
 }
 
-fn init_tracing(verbose: u8) {
+fn init_tracing(debug: u8) {
     let explicit = std::env::var("RUST_LOG").ok();
-    if verbose == 0 && explicit.is_none() {
+    if debug == 0 && explicit.is_none() {
         return;
     }
-    let base = explicit.unwrap_or_else(|| match verbose {
+    let base = explicit.unwrap_or_else(|| match debug {
         1 => "warn,biscuit_icon=info,icon=info".into(),
         2 => "info,biscuit_icon=debug,icon=debug".into(),
         _ => "debug,biscuit_icon=trace,icon=trace".into(),
@@ -51,4 +53,35 @@ fn init_tracing(verbose: u8) {
         .with(filter)
         .with(fmt::layer().with_writer(std::io::stderr).compact())
         .init();
+}
+
+/// Renders a human-readable, Prose-styled error to stderr.
+///
+/// With `--verbose`, the cause chain is deduplicated and appended.
+fn render_error(err: &color_eyre::eyre::Report, verbose: u8) {
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::terminal::Terminal;
+
+    let term = Terminal::new();
+    let mut message = format!("<red><b>Error:</b></red> {err}");
+
+    if verbose > 0 {
+        let mut seen = Vec::new();
+        for cause in err.chain().skip(1) {
+            let text = cause.to_string();
+            if !seen.contains(&text) {
+                seen.push(text.clone());
+            }
+        }
+        if !seen.is_empty() {
+            message.push_str("\n<dim>Caused by:</dim>");
+            for cause in seen {
+                message.push_str(&format!("\n  <dim>- {cause}</dim>"));
+            }
+        }
+    }
+
+    let prose = Prose::new(message);
+    eprintln!("{}", prose.render(&term));
 }
