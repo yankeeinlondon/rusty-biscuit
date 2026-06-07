@@ -6,7 +6,7 @@ use crate::body::IconBody;
 use crate::error::{IconError, Result};
 
 /// Metadata about an Iconify icon set.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SetInfo {
     pub prefix: String,
     pub title: String,
@@ -122,8 +122,8 @@ impl IconCache {
     /// ## Errors
     /// [`IconError::Cache`] on query failure.
     pub fn search_names(&self, needle: &str) -> Result<Vec<String>> {
-        let mut stmt = self
-            .conn()?
+        let conn = self.conn()?;
+        let mut stmt = conn
             .prepare("SELECT prefix, name FROM icons WHERE name LIKE ?1 ORDER BY prefix, name")
             .map_err(map_sql)?;
         let like = format!("%{needle}%");

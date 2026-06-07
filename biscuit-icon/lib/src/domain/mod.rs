@@ -40,6 +40,41 @@ use crate::body::IconBody;
 use crate::glyph::Glyph;
 use crate::icon::Icon;
 
+/// Builds an [`Icon`] for a curated domain id, if one exists.
+#[must_use]
+pub fn icon_for_id(id: &str) -> Option<Icon> {
+    use strum::IntoEnumIterator;
+
+    macro_rules! try_set {
+        ($enum:ty) => {
+            for variant in <$enum>::iter() {
+                if variant.iconify_id() == id {
+                    return Some(variant.icon());
+                }
+            }
+        };
+    }
+
+    try_set!(Os);
+    try_set!(Emoji);
+    try_set!(Arrow);
+    try_set!(Data);
+    try_set!(File);
+    try_set!(Hardware);
+    try_set!(Timing);
+    try_set!(Button);
+    try_set!(Control);
+    try_set!(Network);
+    try_set!(DevOps);
+    try_set!(Actors);
+    try_set!(Nav);
+    try_set!(Sport);
+    try_set!(Brand);
+    try_set!(Social);
+
+    None
+}
+
 /// Common behavior for every curated domain-icon enum.
 pub trait DomainIcon: Copy {
     /// The upstream Iconify identifier, e.g. `"hugeicons:apple-finder"`.

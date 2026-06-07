@@ -1,4 +1,4 @@
 //! On-disk SQLite cache of network-fetched Iconify icons.
 
 mod store;
-pub use store::IconCache;
+pub use store::{IconCache, SetInfo};
