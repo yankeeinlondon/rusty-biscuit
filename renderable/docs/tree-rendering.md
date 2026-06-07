@@ -54,9 +54,12 @@ Three types form the model:
     byte range, so diagnostics and future transforms can point back at the
     original text.
   - `attrs` (`NodeAttrs`) carries identity (`id`) and semantic `classes`
-    alongside **typed sparse fields** — `layout`, `style`, `sequence_join`,
-    `list_marker_policy`, and the per-kind `component` hint group (see
-    [Layout and style](#layout-and-style-on-the-tree)). Reads cost no serde
+    alongside **typed sparse fields** — `layout`, `style` (whose color slots are
+    alpha-bearing `PaintColor`), `sequence_join`, `list_marker_policy`, the
+    per-kind `component` hint group, `text_layout` (unresolved width-dependent
+    text intent on link/image/list-item nodes), and `browser` (typed, validated
+    browser-target attributes) — see
+    [Layout and style](#layout-and-style-on-the-tree). Reads cost no serde
     round-trip. The `data` map is reserved for package-local extension
     namespaces (`darkmatter.*`); a stale `renderable.*` key in `data` is a
     validation error.
@@ -226,8 +229,12 @@ equivalent yet. (`components.md` tracks each component's exact state.)
 
 Darkmatter's public Markdown rendering runs on the tree. `Markdown::as_html`,
 `Markdown::as_terminal`, and `DarkmatterPage::render` / `render_to_browser` all
-fold to a `Document` and render through the tree renderers; the hand-written
-event-stream serializers they once used have been removed.
+build a **complete** `Document` — component policy, alpha-bearing `PaintColor`,
+text layout, browser attributes, and HR defaults are baked onto the nodes during
+construction by darkmatter's context-aware fold (`TreeBuildContext`) — and then
+run **one target fold** over it. There is no post-fold decoration pass and no
+output rewriting; the hand-written event-stream serializers darkmatter once used
+have been removed.
 
 A few responsibilities sit deliberately **outside** the fold:
 

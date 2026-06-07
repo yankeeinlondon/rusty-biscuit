@@ -1,5 +1,5 @@
 ---
-status: ready for implementation
+status: complete
 date: 2026-06-06
 owner: ken
 spec: renderable/features/2026-06-06-tree-features/spec.md
@@ -78,6 +78,78 @@ skills_files_updated_during_phase_5: []
 packages_touched_during_phase_5:
     - renderable
     - biscuit-terminal
+source_files_during_phase_6:
+    - darkmatter/lib/src/style/color.rs
+    - darkmatter/lib/src/layout/page.rs
+    - darkmatter/lib/src/layout/context.rs
+    - darkmatter/lib/src/style/apply.rs
+    - darkmatter/lib/src/markdown/render_tree/decorate.rs
+    - darkmatter/lib/src/markdown/render_tree/build_context.rs
+    - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+    - darkmatter/lib/src/markdown/render_tree/fold.rs
+    - darkmatter/lib/src/markdown/render_tree/mod.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages_touched_during_phase_6:
+    - darkmatter
+source_files_during_phase_7:
+    - renderable/src/tree/render/browser.rs
+    - biscuit-terminal/lib/src/render_tree/render.rs
+    - darkmatter/lib/src/layout/page.rs
+    - darkmatter/lib/src/layout/context.rs
+    - darkmatter/lib/src/layout/mod.rs
+    - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+    - darkmatter/lib/src/style/bespoke.rs
+    - darkmatter/lib/tests/snapshots/cutover_reference__ref_block_quote_width_and_left_browser.snap
+    - darkmatter/lib/tests/snapshots/cutover_reference__ref_centered_table_browser.snap
+    - darkmatter/lib/tests/snapshots/cutover_reference__ref_list_left_margin_browser.snap
+    - darkmatter/lib/tests/snapshots/cutover_reference__ref_page_background_pronounced_browser.snap
+    - darkmatter/lib/tests/snapshots/cutover_reference__ref_table_max_width_browser.snap
+    - darkmatter/lib/tests/snapshots/tree_features_characterization__char_component_color_current_browser.snap
+    - darkmatter/lib/tests/snapshots/tree_features_characterization__char_component_color_half_opacity_browser.snap
+    - darkmatter/lib/tests/snapshots/tree_features_characterization__char_component_color_inherit_browser.snap
+    - darkmatter/lib/tests/snapshots/tree_features_characterization__char_component_color_opaque_browser.snap
+    - darkmatter/lib/tests/snapshots/tree_features_characterization__char_component_color_transparent_browser.snap
+    - darkmatter/lib/tests/snapshots/tree_features_characterization__char_local_image_inline_css_precedence_browser.snap
+    - darkmatter/lib/tests/snapshots/tree_features_characterization__char_structured_link_attributes_html.snap
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/renderable/SKILL.md
+packages_touched_during_phase_7:
+    - renderable
+    - biscuit-terminal
+    - darkmatter
+source_files_during_phase_8:
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/render_tree/mod.rs
+    - darkmatter/lib/src/markdown/render_tree/structural_gate.rs
+    - darkmatter/lib/tests/cutover_reference.rs
+    - darkmatter/lib/tests/tree_features_characterization.rs
+docs_updated_during_phase_8: []
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
+packages_touched_during_phase_8:
+    - darkmatter
+source_files_during_phase_9: []
+docs_updated_during_phase_9:
+    - renderable/docs/tree-rendering.md
+    - renderable/docs/layout-and-style.md
+    - darkmatter/docs/render-tree-fold.md
+    - darkmatter/docs/darkmatter-rendering-pipeline.md
+    - darkmatter/docs/rendering/style.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+    - .claude/skills/renderable/style.md
+    - .claude/skills/renderable/tree.md
+    - .claude/skills/biscuit-terminal/render-tree.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/terminal.md
+packages_touched_during_phase_9:
+    - renderable
+    - biscuit-terminal
+    - darkmatter
 ---
 
 # Tree Features Implementation Plan
@@ -363,30 +435,30 @@ Move policy and directive lowering into Markdown node construction.
 - `darkmatter/lib/src/style/{apply,bespoke,color}.rs`
 - `darkmatter/lib/src/render/{link,image_ref}.rs` as parser helpers
 
-- [ ] Introduce `TreeBuildContext` (or an equivalent Darkmatter-owned policy
+- [x] Introduce `TreeBuildContext` (or an equivalent Darkmatter-owned policy
   view) and context-aware fold entry points.
-- [ ] Keep the unstyled/default path cheap with an empty context.
-- [ ] Apply component policy when each container node closes:
+- [x] Keep the unstyled/default path cheap with an empty context.
+- [x] Apply component policy when each container node closes:
   table, block quote, ordered/unordered list, list item, code, image, link, and
   thematic break.
-- [ ] Attach page inheriting foreground to the root and rely on
+- [x] Attach page inheriting foreground to the root and rely on
   `InheritedStyle`; do not copy page color to component nodes.
-- [ ] Lower `StyleColor` to `PaintColor` at the parser/apply boundary.
+- [x] Lower `StyleColor` to `PaintColor` at the parser/apply boundary.
   `ComponentPolicy` and post-construction component types must no longer retain
   `StyleColor`.
-- [ ] Attach exact/max text layout to link/image/list nodes without replacing
+- [x] Attach exact/max text layout to link/image/list nodes without replacing
   children or alt text.
-- [ ] Parse structured link/image metadata once during construction:
+- [x] Parse structured link/image metadata once during construction:
   - classes -> `NodeAttrs::classes`;
   - target/standard attrs -> typed browser attrs;
   - prompt -> validated `data-prompt`;
   - custom data -> validated `data_attrs`;
   - per-node CSS merged over frontmatter defaults -> `inline_style`;
   - clear a raw directive title only after its semantic fields are preserved.
-- [ ] Move HR defaults/inline precedence into construction or a construction
+- [x] Move HR defaults/inline precedence into construction or a construction
   input path so the initial tree is complete; avoid creating a replacement
   post-fold decoration walk.
-- [ ] Add structural tests that inspect the initial `Document` before rendering.
+- [x] Add structural tests that inspect the initial `Document` before rendering.
 
 **Verification:**
 
@@ -409,21 +481,33 @@ Flip all public rendering onto the complete tree and remove obsolete machinery.
 - `darkmatter/lib/src/layout/{context,page,mod}.rs`
 - affected tests and benches
 
-- [ ] Switch terminal, browser, Markdown, MarkdownPlus, and `DarkmatterPage`
+- [x] Switch terminal, browser, Markdown, MarkdownPlus, and `DarkmatterPage`
   paths to the context-aware complete-tree builder followed by the target fold.
-- [ ] Reduce `LayoutContext` to documented page-frame residue.
-- [ ] Delete:
-  - `decorate_document` and `component_for`;
+  (Production paths route through `render_tree_{terminal,html}_with_context` /
+  `to_render_document_with_context`; `DarkmatterPage::render`/`render_to_browser`
+  thread the `TreeBuildContext`. The HTML entry points now also return
+  `MarkdownResult` so the restored `validate_code_directives` browser preflight —
+  dropped mid-Phase-6 — runs over the single folded tree.)
+- [x] Reduce `LayoutContext` to documented page-frame residue. (Already reduced;
+  the component-policy decoration *signal* is read straight off the page in
+  `page.rs` so `LayoutContext` keeps no policy map.)
+- [x] Delete:
+  - `decorate_document` and `component_for` (render-time);
   - component policy maps/lookups from render-time context;
-  - inline link/image text mutation;
-  - `darkmatter.li` and `darkmatter.style` production hints;
+  - inline link/image text mutation (link children / image alt stay intact;
+    terminal projections are shaped without mutating the tree);
+  - `darkmatter.li` (removed the `list_item_align_pad` read in
+    `biscuit-terminal` — typed list-item `text_layout` now drives the marker
+    lift + block-aligned body pad) and `darkmatter.style` production hints;
   - opacity sentinel collection and HTML rewrites;
   - link/image attribute sentinels and HTML rewrites;
   - obsolete `*_with_layout` variants;
-  - post-construction `StyleColor` policy slots.
-- [ ] Use `rg` deletion checks for every removed symbol/namespace.
-- [ ] Update benches to call the actual new production path, not a compatibility
-  helper.
+  - post-construction `StyleColor` policy slots (`ComponentPolicy` carries
+    `PaintColor`).
+- [x] Use `rg` deletion checks for every removed symbol/namespace.
+- [x] Update benches to call the actual new production path, not a compatibility
+  helper. (Benches reference only the public `render_tree_*` entry points and
+  compile against the new signatures.)
 
 **Verification:**
 
@@ -439,51 +523,112 @@ by one target fold, with no policy decoration or output rewriting.
 
 Prove the architecture and review intentional output movement.
 
-- [ ] Expand the structural gate corpus with alpha paint, component policy,
-  exact/max text layout, and browser attrs.
-- [ ] Assert corpus coverage before folding so zero-access checks cannot pass
-  vacuously.
-- [ ] Assert zero extension-bag accesses for first-class behavior through the
-  real styled Darkmatter entry points.
-- [ ] Add immutable-tree tests across targets and widths.
-- [ ] Review the five stale centering snapshots and accept `auto` margins only
-  with an explicit CSS rationale.
-- [ ] Review all alpha, text-layout, structured-attribute, and list snapshot
-  changes individually.
-- [ ] Compile and run Criterion trend cases:
-  - `cargo bench -p darkmatter --bench render_pipeline_steps --no-run`
-  - targeted short runs for terminal/browser production cases;
-  - renderable/biscuit-terminal render-tree benches where changed.
-- [ ] Investigate material regressions; do not create a flaky timing gate.
+- [x] Expand the structural gate corpus with alpha paint, component policy,
+  exact/max text layout, and browser attrs. (New crate-internal gate
+  `darkmatter/lib/src/markdown/render_tree/structural_gate.rs` drives a
+  `style:`-frontmatter corpus — `block-quote.bg-color: red-500/50` alpha paint,
+  `table.alignment` + per-component colors, `hyperlinks.width` /
+  `li.max-width` / `images.local-style.width` text layout, and a structured
+  link directive's typed browser link/`data-*`/inline-style attrs — through the
+  real styled `DarkmatterPage` build context.)
+- [x] Assert corpus coverage before folding so zero-access checks cannot pass
+  vacuously. (`styled_corpus_populates_every_typed_group` walks the built
+  `Document` and asserts alpha paint, baked component policy, text-layout,
+  browser link attrs, inline_style, and `data_attrs` are all present before any
+  fold runs.)
+- [x] Assert zero extension-bag accesses for first-class behavior through the
+  real styled Darkmatter entry points. (`styled_{terminal,browser}_path_does_
+  zero_renderable_owned_hint_roundtrips` fold the same corpus through
+  `render_tree_{terminal,html}_with_context` with renderable's
+  `hint-access-counter` enabled via darkmatter dev-deps; `renderable_owned == 0`
+  on both, and the terminal gate asserts the `darkmatter.hr` extension access is
+  non-zero to prove the counter is live.)
+- [x] Add immutable-tree tests across targets and widths.
+  (`rendering_does_not_mutate_the_tree_across_targets_and_widths` renders one
+  built tree at 40 and 100 cols plus the browser, asserts the two terminal
+  outputs differ, and asserts the input `Document` equals a pristine clone.)
+- [x] Review the five stale centering snapshots and accept `auto` margins only
+  with an explicit CSS rationale. (All five `cutover_reference` browser
+  snapshots are re-baselined to `margin: 0ch auto 0ch auto` and pass; the CSS
+  rationale — `auto` side margins are the canonical center-a-`max-width`-frame
+  idiom, mirrored by `layout/page.rs` `center_frame` and its two unit tests — is
+  recorded in `cutover_reference.rs`'s module doc.)
+- [x] Review all alpha, text-layout, structured-attribute, and list snapshot
+  changes individually. (The seven re-baselined characterization snapshots —
+  `rgb`/single-`rgba` color lowering, validated single `inline_style` replacing
+  the double `style=`, deterministic typed attr ordering, and unmutated image
+  `alt` — are each reviewed and accepted in `tree_features_characterization.rs`'s
+  module doc; the terminal `char_hyperlink_*` / `char_list_item_*` snapshots are
+  unchanged.)
+- [x] Compile and run Criterion trend cases:
+  - `cargo bench -p darkmatter --bench render_pipeline_steps --no-run` (builds);
+  - targeted short runs for terminal/browser production cases (`--quick`
+    `render_pipeline_{terminal,browser}/full`): both **improved** (terminal full
+    −31%, browser full −14%) versus the prior baseline — consistent with
+    dropping the post-fold decoration pass and HTML rewrites;
+  - renderable `render` and biscuit-terminal `render_tree` benches both build.
+- [x] Investigate material regressions; do not create a flaky timing gate. (No
+  regressions; the only movement is the improvement above. Timing remains
+  non-gating — the gate is the structural zero-access assertion, not a
+  wall-clock threshold.)
 
 **Exit condition:** Structural gates prove the intended architecture and the
 reference corpus is green with reviewed changes.
 
 ## Phase 9: Documentation and Full Verification
 
-- [ ] Update:
-  - `renderable/docs/tree-rendering.md`;
-  - `renderable/docs/layout-and-style.md`;
-  - component migration guidance;
-  - Darkmatter rendering/style docs;
-  - public examples for `PaintColor`, text layout, and browser attrs;
-  - same-version-only tree serde documentation;
-  - renderable, biscuit-terminal, and Darkmatter skills.
-- [ ] Review all changed rustdoc and inline comments for drift.
-- [ ] Run final Level 1 and doctest verification:
-  - `just -f renderable/justfile test`
-  - `just -f renderable/justfile doctest`
-  - `just -f biscuit-terminal/justfile test`
-  - `just -f biscuit-terminal/justfile doctest`
-  - `just -f darkmatter/justfile test`
-  - `just -f darkmatter/justfile doctest`
-- [ ] Run lint checks without invoking `cargo fmt`:
-  - package `just lint` recipes, noting that they perform formatting checks;
-  - fix only files in this change.
-- [ ] Leave Level 2/browser execution for closeout unless a changed behavior
-  cannot be trusted without it; when run, use only `just test-l2` /
-  `just test-browser`.
-- [ ] Record final verification results for the closeout spec.
+- [x] Update:
+  - `renderable/docs/tree-rendering.md` — typed sparse fields now list
+    `text_layout` and `browser`, `Style` color slots noted as alpha-bearing
+    `PaintColor`, and the darkmatter pipeline section describes complete-tree
+    construction (`TreeBuildContext`) + one target fold, no decoration pass;
+  - `renderable/docs/layout-and-style.md` — §6 `Style` struct flipped to
+    `TargetValue<PerMode<PaintColor>>` (with the `PaintColor`/`Opacity` /
+    `paint_to_css_color` contract) and §7 darkmatter migration rewritten
+    (`ComponentPolicy` carries `PaintColor`; `decorate` pass / `darkmatter.style`
+    deleted);
+  - component migration guidance — the renderable `SKILL.md` IR-status section
+    (already current from Phase 7) and `tree.md`'s new *Browser Attributes* /
+    `text_layout` accessor families cover producer-side attachment;
+  - Darkmatter rendering/style docs — `darkmatter/docs/render-tree-fold.md`
+    (experimental → production + complete-tree construction),
+    `darkmatter/docs/darkmatter-rendering-pipeline.md` (CURRENT STATE NOTES /
+    Render Path rewritten off the deleted event-stream renderer), and
+    `darkmatter/docs/rendering/style.md` (sub-spec #3/#5 storage + public API now
+    `PaintColor`, opacity rides the alpha channel, no `decorate_document`);
+  - public examples for `PaintColor`, text layout, and browser attrs — added to
+    renderable `style.md` (PaintColor/Opacity section) and `tree.md`
+    (`text_layout` + Browser Attributes); rustdoc examples already present on the
+    new types (`paint.rs`, `attrs.rs`);
+  - same-version-only tree serde documentation — `tree.md` *Render Hints* states
+    the typed fields serialize to same-version serde JSON (not a cross-version
+    durable format);
+  - renderable, biscuit-terminal, and Darkmatter skills — see
+    `skills_files_updated_during_phase_9`.
+- [x] Review all changed rustdoc and inline comments for drift. (No stale
+  comments remained in changed `renderable` / `biscuit-terminal` source; the
+  `component_for` / `decorate_document` mentions in
+  `darkmatter/.../build_context.rs` are a new local helper plus a legitimate
+  "this replaces" note. Fixed doc drift: darkmatter `terminal.md` referenced the
+  deleted `for_terminal` / `write_terminal` / `push_prose_text` / `LineWrapper`
+  helpers; bt `render-tree.md` referenced `renderable.widget.progress.*`
+  data-bag hints that are now typed `ComponentHints`.)
+- [x] Run final Level 1 and doctest verification (all green):
+  - `just -f renderable/justfile test` — 486 passed;
+  - `just -f renderable/justfile doctest` — passed;
+  - `just -f biscuit-terminal/justfile test` — 357 passed (68 skipped L2);
+  - `just -f biscuit-terminal/justfile doctest` — passed;
+  - `just -f darkmatter/justfile test` — passed;
+  - `just -f darkmatter/justfile doctest` — passed.
+- [x] Run lint checks without invoking `cargo fmt`:
+  - `just -f {renderable,biscuit-terminal,darkmatter}/justfile lint` — all exit
+    0 (clippy + fmt-check clean); this phase changed only Markdown docs/skills,
+    so no Rust formatting was affected.
+- [x] Leave Level 2/browser execution for closeout. (Not required — no changed
+  behavior in this phase; Phase 9 is documentation + verification only.)
+- [x] Record final verification results for the closeout spec. (Captured above:
+  L1 tests + doctests + lint all green across renderable, biscuit-terminal, and
+  darkmatter.)
 
 **Exit condition:** The feature spec acceptance criteria are met, docs match the
 implementation, and the closeout work can begin from a green tree.

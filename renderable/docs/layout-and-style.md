@@ -252,16 +252,25 @@ sits*, `Style` decides *what the box looks like*. A component declares a
 
 ```rust
 pub struct Style {
-    pub color: Option<TargetValue<PerMode<Color>>>,
-    pub background: Option<TargetValue<PerMode<Color>>>,  // paints content + padding box
+    pub color: Option<TargetValue<PerMode<PaintColor>>>,
+    pub background: Option<TargetValue<PerMode<PaintColor>>>,  // paints content + padding box
     pub emphasis: TextEmphasis,
-    pub border: Option<Border>,
+    pub border: Option<Border>,                               // Border.color is also PaintColor
 }
 ```
 
-- **`color` / `background`** — foreground and box background color. Per CSS,
-  `background` paints the content box *and* the `Layout.padding` box (out to the
-  border edge), but not the margin.
+- **`color` / `background`** — foreground and box background paint. They carry
+  `PaintColor` (a `Color` plus an `Opacity` alpha byte), not bare `Color`, so
+  alpha survives the tree without a side channel; `Border.color` is `PaintColor`
+  too. `PerMode` accepts `impl Into<PaintColor>`, so opaque construction from a
+  `Color` stays concise. The terminal target reads `PaintColor::color` and
+  ignores the alpha at every color depth; the browser lowers the pair to
+  `rgb(...)` / `rgba(...)` (or a `transparent` / `currentColor` / `inherit`
+  keyword) through the shared `paint_to_css_color`. `Opacity` defaults to opaque
+  and is elided from the serialized form when opaque, so an alpha-less tree
+  serializes exactly as it did before alpha existed. Per CSS, `background` paints
+  the content box *and* the `Layout.padding` box (out to the border edge), but
+  not the margin.
 - **`emphasis`** — the shared `TextEmphasis` leaf (bold, dim, italic,
   underline, strikethrough, blink, inverse), also reused by `Prose`.
 - **`border`** — `Border { color, weight, line_style, sides, radius }`.
@@ -428,13 +437,21 @@ The darkmatter cutover is complete. The deprecated page-layout value types —
 `DarkmatterPage` now stores `renderable::layout::Edges`,
 `TargetValue<Length>`, and `ComponentPolicy` directly; `style:` frontmatter
 lowers straight into the per-component `ComponentPolicy` — a
-`renderable::layout::Layout` plus `color` / `bg_color` retained as `StyleColor`
-(so Tailwind/hex opacity survives to the HTML target). The `decorate` pass then
-projects layout and color onto the render-tree nodes' `renderable::style::Style`
-(opacity is carried separately as a `darkmatter.style` render hint the browser
-entry point lowers to `rgba(...)`), and the render-tree folds perform all width,
-padding, alignment, and CSS resolution. `DarkmatterPage` survives as a slim,
-renderable-typed page frame.
+`renderable::layout::Layout` plus `color` / `bg_color` carried as alpha-bearing
+`renderable::style::PaintColor`. The parsed `StyleColor` (which carries optional
+Tailwind/hex opacity) is lowered to `PaintColor` at the parser/apply boundary,
+so opacity rides in the paint's alpha channel rather than a side channel — there
+is no `StyleColor` left on post-construction component types.
+
+The render tree is built **complete** during construction: darkmatter's
+context-aware fold (`render_tree::build_context`, a `TreeBuildContext`) bakes
+component policy, page-inheriting color, alpha paint, text layout, and HR
+defaults onto the nodes as it folds, and each target then runs **one fold** over
+that tree. The old post-fold `decorate` pass and the `darkmatter.style` /
+`darkmatter.li` render hints have been **deleted**; the browser fold lowers
+alpha straight to `rgba(...)` with no post-render HTML rewrite. The render-tree
+folds perform all width, padding, alignment, and CSS resolution. `DarkmatterPage`
+survives as a slim, renderable-typed page frame.
 
 ### `style:` frontmatter status
 
