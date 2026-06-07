@@ -1,0 +1,1170 @@
+//! git2 golden-value and discovery tri-state parity tests.
+//!
+//! These lock the observable behavior of sniff's git layer while it is still
+//! backed by git2, so the gitoxide port can be validated against an independent
+//! git2 ground truth built by the same deterministic fixtures. The fixtures pin
+//! signatures and commit times (via the bench `builder`), so object IDs and
+//! orderings are reproducible; assertions either compare the public `sniff` API
+//! against a freshly-opened git2 handle or against structural invariants that
+//! must survive the backend swap.
+
+#[path = "../benches/support/builder.rs"]
+mod builder;
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use git2::Repository;
+use tempfile::TempDir;
+
+use sniff::SniffError;
+use sniff::filesystem::detect_git_with_request;
+use sniff::filesystem::git::{
+    DeltaKind, FileAction, FileStatus, GitHostingProvider, GitRepo, get_commit_files,
+    merge_conflicts_at,
+};
+use sniff::request::GitRequest;
+
+/// Normalize a path to forward slashes so assertions hold on Windows, where
+/// `PathBuf` display uses backslashes even though git stores POSIX paths.
+fn norm(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+/// Build a linear `main`-branch history with `commits` commits, pinned times.
+///
+/// Each commit rewrites `file.txt` and adds a per-commit source file so every
+/// commit carries a small diff. HEAD is forced to `refs/heads/main` before the
+/// first commit so the branch name is deterministic regardless of the host's
+/// `init.defaultBranch`.
+fn build_linear_main(root: &Path, commits: usize) -> Repository {
+    let repo = builder::init_repo(root);
+    repo.set_head("refs/heads/main")
+        .expect("point HEAD at main");
+
+    let mut seconds = 1_000i64;
+    for i in 0..commits {
+        builder::write_file(&root.join("file.txt"), &format!("v{i}\n"));
+        builder::write_file(
+            &root.join(format!("src/m{i:02}.rs")),
+            &format!("pub const N: u32 = {i};\n"),
+        );
+        builder::commit_all_at(&repo, &format!("c{i}: commit {i}"), seconds);
+        seconds += 60;
+    }
+    repo
+}
+
+/// Collect HEAD-reachable commit SHAs newest-first using a fresh git2 handle —
+/// the independent ground truth the public API must match.
+fn git2_head_shas(repo: &Repository) -> Vec<String> {
+    let mut revwalk = repo.revwalk().expect("revwalk");
+    revwalk.set_sorting(git2::Sort::TIME).expect("set sorting");
+    revwalk.push_head().expect("push HEAD");
+    revwalk
+        .filter_map(|oid| oid.ok().map(|o| o.to_string()))
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Golden values
+// ---------------------------------------------------------------------------
+
+#[test]
+fn golden_branch_identity_matches_head() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 3);
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    assert_eq!(handle.current_branch().as_deref(), Some("main"));
+
+    // Ground truth: HEAD shorthand from an independent git2 handle.
+    let head_shorthand = repo.head().unwrap().shorthand().unwrap().to_string();
+    assert_eq!(handle.current_branch(), Some(head_shorthand));
+}
+
+#[test]
+fn golden_commit_ordering_is_newest_first_and_matches_git2() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 5);
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let api_shas: Vec<String> = handle
+        .recent_commits(5)
+        .iter()
+        .map(|c| c.sha.clone())
+        .collect();
+
+    // Identical SHAs in identical order to the independent git2 walk.
+    assert_eq!(api_shas, git2_head_shas(&repo));
+
+    // Timestamps strictly decreasing (newest-first).
+    let times: Vec<_> = handle
+        .recent_commits(5)
+        .iter()
+        .map(|c| c.timestamp)
+        .collect();
+    assert!(
+        times.windows(2).all(|w| w[0] >= w[1]),
+        "expected newest-first: {times:?}"
+    );
+}
+
+#[test]
+fn golden_status_categories_staged_unstaged_untracked() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 1);
+
+    // Staged: a brand new file added to the index.
+    fs::write(dir.path().join("staged.txt"), "staged\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("staged.txt")).unwrap();
+    index.write().unwrap();
+
+    // Unstaged: modify a tracked file without staging.
+    fs::write(dir.path().join("file.txt"), "modified\n").unwrap();
+
+    // Untracked: a new file left out of the index.
+    fs::write(dir.path().join("untracked.txt"), "untracked\n").unwrap();
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert_eq!(info.status.staged_count, 1, "one staged add");
+    assert_eq!(info.status.unstaged_count, 1, "one unstaged modify");
+    assert_eq!(info.status.untracked_count, 1, "one untracked file");
+    assert!(info.status.is_dirty);
+}
+
+#[test]
+fn golden_commit_file_changes_are_path_ordered() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 1);
+
+    // A commit touching several files in non-sorted creation order.
+    builder::write_file(&dir.path().join("zeta.txt"), "z\n");
+    builder::write_file(&dir.path().join("alpha.txt"), "a\n");
+    builder::write_file(&dir.path().join("src/m01.rs"), "pub const X: u32 = 1;\n");
+    builder::commit_all_at(&repo, "multi-file change", 5_000);
+
+    let head_sha = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    let gix_repo = gix::open(dir.path()).unwrap();
+    let head_oid = gix::ObjectId::from_hex(head_sha.as_bytes()).unwrap();
+    let files: Vec<String> = get_commit_files(&gix_repo, head_oid)
+        .iter()
+        .map(|(p, _)| norm(p))
+        .collect();
+
+    assert!(files.contains(&"alpha.txt".to_string()));
+    assert!(files.contains(&"zeta.txt".to_string()));
+    assert!(files.contains(&"src/m01.rs".to_string()));
+
+    // gix diff_tree_to_tree yields path-ordered results; lock that ordering.
+    let mut sorted = files.clone();
+    sorted.sort();
+    assert_eq!(files, sorted, "commit files should be path-ordered");
+}
+
+#[test]
+fn golden_branch_ahead_behind_counts() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 3);
+
+    // Branch `feature` off the second commit (one behind main's tip), then add
+    // one commit (one ahead). Relative to main's HEAD it is 1 ahead / 1 behind.
+    let second = git2_head_shas(&repo)[1].clone();
+    let second_oid = git2::Oid::from_str(&second).unwrap();
+    let second_commit = repo.find_commit(second_oid).unwrap();
+    repo.branch("feature", &second_commit, false).unwrap();
+    repo.set_head("refs/heads/feature").unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    builder::write_file(&dir.path().join("feature.txt"), "feature\n");
+    builder::commit_all_at(&repo, "feature commit", 4_000);
+
+    // Back to main as the current branch.
+    repo.set_head("refs/heads/main").unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let branches = handle.branches();
+    let feature = branches
+        .iter()
+        .find(|b| b.name == "feature")
+        .expect("feature branch present");
+    assert_eq!(feature.ahead, 1, "feature is one commit ahead of main");
+    assert_eq!(feature.behind, 1, "feature is one commit behind main");
+}
+
+#[test]
+fn golden_remote_url_and_provider() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 1);
+    repo.remote("origin", "https://github.com/rust-lang/cargo.git")
+        .unwrap();
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    let origin = info
+        .remotes
+        .iter()
+        .find(|r| r.name == "origin")
+        .expect("origin remote present");
+    assert_eq!(
+        origin.url.as_deref(),
+        Some("https://github.com/rust-lang/cargo.git")
+    );
+    assert_eq!(origin.provider, GitHostingProvider::GitHub);
+    assert_eq!(info.org.as_deref(), Some("rust-lang"));
+    assert_eq!(info.repo.as_deref(), Some("cargo"));
+}
+
+#[test]
+fn golden_config_user_identity() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 1);
+    {
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Golden Tester").unwrap();
+        config.set_str("user.email", "golden@sniff.test").unwrap();
+    }
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let config = handle.config();
+    assert_eq!(config.user_name.as_deref(), Some("Golden Tester"));
+    assert_eq!(config.user_email.as_deref(), Some("golden@sniff.test"));
+}
+
+#[test]
+fn golden_worktree_metadata() {
+    let dir = TempDir::new().unwrap();
+    builder::build_git_repo_with_worktrees(dir.path(), 2);
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let worktrees = handle.worktrees();
+    assert_eq!(worktrees.len(), 2, "two linked worktrees");
+
+    for (branch, info) in &worktrees {
+        assert!(
+            branch == "wt000" || branch == "wt001",
+            "unexpected worktree branch {branch}"
+        );
+        // Each linked worktree carries exactly one divergent commit.
+        assert_eq!(
+            info.ahead, 1,
+            "worktree {branch} should be one commit ahead"
+        );
+        assert_eq!(info.behind, 0, "worktree {branch} should be zero behind");
+        assert!(!info.merged, "worktree {branch} is not merged into base");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Discovery tri-state (git2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn discovery_found_returns_some() {
+    let dir = TempDir::new().unwrap();
+    build_linear_main(dir.path(), 1);
+
+    let handle = GitRepo::discover(dir.path()).unwrap();
+    assert!(handle.is_some(), "a real repo discovers to Ok(Some)");
+}
+
+#[test]
+fn discovery_genuine_non_repository_returns_ok_none() {
+    // A plain temp dir with no `.git` anywhere up to the filesystem root.
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("plain.txt"), "not a repo\n").unwrap();
+
+    let result = GitRepo::discover(dir.path()).unwrap();
+    assert!(
+        result.is_none(),
+        "a non-repository directory discovers to Ok(None)"
+    );
+}
+
+#[test]
+fn discovery_bare_repository_surfaces_error() {
+    // A bare repository discovers successfully but has no working directory;
+    // sniff treats the missing workdir as an error rather than Ok(None). This
+    // is the only error state git2 discovery currently surfaces — Phase 2
+    // widens it to trust/permission/corruption failures under gix.
+    let dir = TempDir::new().unwrap();
+    let bare_path: PathBuf = dir.path().join("bare.git");
+    Repository::init_bare(&bare_path).unwrap();
+
+    let result = GitRepo::discover(&bare_path);
+    assert!(
+        matches!(result, Err(SniffError::NotARepository(_))),
+        "bare repo (no workdir) should surface an error, got {result:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — gix-backed discovery and basic identity queries
+// ---------------------------------------------------------------------------
+
+#[test]
+fn phase2_head_id_matches_git2_oid() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 3);
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let git2_head = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+
+    assert_eq!(
+        handle.head_id().as_deref(),
+        Some(git2_head.as_str()),
+        "gix head_id should equal the git2 HEAD oid"
+    );
+    assert!(
+        !handle.is_detached_head(),
+        "HEAD is on a branch, not detached"
+    );
+}
+
+#[test]
+fn phase2_detached_head_is_detected_and_branch_is_none() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+    let head_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+    repo.set_head_detached(head_oid).unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    assert!(handle.is_detached_head(), "HEAD should be detached");
+    assert_eq!(
+        handle.current_branch(),
+        None,
+        "detached HEAD has no branch name"
+    );
+    // The id is still resolvable even when detached.
+    assert_eq!(
+        handle.head_id().as_deref(),
+        Some(head_oid.to_string().as_str())
+    );
+}
+
+#[test]
+fn phase2_unborn_head_branch_and_id_are_none() {
+    // A freshly initialized repository with no commits has an unborn HEAD.
+    // The documented infallible accessors must suppress the underlying error
+    // and report `None` rather than propagating or panicking.
+    let dir = TempDir::new().unwrap();
+    let _repo = builder::init_repo(dir.path());
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    assert_eq!(handle.current_branch(), None, "unborn HEAD has no branch");
+    assert_eq!(handle.head_id(), None, "unborn HEAD has no commit id");
+}
+
+#[test]
+fn phase2_main_repo_git_dir_equals_common_dir() {
+    let dir = TempDir::new().unwrap();
+    build_linear_main(dir.path(), 1);
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    assert!(!handle.in_worktree(), "main repo is not a linked worktree");
+    assert_eq!(
+        norm(handle.git_dir()),
+        norm(handle.common_dir()),
+        "main repo git_dir and common_dir coincide"
+    );
+    assert_eq!(handle.base_repo_root(), None, "main repo has no base root");
+}
+
+#[test]
+fn phase2_linked_worktree_paths_and_flags() {
+    let dir = TempDir::new().unwrap();
+    builder::build_git_repo_with_worktrees(dir.path(), 1);
+
+    let wt_path = dir.path().join("_wt").join("wt000");
+    let handle = GitRepo::discover(&wt_path)
+        .unwrap()
+        .expect("worktree found");
+
+    assert!(
+        handle.in_worktree(),
+        "discovered handle is a linked worktree"
+    );
+    assert_ne!(
+        norm(handle.git_dir()),
+        norm(handle.common_dir()),
+        "linked worktree git_dir differs from the shared common_dir"
+    );
+    let base = handle.base_repo_root().expect("worktree has a base root");
+    // The base root is the parent of the common (.git) directory — i.e. the
+    // main repository's working directory.
+    assert_eq!(
+        norm(&base),
+        norm(handle.common_dir().parent().unwrap()),
+        "base_repo_root is the parent of common_dir"
+    );
+}
+
+#[test]
+fn phase2_discover_walks_up_from_subdirectory() {
+    let dir = TempDir::new().unwrap();
+    build_linear_main(dir.path(), 1);
+    let nested = dir.path().join("src");
+
+    let handle = GitRepo::discover(&nested).unwrap().expect("repo found");
+    assert_eq!(
+        norm(handle.repo_root()),
+        norm(dir.path()),
+        "discovery walks parents to the working-tree root"
+    );
+}
+
+#[test]
+fn phase2_sha256_repository_does_not_panic() {
+    // sniff enables only the gix `sha1` feature, preserving the git2 SHA-1-only
+    // contract. Where the host `git` can create a SHA-256 repository, discovery
+    // and the basic accessors must produce a well-defined result (Ok/Err)
+    // rather than panicking or misparsing a fixed-width object id.
+    let dir = TempDir::new().unwrap();
+    let repo_path = dir.path().join("sha256");
+    fs::create_dir_all(&repo_path).unwrap();
+
+    let init = std::process::Command::new("git")
+        .args(["init", "--object-format=sha256"])
+        .current_dir(&repo_path)
+        .output();
+    let Ok(out) = init else {
+        eprintln!("skipping: `git` not available");
+        return;
+    };
+    if !out.status.success() {
+        eprintln!("skipping: this git lacks --object-format=sha256");
+        return;
+    }
+
+    // sniff enables only gix's `sha1` feature, so a SHA-256 repository is
+    // unsupported. The contract is an explicit error (gix cannot load its
+    // config) — distinct from both success and "not a repository" (`Ok(None)`),
+    // so a SHA-256 repo is never silently mis-handled or reported as absent.
+    let result = GitRepo::discover(&repo_path);
+    assert!(
+        result.is_err(),
+        "SHA-256 repo must surface an error, not success or absence"
+    );
+}
+
+/// Initialize an unsupported (SHA-256) repository, returning its path, or `None`
+/// when the host `git` cannot create one.
+fn sha256_repo(dir: &TempDir) -> Option<PathBuf> {
+    let repo_path = dir.path().join("sha256");
+    fs::create_dir_all(&repo_path).ok()?;
+    let out = std::process::Command::new("git")
+        .args(["init", "--object-format=sha256"])
+        .current_dir(&repo_path)
+        .output()
+        .ok()?;
+    out.status.success().then_some(repo_path)
+}
+
+#[test]
+fn cli_facing_apis_surface_open_failure_instead_of_absence() {
+    // An unsupported repository is a trust/permission/IO/corruption-class
+    // failure: the CLI-facing helpers must propagate it (Err), never erase it to
+    // "missing repo" / "no remote" / "no conflicts". This is the contract the
+    // `.ok()`/`.ok().flatten()`/raw-`gix::open` swallowing used to violate.
+    let dir = TempDir::new().unwrap();
+    let Some(repo_path) = sha256_repo(&dir) else {
+        eprintln!("skipping: host git cannot create a SHA-256 repository");
+        return;
+    };
+    let p = repo_path.as_path();
+
+    assert!(sniff::filesystem::repo_root(p).is_err(), "repo_root");
+    assert!(
+        sniff::filesystem::merge_conflicts_at(p).is_err(),
+        "merge_conflicts_at"
+    );
+    assert!(
+        sniff::filesystem::commit_by_sha_at(p, "deadbeef").is_err(),
+        "commit_by_sha_at"
+    );
+    assert!(
+        sniff::filesystem::commit_files_at(p, "deadbeef").is_err(),
+        "commit_files_at"
+    );
+    assert!(
+        sniff::filesystem::commits_for_path_at(p, "", 5).is_err(),
+        "commits_for_path_at"
+    );
+    assert!(
+        sniff::filesystem::commits_for_branch_at(p, "main", 5).is_err(),
+        "commits_for_branch_at"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — gix-backed working-tree status parity
+// ---------------------------------------------------------------------------
+
+/// Build a deterministic repo with one committed file and return the git2 handle.
+fn repo_with_one_file(root: &Path, filename: &str, content: &str) -> Repository {
+    let repo = builder::init_repo(root);
+    repo.set_head("refs/heads/main")
+        .expect("point HEAD at main");
+    builder::write_file(&root.join(filename), content);
+    builder::commit_all_at(&repo, "initial", 1_000);
+    repo
+}
+
+#[test]
+fn phase3_clean_repo_reports_zero_counts_and_not_dirty() {
+    let dir = TempDir::new().unwrap();
+    let _repo = repo_with_one_file(dir.path(), "file.txt", "hello\n");
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert!(!info.status.is_dirty);
+    assert_eq!(info.status.staged_count, 0);
+    assert_eq!(info.status.unstaged_count, 0);
+    assert_eq!(info.status.untracked_count, 0);
+    assert!(info.file_changes.is_empty());
+}
+
+#[test]
+fn phase3_staged_add_is_created_with_staged_status() {
+    let dir = TempDir::new().unwrap();
+    let repo = repo_with_one_file(dir.path(), "file.txt", "hello\n");
+
+    fs::write(dir.path().join("new.rs"), "pub const X: u32 = 1;\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("new.rs")).unwrap();
+    index.write().unwrap();
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert!(info.status.is_dirty);
+    assert_eq!(info.status.staged_count, 1);
+    assert_eq!(info.status.unstaged_count, 0);
+
+    let change = info
+        .file_changes
+        .iter()
+        .find(|c| norm(&c.path) == "new.rs")
+        .expect("new.rs change present");
+    assert_eq!(change.status, FileStatus::Staged);
+    assert_eq!(change.action, FileAction::Created);
+    assert_eq!(change.lines_added, 1);
+    assert_eq!(change.lines_removed, 0);
+}
+
+#[test]
+fn phase3_staged_delete_is_deleted_with_staged_status() {
+    let dir = TempDir::new().unwrap();
+    let repo = repo_with_one_file(dir.path(), "old.rs", "pub const X: u32 = 1;\n");
+
+    fs::remove_file(dir.path().join("old.rs")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("old.rs")).unwrap();
+    index.write().unwrap();
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert!(info.status.is_dirty);
+    assert_eq!(info.status.staged_count, 1);
+    assert_eq!(info.status.unstaged_count, 0);
+
+    let change = info
+        .file_changes
+        .iter()
+        .find(|c| norm(&c.path) == "old.rs")
+        .expect("old.rs change present");
+    assert_eq!(change.status, FileStatus::Staged);
+    assert_eq!(change.action, FileAction::Deleted);
+    assert_eq!(change.lines_added, 0);
+    assert_eq!(change.lines_removed, 1);
+}
+
+#[test]
+fn phase3_unstaged_modification_is_modified_with_modified_status() {
+    let dir = TempDir::new().unwrap();
+    let _repo = repo_with_one_file(dir.path(), "file.txt", "line one\nline two\n");
+
+    fs::write(dir.path().join("file.txt"), "line one\nmodified two\n").unwrap();
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert!(info.status.is_dirty);
+    assert_eq!(info.status.staged_count, 0);
+    assert_eq!(info.status.unstaged_count, 1);
+
+    let change = info
+        .file_changes
+        .iter()
+        .find(|c| norm(&c.path) == "file.txt")
+        .expect("file.txt change present");
+    assert_eq!(change.status, FileStatus::Modified);
+    assert_eq!(change.action, FileAction::Modified);
+    assert_eq!(change.lines_added, 1);
+    assert_eq!(change.lines_removed, 1);
+}
+
+#[test]
+fn phase3_unstaged_delete_is_deleted_with_modified_status() {
+    let dir = TempDir::new().unwrap();
+    let _repo = repo_with_one_file(dir.path(), "file.txt", "hello\n");
+
+    fs::remove_file(dir.path().join("file.txt")).unwrap();
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert!(info.status.is_dirty);
+    assert_eq!(info.status.staged_count, 0);
+    assert_eq!(info.status.unstaged_count, 1);
+
+    let change = info
+        .file_changes
+        .iter()
+        .find(|c| norm(&c.path) == "file.txt")
+        .expect("file.txt change present");
+    assert_eq!(change.status, FileStatus::Modified);
+    assert_eq!(change.action, FileAction::Deleted);
+    assert_eq!(change.lines_added, 0);
+    assert_eq!(change.lines_removed, 1);
+}
+
+#[test]
+fn phase3_untracked_file_is_created_with_untracked_status() {
+    let dir = TempDir::new().unwrap();
+    let _repo = repo_with_one_file(dir.path(), "file.txt", "hello\n");
+
+    fs::write(dir.path().join("scratch.txt"), "scratch\n").unwrap();
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert!(info.status.is_dirty);
+    assert_eq!(info.status.staged_count, 0);
+    assert_eq!(info.status.unstaged_count, 0);
+    assert_eq!(info.status.untracked_count, 1);
+
+    let change = info
+        .file_changes
+        .iter()
+        .find(|c| norm(&c.path) == "scratch.txt")
+        .expect("scratch.txt change present");
+    assert_eq!(change.status, FileStatus::Untracked);
+    assert_eq!(change.action, FileAction::Created);
+}
+
+#[test]
+fn phase3_both_staged_and_unstaged_reports_both_status() {
+    let dir = TempDir::new().unwrap();
+    let repo = repo_with_one_file(dir.path(), "file.txt", "a\nb\nc\n");
+
+    // Stage a modification.
+    fs::write(dir.path().join("file.txt"), "a\nB\nc\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("file.txt")).unwrap();
+    index.write().unwrap();
+
+    // Then modify again without staging.
+    fs::write(dir.path().join("file.txt"), "a\nB\nC\n").unwrap();
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert!(info.status.is_dirty);
+    assert_eq!(info.status.staged_count, 1);
+    assert_eq!(info.status.unstaged_count, 1);
+
+    let change = info
+        .file_changes
+        .iter()
+        .find(|c| norm(&c.path) == "file.txt")
+        .expect("file.txt change present");
+    assert_eq!(change.status, FileStatus::Both);
+    assert_eq!(change.action, FileAction::Modified);
+    // Stats aggregate staged (1 add / 1 rem) and unstaged (1 add / 1 rem).
+    assert_eq!(change.lines_added, 2);
+    assert_eq!(change.lines_removed, 2);
+}
+
+#[test]
+fn phase3_rename_surfaces_as_delete_and_create() {
+    let dir = TempDir::new().unwrap();
+    let repo = repo_with_one_file(dir.path(), "old.rs", "pub const X: u32 = 1;\n");
+
+    fs::rename(dir.path().join("old.rs"), dir.path().join("new.rs")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("old.rs")).unwrap();
+    index.add_path(Path::new("new.rs")).unwrap();
+    index.write().unwrap();
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert!(info.status.is_dirty);
+    assert_eq!(info.status.staged_count, 2);
+
+    let paths: Vec<String> = info.file_changes.iter().map(|c| norm(&c.path)).collect();
+    assert!(paths.contains(&"old.rs".to_string()));
+    assert!(paths.contains(&"new.rs".to_string()));
+}
+
+#[test]
+fn phase3_merge_conflict_detected_and_reported() {
+    let dir = TempDir::new().unwrap();
+    let repo = repo_with_one_file(dir.path(), "file.txt", "base\n");
+
+    // Create a branch with a conflicting change.
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("other", &head, false).unwrap();
+    repo.set_head("refs/heads/other").unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    fs::write(dir.path().join("file.txt"), "theirs\n").unwrap();
+    builder::commit_all_at(&repo, "theirs", 2_000);
+
+    // Switch back to main and make an incompatible change.
+    repo.set_head("refs/heads/main").unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    fs::write(dir.path().join("file.txt"), "ours\n").unwrap();
+    builder::commit_all_at(&repo, "ours", 3_000);
+
+    // Merge other into main. This will produce conflicts.
+    let other_oid = repo
+        .find_reference("refs/heads/other")
+        .unwrap()
+        .target()
+        .unwrap();
+    let other_annotated = repo.find_annotated_commit(other_oid).unwrap();
+    repo.merge(&[&other_annotated], None, None).ok();
+
+    let conflicts = merge_conflicts_at(dir.path()).unwrap();
+    assert_eq!(conflicts.len(), 1);
+    assert_eq!(norm(&conflicts[0]), "file.txt");
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert!(info.status.is_dirty);
+    let conflict = info
+        .file_changes
+        .iter()
+        .find(|c| norm(&c.path) == "file.txt")
+        .expect("conflict present");
+    assert_eq!(conflict.status, FileStatus::Conflicted);
+}
+
+#[test]
+fn phase3_unborn_head_is_not_dirty_and_has_no_changes() {
+    let dir = TempDir::new().unwrap();
+    let _repo = builder::init_repo(dir.path());
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert!(!info.status.is_dirty);
+    assert_eq!(info.status.staged_count, 0);
+    assert_eq!(info.status.unstaged_count, 0);
+    assert_eq!(info.status.untracked_count, 0);
+    assert!(info.file_changes.is_empty());
+}
+
+/// Inject a staged blob whose index path is the raw `bytes` (not necessarily
+/// valid UTF-8). Bypasses the filesystem — macOS APFS rejects invalid-UTF-8
+/// filenames — to exercise the byte-native status path directly.
+fn stage_raw_path(repo: &git2::Repository, bytes: &[u8], content: &[u8]) {
+    let mut index = repo.index().unwrap();
+    index
+        .add_frombuffer(
+            &git2::IndexEntry {
+                ctime: git2::IndexTime::new(0, 0),
+                mtime: git2::IndexTime::new(0, 0),
+                dev: 0,
+                ino: 0,
+                mode: 0o100644,
+                uid: 0,
+                gid: 0,
+                file_size: content.len() as u32,
+                id: repo.blob(content).unwrap(),
+                flags: 0,
+                flags_extended: 0,
+                path: bytes.to_vec(),
+            },
+            content,
+        )
+        .unwrap();
+    index.write().unwrap();
+}
+
+#[test]
+fn phase3_non_utf8_path_resolves_exact_index_entry_for_stats() {
+    let dir = TempDir::new().unwrap();
+    let repo = repo_with_one_file(dir.path(), "file.txt", "hello\n");
+
+    // 0xC0 is an invalid UTF-8 lead byte. A lossy round-trip would re-encode it
+    // as the replacement character and fail the index lookup (zero stats); the
+    // byte-native path must resolve the real entry and count its lines.
+    stage_raw_path(&repo, &[0xC0, b'r', b's', b't'], b"one\ntwo\nthree\n");
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert!(info.status.is_dirty);
+    assert_eq!(info.status.staged_count, 1);
+    // The index entry has no worktree file, so it surfaces as a staged add
+    // (3 lines added) plus a worktree delete (3 lines removed). Both stats are
+    // non-zero only because the exact byte path resolved its index blob; a
+    // lossy round-trip would have failed the lookup and reported zero.
+    let change = info
+        .file_changes
+        .iter()
+        .find(|c| c.lines_added > 0)
+        .expect("staged non-UTF-8 file with stats");
+    assert_eq!(change.lines_added, 3, "exact byte path must find the blob");
+    assert_eq!(change.lines_removed, 3);
+}
+
+#[test]
+fn phase3_distinct_non_utf8_paths_do_not_collide() {
+    let dir = TempDir::new().unwrap();
+    let repo = repo_with_one_file(dir.path(), "file.txt", "hello\n");
+
+    // Two distinct invalid-UTF-8 paths that both lossily render to a single
+    // replacement character. A `PathBuf`-keyed map would collapse them into one
+    // entry; byte-native keys must keep them distinct.
+    stage_raw_path(&repo, &[0xC0], b"a\n");
+    stage_raw_path(&repo, &[0xC1], b"b\n");
+
+    let info = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    assert_eq!(
+        info.status.staged_count, 2,
+        "distinct byte paths must not collapse to one"
+    );
+    assert_eq!(
+        info.file_changes
+            .iter()
+            .filter(|c| c.lines_added > 0)
+            .count(),
+        2,
+        "both non-UTF-8 files must carry independent stats"
+    );
+}
+
+#[test]
+fn phase3_counts_only_matches_full_request_totals() {
+    let dir = TempDir::new().unwrap();
+    let repo = repo_with_one_file(dir.path(), "file.txt", "hello\n");
+
+    fs::write(dir.path().join("staged.rs"), "staged\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("staged.rs")).unwrap();
+    index.write().unwrap();
+
+    fs::write(dir.path().join("unstaged.rs"), "unstaged\n").unwrap();
+    fs::write(dir.path().join("untracked.rs"), "untracked\n").unwrap();
+
+    let full = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    // A request with no file changes but non-minimal metadata triggers the
+    // detailed-count code path. Its totals must agree with the full walk.
+    let counts = detect_git_with_request(
+        dir.path(),
+        &GitRequest {
+            commit_count: 0,
+            include_file_changes: false,
+            include_file_diffs: false,
+            include_worktrees: true, // keeps is_minimal() false
+            refresh_remote_tracking: false,
+            include_remote_branch_details: false,
+            include_commit_remote_containment: false,
+            max_remote_branches: None,
+        },
+    )
+    .unwrap()
+    .expect("repo found");
+
+    assert_eq!(counts.status.is_dirty, full.status.is_dirty);
+    assert_eq!(counts.status.staged_count, full.status.staged_count);
+    assert_eq!(counts.status.unstaged_count, full.status.unstaged_count);
+    assert_eq!(counts.status.untracked_count, full.status.untracked_count);
+}
+
+#[test]
+fn phase3_detailed_counts_match_full_request_totals() {
+    let dir = TempDir::new().unwrap();
+    let repo = repo_with_one_file(dir.path(), "file.txt", "hello\n");
+
+    fs::write(dir.path().join("staged.rs"), "staged\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("staged.rs")).unwrap();
+    index.write().unwrap();
+
+    fs::write(dir.path().join("unstaged.rs"), "unstaged\n").unwrap();
+    fs::write(dir.path().join("untracked.rs"), "untracked\n").unwrap();
+
+    let full = detect_git_with_request(dir.path(), &GitRequest::full())
+        .unwrap()
+        .expect("repo found");
+
+    // GitRequest::deep() triggers the detailed path listing but omits diffs.
+    let detailed = detect_git_with_request(dir.path(), &GitRequest::deep())
+        .unwrap()
+        .expect("repo found");
+
+    assert_eq!(detailed.status.is_dirty, full.status.is_dirty);
+    assert_eq!(detailed.status.staged_count, full.status.staged_count);
+    assert_eq!(detailed.status.unstaged_count, full.status.unstaged_count);
+    assert_eq!(detailed.status.untracked_count, full.status.untracked_count);
+
+    // Detailed includes path lists; the count of dirty + untracked entries
+    // should equal the file_changes length (excluding conflicts, which this
+    // fixture does not produce).
+    assert_eq!(
+        detailed.status.dirty.len() + detailed.status.untracked.len(),
+        full.file_changes.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — gix-backed commit tree-to-tree diff parity
+// ---------------------------------------------------------------------------
+
+/// Helper: open a gix handle from a path for phase-4 tests.
+fn open_gix(root: &Path) -> gix::Repository {
+    gix::open(root).expect("open with gix")
+}
+
+/// Helper: resolve a full git2 SHA to a gix ObjectId.
+fn sha_to_gix_oid(sha: &str) -> gix::ObjectId {
+    gix::ObjectId::from_hex(sha.as_bytes()).expect("valid full sha")
+}
+
+#[test]
+fn phase4_root_commit_shows_all_files_as_added() {
+    let dir = TempDir::new().unwrap();
+    let repo = builder::init_repo(dir.path());
+    repo.set_head("refs/heads/main")
+        .expect("point HEAD at main");
+
+    builder::write_file(&dir.path().join("alpha.txt"), "alpha\n");
+    builder::write_file(&dir.path().join("src/lib.rs"), "pub fn lib() {}\n");
+    builder::commit_all_at(&repo, "initial", 1_000);
+
+    let head_sha = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    let gix_repo = open_gix(dir.path());
+    let files = get_commit_files(&gix_repo, sha_to_gix_oid(&head_sha));
+
+    assert_eq!(files.len(), 2, "root commit should list all added files");
+    let paths: Vec<String> = files.iter().map(|(p, _)| norm(p)).collect();
+    assert!(paths.contains(&"alpha.txt".to_string()));
+    assert!(paths.contains(&"src/lib.rs".to_string()));
+
+    for (_, kind) in &files {
+        assert_eq!(*kind, DeltaKind::Added, "root commit files should be Added");
+    }
+}
+
+#[test]
+fn phase4_first_parent_commit_with_modifications() {
+    let dir = TempDir::new().unwrap();
+    let repo = builder::init_repo(dir.path());
+    repo.set_head("refs/heads/main")
+        .expect("point HEAD at main");
+
+    builder::write_file(&dir.path().join("file.txt"), "v0\n");
+    builder::commit_all_at(&repo, "initial", 1_000);
+
+    builder::write_file(&dir.path().join("file.txt"), "v1\n");
+    builder::commit_all_at(&repo, "modify", 2_000);
+
+    let head_sha = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    let gix_repo = open_gix(dir.path());
+    let files = get_commit_files(&gix_repo, sha_to_gix_oid(&head_sha));
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(norm(&files[0].0), "file.txt");
+    assert_eq!(files[0].1, DeltaKind::Modified);
+}
+
+#[test]
+fn phase4_commit_with_deletions() {
+    let dir = TempDir::new().unwrap();
+    let repo = builder::init_repo(dir.path());
+    repo.set_head("refs/heads/main")
+        .expect("point HEAD at main");
+
+    builder::write_file(&dir.path().join("keep.txt"), "keep\n");
+    builder::write_file(&dir.path().join("remove.txt"), "remove\n");
+    builder::commit_all_at(&repo, "initial", 1_000);
+
+    std::fs::remove_file(dir.path().join("remove.txt")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("remove.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "delete", &tree, &[&parent])
+        .unwrap();
+
+    let head_sha = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    let gix_repo = open_gix(dir.path());
+    let files = get_commit_files(&gix_repo, sha_to_gix_oid(&head_sha));
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(norm(&files[0].0), "remove.txt");
+    assert_eq!(files[0].1, DeltaKind::Deleted);
+}
+
+#[test]
+fn phase4_rename_surfaces_as_delete_and_add() {
+    let dir = TempDir::new().unwrap();
+    let repo = builder::init_repo(dir.path());
+    repo.set_head("refs/heads/main")
+        .expect("point HEAD at main");
+
+    builder::write_file(&dir.path().join("old.rs"), "pub const X: u32 = 1;\n");
+    builder::commit_all_at(&repo, "initial", 1_000);
+
+    std::fs::rename(dir.path().join("old.rs"), dir.path().join("new.rs")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("old.rs")).unwrap();
+    index.add_path(Path::new("new.rs")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "rename", &tree, &[&parent])
+        .unwrap();
+
+    let head_sha = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    let gix_repo = open_gix(dir.path());
+    let files = get_commit_files(&gix_repo, sha_to_gix_oid(&head_sha));
+
+    assert_eq!(files.len(), 2, "rename tracking disabled → delete + add");
+    let kinds: Vec<DeltaKind> = files.iter().map(|(_, k)| *k).collect();
+    assert!(kinds.contains(&DeltaKind::Deleted));
+    assert!(kinds.contains(&DeltaKind::Added));
+}
+
+#[test]
+fn phase4_binary_file_in_commit() {
+    let dir = TempDir::new().unwrap();
+    let repo = builder::init_repo(dir.path());
+    repo.set_head("refs/heads/main")
+        .expect("point HEAD at main");
+
+    builder::write_file(&dir.path().join("data.bin"), "\x00\x01\x02\x03\n");
+    builder::commit_all_at(&repo, "add binary", 1_000);
+
+    let head_sha = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    let gix_repo = open_gix(dir.path());
+    let files = get_commit_files(&gix_repo, sha_to_gix_oid(&head_sha));
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(norm(&files[0].0), "data.bin");
+    assert_eq!(files[0].1, DeltaKind::Added);
+}
+
+#[test]
+fn phase4_empty_commit_has_no_files() {
+    let dir = TempDir::new().unwrap();
+    let repo = builder::init_repo(dir.path());
+    repo.set_head("refs/heads/main")
+        .expect("point HEAD at main");
+
+    builder::write_file(&dir.path().join("file.txt"), "hello\n");
+    builder::commit_all_at(&repo, "initial", 1_000);
+
+    // Empty commit: same tree as parent
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    let tree = parent.tree().unwrap();
+    let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "empty", &tree, &[&parent])
+        .unwrap();
+
+    let head_sha = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    let gix_repo = open_gix(dir.path());
+    let files = get_commit_files(&gix_repo, sha_to_gix_oid(&head_sha));
+
+    assert!(
+        files.is_empty(),
+        "empty commit should have no changed files"
+    );
+}

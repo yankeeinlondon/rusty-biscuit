@@ -1,0 +1,56 @@
+//! Centralized trusted gix repository discovery and opening.
+//!
+//! Every production repository open rejects untrusted repositories via
+//! `bail_if_untrusted`, preserving libgit2's ownership-validation contract so
+//! sensitive config cannot silently differ on a hostile checkout. Upward-search
+//! exhaustion maps to `Ok(None)` ("not a repository"); trust, permission, I/O,
+//! and corruption failures surface as operation-tagged [`SniffError::Git`].
+
+use std::path::Path;
+
+use crate::{Result, SniffError};
+
+/// Trust mapping that refuses to open untrusted repositories at any trust level.
+fn trusted_options() -> gix::sec::trust::Mapping<gix::open::Options> {
+    gix::sec::trust::Mapping {
+        full: gix::open::Options::default().bail_if_untrusted(true),
+        reduced: gix::open::Options::default().bail_if_untrusted(true),
+    }
+}
+
+/// Discover a trusted repository containing `path`, walking parent directories.
+///
+/// ## Returns
+///
+/// `Ok(None)` when the upward search finds no repository.
+///
+/// ## Errors
+///
+/// Returns [`SniffError::Git`] tagged `"discover"` for trust/ownership,
+/// permission, I/O, and repository-corruption failures — these are *not*
+/// reported as repository absence.
+pub(crate) fn trusted_discover(path: &Path) -> Result<Option<gix::Repository>> {
+    use gix::discover::upwards::Error as Up;
+    match gix::ThreadSafeRepository::discover_opts(path, Default::default(), trusted_options()) {
+        Ok(repo) => Ok(Some(repo.to_thread_local())),
+        // Upward-search exhaustion is the only "not a repository" outcome.
+        Err(gix::discover::Error::Discover(
+            Up::NoGitRepository { .. }
+            | Up::NoGitRepositoryWithinCeiling { .. }
+            | Up::NoGitRepositoryWithinFs { .. },
+        )) => Ok(None),
+        Err(e) => Err(SniffError::git("discover", e)),
+    }
+}
+
+/// Open a trusted repository at a known `path` without an upward search.
+///
+/// ## Errors
+///
+/// Returns [`SniffError::Git`] tagged `"open"` for trust/ownership, permission,
+/// I/O, and corruption failures.
+#[allow(dead_code)] // Used by worktree/known-path opens ported in later phases.
+pub(crate) fn trusted_open(path: &Path) -> Result<gix::Repository> {
+    let opts = gix::open::Options::default().bail_if_untrusted(true);
+    gix::open_opts(path, opts).map_err(|e| SniffError::git("open", e))
+}

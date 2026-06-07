@@ -5,6 +5,7 @@
 
 use chrono::DateTime;
 use git2::Repository;
+use gix::bstr::ByteSlice;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -116,125 +117,84 @@ pub(crate) fn collect_ref_decorations(repo: &Repository) -> HashMap<git2::Oid, V
     decorations
 }
 
-/// Gets the last N commits from HEAD using revwalk.
-pub(crate) fn get_recent_commits(repo: &Repository, count: usize) -> Vec<CommitInfo> {
+/// Convert a `gix::ObjectId` to a `git2::Oid` for lookups in the transitional
+/// ref-decoration cache (ported to gix in Phase 6).
+fn gix_oid_to_git2(oid: gix::ObjectId) -> git2::Oid {
+    git2::Oid::from_bytes(oid.as_slice()).expect("valid sha1 bytes")
+}
+
+/// Gets the last N commits from HEAD using a gix revwalk.
+pub(crate) fn get_recent_commits(repo: &gix::Repository, count: usize) -> Vec<CommitInfo> {
     get_recent_commits_with_decorations(repo, count, None)
 }
 
-/// Gets the last N commits from HEAD using revwalk, with optional pre-computed ref decorations.
+/// Gets the last N commits from HEAD using a gix revwalk, with optional
+/// pre-computed ref decorations.
 pub(crate) fn get_recent_commits_with_decorations(
-    repo: &Repository,
+    repo: &gix::Repository,
     count: usize,
     ref_decorations: Option<&HashMap<git2::Oid, Vec<RefDecoration>>>,
 ) -> Vec<CommitInfo> {
     let mut commits = Vec::new();
 
-    let Ok(mut revwalk) = repo.revwalk() else {
+    let Ok(head) = repo.head_id() else {
         return commits;
     };
 
-    if revwalk.push_head().is_err() {
+    let Ok(walk) = repo
+        .rev_walk(Some(head))
+        .sorting(gix::revision::walk::Sorting::ByCommitTime(
+            gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
+        ))
+        .all()
+    else {
         return commits;
-    }
+    };
 
-    // Collect ref decorations once for all commits (if not provided)
+    // Collect ref decorations once for all commits (if not provided).
+    // Phase 6 will port `collect_ref_decorations` to gix; until then we
+    // open a temporary git2 handle for the same repository.
     let cached = ref_decorations.cloned();
-    let decorations = cached.unwrap_or_else(|| collect_ref_decorations(repo));
+    let decorations = cached.unwrap_or_else(|| {
+        git2::Repository::open(repo.workdir().unwrap_or(Path::new(".")))
+            .map(|r| collect_ref_decorations(&r))
+            .unwrap_or_default()
+    });
 
-    for oid_result in revwalk.take(count) {
-        let Ok(oid) = oid_result else {
+    for info_result in walk.take(count) {
+        let Ok(info) = info_result else {
             continue;
         };
-        let Ok(commit) = repo.find_commit(oid) else {
+        let Ok(commit) = info.object() else {
             continue;
         };
 
-        // Get refs pointing to this commit
-        let refs = decorations.get(&oid).cloned().unwrap_or_default();
+        let refs = decorations
+            .get(&gix_oid_to_git2(info.id))
+            .cloned()
+            .unwrap_or_default();
 
-        let author = commit.author();
+        let Ok(author) = commit.author() else {
+            continue;
+        };
+        let Ok(time) = commit.time() else {
+            continue;
+        };
+        let Ok(message) = commit.message_raw() else {
+            continue;
+        };
+
         commits.push(CommitInfo {
-            sha: commit.id().to_string(),
-            message: commit.message().unwrap_or("").trim().to_string(),
-            author: author.name().unwrap_or("Unknown").to_string(),
-            timestamp: DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default(),
+            sha: info.id.to_string(),
+            message: String::from_utf8_lossy(message.trim()).to_string(),
+            author: author.name.to_string(),
+            timestamp: DateTime::from_timestamp(time.seconds, 0).unwrap_or_default(),
             remotes: None,
             refs,
         });
     }
 
     commits
-}
-
-/// Gets HEAD commit SHA and upstream tracking branch commit SHA.
-pub(crate) fn get_commit_refs(repo: &Repository) -> (String, Option<String>) {
-    // Get HEAD commit SHA
-    let head_sha = repo
-        .head()
-        .map_err(|e| {
-            debug!(error = %e, "could not read HEAD for commit refs");
-            e
-        })
-        .ok()
-        .and_then(|h| {
-            h.peel_to_commit()
-                .map_err(|e| {
-                    debug!(error = %e, "could not peel HEAD to commit");
-                    e
-                })
-                .ok()
-        })
-        .map(|c| c.id().to_string())
-        .unwrap_or_default();
-
-    // Get upstream tracking branch commit using dynamic remote discovery
-    let origin_commit = get_upstream_commit(repo);
-
-    (head_sha, origin_commit)
-}
-
-/// Gets the upstream tracking branch commit SHA using dynamic remote discovery.
-pub(crate) fn get_upstream_commit(repo: &Repository) -> Option<String> {
-    let head = repo
-        .head()
-        .map_err(|e| {
-            debug!(error = %e, "could not read HEAD for upstream commit");
-            e
-        })
-        .ok()?;
-
-    // Only works for branch references, not detached HEAD
-    if !head.is_branch() {
-        return None;
-    }
-
-    let branch_name = head.shorthand()?;
-    let branch = repo
-        .find_branch(branch_name, git2::BranchType::Local)
-        .map_err(|e| {
-            debug!(branch = branch_name, error = %e, "could not find local branch");
-            e
-        })
-        .ok()?;
-
-    // Get the upstream branch (this handles dynamic remote discovery)
-    let upstream = branch
-        .upstream()
-        .map_err(|e| {
-            debug!(error = %e, "branch has no upstream");
-            e
-        })
-        .ok()?;
-    let upstream_commit = upstream
-        .get()
-        .peel_to_commit()
-        .map_err(|e| {
-            debug!(error = %e, "could not peel upstream to commit");
-            e
-        })
-        .ok()?;
-
-    Some(upstream_commit.id().to_string())
 }
 
 /// Resolves the base branch name and its commit OID for ahead/behind calculations.
@@ -321,120 +281,204 @@ impl std::fmt::Display for DeltaKind {
 }
 
 impl DeltaKind {
-    /// Convert a git2 Delta status to a DeltaKind.
-    fn from_delta(delta: git2::Delta) -> Self {
-        match delta {
-            git2::Delta::Added => Self::Added,
-            git2::Delta::Deleted => Self::Deleted,
-            git2::Delta::Renamed => Self::Renamed,
-            git2::Delta::Copied => Self::Copied,
-            _ => Self::Modified,
+    /// Convert an attached gix `Change` to a `DeltaKind` without allocating.
+    fn from_gix_change_attached(change: &gix::object::tree::diff::Change<'_, '_, '_>) -> Self {
+        match change {
+            gix::object::tree::diff::Change::Addition { .. } => Self::Added,
+            gix::object::tree::diff::Change::Deletion { .. } => Self::Deleted,
+            gix::object::tree::diff::Change::Modification { .. } => Self::Modified,
+            // Rename tracking is disabled; treat any rewrite as a modification.
+            gix::object::tree::diff::Change::Rewrite { .. } => Self::Modified,
         }
     }
 }
 
 /// Look up a single commit by full or abbreviated SHA.
 ///
-/// Uses `repo.revparse_single()` to resolve abbreviated or full SHA strings,
+/// Uses `repo.rev_parse_single()` to resolve abbreviated or full SHA strings,
 /// then peels to a commit and builds a `CommitInfo` with ref decorations.
 ///
 /// Returns `None` if the SHA doesn't resolve to a valid commit.
-pub fn get_commit_by_sha(repo: &Repository, sha_prefix: &str) -> Option<CommitInfo> {
+pub fn get_commit_by_sha(repo: &gix::Repository, sha_prefix: &str) -> Option<CommitInfo> {
     get_commit_by_sha_with_decorations(repo, sha_prefix, None)
 }
 
 /// Look up a single commit by SHA with optional pre-computed ref decorations.
 pub(crate) fn get_commit_by_sha_with_decorations(
-    repo: &Repository,
+    repo: &gix::Repository,
     sha_prefix: &str,
     ref_decorations: Option<&HashMap<git2::Oid, Vec<RefDecoration>>>,
 ) -> Option<CommitInfo> {
-    let obj = repo
-        .revparse_single(sha_prefix)
+    let id = repo
+        .rev_parse_single(sha_prefix)
         .map_err(|e| {
             debug!(sha = sha_prefix, error = %e, "could not resolve SHA");
             e
         })
         .ok()?;
-    let commit = obj
-        .peel_to_commit()
+    let commit = id
+        .object()
         .map_err(|e| {
-            debug!(sha = sha_prefix, error = %e, "could not peel object to commit");
+            debug!(sha = sha_prefix, error = %e, "could not resolve object");
             e
         })
-        .ok()?;
+        .ok()?
+        .into_commit();
 
-    let decorations = ref_decorations
+    let decorations = ref_decorations.cloned().unwrap_or_else(|| {
+        git2::Repository::open(repo.workdir().unwrap_or(Path::new(".")))
+            .map(|r| collect_ref_decorations(&r))
+            .unwrap_or_default()
+    });
+    let oid = id.detach();
+    let refs = decorations
+        .get(&gix_oid_to_git2(oid))
         .cloned()
-        .unwrap_or_else(|| collect_ref_decorations(repo));
-    let oid = commit.id();
-    let refs = decorations.get(&oid).cloned().unwrap_or_default();
+        .unwrap_or_default();
 
-    let author = commit.author();
+    let author = commit.author().ok()?;
+    let time = commit.time().ok()?;
+    let message = commit.message_raw().ok()?;
     Some(CommitInfo {
         sha: oid.to_string(),
-        message: commit.message().unwrap_or("").trim().to_string(),
-        author: author.name().unwrap_or("Unknown").to_string(),
-        timestamp: DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default(),
+        message: String::from_utf8_lossy(message.trim()).to_string(),
+        author: author.name.to_string(),
+        timestamp: DateTime::from_timestamp(time.seconds, 0).unwrap_or_default(),
         remotes: None,
         refs,
     })
+}
+
+/// Convert a byte path from `gix` to a `PathBuf` using an explicit lossy
+/// UTF-8 conversion at the public string boundary.
+fn lossy_path(bytes: &gix::bstr::BStr) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(bytes.as_ref()).as_ref())
 }
 
 /// Get the list of files changed by a specific commit.
 ///
 /// Computes a diff between the commit's tree and its first parent's tree.
 /// For the initial commit (no parent), diffs against an empty tree.
+/// Rename tracking is disabled so renames surface as separate delete/add
+/// pairs — matching the existing output contract.
 ///
-/// Returns a list of `(relative_path, DeltaKind)` pairs.
-pub fn get_commit_files(repo: &Repository, full_sha: &str) -> Vec<(PathBuf, DeltaKind)> {
-    let Ok(oid) = git2::Oid::from_str(full_sha) else {
-        return Vec::new();
+/// Returns path-ordered `(relative_path, DeltaKind)` pairs.
+pub fn get_commit_files(
+    repo: &gix::Repository,
+    commit_id: gix::ObjectId,
+) -> Vec<(PathBuf, DeltaKind)> {
+    let mut cache = match repo.diff_resource_cache_for_tree_diff() {
+        Ok(c) => c,
+        Err(e) => {
+            debug!(%commit_id, error = %e, "could not create diff resource cache");
+            return Vec::new();
+        }
     };
-    let Ok(commit) = repo.find_commit(oid) else {
-        return Vec::new();
-    };
-    let Ok(tree) = commit.tree() else {
-        return Vec::new();
-    };
+    get_commit_files_with_cache(repo, commit_id, &mut cache)
+}
 
-    let parent_tree = commit
-        .parent(0)
-        .map_err(|e| {
-            debug!(sha = full_sha, error = %e, "could not get parent commit");
-            e
-        })
-        .ok()
-        .and_then(|p| {
-            p.tree()
-                .map_err(|e| {
-                    debug!(sha = full_sha, error = %e, "could not get parent tree");
-                    e
-                })
-                .ok()
-        });
-    let diff = repo
-        .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
-        .map_err(|e| {
-            debug!(sha = full_sha, error = %e, "could not create diff");
-            e
-        })
-        .ok();
-
-    let Some(diff) = diff else {
-        return Vec::new();
-    };
-
-    diff.deltas()
-        .filter_map(|delta| {
-            let path = delta.new_file().path().unwrap_or(Path::new(""));
-            if path.as_os_str().is_empty() {
-                None
-            } else {
-                Some((path.to_path_buf(), DeltaKind::from_delta(delta.status())))
+/// Like [`get_commit_files`], but reuses an existing diff resource cache.
+///
+/// Callers that diff many commits in a loop should create one cache with
+/// [`Repository::diff_resource_cache_for_tree_diff`] and pass it to this
+/// function for each commit. The cache should be cleared periodically
+/// (e.g., with [`gix::diff::blob::Platform::clear_resource_cache`]) to
+/// avoid unbounded growth when walking large histories.
+pub fn get_commit_files_with_cache(
+    repo: &gix::Repository,
+    commit_id: gix::ObjectId,
+    cache: &mut gix::diff::blob::Platform,
+) -> Vec<(PathBuf, DeltaKind)> {
+    let commit = match repo.find_object(commit_id) {
+        Ok(o) => match o.try_into_commit() {
+            Ok(c) => c,
+            Err(e) => {
+                debug!(%commit_id, error = %e, "object is not a commit");
+                return Vec::new();
             }
-        })
-        .collect()
+        },
+        Err(e) => {
+            debug!(%commit_id, error = %e, "could not find commit");
+            return Vec::new();
+        }
+    };
+    let tree = match commit.tree() {
+        Ok(t) => t,
+        Err(e) => {
+            debug!(%commit_id, error = %e, "could not get commit tree");
+            return Vec::new();
+        }
+    };
+
+    let parent_tree = commit.parent_ids().next().and_then(|parent_id| {
+        match repo.find_object(parent_id.detach()) {
+            Ok(o) => match o.try_into_commit() {
+                Ok(parent_commit) => parent_commit.tree().ok(),
+                Err(e) => {
+                    debug!(%commit_id, error = %e, "parent object is not a commit");
+                    None
+                }
+            },
+            Err(e) => {
+                debug!(%commit_id, error = %e, "could not find parent object");
+                None
+            }
+        }
+    });
+
+    let empty_tree = repo.empty_tree();
+    let old_tree = parent_tree.as_ref().unwrap_or(&empty_tree);
+
+    let mut platform = match old_tree.changes() {
+        Ok(p) => p,
+        Err(e) => {
+            debug!(%commit_id, error = %e, "could not create tree diff platform");
+            return Vec::new();
+        }
+    };
+
+    platform.options(|opts| {
+        opts.track_path().track_rewrites(None);
+    });
+
+    let mut result: Vec<(PathBuf, DeltaKind)> = Vec::new();
+
+    if let Err(e) = platform.for_each_to_obtain_tree_with_cache(
+        &tree,
+        cache,
+        |change| -> std::result::Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
+            if change.entry_mode().is_tree() {
+                return Ok(std::ops::ControlFlow::Continue(()));
+            }
+            let path = lossy_path(change.location());
+            if path.as_os_str().is_empty() {
+                return Ok(std::ops::ControlFlow::Continue(()));
+            }
+            result.push((path, DeltaKind::from_gix_change_attached(&change)));
+            Ok(std::ops::ControlFlow::Continue(()))
+        },
+    ) {
+        debug!(%commit_id, error = %e, "tree diff with cache failed");
+    }
+
+    // gix diff yields path-ordered results in the common case, but
+    // explicit sort keeps the contract regardless of internal ordering.
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+    result
+}
+
+/// Returns `true` if the commit `oid` touches any file whose path starts with
+/// `path_prefix`.
+fn commit_touches_path(
+    repo: &gix::Repository,
+    cache: &mut gix::diff::blob::Platform,
+    oid: gix::ObjectId,
+    path_prefix: &str,
+) -> bool {
+    let files = get_commit_files_with_cache(repo, oid, cache);
+    files
+        .iter()
+        .any(|(p, _)| p.to_string_lossy().starts_with(path_prefix))
 }
 
 /// Get recent commits that touch files under a specific path prefix.
@@ -443,88 +487,88 @@ pub fn get_commit_files(repo: &Repository, full_sha: &str) -> Vec<(PathBuf, Delt
 /// and includes commits where at least one changed file starts with `path_prefix`.
 ///
 /// Ref decorations are collected once and reused for all matching commits.
-pub fn get_commits_for_path(repo: &Repository, path_prefix: &str, count: usize) -> Vec<CommitInfo> {
+pub fn get_commits_for_path(
+    repo: &gix::Repository,
+    path_prefix: &str,
+    count: usize,
+) -> Vec<CommitInfo> {
     get_commits_for_path_with_decorations(repo, path_prefix, count, None)
 }
 
 /// Get recent commits for a path with optional pre-computed ref decorations.
 pub(crate) fn get_commits_for_path_with_decorations(
-    repo: &Repository,
+    repo: &gix::Repository,
     path_prefix: &str,
     count: usize,
     ref_decorations: Option<&HashMap<git2::Oid, Vec<RefDecoration>>>,
 ) -> Vec<CommitInfo> {
     let mut commits = Vec::new();
 
-    let Ok(mut revwalk) = repo.revwalk() else {
+    let Ok(head) = repo.head_id() else {
         return commits;
     };
-    if revwalk.push_head().is_err() {
+
+    let Ok(walk) = repo
+        .rev_walk(Some(head))
+        .sorting(gix::revision::walk::Sorting::ByCommitTime(
+            gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
+        ))
+        .all()
+    else {
         return commits;
-    }
+    };
 
     let cached = ref_decorations.cloned();
-    let decorations = cached.unwrap_or_else(|| collect_ref_decorations(repo));
+    let decorations = cached.unwrap_or_else(|| {
+        git2::Repository::open(repo.workdir().unwrap_or(Path::new(".")))
+            .map(|r| collect_ref_decorations(&r))
+            .unwrap_or_default()
+    });
 
-    for oid_result in revwalk {
+    let mut diff_cache = match repo.diff_resource_cache_for_tree_diff() {
+        Ok(c) => c,
+        Err(_) => return commits,
+    };
+
+    for info_result in walk {
         if commits.len() >= count {
             break;
         }
-        let Ok(oid) = oid_result else {
-            continue;
-        };
-        let Ok(commit) = repo.find_commit(oid) else {
-            continue;
-        };
-        let Ok(tree) = commit.tree() else {
+        let Ok(info) = info_result else {
             continue;
         };
 
-        let parent_tree = commit
-            .parent(0)
-            .map_err(|e| {
-                debug!(sha = %oid, error = %e, "could not get parent for path commit");
-                e
-            })
-            .ok()
-            .and_then(|p| {
-                p.tree()
-                    .map_err(|e| {
-                        debug!(sha = %oid, error = %e, "could not get parent tree for path commit");
-                        e
-                    })
-                    .ok()
-            });
-        let Ok(diff) = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None) else {
+        if !commit_touches_path(repo, &mut diff_cache, info.id, path_prefix) {
             continue;
-        };
-
-        let touches_path = diff.deltas().any(|delta| {
-            let new_path = delta
-                .new_file()
-                .path()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let old_path = delta
-                .old_file()
-                .path()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
-            new_path.starts_with(path_prefix) || old_path.starts_with(path_prefix)
-        });
-
-        if touches_path {
-            let refs = decorations.get(&oid).cloned().unwrap_or_default();
-            let author = commit.author();
-            commits.push(CommitInfo {
-                sha: oid.to_string(),
-                message: commit.message().unwrap_or("").trim().to_string(),
-                author: author.name().unwrap_or("Unknown").to_string(),
-                timestamp: DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default(),
-                remotes: None,
-                refs,
-            });
         }
+
+        let Ok(commit) = info.object() else {
+            continue;
+        };
+
+        let refs = decorations
+            .get(&gix_oid_to_git2(info.id))
+            .cloned()
+            .unwrap_or_default();
+
+        let Ok(author) = commit.author() else {
+            continue;
+        };
+        let Ok(time) = commit.time() else {
+            continue;
+        };
+        let Ok(message) = commit.message_raw() else {
+            continue;
+        };
+
+        commits.push(CommitInfo {
+            sha: info.id.to_string(),
+            message: String::from_utf8_lossy(message.trim()).to_string(),
+            author: author.name.to_string(),
+            timestamp: DateTime::from_timestamp(time.seconds, 0).unwrap_or_default(),
+            remotes: None,
+            refs,
+        });
     }
 
     commits
@@ -533,37 +577,35 @@ pub(crate) fn get_commits_for_path_with_decorations(
 /// Get the last N commits walked from a named branch's tip.
 ///
 /// Looks up `branch_name` as a local branch ref first, then falls back to
-/// `revparse_single` so callers may pass a remote-tracking name (e.g.
+/// `rev_parse_single` so callers may pass a remote-tracking name (e.g.
 /// `origin/main`) or any other ref-like specifier. Returns an empty vector
 /// when the branch cannot be resolved.
 ///
 /// ## Examples
 ///
 /// ```no_run
-/// use git2::Repository;
 /// use sniff::filesystem::git::get_commits_for_branch;
 ///
-/// let repo = Repository::discover(".").unwrap();
+/// let repo = gix::open(".").unwrap();
 /// for commit in get_commits_for_branch(&repo, "main", 10) {
 ///     println!("{} {}", &commit.sha[..7], commit.message);
 /// }
 /// ```
 pub fn get_commits_for_branch(
-    repo: &Repository,
+    repo: &gix::Repository,
     branch_name: &str,
     count: usize,
 ) -> Vec<CommitInfo> {
     let mut commits = Vec::new();
 
     let start_oid = repo
-        .find_branch(branch_name, git2::BranchType::Local)
+        .find_reference(&format!("refs/heads/{branch_name}"))
         .ok()
-        .and_then(|b| b.into_reference().target())
+        .and_then(|r| r.into_fully_peeled_id().ok().map(|id| id.detach()))
         .or_else(|| {
-            repo.revparse_single(branch_name)
+            repo.rev_parse_single(branch_name)
                 .ok()
-                .map(|obj| obj.peel_to_commit().ok().map(|c| c.id()))
-                .unwrap_or(None)
+                .map(|id| id.detach())
         });
 
     let Some(oid) = start_oid else {
@@ -571,30 +613,48 @@ pub fn get_commits_for_branch(
         return commits;
     };
 
-    let Ok(mut revwalk) = repo.revwalk() else {
+    let Ok(walk) = repo
+        .rev_walk(Some(oid))
+        .sorting(gix::revision::walk::Sorting::ByCommitTime(
+            gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
+        ))
+        .all()
+    else {
         return commits;
     };
-    if revwalk.push(oid).is_err() {
-        return commits;
-    }
 
-    let decorations = collect_ref_decorations(repo);
+    let decorations = git2::Repository::open(repo.workdir().unwrap_or(Path::new(".")))
+        .map(|r| collect_ref_decorations(&r))
+        .unwrap_or_default();
 
-    for oid_result in revwalk.take(count) {
-        let Ok(oid) = oid_result else {
+    for info_result in walk.take(count) {
+        let Ok(info) = info_result else {
             continue;
         };
-        let Ok(commit) = repo.find_commit(oid) else {
+        let Ok(commit) = info.object() else {
             continue;
         };
 
-        let refs = decorations.get(&oid).cloned().unwrap_or_default();
-        let author = commit.author();
+        let refs = decorations
+            .get(&gix_oid_to_git2(info.id))
+            .cloned()
+            .unwrap_or_default();
+
+        let Ok(author) = commit.author() else {
+            continue;
+        };
+        let Ok(time) = commit.time() else {
+            continue;
+        };
+        let Ok(message) = commit.message_raw() else {
+            continue;
+        };
+
         commits.push(CommitInfo {
-            sha: commit.id().to_string(),
-            message: commit.message().unwrap_or("").trim().to_string(),
-            author: author.name().unwrap_or("Unknown").to_string(),
-            timestamp: DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default(),
+            sha: info.id.to_string(),
+            message: String::from_utf8_lossy(message.trim()).to_string(),
+            author: author.name.to_string(),
+            timestamp: DateTime::from_timestamp(time.seconds, 0).unwrap_or_default(),
             remotes: None,
             refs,
         });

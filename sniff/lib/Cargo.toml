@@ -14,7 +14,20 @@ dirs = "6"
 ec4rs = "1"
 futures = { version = "0.3", optional = true }
 getifaddrs = "0.6.0"
+# Production git access is migrating from git2 (libgit2) to the pure-Rust gix.
+# git2 stays in [dependencies] only while status/diff/history/remote/worktree
+# helpers are still git2-backed (ported in later phases); it moves to
+# [dev-dependencies] once production no longer references it.
 git2 = "0.20.3"
+gix = { version = "=0.84.0", default-features = false, features = [
+    "sha1",
+    "revision",
+    "status",
+    "blob-diff",
+    "dirwalk",
+    "excludes",
+    "parallel",
+] }
 hyperpolyglot = "0.1.7"
 ignore = "0.4"
 libc = "0.2"

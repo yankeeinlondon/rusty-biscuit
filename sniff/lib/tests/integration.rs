@@ -2205,3 +2205,73 @@ fn parallel_inventory_collects_all_classifications() {
         "classifications should be sorted by path"
     );
 }
+
+#[test]
+fn debug_skewed_git2_order() {
+    use git2::Repository;
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    let now_secs = chrono::Utc::now().timestamp();
+    std::fs::write(dir.path().join("init.txt"), "init").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("init.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let parent_sig =
+        git2::Signature::new("Test User", "test@test.com", &git2::Time::new(now_secs, 0)).unwrap();
+    let parent_oid = repo
+        .commit(
+            Some("HEAD"),
+            &parent_sig,
+            &parent_sig,
+            "recent parent",
+            &tree,
+            &[],
+        )
+        .unwrap();
+
+    let old_epoch = 946684800_i64;
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("src/main.rs")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let old_sig =
+        git2::Signature::new("Test User", "test@test.com", &git2::Time::new(old_epoch, 0)).unwrap();
+    let head_oid = repo
+        .commit(
+            Some("HEAD"),
+            &old_sig,
+            &old_sig,
+            "old head",
+            &tree,
+            &[&repo.find_commit(parent_oid).unwrap()],
+        )
+        .unwrap();
+
+    eprintln!("Parent: {} at {}", parent_oid, now_secs);
+    eprintln!("HEAD: {} at {}", head_oid, old_epoch);
+
+    let mut revwalk = repo.revwalk().unwrap();
+    revwalk.set_sorting(git2::Sort::TIME).unwrap();
+    revwalk.push_head().unwrap();
+
+    eprintln!("\nWith TIME sort:");
+    for oid in revwalk {
+        let oid = oid.unwrap();
+        let commit = repo.find_commit(oid).unwrap();
+        eprintln!(
+            "  {} at {}: {}",
+            oid,
+            commit.time().seconds(),
+            commit.message().unwrap().trim()
+        );
+    }
+}

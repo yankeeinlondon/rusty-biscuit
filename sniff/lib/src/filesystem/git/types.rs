@@ -457,9 +457,12 @@ fn extract_remote_host(url: &str) -> Option<&str> {
 
 /// Lightweight handle to a discovered git repository.
 ///
-/// Wraps a `git2::Repository` and exposes atomic query methods so callers
-/// can request only the data they need without paying for a full
-/// `detect_git` sweep.
+/// Discovery, trust validation, basic identity queries (root, branch, HEAD,
+/// worktree state), working-tree status, and commit tree diffs are backed by
+/// the pure-Rust `gix` handle. The remaining history, ref, remote, and
+/// worktree helpers are still git2-backed during the staged migration and use
+/// the retained `git2::Repository`; both handles refer to the same on-disk
+/// repository.
 ///
 /// ## Examples
 ///
@@ -474,6 +477,9 @@ fn extract_remote_host(url: &str) -> Option<&str> {
 /// }
 /// ```
 pub struct GitRepo {
+    /// Pure-Rust handle backing discovery and basic identity queries.
+    gix: gix::Repository,
+    /// Retained libgit2 handle backing the not-yet-ported helpers.
     repo: Repository,
     repo_root: PathBuf,
     /// Cached ref decorations to avoid recomputing on every commit query.
@@ -507,21 +513,32 @@ impl GitRepo {
 impl GitRepo {
     /// Discover a repository containing `path`.
     ///
-    /// Returns `Ok(None)` when `path` is not inside a git repository.
+    /// Discovery walks parent directories and rejects untrusted repositories.
+    ///
+    /// ## Returns
+    ///
+    /// `Ok(None)` when `path` is not inside a git repository.
+    ///
+    /// ## Errors
+    ///
+    /// Trust/ownership, permission, I/O, and corruption failures surface as
+    /// [`SniffError::Git`] rather than being reported as repository absence.
     #[instrument(skip_all, fields(path = %path.display()))]
     pub fn discover(path: &Path) -> Result<Option<Self>> {
-        let repo = match Repository::discover(path) {
-            Ok(r) => r,
-            Err(e) => {
-                debug!(error = %e, "not a git repository");
-                return Ok(None);
-            }
+        let Some(gix) = super::open::trusted_discover(path)? else {
+            debug!("not a git repository");
+            return Ok(None);
         };
-        let repo_root = repo
+        let repo_root = gix
             .workdir()
             .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?
             .to_path_buf();
+        // Retain a libgit2 handle for the helpers not yet ported to gix. gix has
+        // already validated trust and existence, so this open is expected to
+        // succeed for the same repository.
+        let repo = Repository::open(&repo_root).map_err(|e| SniffError::git("open", e))?;
         Ok(Some(Self {
+            gix,
             repo,
             repo_root,
             ref_decorations: RefCell::new(None),
@@ -534,29 +551,55 @@ impl GitRepo {
         &self.repo_root
     }
 
-    /// Current branch name (`None` for detached HEAD).
+    /// Path to this repository's git directory (the `.git` dir or, for a linked
+    /// worktree, its per-worktree git directory).
+    pub fn git_dir(&self) -> &Path {
+        self.gix.git_dir()
+    }
+
+    /// Path to the common git directory shared across all worktrees.
+    pub fn common_dir(&self) -> &Path {
+        self.gix.common_dir()
+    }
+
+    /// HEAD commit id as a full hex SHA, or `None` for an unborn HEAD.
+    pub fn head_id(&self) -> Option<String> {
+        self.gix.head_id().ok().map(|id| id.to_string())
+    }
+
+    /// Whether HEAD is detached (points directly at a commit).
+    pub fn is_detached_head(&self) -> bool {
+        self.gix.head().map(|h| h.is_detached()).unwrap_or(false)
+    }
+
+    /// Current branch name (`None` for detached or unborn HEAD).
     pub fn current_branch(&self) -> Option<String> {
-        self.repo
+        let head = self
+            .gix
             .head()
             .map_err(|e| {
                 debug!(error = %e, "could not read HEAD");
                 e
             })
-            .ok()
-            .as_ref()
-            .and_then(|h| h.shorthand())
-            .map(String::from)
+            .ok()?;
+        if head.is_unborn() {
+            return None;
+        }
+        // `referent_name` is `None` for a detached HEAD.
+        let name = head.referent_name()?;
+        let name = std::str::from_utf8(name.as_bstr().as_ref()).ok()?;
+        Some(name.strip_prefix("refs/heads/").unwrap_or(name).to_string())
     }
 
     /// Whether the working directory is a linked worktree.
     pub fn in_worktree(&self) -> bool {
-        self.repo.is_worktree()
+        self.gix.worktree().is_some_and(|wt| !wt.is_main())
     }
 
     /// Base repository root when inside a worktree.
     pub fn base_repo_root(&self) -> Option<PathBuf> {
-        if self.repo.is_worktree() {
-            self.repo.commondir().parent().map(Path::to_path_buf)
+        if self.in_worktree() {
+            self.gix.common_dir().parent().map(Path::to_path_buf)
         } else {
             None
         }
@@ -573,24 +616,20 @@ impl GitRepo {
 
     /// File-level working tree status (staged, modified, untracked).
     pub fn file_changes(&self) -> Result<Vec<FileChange>> {
-        let (_status, changes) = super::status::get_repo_status_with_changes(&self.repo, false)?;
+        let (_status, changes) = super::status::get_repo_status_with_changes(&self.gix, false)?;
         Ok(changes)
     }
 
     /// Aggregated working tree status.
     pub fn repo_status(&self) -> Result<RepoStatus> {
-        let (status, _changes) = super::status::get_repo_status_with_changes(&self.repo, false)?;
+        let (status, _changes) = super::status::get_repo_status_with_changes(&self.gix, false)?;
         Ok(status)
     }
 
     /// Recent commits from HEAD.
     pub fn recent_commits(&self, count: usize) -> Vec<CommitInfo> {
         let decorations = self.ref_decorations();
-        super::discovery::get_recent_commits_with_decorations(
-            &self.repo,
-            count,
-            Some(&*decorations),
-        )
+        super::discovery::get_recent_commits_with_decorations(&self.gix, count, Some(&*decorations))
     }
 
     /// Configured remotes.
@@ -660,15 +699,17 @@ impl GitRepo {
         }
 
         let mut recent = if request.commit_count > 0 {
-            super::discovery::get_recent_commits(&self.repo, request.commit_count)
+            super::discovery::get_recent_commits(&self.gix, request.commit_count)
         } else {
             Vec::new()
         };
 
         let (mut status, file_changes) = if request.include_file_changes {
-            super::status::get_repo_status_with_changes(&self.repo, request.include_file_diffs)?
+            super::status::get_repo_status_with_changes(&self.gix, request.include_file_diffs)?
         } else if is_minimal {
-            let (is_dirty, _total) = super::status::get_repo_status_counts(&self.repo);
+            // minimal()/summary() only render the dirty flag — short-circuit on
+            // the first change instead of counting every file.
+            let is_dirty = super::status::is_repo_dirty(&self.gix)?;
             let status = RepoStatus {
                 is_dirty,
                 staged_count: 0,
@@ -681,7 +722,7 @@ impl GitRepo {
             (status, Vec::new())
         } else {
             let (is_dirty, staged, unstaged, untracked) =
-                super::status::get_repo_status_counts_detailed(&self.repo);
+                super::status::get_repo_status_counts_detailed(&self.gix)?;
             let status = RepoStatus {
                 is_dirty,
                 staged_count: staged,
@@ -735,7 +776,7 @@ impl GitRepo {
             status.is_behind = super::remote_refresh::summarize_behind_status(&tracking);
             if request.include_commit_remote_containment {
                 super::remote_refresh::populate_recent_commit_remotes(
-                    &self.repo,
+                    &self.gix,
                     &mut recent,
                     request.max_remote_branches,
                 );
@@ -753,7 +794,7 @@ impl GitRepo {
             repo,
             current_branch,
             branches,
-            in_worktree: self.repo.is_worktree(),
+            in_worktree: self.in_worktree(),
             base_repo_root: self.base_repo_root(),
             recent,
             status,

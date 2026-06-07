@@ -5,6 +5,7 @@
 //! enumeration, tracking status, git config, and linked worktree discovery.
 
 use git2::Repository;
+use gix::bstr::ByteSlice;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
@@ -184,8 +185,7 @@ pub(crate) fn get_tracking_status(
 
     for remote_name in remotes.iter().flatten() {
         let remote_branch_name = format!("{}/{}", remote_name, branch_name);
-        let Ok(remote_ref) =
-            repo.find_reference(&format!("refs/remotes/{}", remote_branch_name))
+        let Ok(remote_ref) = repo.find_reference(&format!("refs/remotes/{}", remote_branch_name))
         else {
             continue;
         };
@@ -383,12 +383,15 @@ pub(crate) fn summarize_behind_status(tracking: &[RemoteTrackingStatus]) -> Opti
 /// Populate commit containment data from locally available remote-tracking refs.
 ///
 /// Instead of checking every commit against every remote tip with
-/// `graph_descendant_of` (O(commits × branches) graph traversals), this
+/// merge-base tests (O(commits × branches) graph traversals), this
 /// walks the ancestry from each remote tip once and builds a
-/// `HashMap<Oid, Vec<remote>>`.  A `max_branches` limit can cap the number
-/// of remote-tracking branches inspected.
+/// `HashMap<ObjectId, Vec<remote>>`.  A `max_branches` limit can cap the
+/// number of remote-tracking branches inspected.
+///
+/// Uses gix's commit-graph aware revwalk for timestamp-and-parent-only
+/// gates, falling back to the object database when no graph is present.
 pub(crate) fn populate_recent_commit_remotes(
-    repo: &Repository,
+    repo: &gix::Repository,
     commits: &mut [CommitInfo],
     max_branches: Option<usize>,
 ) {
@@ -408,48 +411,51 @@ pub(crate) fn populate_recent_commit_remotes(
     let oldest_time = commits
         .iter()
         .filter_map(|c| {
-            git2::Oid::from_str(&c.sha)
+            gix::ObjectId::from_hex(c.sha.as_bytes())
                 .ok()
-                .and_then(|oid| repo.find_commit(oid).ok())
-                .map(|c| c.time().seconds())
+                .and_then(|oid| repo.find_object(oid).ok())
+                .and_then(|o| o.try_into_commit().ok())
+                .and_then(|c| c.time().ok())
+                .map(|t| t.seconds)
         })
         .min()
         .unwrap_or(i64::MIN);
 
     // Walk ancestry from each remote tip, collecting containment.
-    let mut containment: HashMap<git2::Oid, Vec<String>> = HashMap::new();
+    let mut containment: HashMap<gix::ObjectId, Vec<String>> = HashMap::new();
 
     for (remote_name, tip_oid) in &remote_tips {
-        let Ok(mut revwalk) = repo.revwalk() else {
+        let Ok(walk) = repo
+            .rev_walk(Some(*tip_oid))
+            .sorting(gix::revision::walk::Sorting::ByCommitTime(
+                gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
+            ))
+            .all()
+        else {
             continue;
         };
-        if revwalk.push(*tip_oid).is_err() {
-            continue;
-        }
 
-        for oid_result in revwalk {
-            let Ok(oid) = oid_result else {
+        for info_result in walk {
+            let Ok(info) = info_result else {
                 continue;
             };
 
             containment
-                .entry(oid)
+                .entry(info.id)
                 .or_default()
                 .push(remote_name.clone());
 
             // Stop when we reach commits older than the oldest requested.
             // This is a safe heuristic: any commit older than the oldest
             // requested commit cannot be in the `commits` list.
-            if let Ok(commit) = repo.find_commit(oid)
-                && commit.time().seconds() < oldest_time
-            {
+            if info.commit_time() < oldest_time {
                 break;
             }
         }
     }
 
     for commit in commits {
-        let Ok(commit_oid) = git2::Oid::from_str(&commit.sha) else {
+        let Ok(commit_oid) = gix::ObjectId::from_hex(commit.sha.as_bytes()) else {
             continue;
         };
 
@@ -465,14 +471,18 @@ pub(crate) fn populate_recent_commit_remotes(
 }
 
 /// Collect the tip OIDs for all remote-tracking branches keyed by remote name.
-fn remote_branch_tips(repo: &Repository) -> Vec<(String, git2::Oid)> {
-    let Ok(refs) = repo.references_glob("refs/remotes/*") else {
+fn remote_branch_tips(repo: &gix::Repository) -> Vec<(String, gix::ObjectId)> {
+    let Ok(refs) = repo.references() else {
         return Vec::new();
     };
 
-    refs.flatten()
+    let Ok(iter) = refs.prefixed("refs/remotes/") else {
+        return Vec::new();
+    };
+
+    iter.flatten()
         .filter_map(|reference| {
-            let name = reference.name()?;
+            let name = reference.name().as_bstr().to_str_lossy().to_string();
             let branch = name.strip_prefix("refs/remotes/")?;
             if branch.ends_with("/HEAD") {
                 return None;
@@ -480,13 +490,13 @@ fn remote_branch_tips(repo: &Repository) -> Vec<(String, git2::Oid)> {
 
             let (remote_name, _) = branch.split_once('/')?;
             let target = reference
-                .peel_to_commit()
+                .into_fully_peeled_id()
                 .map_err(|e| {
-                    debug!(branch = name, error = %e, "could not peel remote ref to commit");
+                    debug!(branch = %name, error = %e, "could not peel remote ref to commit");
                     e
                 })
                 .ok()?;
-            Some((remote_name.to_string(), target.id()))
+            Some((remote_name.to_string(), target.detach()))
         })
         .collect()
 }
@@ -635,7 +645,10 @@ pub(crate) fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> 
                 })
                 .unwrap_or(false);
 
-            let (dirty, changed_files) = get_repo_status_counts(&worktree_repo);
+            let (dirty, changed_files) = gix::open(worktree_path)
+                .ok()
+                .map(|gix_repo| get_repo_status_counts(&gix_repo))
+                .unwrap_or((false, 0));
 
             Some((
                 branch.clone(),
@@ -701,6 +714,11 @@ mod tests {
             .unwrap();
     }
 
+    /// Open a gix handle for the same on-disk repo used by git2 fixture builders.
+    fn open_gix(dir: &tempfile::TempDir) -> gix::Repository {
+        gix::open(dir.path()).expect("open with gix")
+    }
+
     #[test]
     fn populate_commit_remotes_finds_single_remote() {
         let (dir, repo) = setup_repo();
@@ -732,7 +750,8 @@ mod tests {
             refs: vec![],
         }];
 
-        populate_recent_commit_remotes(&repo, &mut commits, None);
+        let gix_repo = open_gix(&dir);
+        populate_recent_commit_remotes(&gix_repo, &mut commits, None);
 
         assert_eq!(
             commits[0].remotes,
@@ -796,7 +815,8 @@ mod tests {
             },
         ];
 
-        populate_recent_commit_remotes(&repo, &mut commits, None);
+        let gix_repo = open_gix(&dir);
+        populate_recent_commit_remotes(&gix_repo, &mut commits, None);
 
         assert_eq!(
             commits[0].remotes.as_deref(),
@@ -843,9 +863,11 @@ mod tests {
             refs: vec![],
         }];
 
+        let gix_repo = open_gix(&dir);
+
         // With max_branches = 1, only the alphabetically first remote (fork)
         // should be checked.
-        populate_recent_commit_remotes(&repo, &mut commits, Some(1));
+        populate_recent_commit_remotes(&gix_repo, &mut commits, Some(1));
         assert_eq!(
             commits[0].remotes,
             Some(vec!["fork".to_string()]),
@@ -854,7 +876,7 @@ mod tests {
 
         // With max_branches = 2, fork and origin should be checked.
         commits[0].remotes = None;
-        populate_recent_commit_remotes(&repo, &mut commits, Some(2));
+        populate_recent_commit_remotes(&gix_repo, &mut commits, Some(2));
         assert_eq!(
             commits[0].remotes,
             Some(vec!["fork".to_string(), "origin".to_string()]),
