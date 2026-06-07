@@ -102,7 +102,7 @@ use renderable::color::{BasicColor, Color};
 use renderable::html::HtmlPage;
 use renderable::layout::TargetValue as RTargetValue;
 use renderable::markdown::MarkdownRenderable;
-use renderable::style::{PerMode, Style, TextEmphasis};
+use renderable::style::{PaintColor, PerMode, Style, TextEmphasis};
 use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
     render_markdown_node,
@@ -2312,7 +2312,7 @@ impl FsFgKind {
 }
 
 /// Universal [`Style`] color slot for a concrete [`Color`].
-fn fs_universal_color(color: Color) -> RTargetValue<PerMode<Color>> {
+fn fs_universal_color(color: Color) -> RTargetValue<PerMode<PaintColor>> {
     RTargetValue::universal(PerMode::universal(color))
 }
 

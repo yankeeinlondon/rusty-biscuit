@@ -19,7 +19,7 @@
 use renderable::color::{Color, ColorMode as RenderColorMode};
 use renderable::layout::{Length, TargetValue};
 use renderable::style::{
-    Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style, UnderlineStyle,
+    Border, BorderLineStyle, BorderSides, BorderWeight, PaintColor, PerMode, Style, UnderlineStyle,
 };
 use renderable::target::RenderTarget;
 
@@ -309,10 +309,15 @@ fn underline_sgr(underline: UnderlineStyle, term: &Terminal) -> Option<&'static 
     }
 }
 
-/// Resolves a `TargetValue<PerMode<Color>>` to a concrete terminal [`Color`].
-fn resolve_color(tv: &TargetValue<PerMode<Color>>, mode: RenderColorMode) -> Option<Color> {
+/// Resolves a `TargetValue<PerMode<PaintColor>>` to a concrete terminal
+/// [`Color`], intentionally discarding the [`PaintColor`] alpha.
+///
+/// Terminal cells cannot composite a partial alpha, so the opacity is a
+/// documented degradation here — the underlying color is painted at full
+/// strength at every [`ColorDepth`].
+fn resolve_color(tv: &TargetValue<PerMode<PaintColor>>, mode: RenderColorMode) -> Option<Color> {
     tv.resolve(RenderTarget::Terminal)
-        .map(|per_mode| *per_mode.resolve(mode))
+        .map(|per_mode| per_mode.resolve(mode).color)
 }
 
 /// Lowers a [`Color`] to a foreground or background SGR escape.
@@ -965,5 +970,37 @@ mod tests {
         };
         let out = apply_style("x", &style, &truecolor_term());
         assert!(out.contains("\x1b[38;2;"), "got {out:?}");
+    }
+
+    #[test]
+    fn foreground_alpha_degrades_to_the_opaque_color_at_every_depth() {
+        use renderable::style::{Opacity, PaintColor};
+        // A half-transparent foreground paints exactly the same SGR as its
+        // opaque counterpart: the terminal discards alpha at every color depth.
+        let red = Color::Rgb(RgbColor::new(255, 0, 0, BasicColor::Red));
+        let translucent = Style {
+            color: Some(TargetValue::universal(PerMode::universal(
+                PaintColor::new(red).with_opacity(Opacity::new(128)),
+            ))),
+            ..Style::default()
+        };
+        let opaque = Style {
+            color: Some(TargetValue::universal(PerMode::universal(red))),
+            ..Style::default()
+        };
+        for depth in [
+            ColorDepth::TrueColor,
+            ColorDepth::Enhanced,
+            ColorDepth::Basic,
+            ColorDepth::Minimal,
+        ] {
+            let mut term = truecolor_term();
+            term.color_depth = depth;
+            assert_eq!(
+                apply_style("x", &translucent, &term),
+                apply_style("x", &opaque, &term),
+                "alpha changed output at {depth:?}"
+            );
+        }
     }
 }

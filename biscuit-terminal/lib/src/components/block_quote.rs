@@ -6,7 +6,7 @@ use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::html::HtmlPage;
 use renderable::layout::TargetValue;
 use renderable::markdown::MarkdownRenderable;
-use renderable::style::{Border, BorderSides, PerMode, Style};
+use renderable::style::{Border, BorderSides, PaintColor, PerMode, Style};
 use renderable::target::RenderTarget;
 use renderable::tree::render::{MarkdownDialect, MarkdownRenderOptions, render_markdown_node};
 use renderable::tree::{NodeKind, RenderNode, RenderStrictness, TreeRenderable};
@@ -32,8 +32,8 @@ use crate::{
 /// path onto the legacy compatibility renderer.
 const DEFAULT_BORDER: &str = "│ ";
 
-/// Wraps a plain [`Color`] as a universal [`Style`] color value.
-fn universal_color(color: Color) -> TargetValue<PerMode<Color>> {
+/// Wraps a plain [`Color`] as an opaque universal [`Style`] color value.
+fn universal_color(color: Color) -> TargetValue<PerMode<PaintColor>> {
     TargetValue::universal(PerMode::universal(color))
 }
 
@@ -42,10 +42,10 @@ fn universal_color(color: Color) -> TargetValue<PerMode<Color>> {
 /// A universal value resolves directly; an adaptive value resolves to its
 /// dark-mode branch — the migrated builder shims only ever store universal
 /// values, so this is a lossless inverse for the compatibility path.
-fn color_of(slot: &Option<TargetValue<PerMode<Color>>>) -> Option<Color> {
+fn color_of(slot: &Option<TargetValue<PerMode<PaintColor>>>) -> Option<Color> {
     match slot.as_ref()?.resolve(RenderTarget::Terminal)? {
-        PerMode::Universal(color) => Some(*color),
-        PerMode::Adaptive { dark, .. } => Some(*dark),
+        PerMode::Universal(paint) => Some(paint.color),
+        PerMode::Adaptive { dark, .. } => Some(dark.color),
     }
 }
 

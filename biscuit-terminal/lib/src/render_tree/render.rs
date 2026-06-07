@@ -35,7 +35,8 @@ use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
     ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HintNamespace,
     InheritedStyle, NodeKind, ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered,
-    Severity, TableColumnHints, TableTerminalHints, TerminalMermaidMode,
+    Severity, TableColumnHints, TableTerminalHints, TerminalMermaidMode, TextLayoutHints,
+    TextOverflow,
 };
 use renderable::tree::{ValidationError, ValidationMode, validate};
 
@@ -57,6 +58,7 @@ use crate::components::table::{
 use crate::discovery::detection::ColorDepth;
 use crate::utils::block_constraint::{split_lines, visible_width, wrap_lines};
 use crate::utils::layout::{Alignment, WordWrap};
+use crate::utils::word_wrap::truncate;
 
 use super::options::{ImagePlaceholder, TerminalRenderOptions};
 use super::style;
@@ -64,6 +66,10 @@ use super::style;
 /// Maximum size of an inline terminal image at [`GraphicsMode::Rich`], matching
 /// the legacy terminal image renderer's 10 MiB ceiling.
 const MAX_TERMINAL_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+
+/// The ellipsis used when typed [`TextLayoutHints`] truncate a link label or
+/// image placeholder that exceeds its resolved field.
+const ELLIPSIS: &str = "…";
 
 /// Renders a render-tree node to a terminal string.
 ///
@@ -865,6 +871,61 @@ impl Writer<'_> {
         Ok(output)
     }
 
+    /// Applies a node's typed [`TextLayoutHints`] to a single rendered visible
+    /// run (a link label or an image alt-text placeholder).
+    ///
+    /// `width` establishes an exact field: shorter content is padded per
+    /// `alignment`, and longer content is truncated with an ellipsis only when
+    /// `overflow` is [`TextOverflow::Truncate`]. `max_width` is a hard ceiling:
+    /// content exceeding it is always truncated with an ellipsis. When both are
+    /// present, the field is the requested `width` clamped down to the
+    /// `max_width` cap. All measurement and truncation is display-width aware —
+    /// Unicode columns plus embedded SGR / OSC escapes — via [`visible_width`]
+    /// and [`truncate`], so the tree's own text is never mutated; only this
+    /// rendered projection is padded or shortened.
+    fn apply_text_layout(&self, content: String, hints: &TextLayoutHints) -> String {
+        let available = self.opts.context.available_width;
+        let resolve = |tv: &renderable::layout::TargetValue<renderable::layout::Length>| {
+            let cells = resolve_cells(tv, available);
+            (cells > 0).then_some(cells)
+        };
+        let cap = hints.max_width.as_ref().and_then(resolve);
+        let field = hints
+            .width
+            .as_ref()
+            .and_then(resolve)
+            .map(|w| cap.map_or(w, |c| w.min(c)));
+
+        let mut content = content;
+        // Hard `max_width` ceiling: always truncate content that exceeds it.
+        if let Some(cap) = cap
+            && visible_width(&content) > cap
+        {
+            content = truncate(content, &ELLIPSIS.to_string(), &cap);
+        }
+        // Exact `width` field: pad shorter content per alignment; truncate
+        // longer content only when the overflow policy asks for it.
+        if let Some(field) = field {
+            let now = visible_width(&content);
+            if now > field {
+                if hints.overflow == TextOverflow::Truncate {
+                    content = truncate(content, &ELLIPSIS.to_string(), &field);
+                }
+            } else if now < field {
+                let pad = (field - now) as usize;
+                content = match hints.alignment {
+                    Alignment::Left => format!("{content}{}", " ".repeat(pad)),
+                    Alignment::Right => format!("{}{content}", " ".repeat(pad)),
+                    Alignment::Center => {
+                        let left = pad / 2;
+                        format!("{}{content}{}", " ".repeat(left), " ".repeat(pad - left))
+                    }
+                };
+            }
+        }
+        content
+    }
+
     /// Projects a single inline node into terminal SGR output.
     fn render_inline_node(
         &mut self,
@@ -962,6 +1023,14 @@ impl Writer<'_> {
                     );
                     format!("{open}{inner}{close}")
                 };
+                // Typed `text_layout` pads/truncates the visible *label* before
+                // the OSC8 escapes wrap it, so the link's structured children
+                // stay intact in the tree while the rendered label fits its
+                // resolved field.
+                let styled = match node.attrs.text_layout_ref() {
+                    Some(hints) => self.apply_text_layout(styled, hints),
+                    None => styled,
+                };
                 if url.is_empty() {
                     Ok(styled)
                 } else if term.osc_link_support {
@@ -981,7 +1050,7 @@ impl Writer<'_> {
                         ImagePlaceholder::Bracket => format!("[{alt}]"),
                         ImagePlaceholder::Block => format!("▉ IMAGE[{alt}]"),
                     };
-                    match node.attrs.style_ref().filter(|s| !s.is_empty()) {
+                    let styled = match node.attrs.style_ref().filter(|s| !s.is_empty()) {
                         Some(img_style) => {
                             let img_effective = img_style.inherited_from(effective);
                             if img_effective == *effective {
@@ -997,6 +1066,13 @@ impl Writer<'_> {
                             }
                         }
                         None => inner,
+                    };
+                    // Typed `text_layout` pads/truncates the alt-text placeholder
+                    // to its resolved field. The source alt text stays intact in
+                    // the tree (`Image.alt`); only this projection is shaped.
+                    match node.attrs.text_layout_ref() {
+                        Some(hints) => self.apply_text_layout(styled, hints),
+                        None => styled,
                     }
                 };
                 match self.opts.context.graphics_mode {
@@ -1341,6 +1417,52 @@ impl Writer<'_> {
             },
         };
         let full_prefix = format!("{prefix}{check_marker}");
+
+        // A typed `text_layout` on the list item is the successor to the
+        // `darkmatter.li` pad hint: it lifts the marker to its own line and
+        // left-pads the body block per its resolved alignment, keeping the
+        // marker structurally separate from the body placement. The bodies are
+        // rendered, the widest visible line measured, and the alignment pad
+        // derived within the resolved field (`width`/`max_width`, capped by the
+        // available width). A `Left`/no-slack alignment yields no pad and falls
+        // through to the inline rendering below.
+        if let Some(hints) = node.attrs.text_layout_ref() {
+            let mut bodies = Vec::with_capacity(item_children.len());
+            let mut widest = 0u32;
+            for child in item_children {
+                let body = match &child.kind {
+                    NodeKind::Paragraph { children } => {
+                        self.render_inline(children, &Style::default())?
+                    }
+                    _ => self.render(child)?,
+                };
+                widest = widest.max(body.split('\n').map(visible_width).max().unwrap_or(0));
+                bodies.push(body);
+            }
+            let available = self.opts.context.available_width;
+            let field = hints
+                .width
+                .as_ref()
+                .or(hints.max_width.as_ref())
+                .map(|tv| resolve_cells(tv, available))
+                .filter(|cells| *cells > 0)
+                .unwrap_or(available)
+                .min(available);
+            let slack = field.saturating_sub(widest);
+            let pad = match hints.alignment {
+                Alignment::Left => 0,
+                Alignment::Center => slack / 2,
+                Alignment::Right => slack,
+            };
+            if pad > 0 {
+                let mut out = full_prefix.clone();
+                for body in &bodies {
+                    out.push('\n');
+                    out.push_str(&indent_block(body, pad));
+                }
+                return Ok(out);
+            }
+        }
 
         // A decorated right/center-aligned list item lifts its marker to its own
         // line and left-pads the body block, matching the legacy
@@ -2950,6 +3072,160 @@ mod render_tree_tests {
         .expect("render");
         assert!(!out.output.contains("\x1b]8;;"));
         assert!(strip_escape_codes(&out.output).contains("site"));
+    }
+
+    /// A non-OSC8 terminal at `width`, so a link renders as the
+    /// `[label](url)` fallback whose visible label is easy to assert against.
+    fn no_osc_opts(width: u32) -> TerminalRenderOptions {
+        let term = Terminal::builder()
+            .width(width)
+            .osc_link_support(false)
+            .build();
+        TerminalRenderOptions::new(&term, RenderStrictness::Warn)
+    }
+
+    fn text_layout_link(label: &str, hints: TextLayoutHints) -> RenderNode {
+        let mut link =
+            RenderNode::link("https://example.com", None, vec![RenderNode::text(label)]);
+        link.attrs.set_text_layout(&hints);
+        RenderNode::paragraph(vec![link])
+    }
+
+    #[test]
+    fn render_tree_link_text_layout_exact_width_pads_per_alignment() {
+        use renderable::layout::{Length, TargetValue};
+        // `width: 20` establishes an exact field; the short label is padded.
+        let node = text_layout_link(
+            "HI",
+            TextLayoutHints {
+                width: Some(TargetValue::universal(Length::ch(20))),
+                ..Default::default()
+            },
+        );
+        let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+        // The 20-column field is padded left-aligned inside the link label.
+        assert_eq!(
+            stripped,
+            format!("[HI{}](https://example.com)", " ".repeat(18))
+        );
+    }
+
+    #[test]
+    fn render_tree_link_text_layout_max_width_truncates_with_ellipsis() {
+        use renderable::layout::{Length, TargetValue};
+        // `max_width: 8` only truncates content that exceeds the cap.
+        let node = text_layout_link(
+            "A very long hyperlink label",
+            TextLayoutHints {
+                max_width: Some(TargetValue::universal(Length::ch(8))),
+                overflow: TextOverflow::Truncate,
+                ..Default::default()
+            },
+        );
+        let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+        assert_eq!(stripped, "[A very …](https://example.com)");
+        // The visible label is exactly the 8-column cap.
+        assert_eq!(visible_width("A very …"), 8);
+    }
+
+    #[test]
+    fn render_tree_link_text_layout_keeps_structured_children_in_tree() {
+        use renderable::layout::{Length, TargetValue};
+        // Rendering a padded link must not mutate the link's structured
+        // children — the tree keeps the original label nodes.
+        let mut link = RenderNode::link(
+            "https://example.com",
+            None,
+            vec![RenderNode::strong(vec![RenderNode::text("HI")])],
+        );
+        link.attrs.set_text_layout(&TextLayoutHints {
+            width: Some(TargetValue::universal(Length::ch(20))),
+            ..Default::default()
+        });
+        let node = RenderNode::paragraph(vec![link.clone()]);
+        let _ = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
+        // The link node still carries its `Strong` child subtree unchanged.
+        match &link.kind {
+            NodeKind::Link { children, .. } => {
+                assert!(matches!(children[0].kind, NodeKind::Strong { .. }));
+            }
+            other => panic!("expected a Link, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn render_tree_image_text_layout_truncates_alt_placeholder() {
+        use renderable::layout::{Length, TargetValue};
+        let mut image = RenderNode::image("pic.png", None, "a very long alt text");
+        image.attrs.set_text_layout(&TextLayoutHints {
+            max_width: Some(TargetValue::universal(Length::ch(10))),
+            overflow: TextOverflow::Truncate,
+            ..Default::default()
+        });
+        let node = RenderNode::paragraph(vec![image]);
+        let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+        // The bracketed placeholder is capped to 10 columns with an ellipsis.
+        assert_eq!(visible_width(&stripped), 10, "{stripped:?}");
+        assert!(stripped.ends_with('…'), "{stripped:?}");
+        assert!(stripped.starts_with("[a very"), "{stripped:?}");
+    }
+
+    #[test]
+    fn render_tree_list_item_text_layout_lifts_marker_and_pads_body() {
+        use renderable::layout::{Alignment as RAlignment, Length, TargetValue};
+        // A right- and a center-aligned item both lift the `- ` marker to its
+        // own line and left-pad the body; right pads more than center.
+        let build = |alignment: RAlignment| {
+            let mut item = RenderNode::list_item(
+                None,
+                vec![RenderNode::paragraph(vec![RenderNode::text("Item")])],
+            );
+            item.attrs.set_text_layout(&TextLayoutHints {
+                max_width: Some(TargetValue::universal(Length::ch(40))),
+                alignment,
+                ..Default::default()
+            });
+            RenderNode::list(false, None, vec![item])
+        };
+
+        let render_pad = |alignment: RAlignment| -> usize {
+            let out = render_terminal_node(&build(alignment), &no_osc_opts(60)).expect("render");
+            let stripped = strip_escape_codes(&out.output);
+            let mut lines = stripped.lines();
+            // The marker sits on its own line.
+            assert_eq!(lines.next().unwrap().trim_end(), "-");
+            let body = lines.next().expect("body line");
+            assert!(body.trim_start().starts_with("Item"), "{body:?}");
+            body.len() - body.trim_start().len()
+        };
+
+        let right = render_pad(RAlignment::Right);
+        let center = render_pad(RAlignment::Center);
+        assert!(right > center, "right pad {right} should exceed center {center}");
+        assert!(center > 0, "center pad should be positive");
+    }
+
+    #[test]
+    fn render_tree_text_layout_does_not_mutate_tree_across_widths() {
+        use renderable::layout::{Length, TargetValue};
+        let node = text_layout_link(
+            "A very long hyperlink label",
+            TextLayoutHints {
+                max_width: Some(TargetValue::universal(Length::ch(8))),
+                overflow: TextOverflow::Truncate,
+                ..Default::default()
+            },
+        );
+        let pristine = node.clone();
+        let narrow = render_terminal_node(&node, &no_osc_opts(20)).expect("render");
+        let wide = render_terminal_node(&node, &no_osc_opts(80)).expect("render");
+        // The same immutable tree renders at both widths; the cap is absolute
+        // (ch), so the outputs match and the tree is untouched.
+        assert_eq!(narrow.output, wide.output);
+        assert_eq!(node, pristine, "rendering must not mutate the tree");
     }
 
     #[test]

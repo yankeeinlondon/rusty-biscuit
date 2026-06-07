@@ -6,12 +6,12 @@ use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use clap::Args as ClapArgs;
 use renderable::markdown::MarkdownRenderable;
 
-/// Wraps a [`Color`](renderable::color::Color) into the universal
-/// `TargetValue<PerMode<Color>>` shape a [`Style`](renderable::style::Style)
+/// Wraps a [`Color`](renderable::color::Color) into the opaque universal
+/// `TargetValue<PerMode<PaintColor>>` shape a [`Style`](renderable::style::Style)
 /// color slot expects.
 fn color_style_value(
     color: renderable::color::Color,
-) -> renderable::layout::TargetValue<renderable::style::PerMode<renderable::color::Color>> {
+) -> renderable::layout::TargetValue<renderable::style::PerMode<renderable::style::PaintColor>> {
     renderable::layout::TargetValue::universal(renderable::style::PerMode::universal(color))
 }
 
