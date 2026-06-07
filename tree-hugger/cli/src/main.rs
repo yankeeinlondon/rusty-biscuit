@@ -43,27 +43,6 @@ use scanner::*;
     about = "Tree Hugger diagnostics and symbol tooling"
 )]
 struct Cli {
-    /// Glob patterns for files to exclude from scanning
-    #[arg(
-        long,
-        value_name = "GLOB",
-        global = true,
-        display_order = 10,
-        value_hint = ValueHint::AnyPath,
-        add = ArgValueCompleter::new(complete_source_path),
-    )]
-    exclude_files: Vec<String>,
-
-    /// Glob patterns for symbol names to exclude from output
-    #[arg(long, value_name = "GLOB", global = true, display_order = 11)]
-    exclude_symbols: Vec<String>,
-
-    /// Force a specific language. Explicitly named files are parsed with this
-    /// language even when their extension maps elsewhere or is absent; directory
-    /// scans are restricted to this language's extensions.
-    #[arg(long, value_enum, global = true)]
-    language: Option<LanguageArg>,
-
     /// Output as JSON
     #[arg(long, global = true)]
     json: bool,
@@ -72,34 +51,58 @@ struct Cli {
     #[arg(long, global = true)]
     plain: bool,
 
+    #[command(subcommand)]
+    command: Command,
+}
+
+/// Scan options shared by symbol-listing subcommands.
+#[derive(clap::Args, Debug, Clone)]
+struct ScanOptions {
+    /// Glob patterns for files to exclude from scanning
+    #[arg(
+        long,
+        value_name = "GLOB",
+        display_order = 10,
+        value_hint = ValueHint::AnyPath,
+        add = ArgValueCompleter::new(complete_source_path),
+    )]
+    exclude_files: Vec<String>,
+
+    /// Glob patterns for symbol names to exclude from output
+    #[arg(long, value_name = "GLOB", display_order = 11)]
+    exclude_symbols: Vec<String>,
+
+    /// Force a specific language. Explicitly named files are parsed with this
+    /// language even when their extension maps elsewhere or is absent; directory
+    /// scans are restricted to this language's extensions.
+    #[arg(long, value_enum)]
+    language: Option<LanguageArg>,
+
     /// Disable persistent and in-process caching.
     ///
     /// All files are re-parsed and re-analyzed on every invocation.
-    #[arg(long, global = true)]
+    #[arg(long)]
     no_cache: bool,
 
     /// Show symbol-level documentation comments in output
-    #[arg(long, global = true)]
+    #[arg(long)]
     comments: bool,
 
     /// Group symbol output by file path
-    #[arg(long, global = true)]
+    #[arg(long)]
     group_by_file: bool,
 
     /// Group symbol output by module path (directory/module scope)
-    #[arg(long, global = true)]
+    #[arg(long)]
     group_by_module: bool,
 
     /// Sort symbols by kind before name
-    #[arg(long, global = true)]
+    #[arg(long)]
     sort_by_kind: bool,
 
     /// Sort symbols by module before other sort keys
-    #[arg(long, global = true)]
+    #[arg(long)]
     sort_by_module: bool,
-
-    #[command(subcommand)]
-    command: Command,
 }
 
 impl Cli {
@@ -145,6 +148,9 @@ struct CommonArgs {
     /// Show only symbols explicitly exported by the prelude module
     #[arg(long, conflicts_with = "exported", display_order = 31)]
     prelude: bool,
+
+    #[clap(flatten)]
+    scan: ScanOptions,
 }
 
 /// Arguments for the classes command
@@ -188,6 +194,9 @@ struct ClassArgs {
     /// Show only classes explicitly exported by the prelude module
     #[arg(long, conflicts_with = "exported")]
     prelude: bool,
+
+    #[clap(flatten)]
+    scan: ScanOptions,
 }
 
 /// Arguments for the lint command
@@ -244,6 +253,9 @@ struct LintArgs {
     /// List registered lint rules and exit.
     #[arg(long, display_order = 45)]
     list_rules: bool,
+
+    #[clap(flatten)]
+    scan: ScanOptions,
 }
 
 /// Arguments for the completions command
@@ -847,16 +859,7 @@ fn main() -> Result<(), TreeHuggerError> {
         return Ok(());
     }
 
-    let language = cli.language.map(ProgrammingLanguage::from);
-    let filters = cli.command.filters();
     let output_format = cli.output_format();
-    let output_config = OutputConfig::new(output_format, cli.comments);
-    let render_options = SymbolRenderOptions {
-        group_by_file: cli.group_by_file,
-        group_by_module: cli.group_by_module,
-        sort_by_kind: cli.sort_by_kind,
-        sort_by_module: cli.sort_by_module,
-    };
 
     let root_dir = current_dir()?;
     let git_root = find_git_root(&root_dir).unwrap_or_else(|_| root_dir.clone());
@@ -882,6 +885,7 @@ fn main() -> Result<(), TreeHuggerError> {
         }
         let god_files = GodFiles::new(dir);
         let analyses = god_files.analysis();
+        let output_config = OutputConfig::new(output_format, false);
 
         match output_format {
             OutputFormat::Json => {
@@ -923,20 +927,69 @@ fn main() -> Result<(), TreeHuggerError> {
         return Ok(());
     }
 
+    // Extract scan options from the subcommand args. God-files and completions
+    // are handled earlier; every remaining subcommand carries a `ScanOptions`.
+    let (language, exclude_files, exclude_symbols, comments, no_cache, group_by_file, group_by_module, sort_by_kind, sort_by_module) = match &cli.command {
+        Command::Functions(args)
+        | Command::Types(args)
+        | Command::Symbols(args)
+        | Command::Imports(args) => (
+            args.scan.language.map(ProgrammingLanguage::from),
+            &args.scan.exclude_files,
+            &args.scan.exclude_symbols,
+            args.scan.comments,
+            args.scan.no_cache,
+            args.scan.group_by_file,
+            args.scan.group_by_module,
+            args.scan.sort_by_kind,
+            args.scan.sort_by_module,
+        ),
+        Command::Classes(args) => (
+            args.scan.language.map(ProgrammingLanguage::from),
+            &args.scan.exclude_files,
+            &args.scan.exclude_symbols,
+            args.scan.comments,
+            args.scan.no_cache,
+            args.scan.group_by_file,
+            args.scan.group_by_module,
+            args.scan.sort_by_kind,
+            args.scan.sort_by_module,
+        ),
+        Command::Lint(args) => (
+            args.scan.language.map(ProgrammingLanguage::from),
+            &args.scan.exclude_files,
+            &args.scan.exclude_symbols,
+            args.scan.comments,
+            args.scan.no_cache,
+            args.scan.group_by_file,
+            args.scan.group_by_module,
+            args.scan.sort_by_kind,
+            args.scan.sort_by_module,
+        ),
+        _ => unreachable!(),
+    };
+    let filters = cli.command.filters();
+    let output_config = OutputConfig::new(output_format, comments);
+    let render_options = SymbolRenderOptions {
+        group_by_file,
+        group_by_module,
+        sort_by_kind,
+        sort_by_module,
+    };
+
     let scan_filters = classify_filters(filters, &command_kind, language);
-    let excluded_symbol_globs = cli
-        .exclude_symbols
+    let excluded_symbol_globs = exclude_symbols
         .iter()
         .filter_map(|glob| normalize_excluded_symbol_glob(glob))
         .collect::<Vec<_>>();
 
     let mut files = if scan_filters.file_filters.is_empty() {
-        collect_files(&pkg_root, &[], &cli.exclude_files, language)?
+        collect_files(&pkg_root, &[], exclude_files, language)?
     } else {
         collect_files(
             &pkg_root,
             &scan_filters.file_filters,
-            &cli.exclude_files,
+            exclude_files,
             language,
         )?
     };
@@ -964,11 +1017,11 @@ fn main() -> Result<(), TreeHuggerError> {
 
     let analysis_cache = InMemorySymbolCache::new(files.len().max(1));
     let in_process_cache = InProcessCache::with_config(CacheConfig {
-        enabled: !cli.no_cache,
+        enabled: !no_cache,
         persistent: false,
         capacity: files.len().max(1),
     });
-    let persistent_cache = if cli.no_cache {
+    let persistent_cache = if no_cache {
         None
     } else {
         let project_id = pkg_root

@@ -187,17 +187,7 @@ fn test_json_flag_at_end() {
 
 #[test]
 fn test_language_flag_ordering() {
-    // Regression test: --language flag should work in any position
-    hug_cmd()
-        .args([
-            "--language",
-            "rust",
-            "symbols",
-            "tree-hugger/cli/src/main.rs",
-        ])
-        .assert()
-        .success();
-
+    // --language is a subcommand-local flag, so it must follow the subcommand.
     hug_cmd()
         .args([
             "symbols",
@@ -487,7 +477,7 @@ fn test_plain_flag_exists_in_help() {
 #[test]
 fn test_comments_flag_exists_in_help() {
     hug_cmd()
-        .arg("--help")
+        .args(["symbols", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("--comments"));
@@ -496,7 +486,7 @@ fn test_comments_flag_exists_in_help() {
 #[test]
 fn test_exclude_flags_exist_in_help() {
     hug_cmd()
-        .arg("--help")
+        .args(["symbols", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("--exclude-files"))
@@ -1148,7 +1138,7 @@ fn test_lint_experimental_semantics_enables_semantic_diagnostics() {
 
     hug_cmd()
         .current_dir(dir.path())
-        .args(["--no-cache", "--plain", "lint", "probe.rs"])
+        .args(["lint", "--no-cache", "--plain", "probe.rs"])
         .assert()
         .success()
         .stdout(predicate::str::contains("undefined-symbol").not());
@@ -1156,9 +1146,9 @@ fn test_lint_experimental_semantics_enables_semantic_diagnostics() {
     hug_cmd()
         .current_dir(dir.path())
         .args([
+            "lint",
             "--no-cache",
             "--plain",
-            "lint",
             "--experimental-semantics",
             "probe.rs",
         ])
@@ -1169,9 +1159,9 @@ fn test_lint_experimental_semantics_enables_semantic_diagnostics() {
     hug_cmd()
         .current_dir(dir.path())
         .args([
+            "lint",
             "--no-cache",
             "--plain",
-            "lint",
             "--experimental-semantics",
             "--strict",
             "probe.rs",
@@ -1190,9 +1180,9 @@ fn test_lint_policy_selectors_affect_severity_and_exit_code() {
     hug_cmd()
         .current_dir(dir.path())
         .args([
+            "lint",
             "--no-cache",
             "--plain",
-            "lint",
             "--warn",
             "unwrap-call",
             "probe.rs",
@@ -1205,9 +1195,9 @@ fn test_lint_policy_selectors_affect_severity_and_exit_code() {
     hug_cmd()
         .current_dir(dir.path())
         .args([
+            "lint",
             "--no-cache",
             "--plain",
-            "lint",
             "--deny",
             "unwrap-call",
             "probe.rs",
@@ -1220,9 +1210,9 @@ fn test_lint_policy_selectors_affect_severity_and_exit_code() {
     hug_cmd()
         .current_dir(dir.path())
         .args([
+            "lint",
             "--no-cache",
             "--plain",
-            "lint",
             "--deny",
             "category:restriction",
             "probe.rs",
@@ -1237,9 +1227,9 @@ fn test_lint_policy_selectors_affect_severity_and_exit_code() {
     hug_cmd()
         .current_dir(dir.path())
         .args([
+            "lint",
             "--no-cache",
             "--plain",
-            "lint",
             "--warn",
             "unwrap-call",
             "--allow",
@@ -1261,7 +1251,7 @@ fn test_lint_restriction_rules_off_by_default() {
     // unwrap-call is a `restriction` rule: silent unless explicitly enabled.
     hug_cmd()
         .current_dir(dir.path())
-        .args(["--no-cache", "--plain", "lint", "probe.rs"])
+        .args(["lint", "--no-cache", "--plain", "probe.rs"])
         .assert()
         .success()
         .stdout(predicate::str::contains("[unwrap-call]").not());
@@ -1269,7 +1259,7 @@ fn test_lint_restriction_rules_off_by_default() {
     // --strict escalates enabled warnings but must not enable a default-off rule.
     hug_cmd()
         .current_dir(dir.path())
-        .args(["--no-cache", "--plain", "lint", "--strict", "probe.rs"])
+        .args(["lint", "--no-cache", "--plain", "--strict", "probe.rs"])
         .assert()
         .success()
         .stdout(predicate::str::contains("[unwrap-call]").not());
@@ -1299,7 +1289,7 @@ fn test_lint_scan_hides_clean_files_and_excludes_fixtures() {
 
     hug_cmd()
         .current_dir(root)
-        .args(["--no-cache", "--plain", "lint"])
+        .args(["lint", "--no-cache", "--plain"])
         .assert()
         .success()
         .stdout(predicate::str::contains("dirty.rs"))
@@ -1330,9 +1320,9 @@ fn test_lint_explicit_fixture_path_overrides_default_exclude() {
     hug_cmd()
         .current_dir(root)
         .args([
+            "lint",
             "--no-cache",
             "--plain",
-            "lint",
             "--warn",
             "unused-import",
             "tests/fixtures/sample.rs",
@@ -1430,7 +1420,7 @@ fn test_lint_json_includes_syntax_metadata() {
 
     let output = hug_cmd()
         .current_dir(dir.path())
-        .args(["--no-cache", "--json", "lint", "broken.rs"])
+        .args(["lint", "--no-cache", "--json", "broken.rs"])
         .assert()
         .failure()
         .get_output()
@@ -1478,7 +1468,7 @@ JSON
     let output = hug_cmd()
         .current_dir(dir.path())
         .env("PATH", path)
-        .args(["--no-cache", "--json", "lint", "probe.js"])
+        .args(["lint", "--no-cache", "--json", "probe.js"])
         .assert()
         .failure()
         .get_output()
