@@ -33,9 +33,11 @@ mod source;
 mod validate;
 
 pub use attrs::{
-    CodeRenderHints, ColumnConditional, ColumnWidthKind, ColumnsHints, ComponentHints,
-    HintNamespace, ListMarkerPolicy, ListRenderHints, NodeAttrs, ProgressHints, SequenceJoin,
-    TableCellHints, TableColumnHints, TableHints, TableTerminalHints, TaskHints, TaskState,
+    AriaAttrName, BrowserAttrNameError, BrowserAttrs, CodeRenderHints, ColumnConditional,
+    ColumnWidthKind, ColumnsHints, ComponentHints, DataAttrName, HintNamespace, ImageBrowserAttrs,
+    ImageDecoding, ImageLoading, LinkBrowserAttrs, LinkRelation, LinkTarget, ListMarkerPolicy,
+    ListRenderHints, NodeAttrs, ProgressHints, SequenceJoin, TableCellHints, TableColumnHints,
+    TableHints, TableTerminalHints, TaskHints, TaskState, TextLayoutHints, TextOverflow,
 };
 // Test-only instrumentation (gated): exposed so a downstream crate's perf-gate
 // test can observe the `NodeAttrs::data` hint-access counter while folding a

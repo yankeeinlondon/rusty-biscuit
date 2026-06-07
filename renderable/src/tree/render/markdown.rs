@@ -766,28 +766,32 @@ fn escape_inline_html_body(text: &str) -> String {
 /// to one inline CSS declaration string: foreground color, background color,
 /// and the underline variant. Returns `None` when none of those layers is set.
 ///
-/// Colors lower to the `rgb(r, g, b)` form (or `inherit` when the color has no
-/// fixed RGB value). `dim`, `blink`, and `inverse` have no MarkdownPlus CSS
-/// form here and are omitted, so a span carrying only those degrades to inner
-/// text.
+/// Colors share the browser's [`paint_to_css_color`](super::shared) lowering:
+/// an opaque RGB color is `rgb(r, g, b)`, alpha lowers to `rgba(...)`, the
+/// `transparent` / `currentColor` / `inherit` keywords pass through, and the
+/// terminal default / reset colors emit no declaration. `dim`, `blink`, and
+/// `inverse` have no MarkdownPlus CSS form here and are omitted, so a span
+/// carrying only those degrades to inner text.
 fn markdown_plus_style_css(style: &crate::style::Style) -> Option<String> {
     use crate::color::ColorMode;
     use crate::target::RenderTarget;
 
     let resolve = |tv: &crate::layout::TargetValue<
-        crate::style::PerMode<crate::color::Color>,
+        crate::style::PerMode<crate::style::PaintColor>,
     >|
-     -> Option<crate::color::Color> {
+     -> Option<String> {
         tv.resolve(RenderTarget::MarkdownPlus)
             .map(|per_mode| *per_mode.resolve(ColorMode::Dark))
+            .and_then(super::shared::paint_to_css_color)
+            .map(|css| css.to_string())
     };
 
     let mut decls: Vec<String> = Vec::new();
     if let Some(color) = style.color.as_ref().and_then(&resolve) {
-        decls.push(format!("color: {}", rgb_css(color)));
+        decls.push(format!("color: {color}"));
     }
     if let Some(bg) = style.background.as_ref().and_then(&resolve) {
-        decls.push(format!("background-color: {}", rgb_css(bg)));
+        decls.push(format!("background-color: {bg}"));
     }
     if let Some(underline) = style.emphasis.underline {
         decls.push(underline.css_declaration().to_string());
@@ -796,15 +800,6 @@ fn markdown_plus_style_css(style: &crate::style::Style) -> Option<String> {
         None
     } else {
         Some(decls.join("; "))
-    }
-}
-
-/// A CSS color string for a [`Color`](crate::color::Color): `rgb(r, g, b)`, or
-/// `inherit` when the color has no fixed RGB value.
-fn rgb_css(color: crate::color::Color) -> String {
-    match color.to_rgb() {
-        Some((r, g, b)) => format!("rgb({r}, {g}, {b})"),
-        None => "inherit".to_string(),
     }
 }
 
@@ -1023,6 +1018,58 @@ mod tests {
         assert_eq!(render(&link).output, "[here](https://example.com \"Site\")");
         let image = RenderNode::image("img.png", None, "alt text");
         assert_eq!(render(&image).output, "![alt text](img.png)");
+    }
+
+    #[test]
+    fn browser_only_attrs_are_dropped_in_both_markdown_dialects() {
+        // Browser-only typed attributes (link target/rel/download, image
+        // loading/decoding, data-*, inline_style) have no portable Markdown
+        // spelling and no MarkdownPlus HTML form on links/images, so both
+        // dialects emit the plain `[text](url)` / `![alt](url)` form,
+        // byte-identical to the same nodes without browser attrs.
+        let mut link =
+            RenderNode::link("https://example.com", None, vec![RenderNode::text("here")]);
+        let mut image = RenderNode::image("img.png", None, "alt");
+        let mut browser = crate::tree::BrowserAttrs {
+            link: Some(crate::tree::LinkBrowserAttrs {
+                target: Some(crate::tree::LinkTarget::Blank),
+                rel: vec![crate::tree::LinkRelation::NoOpener],
+                download: Some("f.txt".into()),
+            }),
+            inline_style: Some(crate::stylesheet::CssStyle::new().add(
+                crate::stylesheet::CssColorProp::Color,
+                crate::stylesheet::CssColor::rgb(1, 2, 3),
+            )),
+            ..Default::default()
+        };
+        browser.data_attrs.insert(
+            crate::tree::DataAttrName::new("prompt").unwrap(),
+            "x".into(),
+        );
+        link.attrs.set_browser(&browser);
+
+        let image_browser = crate::tree::BrowserAttrs {
+            image: Some(crate::tree::ImageBrowserAttrs {
+                loading: Some(crate::tree::ImageLoading::Lazy),
+                decoding: Some(crate::tree::ImageDecoding::Async),
+            }),
+            ..Default::default()
+        };
+        image.attrs.set_browser(&image_browser);
+
+        for dialect in [MarkdownDialect::Markdown, MarkdownDialect::MarkdownPlus] {
+            let o = opts(dialect, RenderStrictness::Warn);
+            assert_eq!(
+                render_with(&link, &o).output,
+                "[here](https://example.com)",
+                "dialect {dialect:?}"
+            );
+            assert_eq!(
+                render_with(&image, &o).output,
+                "![alt](img.png)",
+                "dialect {dialect:?}"
+            );
+        }
     }
 
     #[test]
@@ -2090,6 +2137,28 @@ mod tests {
         )
         .output;
         assert_eq!(out, "<span style=\"color: rgb(128, 0, 0)\">x</span>");
+    }
+
+    #[test]
+    fn markdown_plus_lowers_foreground_alpha_to_rgba() {
+        use crate::color::{BasicColor, Color, RgbColor};
+        use crate::layout::TargetValue;
+        use crate::style::{Opacity, PaintColor, PerMode, Style};
+        let paint = PaintColor::new(Color::Rgb(RgbColor::new(255, 0, 0, BasicColor::Red)))
+            .with_opacity(Opacity::from_percent(50).unwrap());
+        let span = styled_span(
+            Style {
+                color: Some(TargetValue::universal(PerMode::universal(paint))),
+                ..Default::default()
+            },
+            vec![RenderNode::text("x")],
+        );
+        let out = render_with(
+            &span,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert!(out.contains("color: rgba(255, 0, 0,"), "{out}");
     }
 
     #[test]

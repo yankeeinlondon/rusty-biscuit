@@ -406,6 +406,48 @@ fn check_node(
         }
     }
 
+    // Width-dependent text intent is supported only on link, image, and
+    // list-item nodes; the renderers resolve it against those kinds.
+    if node.attrs.text_layout_ref().is_some()
+        && !matches!(
+            node.kind,
+            NodeKind::Link { .. } | NodeKind::Image { .. } | NodeKind::ListItem { .. }
+        )
+    {
+        report.findings.push(error(
+            format!(
+                "text-layout hints are permitted only on Link, Image, or ListItem nodes, found on {}",
+                kind_name(&node.kind),
+            ),
+            span.clone(),
+        ));
+    }
+
+    // Kind-specific browser sub-groups: a link group belongs only on a Link
+    // node, an image group only on an Image node. The remaining browser fields
+    // (inline_style, data/aria attrs) apply to any node, and the validated name
+    // newtypes already guarantee safe attribute names at construction.
+    if let Some(browser) = node.attrs.browser_ref() {
+        if browser.link.is_some() && !matches!(node.kind, NodeKind::Link { .. }) {
+            report.findings.push(error(
+                format!(
+                    "link browser attributes are permitted only on a Link node, found on {}",
+                    kind_name(&node.kind),
+                ),
+                span.clone(),
+            ));
+        }
+        if browser.image.is_some() && !matches!(node.kind, NodeKind::Image { .. }) {
+            report.findings.push(error(
+                format!(
+                    "image browser attributes are permitted only on an Image node, found on {}",
+                    kind_name(&node.kind),
+                ),
+                span.clone(),
+            ));
+        }
+    }
+
     // Layout attributes are permitted only on block-level nodes.
     if let Some(layout) = node.attrs.layout() {
         if is_inline_kind(&node.kind) {
@@ -1040,6 +1082,120 @@ mod tests {
             .set_list_marker_policy(ListMarkerPolicy::TreeConnectors);
         let mut root = RenderNode::root(vec![list]);
         root.attrs.set_sequence_join(SequenceJoin::None);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    // ── Typed text-layout placement ───────────────────────────────────────
+
+    #[test]
+    fn text_layout_on_paragraph_is_an_error() {
+        use crate::tree::TextLayoutHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_text_layout(&TextLayoutHints::default());
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("text-layout hints are permitted only")),
+            "text-layout hints on a Paragraph must be an error",
+        );
+    }
+
+    #[test]
+    fn text_layout_on_link_image_and_list_item_is_valid() {
+        use crate::tree::TextLayoutHints;
+
+        let mut link = RenderNode::link("u", None, vec![RenderNode::text("l")]);
+        link.attrs.set_text_layout(&TextLayoutHints::default());
+        let mut image = RenderNode::image("u", None, "alt");
+        image.attrs.set_text_layout(&TextLayoutHints::default());
+        let mut item = RenderNode::list_item(None, vec![]);
+        item.attrs.set_text_layout(&TextLayoutHints::default());
+
+        let root = RenderNode::root(vec![
+            RenderNode::paragraph(vec![link, image]),
+            RenderNode::list(false, None, vec![item]),
+        ]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    // ── Typed browser-attribute placement ─────────────────────────────────
+
+    #[test]
+    fn link_browser_attrs_on_non_link_is_an_error() {
+        use crate::tree::{BrowserAttrs, LinkBrowserAttrs, LinkTarget};
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_browser(&BrowserAttrs {
+            link: Some(LinkBrowserAttrs {
+                target: Some(LinkTarget::Blank),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("link browser attributes are permitted only")),
+        );
+    }
+
+    #[test]
+    fn image_browser_attrs_on_non_image_is_an_error() {
+        use crate::tree::{BrowserAttrs, ImageBrowserAttrs, ImageLoading};
+        let mut link = RenderNode::link("u", None, vec![RenderNode::text("l")]);
+        link.attrs.set_browser(&BrowserAttrs {
+            image: Some(ImageBrowserAttrs {
+                loading: Some(ImageLoading::Lazy),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![RenderNode::paragraph(vec![link])]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("image browser attributes are permitted only")),
+        );
+    }
+
+    #[test]
+    fn browser_attrs_match_their_node_kind() {
+        use crate::tree::{
+            BrowserAttrs, DataAttrName, ImageBrowserAttrs, ImageLoading, LinkBrowserAttrs,
+            LinkTarget,
+        };
+
+        let mut link = RenderNode::link("u", None, vec![RenderNode::text("l")]);
+        link.attrs.set_browser(&BrowserAttrs {
+            link: Some(LinkBrowserAttrs {
+                target: Some(LinkTarget::Blank),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let mut image = RenderNode::image("u", None, "alt");
+        image.attrs.set_browser(&BrowserAttrs {
+            image: Some(ImageBrowserAttrs {
+                loading: Some(ImageLoading::Lazy),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        // The generic fields (inline_style, data/aria attrs) are valid anywhere.
+        let mut para = RenderNode::paragraph(vec![link, image]);
+        para.attrs.set_browser(&BrowserAttrs {
+            data_attrs: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert(DataAttrName::new("prompt").unwrap(), "x".into());
+                m
+            },
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![para]);
         assert!(ensure_valid(&root).is_ok());
     }
 

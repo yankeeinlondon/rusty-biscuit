@@ -62,7 +62,7 @@ mod tests {
     use super::*;
     use crate::color::{Color, Tailwind};
     use crate::layout::TargetValue;
-    use crate::style::{Border, PerMode, Style, TextEmphasis};
+    use crate::style::{Border, Opacity, PaintColor, PerMode, Style, TextEmphasis};
 
     fn red() -> Style {
         Style {
@@ -71,6 +71,44 @@ mod tests {
             )))),
             ..Style::default()
         }
+    }
+
+    #[test]
+    fn foreground_alpha_inherits_with_the_color() {
+        // A half-transparent foreground must inherit its alpha intact, since the
+        // whole `PaintColor` is carried forward — alpha is not a separate slot
+        // that could be dropped on the way down.
+        let translucent =
+            PaintColor::new(Color::Tailwind(Tailwind::Red500)).with_opacity(Opacity::new(128));
+        let parent = Style {
+            color: Some(TargetValue::universal(PerMode::universal(translucent))),
+            ..Style::default()
+        };
+        let (child_ctx, _) = InheritedStyle::root().enter(Some(&parent));
+        let (_, grandchild) = child_ctx.enter(None);
+        let inherited = grandchild
+            .color
+            .unwrap()
+            .resolve(crate::target::RenderTarget::Terminal)
+            .copied()
+            .unwrap();
+        assert_eq!(
+            *inherited.resolve(crate::color::ColorMode::Dark),
+            translucent
+        );
+    }
+
+    #[test]
+    fn alpha_background_does_not_inherit() {
+        let translucent =
+            PaintColor::new(Color::Tailwind(Tailwind::Slate100)).with_opacity(Opacity::new(64));
+        let parent = Style {
+            background: Some(TargetValue::universal(PerMode::universal(translucent))),
+            ..Style::default()
+        };
+        let (child_ctx, _) = InheritedStyle::root().enter(Some(&parent));
+        let (_, grandchild) = child_ctx.enter(None);
+        assert!(grandchild.background.is_none());
     }
 
     #[test]

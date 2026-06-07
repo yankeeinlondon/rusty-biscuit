@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 /// A namespace for extension render hints stored in [`NodeAttrs::data`].
 ///
@@ -403,12 +404,17 @@ pub struct ProgressHints {
     pub left_bracket: char,
     /// Right bracket character.
     pub right_bracket: char,
-    /// Color for the filled portion of the track, if any. A `Color` so it
-    /// degrades across terminal color depths through the shared lowering.
+    /// Color for the filled portion of the track, if any. An opaque
+    /// [`Color`](crate::color::Color), not a [`PaintColor`](crate::style::PaintColor):
+    /// a progress segment is a solid glyph run with no alpha-compositing intent,
+    /// so it degrades across terminal color depths and lowers to a solid CSS
+    /// `background-color` through the shared lowering.
     pub filled_color: Option<crate::color::Color>,
-    /// Color for the empty portion of the track, if any.
+    /// Color for the empty portion of the track, if any. Opaque — see
+    /// [`filled_color`](Self::filled_color).
     pub empty_color: Option<crate::color::Color>,
-    /// Color for the left and right bracket glyphs, if any.
+    /// Color for the left and right bracket glyphs, if any. Opaque — see
+    /// [`filled_color`](Self::filled_color).
     pub bracket_color: Option<crate::color::Color>,
 }
 
@@ -677,10 +683,13 @@ pub struct TableTerminalHints {
     /// Whether even data rows receive an alternating text tint.
     pub alternate_text_color: bool,
     /// Explicit background stripe color. `None` selects the renderer's
-    /// adaptive default. A [`Color`](crate::color::Color) so it degrades
-    /// across terminal color depths through the shared lowering.
+    /// adaptive default. An opaque [`Color`](crate::color::Color), not a
+    /// [`PaintColor`](crate::style::PaintColor): a row stripe is a solid tint
+    /// with no alpha intent, so it degrades across terminal color depths
+    /// through the shared lowering.
     pub stripe_bg: Option<crate::color::Color>,
-    /// Explicit text stripe color. `None` selects the adaptive default.
+    /// Explicit text stripe color. `None` selects the adaptive default. Opaque
+    /// — see [`stripe_bg`](Self::stripe_bg).
     pub stripe_text: Option<crate::color::Color>,
 }
 
@@ -727,14 +736,552 @@ pub enum ComponentHints {
     TableCell(TableCellHints),
 }
 
+/// How content that exceeds its resolved field width is handled.
+///
+/// This is unresolved intent: the renderer measures content against the
+/// target width during its fold and applies the policy then. The tree never
+/// stores pre-truncated text.
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::TextOverflow;
+///
+/// assert_eq!(TextOverflow::default(), TextOverflow::Preserve);
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextOverflow {
+    /// Leave content untouched even when it exceeds the field width.
+    #[default]
+    Preserve,
+    /// Truncate content (with the renderer's ellipsis) when it exceeds the
+    /// field width.
+    Truncate,
+}
+
+/// Typed, unresolved width-dependent text intent for a node.
+///
+/// Attaches to a [`NodeKind::Link`], [`NodeKind::Image`], or
+/// [`NodeKind::ListItem`] as the sparse [`NodeAttrs::text_layout`] field. It
+/// describes *what* the producer wants (an exact field width, a maximum width,
+/// an alignment, and an overflow policy) without performing any target width
+/// math: the renderer resolves percentages, measures rendered content, and
+/// applies alignment and overflow during its single fold.
+///
+/// `width` and `max_width` are not interchangeable. `width` establishes an
+/// exact resolved field width and pads shorter content according to
+/// `alignment`; `max_width` only truncates content that exceeds the cap and
+/// leaves shorter content unchanged. When both are present, `width` is the
+/// requested field width subject to the `max_width` cap.
+///
+/// The tree retains semantic source content: an image keeps its real `alt`
+/// text and a link keeps its child nodes regardless of these hints.
+///
+/// [`NodeKind::Link`]: crate::tree::NodeKind::Link
+/// [`NodeKind::Image`]: crate::tree::NodeKind::Image
+/// [`NodeKind::ListItem`]: crate::tree::NodeKind::ListItem
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::layout::{Alignment, Length, TargetValue};
+/// use renderable::tree::{NodeAttrs, TextLayoutHints, TextOverflow};
+///
+/// let mut attrs = NodeAttrs::default();
+/// attrs.set_text_layout(&TextLayoutHints {
+///     max_width: Some(TargetValue::universal(Length::ch(20))),
+///     overflow: TextOverflow::Truncate,
+///     alignment: Alignment::Center,
+///     ..Default::default()
+/// });
+/// assert_eq!(attrs.text_layout().unwrap().overflow, TextOverflow::Truncate);
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TextLayoutHints {
+    /// Exact resolved field width; pads shorter content per `alignment`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<crate::layout::TargetValue<crate::layout::Length>>,
+    /// Maximum width; truncates only content that exceeds the cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_width: Option<crate::layout::TargetValue<crate::layout::Length>>,
+    /// Alignment of content within the resolved field width.
+    #[serde(default, skip_serializing_if = "is_default_alignment")]
+    pub alignment: crate::layout::Alignment,
+    /// Overflow handling for content that exceeds the field width.
+    #[serde(default, skip_serializing_if = "is_default_overflow")]
+    pub overflow: TextOverflow,
+}
+
+fn is_default_alignment(alignment: &crate::layout::Alignment) -> bool {
+    *alignment == crate::layout::Alignment::default()
+}
+
+fn is_default_overflow(overflow: &TextOverflow) -> bool {
+    *overflow == TextOverflow::default()
+}
+
+/// The browsing context a hyperlink opens in (the HTML `target` attribute).
+///
+/// The four standard keywords are typed; any other value is a named browsing
+/// context preserved verbatim. A named context whose name happens to equal a
+/// standard keyword string round-trips as the keyword variant.
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::LinkTarget;
+///
+/// assert_eq!(LinkTarget::parse("_blank"), LinkTarget::Blank);
+/// assert_eq!(LinkTarget::Blank.as_str(), "_blank");
+/// assert_eq!(LinkTarget::parse("frame1"), LinkTarget::Named("frame1".into()));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum LinkTarget {
+    /// `_self` — the current browsing context.
+    SelfTab,
+    /// `_blank` — a new, unnamed browsing context.
+    Blank,
+    /// `_parent` — the parent browsing context.
+    Parent,
+    /// `_top` — the topmost browsing context.
+    Top,
+    /// A named browsing context.
+    Named(String),
+}
+
+impl LinkTarget {
+    /// Returns the HTML `target` attribute value.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            LinkTarget::SelfTab => "_self",
+            LinkTarget::Blank => "_blank",
+            LinkTarget::Parent => "_parent",
+            LinkTarget::Top => "_top",
+            LinkTarget::Named(name) => name.as_str(),
+        }
+    }
+
+    /// Parses an HTML `target` value, mapping the four standard keywords to
+    /// their typed variants and any other value to a named browsing context.
+    #[must_use]
+    pub fn parse(value: &str) -> LinkTarget {
+        match value {
+            "_self" => LinkTarget::SelfTab,
+            "_blank" => LinkTarget::Blank,
+            "_parent" => LinkTarget::Parent,
+            "_top" => LinkTarget::Top,
+            other => LinkTarget::Named(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for LinkTarget {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for LinkTarget {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(LinkTarget::parse(&String::deserialize(d)?))
+    }
+}
+
+/// A hyperlink relationship (one token of the HTML `rel` attribute).
+///
+/// Covers the relations relevant to safe link generation; `NoOpener` and
+/// `NoReferrer` are the security-significant companions to a `_blank` target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LinkRelation {
+    /// `noopener` — the opened context cannot reach `window.opener`.
+    NoOpener,
+    /// `noreferrer` — suppress the `Referer` header and `window.opener`.
+    NoReferrer,
+    /// `nofollow` — search engines should not follow this link.
+    NoFollow,
+    /// `alternate` — an alternate representation.
+    Alternate,
+    /// `author` — a link to the author.
+    Author,
+    /// `bookmark` — a permalink for the nearest ancestor section.
+    Bookmark,
+    /// `external` — the target is on a different site.
+    External,
+    /// `help` — context-sensitive help.
+    Help,
+    /// `license` — copyright license terms.
+    License,
+    /// `next` — the next document in a series.
+    Next,
+    /// `prev` — the previous document in a series.
+    Prev,
+    /// `search` — a search facility.
+    Search,
+    /// `tag` — a tag applying to the current document.
+    Tag,
+}
+
+impl LinkRelation {
+    /// Returns the HTML `rel` token for this relation.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LinkRelation::NoOpener => "noopener",
+            LinkRelation::NoReferrer => "noreferrer",
+            LinkRelation::NoFollow => "nofollow",
+            LinkRelation::Alternate => "alternate",
+            LinkRelation::Author => "author",
+            LinkRelation::Bookmark => "bookmark",
+            LinkRelation::External => "external",
+            LinkRelation::Help => "help",
+            LinkRelation::License => "license",
+            LinkRelation::Next => "next",
+            LinkRelation::Prev => "prev",
+            LinkRelation::Search => "search",
+            LinkRelation::Tag => "tag",
+        }
+    }
+}
+
+/// Validated browser attributes specific to a [`NodeKind::Link`].
+///
+/// [`NodeKind::Link`]: crate::tree::NodeKind::Link
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::{LinkBrowserAttrs, LinkRelation, LinkTarget};
+///
+/// let attrs = LinkBrowserAttrs {
+///     target: Some(LinkTarget::Blank),
+///     rel: vec![LinkRelation::NoOpener, LinkRelation::NoReferrer],
+///     download: None,
+/// };
+/// assert_eq!(attrs.rel.len(), 2);
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkBrowserAttrs {
+    /// The browsing context the link opens in (`target`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<LinkTarget>,
+    /// Link relationships (`rel`), emitted as a space-separated token list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rel: Vec<LinkRelation>,
+    /// The `download` attribute's suggested filename, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download: Option<String>,
+}
+
+/// How the browser should defer loading an image (the `loading` attribute).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageLoading {
+    /// `eager` — load immediately.
+    Eager,
+    /// `lazy` — defer loading until near the viewport.
+    Lazy,
+}
+
+impl ImageLoading {
+    /// Returns the HTML `loading` attribute value.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ImageLoading::Eager => "eager",
+            ImageLoading::Lazy => "lazy",
+        }
+    }
+}
+
+/// How the browser should decode an image (the `decoding` attribute).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageDecoding {
+    /// `sync` — decode synchronously.
+    Sync,
+    /// `async` — decode asynchronously.
+    Async,
+    /// `auto` — let the browser decide.
+    Auto,
+}
+
+impl ImageDecoding {
+    /// Returns the HTML `decoding` attribute value.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ImageDecoding::Sync => "sync",
+            ImageDecoding::Async => "async",
+            ImageDecoding::Auto => "auto",
+        }
+    }
+}
+
+/// Validated browser attributes specific to a [`NodeKind::Image`].
+///
+/// [`NodeKind::Image`]: crate::tree::NodeKind::Image
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::{ImageBrowserAttrs, ImageDecoding, ImageLoading};
+///
+/// let attrs = ImageBrowserAttrs {
+///     loading: Some(ImageLoading::Lazy),
+///     decoding: Some(ImageDecoding::Async),
+/// };
+/// assert_eq!(attrs.loading, Some(ImageLoading::Lazy));
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageBrowserAttrs {
+    /// The `loading` attribute, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loading: Option<ImageLoading>,
+    /// The `decoding` attribute, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decoding: Option<ImageDecoding>,
+}
+
+/// An error raised when a `data-*` or `aria-*` attribute name is rejected.
+///
+/// The validated name newtypes ([`DataAttrName`], [`AriaAttrName`]) reject
+/// names that could break out of an HTML attribute token or carry reserved
+/// meaning, so the browser renderer can emit them without re-escaping the name.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum BrowserAttrNameError {
+    /// The name was empty.
+    #[error("attribute name must not be empty")]
+    Empty,
+    /// The name contained characters outside `[a-z][a-z0-9-]*`.
+    #[error(
+        "attribute name {0:?} is invalid: use lowercase ASCII letters, digits, and hyphens, \
+         starting with a letter"
+    )]
+    InvalidChars(String),
+    /// The name was syntactically valid but reserved (e.g. a `xml`-prefixed
+    /// `data-*` name).
+    #[error("attribute name {0:?} is reserved")]
+    Reserved(String),
+}
+
+/// Validates a `data-*` / `aria-*` attribute name *suffix* (the portion after
+/// the `data-` / `aria-` prefix).
+///
+/// The suffix must be non-empty, begin with an ASCII lowercase letter, and
+/// otherwise contain only ASCII lowercase letters, digits, and hyphens. Those
+/// rules already exclude every character that could escape an attribute token
+/// (whitespace, quotes, `=`, `<`, `>`, `/`). When `is_data` is set, an `xml`
+/// prefix is additionally reserved per the HTML `data-*` rules.
+fn validate_attr_suffix(name: &str, is_data: bool) -> Result<(), BrowserAttrNameError> {
+    if name.is_empty() {
+        return Err(BrowserAttrNameError::Empty);
+    }
+    let mut chars = name.chars();
+    let first = chars.next().expect("non-empty checked above");
+    if !first.is_ascii_lowercase() {
+        return Err(BrowserAttrNameError::InvalidChars(name.to_string()));
+    }
+    if !chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+        return Err(BrowserAttrNameError::InvalidChars(name.to_string()));
+    }
+    if is_data && name.starts_with("xml") {
+        return Err(BrowserAttrNameError::Reserved(name.to_string()));
+    }
+    Ok(())
+}
+
+/// A validated HTML `data-*` attribute name suffix.
+///
+/// Stores the portion after `data-` (e.g. `prompt` for `data-prompt`). Because
+/// the stored name is always emitted with a fixed `data-` prefix, this type
+/// makes it impossible to inject an arbitrary attribute such as `onclick`,
+/// `style`, `href`, or `src` through the extension map.
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::DataAttrName;
+///
+/// assert!(DataAttrName::new("prompt").is_ok());
+/// assert!(DataAttrName::new("Prompt").is_err()); // uppercase rejected
+/// assert!(DataAttrName::new("xml-foo").is_err()); // reserved prefix
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DataAttrName(String);
+
+impl DataAttrName {
+    /// Validates and wraps a `data-*` attribute name suffix.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`BrowserAttrNameError`] when the suffix is empty, contains
+    /// disallowed characters, or uses the reserved `xml` prefix.
+    pub fn new(name: impl Into<String>) -> Result<Self, BrowserAttrNameError> {
+        let name = name.into();
+        validate_attr_suffix(&name, true)?;
+        Ok(DataAttrName(name))
+    }
+
+    /// Returns the attribute name suffix (without the `data-` prefix).
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for DataAttrName {
+    type Error = BrowserAttrNameError;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        DataAttrName::new(value)
+    }
+}
+
+impl Serialize for DataAttrName {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for DataAttrName {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        DataAttrName::new(String::deserialize(d)?).map_err(serde::de::Error::custom)
+    }
+}
+
+/// A validated HTML `aria-*` attribute name suffix.
+///
+/// Stores the portion after `aria-` (e.g. `label` for `aria-label`). Like
+/// [`DataAttrName`], the fixed `aria-` prefix prevents injecting an arbitrary
+/// attribute through the extension map.
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::AriaAttrName;
+///
+/// assert!(AriaAttrName::new("label").is_ok());
+/// assert!(AriaAttrName::new("aria label").is_err());
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AriaAttrName(String);
+
+impl AriaAttrName {
+    /// Validates and wraps an `aria-*` attribute name suffix.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`BrowserAttrNameError`] when the suffix is empty or contains
+    /// disallowed characters.
+    pub fn new(name: impl Into<String>) -> Result<Self, BrowserAttrNameError> {
+        let name = name.into();
+        validate_attr_suffix(&name, false)?;
+        Ok(AriaAttrName(name))
+    }
+
+    /// Returns the attribute name suffix (without the `aria-` prefix).
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for AriaAttrName {
+    type Error = BrowserAttrNameError;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        AriaAttrName::new(value)
+    }
+}
+
+impl Serialize for AriaAttrName {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for AriaAttrName {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        AriaAttrName::new(String::deserialize(d)?).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Typed, validated browser-target attributes for a node.
+///
+/// Attaches to a node as the sparse [`NodeAttrs::browser`] field. It carries
+/// every attribute the browser renderer is expected to emit *before* the fold
+/// begins, so the browser paths never patch completed HTML. The `link` and
+/// `image` sub-groups are kind-specific (a `link` group is permitted only on a
+/// [`NodeKind::Link`], an `image` group only on a [`NodeKind::Image`]); the
+/// remaining fields apply to any node.
+///
+/// `inline_style` is a validated [`CssStyle`](crate::stylesheet::CssStyle), not
+/// a raw CSS string, so unparsed CSS cannot be injected. The `data_attrs` and
+/// `aria_attrs` maps are deliberately *not* named `data`: they hold first-class
+/// typed HTML `data-*` / `aria-*` attributes, distinct from the opaque
+/// [`NodeAttrs::data`] extension bag.
+///
+/// [`NodeKind::Link`]: crate::tree::NodeKind::Link
+/// [`NodeKind::Image`]: crate::tree::NodeKind::Image
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::{BrowserAttrs, DataAttrName};
+///
+/// let mut attrs = BrowserAttrs::default();
+/// attrs
+///     .data_attrs
+///     .insert(DataAttrName::new("prompt").unwrap(), "explain".into());
+/// assert!(!attrs.is_empty());
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrowserAttrs {
+    /// Link-specific attributes; valid only on a [`NodeKind::Link`].
+    ///
+    /// [`NodeKind::Link`]: crate::tree::NodeKind::Link
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<LinkBrowserAttrs>,
+    /// Image-specific attributes; valid only on a [`NodeKind::Image`].
+    ///
+    /// [`NodeKind::Image`]: crate::tree::NodeKind::Image
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<ImageBrowserAttrs>,
+    /// Validated inline CSS, merged from structured directives and frontmatter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_style: Option<crate::stylesheet::CssStyle>,
+    /// Validated HTML `data-*` attributes, in deterministic key order.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub data_attrs: BTreeMap<DataAttrName, String>,
+    /// Validated HTML `aria-*` attributes, in deterministic key order.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub aria_attrs: BTreeMap<AriaAttrName, String>,
+}
+
+impl BrowserAttrs {
+    /// Returns `true` when no browser attribute is set.
+    ///
+    /// Used as the sparsity predicate by
+    /// [`NodeAttrs::retain_non_default_browser`].
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.link.is_none()
+            && self.image.is_none()
+            && self.inline_style.is_none()
+            && self.data_attrs.is_empty()
+            && self.aria_attrs.is_empty()
+    }
+}
+
 /// Optional presentational attributes carried by every render node.
 ///
 /// All fields are optional; the [`Default`] value is an empty set of
-/// attributes. First-class presentation — `layout`, `style`, the two hot
-/// per-node hints (`sequence_join`, `list_marker_policy`), and the per-kind
-/// `component` hint group — lives in typed sparse fields, so reads cost no
-/// serde round-trip. `data` carries only package-local extension namespaces
-/// (e.g. `darkmatter.hr.*`).
+/// attributes. First-class presentation — `layout`, `style`, `text_layout`,
+/// `browser`, the two hot per-node hints (`sequence_join`,
+/// `list_marker_policy`), and the per-kind `component` hint group — lives in
+/// typed sparse fields, so reads cost no serde round-trip. `data` carries only
+/// package-local extension namespaces (e.g. `darkmatter.hr.*`).
 ///
 /// ## Examples
 ///
@@ -773,6 +1320,13 @@ pub struct NodeAttrs {
     /// Per-component render hints, when the node kind carries any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component: Option<Box<ComponentHints>>,
+    /// Width-dependent text intent, when set. Permitted on link, image, and
+    /// list-item nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_layout: Option<Box<TextLayoutHints>>,
+    /// Typed browser-target attributes, when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<Box<BrowserAttrs>>,
     /// Extension-namespace structured data keyed by name (e.g.
     /// `darkmatter.hr.*`). Not used for first-class `renderable.*` hints.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -1386,6 +1940,201 @@ impl NodeAttrs {
     #[must_use]
     pub fn style_ref(&self) -> Option<&crate::style::Style> {
         self.style.as_deref()
+    }
+
+    /// Returns a mutable reference to this node's [`Style`](crate::style::Style),
+    /// allocating a default one only if the field is absent.
+    ///
+    /// This is convenience over the typed [`NodeAttrs::style`] field, not a new
+    /// attribute layer: it touches neither [`NodeAttrs::data`] nor any
+    /// serialized lookup key. Mutating through it can leave a default `Style`
+    /// box behind; call [`retain_non_default_style`](Self::retain_non_default_style)
+    /// afterwards to restore sparsity.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.style_mut_or_default().emphasis.bold = true;
+    /// assert!(attrs.style().unwrap().emphasis.bold);
+    /// ```
+    pub fn style_mut_or_default(&mut self) -> &mut crate::style::Style {
+        self.style
+            .get_or_insert_with(|| Box::new(crate::style::Style::default()))
+    }
+
+    /// Drops a [`Style`](crate::style::Style) box that equals
+    /// [`Style::default`](crate::style::Style), restoring sparsity after a
+    /// [`style_mut_or_default`](Self::style_mut_or_default) that left no change.
+    pub fn retain_non_default_style(&mut self) {
+        if self
+            .style
+            .as_deref()
+            .is_some_and(|s| *s == crate::style::Style::default())
+        {
+            self.style = None;
+        }
+    }
+
+    /// Returns a mutable reference to this node's [`Layout`](crate::layout::Layout),
+    /// allocating a default one only if the field is absent.
+    ///
+    /// Companion to [`style_mut_or_default`](Self::style_mut_or_default); the
+    /// same sparsity caveat applies — call
+    /// [`retain_non_default_layout`](Self::retain_non_default_layout) afterwards.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::layout::{Alignment, Layout};
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.layout_mut_or_default().alignment = Alignment::Center;
+    /// assert_eq!(attrs.layout().unwrap().alignment, Alignment::Center);
+    /// ```
+    pub fn layout_mut_or_default(&mut self) -> &mut crate::layout::Layout {
+        self.layout
+            .get_or_insert_with(|| Box::new(crate::layout::Layout::default()))
+    }
+
+    /// Drops a [`Layout`](crate::layout::Layout) box that equals
+    /// [`Layout::default`](crate::layout::Layout), restoring sparsity.
+    pub fn retain_non_default_layout(&mut self) {
+        if self
+            .layout
+            .as_deref()
+            .is_some_and(|l| *l == crate::layout::Layout::default())
+        {
+            self.layout = None;
+        }
+    }
+
+    /// Stores [`TextLayoutHints`] as the typed [`NodeAttrs::text_layout`] field.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{NodeAttrs, TextLayoutHints, TextOverflow};
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_text_layout(&TextLayoutHints {
+    ///     overflow: TextOverflow::Truncate,
+    ///     ..Default::default()
+    /// });
+    /// assert_eq!(attrs.text_layout().unwrap().overflow, TextOverflow::Truncate);
+    /// ```
+    pub fn set_text_layout(&mut self, hints: &TextLayoutHints) {
+        self.text_layout = Some(Box::new(hints.clone()));
+    }
+
+    /// Reads the [`TextLayoutHints`] stored on this node, if any.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// assert!(NodeAttrs::default().text_layout().is_none());
+    /// ```
+    #[must_use]
+    pub fn text_layout(&self) -> Option<TextLayoutHints> {
+        self.text_layout.as_deref().cloned()
+    }
+
+    /// Borrowed accessor for renderer hot paths (no clone).
+    ///
+    /// Returns `None` when no text-layout hints are set.
+    #[must_use]
+    pub fn text_layout_ref(&self) -> Option<&TextLayoutHints> {
+        self.text_layout.as_deref()
+    }
+
+    /// Returns a mutable reference to this node's [`TextLayoutHints`],
+    /// allocating a default one only if the field is absent.
+    ///
+    /// Same sparsity caveat as [`style_mut_or_default`](Self::style_mut_or_default);
+    /// call [`retain_non_default_text_layout`](Self::retain_non_default_text_layout)
+    /// afterwards.
+    pub fn text_layout_mut_or_default(&mut self) -> &mut TextLayoutHints {
+        self.text_layout
+            .get_or_insert_with(|| Box::new(TextLayoutHints::default()))
+    }
+
+    /// Drops a [`TextLayoutHints`] box that equals [`TextLayoutHints::default`],
+    /// restoring sparsity.
+    pub fn retain_non_default_text_layout(&mut self) {
+        if self
+            .text_layout
+            .as_deref()
+            .is_some_and(|t| *t == TextLayoutHints::default())
+        {
+            self.text_layout = None;
+        }
+    }
+
+    /// Stores [`BrowserAttrs`] as the typed [`NodeAttrs::browser`] field.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{BrowserAttrs, ImageBrowserAttrs, ImageLoading, NodeAttrs};
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_browser(&BrowserAttrs {
+    ///     image: Some(ImageBrowserAttrs {
+    ///         loading: Some(ImageLoading::Lazy),
+    ///         ..Default::default()
+    ///     }),
+    ///     ..Default::default()
+    /// });
+    /// assert!(attrs.browser().is_some());
+    /// ```
+    pub fn set_browser(&mut self, attrs: &BrowserAttrs) {
+        self.browser = Some(Box::new(attrs.clone()));
+    }
+
+    /// Reads the [`BrowserAttrs`] stored on this node, if any.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// assert!(NodeAttrs::default().browser().is_none());
+    /// ```
+    #[must_use]
+    pub fn browser(&self) -> Option<BrowserAttrs> {
+        self.browser.as_deref().cloned()
+    }
+
+    /// Borrowed accessor for renderer hot paths (no clone).
+    ///
+    /// Returns `None` when no browser attributes are set.
+    #[must_use]
+    pub fn browser_ref(&self) -> Option<&BrowserAttrs> {
+        self.browser.as_deref()
+    }
+
+    /// Returns a mutable reference to this node's [`BrowserAttrs`], allocating
+    /// a default one only if the field is absent.
+    ///
+    /// Same sparsity caveat as [`style_mut_or_default`](Self::style_mut_or_default);
+    /// call [`retain_non_default_browser`](Self::retain_non_default_browser)
+    /// afterwards.
+    pub fn browser_mut_or_default(&mut self) -> &mut BrowserAttrs {
+        self.browser
+            .get_or_insert_with(|| Box::new(BrowserAttrs::default()))
+    }
+
+    /// Drops an empty [`BrowserAttrs`] box (see [`BrowserAttrs::is_empty`]),
+    /// restoring sparsity.
+    pub fn retain_non_default_browser(&mut self) {
+        if self.browser.as_deref().is_some_and(BrowserAttrs::is_empty) {
+            self.browser = None;
+        }
     }
 
     /// Stores a [`SequenceJoin`] policy as the typed
@@ -2348,6 +3097,11 @@ mod tests {
         task_item.attrs.set_task_hints(&TaskHints {
             state: TaskState::InProgress,
         });
+        // List-item body text layout: exercises text_layout on a ListItem.
+        task_item.attrs.set_text_layout(&TextLayoutHints {
+            alignment: crate::layout::Alignment::Right,
+            ..Default::default()
+        });
         task_item
             .attrs
             .set_hint(HintNamespace("darkmatter.hr"), "kind", json!("solid"));
@@ -2396,11 +3150,60 @@ mod tests {
             highlight: true,
         });
 
+        // Media paragraph: a link and an image carrying typed browser attrs and
+        // width-dependent text layout. These exercise the browser/text_layout
+        // typed groups; the renderers consuming them is a later phase, so the
+        // fold simply must not round-trip them through `data`.
+        let mut link = RenderNode::link("https://example.com", Some("t".into()), vec![
+            RenderNode::text("link"),
+        ]);
+        link.attrs.set_browser(&BrowserAttrs {
+            link: Some(LinkBrowserAttrs {
+                target: Some(LinkTarget::Blank),
+                rel: vec![LinkRelation::NoOpener, LinkRelation::NoReferrer],
+                ..Default::default()
+            }),
+            inline_style: Some(
+                crate::stylesheet::CssStyle::new().add(
+                    crate::stylesheet::CssColorProp::Color,
+                    crate::stylesheet::CssColor::rgb(0x33, 0x66, 0x99),
+                ),
+            ),
+            data_attrs: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert(DataAttrName::new("prompt").unwrap(), "explain".to_string());
+                m
+            },
+            ..Default::default()
+        });
+        link.attrs.set_text_layout(&TextLayoutHints {
+            max_width: Some(crate::layout::TargetValue::universal(
+                crate::layout::Length::ch(20),
+            )),
+            overflow: TextOverflow::Truncate,
+            ..Default::default()
+        });
+        let mut image = RenderNode::image("img.png", None, "alt text");
+        image.attrs.set_browser(&BrowserAttrs {
+            image: Some(ImageBrowserAttrs {
+                loading: Some(ImageLoading::Lazy),
+                decoding: Some(ImageDecoding::Async),
+            }),
+            ..Default::default()
+        });
+        image.attrs.set_text_layout(&TextLayoutHints {
+            width: Some(crate::layout::TargetValue::universal(
+                crate::layout::Length::ch(16),
+            )),
+            ..Default::default()
+        });
+        let media_para = RenderNode::paragraph(vec![link, image]);
+
         Document {
             sources: SourceRegistry::default(),
             metadata: DocumentMetadata::default(),
             root: RenderNode::root(vec![
-                heading, styled_para, progress, columns, list, table, code,
+                heading, styled_para, progress, columns, list, table, code, media_para,
             ]),
         }
     }
@@ -2454,5 +3257,304 @@ mod tests {
             renderable_owned, 0,
             "the browser streaming fold must not round-trip any renderable-owned hint through `data`",
         );
+    }
+
+    /// Collects, for the whole tree, whether each typed group is populated on
+    /// at least one node. Used to prove the perf-gate corpus is not vacuous:
+    /// the typed groups it claims to exercise are genuinely present.
+    #[cfg(test)]
+    fn corpus_coverage(node: &crate::tree::RenderNode) -> (bool, bool, bool, bool, bool, bool) {
+        fn walk(
+            node: &crate::tree::RenderNode,
+            text_layout: &mut bool,
+            link: &mut bool,
+            image: &mut bool,
+            inline_style: &mut bool,
+            data_attrs: &mut bool,
+            style_alpha_capable: &mut bool,
+        ) {
+            *text_layout |= node.attrs.text_layout_ref().is_some();
+            if let Some(browser) = node.attrs.browser_ref() {
+                *link |= browser.link.is_some();
+                *image |= browser.image.is_some();
+                *inline_style |= browser.inline_style.is_some();
+                *data_attrs |= !browser.data_attrs.is_empty();
+            }
+            *style_alpha_capable |= node.attrs.style_ref().is_some_and(|s| s.color.is_some());
+            for child in node.children() {
+                walk(
+                    child,
+                    text_layout,
+                    link,
+                    image,
+                    inline_style,
+                    data_attrs,
+                    style_alpha_capable,
+                );
+            }
+        }
+        let mut flags = (false, false, false, false, false, false);
+        walk(
+            node,
+            &mut flags.0,
+            &mut flags.1,
+            &mut flags.2,
+            &mut flags.3,
+            &mut flags.4,
+            &mut flags.5,
+        );
+        flags
+    }
+
+    /// The styled corpus must actually populate every typed group the perf gate
+    /// claims to exercise; otherwise the `renderable_owned == 0` assertion would
+    /// pass vacuously.
+    #[test]
+    fn styled_corpus_populates_every_typed_group() {
+        let doc = styled_corpus_document();
+        let (text_layout, link, image, inline_style, data_attrs, style_alpha_capable) =
+            corpus_coverage(&doc.root);
+        assert!(text_layout, "corpus must carry text_layout hints");
+        assert!(link, "corpus must carry link browser attrs");
+        assert!(image, "corpus must carry image browser attrs");
+        assert!(inline_style, "corpus must carry browser inline_style");
+        assert!(data_attrs, "corpus must carry browser data_attrs");
+        assert!(
+            style_alpha_capable,
+            "corpus must carry alpha-capable Style color",
+        );
+    }
+
+    #[test]
+    fn text_layout_round_trip_and_sparsity() {
+        use crate::layout::{Alignment, Length, TargetValue};
+
+        let mut attrs = NodeAttrs::default();
+        assert!(attrs.text_layout().is_none());
+        let hints = TextLayoutHints {
+            width: Some(TargetValue::universal(Length::ch(12))),
+            max_width: Some(TargetValue::universal(Length::ch(20))),
+            alignment: Alignment::Center,
+            overflow: TextOverflow::Truncate,
+        };
+        attrs.set_text_layout(&hints);
+        assert_eq!(attrs.text_layout().as_ref(), Some(&hints));
+        assert_eq!(attrs.text_layout_ref(), Some(&hints));
+        // Text layout rides on a typed field, never the bag.
+        assert!(attrs.data.is_empty());
+    }
+
+    #[test]
+    fn text_layout_default_elides_every_field() {
+        // A default `TextLayoutHints` serializes to the empty object — width,
+        // max_width, alignment, and overflow are all skipped at their defaults.
+        let json = serde_json::to_string(&TextLayoutHints::default()).unwrap();
+        assert_eq!(json, "{}");
+
+        // A node carrying default text layout still serializes the key (the
+        // field is present), but the value is the empty object.
+        let mut attrs = NodeAttrs::default();
+        attrs.set_text_layout(&TextLayoutHints::default());
+        let json = serde_json::to_string(&attrs).unwrap();
+        assert!(json.contains("\"textLayout\":{}"));
+    }
+
+    #[test]
+    fn text_layout_mut_or_default_is_lazy_and_retains_sparsity() {
+        let mut attrs = NodeAttrs::default();
+        assert!(attrs.text_layout.is_none());
+        // A mutation that leaves the default in place is retained away.
+        let _ = attrs.text_layout_mut_or_default();
+        assert!(attrs.text_layout.is_some());
+        attrs.retain_non_default_text_layout();
+        assert!(attrs.text_layout.is_none());
+
+        // A real mutation survives the retain.
+        attrs.text_layout_mut_or_default().overflow = TextOverflow::Truncate;
+        attrs.retain_non_default_text_layout();
+        assert_eq!(attrs.text_layout().unwrap().overflow, TextOverflow::Truncate);
+    }
+
+    #[test]
+    fn browser_round_trip_and_sparsity() {
+        let mut attrs = NodeAttrs::default();
+        assert!(attrs.browser().is_none());
+
+        let mut browser = BrowserAttrs {
+            link: Some(LinkBrowserAttrs {
+                target: Some(LinkTarget::Blank),
+                rel: vec![LinkRelation::NoOpener, LinkRelation::NoReferrer],
+                download: Some("file.pdf".into()),
+            }),
+            inline_style: Some(
+                crate::stylesheet::CssStyle::new()
+                    .add(
+                        crate::stylesheet::CssColorProp::Color,
+                        crate::stylesheet::CssColor::rgb(1, 2, 3),
+                    ),
+            ),
+            ..Default::default()
+        };
+        browser
+            .data_attrs
+            .insert(DataAttrName::new("prompt").unwrap(), "explain".into());
+        browser
+            .aria_attrs
+            .insert(AriaAttrName::new("label").unwrap(), "Open".into());
+
+        attrs.set_browser(&browser);
+        assert_eq!(attrs.browser().as_ref(), Some(&browser));
+        assert_eq!(attrs.browser_ref(), Some(&browser));
+        assert!(attrs.data.is_empty());
+
+        // Full serde round-trip through the node attrs preserves every field,
+        // including the validated inline style and the validated map keys.
+        let json = serde_json::to_string(&attrs).unwrap();
+        let decoded: NodeAttrs = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.browser(), Some(browser));
+    }
+
+    #[test]
+    fn browser_default_elides_when_empty() {
+        // An empty BrowserAttrs serializes to the empty object.
+        assert_eq!(
+            serde_json::to_string(&BrowserAttrs::default()).unwrap(),
+            "{}"
+        );
+        assert!(BrowserAttrs::default().is_empty());
+    }
+
+    #[test]
+    fn browser_mut_or_default_is_lazy_and_retains_sparsity() {
+        let mut attrs = NodeAttrs::default();
+        let _ = attrs.browser_mut_or_default();
+        assert!(attrs.browser.is_some());
+        attrs.retain_non_default_browser();
+        assert!(attrs.browser.is_none());
+
+        attrs.browser_mut_or_default().image = Some(ImageBrowserAttrs {
+            loading: Some(ImageLoading::Lazy),
+            ..Default::default()
+        });
+        attrs.retain_non_default_browser();
+        assert!(attrs.browser.is_some());
+    }
+
+    #[test]
+    fn link_target_round_trip_including_named() {
+        for target in [
+            LinkTarget::SelfTab,
+            LinkTarget::Blank,
+            LinkTarget::Parent,
+            LinkTarget::Top,
+            LinkTarget::Named("frame1".into()),
+        ] {
+            let json = serde_json::to_string(&target).unwrap();
+            let back: LinkTarget = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, target);
+            assert_eq!(LinkTarget::parse(target.as_str()), target);
+        }
+    }
+
+    #[test]
+    fn link_relation_serializes_as_lowercase_token() {
+        assert_eq!(
+            serde_json::to_string(&LinkRelation::NoOpener).unwrap(),
+            "\"noopener\""
+        );
+        let back: LinkRelation = serde_json::from_str("\"noreferrer\"").unwrap();
+        assert_eq!(back, LinkRelation::NoReferrer);
+    }
+
+    #[test]
+    fn image_enums_serialize_as_html_tokens() {
+        assert_eq!(
+            serde_json::to_string(&ImageLoading::Lazy).unwrap(),
+            "\"lazy\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ImageDecoding::Async).unwrap(),
+            "\"async\""
+        );
+        let back: ImageDecoding = serde_json::from_str("\"auto\"").unwrap();
+        assert_eq!(back, ImageDecoding::Auto);
+    }
+
+    #[test]
+    fn data_attr_name_validation() {
+        assert!(DataAttrName::new("prompt").is_ok());
+        assert!(DataAttrName::new("user-id").is_ok());
+        assert!(DataAttrName::new("x9").is_ok());
+        // Rejections: empty, uppercase, leading digit, unsafe chars, reserved.
+        assert_eq!(DataAttrName::new(""), Err(BrowserAttrNameError::Empty));
+        assert!(matches!(
+            DataAttrName::new("Prompt"),
+            Err(BrowserAttrNameError::InvalidChars(_))
+        ));
+        assert!(matches!(
+            DataAttrName::new("9lives"),
+            Err(BrowserAttrNameError::InvalidChars(_))
+        ));
+        assert!(matches!(
+            DataAttrName::new("on click"),
+            Err(BrowserAttrNameError::InvalidChars(_))
+        ));
+        assert!(matches!(
+            DataAttrName::new("foo=bar"),
+            Err(BrowserAttrNameError::InvalidChars(_))
+        ));
+        assert!(matches!(
+            DataAttrName::new("xmltest"),
+            Err(BrowserAttrNameError::Reserved(_))
+        ));
+    }
+
+    #[test]
+    fn aria_attr_name_validation_allows_xml_prefix_but_not_unsafe() {
+        // `aria-` names are not subject to the data-* `xml` reservation.
+        assert!(AriaAttrName::new("label").is_ok());
+        assert!(AriaAttrName::new("xmltest").is_ok());
+        assert!(matches!(
+            AriaAttrName::new("aria label"),
+            Err(BrowserAttrNameError::InvalidChars(_))
+        ));
+        assert_eq!(AriaAttrName::new(""), Err(BrowserAttrNameError::Empty));
+    }
+
+    #[test]
+    fn validated_map_keys_reject_unsafe_names_on_deserialize() {
+        // An unsafe `data-*` key in serialized form is rejected, so the
+        // validated extension map cannot be bypassed through serde.
+        let bad = r#"{"browser":{"data_attrs":{"on click":"x"}}}"#;
+        assert!(serde_json::from_str::<NodeAttrs>(bad).is_err());
+    }
+
+    #[test]
+    fn style_mut_or_default_is_lazy_and_retains_sparsity() {
+        let mut attrs = NodeAttrs::default();
+        assert!(attrs.style.is_none());
+        let _ = attrs.style_mut_or_default();
+        assert!(attrs.style.is_some());
+        attrs.retain_non_default_style();
+        assert!(attrs.style.is_none());
+
+        attrs.style_mut_or_default().emphasis.bold = true;
+        attrs.retain_non_default_style();
+        assert!(attrs.style().unwrap().emphasis.bold);
+    }
+
+    #[test]
+    fn layout_mut_or_default_is_lazy_and_retains_sparsity() {
+        use crate::layout::Alignment;
+        let mut attrs = NodeAttrs::default();
+        assert!(attrs.layout.is_none());
+        let _ = attrs.layout_mut_or_default();
+        assert!(attrs.layout.is_some());
+        attrs.retain_non_default_layout();
+        assert!(attrs.layout.is_none());
+
+        attrs.layout_mut_or_default().alignment = Alignment::Center;
+        attrs.retain_non_default_layout();
+        assert_eq!(attrs.layout().unwrap().alignment, Alignment::Center);
     }
 }

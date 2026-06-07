@@ -22,6 +22,10 @@ use serde::{Deserialize, Serialize};
 use crate::color::{Color, ColorMode};
 use crate::layout::{Length, TargetValue};
 
+pub mod paint;
+
+pub use paint::{Opacity, PaintColor};
+
 /// The underline variant a styled region requests.
 ///
 /// This records intent only. Capability-aware degradation is the target
@@ -250,13 +254,21 @@ pub enum PerMode<T> {
 
 impl<T> PerMode<T> {
     /// A value used for every background mode.
-    pub fn universal(value: T) -> PerMode<T> {
-        PerMode::Universal(value)
+    ///
+    /// Accepts any `Into<T>`, so an opaque [`PaintColor`] slot takes a plain
+    /// [`Color`](crate::color::Color) directly via [`From<Color>`](PaintColor).
+    pub fn universal(value: impl Into<T>) -> PerMode<T> {
+        PerMode::Universal(value.into())
     }
 
     /// Distinct values for light and dark backgrounds.
-    pub fn adaptive(light: T, dark: T) -> PerMode<T> {
-        PerMode::Adaptive { light, dark }
+    ///
+    /// Each side accepts any `Into<T>`, matching [`universal`](Self::universal).
+    pub fn adaptive(light: impl Into<T>, dark: impl Into<T>) -> PerMode<T> {
+        PerMode::Adaptive {
+            light: light.into(),
+            dark: dark.into(),
+        }
     }
 
     /// Resolve the value for `mode`.
@@ -338,7 +350,10 @@ pub enum BorderSides {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Border {
     /// Border color, if any. `None` uses the target's default line color.
-    pub color: Option<TargetValue<PerMode<Color>>>,
+    ///
+    /// Carries [`PaintColor`], so a border edge can request alpha; the
+    /// terminal renderer paints the underlying color and ignores it.
+    pub color: Option<TargetValue<PerMode<PaintColor>>>,
     /// Visual weight.
     pub weight: BorderWeight,
     /// Line treatment.
@@ -352,16 +367,16 @@ pub struct Border {
 /// Constructors for the adaptive background tints that the deleted `Fill`
 /// intensities used to supply implicitly.
 ///
-/// These return the `TargetValue<PerMode<Color>>` value [`Style::background`]
-/// holds; `Background` itself is a zero-sized constructor namespace, never
-/// stored, so serialized `Style.background` still contains only the color
-/// value.
+/// These return the `TargetValue<PerMode<PaintColor>>` value
+/// [`Style::background`] holds; `Background` itself is a zero-sized constructor
+/// namespace, never stored. The tints are opaque, so the elided-opacity serde
+/// shape keeps `Style.background` carrying only the color value.
 pub struct Background;
 
 impl Background {
     /// A faint adaptive tint (the former subtle fill tint):
     /// `rgb(235,235,238)` on light, `rgb(30,30,34)` on dark.
-    pub fn subtle() -> TargetValue<PerMode<Color>> {
+    pub fn subtle() -> TargetValue<PerMode<PaintColor>> {
         use crate::color::{BasicColor, RgbColor};
         TargetValue::universal(PerMode::adaptive(
             Color::Rgb(RgbColor::new(235, 235, 238, BasicColor::White)),
@@ -371,7 +386,7 @@ impl Background {
 
     /// A strong adaptive tint (the former pronounced fill tint):
     /// `rgb(215,215,220)` on light, `rgb(50,50,56)` on dark.
-    pub fn pronounced() -> TargetValue<PerMode<Color>> {
+    pub fn pronounced() -> TargetValue<PerMode<PaintColor>> {
         use crate::color::{BasicColor, RgbColor};
         TargetValue::universal(PerMode::adaptive(
             Color::Rgb(RgbColor::new(215, 215, 220, BasicColor::White)),
@@ -403,13 +418,13 @@ impl Background {
 ///   "color": {
 ///     "universal": {
 ///       "adaptive": {
-///         "light": { "Tailwind": "Blue700" },
-///         "dark": { "Tailwind": "Blue300" }
+///         "light": { "color": { "Tailwind": "Blue700" } },
+///         "dark": { "color": { "Tailwind": "Blue300" } }
 ///       }
 ///     }
 ///   },
 ///   "background": {
-///     "universal": { "universal": { "Tailwind": "Slate100" } }
+///     "universal": { "universal": { "color": { "Tailwind": "Slate100" } } }
 ///   },
 ///   "emphasis": {
 ///     "bold": true,
@@ -432,10 +447,10 @@ impl Background {
 /// ```
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Style {
-    /// Foreground (text) color. Inherits through the render tree.
-    pub color: Option<TargetValue<PerMode<Color>>>,
-    /// Background color of the component's box. Does not inherit.
-    pub background: Option<TargetValue<PerMode<Color>>>,
+    /// Foreground (text) color, with alpha. Inherits through the render tree.
+    pub color: Option<TargetValue<PerMode<PaintColor>>>,
+    /// Background color of the component's box, with alpha. Does not inherit.
+    pub background: Option<TargetValue<PerMode<PaintColor>>>,
     /// Text emphasis — the shared [`TextEmphasis`] leaf. Inherits through the
     /// render tree.
     ///
@@ -485,13 +500,14 @@ mod tests {
 
         let bg = Background::subtle();
         let per_mode = bg.resolve(RenderTarget::Terminal).unwrap();
+        // The tint is opaque paint: compare the underlying color.
         assert_eq!(
-            per_mode.resolve(ColorMode::Dark),
-            &Color::Rgb(RgbColor::new(30, 30, 34, BasicColor::Black))
+            per_mode.resolve(ColorMode::Dark).color,
+            Color::Rgb(RgbColor::new(30, 30, 34, BasicColor::Black))
         );
         assert_eq!(
-            per_mode.resolve(ColorMode::Light),
-            &Color::Rgb(RgbColor::new(235, 235, 238, BasicColor::White))
+            per_mode.resolve(ColorMode::Light).color,
+            Color::Rgb(RgbColor::new(235, 235, 238, BasicColor::White))
         );
     }
 
@@ -501,12 +517,12 @@ mod tests {
 
         let per_mode = *Background::pronounced().resolve(RenderTarget::Terminal).unwrap();
         assert_eq!(
-            per_mode.resolve(ColorMode::Dark),
-            &Color::Rgb(RgbColor::new(50, 50, 56, BasicColor::Black))
+            per_mode.resolve(ColorMode::Dark).color,
+            Color::Rgb(RgbColor::new(50, 50, 56, BasicColor::Black))
         );
         assert_eq!(
-            per_mode.resolve(ColorMode::Light),
-            &Color::Rgb(RgbColor::new(215, 215, 220, BasicColor::White))
+            per_mode.resolve(ColorMode::Light).color,
+            Color::Rgb(RgbColor::new(215, 215, 220, BasicColor::White))
         );
     }
 
@@ -531,6 +547,18 @@ mod tests {
         }"#;
         let style: Style = serde_json::from_str(json).unwrap();
         assert!(style.is_empty());
+    }
+
+    #[test]
+    fn pre_paint_color_style_shape_is_rejected() {
+        // Documents the clean serde break: before `PaintColor`, the `color`
+        // slot's `PerMode` leaf was a bare `Color` (`{ "Tailwind": "Blue500" }`).
+        // The leaf is now a `PaintColor` (`{ "color": { ... } }`), so the old
+        // shape no longer deserializes — there is no migration path.
+        let old_shape = r#"{
+            "color": { "universal": { "universal": { "Tailwind": "Blue500" } } }
+        }"#;
+        assert!(serde_json::from_str::<Style>(old_shape).is_err());
     }
 
     #[test]
@@ -651,7 +679,7 @@ mod tests {
 
     #[test]
     fn per_mode_universal_resolves_for_every_mode() {
-        let value = PerMode::universal(Color::Tailwind(Tailwind::Blue500));
+        let value: PerMode<Color> = PerMode::universal(Color::Tailwind(Tailwind::Blue500));
         for mode in [ColorMode::Light, ColorMode::Dark, ColorMode::Unknown] {
             assert_eq!(value.resolve(mode), &Color::Tailwind(Tailwind::Blue500));
         }
@@ -659,7 +687,7 @@ mod tests {
 
     #[test]
     fn per_mode_adaptive_resolves_per_mode() {
-        let value = PerMode::adaptive(
+        let value: PerMode<Color> = PerMode::adaptive(
             Color::Tailwind(Tailwind::Blue700),
             Color::Tailwind(Tailwind::Blue300),
         );
@@ -680,7 +708,7 @@ mod tests {
 
     #[test]
     fn per_mode_serde_roundtrip() {
-        let value = PerMode::adaptive(
+        let value: PerMode<Color> = PerMode::adaptive(
             Color::Tailwind(Tailwind::Slate100),
             Color::Tailwind(Tailwind::Slate900),
         );
@@ -833,13 +861,13 @@ mod tests {
             "color": {
               "universal": {
                 "adaptive": {
-                  "light": { "Tailwind": "Blue700" },
-                  "dark": { "Tailwind": "Blue300" }
+                  "light": { "color": { "Tailwind": "Blue700" } },
+                  "dark": { "color": { "Tailwind": "Blue300" } }
                 }
               }
             },
             "background": {
-              "universal": { "universal": { "Tailwind": "Slate100" } }
+              "universal": { "universal": { "color": { "Tailwind": "Slate100" } } }
             },
             "emphasis": {
               "bold": true,

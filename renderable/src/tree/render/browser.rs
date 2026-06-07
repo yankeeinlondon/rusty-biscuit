@@ -2278,6 +2278,16 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
             decls.push(css);
         }
     }
+    // Validated `inline_style` (browser-only author CSS, already merged over
+    // frontmatter defaults upstream) lowers last so its declarations win over
+    // the derived `Layout` / `Style` CSS in source order — a single `style`
+    // attribute, never a second conflicting one. It is a validated
+    // `CssStyle`, so no unparsed CSS can be injected here.
+    if let Some(browser) = attrs.browser_ref()
+        && let Some(inline_style) = &browser.inline_style
+    {
+        decls.extend(css_style_declarations(inline_style));
+    }
     if needs_content_box {
         // Prepend so the contract is set before the width/padding it governs.
         decls.insert(0, "box-sizing:content-box".into());
@@ -2285,7 +2295,91 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
     if !decls.is_empty() {
         out.push(HtmlAttribute::Other("style".into(), decls.join(";")));
     }
+    push_browser_attributes(&mut out, attrs);
     out
+}
+
+/// Lowers a validated [`CssStyle`](crate::stylesheet::CssStyle) to compact
+/// `name:value` declaration strings matching the inline-`style` form the
+/// browser renderer emits for `Layout` / `Style`.
+///
+/// [`CssStyle::to_css`](crate::stylesheet::CssStyle::to_css) produces the
+/// human-spaced `name: value;` form (one declaration per line); this collapses
+/// each line to `name:value` so it merges cleanly into the joined `style`
+/// attribute.
+fn css_style_declarations(style: &crate::stylesheet::CssStyle) -> Vec<String> {
+    style
+        .to_css()
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim().trim_end_matches(';');
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.replacen(": ", ":", 1))
+            }
+        })
+        .collect()
+}
+
+/// Appends the typed browser attributes carried by [`NodeAttrs::browser`].
+///
+/// The kind-specific `link` / `image` sub-groups are emitted unconditionally
+/// from whichever group is present — validation guarantees a `link` group only
+/// rides a [`NodeKind::Link`] and an `image` group only a [`NodeKind::Image`],
+/// so no node-kind check is needed here. `data_attrs` and `aria_attrs` emit in
+/// the deterministic [`BTreeMap`](std::collections::BTreeMap) key order with a
+/// fixed `data-` / `aria-` prefix, so an arbitrary attribute (`onclick`,
+/// `href`, `src`, `style`) can never be injected through them. `inline_style`
+/// is handled by [`node_attributes`] so it coalesces into the single `style`
+/// attribute.
+fn push_browser_attributes(out: &mut Vec<HtmlAttribute>, attrs: &NodeAttrs) {
+    let Some(browser) = attrs.browser_ref() else {
+        return;
+    };
+    if let Some(link) = &browser.link {
+        if let Some(target) = &link.target {
+            out.push(HtmlAttribute::Target(target.as_str().to_string()));
+        }
+        if !link.rel.is_empty() {
+            let rel = link
+                .rel
+                .iter()
+                .map(|r| r.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            out.push(HtmlAttribute::Other("rel".into(), rel));
+        }
+        if let Some(download) = &link.download {
+            out.push(HtmlAttribute::Other("download".into(), download.clone()));
+        }
+    }
+    if let Some(image) = &browser.image {
+        if let Some(loading) = image.loading {
+            out.push(HtmlAttribute::Other(
+                "loading".into(),
+                loading.as_str().to_string(),
+            ));
+        }
+        if let Some(decoding) = image.decoding {
+            out.push(HtmlAttribute::Other(
+                "decoding".into(),
+                decoding.as_str().to_string(),
+            ));
+        }
+    }
+    for (name, value) in &browser.data_attrs {
+        out.push(HtmlAttribute::Other(
+            format!("data-{}", name.as_str()),
+            value.clone(),
+        ));
+    }
+    for (name, value) in &browser.aria_attrs {
+        out.push(HtmlAttribute::Other(
+            format!("aria-{}", name.as_str()),
+            value.clone(),
+        ));
+    }
 }
 
 /// Whether a [`Layout`](crate::layout::Layout) lowers a non-default `width` or
@@ -2337,13 +2431,18 @@ fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> S
 
     let mut decls: Vec<String> = Vec::new();
 
+    // Both color slots and the border share one lowering: `PaintColor` →
+    // validated `CssColor` (`rgb()` / `rgba()` / keyword) via the shared
+    // `paint_to_css_color`, so alpha survives and the CSS form stays consistent
+    // with the MarkdownPlus emitter.
     let resolve_color = |tv: &crate::layout::TargetValue<
-        crate::style::PerMode<crate::color::Color>,
+        crate::style::PerMode<crate::style::PaintColor>,
     >|
      -> Option<String> {
         tv.resolve(RenderTarget::Browser)
             .map(|per_mode| *per_mode.resolve(ColorMode::Dark))
-            .and_then(super::shared::color_to_css)
+            .and_then(super::shared::paint_to_css_color)
+            .map(|css| css.to_string())
     };
 
     if let Some(color) = style.color.as_ref().and_then(&resolve_color) {
@@ -2406,7 +2505,7 @@ fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> S
 fn lower_border(
     border: &crate::style::Border,
     resolve_color: impl Fn(
-        &crate::layout::TargetValue<crate::style::PerMode<crate::color::Color>>,
+        &crate::layout::TargetValue<crate::style::PerMode<crate::style::PaintColor>>,
     ) -> Option<String>,
     decls: &mut Vec<String>,
 ) {
@@ -3233,6 +3332,114 @@ mod tests {
     }
 
     #[test]
+    fn link_emits_typed_browser_attributes() {
+        let mut link = RenderNode::link("https://example.com/x", None, vec![RenderNode::text("go")]);
+        let browser = crate::tree::BrowserAttrs {
+            link: Some(crate::tree::LinkBrowserAttrs {
+                target: Some(crate::tree::LinkTarget::Blank),
+                rel: vec![
+                    crate::tree::LinkRelation::NoOpener,
+                    crate::tree::LinkRelation::NoReferrer,
+                ],
+                download: Some("file.txt".into()),
+            }),
+            ..Default::default()
+        };
+        link.attrs.set_browser(&browser);
+        assert_eq!(
+            html(&link),
+            r#"<a target="_blank" rel="noopener noreferrer" download="file.txt" href="https://example.com/x">go</a>"#
+        );
+    }
+
+    #[test]
+    fn image_emits_typed_browser_attributes() {
+        let mut image = RenderNode::image("p.png", None, "alt");
+        let browser = crate::tree::BrowserAttrs {
+            image: Some(crate::tree::ImageBrowserAttrs {
+                loading: Some(crate::tree::ImageLoading::Lazy),
+                decoding: Some(crate::tree::ImageDecoding::Async),
+            }),
+            ..Default::default()
+        };
+        image.attrs.set_browser(&browser);
+        assert_eq!(
+            html(&image),
+            r#"<img loading="lazy" decoding="async" src="p.png" alt="alt">"#
+        );
+    }
+
+    #[test]
+    fn node_emits_data_and_aria_attributes_in_deterministic_order_and_escaped() {
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        let mut browser = crate::tree::BrowserAttrs::default();
+        // Insert out of sorted order; BTreeMap emits them sorted.
+        browser
+            .data_attrs
+            .insert(crate::tree::DataAttrName::new("z-last").unwrap(), "1".into());
+        browser.data_attrs.insert(
+            crate::tree::DataAttrName::new("prompt").unwrap(),
+            "explain < this".into(),
+        );
+        browser.aria_attrs.insert(
+            crate::tree::AriaAttrName::new("label").unwrap(),
+            "info".into(),
+        );
+        para.attrs.set_browser(&browser);
+        assert_eq!(
+            html(&para),
+            r#"<p data-prompt="explain &lt; this" data-z-last="1" aria-label="info">x</p>"#
+        );
+    }
+
+    #[test]
+    fn inline_style_merges_with_node_style_into_a_single_attribute() {
+        use crate::style::{PaintColor, PerMode, Style};
+        let mut span = RenderNode::span(vec![], vec![RenderNode::text("x")]);
+        // Node `Style` sets a foreground color; inline_style sets a background.
+        span.attrs.set_style(&Style {
+            color: Some(crate::layout::TargetValue::universal(PerMode::universal(
+                PaintColor::new(crate::color::Color::Tailwind(crate::color::Tailwind::Inherit)),
+            ))),
+            ..Default::default()
+        });
+        let browser = crate::tree::BrowserAttrs {
+            inline_style: Some(crate::stylesheet::CssStyle::new().add(
+                crate::stylesheet::CssColorProp::BackgroundColor,
+                crate::stylesheet::CssColor::rgb(0x33, 0x66, 0x99),
+            )),
+            ..Default::default()
+        };
+        span.attrs.set_browser(&browser);
+        // A single `style` attribute carries both the node-`Style` color and the
+        // inline_style background, inline_style last so it wins in source order.
+        assert_eq!(
+            html(&span),
+            r#"<span style="color:inherit;background-color:rgb(51, 102, 153)">x</span>"#
+        );
+    }
+
+    /// The validated `data-*` / `aria-*` name newtypes make it impossible to
+    /// inject a duplicate/replacement `href`, `src`, raw `style`, or
+    /// event-handler attribute through the typed extension maps — the spec's
+    /// "no attribute injection" contract.
+    #[test]
+    fn browser_attr_name_newtypes_reject_injection_vectors() {
+        for forbidden in ["href", "src", "style", "onclick", "onload"] {
+            // A `data-`/`aria-` prefix is always prepended, so even an accepted
+            // name cannot become a bare `href`/`src`/`style`/`onclick`. The
+            // names here are themselves valid suffixes, proving the prefix — not
+            // name rejection — is the guard.
+            let data = crate::tree::DataAttrName::new(forbidden).unwrap();
+            assert_eq!(data.as_str(), forbidden);
+        }
+        // Names that *could* break out of the attribute token are rejected.
+        assert!(crate::tree::DataAttrName::new("on click").is_err());
+        assert!(crate::tree::DataAttrName::new("href=\"x\"").is_err());
+        assert!(crate::tree::AriaAttrName::new("foo>bar").is_err());
+    }
+
+    #[test]
     fn thematic_break_and_breaks() {
         // Under GraphicsMode::Off a plain break degrades to <hr>.
         assert_eq!(
@@ -3613,6 +3820,65 @@ mod tests {
                 "1",
                 vec![RenderNode::paragraph(vec![RenderNode::text("note")])],
             ),
+            // A paragraph carrying typed browser attrs (inline style merged with
+            // node Style, plus data-* / aria-* maps) — exercises the generic
+            // browser-attr lowering in both writers.
+            {
+                let mut para = RenderNode::paragraph(vec![RenderNode::text("attrs")]);
+                let mut browser = crate::tree::BrowserAttrs {
+                    inline_style: Some(crate::stylesheet::CssStyle::new().add(
+                        crate::stylesheet::CssColorProp::Color,
+                        crate::stylesheet::CssColor::rgb(0x33, 0x66, 0x99),
+                    )),
+                    ..Default::default()
+                };
+                browser.data_attrs.insert(
+                    crate::tree::DataAttrName::new("prompt").unwrap(),
+                    "explain < this".into(),
+                );
+                browser.aria_attrs.insert(
+                    crate::tree::AriaAttrName::new("label").unwrap(),
+                    "info".into(),
+                );
+                para.attrs.set_browser(&browser);
+                para
+            },
+            // A link carrying typed link browser attrs and an image carrying
+            // typed image browser attrs — exercises the kind-specific lowering.
+            RenderNode::paragraph(vec![
+                {
+                    let mut link = RenderNode::link(
+                        "https://example.com/x",
+                        None,
+                        vec![RenderNode::text("go")],
+                    );
+                    let browser = crate::tree::BrowserAttrs {
+                        link: Some(crate::tree::LinkBrowserAttrs {
+                            target: Some(crate::tree::LinkTarget::Blank),
+                            rel: vec![
+                                crate::tree::LinkRelation::NoOpener,
+                                crate::tree::LinkRelation::NoReferrer,
+                            ],
+                            download: Some("file.txt".into()),
+                        }),
+                        ..Default::default()
+                    };
+                    link.attrs.set_browser(&browser);
+                    link
+                },
+                {
+                    let mut image = RenderNode::image("p.png", None, "alt");
+                    let browser = crate::tree::BrowserAttrs {
+                        image: Some(crate::tree::ImageBrowserAttrs {
+                            loading: Some(crate::tree::ImageLoading::Lazy),
+                            decoding: Some(crate::tree::ImageDecoding::Async),
+                        }),
+                        ..Default::default()
+                    };
+                    image.attrs.set_browser(&browser);
+                    image
+                },
+            ]),
         ]
     }
 
@@ -4367,7 +4633,7 @@ mod tests {
 
     fn universal_color(
         c: crate::color::Color,
-    ) -> crate::layout::TargetValue<crate::style::PerMode<crate::color::Color>> {
+    ) -> crate::layout::TargetValue<crate::style::PerMode<crate::style::PaintColor>> {
         crate::layout::TargetValue::universal(crate::style::PerMode::universal(c))
     }
 
@@ -4379,7 +4645,25 @@ mod tests {
             ..Default::default()
         });
         let out = html(&node);
-        assert!(out.contains("color:#"), "{out}");
+        assert!(out.contains("color:rgb("), "{out}");
+    }
+
+    #[test]
+    fn style_foreground_alpha_lowers_to_rgba() {
+        use crate::color::{BasicColor, Color, RgbColor};
+        use crate::style::{Opacity, PaintColor, PerMode};
+        let paint = PaintColor::new(Color::Rgb(RgbColor::new(255, 0, 0, BasicColor::Red)))
+            .with_opacity(Opacity::from_percent(50).unwrap());
+        let node = styled_para(crate::style::Style {
+            color: Some(crate::layout::TargetValue::universal(PerMode::universal(
+                paint,
+            ))),
+            ..Default::default()
+        });
+        let out = html(&node);
+        // A single declaration carrying the alpha — no opaque pre-declaration.
+        assert!(out.contains("color:rgba(255, 0, 0,"), "{out}");
+        assert_eq!(out.matches("color:").count(), 1, "{out}");
     }
 
     #[test]
@@ -4390,7 +4674,7 @@ mod tests {
             ..Default::default()
         });
         let out = html(&node);
-        assert!(out.contains("background-color:#"), "{out}");
+        assert!(out.contains("background-color:rgb("), "{out}");
     }
 
     #[test]
@@ -4515,7 +4799,7 @@ mod tests {
         // A single style attribute carrying both layout and style CSS.
         assert_eq!(out.matches("style=").count(), 1, "{out}");
         assert!(out.contains("margin-left:2ch"), "{out}");
-        assert!(out.contains("color:#"), "{out}");
+        assert!(out.contains("color:rgb("), "{out}");
     }
 
     #[test]
@@ -4527,7 +4811,7 @@ mod tests {
             ..Default::default()
         });
         let out = html(&span);
-        assert!(out.contains("color:#"), "{out}");
+        assert!(out.contains("color:rgb("), "{out}");
     }
 
     #[test]
@@ -4716,7 +5000,7 @@ mod tests {
         let td_attrs = &after[..after.find('>').expect("td close")];
         assert_eq!(td_attrs.matches("style=").count(), 1, "{out}");
         assert!(td_attrs.contains("text-align:right"), "{out}");
-        assert!(td_attrs.contains("color:#"), "{out}");
+        assert!(td_attrs.contains("color:rgb("), "{out}");
     }
 
     // ── RT-FILESYSTEM-001: browser marker policy ───────────────────────────
