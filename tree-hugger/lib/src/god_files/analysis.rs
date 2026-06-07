@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::FileReference;
 use rayon::prelude::*;
+use tree_sitter::Node;
 
 use crate::file::tree_file::TreeFile;
 use crate::scanner::collect_files;
@@ -136,13 +137,10 @@ fn analyze_single_file(path: &Path, root: &Path) -> Option<GodAnalysis> {
             let imports = tree_file.imported_symbols().unwrap_or_default();
 
             let blocks_data = compute_symbol_blocks(&source, &records, &comment_ranges);
-            let top_level: Vec<&SymbolRecord> = records
-                .iter()
-                .filter(|r| r.identity.module_path.is_none())
-                .collect();
+            let top_level = collect_top_level(&records);
             let top_level_symbol_count = top_level.len();
             let kind_histogram = build_kind_histogram(&top_level);
-            let max_nesting_depth = compute_max_nesting_depth(&records);
+            let max_nesting_depth = compute_max_nesting_depth(&tree_file);
             let import_fan_out = imports.len();
             let todo_fixme_count = count_todo_fixme(&source, &comment_ranges);
             let comment_density = compute_comment_density(physical_lines, &source, &comment_ranges);
@@ -710,6 +708,70 @@ fn is_container_kind(kind: SymbolKindV2) -> bool {
     )
 }
 
+/// Collect the records with no owning symbol — the file's top-level symbols.
+///
+/// A symbol is top-level only when it has neither a recorded container name
+/// (`module_path`) nor a declaration span enclosed by another symbol. Relying
+/// on `module_path` alone over-reports: the parse pass does not consistently
+/// populate it for locals and parameters, so those would masquerade as
+/// file-scope symbols. Span containment is the authoritative corrective signal
+/// — a parameter or local always sits inside its owning function's declaration
+/// span — while genuine file-scope variables remain enclosed by nothing and
+/// stay counted.
+fn collect_top_level(records: &[SymbolRecord]) -> Vec<&SymbolRecord> {
+    let enclosed = compute_enclosed(records);
+    records
+        .iter()
+        .enumerate()
+        .filter(|(i, r)| r.identity.module_path.is_none() && !enclosed[*i])
+        .map(|(_, r)| r)
+        .collect()
+}
+
+/// For each record (indexed by position), whether another record's declaration
+/// span strictly encloses it.
+///
+/// Symbol spans are laminar (AST-derived: any two are disjoint or one contains
+/// the other), so a single sweep with a stack of enclosing spans decides
+/// containment in `O(n log n)` — the same near-linear shape the analysis pass
+/// requires for files with tens of thousands of symbols.
+fn compute_enclosed(records: &[SymbolRecord]) -> Vec<bool> {
+    let mut enclosed = vec![false; records.len()];
+
+    // (record index, span). Records without a usable span cannot be proven
+    // enclosed and are left at the default `false` (treated as file-scope).
+    let mut spans: Vec<(usize, SpanBytes)> = records
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| record_span_bytes(r).map(|s| (i, s)))
+        .collect();
+
+    // Start ascending, end descending: wider (enclosing) spans sort before the
+    // narrower spans they contain on a tie.
+    spans.sort_by(|a, b| a.1.0.cmp(&b.1.0).then_with(|| b.1.1.cmp(&a.1.1)));
+
+    let mut stack: Vec<SpanBytes> = Vec::new();
+    for &(idx, (start, end, _, _)) in &spans {
+        // Pop ancestors that do not strictly enclose the current span. Equal
+        // spans are treated as siblings (strictness on at least one bound), so
+        // a degenerate duplicate never claims to contain the original.
+        while let Some(&(top_start, top_end, _, _)) = stack.last() {
+            let encloses =
+                top_start <= start && top_end >= end && (top_start < start || top_end > end);
+            if encloses {
+                break;
+            }
+            stack.pop();
+        }
+        if !stack.is_empty() {
+            enclosed[idx] = true;
+        }
+        stack.push((start, end, 0, 0));
+    }
+
+    enclosed
+}
+
 /// Build a deterministic histogram from top-level symbols.
 fn build_kind_histogram(top_level: &[&SymbolRecord]) -> KindHistogram {
     let mut map: BTreeMap<SymbolKind, usize> = BTreeMap::new();
@@ -719,51 +781,205 @@ fn build_kind_histogram(top_level: &[&SymbolRecord]) -> KindHistogram {
     KindHistogram(map)
 }
 
-/// Compute maximum symbol nesting depth from range containment.
-fn compute_max_nesting_depth(records: &[SymbolRecord]) -> usize {
-    if records.is_empty() {
-        return 0;
-    }
-    // Prefer declaration_span for nesting depth because it covers the entire
-    // definition including nested symbols; body_span is often too tight and
-    // may not strictly enclose a nested body on shared end bytes.
-    let mut spans: Vec<(u32, u32)> = records
-        .iter()
-        .filter_map(|r| {
-            let span = &r.source.declaration_span;
-            if span.start_byte == 0 && span.end_byte == 0 {
-                return None;
-            }
-            Some((span.start_byte, span.end_byte))
-        })
-        .collect();
-
-    if spans.is_empty() {
-        return 0;
-    }
-
-    // Sort by start_byte ascending, and for ties put wider spans first.
-    spans.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
-
-    // Symbol spans are laminar (AST-derived: any two are disjoint or one
-    // contains the other), so a single sweep with a stack of enclosing spans
-    // yields the deepest chain in O(n). The stack holds the current ancestor
-    // chain bottom-to-top; each entry strictly contains the one above it.
-    // Containment matches the sort tie-break (strict on start, so equal-start
-    // spans are siblings rather than nested).
-    let mut stack: Vec<(u32, u32)> = Vec::new();
-    let mut max_depth = 1usize;
-    for &(start, end) in &spans {
-        while let Some(&(top_start, top_end)) = stack.last() {
-            if top_start < start && top_end >= end {
-                break;
-            }
-            stack.pop();
+/// Compute the deepest nesting of control-flow constructs from a single walk
+/// of the concrete syntax tree.
+///
+/// Symbol-span containment cannot see this signal: `if`/`for`/`while`/`match`/
+/// `try` constructs are not extracted symbols, so a function packed with eight
+/// nested `if` blocks would otherwise report the trivial depth of its symbol
+/// records. Walking the tree-sitter tree and counting only control-flow
+/// construct nodes (not their body blocks, and not function or class scopes)
+/// yields a depth that grows with nested branching and stays flat for
+/// sequential branches.
+fn compute_max_nesting_depth(tree_file: &TreeFile) -> usize {
+    let language = tree_file.language;
+    let mut max_depth = 0usize;
+    // Iterative DFS carrying the control-flow depth of each node's parent, so a
+    // deep tree cannot overflow the call stack.
+    let mut stack: Vec<(Node, usize)> = vec![(tree_file.root_node(), 0)];
+    while let Some((node, depth)) = stack.pop() {
+        let child_depth = if is_control_flow_nesting(language, node.kind()) {
+            let here = depth + 1;
+            max_depth = max_depth.max(here);
+            here
+        } else {
+            depth
+        };
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            stack.push((child, child_depth));
         }
-        max_depth = max_depth.max(stack.len() + 1);
-        stack.push((start, end));
     }
     max_depth
+}
+
+/// Returns true for syntax-tree node kinds that introduce a control-flow
+/// nesting level in `language`'s grammar.
+///
+/// Classification is per-language because the same node kind means different
+/// things across grammars: Scala's `try_expression` is a real `try { } catch`
+/// block, while Rust's and Swift's `try_expression` is the postfix `?` /
+/// prefix `try` operator and must not count. The kind sets are derived from the
+/// pinned grammars' `node-types.json`.
+///
+/// Each set matches the construct node itself (`if_statement`, `for_statement`,
+/// …) and not its body block, so each nesting level is counted once. Clause and
+/// arm nodes (`else_clause`, `elif_clause`, `case_statement`, `catch_clause`)
+/// are children of their construct and excluded — counting them would double the
+/// depth of a single branch. Ternary `conditional_expression` is excluded: the
+/// metric measures block nesting, not expression nesting.
+fn is_control_flow_nesting(language: ProgrammingLanguage, kind: &str) -> bool {
+    match language {
+        ProgrammingLanguage::Rust => matches!(
+            kind,
+            "if_expression"
+                | "match_expression"
+                | "for_expression"
+                | "while_expression"
+                | "loop_expression"
+                | "try_block"
+        ),
+        ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => matches!(
+            kind,
+            "if_statement"
+                | "for_statement"
+                | "for_in_statement"
+                | "while_statement"
+                | "do_statement"
+                | "switch_statement"
+                | "try_statement"
+                | "with_statement"
+        ),
+        ProgrammingLanguage::Go => matches!(
+            kind,
+            "if_statement"
+                | "for_statement"
+                | "expression_switch_statement"
+                | "type_switch_statement"
+                | "select_statement"
+        ),
+        ProgrammingLanguage::Python => matches!(
+            kind,
+            "if_statement"
+                | "for_statement"
+                | "while_statement"
+                | "match_statement"
+                | "try_statement"
+                | "with_statement"
+        ),
+        ProgrammingLanguage::Java => matches!(
+            kind,
+            "if_statement"
+                | "for_statement"
+                | "enhanced_for_statement"
+                | "while_statement"
+                | "do_statement"
+                | "switch_expression"
+                | "try_statement"
+                | "try_with_resources_statement"
+        ),
+        ProgrammingLanguage::Php => matches!(
+            kind,
+            "if_statement"
+                | "for_statement"
+                | "foreach_statement"
+                | "while_statement"
+                | "do_statement"
+                | "switch_statement"
+                | "try_statement"
+                | "match_expression"
+        ),
+        // Perl block forms plus statement-modifier (postfix) and `*_simple`
+        // forms; both express conditional/looping execution in this grammar.
+        ProgrammingLanguage::Perl => matches!(
+            kind,
+            "if_statement"
+                | "unless_statement"
+                | "while_statement"
+                | "until_statement"
+                | "for_statement_1"
+                | "for_statement_2"
+                | "if_simple_statement"
+                | "unless_simple_statement"
+                | "while_simple_statement"
+                | "until_simple_statement"
+                | "for_simple_statement"
+                | "when_simple_statement"
+        ),
+        ProgrammingLanguage::Bash => matches!(
+            kind,
+            "if_statement"
+                | "for_statement"
+                | "c_style_for_statement"
+                | "while_statement"
+                | "case_statement"
+        ),
+        ProgrammingLanguage::Zsh => matches!(
+            kind,
+            "if_statement"
+                | "for_statement"
+                | "c_style_for_statement"
+                | "terse_for_statement"
+                | "while_statement"
+                | "repeat_statement"
+                | "case_statement"
+                | "select_statement"
+        ),
+        ProgrammingLanguage::C => matches!(
+            kind,
+            "if_statement"
+                | "for_statement"
+                | "while_statement"
+                | "do_statement"
+                | "switch_statement"
+                | "seh_try_statement"
+        ),
+        ProgrammingLanguage::Cpp => matches!(
+            kind,
+            "if_statement"
+                | "for_statement"
+                | "for_range_loop"
+                | "while_statement"
+                | "do_statement"
+                | "switch_statement"
+                | "try_statement"
+                | "seh_try_statement"
+        ),
+        ProgrammingLanguage::CSharp => matches!(
+            kind,
+            "if_statement"
+                | "for_statement"
+                | "foreach_statement"
+                | "while_statement"
+                | "do_statement"
+                | "switch_statement"
+                | "switch_expression"
+                | "try_statement"
+        ),
+        ProgrammingLanguage::Swift => matches!(
+            kind,
+            "if_statement"
+                | "for_statement"
+                | "while_statement"
+                | "repeat_while_statement"
+                | "switch_statement"
+                | "do_statement"
+                | "guard_statement"
+        ),
+        ProgrammingLanguage::Scala => matches!(
+            kind,
+            "if_expression"
+                | "for_expression"
+                | "while_expression"
+                | "do_while_expression"
+                | "match_expression"
+                | "try_expression"
+        ),
+        ProgrammingLanguage::Lua => matches!(
+            kind,
+            "if_statement" | "for_statement" | "while_statement" | "repeat_statement"
+        ),
+    }
 }
 
 /// Synthesize refactor hints from signals and ranked blocks.
@@ -1479,6 +1695,81 @@ class BigClass:
     }
 
     #[test]
+    fn top_level_excludes_locals_and_parameters() {
+        // Public-boundary reproduction: ten top-level functions, each with one
+        // parameter and many local assignments. The locals and parameters have
+        // no recorded container, so the old `module_path.is_none()` test
+        // counted all of them as top-level (hundreds of phantom Variables and
+        // Parameters) and emitted a wildly inflated ManyUnrelatedTopLevel hint.
+        let dir = TempDir::new().unwrap();
+        let mut source = String::new();
+        for f in 0..10 {
+            source.push_str(&format!("def f{f}(arg):\n"));
+            for v in 0..44 {
+                source.push_str(&format!("    local_{f}_{v} = arg + {v}\n"));
+            }
+        }
+        temp_file(&dir, "functions.py", &source);
+
+        let god_files = GodFiles::new(dir.path());
+        let analysis = god_files.analysis();
+        assert_eq!(analysis.len(), 1, "file should report as a god file");
+        let report = &analysis[0];
+
+        assert_eq!(
+            report.top_level_symbol_count, 10,
+            "only the ten functions are top-level; locals and parameters are not"
+        );
+        let kinds: Vec<_> = report.kind_histogram.0.keys().copied().collect();
+        assert_eq!(
+            kinds,
+            vec![SymbolKind::Function],
+            "histogram must contain only the top-level functions, got {:?}",
+            report.kind_histogram.0
+        );
+        assert!(
+            report
+                .refactor_hints
+                .iter()
+                .any(|h| matches!(h, RefactorHint::ManyUnrelatedTopLevel { count: 10 })),
+            "hint count must be the ten functions, got {:?}",
+            report.refactor_hints
+        );
+    }
+
+    #[test]
+    fn top_level_keeps_file_scope_variables() {
+        // File-scope (module-level) variables have no enclosing symbol and must
+        // remain counted as top-level alongside functions.
+        let mut source = String::new();
+        for i in 0..12 {
+            source.push_str(&format!("CONST_{i} = {i}\n"));
+        }
+        source.push_str("def helper(x):\n    return x\n");
+        let dir = TempDir::new().unwrap();
+        let path = temp_file(&dir, "globals.py", &source);
+
+        let tree_file = TreeFile::new(&path).unwrap();
+        let records = tree_file.symbol_records().unwrap();
+        let top_level = collect_top_level(&records);
+
+        let var_count = top_level
+            .iter()
+            .filter(|r| SymbolKind::from(r.kind) == SymbolKind::Variable)
+            .count();
+        assert_eq!(var_count, 12, "all twelve file-scope variables are top-level");
+        assert!(
+            top_level.iter().any(|r| r.identity.name == "helper"),
+            "the top-level function must remain counted"
+        );
+        // `helper`'s parameter and any function-body locals are enclosed.
+        assert!(
+            !top_level.iter().any(|r| r.identity.name == "x"),
+            "the function parameter must be excluded"
+        );
+    }
+
+    #[test]
     fn todo_fixme_count_in_comments() {
         let source = r#"
 # TODO: fix this
@@ -1671,25 +1962,305 @@ x = 1
         )));
     }
 
-    #[test]
-    fn max_nesting_depth_from_nested_functions() {
-        let dir = TempDir::new().unwrap();
-        let mut source = String::new();
-        source.push_str("def outer():\n");
-        source.push_str("    def inner():\n");
-        source.push_str("        def deepest():\n");
-        source.push_str("            pass\n");
-        // Pad outer so its body span encloses the nested functions.
-        for i in 0..20 {
-            source.push_str(&format!("    x{} = {}\n", i, i));
-        }
-        let path = temp_file(&dir, "nested.py", &source);
+    /// `(extension, source, expected_depth)`. Every supported language is
+    /// exercised with its grammar-specific loop, conditional, match, and
+    /// exception forms so the per-language node-kind sets in
+    /// `is_control_flow_nesting` cannot silently lose a construct. Each `deep`
+    /// case nests distinct constructs; each `flat`/sequential case keeps them
+    /// side by side so nesting must not accumulate. Function and class scopes do
+    /// not count — only branching/looping/match/exception constructs do.
+    const NESTING_DEPTH_CASES: &[(&str, &str, usize)] = &[
+        // Python: one function, eight nested `if` blocks → depth 8.
+        (
+            "py",
+            "def f(x):\n    if x > 0:\n        if x > 1:\n            if x > 2:\n                if x > 3:\n                    if x > 4:\n                        if x > 5:\n                            if x > 6:\n                                if x > 7:\n                                    return x\n",
+            8,
+        ),
+        // Python: eight *sequential* ifs in one function → depth 1.
+        (
+            "py",
+            "def f(x):\n    if x == 0:\n        return 0\n    if x == 1:\n        return 1\n    if x == 2:\n        return 2\n    if x == 3:\n        return 3\n",
+            1,
+        ),
+        // Python: with / for / match / while / try → depth 5.
+        (
+            "py",
+            "def f(x):\n    with a() as b:\n        for i in x:\n            match i:\n                case 0:\n                    while i:\n                        try:\n                            pass\n                        except Exception:\n                            pass\n",
+            5,
+        ),
+        // Rust: nested for / if / while inside a function → depth 3.
+        (
+            "rs",
+            "fn f(n: i32) {\n    for i in 0..n {\n        if i > 0 {\n            while i < n {\n                break;\n            }\n        }\n    }\n}\n",
+            3,
+        ),
+        // Rust: a single function with no control flow → depth 0.
+        ("rs", "fn f() {\n    let x = 1;\n    let y = 2;\n}\n", 0),
+        // Rust: match arm body holds a loop holding an if → depth 3.
+        (
+            "rs",
+            "fn f(x: i32) {\n    match x {\n        _ => {\n            loop {\n                if x > 0 {}\n            }\n        }\n    }\n}\n",
+            3,
+        ),
+        // Rust: the `?` operator is `try_expression`, not a nesting block → 0.
+        (
+            "rs",
+            "fn f() -> Result<(), ()> {\n    let _ = g()?;\n    Ok(())\n}\n",
+            0,
+        ),
+        // Rust: a `try { }` block (`try_block`) holding an if → depth 2.
+        (
+            "rs",
+            "fn f() {\n    let _: Result<(), ()> = try {\n        if true {}\n    };\n}\n",
+            2,
+        ),
+        // JavaScript: nested for / if / try → depth 3.
+        (
+            "js",
+            "function f(items) {\n  for (const i of items) {\n    if (i) {\n      try {\n        use(i);\n      } catch (e) {}\n    }\n  }\n}\n",
+            3,
+        ),
+        // JavaScript: do / with / if → depth 3.
+        (
+            "js",
+            "function f(o, x) {\n  do {\n    with (o) {\n      if (x) {}\n    }\n  } while (false);\n}\n",
+            3,
+        ),
+        // TypeScript: for-of / if / while → depth 3.
+        (
+            "ts",
+            "function f(items: number[]) {\n  for (const i of items) {\n    if (i) {\n      while (i) {}\n    }\n  }\n}\n",
+            3,
+        ),
+        // TypeScript: switch / do-while → depth 2.
+        (
+            "ts",
+            "function f(n: number) {\n  switch (n) {\n    case 1:\n      do {} while (n > 0);\n  }\n}\n",
+            2,
+        ),
+        // Go: for / if / expression-switch → depth 3.
+        (
+            "go",
+            "func f(n int) {\n\tfor i := 0; i < n; i++ {\n\t\tif i > 0 {\n\t\t\tswitch i {\n\t\t\tcase 1:\n\t\t\t}\n\t\t}\n\t}\n}\n",
+            3,
+        ),
+        // Go: select / type-switch → depth 2.
+        (
+            "go",
+            "func f(ch chan int, x interface{}) {\n\tselect {\n\tcase <-ch:\n\t\tswitch x.(type) {\n\t\tcase int:\n\t\t}\n\t}\n}\n",
+            2,
+        ),
+        // Java: try-with-resources / enhanced-for / if → depth 3.
+        (
+            "java",
+            "class C {\n  void f(java.util.List<String> xs) throws Exception {\n    try (var r = open()) {\n      for (var x : xs) {\n        if (x != null) {}\n      }\n    }\n  }\n}\n",
+            3,
+        ),
+        // Java: switch / while / do → depth 3.
+        (
+            "java",
+            "class C {\n  void f(int n) {\n    switch (n) {\n      case 1:\n        while (n > 0) {\n          do {} while (n > 0);\n        }\n    }\n  }\n}\n",
+            3,
+        ),
+        // PHP: foreach / if / while → depth 3.
+        (
+            "php",
+            "<?php\nfunction f($items) {\n  foreach ($items as $i) {\n    if ($i) {\n      while ($i) {}\n    }\n  }\n}\n",
+            3,
+        ),
+        // PHP: switch / match-expression → depth 2.
+        (
+            "php",
+            "<?php\nfunction f($x) {\n  switch ($x) {\n    case 1:\n      $y = match($x) { 1 => 1, default => 2 };\n      break;\n  }\n}\n",
+            2,
+        ),
+        // Perl: block if / unless / while → depth 3.
+        (
+            "pl",
+            "if ($x) {\n  unless ($y) {\n    while ($z) {}\n  }\n}\n",
+            3,
+        ),
+        // Perl: until block holding a foreach (`for_statement_2`) → depth 2.
+        (
+            "pl",
+            "until ($done) {\n  for my $i (@list) {}\n}\n",
+            2,
+        ),
+        // Perl: C-style for (`for_statement_1`) holding an if → depth 2.
+        (
+            "pl",
+            "for (my $i = 0; $i < 10; $i++) {\n  if ($i) {}\n}\n",
+            2,
+        ),
+        // Perl: postfix statement modifier inside a block → depth 2.
+        ("pl", "if ($x) {\n  print 1 unless $y;\n}\n", 2),
+        // Perl: a lone postfix `if` modifier (`if_simple_statement`) → depth 1.
+        ("pl", "print 1 if $c;\n", 1),
+        // Bash: if / for / while → depth 3.
+        (
+            "sh",
+            "if true; then\n  for x in a b; do\n    while true; do :; done\n  done\nfi\n",
+            3,
+        ),
+        // Bash: case holding a C-style for → depth 2.
+        (
+            "sh",
+            "case $x in\n  a)\n    for ((i=0;i<3;i++)); do :; done\n  ;;\nesac\n",
+            2,
+        ),
+        // Zsh: for / if / while → depth 3.
+        (
+            "zsh",
+            "for x in a b; do\n  if true; then\n    while true; do :; done\n  fi\ndone\n",
+            3,
+        ),
+        // Zsh: repeat holding a case → depth 2.
+        (
+            "zsh",
+            "repeat 3; do\n  case $x in\n    a) :;;\n  esac\ndone\n",
+            2,
+        ),
+        // Zsh: select holding an if → depth 2.
+        (
+            "zsh",
+            "select x in a b; do\n  if true; then :; fi\ndone\n",
+            2,
+        ),
+        // C: for / if / while → depth 3.
+        (
+            "c",
+            "void f(int n) {\n  for (int i = 0; i < n; i++) {\n    if (i) {\n      while (i) {}\n    }\n  }\n}\n",
+            3,
+        ),
+        // C: switch holding a do-while → depth 2.
+        (
+            "c",
+            "void f(int n) {\n  switch (n) {\n    case 1:\n      do {} while (0);\n  }\n}\n",
+            2,
+        ),
+        // C++: range-for / if / while → depth 3.
+        (
+            "cpp",
+            "void f(std::vector<int> v) {\n  for (auto x : v) {\n    if (x) {\n      while (x) {}\n    }\n  }\n}\n",
+            3,
+        ),
+        // C++: try holding a switch → depth 2.
+        (
+            "cpp",
+            "void f(int n) {\n  try {\n    switch (n) {\n      case 1:\n        break;\n    }\n  } catch (...) {}\n}\n",
+            2,
+        ),
+        // C#: foreach / if / while → depth 3.
+        (
+            "cs",
+            "class C {\n  void F(int[] xs) {\n    foreach (var x in xs) {\n      if (x > 0) {\n        while (x > 0) {}\n      }\n    }\n  }\n}\n",
+            3,
+        ),
+        // C#: try holding a switch statement → depth 2.
+        (
+            "cs",
+            "class C {\n  void F(int n) {\n    try {\n      switch (n) {\n        case 1:\n          break;\n      }\n    } catch {}\n  }\n}\n",
+            2,
+        ),
+        // Swift: for / if / while → depth 3.
+        (
+            "swift",
+            "func f(items: [Int]) {\n  for i in items {\n    if i > 0 {\n      while i > 0 {}\n    }\n  }\n}\n",
+            3,
+        ),
+        // Swift: repeat-while holding a switch → depth 2.
+        (
+            "swift",
+            "func f(n: Int) {\n  repeat {\n    switch n {\n    case 1: break\n    default: break\n    }\n  } while n > 0\n}\n",
+            2,
+        ),
+        // Swift: guard else-block holding a for → depth 2.
+        (
+            "swift",
+            "func f(x: Int?) {\n  guard let y = x else {\n    for _ in 0..<1 {}\n    return\n  }\n  _ = y\n}\n",
+            2,
+        ),
+        // Scala: for / if / while → depth 3.
+        (
+            "scala",
+            "object O {\n  def f(items: List[Int]): Unit = {\n    for (i <- items) {\n      if (i > 0) {\n        while (i > 0) {}\n      }\n    }\n  }\n}\n",
+            3,
+        ),
+        // Scala: match arm holding a try (`try_expression` here is a real block) → depth 2.
+        (
+            "scala",
+            "object O {\n  def f(x: Int): Unit = {\n    x match {\n      case _ =>\n        try { g() } catch { case e: Exception => () }\n    }\n  }\n}\n",
+            2,
+        ),
+        // Scala: do-while holding an if → depth 2.
+        (
+            "scala",
+            "object O {\n  def f(): Unit = {\n    var n = 0\n    do { if (n > 0) {} } while (n < 3)\n  }\n}\n",
+            2,
+        ),
+        // Lua: for / if / while → depth 3.
+        (
+            "lua",
+            "function f(items)\n  for _, i in ipairs(items) do\n    if i then\n      while i do end\n    end\n  end\nend\n",
+            3,
+        ),
+        // Lua: repeat holding an if → depth 2.
+        (
+            "lua",
+            "function f()\n  repeat\n    if x then end\n  until done\nend\n",
+            2,
+        ),
+    ];
 
-        let tree_file = TreeFile::new(&path).unwrap();
-        let records = tree_file.symbol_records().unwrap();
-        let depth = compute_max_nesting_depth(&records);
-        // outer contains inner contains deepest.
-        assert!(depth >= 3, "expected depth >= 3, got {}", depth);
+    #[test]
+    fn nesting_depth_counts_control_flow_not_symbols() {
+        let dir = TempDir::new().unwrap();
+        for (ext, source, expected_depth) in NESTING_DEPTH_CASES {
+            let path = temp_file(&dir, &format!("nest.{ext}"), source);
+            let tree_file =
+                TreeFile::new(&path).unwrap_or_else(|e| panic!("{ext}: TreeFile::new failed: {e}"));
+            let depth = compute_max_nesting_depth(&tree_file);
+            assert_eq!(
+                depth, *expected_depth,
+                "{ext}: control-flow nesting depth mismatch for source:\n{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn deeply_nested_control_flow_emits_hint() {
+        // Public-boundary reproduction: a function with eight nested `if`
+        // blocks must surface `DeeplyNested`. Symbol-span nesting reported a
+        // trivial depth here and emitted no hint.
+        let dir = TempDir::new().unwrap();
+        let mut source = String::from("def handler(value):\n");
+        for level in 0..8 {
+            let indent = "    ".repeat(level + 1);
+            source.push_str(&format!("{indent}if value > {level}:\n"));
+        }
+        let deepest = "    ".repeat(9);
+        source.push_str(&format!("{deepest}return value\n"));
+        // Pad to a reportable god file (>= 400 effective SLOC).
+        for i in 0..420 {
+            source.push_str(&format!("x{i} = {i}\n"));
+        }
+        temp_file(&dir, "deep.py", &source);
+
+        let god_files = GodFiles::new(dir.path());
+        let analysis = god_files.analysis();
+        assert_eq!(analysis.len(), 1);
+        assert!(
+            analysis[0].max_nesting_depth >= 8,
+            "expected control-flow depth >= 8, got {}",
+            analysis[0].max_nesting_depth
+        );
+        assert!(
+            analysis[0]
+                .refactor_hints
+                .iter()
+                .any(|h| matches!(h, RefactorHint::DeeplyNested { .. })),
+            "deeply nested control flow must emit a DeeplyNested hint"
+        );
     }
 
     /// Synthetic flat record with a disjoint declaration span; nothing nests.
@@ -1738,22 +2309,21 @@ x = 1
         }
     }
 
-    /// Performance regression for review-7: `compute_max_nesting_depth` was
+    /// Performance regression for review-7: span-containment processing must
+    /// stay near-linear. `compute_enclosed` (which decides top-level ownership)
+    /// is the remaining symbol-span sweep — a naive containment check is
     /// `O(symbols^2)` (each span compared against every prior span), so a flat
     /// file with tens of thousands of symbols — exactly the large files this
-    /// command targets — stalled for over a minute. The stack sweep is
+    /// command targets — would stall for over a minute. The stack sweep is
     /// `O(n log n)`.
     ///
     /// This is the bounded CI guard the review calls for: the ceiling is
     /// calibrated to the symbol count, so a reintroduced quadratic path blows
-    /// past it without parsing a giant fixture. The old DP did ~2.5B
-    /// comparisons at 50k symbols (tens of seconds in debug); the linear sweep
-    /// is sub-millisecond, leaving a ~1000x margin that absorbs CI load. A
-    /// wall-clock *ratio* across sizes is too noisy under parallel test
-    /// execution to assert here — track the precise slope with a Criterion
-    /// benchmark instead.
+    /// past it without parsing a giant fixture. A wall-clock *ratio* across
+    /// sizes is too noisy under parallel test execution to assert here — track
+    /// the precise slope with a Criterion benchmark instead.
     #[test]
-    fn nesting_depth_stays_near_linear_on_flat_symbols() {
+    fn enclosure_stays_near_linear_on_flat_symbols() {
         use std::time::{Duration, Instant};
 
         let flat: Vec<SymbolRecord> = (0..50_000).map(|i| flat_record(i * 10)).collect();
@@ -1762,9 +2332,12 @@ x = 1
         let mut best = Duration::MAX;
         for _ in 0..3 {
             let start = Instant::now();
-            let depth = compute_max_nesting_depth(&flat);
+            let enclosed = compute_enclosed(&flat);
             best = best.min(start.elapsed());
-            assert_eq!(depth, 1, "disjoint flat spans must have nesting depth 1");
+            assert!(
+                enclosed.iter().all(|&e| !e),
+                "disjoint flat spans must enclose nothing"
+            );
         }
 
         assert!(

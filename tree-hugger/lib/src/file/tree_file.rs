@@ -98,6 +98,15 @@ impl TreeFile {
         &self.source
     }
 
+    /// Returns the root node of the parsed syntax tree.
+    ///
+    /// Exposed within the crate for analyses that must walk the concrete
+    /// syntax tree directly (e.g. control-flow nesting depth) rather than the
+    /// extracted symbol records.
+    pub(crate) fn root_node(&self) -> Node<'_> {
+        self.tree.root_node()
+    }
+
     /// Returns the byte ranges of all comment nodes detected by the comments
     /// query for this file's language.
     ///

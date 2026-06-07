@@ -107,6 +107,8 @@ pub struct GodAnalysis {
     pub kind_histogram: KindHistogram,
 
     // --- Signal: complexity ---
+    /// Deepest nesting of control-flow constructs (if/loop/match/try), counted
+    /// from a single syntax-tree walk. Function and class scopes do not count.
     pub max_nesting_depth: usize,
 
     // --- Signal: coupling & debt ---
