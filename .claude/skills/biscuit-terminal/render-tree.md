@@ -83,10 +83,11 @@ RenderableTerminalContent::to_tree_nodes(
 The terminal tree renderer renders headings/sections, ordered/unordered
 lists, and tables **natively** — it no longer delegates back to the bespoke
 `Section`, `OrderedList`/`UnorderedList`, or `Table` components. Progress
-widgets render from `renderable.widget.progress.*` hints on a `Paragraph`;
-two-column layouts render from `renderable.widget.columns.*` hints on a
-`BlockQuote`. Tables use a two-pass pre-scan / emit renderer that reuses the
-table module's width-planning utilities (but not `Table::render()`).
+widgets render from the typed `ComponentHints::Progress` group on a `Paragraph`;
+two-column layouts render from `ComponentHints::Columns` on a `BlockQuote`
+(typed `NodeAttrs::component` fields, not `data`-bag hints). Tables use a
+two-pass pre-scan / emit renderer that reuses the table module's width-planning
+utilities (but not `Table::render()`).
 
 ## Layout
 
@@ -124,6 +125,28 @@ flows through whether a component is rendered via the tree or composed bespoke.
 `available_width` — is the bespoke (non-tree) path's terminal layout
 application, now reading the same `Layout` type. The legacy `RowFill` /
 `MaxWidth` / `Margin` enum and the `row_fill_strategy` builder are removed.
+
+## Text Layout
+
+The terminal renderer is the only target that consumes
+`NodeAttrs::text_layout` (typed `TextLayoutHints`: `width`, `max_width`,
+`alignment`, `overflow`). `Writer::apply_text_layout` resolves `width` /
+`max_width` to cells against the render width, pads per `alignment`, and
+truncates overflow with `…` via the ANSI-aware `word_wrap::truncate`. It is
+wired into three node shapes without mutating the tree:
+
+- **`Link`** — the link label/display text is shaped to the resolved field
+  (the structured link children stay intact for OSC 8 / fallback).
+- **`Image`** — the `▉ IMAGE[alt]` placeholder is shaped with the alt text
+  *inside* the brackets; the source `alt` stays intact on the node.
+- **`ListItem`** — the marker is lifted out and the item body is block-aligned
+  and padded within the resolved field; the marker stays structurally separate
+  from body placement.
+
+`width` establishes an exact field width and pads shorter content; `max_width`
+only truncates content that exceeds the cap. Resolution happens during the fold,
+so rendering one tree at different widths never mutates it. The browser and
+Markdown folds ignore `text_layout`.
 
 ## Code-Render Hook
 
