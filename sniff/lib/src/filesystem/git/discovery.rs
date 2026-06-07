@@ -186,11 +186,13 @@ pub(crate) fn get_recent_commits_with_decorations(
 /// When the repo is a worktree, finds the base repo's current branch. Otherwise
 /// uses the current HEAD branch. Falls back to "main" or "master" if HEAD is
 /// detached or unavailable.
-pub(crate) fn resolve_base_branch(repo: &gix::Repository) -> (String, Option<gix::ObjectId>) {
+pub(crate) fn resolve_base_branch(
+    repo: &gix::Repository,
+) -> crate::Result<(String, Option<gix::ObjectId>)> {
     // For a linked worktree, the base branch is the MAIN worktree's HEAD, found
     // via the shared common dir; otherwise it is this repo's own HEAD.
     let base_repo = if repo.git_dir() != repo.common_dir() {
-        super::open::trusted_open(repo.common_dir()).ok()
+        Some(super::open::trusted_open(repo.common_dir())?)
     } else {
         None
     };
@@ -200,18 +202,18 @@ pub(crate) fn resolve_base_branch(repo: &gix::Repository) -> (String, Option<gix
     if let Ok(Some(name)) = effective.head_name() {
         let branch = name.shorten().to_string();
         let oid = effective.head_id().ok().map(|id| id.detach());
-        return (branch, oid);
+        return Ok((branch, oid));
     }
 
     // Fallback: try "main", then "master".
     for candidate in ["main", "master"] {
         if let Ok(reference) = repo.find_reference(&format!("refs/heads/{candidate}")) {
             let oid = reference.into_fully_peeled_id().ok().map(|id| id.detach());
-            return (candidate.to_string(), oid);
+            return Ok((candidate.to_string(), oid));
         }
     }
 
-    ("main".to_string(), None)
+    Ok(("main".to_string(), None))
 }
 
 /// Kind of change a file underwent in a commit.

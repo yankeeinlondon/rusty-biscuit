@@ -4,6 +4,7 @@
 //! is inside a linked Git worktree and extracting its name, as well as
 //! listing all worktrees in a repository.
 
+use crate::SniffError;
 use gix::bstr::ByteSlice;
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -133,7 +134,7 @@ pub fn list_worktrees(base_dir: &Path) -> Result<Option<Vec<WorktreeEntry>>, Box
     // If discovery landed on a linked worktree, open the base repository so
     // that worktree enumeration includes the main worktree as well.
     let base_repo = if is_linked_worktree(&discovered) {
-        super::open::trusted_open(discovered.common_dir()).ok()
+        Some(super::open::trusted_open(discovered.common_dir())?)
     } else {
         None
     };
@@ -172,25 +173,17 @@ pub fn list_worktrees(base_dir: &Path) -> Result<Option<Vec<WorktreeEntry>>, Box
     }
 
     // Add linked worktrees.
-    let proxies = match repo.worktrees() {
-        Ok(p) => p,
-        Err(_) => {
-            entries.sort_by(|a, b| a.name.cmp(&b.name));
-            return Ok(Some(entries));
-        }
-    };
+    let proxies = repo.worktrees().map_err(|e| SniffError::git("worktrees", e))?;
 
     for proxy in proxies {
         let name = proxy.id().to_str_lossy().into_owned();
-        let Ok(path) = proxy.base() else {
-            continue;
-        };
+        let path = proxy.base().map_err(|e| SniffError::git("worktree_base", e))?;
         let canonical = std::fs::canonicalize(&path).unwrap_or(path);
 
         // Open the worktree as its own repository to read HEAD.
-        let (branch, is_detached) = match gix::open(&canonical) {
-            Ok(wt_repo) => resolve_branch_and_detached(&wt_repo),
-            Err(_) => (None, false),
+        let (branch, is_detached) = {
+            let wt_repo = super::open::trusted_open(&canonical)?;
+            resolve_branch_and_detached(&wt_repo)
         };
 
         let is_current = is_worktree_current(&canonical, current_canonical.as_deref());
@@ -232,6 +225,8 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::Path;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
 
     /// Creates a temporary git repo with a single file committed.
@@ -506,6 +501,58 @@ mod tests {
         assert_eq!(
             main.name, expected,
             "main worktree should be named from directory basename"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_worktrees_propagates_registry_error() {
+        let (dir, repo) = setup_repo();
+        let wt_path = dir.path().join("linked-wt");
+        let _wt = repo.worktree("linked-wt", &wt_path, None).unwrap();
+
+        let worktrees_dir = dir.path().join(".git").join("worktrees");
+        std::fs::set_permissions(
+            &worktrees_dir,
+            std::fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
+
+        let result = list_worktrees(dir.path());
+
+        // Restore permissions so TempDir can clean up.
+        std::fs::set_permissions(
+            &worktrees_dir,
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+
+        assert!(
+            result.is_err(),
+            "unreadable worktree registry must surface an error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn list_worktrees_propagates_proxy_base_error() {
+        let (dir, repo) = setup_repo();
+        let wt_path = dir.path().join("linked-wt");
+        let _wt = repo.worktree("linked-wt", &wt_path, None).unwrap();
+
+        // Empty the gitdir file so proxy.base() fails (the proxy still
+        // exists because the file was present when worktrees() scanned).
+        let gitdir_file = dir
+            .path()
+            .join(".git")
+            .join("worktrees")
+            .join("linked-wt")
+            .join("gitdir");
+        std::fs::write(&gitdir_file, b"").expect("empty worktree gitdir file");
+
+        let result = list_worktrees(dir.path());
+        assert!(
+            result.is_err(),
+            "empty worktree gitdir must surface an error, got {result:?}"
         );
     }
 }

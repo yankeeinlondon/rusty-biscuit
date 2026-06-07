@@ -1,4 +1,5 @@
 //! Remote tracking, fetch, branch discovery, and worktree helpers.
+//! TEST EDIT
 //!
 //! This module covers configured remotes, refresh of remote-tracking refs via
 //! the user's `git` binary, locally cached remote branch lookups, local branch
@@ -12,6 +13,7 @@ use tracing::{debug, warn};
 
 use super::discovery::resolve_base_branch;
 use super::status::get_repo_status_counts;
+use crate::SniffError;
 use super::types::*;
 
 /// gix equivalent of git2's `graph_ahead_behind`: `(commits reachable from
@@ -97,22 +99,34 @@ pub(crate) fn get_git_config(repo: &gix::Repository) -> GitConfig {
 /// Parse the platform-specific system gitconfig that gix's standard search does
 /// not include, for use as a lowest-precedence fallback.
 fn extra_system_config() -> Option<gix::config::File<'static>> {
-    #[cfg(target_os = "macos")]
-    let path: &std::path::Path =
-        std::path::Path::new("/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig");
-    #[cfg(target_os = "windows")]
-    let path: &std::path::Path = std::path::Path::new(r"C:\Program Files\Git\etc\gitconfig");
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    return None;
+    extra_system_config_at(platform_extra_system_config_path())
+}
 
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    {
-        if !path.exists() {
-            return None;
-        }
-        gix::config::File::from_path_no_includes(path.to_path_buf(), gix::config::Source::System)
-            .ok()
+#[cfg(target_os = "macos")]
+fn platform_extra_system_config_path() -> Option<&'static std::path::Path> {
+    Some(std::path::Path::new(
+        "/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig",
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn platform_extra_system_config_path() -> Option<&'static std::path::Path> {
+    Some(std::path::Path::new(r"C:\Program Files\Git\etc\gitconfig"))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn platform_extra_system_config_path() -> Option<&'static std::path::Path> {
+    None
+}
+
+fn extra_system_config_at(
+    path: Option<&std::path::Path>,
+) -> Option<gix::config::File<'static>> {
+    let path = path?;
+    if !path.exists() {
+        return None;
     }
+    gix::config::File::from_path_no_includes(path.to_path_buf(), gix::config::Source::System).ok()
 }
 
 /// Gets all local branches with commit hashes and ahead/behind counts.
@@ -405,22 +419,12 @@ pub(crate) fn populate_recent_commit_remotes(
         remote_tips.truncate(limit);
     }
 
-    // Determine the oldest commit time among the requested commits so we
-    // can stop ancestry walks early.
-    let oldest_time = commits
-        .iter()
-        .filter_map(|c| {
-            gix::ObjectId::from_hex(c.sha.as_bytes())
-                .ok()
-                .and_then(|oid| repo.find_object(oid).ok())
-                .and_then(|o| o.try_into_commit().ok())
-                .and_then(|c| c.time().ok())
-                .map(|t| t.seconds)
-        })
-        .min()
-        .unwrap_or(i64::MIN);
-
     // Walk ancestry from each remote tip, collecting containment.
+    //
+    // We do NOT stop early based on commit time: gix's ByCommitTime walk is a
+    // lazy frontier, not a globally monotonic sequence. An old-dated child can
+    // have a newer-dated parent, so a time-based `break` would incorrectly
+    // discard unseen requested commits (see skewed-timestamp test).
     let mut containment: HashMap<gix::ObjectId, Vec<String>> = HashMap::new();
 
     for (remote_name, tip_oid) in &remote_tips {
@@ -443,13 +447,6 @@ pub(crate) fn populate_recent_commit_remotes(
                 .entry(info.id)
                 .or_default()
                 .push(remote_name.clone());
-
-            // Stop when we reach commits older than the oldest requested.
-            // This is a safe heuristic: any commit older than the oldest
-            // requested commit cannot be in the `commits` list.
-            if info.commit_time() < oldest_time {
-                break;
-            }
         }
     }
 
@@ -566,39 +563,37 @@ fn get_remote_branches(repo: &gix::Repository, remote_name: &str) -> Option<Vec<
 /// are filtered out. For each worktree, opens it as a Repository to access
 /// HEAD commit, dirty status, and ahead/behind counts relative to the base
 /// repository's default branch.
-pub(crate) fn get_worktrees(repo: &gix::Repository) -> HashMap<String, WorktreeInfo> {
+pub(crate) fn get_worktrees(
+    repo: &gix::Repository,
+) -> crate::Result<HashMap<String, WorktreeInfo>> {
     use rayon::prelude::*;
 
-    let proxies = match repo.worktrees() {
-        Ok(p) => p,
-        Err(_) => return HashMap::new(),
-    };
+    let proxies = repo.worktrees().map_err(|e| SniffError::git("worktrees", e))?;
 
     // Base branch name and tip for ahead/behind: the main worktree's HEAD,
     // falling back to "main"/"master".
-    let (base_branch, base_oid) = resolve_base_branch(repo);
+    let (base_branch, base_oid) = resolve_base_branch(repo)?;
 
     // Collect (name, worktree path) pairs up front — cheap sequential work —
-    // before the per-worktree analysis fans out.
-    let worktree_paths: Vec<(String, PathBuf)> = proxies
-        .iter()
-        .filter_map(|proxy| {
-            let name = proxy.id().to_str_lossy().into_owned();
-            let path = proxy.base().ok()?;
-            Some((name, path))
-        })
-        .collect();
+    // before the per-worktree analysis fans out. Trust, permission, I/O, and
+    // corruption failures are propagated rather than silently dropped.
+    let mut worktree_paths: Vec<(String, PathBuf)> = Vec::new();
+    for proxy in proxies {
+        let name = proxy.id().to_str_lossy().into_owned();
+        let path = proxy.base().map_err(|e| SniffError::git("worktree_base", e))?;
+        worktree_paths.push((name, path));
+    }
 
     // R4: open the base repository once and share it across Rayon workers via
     // a thread-safe handle; each worker derives a cheap thread-local view
     // rather than reopening the base repo N times.
     let base_sync = repo.clone().into_sync();
 
-    worktree_paths
+    let results: crate::Result<Vec<(String, WorktreeInfo)>> = worktree_paths
         .par_iter()
-        .filter_map(|(name, worktree_path)| {
+        .map(|(name, worktree_path)| {
             let base = base_sync.to_thread_local();
-            let worktree_repo = gix::open(worktree_path).ok()?;
+            let worktree_repo = super::open::trusted_open(worktree_path)?;
 
             let branch = worktree_repo
                 .head_name()
@@ -633,7 +628,7 @@ pub(crate) fn get_worktrees(repo: &gix::Repository) -> HashMap<String, WorktreeI
 
             let (dirty, changed_files) = get_repo_status_counts(&worktree_repo);
 
-            Some((
+            Ok((
                 branch.clone(),
                 WorktreeInfo {
                     branch,
@@ -649,7 +644,9 @@ pub(crate) fn get_worktrees(repo: &gix::Repository) -> HashMap<String, WorktreeI
                 },
             ))
         })
-        .collect()
+        .collect();
+
+    Ok(results?.into_iter().collect())
 }
 
 /// Merge the worktree tip into the base in memory (no repository writes) and
@@ -917,6 +914,81 @@ mod tests {
         gix::ObjectId::from_hex(oid.to_string().as_bytes()).unwrap()
     }
 
+    /// Commit `content` to `rel_path` with the given `parents` and `seconds`
+    /// timestamp, returning the new commit Oid without moving any ref.
+    fn commit_detached_at(
+        repo: &Repository,
+        rel_path: &str,
+        content: &str,
+        msg: &str,
+        parents: &[git2::Oid],
+        seconds: i64,
+    ) -> git2::Oid {
+        let sig = git2::Signature::new("T", "t@e.com", &git2::Time::new(seconds, 0)).unwrap();
+        let mut index = repo.index().unwrap();
+        match parents.first() {
+            Some(&p) => {
+                let parent_tree = repo.find_commit(p).unwrap().tree().unwrap();
+                index.read_tree(&parent_tree).unwrap();
+            }
+            None => index.clear().unwrap(),
+        }
+        std::fs::write(repo.workdir().unwrap().join(rel_path), content).unwrap();
+        index.add_path(Path::new(rel_path)).unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let parent_commits: Vec<git2::Commit> = parents
+            .iter()
+            .map(|p| repo.find_commit(*p).unwrap())
+            .collect();
+        let parent_refs: Vec<&git2::Commit> = parent_commits.iter().collect();
+        repo.commit(None, &sig, &sig, msg, &tree, &parent_refs)
+            .unwrap()
+    }
+
+    #[test]
+    fn populate_commit_remotes_skewed_timestamp_ancestor_not_pruned() {
+        let (dir, repo) = setup_repo();
+
+        // Create a skewed-timestamp chain:
+        //   C (time 200) <- A (time 50) <- B (time 100, HEAD, remote tip)
+        //
+        // ByCommitTime(NewestFirst) walk order from B:
+        //   B (100) → A (50) → C (200)
+        //
+        // An old `break` on A (50 < oldest_time=200) would prune C before it
+        // is visited. The fix removes time-based stopping so C is found.
+        let base = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let c = commit_detached_at(&repo, "c.txt", "c", "c", &[base], 200);
+        let a = commit_detached_at(&repo, "a.txt", "a", "a", &[c], 50);
+        let b = commit_detached_at(&repo, "b.txt", "b", "b", &[a], 100);
+
+        // Point HEAD at B so the walk starts from the remote tip.
+        repo.reference("refs/heads/main", b, true, "set main").unwrap();
+        repo.set_head("refs/heads/main").unwrap();
+
+        // Fake remote pointing at B.
+        add_fake_remote(&repo, "origin", "main", b);
+
+        // Request commit C (the skewed ancestor with timestamp 200).
+        let mut commits = vec![CommitInfo {
+            sha: c.to_string(),
+            message: "c".to_string(),
+            author: "T".to_string(),
+            timestamp: chrono::Utc::now(),
+            remotes: None,
+            refs: vec![],
+        }];
+
+        let gix_repo = open_gix(&dir);
+        populate_recent_commit_remotes(&gix_repo, &mut commits, None);
+
+        assert_eq!(
+            commits[0].remotes,
+            Some(vec!["origin".to_string()]),
+            "skewed ancestor C must be found via origin even though its parent A is older"
+        );
+    }
+
     #[test]
     fn has_merge_conflicts_matches_git2_oracle() {
         let (dir, repo) = setup_repo();
@@ -980,5 +1052,127 @@ mod tests {
         let gix_repo = gix::open(repo.workdir().unwrap()).unwrap();
         // Concurrency of 0 should be clamped to 1.
         refresh_remote_tracking_refs(&gix_repo, 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn extra_system_config_macos_does_not_panic_when_clt_file_absent() {
+        // If the CLT gitconfig does not exist, extra_system_config must return
+        // None without panicking. When it does exist, it must parse successfully.
+        let path = std::path::Path::new(
+            "/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig",
+        );
+        if path.exists() {
+            let file = gix::config::File::from_path_no_includes(
+                path.to_path_buf(),
+                gix::config::Source::System,
+            );
+            assert!(file.is_ok(), "CLT gitconfig must parse when present");
+        } else {
+            assert!(
+                extra_system_config().is_none(),
+                "extra_system_config must return None when CLT file is absent"
+            );
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn extra_system_config_windows_does_not_panic_when_file_absent() {
+        let path = std::path::Path::new(r"C:\Program Files\Git\etc\gitconfig");
+        if path.exists() {
+            let file = gix::config::File::from_path_no_includes(
+                path.to_path_buf(),
+                gix::config::Source::System,
+            );
+            assert!(file.is_ok(), "Git for Windows gitconfig must parse when present");
+        } else {
+            assert!(
+                extra_system_config().is_none(),
+                "extra_system_config must return None when Git for Windows config is absent"
+            );
+        }
+    }
+
+    #[test]
+    fn extra_system_config_at_reads_file_when_present() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("extra.gitconfig");
+        std::fs::write(
+            &path,
+            "[user]\n\tname = Extra Tester\n\temail = extra@sniff.test\n",
+        )
+        .unwrap();
+
+        let file = extra_system_config_at(Some(&path));
+        assert!(file.is_some(), "must parse existing file");
+        let file = file.unwrap();
+        assert_eq!(
+            file.string("user.name").map(|s| s.to_string()),
+            Some("Extra Tester".to_string())
+        );
+        assert_eq!(
+            file.string("user.email").map(|s| s.to_string()),
+            Some("extra@sniff.test".to_string())
+        );
+    }
+
+    #[test]
+    fn extra_system_config_at_returns_none_when_path_missing() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("nonexistent.gitconfig");
+        assert!(
+            extra_system_config_at(Some(&path)).is_none(),
+            "must return None for missing file"
+        );
+    }
+
+    #[test]
+    fn extra_system_config_at_returns_none_when_path_is_none() {
+        assert!(
+            extra_system_config_at(None).is_none(),
+            "must return None when no path is provided"
+        );
+    }
+
+    #[test]
+    fn extra_system_config_fallback_has_lowest_precedence() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "content\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial", &tree, &[])
+            .unwrap();
+
+        // Set a local value.
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Local Tester").unwrap();
+        }
+
+        // Create an extra-system config with a different value.
+        let extra_path = dir.path().join("extra.gitconfig");
+        std::fs::write(&extra_path, "[user]\n\tname = Extra Tester\n").unwrap();
+
+        let gix_repo = gix::open(repo.workdir().unwrap()).unwrap();
+        // Temporarily swap the production path to our fake file.
+        let file = extra_system_config_at(Some(&extra_path));
+        assert!(file.is_some());
+
+        // get_git_config uses the snapshot (local) first, then falls back to
+        // extra_system_config. Local must win.
+        let config = get_git_config(&gix_repo);
+        assert_eq!(
+            config.user_name.as_deref(),
+            Some("Local Tester"),
+            "local config must override extra system fallback"
+        );
     }
 }

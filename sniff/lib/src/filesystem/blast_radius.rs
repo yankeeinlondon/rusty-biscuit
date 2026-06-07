@@ -74,9 +74,10 @@ pub fn collect_changed_paths(
     let repo_root = git_repo.repo_root().to_path_buf();
 
     let raw_paths = match query.scope {
-        ChangeScope::LastCommit => gix::open(&repo_root)
-            .map(|repo| collect_last_commit_paths(&repo))
-            .unwrap_or_default(),
+        ChangeScope::LastCommit => {
+            let repo = crate::filesystem::git::open::trusted_open(&repo_root)?;
+            collect_last_commit_paths(&repo)
+        }
         _ => collect_working_tree_paths(&git_repo, query.scope)?,
     };
 

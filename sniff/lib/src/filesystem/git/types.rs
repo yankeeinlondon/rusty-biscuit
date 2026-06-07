@@ -627,7 +627,14 @@ impl GitRepo {
     }
 
     /// Linked worktrees.
-    pub fn worktrees(&self) -> HashMap<String, WorktreeInfo> {
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`SniffError::Git`] if a linked worktree cannot be opened due to
+    /// trust, permission, I/O, or corruption failure. The trusted-open invariant
+    /// is enforced for every worktree; failures are propagated rather than
+    /// silently omitted.
+    pub fn worktrees(&self) -> Result<HashMap<String, WorktreeInfo>> {
         super::remote_refresh::get_worktrees(&self.gix)
     }
 
@@ -738,7 +745,7 @@ impl GitRepo {
         };
 
         let worktrees = if request.include_worktrees {
-            super::remote_refresh::get_worktrees(&self.gix)
+            super::remote_refresh::get_worktrees(&self.gix)?
         } else {
             HashMap::new()
         };

@@ -24,6 +24,13 @@ use sniff::filesystem::git::{
     merge_conflicts_at,
 };
 use sniff::request::GitRequest;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
+/// Serializes tests that mutate process environment variables. `std::env::set_var`
+/// is unsafe in multi-threaded code; acquiring this mutex before mutating env
+/// vars prevents races between concurrent tests.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Normalize a path to forward slashes so assertions hold on Windows, where
 /// `PathBuf` display uses backslashes even though git stores POSIX paths.
@@ -230,19 +237,39 @@ fn golden_remote_url_and_provider() {
 }
 
 #[test]
-fn golden_config_user_identity() {
+fn golden_config_all_twelve_keys() {
     let dir = TempDir::new().unwrap();
     let repo = build_linear_main(dir.path(), 1);
     {
         let mut config = repo.config().unwrap();
         config.set_str("user.name", "Golden Tester").unwrap();
         config.set_str("user.email", "golden@sniff.test").unwrap();
+        config.set_bool("gpg.use-agent", true).unwrap();
+        config.set_str("gpg.program", "gpg2").unwrap();
+        config.set_str("credential.helper", "store").unwrap();
+        config.set_str("user.signingkey", "ABC123").unwrap();
+        config.set_bool("commit.gpgsign", true).unwrap();
+        config.set_bool("tag.gpgsign", false).unwrap();
+        config.set_str("core.pager", "less").unwrap();
+        config.set_str("delta.syntax-theme", "Dracula").unwrap();
+        config.set_bool("delta.light", true).unwrap();
+        config.set_bool("delta.side-by-side", false).unwrap();
     }
 
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
     let config = handle.config();
     assert_eq!(config.user_name.as_deref(), Some("Golden Tester"));
     assert_eq!(config.user_email.as_deref(), Some("golden@sniff.test"));
+    assert_eq!(config.gpg_use_agent, Some(true));
+    assert_eq!(config.gpg_program.as_deref(), Some("gpg2"));
+    assert_eq!(config.credential_helper.as_deref(), Some("store"));
+    assert_eq!(config.signing_key.as_deref(), Some("ABC123"));
+    assert_eq!(config.commit_sign, Some(true));
+    assert_eq!(config.tag_sign, Some(false));
+    assert_eq!(config.pager.as_deref(), Some("less"));
+    assert_eq!(config.delta_syntax_theme.as_deref(), Some("Dracula"));
+    assert_eq!(config.delta_light, Some(true));
+    assert_eq!(config.delta_side_by_side, Some(false));
 }
 
 #[test]
@@ -251,7 +278,7 @@ fn golden_worktree_metadata() {
     builder::build_git_repo_with_worktrees(dir.path(), 2);
 
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
-    let worktrees = handle.worktrees();
+    let worktrees = handle.worktrees().expect("worktrees should succeed");
     assert_eq!(worktrees.len(), 2, "two linked worktrees");
 
     for (branch, info) in &worktrees {
@@ -268,6 +295,80 @@ fn golden_worktree_metadata() {
         assert!(!info.merged, "worktree {branch} is not merged into base");
     }
 }
+
+#[test]
+fn worktree_trusted_open_failure_is_propagated() {
+    let dir = TempDir::new().unwrap();
+    builder::build_git_repo_with_worktrees(dir.path(), 1);
+
+    // Corrupt the linked worktree by removing its `.git` file so
+    // `trusted_open` fails (not a repository).
+    let wt_path = dir.path().join("_wt").join("wt000");
+    let git_file = wt_path.join(".git");
+    std::fs::remove_file(&git_file).expect("remove worktree .git file");
+    assert!(!git_file.exists(), ".git file should be gone");
+
+    // `get_worktrees` must propagate the open failure rather than
+    // silently omitting the worktree or returning empty metadata.
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let result = handle.worktrees();
+    assert!(
+        result.is_err(),
+        "corrupted linked worktree must surface an error, got {result:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn worktree_registry_error_is_propagated() {
+    let dir = TempDir::new().unwrap();
+    builder::build_git_repo_with_worktrees(dir.path(), 1);
+
+    let worktrees_dir = dir.path().join(".git").join("worktrees");
+    std::fs::set_permissions(
+        &worktrees_dir,
+        std::fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let result = handle.worktrees();
+
+    std::fs::set_permissions(
+        &worktrees_dir,
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+
+    assert!(
+        result.is_err(),
+        "unreadable worktree registry must surface an error, got {result:?}"
+    );
+}
+
+#[test]
+fn worktree_proxy_base_error_is_propagated() {
+    let dir = TempDir::new().unwrap();
+    builder::build_git_repo_with_worktrees(dir.path(), 1);
+
+    // Empty the gitdir file so proxy.base() fails (the proxy still
+    // exists because the file was present when worktrees() scanned).
+    let gitdir_file = dir
+        .path()
+        .join(".git")
+        .join("worktrees")
+        .join("wt000")
+        .join("gitdir");
+    std::fs::write(&gitdir_file, b"").expect("empty worktree gitdir file");
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let result = handle.worktrees();
+    assert!(
+        result.is_err(),
+        "empty worktree gitdir must surface an error, got {result:?}"
+    );
+}
+
 
 // ---------------------------------------------------------------------------
 // Discovery tri-state (git2)
@@ -555,6 +656,102 @@ fn ref_decorations_match_git2_for_branches_and_tags() {
     assert_eq!(feature.kind, RefKind::LocalBranch);
 
     let tag = head_commit.refs.iter().find(|r| r.name == "v1.0").unwrap();
+    assert_eq!(tag.kind, RefKind::Tag);
+    assert!(!tag.is_head);
+}
+
+#[test]
+fn ref_decorations_include_remote_tracking_refs() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    // Create a fake remote-tracking ref pointing at HEAD.
+    repo.reference("refs/remotes/origin/main", head.id(), true, "fake remote")
+        .unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let commits = handle.recent_commits(2);
+    let head_sha = head.id().to_string();
+    let head_commit = commits
+        .iter()
+        .find(|c| c.sha == head_sha)
+        .expect("HEAD commit present");
+
+    let remote = head_commit
+        .refs
+        .iter()
+        .find(|r| r.name == "origin/main")
+        .expect("origin/main decoration present");
+    assert_eq!(remote.kind, RefKind::RemoteBranch);
+    assert!(!remote.is_head);
+}
+
+#[test]
+fn ref_decorations_resolve_symbolic_remote_head() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    // Add a real remote so remote_names() includes "origin".
+    repo.remote("origin", "https://example.com/repo.git")
+        .unwrap();
+    // Create refs/remotes/origin/HEAD as a symbolic ref to origin/main.
+    repo.reference(
+        "refs/remotes/origin/main",
+        head.id(),
+        true,
+        "fake remote branch",
+    )
+    .unwrap();
+    repo.reference_symbolic(
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+        true,
+        "fake remote HEAD",
+    )
+    .unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let remotes = handle.remotes(true);
+    let origin = remotes.iter().find(|r| r.name == "origin").expect("origin present");
+    assert_eq!(
+        origin.default_branch.as_deref(),
+        Some("main"),
+        "symbolic refs/remotes/origin/HEAD should resolve to 'main'"
+    );
+}
+
+#[test]
+fn ref_decorations_peel_annotated_tags() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    // Create an annotated tag (tag object, not direct ref).
+    let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+    repo.tag(
+        "v2.0",
+        head.as_object(),
+        &sig,
+        "annotated tag message",
+        false,
+    )
+    .unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let commits = handle.recent_commits(2);
+    let head_sha = head.id().to_string();
+    let head_commit = commits
+        .iter()
+        .find(|c| c.sha == head_sha)
+        .expect("HEAD commit present");
+
+    let tag = head_commit
+        .refs
+        .iter()
+        .find(|r| r.name == "v2.0")
+        .expect("v2.0 annotation present");
     assert_eq!(tag.kind, RefKind::Tag);
     assert!(!tag.is_head);
 }
@@ -1209,5 +1406,328 @@ fn phase4_empty_commit_has_no_files() {
     assert!(
         files.is_empty(),
         "empty commit should have no changed files"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — gix-backed refs, branches, and config parity
+// ---------------------------------------------------------------------------
+
+// Linux-only: macOS APFS/HFS+ reject invalid-UTF-8 filenames, so the
+// fixture cannot be created there. The non-UTF-8 path policy is covered
+// by the path-based tests above on all Unix platforms.
+#[cfg(target_os = "linux")]
+#[test]
+fn phase5_non_utf8_ref_is_not_silently_dropped() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 1);
+
+    // Create a branch with a non-UTF-8 name by writing the ref file directly.
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let refs_dir = repo.path().join("refs").join("heads");
+    let bad_name = std::ffi::OsStr::from_bytes(b"bad\xC0ref");
+    let ref_path = refs_dir.join(bad_name);
+    std::fs::write(&ref_path, format!("{}\n", head.id())).unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let branches = handle.branches();
+    let names: Vec<&str> = branches.iter().map(|b| b.name.as_str()).collect();
+
+    // The ref must not be silently dropped; it appears with the Unicode
+    // replacement character (U+FFFD) where the invalid UTF-8 sequence was.
+    assert!(
+        names.iter().any(|n| n.contains('\u{FFFD}')),
+        "non-UTF-8 ref must appear with replacement character, got: {names:?}"
+    );
+}
+
+#[test]
+fn config_local_overrides_global() {
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 1);
+
+    // Set up a fake HOME with a global gitconfig.
+    let fake_home = TempDir::new().unwrap();
+    let global_config = fake_home.path().join(".gitconfig");
+    std::fs::write(
+        &global_config,
+        "[user]\n\tname = Global Tester\n\temail = global@sniff.test\n",
+    )
+    .unwrap();
+
+    // Set local config values that should override global.
+    {
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Local Tester").unwrap();
+        config.set_str("user.email", "local@sniff.test").unwrap();
+    }
+
+    // Point GIT_CONFIG_GLOBAL at the fake file so gix reads it.
+    let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &global_config); }
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let cfg = handle.config();
+
+    // Restore before assertions so panics don't leak the change.
+    match original_global {
+        Some(h) => unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", h) },
+        None => unsafe { std::env::remove_var("GIT_CONFIG_GLOBAL") },
+    }
+
+    assert_eq!(
+        cfg.user_name.as_deref(),
+        Some("Local Tester"),
+        "local config must override global"
+    );
+    assert_eq!(
+        cfg.user_email.as_deref(),
+        Some("local@sniff.test"),
+        "local config must override global"
+    );
+}
+
+#[test]
+fn config_global_fallback_when_no_local_value() {
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 1);
+
+    let fake_home = TempDir::new().unwrap();
+    let global_config = fake_home.path().join(".gitconfig");
+    std::fs::write(
+        &global_config,
+        "[user]\n\tname = Global Tester\n\temail = global@sniff.test\n",
+    )
+    .unwrap();
+
+    let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &global_config); }
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let cfg = handle.config();
+
+    match original_global {
+        Some(h) => unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", h) },
+        None => unsafe { std::env::remove_var("GIT_CONFIG_GLOBAL") },
+    }
+
+    assert_eq!(
+        cfg.user_name.as_deref(),
+        Some("Global Tester"),
+        "global config must be read when local is absent"
+    );
+    assert_eq!(
+        cfg.user_email.as_deref(),
+        Some("global@sniff.test"),
+        "global config must be read when local is absent"
+    );
+}
+
+#[test]
+fn config_system_global_local_precedence() {
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 1);
+
+    // Create fake system and global configs.
+    let system_config = dir.path().join("system.gitconfig");
+    let global_config = dir.path().join("global.gitconfig");
+    std::fs::write(
+        &system_config,
+        "[user]\n\tname = System Tester\n\temail = system@sniff.test\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &global_config,
+        "[user]\n\tname = Global Tester\n\temail = global@sniff.test\n",
+    )
+    .unwrap();
+
+    // Set local values that should override both.
+    {
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Local Tester").unwrap();
+        config.set_str("user.email", "local@sniff.test").unwrap();
+    }
+
+    let original_system = std::env::var_os("GIT_CONFIG_SYSTEM");
+    let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+    unsafe { std::env::set_var("GIT_CONFIG_SYSTEM", &system_config); }
+    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &global_config); }
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let cfg = handle.config();
+
+    match original_system {
+        Some(h) => unsafe { std::env::set_var("GIT_CONFIG_SYSTEM", h) },
+        None => unsafe { std::env::remove_var("GIT_CONFIG_SYSTEM") },
+    }
+    match original_global {
+        Some(h) => unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", h) },
+        None => unsafe { std::env::remove_var("GIT_CONFIG_GLOBAL") },
+    }
+
+    assert_eq!(
+        cfg.user_name.as_deref(),
+        Some("Local Tester"),
+        "local must override global and system"
+    );
+    assert_eq!(
+        cfg.user_email.as_deref(),
+        Some("local@sniff.test"),
+        "local must override global and system"
+    );
+}
+
+#[test]
+fn config_system_fallback_when_no_local_or_global_value() {
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 1);
+
+    let system_config = dir.path().join("system.gitconfig");
+    std::fs::write(
+        &system_config,
+        "[user]\n\tname = System Tester\n\temail = system@sniff.test\n",
+    )
+    .unwrap();
+
+    // Create an empty global config to suppress the real ~/.gitconfig.
+    let global_config = dir.path().join("global.gitconfig");
+    std::fs::write(&global_config, "").unwrap();
+
+    let original_system = std::env::var_os("GIT_CONFIG_SYSTEM");
+    let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+    unsafe { std::env::set_var("GIT_CONFIG_SYSTEM", &system_config); }
+    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &global_config); }
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let cfg = handle.config();
+
+    match original_system {
+        Some(h) => unsafe { std::env::set_var("GIT_CONFIG_SYSTEM", h) },
+        None => unsafe { std::env::remove_var("GIT_CONFIG_SYSTEM") },
+    }
+    match original_global {
+        Some(h) => unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", h) },
+        None => unsafe { std::env::remove_var("GIT_CONFIG_GLOBAL") },
+    }
+
+    assert_eq!(
+        cfg.user_name.as_deref(),
+        Some("System Tester"),
+        "system config must be read when local and global are absent"
+    );
+    assert_eq!(
+        cfg.user_email.as_deref(),
+        Some("system@sniff.test"),
+        "system config must be read when local and global are absent"
+    );
+}
+
+#[test]
+fn config_all_twelve_keys_from_global_source() {
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 1);
+
+    let fake_home = TempDir::new().unwrap();
+    let global_config = fake_home.path().join(".gitconfig");
+    std::fs::write(
+        &global_config,
+        r#"[user]
+	name = Global Tester
+	email = global@sniff.test
+	signingkey = GLOBAL123
+[gpg]
+	use-agent = true
+	program = gpg2
+[credential]
+	helper = store
+[commit]
+	gpgsign = true
+[tag]
+	gpgsign = false
+[core]
+	pager = less
+[delta]
+	syntax-theme = Dracula
+	light = true
+	side-by-side = false
+"#,
+    )
+    .unwrap();
+    let _ = &fake_home; // keep temp dir alive
+
+    let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &global_config); }
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let config = handle.config();
+
+    match original_global {
+        Some(h) => unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", h) },
+        None => unsafe { std::env::remove_var("GIT_CONFIG_GLOBAL") },
+    }
+
+    assert_eq!(config.user_name.as_deref(), Some("Global Tester"));
+    assert_eq!(config.user_email.as_deref(), Some("global@sniff.test"));
+    assert_eq!(config.gpg_use_agent, Some(true));
+    assert_eq!(config.gpg_program.as_deref(), Some("gpg2"));
+    assert_eq!(config.credential_helper.as_deref(), Some("store"));
+    assert_eq!(config.signing_key.as_deref(), Some("GLOBAL123"));
+    assert_eq!(config.commit_sign, Some(true));
+    assert_eq!(config.tag_sign, Some(false));
+    assert_eq!(config.pager.as_deref(), Some("less"));
+    assert_eq!(config.delta_syntax_theme.as_deref(), Some("Dracula"));
+    assert_eq!(config.delta_light, Some(true));
+    assert_eq!(config.delta_side_by_side, Some(false));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn config_extra_system_file_is_lowest_precedence() {
+    let _guard = ENV_LOCK.lock().unwrap();
+
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 1);
+
+    // Create a fake global config.
+    let fake_home = TempDir::new().unwrap();
+    let global_config = fake_home.path().join(".gitconfig");
+    std::fs::write(
+        &global_config,
+        "[user]\n\tname = Global Tester\n\temail = global@sniff.test\n",
+    )
+    .unwrap();
+
+    let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &global_config); }
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    let cfg = handle.config();
+
+    match original_global {
+        Some(h) => unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", h) },
+        None => unsafe { std::env::remove_var("GIT_CONFIG_GLOBAL") },
+    }
+
+    // Global must win over the (possibly absent) CLT extra config. The real
+    // value of this test is that it exercises the code path on macOS; when the
+    // CLT file is absent the fallback is a no-op, and when present it is
+    // lowest-precedence, so global always dominates.
+    assert_eq!(
+        cfg.user_name.as_deref(),
+        Some("Global Tester"),
+        "global config must take precedence over extra system fallback"
     );
 }
