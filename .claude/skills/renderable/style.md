@@ -22,11 +22,13 @@ block-only (unlike `Layout`).
 ## Style
 
 ```rust
-use renderable::style::{Style, Border, BorderSides, PerMode};
+use renderable::style::{Style, Border, BorderSides, PaintColor, PerMode};
 use renderable::layout::TargetValue;
 use renderable::color::{Color, Tailwind};
 
 let style = Style {
+    // color / background hold PaintColor (color + alpha). `PerMode` accepts
+    // `impl Into<PaintColor>`, so an opaque `Color` constructs concisely.
     color: Some(TargetValue::universal(PerMode::adaptive(
         Color::Tailwind(Tailwind::Blue700),
         Color::Tailwind(Tailwind::Blue300),
@@ -41,9 +43,43 @@ let style = Style {
 `Style::default()` is all-none / all-false; `Style::is_empty()` reports it. A
 `Style` carrying only `Background::subtle()` / `pronounced()` is **not** empty.
 
-Fields: `color`, `background`, `emphasis`, `border`. (`background` paints the
+Fields: `color`, `background`, `emphasis`, `border`. The color-bearing fields
+(`color`, `background`, and `Border.color`) are
+`TargetValue<PerMode<PaintColor>>` — alpha-bearing paint, not bare `Color` (see
+[PaintColor and Opacity](#paintcolor-and-opacity)). (`background` paints the
 component's content box *and* its `Layout.padding` box, matching CSS — there is
 no separate `fill` field.)
+
+## PaintColor and Opacity
+
+`PaintColor { color: Color, opacity: Opacity }` is the alpha-bearing paint the
+render tree carries so a target gets the full color without a side channel.
+`Opacity(u8)` is a raw `0..=255` alpha byte; it defaults to `Opacity::OPAQUE`
+and is **elided on serialization when opaque**, so a tree that never sets alpha
+serializes exactly as it did before alpha existed.
+
+```rust
+use renderable::style::{Opacity, PaintColor};
+use renderable::color::{Color, Tailwind};
+
+let opaque: PaintColor = Color::Tailwind(Tailwind::Red500).into(); // From<Color>
+let half = PaintColor::new(Color::Tailwind(Tailwind::Red500))
+    .with_opacity(Opacity::from_percent(50).unwrap());            // 50 -> 128
+
+assert_eq!(Opacity::default(), Opacity::OPAQUE);
+assert_eq!(Opacity::from_percent(100), Some(Opacity::new(255)));
+assert_eq!(Opacity::from_percent(101), None);                    // > 100 rejected
+```
+
+- `Opacity::{TRANSPARENT, OPAQUE}`, `Opacity::new(u8)`, `Opacity::alpha()`,
+  `Opacity::is_opaque()`, and `Opacity::as_css_alpha()` (normalized `0.0..=1.0`).
+- `from_percent(pct)` rounds via `(pct * 255 + 50) / 100`; `> 100` returns `None`.
+- **Terminal** targets read `PaintColor::color` and intentionally ignore the
+  alpha at every color depth.
+- **Browser** lowers the pair to `rgb(...)` (opaque) / `rgba(...)` (alpha) via
+  the shared `tree::render::shared::paint_to_css_color`; `transparent` /
+  `currentColor` / `inherit` keywords ignore the stored alpha; terminal
+  default/reset colors emit no CSS declaration.
 
 ### Inheritance
 
@@ -191,9 +227,11 @@ or the typed slot struct.
 ## Browser Coverage
 
 Browser lowering covers `color`, `background`, `emphasis`, and `border`:
-inline bold/italic/strikethrough use semantic wrappers, block-level emphasis
-uses CSS declarations, and underline variants, dim, blink, and inverse
-(`filter:invert(1)`) lower to CSS. `border` lowers the full matrix — `weight` →
+`color` / `background` lower their `PaintColor` through `paint_to_css_color`
+(opaque → `rgb(...)`, alpha → `rgba(...)`, Tailwind `transparent` /
+`current` / `inherit` → CSS keywords); inline bold/italic/strikethrough use
+semantic wrappers, block-level emphasis uses CSS declarations, and underline
+variants, dim, blink, and inverse (`filter:invert(1)`) lower to CSS. `border` lowers the full matrix — `weight` →
 `border-width` px step, `line_style` → `border-style`, `color` → `border-color`,
 `radius` → `border-radius`, with `BorderSides::All` using shorthands and
 `Sides { .. }` emitting per-side declarations. `Layout.padding` lowers to

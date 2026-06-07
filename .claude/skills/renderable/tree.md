@@ -107,8 +107,21 @@ cross-version durable format. The fields:
 - **`list_marker_policy: ListMarkerPolicy`** — list marker presentation; the
   default policy serializes to nothing.
 - **`component: Option<Box<ComponentHints>>`** — the per-kind hint group (below).
+- **`text_layout: Option<Box<TextLayoutHints>>`** — unresolved, width-dependent
+  text intent (`width`, `max_width`, `alignment`, `overflow`). Permitted on
+  `Link`, `Image`, and `ListItem` nodes only. The producer states *what* it
+  wants; the renderer resolves percentages, measures rendered content, and
+  applies alignment/overflow during its single fold — the tree never stores
+  pre-truncated text, and a link keeps its children / an image keeps its `alt`.
+  `width` pads shorter content per `alignment`; `max_width` only truncates
+  content that exceeds the cap. Consumed by the terminal renderer; the browser
+  and Markdown folds ignore it. Set via `set_text_layout` / read with
+  `text_layout` / `text_layout_ref`.
+- **`browser: Option<Box<BrowserAttrs>>`** — typed, validated browser-target
+  attributes (see [Browser Attributes](#browser-attributes)). Set via
+  `set_browser` / read with `browser` / `browser_ref`.
 - **`data: BTreeMap<String, serde_json::Value>`** — **extension namespaces only**
-  (`darkmatter.hr.*`, `darkmatter.li.*`). `set_hint` / `get_hint` /
+  (e.g. `darkmatter.hr.*`). `set_hint` / `get_hint` /
   `remove_hint` and the `HintNamespace` wrapper remain for package-local
   extension data. Stale `renderable.*` keys in `data` are a **validation error**
   (see [Validation](#diagnostics-and-validation)) — they are not migrated into
@@ -139,6 +152,34 @@ The accessor names and signatures (`set_list_hints` / `list_hints`,
 from the bag era — only their bodies switched to typed-field reads, plus
 `*_ref` borrowed variants (`list_hints_ref`, `code_hints_ref`, `style_ref`,
 `layout_ref`) for renderer hot paths.
+
+## Browser Attributes
+
+`BrowserAttrs` (the typed `NodeAttrs::browser` field) carries every attribute
+the browser renderer emits *before* the fold begins, so the browser paths never
+patch completed HTML:
+
+- **`link: Option<LinkBrowserAttrs>`** — valid only on a `Link`. Holds a typed
+  `target` (`LinkTarget`: the four standard keywords plus `Named`), `rel`
+  (`Vec<LinkRelation>` emitted as a space-separated token list), and `download`.
+- **`image: Option<ImageBrowserAttrs>`** — valid only on an `Image`. Holds
+  `loading` (`ImageLoading`) and `decoding` (`ImageDecoding`).
+- **`inline_style: Option<CssStyle>`** — a *validated* `CssStyle`, not a raw
+  string, so unparsed CSS cannot be injected. A property set here replaces the
+  same property derived from the node's `Style`.
+- **`data_attrs: BTreeMap<DataAttrName, String>`** and
+  **`aria_attrs: BTreeMap<AriaAttrName, String>`** — first-class typed `data-*`
+  / `aria-*` attributes in deterministic key order. `DataAttrName` /
+  `AriaAttrName` reject empty, uppercase, or unsafe names (and `data-*` reserves
+  the `xml` prefix) with `BrowserAttrNameError`, at construction *and* on serde
+  deserialize. The fixed `data-` / `aria-` prefix makes it impossible to inject
+  an arbitrary attribute (`onclick`, `style`, `href`, `src`) through the map.
+
+These are distinct from the opaque `NodeAttrs::data` extension bag. Both browser
+writers (fragment and streaming) fold them into identical output: classes, the
+single merged `style` attribute, typed link/image attributes, and stable
+`data-*` / `aria-*` ordering and escaping. The Markdown renderer never reads
+`browser`, so both dialects drop browser-only attrs.
 
 ## Inheritance Resolver — `InheritedStyle`
 
@@ -210,9 +251,11 @@ pub trait CodeRenderer {
 - **`RenderError`** — a fatal render failure.
 - **`validate`** / **`ensure_valid`** — structural-invariant checks. These
   enforce typed-field placement (`Layout` block-only, `sequence_join` Root-only,
-  `task_hints` ListItem-only, `table_title` Table-only) and reject any stale
-  `renderable.*` key left in `data` — first-class hints must be typed fields,
-  while other namespaces (`darkmatter.*`) are allowed.
+  `task_hints` ListItem-only, `table_title` Table-only, `text_layout` only on
+  `Link` / `Image` / `ListItem`, a `browser.link` group only on a `Link` and a
+  `browser.image` group only on an `Image`) and reject any stale `renderable.*`
+  key left in `data` — first-class hints must be typed fields, while other
+  namespaces (`darkmatter.*`) are allowed.
 
 ## Tree Renderers
 
@@ -233,10 +276,14 @@ pub trait CodeRenderer {
   (browser). These live in the `biscuit-terminal` crate — see the
   biscuit-terminal skill's *Render Tree* topic.
 
-## Darkmatter Fold (experimental, internal)
+## Darkmatter Fold (production)
 
 `darkmatter::markdown::render_tree` folds a `pulldown-cmark` 0.13 event stream
-into a `Document` via `fold_markdown_to_document`. It is **experimental and
-internal** — it does not change darkmatter's public `as_html` / `for_terminal`
-renderers. A full darkmatter migration onto the tree renderer is upcoming
-(`renderable/features/2026-05-16-color-decisions/` is its first precursor).
+into a `Document` via `fold_markdown_to_document`, then bakes component policy,
+alpha-bearing `PaintColor`, text layout, browser attrs, and HR defaults onto the
+nodes during construction through a `TreeBuildContext` (the context-aware fold
+entry points). This is the **production** path: `Markdown::as_html` /
+`as_terminal` and `DarkmatterPage::render` / `render_to_browser` build a complete
+tree this way and run exactly **one target fold** over it — there is no
+post-fold decoration pass, no `darkmatter.li` / `darkmatter.style` hint, and no
+HTML rewriting. See the `darkmatter` skill for the build-context details.
