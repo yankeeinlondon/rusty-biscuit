@@ -137,6 +137,7 @@ pub(crate) fn get_recent_commits_with_decorations(
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
+        .use_commit_graph(Some(true))
         .all()
     else {
         return commits;
@@ -472,6 +473,7 @@ pub(crate) fn get_commits_for_path_with_decorations(
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
+        .use_commit_graph(Some(true))
         .all()
     else {
         return commits;

@@ -32,11 +32,7 @@ fn trusted_options() -> gix::sec::trust::Mapping<gix::open::Options> {
 pub(crate) fn trusted_discover(path: &Path) -> Result<Option<gix::Repository>> {
     use gix::discover::upwards::Error as Up;
     match gix::ThreadSafeRepository::discover_opts(path, Default::default(), trusted_options()) {
-        Ok(repo) => {
-            let mut repo = repo.to_thread_local();
-            configure_cache(&mut repo);
-            Ok(Some(repo))
-        }
+        Ok(repo) => Ok(Some(repo.to_thread_local())),
         // Upward-search exhaustion is the only "not a repository" outcome.
         Err(gix::discover::Error::Discover(
             Up::NoGitRepository { .. }
@@ -52,7 +48,10 @@ pub(crate) fn trusted_discover(path: &Path) -> Result<Option<gix::Repository>> {
 /// gix performs best when repeated object lookups are cached. This heuristic
 /// sizes the cache proportionally to the index entry count (~10 MB per 10 k
 /// tracked files), matching the recommendation in the migration spec.
-fn configure_cache(repo: &mut gix::Repository) {
+///
+/// Callers should invoke this before object-intensive operations (revwalk,
+/// diff, ref enumeration) rather than unconditionally at open time.
+pub(crate) fn configure_cache(repo: &mut gix::Repository) {
     if let Ok(index) = repo.index_or_empty() {
         let size = repo.compute_object_cache_size_for_tree_diffs(&index);
         repo.object_cache_size_if_unset(size);
@@ -68,7 +67,5 @@ fn configure_cache(repo: &mut gix::Repository) {
 #[allow(dead_code)] // Used by worktree/known-path opens ported in later phases.
 pub(crate) fn trusted_open(path: &Path) -> Result<gix::Repository> {
     let opts = gix::open::Options::default().bail_if_untrusted(true);
-    let mut repo = gix::open_opts(path, opts).map_err(|e| SniffError::git("open", e))?;
-    configure_cache(&mut repo);
-    Ok(repo)
+    gix::open_opts(path, opts).map_err(|e| SniffError::git("open", e))
 }

@@ -199,8 +199,9 @@ pub fn get_recent_commits_by_duration(
     duration: Duration,
     period_label: &str,
 ) -> Result<CommitDescSet> {
-    let repo = super::open::trusted_discover(base_dir)?
+    let mut repo = super::open::trusted_discover(base_dir)?
         .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    super::open::configure_cache(&mut repo);
     let repo_root = repo
         .workdir()
         .map(Path::to_path_buf)
@@ -227,8 +228,9 @@ pub fn get_recent_commits_in_range(
     until: DateTime<Utc>,
     period_label: &str,
 ) -> Result<CommitDescSet> {
-    let repo = super::open::trusted_discover(base_dir)?
+    let mut repo = super::open::trusted_discover(base_dir)?
         .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    super::open::configure_cache(&mut repo);
     let repo_root = repo
         .workdir()
         .map(Path::to_path_buf)
@@ -248,8 +250,9 @@ pub fn get_recent_commits_in_range(
 }
 
 pub fn get_recent_commits_by_date(base_dir: &Path, date: NaiveDate) -> Result<CommitDescSet> {
-    let repo = super::open::trusted_discover(base_dir)?
+    let mut repo = super::open::trusted_discover(base_dir)?
         .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    super::open::configure_cache(&mut repo);
     let repo_root = repo
         .workdir()
         .map(Path::to_path_buf)
@@ -272,8 +275,9 @@ pub fn get_recent_commits_by_date(base_dir: &Path, date: NaiveDate) -> Result<Co
 }
 
 pub fn get_recent_commits_by_hash(base_dir: &Path, hash: &str) -> Result<CommitDescSet> {
-    let repo = super::open::trusted_discover(base_dir)?
+    let mut repo = super::open::trusted_discover(base_dir)?
         .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    super::open::configure_cache(&mut repo);
     let repo_root = repo
         .workdir()
         .map(Path::to_path_buf)
@@ -327,8 +331,9 @@ pub fn get_recent_commits_by_count(base_dir: &Path, count: usize) -> Result<Comm
         return Err(SniffError::InvalidPeriod("0".to_string()));
     }
 
-    let repo = super::open::trusted_discover(base_dir)?
+    let mut repo = super::open::trusted_discover(base_dir)?
         .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    super::open::configure_cache(&mut repo);
     let repo_root = repo
         .workdir()
         .map(Path::to_path_buf)
@@ -369,6 +374,7 @@ fn collect_commits_in_range(
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
+        .use_commit_graph(Some(true))
         .all()
     else {
         return commits;
@@ -481,6 +487,7 @@ fn collect_commits_from_hash_to_head(
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
+        .use_commit_graph(Some(true))
         .all()
     else {
         return commits;
@@ -583,6 +590,7 @@ fn collect_commits_by_count(
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
+        .use_commit_graph(Some(true))
         .all()
     else {
         return commits;
