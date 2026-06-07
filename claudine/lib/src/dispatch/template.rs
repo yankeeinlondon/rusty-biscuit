@@ -406,6 +406,7 @@ impl TemplateVariable {
 /// #     tool_response: None, error: None, prompt: None, agent_type: None,
 /// #     notification_type: None, notification_message: None,
 /// #     extra: HashMap::new(), env: EnvironmentContext::default(),
+/// #     agent_pid: None,
 /// # };
 /// let result = interpolate("Provider is {{provider}}", &meta);
 /// assert_eq!(result, "Provider is claude");
@@ -617,6 +618,7 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: None,
             extra: HashMap::new(),
             env: EnvironmentContext {
                 os: OsContext {
@@ -661,6 +663,7 @@ mod tests {
                 primary_language: Some("Rust".to_string()),
                 package_area: Some("claudine".to_string()),
                 package: Some("claudine-cli".to_string()),
+                claudine_pid: None,
             },
         }
     }

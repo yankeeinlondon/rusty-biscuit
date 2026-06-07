@@ -126,8 +126,9 @@ pub(crate) fn run_child(
 
     let spawned_at = Instant::now();
     let mut child = command.spawn()?;
+    let captured_pid = child.id();
     *child_spawned = true;
-    Span::current().record("child_pid", tracing::field::display(child.id()));
+    Span::current().record("child_pid", tracing::field::display(captured_pid));
 
     // Shared first-response trackers. Each channel stamps the first
     // non-filtered line it sees so we can compute best-effort latency
@@ -275,6 +276,7 @@ pub(crate) fn run_child(
             total_elapsed,
             first_response_latency: first_response,
         },
+        agent_pid: Some(captured_pid),
     })
 }
 
@@ -412,8 +414,9 @@ pub(crate) fn run_child_capture(
 
     let spawned_at = Instant::now();
     let mut child = command.spawn()?;
+    let captured_pid = child.id();
     *child_spawned = true;
-    Span::current().record("child_pid", tracing::field::display(child.id()));
+    Span::current().record("child_pid", tracing::field::display(captured_pid));
 
     // Shared first-response trackers (always piped in capture mode).
     let first_stdout_at = Arc::new(std::sync::Mutex::new(None));
@@ -531,6 +534,7 @@ pub(crate) fn run_child_capture(
             total_elapsed,
             first_response_latency: first_response,
         },
+        agent_pid: Some(captured_pid),
     })
 }
 
@@ -594,8 +598,9 @@ pub(crate) fn run_child_stream_semantic(
     }
 
     let mut child = command.spawn()?;
+    let captured_pid = child.id();
     *child_spawned = true;
-    Span::current().record("child_pid", tracing::field::display(child.id()));
+    Span::current().record("child_pid", tracing::field::display(captured_pid));
 
     // Terminal-local renderer for OutputText (stdout markdown). Wrapped
     // in Arc<Mutex<_>> so the builder closures can retain independent
@@ -689,7 +694,8 @@ pub(crate) fn run_child_stream_semantic(
         };
         let reasoning_cb: ReasoningCallback = Box::new(|_chunk: &str| {});
 
-        let mut parser: Box<dyn SemanticStreamParser> = build_parser(output_cb, reasoning_cb);
+        let mut parser: Box<dyn SemanticStreamParser> =
+            build_parser(output_cb, reasoning_cb, Some(captured_pid));
         let mut fallback_mode = false;
         let mut stream_capture = stream_capture_owned;
 
@@ -963,5 +969,228 @@ pub(crate) fn run_child_stream_semantic(
             total_elapsed: started_at.elapsed(),
             first_response_latency: first_response,
         },
+        agent_pid: Some(captured_pid),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal env that satisfies the `PATH` / `HOME` debug-asserts inside
+    /// every spawn function. Test-owned so we never depend on the host
+    /// shell's environment.
+    fn minimal_env() -> HashMap<OsString, OsString> {
+        let mut env = HashMap::new();
+        env.insert(OsString::from("PATH"), OsString::from("/usr/bin:/bin"));
+        env.insert(OsString::from("HOME"), OsString::from("/tmp"));
+        env
+    }
+
+    /// Find a working `/bin/true`-equivalent on the test host. macOS ships
+    /// `/usr/bin/true`; Linux distros typically have both `/bin/true` and
+    /// `/usr/bin/true`. We prefer `/usr/bin/true` (always present on macOS)
+    /// and fall back to `/bin/true`.
+    fn true_binary() -> &'static Path {
+        if Path::new("/usr/bin/true").exists() {
+            Path::new("/usr/bin/true")
+        } else {
+            Path::new("/bin/true")
+        }
+    }
+
+    /// Spawn must populate `ProcessResult.agent_pid` immediately after
+    /// `command.spawn()?` returns. The captured PID must match a real
+    /// positive integer. This test exercises the legacy/interactive spawn
+    /// path used by direct wrappers and legacy composition runs.
+    #[test]
+    fn run_child_captures_agent_pid_after_successful_spawn() {
+        let env = minimal_env();
+        let cwd = Path::new("/tmp");
+        let mut child_spawned = false;
+
+        let result = run_child(
+            true_binary(),
+            &[],
+            &env,
+            cwd,
+            None,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned,
+        )
+        .expect("spawning /usr/bin/true must succeed on the test host");
+
+        assert!(child_spawned, "child_spawned flag must flip on success");
+        let pid = result
+            .agent_pid
+            .expect("agent_pid must be Some after a successful spawn");
+        assert!(pid > 0, "spawned child PID must be a positive integer");
+    }
+
+    /// `run_child_capture` shares the same spawn path as `run_child` and
+    /// must also stamp `agent_pid`. This is the path used by legacy
+    /// composition runs and harness-orchestration capture fallbacks.
+    #[test]
+    fn run_child_capture_captures_agent_pid_after_successful_spawn() {
+        let env = minimal_env();
+        let cwd = Path::new("/tmp");
+        let mut child_spawned = false;
+
+        let result = run_child_capture(
+            Path::new("/bin/echo"),
+            &["ok".to_string()],
+            &env,
+            cwd,
+            None,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned,
+        )
+        .expect("spawning /bin/echo must succeed on the test host");
+
+        assert!(child_spawned);
+        let pid = result
+            .agent_pid
+            .expect("agent_pid must be Some after a successful spawn");
+        assert!(pid > 0);
+    }
+
+    /// A failed spawn must return `Err` and leave the `child_spawned`
+    /// flag untouched. Crucially, no `ProcessResult` is constructed on
+    /// the failure path, so the caller cannot observe a fabricated
+    /// `agent_pid` value.
+    #[test]
+    fn run_child_failed_spawn_returns_err_without_agent_pid() {
+        let env = minimal_env();
+        let cwd = Path::new("/tmp");
+        let mut child_spawned = false;
+
+        let result = run_child_capture(
+            Path::new("/nonexistent/binary/that/does/not/exist"),
+            &[],
+            &env,
+            cwd,
+            None,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned,
+        );
+
+        assert!(
+            result.is_err(),
+            "spawning a nonexistent binary must return Err"
+        );
+        assert!(
+            !child_spawned,
+            "child_spawned flag must stay false when spawn fails"
+        );
+    }
+
+    /// End-to-end proof that `CLAUDINE_PID`, injected by the env-plan
+    /// builder in `wrap/env.rs`, actually reaches the spawned child's
+    /// environment. Spawns `/usr/bin/env` and inspects the captured
+    /// stdout for the `CLAUDINE_PID=<claudine_pid>` line.
+    #[test]
+    fn run_child_capture_propagates_claudine_pid_to_child_environment() {
+        let mut env = minimal_env();
+        let claudine_pid = std::process::id();
+        env.insert(
+            OsString::from("CLAUDINE_PID"),
+            OsString::from(claudine_pid.to_string()),
+        );
+        let cwd = Path::new("/tmp");
+        let mut child_spawned = false;
+
+        let result = run_child_capture(
+            Path::new("/usr/bin/env"),
+            &[],
+            &env,
+            cwd,
+            None,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned,
+        )
+        .expect("spawning /usr/bin/env must succeed on the test host");
+
+        assert!(child_spawned);
+        let expected_line = format!("CLAUDINE_PID={claudine_pid}");
+        assert!(
+            result.data.stdout.contains(&expected_line),
+            "child stdout must include {expected_line:?}; got: {:?}",
+            result.data.stdout,
+        );
+        let pid = result
+            .agent_pid
+            .expect("agent_pid must be Some after a successful spawn");
+        assert!(pid > 0);
+    }
+
+    /// Each spawn returns a fresh `ProcessResult` with its own
+    /// `agent_pid`. This is the per-attempt reset guarantee that
+    /// harness retries and composition iterations depend on —
+    /// no stale PID can leak from a previous attempt into the next.
+    #[test]
+    fn consecutive_spawns_produce_distinct_agent_pids() {
+        let env = minimal_env();
+        let cwd = Path::new("/tmp");
+
+        let mut child_spawned_a = false;
+        let result_a = run_child_capture(
+            Path::new("/bin/echo"),
+            &["first".to_string()],
+            &env,
+            cwd,
+            None,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned_a,
+        )
+        .expect("first spawn must succeed");
+
+        let mut child_spawned_b = false;
+        let result_b = run_child_capture(
+            Path::new("/bin/echo"),
+            &["second".to_string()],
+            &env,
+            cwd,
+            None,
+            ChildIoOptions {
+                stdout_noise_prefixes: &[],
+                stderr_noise_prefixes: &[],
+                stdin_seed: None,
+            },
+            &mut child_spawned_b,
+        )
+        .expect("second spawn must succeed");
+
+        let pid_a = result_a
+            .agent_pid
+            .expect("first spawn must capture agent_pid");
+        let pid_b = result_b
+            .agent_pid
+            .expect("second spawn must capture agent_pid");
+        assert!(
+            pid_a != pid_b,
+            "consecutive spawns must produce distinct PIDs \
+             (got pid_a={pid_a}, pid_b={pid_b}); \
+             if they collide the per-attempt reset contract is broken"
+        );
+    }
 }

@@ -927,14 +927,37 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         )
     );
 
+    // Change-oriented repo subcommands map staged/unstaged/dirty files to
+    // packages (or list changed files). They need per-file change stats but
+    // never worktree enumeration or commit history. `full()` would enable
+    // `include_worktrees`, whose `get_worktrees` fan-out opens every linked
+    // worktree and runs a full status scan + merge simulation per worktree —
+    // seconds on a checkout with many worktrees, for data these actions discard.
+    let changes_only_repo_action = matches!(
+        &repo_action,
+        Some(
+            crate::args::RepoAction::StagedPackages { .. }
+                | crate::args::RepoAction::StagedPackageAreas { .. }
+                | crate::args::RepoAction::UnstagedPackages { .. }
+                | crate::args::RepoAction::UnstagedPackageAreas { .. }
+                | crate::args::RepoAction::DirtyPackages { .. }
+                | crate::args::RepoAction::DirtyPackageAreas { .. }
+                | crate::args::RepoAction::StagedSourceCode(_)
+                | crate::args::RepoAction::UnstagedSourceCode(_)
+                | crate::args::RepoAction::DirtySourceCode(_)
+                | crate::args::RepoAction::DirtyFiles(_)
+                | crate::args::RepoAction::IsCurrentPackageAreaDirty
+                | crate::args::RepoAction::PackageAreaHasSourceCodeChanges
+        )
+    );
+
     // Build git request based on deep/commit_count flags
-    let git_request = if refresh_remotes_enabled {
-        GitRequest::deep().commit_count(history_count)
-    } else if lightweight_repo_action {
-        GitRequest::summary()
-    } else {
-        GitRequest::full().commit_count(history_count)
-    };
+    let git_request = select_git_request(
+        refresh_remotes_enabled,
+        lightweight_repo_action,
+        changes_only_repo_action,
+        history_count,
+    );
 
     // Build a targeted DetectionPlan based on the output filter
     let plan = match output_filter {
@@ -1805,6 +1828,29 @@ fn detect_programs_for_filter(filter: OutputFilter) -> ProgramsInfo {
 /// Determine if a repo action produces machine-readable/pipable text output.
 ///
 /// Scriptable commands emit perf to stderr so stdout stays clean for pipelines.
+/// Select the [`GitRequest`] detail level for a repo subcommand.
+///
+/// `changes_only` actions map file changes to packages but render no worktrees,
+/// branches, or commit history, so they take `summary` + file changes — never
+/// `full`, whose `include_worktrees` triggers the per-worktree status/merge
+/// fan-out that costs seconds on a checkout with many linked worktrees.
+fn select_git_request(
+    refresh_remotes: bool,
+    lightweight: bool,
+    changes_only: bool,
+    history_count: usize,
+) -> GitRequest {
+    if refresh_remotes {
+        GitRequest::deep().commit_count(history_count)
+    } else if lightweight {
+        GitRequest::summary()
+    } else if changes_only {
+        GitRequest::summary().include_file_changes(true)
+    } else {
+        GitRequest::full().commit_count(history_count)
+    }
+}
+
 fn is_scriptable_repo_action(action: Option<&crate::args::RepoAction>) -> bool {
     use crate::args::RepoAction;
     match action {
@@ -1823,6 +1869,33 @@ fn is_scriptable_repo_action(action: Option<&crate::args::RepoAction>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changes_only_actions_skip_worktree_enumeration() {
+        // Mapping staged/unstaged/dirty files to packages must never enable
+        // `include_worktrees` — that is the per-worktree status/merge fan-out
+        // that made `staged-packages` take seconds on a many-worktree checkout.
+        let req = select_git_request(false, false, true, 10);
+        assert!(
+            !req.include_worktrees,
+            "change-only actions must not enumerate worktrees"
+        );
+        assert!(
+            req.include_file_changes,
+            "change-only actions still need per-file change stats"
+        );
+        assert_eq!(
+            req.commit_count, 0,
+            "change-only actions need no commit history"
+        );
+    }
+
+    #[test]
+    fn full_repo_action_keeps_worktrees() {
+        // The default repo summary still renders the worktree table.
+        let req = select_git_request(false, false, false, 10);
+        assert!(req.include_worktrees);
+    }
 
     #[test]
     fn completions_help_detection() {

@@ -360,7 +360,11 @@ _test_browser pkg *args="":
     echo
     echo -e "🌐 Browser tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
-    cargo nextest run -p {{ pkg }} -E 'test(/browser_/)' --no-tests=pass {{ args }}
+    # Run one test at a time (`-j 1`). Each browser test spawns its own headless
+    # Chrome; `#[serial(browser)]` cannot serialize them because nextest runs
+    # each test in a separate process. Concurrent Chromes overwhelm teardown and
+    # trip nextest's leak detector — mirror the L2 tier and serialize the tier.
+    cargo nextest run -p {{ pkg }} -j 1 -E 'test(/browser_/)' --no-tests=pass {{ args }}
 
 # Real-resource tier: external services/devices. Selecting the set is harmless;
 # tests themselves are responsible for skipping when the resource is absent.

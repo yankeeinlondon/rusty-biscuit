@@ -465,6 +465,22 @@ fn prepare_meta_for_dispatch(meta: &mut EventMeta, env: &EnvironmentContext) {
             .entry("yolo".to_string())
             .or_insert_with(|| Value::String(yolo));
     }
+
+    // Mirror wrapper PID fields into `extra` so templates and expressions
+    // can resolve `claudine_pid` / `agent_pid` alongside the existing
+    // stringly-typed wrapper context keys. The typed fields on
+    // `EnvironmentContext` and `EventMeta` remain the source of truth for
+    // JSONL and SQL ingest; this mirror exists only for template bridging.
+    if let Some(pid) = meta.env.claudine_pid {
+        meta.extra
+            .entry("claudine_pid".to_string())
+            .or_insert(Value::Number(serde_json::Number::from(pid)));
+    }
+    if let Some(pid) = meta.agent_pid {
+        meta.extra
+            .entry("agent_pid".to_string())
+            .or_insert(Value::Number(serde_json::Number::from(pid)));
+    }
 }
 
 async fn dispatch_preparsed(
@@ -889,6 +905,7 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: None,
             extra: HashMap::new(),
             env: env.clone(),
         };
@@ -969,6 +986,7 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: None,
             extra: HashMap::new(),
             env: env.clone(),
         };
@@ -1020,6 +1038,7 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: None,
             extra: HashMap::new(),
             env: EnvironmentContext::default(),
         };

@@ -208,6 +208,43 @@ mod tests {
     }
 
     #[test]
+    fn standalone_render_degrades_colors_across_depths() {
+        use crate::discovery::detection::ColorDepth;
+
+        // The standalone `Prose::render` path (the bespoke terminal emitter) must
+        // honour the terminal's color depth, exactly like the render-tree path.
+        // A web color (grey = rgb(128,128,128)) is the witness: truecolor keeps
+        // `38;2;…`, 256-color lowers to `38;5;…`, 16-color falls back to a basic
+        // SGR with no extended sequence, and no-color emits no color SGR at all.
+        // Regression: the emitter previously emitted truecolor regardless of
+        // depth, leaking `38;2;…` even under `ColorDepth::None`.
+        let render_at = |depth: ColorDepth| {
+            let term = Terminal::builder()
+                .color_depth(depth)
+                .width(80)
+                .supports_unicode(true)
+                .build();
+            Prose::new("<grey>x</grey>").render(&term)
+        };
+
+        let truecolor = render_at(ColorDepth::TrueColor);
+        assert!(truecolor.contains("\x1b[38;2;128;128;128m"), "got: {truecolor:?}");
+
+        let enhanced = render_at(ColorDepth::Enhanced);
+        assert!(enhanced.contains("\x1b[38;5;"), "256-color expected; got: {enhanced:?}");
+        assert!(!enhanced.contains("38;2;"), "must not stay truecolor; got: {enhanced:?}");
+
+        let basic = render_at(ColorDepth::Basic);
+        assert!(!basic.contains("38;2;") && !basic.contains("38;5;"), "got: {basic:?}");
+
+        let none = render_at(ColorDepth::None);
+        assert!(
+            !none.contains("38;") && !none.contains("48;"),
+            "no-color render must not emit any color SGR; got: {none:?}"
+        );
+    }
+
+    #[test]
     fn test_tailwind_color_block() {
         let prose = Prose::new("<purple-500>tailwind purple</purple-500>");
         let result = prose.render_optimistic(None);

@@ -75,6 +75,16 @@ pub struct EventMeta {
     /// for all events in the session.
     #[serde(default)]
     pub env: EnvironmentContext,
+
+    /// Immediate child PID returned by the wrapper spawn operation.
+    ///
+    /// `None` until a successful provider spawn. Raw JSONL records omit
+    /// the key entirely when unavailable (`skip_serializing_if`), while
+    /// reporting DTOs and SQL columns expose a stable nullable field
+    /// where `null` means "no provider child PID was available for that
+    /// row".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_pid: Option<u32>,
 }
 
 /// Structured wrapper for provider tool names.
@@ -115,6 +125,7 @@ impl EventMeta {
             notification_message: None,
             extra: HashMap::new(),
             env: EnvironmentContext::default(),
+            agent_pid: None,
         }
     }
 
@@ -149,6 +160,7 @@ mod tests {
             notification_message: None,
             extra: HashMap::new(),
             env: EnvironmentContext::default(),
+            agent_pid: None,
         }
     }
 
@@ -194,5 +206,40 @@ mod tests {
         assert!(meta.session_id.is_none());
         assert!(meta.tool_name.is_none());
         assert!(meta.extra.is_empty());
+    }
+
+    /// Phase 3 — `agent_pid` MUST be omitted from JSONL when `None`.
+    ///
+    /// This keeps raw stream records compact when the wrapper has not yet
+    /// spawned the provider (or when the record originates from a hook
+    /// handler that has no way to know the agent PID).
+    #[test]
+    fn agent_pid_omitted_when_none() {
+        let meta = sample_meta();
+        let json = serde_json::to_value(&meta).unwrap();
+        assert!(
+            json.get("agent_pid").is_none(),
+            "agent_pid must be omitted when None; got: {json}"
+        );
+    }
+
+    /// Phase 3 — `agent_pid` MUST appear as a number when populated.
+    #[test]
+    fn agent_pid_serialized_when_some() {
+        let mut meta = sample_meta();
+        meta.agent_pid = Some(42_345);
+        let json = serde_json::to_value(&meta).unwrap();
+        assert_eq!(json["agent_pid"], 42_345);
+    }
+
+    /// Phase 3 — legacy JSONL without `agent_pid` MUST round-trip to `None`.
+    #[test]
+    fn agent_pid_defaults_to_none_on_deserialize() {
+        let json = serde_json::json!({
+            "provider": "claude",
+            "event": "before_tool"
+        });
+        let meta: EventMeta = serde_json::from_value(json).unwrap();
+        assert!(meta.agent_pid.is_none());
     }
 }
