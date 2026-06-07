@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use git2::Repository;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
@@ -457,12 +456,9 @@ fn extract_remote_host(url: &str) -> Option<&str> {
 
 /// Lightweight handle to a discovered git repository.
 ///
-/// Discovery, trust validation, basic identity queries (root, branch, HEAD,
-/// worktree state), working-tree status, and commit tree diffs are backed by
-/// the pure-Rust `gix` handle. The remaining history, ref, remote, and
-/// worktree helpers are still git2-backed during the staged migration and use
-/// the retained `git2::Repository`; both handles refer to the same on-disk
-/// repository.
+/// Discovery, trust validation, identity queries (root, branch, HEAD, worktree
+/// state), working-tree status, history, refs, remotes, config, and worktree
+/// queries are all backed by the pure-Rust `gix` handle.
 ///
 /// ## Examples
 ///
@@ -477,13 +473,11 @@ fn extract_remote_host(url: &str) -> Option<&str> {
 /// }
 /// ```
 pub struct GitRepo {
-    /// Pure-Rust handle backing discovery and basic identity queries.
+    /// Pure-Rust handle backing discovery and all git queries.
     gix: gix::Repository,
-    /// Retained libgit2 handle backing the not-yet-ported helpers.
-    repo: Repository,
     repo_root: PathBuf,
     /// Cached ref decorations to avoid recomputing on every commit query.
-    ref_decorations: RefCell<Option<HashMap<git2::Oid, Vec<RefDecoration>>>>,
+    ref_decorations: RefCell<Option<HashMap<gix::ObjectId, Vec<RefDecoration>>>>,
     /// Cached git config so disk reads happen at most once per instance.
     config_cache: OnceLock<GitConfig>,
 }
@@ -500,10 +494,10 @@ impl GitRepo {
     /// Returns cached ref decorations, computing them once on first access.
     pub(crate) fn ref_decorations(
         &self,
-    ) -> std::cell::Ref<'_, HashMap<git2::Oid, Vec<RefDecoration>>> {
+    ) -> std::cell::Ref<'_, HashMap<gix::ObjectId, Vec<RefDecoration>>> {
         // If not yet computed, compute and cache
         if self.ref_decorations.borrow().is_none() {
-            let decorations = super::discovery::collect_ref_decorations(&self.repo);
+            let decorations = super::discovery::collect_ref_decorations(&self.gix);
             *self.ref_decorations.borrow_mut() = Some(decorations);
         }
         std::cell::Ref::map(self.ref_decorations.borrow(), |opt| opt.as_ref().unwrap())
@@ -533,13 +527,8 @@ impl GitRepo {
             .workdir()
             .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?
             .to_path_buf();
-        // Retain a libgit2 handle for the helpers not yet ported to gix. gix has
-        // already validated trust and existence, so this open is expected to
-        // succeed for the same repository.
-        let repo = Repository::open(&repo_root).map_err(|e| SniffError::git("open", e))?;
         Ok(Some(Self {
             gix,
-            repo,
             repo_root,
             ref_decorations: RefCell::new(None),
             config_cache: OnceLock::new(),
@@ -607,7 +596,7 @@ impl GitRepo {
 
     /// Organization and repository name parsed from the preferred remote URL.
     pub fn org_and_repo(&self) -> (Option<String>, Option<String>) {
-        let remotes = super::remote_refresh::get_remotes(&self.repo, false);
+        let remotes = super::remote_refresh::get_remotes(&self.gix, false);
         preferred_remote(&remotes)
             .and_then(|r| r.url.as_deref())
             .map(parse_org_repo)
@@ -634,31 +623,31 @@ impl GitRepo {
 
     /// Configured remotes.
     pub fn remotes(&self, include_details: bool) -> Vec<RemoteInfo> {
-        super::remote_refresh::get_remotes(&self.repo, include_details)
+        super::remote_refresh::get_remotes(&self.gix, include_details)
     }
 
     /// Linked worktrees.
     pub fn worktrees(&self) -> HashMap<String, WorktreeInfo> {
-        super::remote_refresh::get_worktrees(&self.repo)
+        super::remote_refresh::get_worktrees(&self.gix)
     }
 
     /// Git user configuration.
     pub fn config(&self) -> GitConfig {
         self.config_cache
-            .get_or_init(|| super::remote_refresh::get_git_config(&self.repo))
+            .get_or_init(|| super::remote_refresh::get_git_config(&self.gix))
             .clone()
     }
 
     /// Local branch information.
     pub fn branches(&self) -> Vec<LocalBranchInfo> {
         let current = self.current_branch();
-        super::remote_refresh::get_local_branches(&self.repo, current.as_deref())
+        super::remote_refresh::get_local_branches(&self.gix, current.as_deref())
     }
 
     /// Per-remote tracking status (ahead/behind).
     pub fn tracking_status(&self) -> Vec<RemoteTrackingStatus> {
         let current = self.current_branch();
-        super::remote_refresh::get_tracking_status(&self.repo, current.as_deref())
+        super::remote_refresh::get_tracking_status(&self.gix, current.as_deref())
     }
 
     /// Full detection — equivalent to `detect_git()` but reuses
@@ -695,7 +684,7 @@ impl GitRepo {
         let is_minimal = request.is_minimal();
 
         if request.refresh_remote_tracking {
-            super::remote_refresh::refresh_remote_tracking_refs(&self.repo, 2);
+            super::remote_refresh::refresh_remote_tracking_refs(&self.gix, 2);
         }
 
         let mut recent = if request.commit_count > 0 {
@@ -743,13 +732,13 @@ impl GitRepo {
         let wants_metadata = request.wants_repo_metadata();
 
         let remotes = if wants_metadata {
-            super::remote_refresh::get_remotes(&self.repo, request.include_remote_branch_details)
+            super::remote_refresh::get_remotes(&self.gix, request.include_remote_branch_details)
         } else {
             Vec::new()
         };
 
         let worktrees = if request.include_worktrees {
-            super::remote_refresh::get_worktrees(&self.repo)
+            super::remote_refresh::get_worktrees(&self.gix)
         } else {
             HashMap::new()
         };
@@ -761,13 +750,13 @@ impl GitRepo {
         };
 
         let branches = if wants_metadata {
-            super::remote_refresh::get_local_branches(&self.repo, current_branch.as_deref())
+            super::remote_refresh::get_local_branches(&self.gix, current_branch.as_deref())
         } else {
             Vec::new()
         };
 
         let tracking = if wants_metadata {
-            super::remote_refresh::get_tracking_status(&self.repo, current_branch.as_deref())
+            super::remote_refresh::get_tracking_status(&self.gix, current_branch.as_deref())
         } else {
             Vec::new()
         };

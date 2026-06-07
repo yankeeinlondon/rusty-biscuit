@@ -4,7 +4,6 @@
 //! the user's `git` binary, locally cached remote branch lookups, local branch
 //! enumeration, tracking status, git config, and linked worktree discovery.
 
-use git2::Repository;
 use gix::bstr::ByteSlice;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -15,49 +14,104 @@ use super::discovery::resolve_base_branch;
 use super::status::get_repo_status_counts;
 use super::types::*;
 
+/// gix equivalent of git2's `graph_ahead_behind`: `(commits reachable from
+/// `local` but not `upstream`, commits reachable from `upstream` but not
+/// `local`)`, computed with two hidden-tip revwalks.
+fn ahead_behind(
+    repo: &gix::Repository,
+    local: gix::ObjectId,
+    upstream: gix::ObjectId,
+) -> (usize, usize) {
+    (
+        count_reachable_excluding(repo, local, upstream),
+        count_reachable_excluding(repo, upstream, local),
+    )
+}
+
+/// Count commits reachable from `tip` once everything reachable from `hide` is
+/// excluded — the building block for ahead/behind.
+fn count_reachable_excluding(
+    repo: &gix::Repository,
+    tip: gix::ObjectId,
+    hide: gix::ObjectId,
+) -> usize {
+    repo.rev_walk(Some(tip))
+        .with_hidden(Some(hide))
+        .all()
+        .map(|walk| walk.filter_map(Result::ok).count())
+        .unwrap_or(0)
+}
+
+/// True when `ancestor` is reachable from `descendant` (i.e. already merged):
+/// their merge base is `ancestor` itself.
+fn is_ancestor(repo: &gix::Repository, ancestor: gix::ObjectId, descendant: gix::ObjectId) -> bool {
+    repo.merge_base(ancestor, descendant)
+        .map(|base| base.detach() == ancestor)
+        .unwrap_or(false)
+}
+
 /// Gets git configuration (user info, GPG, signing).
-pub(crate) fn get_git_config(repo: &Repository) -> GitConfig {
-    #[allow(unused_mut)]
-    let mut config = match repo.config() {
-        Ok(c) => c,
-        Err(_) => return GitConfig::default(),
+///
+/// Reads from gix's layered snapshot (system/global/local). gix does not search
+/// the platform-specific system gitconfig that ships with Apple's Command Line
+/// Tools (macOS) or Git for Windows, so that file is parsed separately and used
+/// as a lowest-precedence (ProgramData-equivalent) fallback — matching the
+/// extra file libgit2 was given.
+pub(crate) fn get_git_config(repo: &gix::Repository) -> GitConfig {
+    let snapshot = repo.config_snapshot();
+    let extra = extra_system_config();
+
+    let string = |key: &str| -> Option<String> {
+        snapshot.string(key).map(|v| v.to_string()).or_else(|| {
+            extra
+                .as_ref()
+                .and_then(|f| f.string(key))
+                .map(|v| v.to_string())
+        })
+    };
+    let boolean = |key: &str| -> Option<bool> {
+        snapshot.boolean(key).or_else(|| {
+            extra
+                .as_ref()
+                .and_then(|f| f.boolean(key))
+                .and_then(Result::ok)
+        })
     };
 
-    // On macOS, the Developer Tools system gitconfig lives outside libgit2's
-    // default search paths. Include it so we pick up credential.helper, etc.
-    #[cfg(target_os = "macos")]
-    {
-        let macos_system = std::path::Path::new(
-            "/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig",
-        );
-        if macos_system.exists() {
-            let _ = config.add_file(macos_system, git2::ConfigLevel::ProgramData, false);
-        }
-    }
-
-    // Git for Windows installs a system-level gitconfig that libgit2 may not
-    // find automatically via its ProgramData search.
-    #[cfg(target_os = "windows")]
-    {
-        let git_for_windows = std::path::Path::new(r"C:\Program Files\Git\etc\gitconfig");
-        if git_for_windows.exists() {
-            let _ = config.add_file(git_for_windows, git2::ConfigLevel::ProgramData, false);
-        }
-    }
-
     GitConfig {
-        user_name: config.get_string("user.name").ok(),
-        user_email: config.get_string("user.email").ok(),
-        gpg_use_agent: config.get_bool("gpg.use-agent").ok(),
-        gpg_program: config.get_string("gpg.program").ok(),
-        credential_helper: config.get_string("credential.helper").ok(),
-        signing_key: config.get_string("user.signingkey").ok(),
-        commit_sign: config.get_bool("commit.gpgsign").ok(),
-        tag_sign: config.get_bool("tag.gpgsign").ok(),
-        pager: config.get_string("core.pager").ok(),
-        delta_syntax_theme: config.get_string("delta.syntax-theme").ok(),
-        delta_light: config.get_bool("delta.light").ok(),
-        delta_side_by_side: config.get_bool("delta.side-by-side").ok(),
+        user_name: string("user.name"),
+        user_email: string("user.email"),
+        gpg_use_agent: boolean("gpg.use-agent"),
+        gpg_program: string("gpg.program"),
+        credential_helper: string("credential.helper"),
+        signing_key: string("user.signingkey"),
+        commit_sign: boolean("commit.gpgsign"),
+        tag_sign: boolean("tag.gpgsign"),
+        pager: string("core.pager"),
+        delta_syntax_theme: string("delta.syntax-theme"),
+        delta_light: boolean("delta.light"),
+        delta_side_by_side: boolean("delta.side-by-side"),
+    }
+}
+
+/// Parse the platform-specific system gitconfig that gix's standard search does
+/// not include, for use as a lowest-precedence fallback.
+fn extra_system_config() -> Option<gix::config::File<'static>> {
+    #[cfg(target_os = "macos")]
+    let path: &std::path::Path =
+        std::path::Path::new("/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig");
+    #[cfg(target_os = "windows")]
+    let path: &std::path::Path = std::path::Path::new(r"C:\Program Files\Git\etc\gitconfig");
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    return None;
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        if !path.exists() {
+            return None;
+        }
+        gix::config::File::from_path_no_includes(path.to_path_buf(), gix::config::Source::System)
+            .ok()
     }
 }
 
@@ -67,84 +121,52 @@ pub(crate) fn get_git_config(repo: &Repository) -> GitConfig {
 /// ahead/behind relative to the current branch's HEAD. The current branch
 /// itself gets ahead=0, behind=0.
 pub(crate) fn get_local_branches(
-    repo: &Repository,
+    repo: &gix::Repository,
     current_branch: Option<&str>,
 ) -> Vec<LocalBranchInfo> {
     let mut branches = Vec::new();
 
-    // Resolve HEAD commit OID for ahead/behind calculations
-    let head_oid = repo
-        .head()
-        .map_err(|e| {
-            debug!(error = %e, "could not read HEAD for branch comparisons");
-            e
-        })
-        .ok()
-        .and_then(|h| {
-            h.peel_to_commit()
-                .map_err(|e| {
-                    debug!(error = %e, "could not peel HEAD to commit for branch comparisons");
-                    e
-                })
-                .ok()
-        })
-        .map(|c| c.id());
+    // HEAD commit OID for ahead/behind calculations.
+    let head_oid = repo.head_id().ok().map(|id| id.detach());
 
-    if let Ok(branch_iter) = repo.branches(Some(git2::BranchType::Local)) {
-        for branch_result in branch_iter {
-            if let Ok((branch, _)) = branch_result
-                && let Ok(Some(name)) = branch.name()
-            {
-                let is_current = current_branch.is_some_and(|cb| cb == name);
+    let Ok(platform) = repo.references() else {
+        return branches;
+    };
+    let Ok(iter) = platform.local_branches() else {
+        return branches;
+    };
 
-                // Get short hash from branch tip commit
-                let short_hash = branch
-                    .get()
-                    .peel_to_commit()
-                    .map_err(|e| {
-                        debug!(branch = name, error = %e, "could not peel branch to commit");
-                        e
-                    })
-                    .ok()
-                    .map(|c| {
-                        let id = c.id().to_string();
-                        id[..8.min(id.len())].to_string()
-                    })
-                    .unwrap_or_default();
+    for reference in iter.flatten() {
+        let full = reference.name().as_bstr().to_str_lossy().into_owned();
+        let Some(name) = full.strip_prefix("refs/heads/") else {
+            continue;
+        };
+        let name = name.to_string();
+        let is_current = current_branch.is_some_and(|cb| cb == name);
 
-                // Compute ahead/behind relative to HEAD
-                let (ahead, behind) = if is_current {
-                    (0, 0)
-                } else if let Some(head_id) = head_oid {
-                    branch
-                        .get()
-                        .peel_to_commit()
-                        .map_err(|e| {
-                            debug!(branch = name, error = %e, "could not peel branch for ahead/behind");
-                            e
-                        })
-                        .ok()
-                        .and_then(|c| {
-                            repo.graph_ahead_behind(c.id(), head_id)
-                                .map_err(|e| {
-                                    debug!(branch = name, error = %e, "could not compute ahead/behind");
-                                    e
-                                })
-                                .ok()
-                        })
-                        .unwrap_or((0, 0))
-                } else {
-                    (0, 0)
-                };
+        // Tip commit of the branch (peeling through annotated tags is a no-op
+        // for a branch ref, but keeps behavior uniform).
+        let tip = reference.into_fully_peeled_id().ok().map(|id| id.detach());
 
-                branches.push(LocalBranchInfo {
-                    name: name.to_string(),
-                    short_hash,
-                    ahead,
-                    behind,
-                });
-            }
-        }
+        let short_hash = tip
+            .map(|oid| {
+                let id = oid.to_string();
+                id[..8.min(id.len())].to_string()
+            })
+            .unwrap_or_default();
+
+        let (ahead, behind) = match (is_current, tip, head_oid) {
+            (true, _, _) => (0, 0),
+            (false, Some(tip), Some(head)) => ahead_behind(repo, tip, head),
+            _ => (0, 0),
+        };
+
+        branches.push(LocalBranchInfo {
+            name,
+            short_hash,
+            ahead,
+            behind,
+        });
     }
 
     branches
@@ -162,7 +184,7 @@ pub(crate) fn get_local_branches(
 /// `refs/remotes/<remote>/<branch>` that the local branch does not yet
 /// have.
 pub(crate) fn get_tracking_status(
-    repo: &Repository,
+    repo: &gix::Repository,
     current_branch: Option<&str>,
 ) -> Vec<RemoteTrackingStatus> {
     let mut tracking = Vec::new();
@@ -171,46 +193,31 @@ pub(crate) fn get_tracking_status(
         return tracking;
     };
 
-    let Ok(local_branch) = repo.find_branch(branch_name, git2::BranchType::Local) else {
+    let Ok(local_ref) = repo.find_reference(&format!("refs/heads/{branch_name}")) else {
         return tracking;
     };
-
-    let Ok(local_commit) = local_branch.get().peel_to_commit() else {
+    let Ok(local_id) = local_ref.into_fully_peeled_id() else {
         return tracking;
     };
+    let local = local_id.detach();
 
-    let Ok(remotes) = repo.remotes() else {
-        return tracking;
-    };
-
-    for remote_name in remotes.iter().flatten() {
-        let remote_branch_name = format!("{}/{}", remote_name, branch_name);
-        let Ok(remote_ref) = repo.find_reference(&format!("refs/remotes/{}", remote_branch_name))
-        else {
+    for remote_name in repo.remote_names() {
+        let remote_name = remote_name.to_string();
+        let remote_ref_name = format!("refs/remotes/{remote_name}/{branch_name}");
+        let Ok(remote_ref) = repo.find_reference(&remote_ref_name) else {
             continue;
         };
-        let Ok(remote_commit) = remote_ref.peel_to_commit() else {
+        let Ok(remote_id) = remote_ref.into_fully_peeled_id() else {
             continue;
         };
+        let remote = remote_id.detach();
 
-        let behind = match repo.graph_ahead_behind(local_commit.id(), remote_commit.id()) {
-            Ok((_, b)) => b,
-            Err(e) => {
-                debug!(remote = remote_name, error = %e, "could not compute behind count");
-                continue;
-            }
-        };
-
-        let ahead = match push_relevant_ahead(repo, local_commit.id(), remote_name) {
-            Ok(n) => n,
-            Err(e) => {
-                debug!(remote = remote_name, error = %e, "could not compute push-relevant ahead");
-                continue;
-            }
-        };
+        // behind: commits on the remote-tracking branch the local does not have.
+        let behind = count_reachable_excluding(repo, remote, local);
+        let ahead = push_relevant_ahead(repo, local, &remote_name);
 
         tracking.push(RemoteTrackingStatus {
-            remote: remote_name.to_string(),
+            remote: remote_name,
             ahead,
             behind,
         });
@@ -227,72 +234,64 @@ pub(crate) fn get_tracking_status(
 /// count when the local branch has merged-forward commits that already
 /// exist on `origin/main` (or other remote branches), even if
 /// `origin/<branch>` itself is stale.
-fn push_relevant_ahead(
-    repo: &Repository,
-    local: git2::Oid,
-    remote_name: &str,
-) -> Result<usize, git2::Error> {
-    let mut walk = repo.revwalk()?;
-    walk.push(local)?;
+fn push_relevant_ahead(repo: &gix::Repository, local: gix::ObjectId, remote_name: &str) -> usize {
+    let prefix = format!("refs/remotes/{remote_name}/");
+    let hidden: Vec<gix::ObjectId> = match repo.references() {
+        Ok(platform) => match platform.prefixed(prefix.as_str()) {
+            Ok(iter) => iter
+                .flatten()
+                .filter_map(|r| r.into_fully_peeled_id().ok().map(|id| id.detach()))
+                .collect(),
+            Err(_) => Vec::new(),
+        },
+        Err(_) => Vec::new(),
+    };
 
-    let glob = format!("refs/remotes/{}/*", remote_name);
-    let refs = repo.references_glob(&glob)?;
-    for r in refs.flatten() {
-        // `target()` returns None for symbolic refs (e.g. refs/remotes/origin/HEAD);
-        // the underlying concrete ref is iterated separately, so skipping is safe.
-        if let Some(oid) = r.target() {
-            let _ = walk.hide(oid);
-        }
-    }
-
-    Ok(walk.count())
+    repo.rev_walk(Some(local))
+        .with_hidden(hidden)
+        .all()
+        .map(|walk| walk.filter_map(Result::ok).count())
+        .unwrap_or(0)
 }
 
 /// Retrieves all configured remotes with their URLs and hosting providers.
 ///
 /// When `include_remote_details` is true, also includes locally known
 /// remote-tracking branches and the resolved default branch.
-pub(crate) fn get_remotes(repo: &Repository, include_remote_details: bool) -> Vec<RemoteInfo> {
-    repo.remotes()
-        .map(|names| {
-            names
-                .iter()
-                .flatten()
-                .filter_map(|name| {
-                    repo.find_remote(name)
-                        .map_err(|e| {
-                            debug!(remote = name, error = %e, "could not find remote");
-                            e
-                        })
-                        .ok()
-                        .map(|remote| {
-                            let url = remote.url().map(String::from);
-                            let provider = url
-                                .as_ref()
-                                .map(|u| GitHostingProvider::from_url(u))
-                                .unwrap_or(GitHostingProvider::Unknown);
+pub(crate) fn get_remotes(repo: &gix::Repository, include_remote_details: bool) -> Vec<RemoteInfo> {
+    // Read URLs straight from config (`remote.<name>.url`) so the exact stored
+    // string is preserved rather than gix's reserialized `Url` form.
+    let cfg = repo.config_snapshot();
+    repo.remote_names()
+        .into_iter()
+        .map(|name| {
+            let name = name.to_string();
+            let url = cfg
+                .string(format!("remote.{name}.url").as_str())
+                .map(|v| v.to_string());
+            let provider = url
+                .as_ref()
+                .map(|u| GitHostingProvider::from_url(u))
+                .unwrap_or(GitHostingProvider::Unknown);
 
-                            let (branches, default_branch) = if include_remote_details {
-                                (
-                                    get_remote_branches(repo, name),
-                                    get_remote_default_branch(repo, name),
-                                )
-                            } else {
-                                (None, None)
-                            };
+            let (branches, default_branch) = if include_remote_details {
+                (
+                    get_remote_branches(repo, &name),
+                    get_remote_default_branch(repo, &name),
+                )
+            } else {
+                (None, None)
+            };
 
-                            RemoteInfo {
-                                name: name.to_string(),
-                                url,
-                                provider,
-                                branches,
-                                default_branch,
-                            }
-                        })
-                })
-                .collect()
+            RemoteInfo {
+                name,
+                url,
+                provider,
+                branches,
+                default_branch,
+            }
         })
-        .unwrap_or_default()
+        .collect()
 }
 
 /// Refresh local remote-tracking refs using the user's configured `git` binary.
@@ -300,16 +299,16 @@ pub(crate) fn get_remotes(repo: &Repository, include_remote_details: bool) -> Ve
 /// When multiple remotes are configured, fetches run with bounded parallelism
 /// (up to `max_concurrency`, clamped to 1–3) to reduce latency.  Terminal
 /// prompts are disabled so CLI use does not block on credential input.
-pub(crate) fn refresh_remote_tracking_refs(repo: &Repository, max_concurrency: usize) {
+pub(crate) fn refresh_remote_tracking_refs(repo: &gix::Repository, max_concurrency: usize) {
     let Some(repo_root) = repo.workdir() else {
         return;
     };
 
-    let Ok(remotes) = repo.remotes() else {
-        return;
-    };
-
-    let remote_names: Vec<String> = remotes.iter().flatten().map(|s| s.to_string()).collect();
+    let remote_names: Vec<String> = repo
+        .remote_names()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
 
     if remote_names.is_empty() {
         return;
@@ -504,7 +503,7 @@ fn remote_branch_tips(repo: &gix::Repository) -> Vec<(String, gix::ObjectId)> {
 /// Resolves the default branch for a remote from `refs/remotes/{name}/HEAD`.
 ///
 /// Returns the branch name (e.g., "main") if the symbolic ref exists and can be resolved.
-fn get_remote_default_branch(repo: &Repository, remote_name: &str) -> Option<String> {
+fn get_remote_default_branch(repo: &gix::Repository, remote_name: &str) -> Option<String> {
     let ref_name = format!("refs/remotes/{}/HEAD", remote_name);
     let reference = repo
         .find_reference(&ref_name)
@@ -513,30 +512,36 @@ fn get_remote_default_branch(repo: &Repository, remote_name: &str) -> Option<Str
             e
         })
         .ok()?;
-    let target = reference.symbolic_target()?;
+    let gix::refs::TargetRef::Symbolic(target) = reference.target() else {
+        return None;
+    };
     let prefix = format!("refs/remotes/{}/", remote_name);
-    target.strip_prefix(&prefix).map(String::from)
+    target
+        .as_bstr()
+        .to_str_lossy()
+        .strip_prefix(&prefix)
+        .map(String::from)
 }
 
 /// Gets branch names for a remote from local tracking refs (`refs/remotes/<name>/*`).
 ///
 /// Reads locally cached remote branch info (updated on fetch/pull).
 /// No network access required.
-fn get_remote_branches(repo: &Repository, remote_name: &str) -> Option<Vec<String>> {
-    let pattern = format!("refs/remotes/{}/*", remote_name);
-    let refs = repo
-        .references_glob(&pattern)
+fn get_remote_branches(repo: &gix::Repository, remote_name: &str) -> Option<Vec<String>> {
+    let prefix = format!("refs/remotes/{}/", remote_name);
+    let refs = repo.references().ok()?;
+    let iter = refs
+        .prefixed(prefix.as_str())
         .map_err(|e| {
             debug!(remote = remote_name, error = %e, "could not glob remote branches");
             e
         })
         .ok()?;
-    let prefix = format!("refs/remotes/{}/", remote_name);
 
-    let mut branches: Vec<String> = refs
+    let mut branches: Vec<String> = iter
         .flatten()
         .filter_map(|r| {
-            let name = r.name()?;
+            let name = r.name().as_bstr().to_str_lossy().into_owned();
             let branch = name.strip_prefix(&prefix)?;
             if branch == "HEAD" {
                 None
@@ -561,94 +566,72 @@ fn get_remote_branches(repo: &Repository, remote_name: &str) -> Option<Vec<Strin
 /// are filtered out. For each worktree, opens it as a Repository to access
 /// HEAD commit, dirty status, and ahead/behind counts relative to the base
 /// repository's default branch.
-pub(crate) fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
+pub(crate) fn get_worktrees(repo: &gix::Repository) -> HashMap<String, WorktreeInfo> {
     use rayon::prelude::*;
 
-    let worktree_names = match repo.worktrees() {
-        Ok(names) => names,
+    let proxies = match repo.worktrees() {
+        Ok(p) => p,
         Err(_) => return HashMap::new(),
     };
 
-    // Resolve the base branch name and its commit OID for ahead/behind calculations.
-    // Try the base repo's HEAD first; fall back to "main" then "master".
+    // Base branch name and tip for ahead/behind: the main worktree's HEAD,
+    // falling back to "main"/"master".
     let (base_branch, base_oid) = resolve_base_branch(repo);
 
-    // Collect (name, path) pairs up front — cheap sequential work — so per-worktree
-    // analysis can fan out in parallel. git2::Repository is !Sync, so each worker
-    // opens its own handles rather than sharing `repo`.
-    let base_repo_path = repo.path().to_path_buf();
-    let worktree_paths: Vec<(String, PathBuf)> = worktree_names
+    // Collect (name, worktree path) pairs up front — cheap sequential work —
+    // before the per-worktree analysis fans out.
+    let worktree_paths: Vec<(String, PathBuf)> = proxies
         .iter()
-        .flatten()
-        .filter_map(|name| {
-            let wt = repo.find_worktree(name).ok()?;
-            Some((name.to_string(), wt.path().to_path_buf()))
+        .filter_map(|proxy| {
+            let name = proxy.id().to_str_lossy().into_owned();
+            let path = proxy.base().ok()?;
+            Some((name, path))
         })
         .collect();
 
-    // Open the base repo once before the parallel section to avoid N reopens.
-    // We keep the opened handle alive for the scope of the parallel work.
-    let _base_repo = Repository::open(&base_repo_path).ok();
+    // R4: open the base repository once and share it across Rayon workers via
+    // a thread-safe handle; each worker derives a cheap thread-local view
+    // rather than reopening the base repo N times.
+    let base_sync = repo.clone().into_sync();
 
     worktree_paths
         .par_iter()
         .filter_map(|(name, worktree_path)| {
-            let worktree_repo = Repository::open(worktree_path).ok()?;
+            let base = base_sync.to_thread_local();
+            let worktree_repo = gix::open(worktree_path).ok()?;
 
-            // Get branch name and HEAD commit from worktree
-            let head = worktree_repo.head().ok();
-            let branch = head
-                .as_ref()
-                .and_then(|h| h.shorthand().map(String::from))
-                .unwrap_or_else(|| name.to_string());
-            let head_commit = head.and_then(|h| h.peel_to_commit().ok());
-            let sha = head_commit
-                .as_ref()
-                .map(|c| c.id().to_string())
-                .unwrap_or_default();
-
-            // Open a per-thread handle on the base repo for graph/merge queries.
-            // The outer _base_repo keeps the underlying git structures warm,
-            // but git2::Repository is !Sync so each thread still needs its own handle.
-            let base_repo = Repository::open(&base_repo_path).ok();
-
-            let (ahead, behind) = base_repo
-                .as_ref()
-                .zip(base_oid)
-                .zip(head_commit.as_ref())
-                .and_then(|((base_repo, base), wt_commit)| {
-                    base_repo.graph_ahead_behind(wt_commit.id(), base).ok()
-                })
-                .unwrap_or((0, 0));
-
-            let merged = base_repo
-                .as_ref()
-                .zip(base_oid)
-                .zip(head_commit.as_ref())
-                .map(|((base_repo, base), wt_commit)| {
-                    base_repo
-                        .graph_descendant_of(base, wt_commit.id())
-                        .unwrap_or(false)
-                })
-                .unwrap_or(false);
-
-            let has_conflicts = base_repo
-                .as_ref()
-                .zip(base_oid)
-                .zip(head_commit.as_ref())
-                .and_then(|((base_repo, base_id), wt_commit)| {
-                    let base_commit = base_repo.find_commit(base_id).ok()?;
-                    let index = base_repo
-                        .merge_commits(wt_commit, &base_commit, None)
-                        .ok()?;
-                    Some(index.has_conflicts())
-                })
-                .unwrap_or(false);
-
-            let (dirty, changed_files) = gix::open(worktree_path)
+            let branch = worktree_repo
+                .head_name()
                 .ok()
-                .map(|gix_repo| get_repo_status_counts(&gix_repo))
-                .unwrap_or((false, 0));
+                .flatten()
+                .map(|n| n.shorten().to_string())
+                .unwrap_or_else(|| name.clone());
+            let wt_head = worktree_repo.head_id().ok().map(|id| id.detach());
+            let sha = wt_head.map(|o| o.to_string()).unwrap_or_default();
+
+            let (ahead, behind) = match (wt_head, base_oid) {
+                (Some(wt), Some(base_id)) => ahead_behind(&base, wt, base_id),
+                _ => (0, 0),
+            };
+
+            // `merged` when the base already contains the worktree tip.
+            let merged = match (wt_head, base_oid) {
+                (Some(wt), Some(base_id)) => is_ancestor(&base, wt, base_id),
+                _ => false,
+            };
+
+            // R5: a merged branch cannot conflict, so skip the merge probe;
+            // only unmerged branches are merged in-memory to detect conflicts.
+            let has_conflicts = if merged {
+                false
+            } else {
+                match (wt_head, base_oid) {
+                    (Some(wt), Some(base_id)) => has_merge_conflicts(&base, wt, base_id),
+                    _ => false,
+                }
+            };
+
+            let (dirty, changed_files) = get_repo_status_counts(&worktree_repo);
 
             Some((
                 branch.clone(),
@@ -669,9 +652,23 @@ pub(crate) fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> 
         .collect()
 }
 
+/// Merge the worktree tip into the base in memory (no repository writes) and
+/// report whether the merge has unresolved conflicts — the gix equivalent of
+/// git2's `merge_commits` + `Index::has_conflicts`.
+fn has_merge_conflicts(repo: &gix::Repository, ours: gix::ObjectId, theirs: gix::ObjectId) -> bool {
+    let labels = gix::merge::blob::builtin_driver::text::Labels::default();
+    match repo.merge_commits(ours, theirs, labels, gix::merge::commit::Options::default()) {
+        Ok(outcome) => outcome
+            .tree_merge
+            .has_unresolved_conflicts(gix::merge::tree::TreatAsUnresolved::git()),
+        Err(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use git2::Repository;
     use std::path::Path;
     use tempfile::TempDir;
 
@@ -884,18 +881,104 @@ mod tests {
         );
     }
 
+    /// Commit `content` to `rel_path` with the given `parents`, returning the
+    /// new commit Oid without moving any ref.
+    fn commit_detached(
+        repo: &Repository,
+        rel_path: &str,
+        content: &str,
+        msg: &str,
+        parents: &[git2::Oid],
+    ) -> git2::Oid {
+        let sig = git2::Signature::now("T", "t@e.com").unwrap();
+        let mut index = repo.index().unwrap();
+        // Reset the (shared) index to the first parent's tree so each commit
+        // starts clean instead of inheriting stray index state.
+        match parents.first() {
+            Some(&p) => {
+                let parent_tree = repo.find_commit(p).unwrap().tree().unwrap();
+                index.read_tree(&parent_tree).unwrap();
+            }
+            None => index.clear().unwrap(),
+        }
+        std::fs::write(repo.workdir().unwrap().join(rel_path), content).unwrap();
+        index.add_path(Path::new(rel_path)).unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let parent_commits: Vec<git2::Commit> = parents
+            .iter()
+            .map(|p| repo.find_commit(*p).unwrap())
+            .collect();
+        let parent_refs: Vec<&git2::Commit> = parent_commits.iter().collect();
+        repo.commit(None, &sig, &sig, msg, &tree, &parent_refs)
+            .unwrap()
+    }
+
+    fn to_gix(oid: git2::Oid) -> gix::ObjectId {
+        gix::ObjectId::from_hex(oid.to_string().as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn has_merge_conflicts_matches_git2_oracle() {
+        let (dir, repo) = setup_repo();
+        let base = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        // Two commits that both rewrite test.txt from the base → conflict.
+        let ours = commit_detached(&repo, "test.txt", "ours\n", "ours", &[base]);
+        let theirs = commit_detached(&repo, "test.txt", "theirs\n", "theirs", &[base]);
+
+        // A commit that only adds a new file → no overlap, merges cleanly.
+        let clean = commit_detached(&repo, "other.txt", "clean\n", "clean", &[base]);
+
+        let gix_repo = gix::open(dir.path()).unwrap();
+
+        // gix probe vs git2 oracle: conflicting pair.
+        let git2_conflict = repo
+            .merge_commits(
+                &repo.find_commit(ours).unwrap(),
+                &repo.find_commit(theirs).unwrap(),
+                None,
+            )
+            .unwrap()
+            .has_conflicts();
+        assert!(git2_conflict, "git2 oracle: ours/theirs should conflict");
+        assert!(
+            has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(theirs)),
+            "gix probe must agree: ours/theirs conflict"
+        );
+
+        // gix probe vs git2 oracle: clean pair.
+        let git2_clean_conflict = repo
+            .merge_commits(
+                &repo.find_commit(ours).unwrap(),
+                &repo.find_commit(clean).unwrap(),
+                None,
+            )
+            .unwrap()
+            .has_conflicts();
+        assert!(
+            !git2_clean_conflict,
+            "git2 oracle: ours/clean should not conflict"
+        );
+        assert!(
+            !has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(clean)),
+            "gix probe must agree: ours/clean is conflict-free"
+        );
+    }
+
     #[test]
     fn refresh_remote_tracking_refs_single_remote_runs_without_panic() {
         let (_dir, repo) = setup_repo();
+        let gix_repo = gix::open(repo.workdir().unwrap()).unwrap();
         // With a single remote, the serial path should execute without error.
-        refresh_remote_tracking_refs(&repo, 2);
+        refresh_remote_tracking_refs(&gix_repo, 2);
         // The function has no return value; absence of panic is the test.
     }
 
     #[test]
     fn refresh_remote_tracking_refs_zero_concurrency_uses_one() {
         let (_dir, repo) = setup_repo();
+        let gix_repo = gix::open(repo.workdir().unwrap()).unwrap();
         // Concurrency of 0 should be clamped to 1.
-        refresh_remote_tracking_refs(&repo, 0);
+        refresh_remote_tracking_refs(&gix_repo, 0);
     }
 }

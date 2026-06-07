@@ -2,11 +2,9 @@
 //!
 //! These wrap the git helpers behind plain path arguments and plain return
 //! types so `sniff-cli` needs no git backend dependency (no `git2`/`gix`
-//! imports). Repository-root resolution and commit file diff use the
-//! centralized trusted gix discovery ([`open::trusted_discover`]); the
-//! remaining helpers (history, remote, worktree) are still git2-backed
-//! internally and are replaced as later migration phases port each helper to
-//! gix.
+//! imports). All helpers open through the centralized trusted gix discovery
+//! ([`open::trusted_discover`]), so trust/permission/I/O/corruption failures
+//! surface distinctly from genuine repository absence.
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +14,7 @@ use super::discovery::{
 use super::open;
 use super::status::detect_merge_conflicts;
 use super::types::{CommitInfo, GitHostingProvider};
-use crate::{Result, SniffError};
+use crate::Result;
 
 /// Working-directory root of the repository containing `path`.
 ///
@@ -39,20 +37,6 @@ pub fn repo_root(path: &Path) -> Result<Option<PathBuf>> {
 /// [`SniffError::Git`]; genuine repository absence is `Ok(None)`.
 fn open_gix(path: &Path) -> Result<Option<gix::Repository>> {
     open::trusted_discover(path)
-}
-
-/// Discover a git2 handle for the (currently git2-backed) transitional helpers.
-///
-/// Maps `NotFound` to `Ok(None)` (genuine absence) and every other discovery
-/// failure — ownership/trust, permission, I/O, corruption — to
-/// [`SniffError::Git`], so transitional remote queries honor the same error
-/// contract as the gix opener.
-fn open_git2(path: &Path) -> Result<Option<git2::Repository>> {
-    match git2::Repository::discover(path) {
-        Ok(repo) => Ok(Some(repo)),
-        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
-        Err(e) => Err(SniffError::git("discover", e)),
-    }
 }
 
 /// Metadata for a single commit resolved by (possibly abbreviated) SHA.
@@ -137,7 +121,7 @@ pub fn merge_conflicts_at(path: &Path) -> Result<Vec<PathBuf>> {
 /// Trust/ownership, permission, I/O, and corruption failures surface as
 /// [`SniffError::Git`].
 pub fn preferred_remote_url(path: &Path) -> Result<Option<String>> {
-    Ok(open_git2(path)?.as_ref().and_then(resolve_origin_or_first))
+    Ok(open::trusted_discover(path)?.and_then(|repo| resolve_origin_or_first(&repo)))
 }
 
 /// URL of the named remote, or `None` if the remote is absent or has no URL.
@@ -147,13 +131,10 @@ pub fn preferred_remote_url(path: &Path) -> Result<Option<String>> {
 /// Trust/ownership, permission, I/O, and corruption failures surface as
 /// [`SniffError::Git`].
 pub fn remote_url(path: &Path, name: &str) -> Result<Option<String>> {
-    let Some(repo) = open_git2(path)? else {
+    let Some(repo) = open::trusted_discover(path)? else {
         return Ok(None);
     };
-    let Ok(remote) = repo.find_remote(name) else {
-        return Ok(None);
-    };
-    Ok(remote.url().map(String::from))
+    Ok(remote_url_from_config(&repo, name))
 }
 
 /// Browser URL for viewing `sha` on the repository's `origin` provider.
@@ -163,17 +144,23 @@ pub fn remote_url(path: &Path, name: &str) -> Result<Option<String>> {
 /// Trust/ownership, permission, I/O, and corruption failures surface as
 /// [`SniffError::Git`].
 pub fn commit_browser_url(path: &Path, sha: &str) -> Result<Option<String>> {
-    let Some(repo) = open_git2(path)? else {
+    let Some(repo) = open::trusted_discover(path)? else {
         return Ok(None);
     };
-    Ok(browser_url_from_repo(&repo, sha))
+    Ok(remote_url_from_config(&repo, "origin").and_then(|url| browser_url_from_url(&url, sha)))
 }
 
-/// Compose the `origin`-provider browser URL for `sha`, or `None` when the
-/// repository has no usable `origin` remote/provider.
-fn browser_url_from_repo(repo: &git2::Repository, sha: &str) -> Option<String> {
-    let remote = repo.find_remote("origin").ok()?;
-    let url = remote.url()?;
+/// Read `remote.<name>.url` straight from config so the exact stored string is
+/// returned (rather than gix's reserialized `Url` form).
+fn remote_url_from_config(repo: &gix::Repository, name: &str) -> Option<String> {
+    repo.config_snapshot()
+        .string(format!("remote.{name}.url").as_str())
+        .map(|v| v.to_string())
+}
+
+/// Compose the `origin`-provider browser URL for `sha`, or `None` when `url`
+/// has no recognized provider.
+fn browser_url_from_url(url: &str, sha: &str) -> Option<String> {
     let provider = GitHostingProvider::from_url(url);
     let base = provider.browser_base_url()?;
 
@@ -195,20 +182,12 @@ fn browser_url_from_repo(repo: &git2::Repository, sha: &str) -> Option<String> {
 }
 
 /// `origin` URL if present, otherwise the first configured remote with a URL.
-fn resolve_origin_or_first(repo: &git2::Repository) -> Option<String> {
-    if let Ok(remote) = repo.find_remote("origin")
-        && let Some(url) = remote.url()
-    {
-        return Some(url.to_string());
+fn resolve_origin_or_first(repo: &gix::Repository) -> Option<String> {
+    if let Some(url) = remote_url_from_config(repo, "origin") {
+        return Some(url);
     }
-
-    for remote_name in repo.remotes().ok()?.iter().flatten() {
-        if let Ok(remote) = repo.find_remote(remote_name)
-            && let Some(url) = remote.url()
-        {
-            return Some(url.to_string());
-        }
-    }
-
-    None
+    // `remote_names()` is sorted, so this is the alphabetically-first remote.
+    repo.remote_names()
+        .into_iter()
+        .find_map(|name| remote_url_from_config(repo, &name.to_string()))
 }

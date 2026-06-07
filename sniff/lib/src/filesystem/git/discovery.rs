@@ -4,7 +4,6 @@
 //! base-branch resolution, and the `DeltaKind` enum.
 
 use chrono::DateTime;
-use git2::Repository;
 use gix::bstr::ByteSlice;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -35,47 +34,45 @@ pub fn detect_git_with_request(path: &Path, request: &GitRequest) -> Result<Opti
 /// Collects all refs (branches, remote tracking, tags) pointing to each commit.
 ///
 /// Returns a HashMap from commit OID to a vector of ref decorations.
-pub(crate) fn collect_ref_decorations(repo: &Repository) -> HashMap<git2::Oid, Vec<RefDecoration>> {
-    let mut decorations: HashMap<git2::Oid, Vec<RefDecoration>> = HashMap::new();
+pub(crate) fn collect_ref_decorations(
+    repo: &gix::Repository,
+) -> HashMap<gix::ObjectId, Vec<RefDecoration>> {
+    let mut decorations: HashMap<gix::ObjectId, Vec<RefDecoration>> = HashMap::new();
 
-    // Get current HEAD target to mark the active branch
-    let head_target = repo
-        .head()
+    // Short name of the branch HEAD points to (None when HEAD is detached), so
+    // the active branch can be marked.
+    let head_target: Option<String> = repo
+        .head_name()
         .map_err(|e| {
             debug!(error = %e, "could not read HEAD for decorations");
             e
         })
         .ok()
-        .and_then(|h| {
-            if h.is_branch() {
-                h.shorthand().map(String::from)
-            } else {
-                None
-            }
-        });
+        .flatten()
+        .map(|full| full.shorten().to_string());
 
-    // Iterate all references
-    let Ok(refs) = repo.references() else {
+    let Ok(platform) = repo.references() else {
+        return decorations;
+    };
+    let Ok(iter) = platform.all() else {
         return decorations;
     };
 
-    for reference in refs.flatten() {
-        let Some(name) = reference.name() else {
-            continue;
-        };
+    for reference in iter.flatten() {
+        let full_name = reference.name().as_bstr().to_string();
 
-        // Resolve the reference to its target commit
-        let Ok(target) = reference.peel_to_commit() else {
+        // Peel through annotated tags to the commit the ref ultimately names.
+        let Ok(id) = reference.into_fully_peeled_id() else {
             continue;
         };
-        let oid = target.id();
+        let oid = id.detach();
 
         // Determine ref kind and display name
-        let (kind, display_name) = if let Some(branch) = name.strip_prefix("refs/heads/") {
+        let (kind, display_name) = if let Some(branch) = full_name.strip_prefix("refs/heads/") {
             (RefKind::LocalBranch, branch.to_string())
-        } else if let Some(remote) = name.strip_prefix("refs/remotes/") {
+        } else if let Some(remote) = full_name.strip_prefix("refs/remotes/") {
             (RefKind::RemoteBranch, remote.to_string())
-        } else if let Some(tag) = name.strip_prefix("refs/tags/") {
+        } else if let Some(tag) = full_name.strip_prefix("refs/tags/") {
             (RefKind::Tag, tag.to_string())
         } else {
             continue; // Skip other refs (notes, stash, etc.)
@@ -117,12 +114,6 @@ pub(crate) fn collect_ref_decorations(repo: &Repository) -> HashMap<git2::Oid, V
     decorations
 }
 
-/// Convert a `gix::ObjectId` to a `git2::Oid` for lookups in the transitional
-/// ref-decoration cache (ported to gix in Phase 6).
-fn gix_oid_to_git2(oid: gix::ObjectId) -> git2::Oid {
-    git2::Oid::from_bytes(oid.as_slice()).expect("valid sha1 bytes")
-}
-
 /// Gets the last N commits from HEAD using a gix revwalk.
 pub(crate) fn get_recent_commits(repo: &gix::Repository, count: usize) -> Vec<CommitInfo> {
     get_recent_commits_with_decorations(repo, count, None)
@@ -133,7 +124,7 @@ pub(crate) fn get_recent_commits(repo: &gix::Repository, count: usize) -> Vec<Co
 pub(crate) fn get_recent_commits_with_decorations(
     repo: &gix::Repository,
     count: usize,
-    ref_decorations: Option<&HashMap<git2::Oid, Vec<RefDecoration>>>,
+    ref_decorations: Option<&HashMap<gix::ObjectId, Vec<RefDecoration>>>,
 ) -> Vec<CommitInfo> {
     let mut commits = Vec::new();
 
@@ -155,11 +146,7 @@ pub(crate) fn get_recent_commits_with_decorations(
     // Phase 6 will port `collect_ref_decorations` to gix; until then we
     // open a temporary git2 handle for the same repository.
     let cached = ref_decorations.cloned();
-    let decorations = cached.unwrap_or_else(|| {
-        git2::Repository::open(repo.workdir().unwrap_or(Path::new(".")))
-            .map(|r| collect_ref_decorations(&r))
-            .unwrap_or_default()
-    });
+    let decorations = cached.unwrap_or_else(|| collect_ref_decorations(repo));
 
     for info_result in walk.take(count) {
         let Ok(info) = info_result else {
@@ -169,10 +156,7 @@ pub(crate) fn get_recent_commits_with_decorations(
             continue;
         };
 
-        let refs = decorations
-            .get(&gix_oid_to_git2(info.id))
-            .cloned()
-            .unwrap_or_default();
+        let refs = decorations.get(&info.id).cloned().unwrap_or_default();
 
         let Ok(author) = commit.author() else {
             continue;
@@ -202,49 +186,27 @@ pub(crate) fn get_recent_commits_with_decorations(
 /// When the repo is a worktree, finds the base repo's current branch. Otherwise
 /// uses the current HEAD branch. Falls back to "main" or "master" if HEAD is
 /// detached or unavailable.
-pub(crate) fn resolve_base_branch(repo: &Repository) -> (String, Option<git2::Oid>) {
-    // If we're in a worktree, open the base repo to get its HEAD branch
-    let base_repo = if repo.is_worktree() {
-        repo.commondir().parent().and_then(|p| {
-            Repository::open(p)
-                .map_err(|e| {
-                    debug!(error = %e, "could not open base repository");
-                    e
-                })
-                .ok()
-        })
+pub(crate) fn resolve_base_branch(repo: &gix::Repository) -> (String, Option<gix::ObjectId>) {
+    // For a linked worktree, the base branch is the MAIN worktree's HEAD, found
+    // via the shared common dir; otherwise it is this repo's own HEAD.
+    let base_repo = if repo.git_dir() != repo.common_dir() {
+        super::open::trusted_open(repo.common_dir()).ok()
     } else {
         None
     };
-    let effective_repo = base_repo.as_ref().unwrap_or(repo);
+    let effective = base_repo.as_ref().unwrap_or(repo);
 
-    // Try the base repo's current HEAD branch
-    if let Ok(head) = effective_repo.head()
-        && let Some(name) = head.shorthand()
-    {
-        let oid = head
-            .peel_to_commit()
-            .map_err(|e| {
-                debug!(error = %e, "could not peel base branch HEAD to commit");
-                e
-            })
-            .ok()
-            .map(|c| c.id());
-        return (name.to_string(), oid);
+    // Try the effective repo's current HEAD branch.
+    if let Ok(Some(name)) = effective.head_name() {
+        let branch = name.shorten().to_string();
+        let oid = effective.head_id().ok().map(|id| id.detach());
+        return (branch, oid);
     }
 
-    // Fallback: try "main", then "master"
-    for candidate in &["main", "master"] {
-        let refname = format!("refs/heads/{candidate}");
-        if let Ok(reference) = repo.find_reference(&refname) {
-            let oid = reference
-                .peel_to_commit()
-                .map_err(|e| {
-                    debug!(branch = candidate, error = %e, "could not peel fallback branch to commit");
-                    e
-                })
-                .ok()
-                .map(|c| c.id());
+    // Fallback: try "main", then "master".
+    for candidate in ["main", "master"] {
+        if let Ok(reference) = repo.find_reference(&format!("refs/heads/{candidate}")) {
+            let oid = reference.into_fully_peeled_id().ok().map(|id| id.detach());
             return (candidate.to_string(), oid);
         }
     }
@@ -307,7 +269,7 @@ pub fn get_commit_by_sha(repo: &gix::Repository, sha_prefix: &str) -> Option<Com
 pub(crate) fn get_commit_by_sha_with_decorations(
     repo: &gix::Repository,
     sha_prefix: &str,
-    ref_decorations: Option<&HashMap<git2::Oid, Vec<RefDecoration>>>,
+    ref_decorations: Option<&HashMap<gix::ObjectId, Vec<RefDecoration>>>,
 ) -> Option<CommitInfo> {
     let id = repo
         .rev_parse_single(sha_prefix)
@@ -325,16 +287,11 @@ pub(crate) fn get_commit_by_sha_with_decorations(
         .ok()?
         .into_commit();
 
-    let decorations = ref_decorations.cloned().unwrap_or_else(|| {
-        git2::Repository::open(repo.workdir().unwrap_or(Path::new(".")))
-            .map(|r| collect_ref_decorations(&r))
-            .unwrap_or_default()
-    });
-    let oid = id.detach();
-    let refs = decorations
-        .get(&gix_oid_to_git2(oid))
+    let decorations = ref_decorations
         .cloned()
-        .unwrap_or_default();
+        .unwrap_or_else(|| collect_ref_decorations(repo));
+    let oid = id.detach();
+    let refs = decorations.get(&oid).cloned().unwrap_or_default();
 
     let author = commit.author().ok()?;
     let time = commit.time().ok()?;
@@ -500,7 +457,7 @@ pub(crate) fn get_commits_for_path_with_decorations(
     repo: &gix::Repository,
     path_prefix: &str,
     count: usize,
-    ref_decorations: Option<&HashMap<git2::Oid, Vec<RefDecoration>>>,
+    ref_decorations: Option<&HashMap<gix::ObjectId, Vec<RefDecoration>>>,
 ) -> Vec<CommitInfo> {
     let mut commits = Vec::new();
 
@@ -519,11 +476,7 @@ pub(crate) fn get_commits_for_path_with_decorations(
     };
 
     let cached = ref_decorations.cloned();
-    let decorations = cached.unwrap_or_else(|| {
-        git2::Repository::open(repo.workdir().unwrap_or(Path::new(".")))
-            .map(|r| collect_ref_decorations(&r))
-            .unwrap_or_default()
-    });
+    let decorations = cached.unwrap_or_else(|| collect_ref_decorations(repo));
 
     let mut diff_cache = match repo.diff_resource_cache_for_tree_diff() {
         Ok(c) => c,
@@ -546,10 +499,7 @@ pub(crate) fn get_commits_for_path_with_decorations(
             continue;
         };
 
-        let refs = decorations
-            .get(&gix_oid_to_git2(info.id))
-            .cloned()
-            .unwrap_or_default();
+        let refs = decorations.get(&info.id).cloned().unwrap_or_default();
 
         let Ok(author) = commit.author() else {
             continue;
@@ -623,9 +573,7 @@ pub fn get_commits_for_branch(
         return commits;
     };
 
-    let decorations = git2::Repository::open(repo.workdir().unwrap_or(Path::new(".")))
-        .map(|r| collect_ref_decorations(&r))
-        .unwrap_or_default();
+    let decorations = collect_ref_decorations(repo);
 
     for info_result in walk.take(count) {
         let Ok(info) = info_result else {
@@ -635,10 +583,7 @@ pub fn get_commits_for_branch(
             continue;
         };
 
-        let refs = decorations
-            .get(&gix_oid_to_git2(info.id))
-            .cloned()
-            .unwrap_or_default();
+        let refs = decorations.get(&info.id).cloned().unwrap_or_default();
 
         let Ok(author) = commit.author() else {
             continue;

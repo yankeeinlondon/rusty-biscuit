@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tracing::{debug, instrument};
+use tracing::instrument;
 
 use crate::filesystem::docs::{MarkdownMeta, detect_blast_radius_docs};
 use crate::filesystem::git::{GitRepo, get_commit_files};
