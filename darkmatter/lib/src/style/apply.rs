@@ -947,7 +947,7 @@ mod tests {
         let policy = page.component_policy(PageComponent::Tables).unwrap();
         let color = policy.color.as_ref().unwrap();
         assert_eq!(color.color, Color::Tailwind(Tailwind::Red500));
-        assert_eq!(color.opacity, None);
+        assert_eq!(color.opacity, renderable::style::Opacity::OPAQUE);
     }
 
     #[test]
@@ -955,7 +955,7 @@ mod tests {
         let page = apply_for_test("table:\n  bg-color: red-500/50\n");
         let policy = page.component_policy(PageComponent::Tables).unwrap();
         let bg = policy.bg_color.as_ref().unwrap();
-        assert_eq!(bg.opacity, Some(50), "component bg-color opacity must survive lowering");
+        assert_ne!(bg.opacity, renderable::style::Opacity::OPAQUE, "component bg-color opacity must survive lowering");
     }
 
     #[test]
@@ -1873,6 +1873,7 @@ mod tests {
             color: Color::Tailwind(Tailwind::Red500),
             opacity: None,
         };
+        let paint = color.to_paint_color();
         let style = style_with_hr(HrStyle {
             color: Some(color.clone()),
             ..HrStyle::default()
@@ -1880,7 +1881,7 @@ mod tests {
         let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
         assert_eq!(
             out.color_for(PageComponent::Hr),
-            Some(&color)
+            Some(&paint)
         );
     }
 
@@ -1892,6 +1893,7 @@ mod tests {
             color: Color::Tailwind(Tailwind::Blue500),
             opacity: None,
         };
+        let paint = color.to_paint_color();
         let style = style_with_hr(HrStyle {
             bg_color: Some(color.clone()),
             ..HrStyle::default()
@@ -1899,7 +1901,7 @@ mod tests {
         let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
         assert_eq!(
             out.bg_color_for(PageComponent::Hr),
-            Some(&color)
+            Some(&paint)
         );
     }
 

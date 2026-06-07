@@ -2,4 +2,4 @@
 source: darkmatter/lib/tests/tree_features_characterization.rs
 expression: body
 ---
-<p><a class="btn" style="color: blue;" target="_blank" title="Go" data-prompt="Run it" data-id="42" href="https://example.com">Click</a></p>
+<p><a class="btn" style="color:blue" target="_blank" data-id="42" data-prompt="Run it" href="https://example.com" title="Go">Click</a></p>

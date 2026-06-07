@@ -2,4 +2,4 @@
 source: darkmatter/lib/tests/tree_features_characterization.rs
 expression: render_browser_body(&md)
 ---
-<blockquote class="" style="color:transparent"><p>A quoted paragraph.</p></blockquote>
+<blockquote style="color:transparent"><p>A quoted paragraph.</p></blockquote>

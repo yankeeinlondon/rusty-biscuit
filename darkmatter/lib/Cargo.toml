@@ -87,6 +87,12 @@ jsonschema = { version = "0.42", default-features = false }
 sha2 = "0.10"
 
 [dev-dependencies]
+# Re-declares the renderable path dep with the test-only `hint-access-counter`
+# feature so the structural performance gate (`render_tree::structural_gate`)
+# can observe the `NodeAttrs::data` hint-access counter while folding a styled
+# corpus through the real Darkmatter entry points. Cargo unifies this with the
+# `[dependencies]` declaration for the test build.
+renderable = { path = "../../renderable", features = ["hint-access-counter"] }
 tokio = { version = "1.48", features = ["full", "test-util"] }
 tracing-test = "0.2"
 insta = "1.41"

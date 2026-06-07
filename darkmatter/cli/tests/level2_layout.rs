@@ -2355,6 +2355,33 @@ fn level2_style_hyperlinks_width_pads_label_in_terminal() {
     );
 }
 
+/// Regression (review-1, finding 1): an exact `style.hyperlinks.width` is an
+/// exact field, so a label wider than the field must be truncated in a real
+/// terminal — the visible field must not overflow the five columns.
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_hyperlinks_exact_width_truncates_label_in_terminal() {
+    let body = "---\nstyle:\n  hyperlinks:\n    width: 5\n---\n\n\
+        [A very long hyperlink label](https://example.com)\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    // The five-column field truncates with an ellipsis; the overflowing tail of
+    // the label must be absent from the visible capture.
+    assert!(
+        frame.plain.contains('…'),
+        "expected the long label truncated to an ellipsis. plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        !frame.plain.contains("hyperlink label"),
+        "the overflowing label tail must not appear in the visible field. plain:\n{}",
+        frame.plain
+    );
+}
+
 /// `style.images.local-style.color` + `bg-color` must color a local image's
 /// fallback alt text in a real terminal. Remote images must not pick this up.
 #[test]

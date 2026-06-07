@@ -45,6 +45,7 @@ use renderable::tree::{
 };
 use std::ops::Range;
 
+use super::build_context::{TreeBuildContext, apply_node_policy, apply_page_colors};
 use super::source::single_source_registry;
 use crate::markdown::inline::HorizontalRuleAttrs;
 
@@ -134,16 +135,19 @@ enum ContainerKind {
 }
 
 /// The mutable state threaded through the fold.
-struct Fold {
+struct Fold<'ctx> {
     /// Container stack; the last entry is the innermost open container.
     stack: Vec<Frame>,
     /// The single source every parsed node refers to.
     source: SourceId,
     /// Diagnostics accumulated during the fold.
     diagnostics: Vec<Diagnostic>,
+    /// Construction-time policy; `None` on the plain fold, `Some` on the
+    /// context-aware fold that bakes component policy into nodes.
+    ctx: Option<&'ctx TreeBuildContext<'ctx>>,
 }
 
-impl Fold {
+impl Fold<'_> {
     /// Builds a [`SourceSpan`] for a parsed node spanning `range`.
     fn parsed_span(&self, range: Range<usize>) -> SourceSpan {
         SourceSpan {
@@ -166,11 +170,13 @@ impl Fold {
     }
 
     /// Appends a leaf node carrying a parsed span over `range`.
-    fn push_leaf(&mut self, kind_node: RenderNode, range: Range<usize>) {
+    fn push_leaf(&mut self, mut kind_node: RenderNode, range: Range<usize>) {
         let span = self.parsed_span(range);
-        let mut node = kind_node;
-        node.span = span;
-        self.push_child(node);
+        kind_node.span = span;
+        if let Some(ctx) = self.ctx {
+            apply_node_policy(&mut kind_node, ctx);
+        }
+        self.push_child(kind_node);
     }
 
     /// Feeds a single `(Event, Range)` pair through the fold's main dispatch.
@@ -268,6 +274,7 @@ pub fn fold_markdown_to_document_with_metadata(
         }],
         source: source_id,
         diagnostics: Vec::new(),
+        ctx: None,
     };
 
     for (event, range) in Parser::new_ext(input, options).into_offset_iter() {
@@ -435,6 +442,7 @@ pub fn fold_markdown_spanned_with_frontmatter(
         }],
         source: source_id,
         diagnostics: Vec::new(),
+        ctx: None,
     };
 
     // 3. Plain fold. `Fold::end` dispatches `~~…~~` containers to `Extended`
@@ -444,7 +452,10 @@ pub fn fold_markdown_spanned_with_frontmatter(
         match be {
             BlockExtensionEvent::Standard(event, range) => fold.feed_event(event, range),
             BlockExtensionEvent::HorizontalRule { attrs, body_range } => {
-                let node = lower_hr_attrs_to_node(attrs, body_range, fold.source);
+                let mut node = lower_hr_attrs_to_node(attrs, body_range, fold.source);
+                if let Some(ctx) = fold.ctx {
+                    apply_node_policy(&mut node, ctx);
+                }
                 fold.push_child(node);
             }
         }
@@ -493,7 +504,103 @@ pub fn fold_markdown_spanned_with_frontmatter(
     (document, diagnostics)
 }
 
-impl Fold {
+/// Context-aware span fold: identical to [`fold_markdown_spanned_with_frontmatter`]
+/// but attaches construction-time policy (component layout, colors, text-layout
+/// hints, structured directives, HR defaults) from `ctx` as nodes are built.
+///
+/// The resulting [`Document`] is the complete typed render input — no
+/// post-fold decoration or attribute injection is needed.
+///
+/// ## Returns
+///
+/// The folded [`Document`] and any non-fatal [`Diagnostic`]s.
+#[must_use]
+pub(crate) fn fold_markdown_spanned_with_context(
+    source: SourceDescriptor,
+    md: &crate::markdown::Markdown,
+    ctx: &TreeBuildContext,
+) -> (Document, Vec<Diagnostic>) {
+    use super::block_extension::{BlockExtensionEvent, BlockExtensionProcessor};
+    use super::inline_extension::rewrite_inline_extensions;
+
+    let metadata = DocumentMetadata {
+        frontmatter: md.frontmatter().raw_source().map(|raw| TreeFrontmatter {
+            format: FrontmatterFormat::Yaml,
+            raw: raw.to_string(),
+        }),
+    };
+    let (registry, source_id) = single_source_registry(source);
+
+    let rewrite = rewrite_inline_extensions(md.content());
+
+    let options = render_tree_parser_options();
+    let parser = Parser::new_ext(rewrite.source.as_ref(), options).into_offset_iter();
+    let chain = BlockExtensionProcessor::new(parser);
+
+    let mut fold = Fold {
+        stack: vec![Frame {
+            tag: ContainerKind::Root,
+            children: Vec::new(),
+            start: 0,
+        }],
+        source: source_id,
+        diagnostics: Vec::new(),
+        ctx: Some(ctx),
+    };
+
+    for be in chain {
+        match be {
+            BlockExtensionEvent::Standard(event, range) => fold.feed_event(event, range),
+            BlockExtensionEvent::HorizontalRule { attrs, body_range } => {
+                let mut node = lower_hr_attrs_to_node(attrs, body_range, fold.source);
+                if let Some(ctx) = fold.ctx {
+                    apply_node_policy(&mut node, ctx);
+                }
+                fold.push_child(node);
+            }
+        }
+    }
+
+    while fold.stack.len() > 1 {
+        let frame = fold.stack.pop().expect("len checked");
+        fold.diagnostics.push(Diagnostic::structural(
+            "unclosed container in event stream",
+            None,
+        ));
+        if let Some(parent) = fold.stack.last_mut() {
+            parent.children.extend(frame.children);
+        }
+    }
+
+    let root_children = fold.stack.pop().map(|f| f.children).unwrap_or_default();
+    let mut diagnostics = fold.diagnostics;
+    let mut root = RenderNode::root(root_children);
+
+    // Apply page-level colors to the root so they inherit to all descendants.
+    apply_page_colors(&mut root, ctx);
+
+    if !rewrite.provenance.is_empty() {
+        resolve_node_spans(&mut root, &rewrite.provenance);
+        for diagnostic in &mut diagnostics {
+            if let Some(location) = diagnostic
+                .span
+                .as_mut()
+                .and_then(|span| span.location.as_mut())
+            {
+                location.bytes = rewrite.provenance.resolve_range(location.bytes.clone());
+            }
+        }
+    }
+
+    let document = Document {
+        sources: registry,
+        metadata,
+        root,
+    };
+    (document, diagnostics)
+}
+
+impl Fold<'_> {
     /// Handles an `Event::Start`, pushing a container frame.
     fn start(&mut self, tag: Tag<'_>, range: Range<usize>) {
         let kind = match tag {
@@ -622,12 +729,18 @@ impl Fold {
                 // a darkmatter inline-extension envelope produced by the source
                 // rewriter (`==mark==` / `⌄dim⌄`). Peek the leading marker and
                 // dispatch accordingly.
-                let node = self.dispatch_strikethrough(children, span);
+                let mut node = self.dispatch_strikethrough(children, span);
+                if let Some(ctx) = self.ctx {
+                    apply_node_policy(&mut node, ctx);
+                }
                 self.push_child(node);
             }
             other => {
                 let mut node = build_container(other, children);
                 node.span = span;
+                if let Some(ctx) = self.ctx {
+                    apply_node_policy(&mut node, ctx);
+                }
                 self.push_child(node);
             }
         }
@@ -1286,6 +1399,7 @@ mod tests {
             }],
             source: SourceId(0),
             diagnostics: Vec::new(),
+            ctx: None,
         };
         fold.task_marker(true, 0..3);
         assert_eq!(fold.diagnostics.len(), 1);

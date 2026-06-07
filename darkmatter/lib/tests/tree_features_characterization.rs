@@ -24,6 +24,38 @@
 //! re-accept it with a rationale — exactly as the cutover-reference corpus is
 //! handled.
 //!
+//! ## Phase 8 review: re-baselined snapshots (all accepted as intended)
+//!
+//! The cutover changed seven of these snapshots. Each diff is the intended
+//! outcome of the typed-tree architecture, reviewed and accepted individually:
+//!
+//! - **alpha / component color** (`char_component_color_opaque`,
+//!   `char_component_color_half_opacity`, `…_transparent`, `…_current`,
+//!   `…_inherit`): colors now lower through the shared `PaintColor` → `CssColor`
+//!   helper, so an opaque color emits `rgb(r, g, b)` (not `#rrggbb`) and a
+//!   half-opacity color emits a **single** `rgba(r, g, b, a)` declaration. The
+//!   pre-cutover double declaration (`background-color:#fb2c36;background-color:
+//!   rgba(…)`) and its `class=""` opacity sentinel are gone — the alpha now
+//!   rides `PaintColor` straight to one direct declaration. The alpha literal is
+//!   the exact `u8` normalization (`128/255 = 0.5019608`), the canonical stored
+//!   form per the spec's `Opacity` design.
+//! - **structured link attributes** (`char_structured_link_attributes`): the
+//!   inline style is the validated `CssStyle` canonical form (`color:blue`), and
+//!   `target` / `data-*` / `title` are typed browser attrs emitted in
+//!   deterministic order — replacing the sentinel-class + post-render
+//!   opening-tag rewrite.
+//! - **local image inline CSS precedence** (`char_local_image_styling`): the
+//!   per-image and frontmatter CSS merge into **one** validated `inline_style`
+//!   attribute (was two `style=` attributes), and the image `alt` is the real
+//!   source text (`alt="A"`) — the terminal placeholder's trailing-space padding
+//!   no longer leaks into the browser alt, honoring "source content is never
+//!   mutated during construction."
+//!
+//! The terminal characterization snapshots (`char_hyperlink_*`,
+//! `char_list_item_*`) and `char_terminal_drops_component_alpha` are unchanged:
+//! width-dependent text layout and alpha degradation already match the typed
+//! `TextLayoutHints` / `PaintColor` resolution.
+//!
 //! ## Known stale snapshots (do not "fix" here)
 //!
 //! `cutover_reference.rs` currently has five red browser snapshots
@@ -219,20 +251,35 @@ fn char_structured_link_attributes() {
 
 #[test]
 fn char_local_image_styling() {
-    // Frontmatter `images.local-style` sets color + width on a local image.
-    // The current production browser path emits this as TWO `style=` attributes
-    // (the `inject_link_image_attributes` overlay plus the render-tree component
-    // color) and leaves a per-image title `style='…'` directive as a literal
-    // `title` rather than merging it as inline CSS. This snapshot pins that
-    // pre-cutover output; Phase 5/6 collapses it to one validated `inline_style`.
+    // Frontmatter `images.local-style` sets color + width on a local image while
+    // a per-image `style='color: blue;'` title directive overrides the color.
+    // The per-image and frontmatter CSS merge into ONE validated `inline_style`
+    // with per-node precedence (blue wins over red), the `width` survives, the
+    // raw directive does not leak as a literal `title`, and `alt` is the real
+    // source text (review-1, finding 2).
     let md = with_style(
         "images:\n  local-style:\n    color: red-500\n    width: 40\n",
         "![A](./local.png \"style='color: blue;'\")\n",
     );
-    insta::assert_snapshot!(
-        "char_local_image_inline_css_precedence_browser",
-        render_browser_body(&md)
+    let body = render_browser_body(&md);
+    assert!(
+        body.contains("color:blue"),
+        "per-node blue must win over frontmatter red. body:\n{body}"
     );
+    assert!(
+        !body.contains("color:rgb(251, 44, 54)"),
+        "frontmatter red must be overridden by the per-node declaration. body:\n{body}"
+    );
+    assert!(
+        !body.contains("title="),
+        "raw `style='...'` directive must not leak as an HTML title. body:\n{body}"
+    );
+    assert_eq!(
+        body.matches("style=").count(),
+        1,
+        "exactly one merged inline style attribute expected. body:\n{body}"
+    );
+    insta::assert_snapshot!("char_local_image_inline_css_precedence_browser", body);
 }
 
 // ---------------------------------------------------------------------------
@@ -262,6 +309,47 @@ fn char_hyperlink_max_width_truncates() {
     insta::assert_snapshot!(
         "char_hyperlink_max_width_terminal",
         render_terminal(&md, 60)
+    );
+}
+
+#[test]
+fn char_hyperlink_exact_width_truncates_long_label() {
+    // Regression (review-1, finding 1): an exact `width` is an exact field, so a
+    // label longer than the field is truncated with an ellipsis — matching the
+    // retired `apply_inline_text_layout` contract. Before the fix the typed
+    // hint carried `TextOverflow::Preserve`, so the long label overflowed the
+    // five-column field unchanged.
+    let md = with_style(
+        "hyperlinks:\n  width: 5\n",
+        "[A very long hyperlink label](https://example.com)\n",
+    );
+    let out = render_terminal(&md, 60);
+    assert!(
+        out.contains('…'),
+        "exact-width long label must be truncated with an ellipsis. out:\n{out}"
+    );
+    assert!(
+        !out.contains("hyperlink label"),
+        "the overflowing tail of the label must be removed. out:\n{out}"
+    );
+}
+
+#[test]
+fn char_image_alt_exact_width_truncates_long_alt() {
+    // Regression (review-1, finding 1): a local image's exact `width` truncates
+    // a long alt-text placeholder rather than letting it overflow the field.
+    let md = with_style(
+        "images:\n  local-style:\n    width: 6\n",
+        "![A very long image alt text](./local.png)\n",
+    );
+    let out = render_terminal(&md, 60);
+    assert!(
+        out.contains('…'),
+        "exact-width long image alt must be truncated with an ellipsis. out:\n{out}"
+    );
+    assert!(
+        !out.contains("image alt text"),
+        "the overflowing tail of the alt text must be removed. out:\n{out}"
     );
 }
 

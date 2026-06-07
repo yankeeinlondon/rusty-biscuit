@@ -5,9 +5,9 @@
 //! page background, max width) and a per-component [`ComponentPolicy`] map
 //! (`layout` plus optional `color` / `bg_color`) populated from `style:`
 //! frontmatter. The page delegates to the render-tree terminal and HTML
-//! renderers; per-component
-//! width, padding, alignment, and color are written onto tree nodes by
-//! [`decorate_document`](crate::markdown::render_tree::decorate::decorate_document)
+//! renderers; per-component width, padding, alignment, and color are baked onto
+//! tree nodes during construction by the context-aware fold
+//! ([`TreeBuildContext`](crate::markdown::render_tree::build_context::TreeBuildContext))
 //! and resolved by the shared renderer folds.
 //!
 //! ## Examples
@@ -45,9 +45,9 @@
 //! ## Direct `style:` lowering
 //!
 //! `style:` frontmatter is lowered **directly** into a per-component
-//! [`ComponentPolicy`] — a `renderable::layout::Layout` plus colors retained as
-//! [`StyleColor`](crate::style::StyleColor) — with no down-conversion to
-//! deprecated types:
+//! [`ComponentPolicy`] — a `renderable::layout::Layout` plus alpha-bearing
+//! [`PaintColor`](renderable::style::PaintColor) colors — with no down-conversion
+//! to deprecated types:
 //!
 //! - `align` → `Layout.alignment`
 //! - `fill: pad <len>` → `Layout.padding` (symmetric or aligned side)
@@ -56,14 +56,14 @@
 //! - `width <len>` → `Layout.width = Width::Fixed`
 //! - `margin-*` → `Layout.margin` (`Edges`)
 //! - `color`/`bg-color` → `ComponentPolicy.color` / `ComponentPolicy.bg_color`,
-//!   kept as [`StyleColor`](crate::style::StyleColor) so Tailwind/hex opacity
-//!   survives to the HTML target
+//!   lowered to [`PaintColor`](renderable::style::PaintColor) at the parser/apply
+//!   boundary so Tailwind/hex opacity survives through the tree to the HTML target
 //!
-//! The `Layout` and colors are projected onto each render-tree node's
-//! [`Style`](renderable::style::Style) by
-//! [`decorate_document`](crate::markdown::render_tree::decorate::decorate_document);
-//! the terminal `Style` carries the color only, while any opacity is emitted on
-//! the browser target via a `darkmatter.style` render hint.
+//! The `Layout` and colors are baked onto each render-tree node's
+//! [`Style`](renderable::style::Style) during construction by the context-aware
+//! fold ([`TreeBuildContext`](crate::markdown::render_tree::build_context::TreeBuildContext)).
+//! The terminal target drops alpha (opaque color only); the browser target lowers
+//! the full `PaintColor` (including alpha) directly to CSS.
 //!
 //! The deprecated `PageMargin`, `PagePadding`, `PageAlignment`, `PageFill`,
 //! `WidthUnit`, and `PageComponent::Lists` vocabulary has been removed.
@@ -75,7 +75,6 @@ mod error;
 mod page;
 mod types;
 
-pub(crate) use context::LayoutContext;
 pub use error::PageRenderError;
 pub use page::{ComponentPolicy, DarkmatterPage};
 pub use types::{PageBackground, PageComponent};

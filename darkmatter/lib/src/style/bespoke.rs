@@ -1063,7 +1063,7 @@ mod tests {
         let md: Markdown = "[link](https://example.com)".into();
         let html = page.render_to_browser(&md).unwrap();
         assert!(
-            html.contains("color: rgb(251, 44, 54)"),
+            html.contains("color:rgb(251, 44, 54)"),
             "HTML should contain red hyperlink color. html={}",
             html
         );
@@ -1105,12 +1105,12 @@ mod tests {
         let md: Markdown = "[local](./file.md) and [remote](https://example.com)".into();
         let html = page.render_to_browser(&md).unwrap();
         assert!(
-            html.contains("color: rgb(43, 127, 255)"),
+            html.contains("color:rgb(43, 127, 255)"),
             "local link should be blue. html={}",
             html
         );
         assert!(
-            html.contains("color: rgb(251, 44, 54)"),
+            html.contains("color:rgb(251, 44, 54)"),
             "remote link should be red. html={}",
             html
         );
@@ -1155,17 +1155,17 @@ mod tests {
         let html = page.render_to_browser(&md).unwrap();
 
         assert!(
-            html.contains("color: green"),
+            html.contains("color:green"),
             "per-link `color: green` must survive. html={}",
             html
         );
         assert!(
-            !html.contains("color: rgb(251, 44, 54)"),
+            !html.contains("color:rgb(251, 44, 54)"),
             "frontmatter red must NOT overwrite the per-link color. html={}",
             html
         );
         assert!(
-            html.contains("background-color: rgb(43, 127, 255)"),
+            html.contains("background-color:rgb(43, 127, 255)"),
             "frontmatter `background-color` must fill the unset property. html={}",
             html
         );
@@ -1361,7 +1361,7 @@ mod tests {
         let md: Markdown = "![alt](./local.png)".into();
         let html = page.render_to_browser(&md).unwrap();
         assert!(
-            html.contains("color: rgb(251, 44, 54)"),
+            html.contains("color:rgb(251, 44, 54)"),
             "HTML should contain red local image color. html={}",
             html
         );
@@ -1397,7 +1397,7 @@ mod tests {
         let md: Markdown = "![alt](https://example.com/remote.png)".into();
         let html = page.render_to_browser(&md).unwrap();
         assert!(
-            !html.contains("color: rgb(251, 44, 54)"),
+            !html.contains("color:rgb(251, 44, 54)"),
             "HTML should NOT contain red local image color for remote image. html={}",
             html
         );

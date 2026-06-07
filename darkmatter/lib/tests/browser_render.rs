@@ -734,6 +734,45 @@ async fn browser_page_max_width_centers_frame() {
     );
 }
 
+/// Review-1 finding 2: a per-image `style='color: blue;'` title directive must
+/// win, in a real browser, over the frontmatter `images.local-style.color`
+/// default — the merged `inline_style` resolves to blue, not the frontmatter
+/// red. The raw directive must not survive as a literal `title`.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_local_image_per_node_css_overrides_frontmatter() {
+    if !require_browser() {
+        return;
+    }
+    let doc = style_page_doc(
+        120,
+        "images:\n  local-style:\n    color: red-500",
+        "![A](./local.png \"style='color: blue;'\")\n",
+    );
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let color = harness
+        .computed_style("img", "color")
+        .await
+        .expect("computed style query");
+    assert_eq!(
+        color, "rgb(0, 0, 255)",
+        "per-node blue must win over frontmatter red in a real browser; got {color}",
+    );
+
+    let title = harness
+        .computed_style("img[title]", "display")
+        .await
+        .expect("computed style query");
+    assert_eq!(
+        title, "<no-match>",
+        "raw `style='...'` directive must not survive as an HTML title attribute",
+    );
+}
+
 /// A list `left-margin` must compute to a non-zero px margin in a real browser.
 #[tokio::test]
 #[serial(browser)]

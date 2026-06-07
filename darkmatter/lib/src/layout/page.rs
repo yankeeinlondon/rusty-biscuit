@@ -797,20 +797,20 @@ impl DarkmatterPage {
             self.page_max_width.clone(),
             &self.terminal_color_mode,
             self.options.color_mode,
-            self.page_color.clone(),
-            self.page_bg_color.clone(),
-            self.component_policies.clone(),
-            self.hyperlink_style.clone(),
-            self.local_hyperlink_style.clone(),
-            self.local_image_style.clone(),
+            self.page_color,
+            self.page_bg_color,
         )?;
 
         // Build derived TerminalOptions.
         let mut options = self.options.clone();
-        // Only cap max_width when layout is actually configured; otherwise
-        // delegate with the same auto-detection behaviour as
-        // `for_terminal(..., TerminalOptions::default())`.
-        if ctx.needs_decoration() || self.max_width().is_some() {
+        // Cap max_width — and so render through an optimistic terminal at the
+        // page width — whenever any page-frame layout OR per-component policy is
+        // configured. `LayoutContext` no longer carries the component-policy map
+        // (it is baked into the tree by the fold), so the component-policy signal
+        // is read straight off the page here. The zero-config path leaves this
+        // unset to keep byte-for-byte parity with `Markdown::as_terminal(default)`.
+        if ctx.needs_decoration() || self.max_width().is_some() || !self.component_policies.is_empty()
+        {
             options.max_width = Some(ctx.effective_width);
         }
         // Honor the captured terminal's color depth on the decorated layout
@@ -836,21 +836,41 @@ impl DarkmatterPage {
             options.code_theme = theme;
         }
 
+        // Build construction-time context for the context-aware fold. HR
+        // defaults resolve through the same precedence as the direct API:
+        // explicit `hr_defaults()` wins; when it is `None`, the deprecated
+        // top-level `hr:` frontmatter supplies the fallback.
+        let hr_defaults_owned = crate::markdown::render_tree::entrypoints::resolve_hr_defaults(
+            md,
+            &options.hr_defaults,
+        );
+        let build_ctx = crate::markdown::render_tree::build_context::TreeBuildContext {
+            component_policies: &self.component_policies,
+            page_color: self.page_color,
+            page_bg_color: self.page_bg_color,
+            hyperlink_style: self.hyperlink_style.as_ref(),
+            local_hyperlink_style: self.local_hyperlink_style.as_ref(),
+            local_image_style: self.local_image_style.as_ref(),
+            hr_defaults: hr_defaults_owned.as_ref(),
+        };
+
         // Delegate to the terminal renderer. When no layout builder has been
-        // called we must NOT thread a layout context — doing so leaks the
+        // called we must NOT thread a build context — doing so leaks the
         // page's captured terminal width into component width resolution and
         // breaks byte-for-byte equivalence with `Markdown::as_terminal(default)`
         // (the zero-config tree path), which performs its own width
         // auto-detection.
-        let body = if self.is_default_layout() {
-            md.as_terminal_with_layout(options, None)
+        let result = if self.is_default_layout() {
+            crate::markdown::render_tree::entrypoints::render_tree_terminal(md, &options)
         } else {
-            md.as_terminal_with_layout(options, Some(&ctx))
+            crate::markdown::render_tree::entrypoints::render_tree_terminal_with_context(
+                md, &options, &build_ctx,
+            )
         }
         .map_err(|e| PageRenderError::Render(e.to_string()))?;
 
-        if !ctx.needs_decoration() {
-            return Ok(body);
+        if !ctx.needs_decoration() && self.component_policies.is_empty() {
+            return Ok(result.output);
         }
 
         // Normalize the body's vertical rhythm before margins are applied, so
@@ -859,7 +879,7 @@ impl DarkmatterPage {
         // lines survives. Runs only on the decorated path; the zero-config path
         // returned above keeps byte-for-byte equivalence with
         // `Markdown::as_terminal(default)`.
-        let body = normalize_body_rhythm(&body);
+        let body = normalize_body_rhythm(&result.output);
 
         Ok(apply_row_decoration(&body, &ctx))
     }
@@ -895,12 +915,8 @@ impl DarkmatterPage {
             self.page_max_width.clone(),
             &self.terminal_color_mode,
             self.options.color_mode,
-            self.page_color.clone(),
-            self.page_bg_color.clone(),
-            self.component_policies.clone(),
-            self.hyperlink_style.clone(),
-            self.local_hyperlink_style.clone(),
-            self.local_image_style.clone(),
+            self.page_color,
+            self.page_bg_color,
         )?;
 
         // Build HtmlOptions from TerminalOptions.
@@ -918,14 +934,37 @@ impl DarkmatterPage {
             local_image_style: self.local_image_style.clone(),
         };
 
+        // Build construction-time context for the context-aware fold.
+        let hr_defaults_owned = crate::markdown::render_tree::entrypoints::resolve_hr_defaults(
+            md,
+            &html_options.hr_defaults,
+        );
+        let build_ctx = crate::markdown::render_tree::build_context::TreeBuildContext {
+            component_policies: &self.component_policies,
+            page_color: self.page_color,
+            page_bg_color: self.page_bg_color,
+            hyperlink_style: self.hyperlink_style.as_ref(),
+            local_hyperlink_style: self.local_hyperlink_style.as_ref(),
+            local_image_style: self.local_image_style.as_ref(),
+            hr_defaults: hr_defaults_owned.as_ref(),
+        };
+
         let body = if self.is_default_layout() {
             md.as_html(html_options)
+                .map_err(|e| PageRenderError::Render(e.to_string()))?
         } else {
-            crate::markdown::render_tree::entrypoints::render_tree_html_with_layout(md, &html_options, &ctx)
-        }
-        .map_err(|e| PageRenderError::Render(e.to_string()))?;
+            crate::markdown::render_tree::entrypoints::render_tree_html_with_context(
+                md, &html_options, &build_ctx,
+            )
+            .map(|r| r.output)
+            .map_err(|e| PageRenderError::Render(e.to_string()))?
+        };
 
-        if !ctx.needs_decoration() && self.stylesheet().is_none() && self.page_meta().is_none() {
+        if !ctx.needs_decoration()
+            && self.component_policies.is_empty()
+            && self.stylesheet().is_none()
+            && self.page_meta().is_none()
+        {
             return Ok(body);
         }
 
@@ -1356,10 +1395,10 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> 
         ));
     }
 
-    // Page-level foreground color from style frontmatter.
-    if let Some(color) = ctx.page_color.as_ref().and_then(crate::style::color::paint_to_css_string) {
-        wrapper_styles.push_str(&format!("color: {color}; "));
-    }
+    // Page-level foreground is NOT emitted here: it rides the render tree's root
+    // node (`apply_page_colors`), which the browser fold renders as a wrapping
+    // `<div>` so the color inherits to descendants through CSS. Emitting it on
+    // the frame too would duplicate the declaration.
 
     // Page-level background color from style frontmatter takes precedence
     // over the computed PageBackground color.
@@ -2988,7 +3027,11 @@ mod tests {
         let md: Markdown = "- alpha\n- beta\n".into();
 
         let out = page.render(&md).unwrap();
-        let red_sgr = crate::style::lower_to_sgr(&red_color(), ColorDepth::TrueColor, false)
+        let red_sc = crate::style::StyleColor {
+            color: red_color().color,
+            opacity: None,
+        };
+        let red_sgr = crate::style::lower_to_sgr(&red_sc, ColorDepth::TrueColor, false)
             .expect("red_color must lower to truecolor SGR");
         // The ul color should wrap the marker AND the body, even though the
         // li scope has no explicit color of its own (the body would
@@ -3056,7 +3099,11 @@ mod tests {
                 || out.contains("\x1b]8;;https://example.com\x1b\\"),
             "OSC8 open sequence must be preserved in table; got: {out:?}"
         );
-        let red_sgr = crate::style::lower_to_sgr(&red_color(), ColorDepth::TrueColor, false)
+        let red_sc = crate::style::StyleColor {
+            color: red_color().color,
+            opacity: None,
+        };
+        let red_sgr = crate::style::lower_to_sgr(&red_sc, ColorDepth::TrueColor, false)
             .expect("red_color must lower to truecolor SGR");
         assert!(
             out.contains(&red_sgr),

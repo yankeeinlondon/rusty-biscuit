@@ -2,6 +2,27 @@
 //!
 //! These snapshots are the parity *reference* (not a byte contract) the cutover
 //! is diffed against; intended diffs are re-accepted with a note in Phase 6.
+//!
+//! ## Phase 8 review: `auto` page-wrapper side margins (accepted)
+//!
+//! Five browser snapshots re-baselined the page wrapper's horizontal margins
+//! from `margin: 0ch 0ch 0ch 0ch` to `margin: 0ch auto 0ch auto`:
+//! `reference_block_quote_width_and_left`, `reference_centered_table`,
+//! `reference_list_left_margin`, `reference_page_background_pronounced`, and
+//! `reference_table_max_width`.
+//!
+//! **CSS rationale (accepted):** every one of these fixtures emits a
+//! `max-width`-capped `.darkmatter-page` wrapper with both author side margins
+//! left at their default (zero). `margin-left: auto; margin-right: auto` is the
+//! canonical CSS idiom for horizontally centering a fixed-`max-width` block in
+//! its container; the old `0ch` left/right pinned the capped frame to the left
+//! edge instead. The vertical margins stay `0ch`. This is the intended browser
+//! centering behavior of the CSS box cutover and mirrors the terminal frame's
+//! left/right placement (authored side margins are emitted verbatim and
+//! suppress the `auto` centering — see `layout/page.rs` `center_frame` and the
+//! `browser_render_with_max_width` /
+//! `browser_render_authored_side_margins_suppress_centering` unit tests). The
+//! change is therefore **intended**, not regressive, and is accepted here.
 
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::layout::DarkmatterPage;
