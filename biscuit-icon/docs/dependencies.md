@@ -6,14 +6,14 @@ Notable crates used by the `biscuit-icon` library and the `icon` CLI, and why.
 
 | Crate | Why |
 |-------|-----|
-| `renderable` (path) | Multi-target render tree; `Icon` implements `TreeRenderable` to emit inline SVG for the browser/markdown targets. |
-| `biscuit-terminal` (path) | Terminal rendering (glyph → image → text ladder). Its `TerminalImage` rasterizes the assembled SVG, so `resvg` arrives **transitively** — there is no direct `resvg` dependency and no `image` cargo feature. |
-| `rusqlite` (bundled) | Local on-disk cache (`~/.cache/biscuit-icon/icons.db`) of network-fetched Iconify bodies. The `bundled` feature compiles SQLite in, avoiding a system dependency. |
-| `reqwest` (0.12) | Iconify JSON API client (`GET /{prefix}.json?icons={name}`), used by both runtime lookups and the dev-only `populate_assets` binary. |
+| `renderable` (path) | Multi-target render tree; `Icon` implements `TreeRenderable` to emit inline SVG for the browser/markdown targets, and `TerminalRenderable` for the terminal ladder. |
+| `biscuit-terminal` (path) | Terminal rendering (glyph → image → text ladder). Its `TerminalImage` rasterizes the assembled SVG; `resvg` arrives **transitively** through `biscuit-terminal`. |
+| `rusqlite` (bundled) | Local on-disk cache (`~/.cache/biscuit-icon/icons.db`) of network-fetched Iconify bodies **and** set metadata. The `bundled` feature compiles SQLite in, avoiding a system dependency. |
+| `reqwest` (0.12) | Iconify JSON API client (`GET /{prefix}.json?icons={name}`, `/collections`, `/search?query=…`), used by both runtime lookups and the dev-only `populate_assets` binary. |
 | `strum` / `strum_macros` | Enum ↔ string conversion (`Display`/`EnumString`/`EnumIter`) for every domain set, powering the string-convenience constructors. |
 | `serde` / `serde_json` | Deserializing the Iconify JSON API responses and serializing `IconBody`. |
 | `thiserror` | `IconError` definition. |
-| `tokio` | Async runtime for the network client. |
+| `tokio` | Async runtime for the network client; also used to offload cache I/O from the async runtime thread with `spawn_blocking`. |
 | `dirs` | Resolving the default cache directory when `HOME` is unset. |
 | `tracing` | Structured diagnostics. |
 
@@ -25,9 +25,9 @@ Notable crates used by the `biscuit-icon` library and the `icon` CLI, and why.
 | `clap_complete` (unstable-dynamic) | `completions <shell>` script generation plus dynamic, cache-querying value completion via `ArgValueCompleter`. |
 | `color-eyre` | Error reporting in `main`. |
 | `tokio` | Async runtime. |
-| `tracing` / `tracing-subscriber` | `-v` verbosity / `RUST_LOG` diagnostics on stderr. |
+| `tracing` / `tracing-subscriber` | `--debug` / `RUST_LOG` diagnostics on stderr; `--verbose` drives user-facing output only. |
 
-## Notes
+## Cargo features
 
-- `resvg` is **not** a direct dependency; it is pulled in transitively by `biscuit-terminal`. Image-protocol rendering is therefore a runtime decision (terminal image support + no available glyph), not a compile-time feature.
+- `image` (default **off**) on both `biscuit-icon` and `biscuit-icon-cli` enables image-protocol terminal rendering of glyph-less icons. When disabled, the terminal ladder stops at the text identifier fallback.
 - The `iconify` crate is intentionally **not** used; bodies are vendored offline and assembled into `<svg>` locally.

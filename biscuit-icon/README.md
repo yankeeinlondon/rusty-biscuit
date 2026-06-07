@@ -190,8 +190,8 @@ The `Icon` struct then provides builder methods for stylizing the icon:
 | `color`    | String literal  | Any CSS color accepted by the Iconify API |
 | `width`    | String literal  | SVG width, defaulting to `1em`            |
 | `height`   | String literal  | SVG height, defaulting to `1em`           |
-| `flip`     | String literal  | `horizontal`, `vertical`, or `both`       |
-| `rotate`   | String literal  | `90`, `180`, or `270`                     |
+| `flip`     | `Flip` enum     | `Flip::Horizontal`, `Flip::Vertical`, or `Flip::Both` |
+| `rotate`   | `Rotate` enum   | `Rotate::R90`, `Rotate::R180`, or `Rotate::R270`      |
 | `view_box` | Boolean literal | Adds Iconify's transparent bounding box   |
 
 ## CLI API Surface
@@ -199,13 +199,18 @@ The `Icon` struct then provides builder methods for stylizing the icon:
 The CLI binary `icon` has an API surface of:
 
 - `sets <filter>` provides the list of icon sets (names only) which Iconify provides; you can optionally filter down the returned sets with the `<filter>` param
-- `icons [filter]` 
-    - provides a list of icons (and icon names) who's name includes the `filter` parameter
+- `icons [filter] [--from <csv>]`
+    - provides a list of icons (and icon names) whose name includes the `filter` parameter
     - you can isolate to an enumerated set of icon sets using the `--from <csv>` filter (e.g., `icon icons happy --from fa,mdi`)
+    - offline results come from the built-in domain catalog plus the local cache; the online Iconify catalog is reached automatically when there are no offline matches
 - `completions`
     - provides dynamic shell completions
     - it will always know the icon set names and the static icon sets built into the binary
-    - but it will also be able to query the database for cached icon names too
+    - it also queries the cache database for cached icon names
+- global flags
+    - `--verbose` increases user-facing diagnostic detail (e.g., cause chains in styled errors)
+    - `--debug` enables raw `tracing` output on stderr (or use `RUST_LOG`)
+    - `--nerd` (or `ICON_NERD_FONT=1`) prefers Nerd Font glyphs when an icon defines one
 - the `icons` subcommand is the _default_ command so a caller can call `icon icons mdi:home` or `icon mdi:home` and both are identical in behavior.
 
 ## Tech Stack
@@ -214,7 +219,7 @@ The CLI binary `icon` has an API surface of:
 
 - Icon bodies come from the Iconify JSON API (`GET https://api.iconify.design/{prefix}.json?icons={name}`) via `reqwest`. Curated domain bodies are vendored offline under `assets/icons/` and embedded at compile time; the `iconify` crate is **not** used (its proc-macro returns full SVG strings from literals, whereas we store bodies + `viewBox` and assemble `<svg>` locally).
 - `renderable` for multi-target rendering (browser/markdown inline SVG).
-- `biscuit-terminal` for terminal rendering (the glyph → image → text ladder; SVG rasterization arrives transitively via its `resvg` dependency).
+- `biscuit-terminal` for terminal rendering (the glyph → image → text ladder; SVG rasterization arrives transitively via its `resvg` dependency). Image-protocol rendering is gated behind the optional `image` cargo feature (off by default).
 - `rusqlite` (bundled) for the local network-lookup cache.
 - `strum` for enum ↔ string conversion across the domain sets.
 
