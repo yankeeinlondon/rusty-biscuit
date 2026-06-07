@@ -2534,3 +2534,56 @@ fn level2_style_images_exact_width_truncates_long_alt_in_terminal() {
         "the complete visible placeholder must fill exactly the 12-column field: {placeholder_line:?}"
     );
 }
+
+/// Regression (review-4): truncating a colored local-image placeholder must keep
+/// its closing SGR reset, so inline text following the truncated image does not
+/// inherit the image's color in a real terminal. Links and images use distinct
+/// renderer branches, so the hyperlink color-bleed regression
+/// (`level2_style_hyperlinks_truncation_does_not_bleed_color_in_terminal`) does
+/// not cover the image placeholder's reset — this verifies it separately.
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_images_truncation_does_not_bleed_color_in_terminal() {
+    // A red local-image placeholder with an exact 12-cell width truncates the
+    // long alt, immediately followed by an unstyled trailing marker on the same
+    // line.
+    let body = "---\nstyle:\n  images:\n    local-style:\n      color: red-500\n      width: 12\n---\n\n\
+        ![A very long image alt text](./no-such-image.png) ZZTRAIL\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    let red_semi = "38;2;251;44;54";
+    let red_colon = "38:2::251:44:54";
+    assert!(
+        frame.raw.contains(red_semi) || frame.raw.contains(red_colon),
+        "expected the local image's red foreground SGR in the capture. raw len={}",
+        frame.raw.len()
+    );
+
+    // The trailing marker must not sit inside the image's red run: there must be
+    // an SGR reset (or default-foreground) between the last red introduction and
+    // the marker. WezTerm reconstructs SGR per cell, so a leaked color would
+    // wrap the marker cells with red and no intervening reset.
+    let trail_pos = frame
+        .raw
+        .find("ZZTRAIL")
+        .unwrap_or_else(|| panic!("trailing marker missing in raw capture. plain:\n{}", frame.plain));
+    let before = &frame.raw[..trail_pos];
+    let red_idx = before
+        .rfind(red_semi)
+        .or_else(|| before.rfind(red_colon))
+        .unwrap_or_else(|| {
+            panic!("image's red SGR must precede the trailing marker. raw:\n{}", frame.raw)
+        });
+    let between = &before[red_idx..];
+    assert!(
+        between.contains("\x1b[0m")
+            || between.contains("\x1b[m")
+            || between.contains("\x1b[39m"),
+        "trailing text inherits the truncated image color: no reset between the \
+         red SGR and the marker. raw:\n{}",
+        frame.raw
+    );
+}
