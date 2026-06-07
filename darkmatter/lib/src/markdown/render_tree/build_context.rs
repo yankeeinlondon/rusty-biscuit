@@ -102,6 +102,12 @@ impl<'a> TreeBuildContext<'a> {
     }
 
     /// Resolve effective hyperlink foreground/background colors.
+    ///
+    /// No page fallback: the page foreground inherits to links through the
+    /// styled root ([`InheritedStyle`](renderable::tree::InheritedStyle)), and
+    /// the page background is painted once by the page frame. Copying either
+    /// onto each link node would defeat inheritance and double-composite an
+    /// alpha-bearing page background.
     pub fn hyperlink_color(
         &self,
         is_local: bool,
@@ -112,19 +118,22 @@ impl<'a> TreeBuildContext<'a> {
             .as_ref()
             .and_then(|s| s.color.as_ref())
             .map(|c| c.to_paint_color())
-            .or_else(|| self.component_color(PageComponent::Hyperlinks))
-            .or(self.page_color);
+            .or_else(|| self.component_color(PageComponent::Hyperlinks));
         let bg = merged
             .as_ref()
             .and_then(|s| s.bg_color.as_ref())
             .map(|c| c.to_paint_color())
-            .or_else(|| self.component_bg_color(PageComponent::Hyperlinks))
-            .or(self.page_bg_color);
+            .or_else(|| self.component_bg_color(PageComponent::Hyperlinks));
 
         (fg, bg)
     }
 
     /// Resolve effective image foreground/background colors for fallback text.
+    ///
+    /// No page fallback, for the same reason as [`hyperlink_color`]: the page
+    /// foreground inherits to the alt-text placeholder through the styled root,
+    /// and the page background is painted by the page frame, not copied onto
+    /// each image node.
     pub fn image_color(
         &self,
         is_local: bool,
@@ -138,13 +147,11 @@ impl<'a> TreeBuildContext<'a> {
         let fg = local
             .and_then(|s| s.color.as_ref())
             .map(|c| c.to_paint_color())
-            .or_else(|| self.component_color(PageComponent::Images))
-            .or(self.page_color);
+            .or_else(|| self.component_color(PageComponent::Images));
         let bg = local
             .and_then(|s| s.bg_color.as_ref())
             .map(|c| c.to_paint_color())
-            .or_else(|| self.component_bg_color(PageComponent::Images))
-            .or(self.page_bg_color);
+            .or_else(|| self.component_bg_color(PageComponent::Images));
 
         (fg, bg)
     }
@@ -900,6 +907,52 @@ mod structural_tests {
             table.attrs.style_ref().is_none_or(|s| s.is_empty()),
             "page color must not be copied onto the table component; got {:?}",
             table.attrs.style_ref()
+        );
+    }
+
+    #[test]
+    fn context_fold_does_not_copy_page_color_onto_links() {
+        // Review-2 finding: with only page colors set (no hyperlink-specific
+        // color), a link node must NOT carry a copied page style — the page
+        // foreground reaches it through root inheritance and the page background
+        // is painted once by the page frame.
+        let policies = empty_policies();
+        let mut ctx = ctx_for(&policies);
+        ctx.page_color = Some(PaintColor::new(renderable::color::Color::Tailwind(
+            renderable::color::Tailwind::Red500,
+        )));
+        ctx.page_bg_color = Some(PaintColor::new(renderable::color::Color::Tailwind(
+            renderable::color::Tailwind::Blue500,
+        )));
+        let doc = fold_test("[label](https://example.com)\n", &ctx);
+        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
+            .expect("link node");
+        assert!(
+            link.attrs.style_ref().is_none_or(|s| s.is_empty()),
+            "page color must not be copied onto the link; got {:?}",
+            link.attrs.style_ref()
+        );
+    }
+
+    #[test]
+    fn context_fold_does_not_copy_page_color_onto_images() {
+        // Same contract for images: a page-only color must not become an
+        // explicit image-node style.
+        let policies = empty_policies();
+        let mut ctx = ctx_for(&policies);
+        ctx.page_color = Some(PaintColor::new(renderable::color::Color::Tailwind(
+            renderable::color::Tailwind::Red500,
+        )));
+        ctx.page_bg_color = Some(PaintColor::new(renderable::color::Color::Tailwind(
+            renderable::color::Tailwind::Blue500,
+        )));
+        let doc = fold_test("![alt](pic.png)\n", &ctx);
+        let image = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Image { .. }))
+            .expect("image node");
+        assert!(
+            image.attrs.style_ref().is_none_or(|s| s.is_empty()),
+            "page color must not be copied onto the image; got {:?}",
+            image.attrs.style_ref()
         );
     }
 

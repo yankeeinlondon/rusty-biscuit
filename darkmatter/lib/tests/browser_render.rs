@@ -828,6 +828,51 @@ async fn browser_page_color_not_copied_onto_component() {
     );
 }
 
+/// Review-2: a translucent page background must be painted **only** by the page
+/// frame. Links and images must not carry a copied page background — otherwise
+/// each one composites the same translucent paint again over the frame. In a
+/// real browser the `.darkmatter-page` frame computes the translucent rgba while
+/// the `<a>` and `<img>` compute fully-transparent backgrounds.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_translucent_page_background_painted_only_by_frame() {
+    if !require_browser() {
+        return;
+    }
+    let doc = style_page_doc(
+        120,
+        "page:\n  bg-color: blue-500/50",
+        "[label](https://example.com)\n\n![A](./local.png)\n",
+    );
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    // The frame paints the translucent page background once (alpha < 1).
+    let frame_bg = harness
+        .computed_style(".darkmatter-page", "background-color")
+        .await
+        .expect("computed style query");
+    assert!(
+        frame_bg.starts_with("rgba(") && frame_bg != "rgba(0, 0, 0, 0)",
+        "the page frame must paint the translucent background; got {frame_bg}",
+    );
+
+    // The link and image must be fully transparent — the page background is not
+    // copied onto them, so it is composited exactly once.
+    for selector in ["a", "img"] {
+        let bg = harness
+            .computed_style(selector, "background-color")
+            .await
+            .expect("computed style query");
+        assert_eq!(
+            bg, "rgba(0, 0, 0, 0)",
+            "{selector} must not carry a copied page background; got {bg}",
+        );
+    }
+}
+
 /// A list `left-margin` must compute to a non-zero px margin in a real browser.
 #[tokio::test]
 #[serial(browser)]
