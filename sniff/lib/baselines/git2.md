@@ -29,9 +29,14 @@ cargo bench -p sniff --bench perf -- --save-baseline git2 git_ops
 The committed numbers below were captured with **reduced sampling**
 (`--measurement-time 3 --warm-up-time 1 --sample-size 10`) on a shared host to
 keep the run tractable; the wide confidence intervals on the slower benches
-(flagged below) reflect that sampling plus host contention. Re-run with the
-default group sampling (no overrides) for a tighter baseline before a real
-no-regression gate.
+(flagged below) reflect that sampling plus host contention.
+
+> ⚠️ **Release blocker:** This baseline **must be recaptured with default
+> Criterion sampling** (no overrides) on the same host as the `gix` comparison
+> before the migration can be judged against the no-regression gate. The
+> current `gix.md` comparison uses default sampling while this baseline uses
+> reduced sampling, making the comparison methodologically invalid for a
+> release decision.
 
 ## Timings
 

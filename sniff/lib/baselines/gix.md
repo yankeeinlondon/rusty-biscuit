@@ -48,11 +48,16 @@ Each row is Criterion's `[lower estimate upper]` 95% confidence interval.
 
 ## Same-Host Comparison vs. `git2` Baseline
 
-The `git2` baseline on this host was captured with reduced sampling
-(`--measurement-time 3 --warm-up-time 1 --sample-size 10`). The comparison
-below uses Criterion's statistical change detection against that baseline.
-Rows marked "Within noise" have Criterion's `p > 0.05` after its noise
-threshold.
+> ⚠️ **Release blocker:** The `git2` baseline below was captured with **reduced
+> sampling** (`--measurement-time 3 --warm-up-time 1 --sample-size 10`), while
+> the `gix` numbers above use **default Criterion sampling**. This mismatch
+> means the comparison is methodologically incomplete and cannot be used for a
+> release no-regression decision. Both baselines must be recaptured with
+> identical default settings on the same host before judging the gate.
+
+The comparison below uses Criterion's statistical change detection against the
+reduced-sampling baseline. Rows marked "Within noise" have Criterion's `p > 0.05`
+after its noise threshold.
 
 | Benchmark | `git2` estimate | `gix` estimate | Change | Criterion decision |
 |-----------|-----------------|----------------|--------|------------------|
