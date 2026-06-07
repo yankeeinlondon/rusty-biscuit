@@ -1577,6 +1577,210 @@ fn test_god_files_json_output() {
 }
 
 #[test]
+fn test_god_files_json_top_level_excludes_locals() {
+    // Public-boundary regression: ten top-level functions, each with one
+    // parameter and many local assignments. The structural summary must count
+    // the ten functions only — locals and parameters are not top-level — and
+    // the ManyUnrelatedTopLevel hint must report 10, not hundreds.
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut content = String::new();
+    for f in 0..10 {
+        content.push_str(&format!("def f{f}(arg):\n"));
+        for v in 0..44 {
+            content.push_str(&format!("    local_{f}_{v} = arg + {v}\n"));
+        }
+    }
+    std::fs::write(dir.path().join("functions.py"), content).unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .args(["god-files", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let arr = json.as_array().expect("json array");
+    assert_eq!(arr.len(), 1);
+    assert_eq!(
+        arr[0]["top_level_symbol_count"].as_u64().unwrap(),
+        10,
+        "only the ten functions are top-level"
+    );
+    let histogram = &arr[0]["kind_histogram"];
+    assert_eq!(
+        histogram["Function"].as_u64().unwrap(),
+        10,
+        "histogram must tally the ten top-level functions"
+    );
+    assert!(
+        histogram.get("Variable").is_none() && histogram.get("Parameter").is_none(),
+        "locals and parameters must not appear in the top-level histogram: {histogram}"
+    );
+    let hints = arr[0]["refactor_hints"].as_array().expect("hints array");
+    assert!(
+        hints.iter().any(|h| h["kind"] == "many_unrelated_top_level"
+            && h["count"].as_u64() == Some(10)),
+        "ManyUnrelatedTopLevel hint count must be 10, got {hints:?}"
+    );
+}
+
+#[test]
+fn test_god_files_json_reports_control_flow_nesting() {
+    // Public-boundary regression: a single function with eight nested `if`
+    // blocks must surface deep control-flow nesting and a DeeplyNested hint.
+    // Symbol-span nesting reported a trivial depth here and emitted no hint.
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut content = String::from("def handler(value):\n");
+    for level in 0..8 {
+        let indent = "    ".repeat(level + 1);
+        content.push_str(&format!("{indent}if value > {level}:\n"));
+    }
+    content.push_str(&format!("{}return value\n", "    ".repeat(9)));
+    for i in 0..420 {
+        content.push_str(&format!("x{i} = {i}\n"));
+    }
+    std::fs::write(dir.path().join("deep.py"), content).unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .args(["god-files", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    let arr = json.as_array().expect("json array");
+    assert_eq!(arr.len(), 1);
+    assert!(
+        arr[0]["max_nesting_depth"].as_u64().unwrap() >= 8,
+        "expected control-flow nesting depth >= 8, got {}",
+        arr[0]["max_nesting_depth"]
+    );
+    let hints = arr[0]["refactor_hints"].as_array().expect("hints array");
+    assert!(
+        hints.iter().any(|h| h["kind"] == "deeply_nested"),
+        "deep control flow must emit a DeeplyNested hint, got {hints:?}"
+    );
+}
+
+#[test]
+fn test_god_files_json_reports_nesting_non_python_forms() {
+    // Public-boundary regression for the iteration-9 cross-language gap: the
+    // four grammar-specific forms that previously reported `max_nesting_depth: 0`
+    // at the CLI boundary — Perl `unless`, C++ range-for, Java
+    // try-with-resources, and Swift repeat-while. Each file nests eight of the
+    // construct and must surface depth >= 8 with a `deeply_nested` hint, padded
+    // past the god-file SLOC floor.
+    fn nest(open: impl Fn(usize) -> String, close: impl Fn(usize) -> String, body: &str) -> String {
+        let mut s = String::new();
+        for level in 0..8 {
+            s.push_str(&open(level));
+        }
+        s.push_str(body);
+        for level in (0..8).rev() {
+            s.push_str(&close(level));
+        }
+        s
+    }
+
+    let perl = {
+        let mut s = nest(
+            |l| format!("{}unless ($value > {l}) {{\n", "  ".repeat(l)),
+            |l| format!("{}}}\n", "  ".repeat(l)),
+            &format!("{}$value = 1;\n", "  ".repeat(8)),
+        );
+        for i in 0..420 {
+            s.push_str(&format!("my $x{i} = {i};\n"));
+        }
+        ("deep.pl", s)
+    };
+    let cpp = {
+        let mut s = String::from("void handler(int v[]) {\n");
+        s.push_str(&nest(
+            |l| format!("{}for (auto a{l} : v) {{\n", "  ".repeat(l + 1)),
+            |l| format!("{}}}\n", "  ".repeat(l + 1)),
+            &format!("{}int z = 1;\n", "  ".repeat(9)),
+        ));
+        s.push_str("}\n");
+        for i in 0..420 {
+            s.push_str(&format!("int g{i} = {i};\n"));
+        }
+        ("deep.cpp", s)
+    };
+    let java = {
+        let mut s = String::from("class Handler {\n  void run() throws Exception {\n");
+        s.push_str(&nest(
+            |l| format!("{}try (var r{l} = open()) {{\n", "    ".repeat(l + 1)),
+            |l| format!("{}}}\n", "    ".repeat(l + 1)),
+            &format!("{}use();\n", "    ".repeat(9)),
+        ));
+        s.push_str("  }\n");
+        for i in 0..420 {
+            s.push_str(&format!("  int g{i} = {i};\n"));
+        }
+        s.push_str("}\n");
+        ("deep.java", s)
+    };
+    let swift = {
+        let mut s = String::from("func handler() {\n");
+        s.push_str(&nest(
+            |l| format!("{}repeat {{\n", "  ".repeat(l + 1)),
+            |l| format!("{}}} while c{l}\n", "  ".repeat(l + 1)),
+            &format!("{}work()\n", "  ".repeat(9)),
+        ));
+        s.push_str("}\n");
+        for i in 0..420 {
+            s.push_str(&format!("let g{i} = {i}\n"));
+        }
+        ("deep.swift", s)
+    };
+    let zsh = {
+        let mut s = nest(
+            |l| format!("{}select x{l} in a b; do\n", "  ".repeat(l)),
+            |l| format!("{}done\n", "  ".repeat(l)),
+            &format!("{}:;\n", "  ".repeat(8)),
+        );
+        for i in 0..420 {
+            s.push_str(&format!("local g{i}={i}\n"));
+        }
+        ("deep.zsh", s)
+    };
+
+    for (name, content) in [perl, cpp, java, swift, zsh] {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join(name), content).unwrap();
+
+        let output = hug_cmd()
+            .current_dir(dir.path())
+            .args(["god-files", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let json: Value = serde_json::from_slice(&output).unwrap();
+        let arr = json.as_array().expect("json array");
+        assert_eq!(arr.len(), 1, "{name}: expected one god-file record");
+        assert!(
+            arr[0]["max_nesting_depth"].as_u64().unwrap() >= 8,
+            "{name}: expected control-flow nesting depth >= 8, got {}",
+            arr[0]["max_nesting_depth"]
+        );
+        let hints = arr[0]["refactor_hints"].as_array().expect("hints array");
+        assert!(
+            hints.iter().any(|h| h["kind"] == "deeply_nested"),
+            "{name}: deep control flow must emit a DeeplyNested hint, got {hints:?}"
+        );
+    }
+}
+
+#[test]
 fn test_god_files_high_risk_filters_json() {
     // `--high-risk` must filter the JSON payload, not only the rendered report.
     let dir = tempfile::TempDir::new().unwrap();
