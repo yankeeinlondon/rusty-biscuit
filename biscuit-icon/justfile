@@ -38,8 +38,8 @@ test *args="":
     @just _test biscuit-icon {{args}}
     @just _test biscuit-icon-cli {{args}}
 
-test-l2:
-    @echo "test-l2: not applicable for biscuit-icon"
+test-l2 *args="":
+    @just _test_l2 biscuit-icon-cli --features image {{args}}
 
 test-l3:
     @echo "test-l3: not applicable for biscuit-icon"
