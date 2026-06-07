@@ -173,11 +173,15 @@ pub fn list_worktrees(base_dir: &Path) -> Result<Option<Vec<WorktreeEntry>>, Box
     }
 
     // Add linked worktrees.
-    let proxies = repo.worktrees().map_err(|e| SniffError::git("worktrees", e))?;
+    let proxies = repo
+        .worktrees()
+        .map_err(|e| SniffError::git("worktrees", e))?;
 
     for proxy in proxies {
         let name = proxy.id().to_str_lossy().into_owned();
-        let path = proxy.base().map_err(|e| SniffError::git("worktree_base", e))?;
+        let path = proxy
+            .base()
+            .map_err(|e| SniffError::git("worktree_base", e))?;
         let canonical = std::fs::canonicalize(&path).unwrap_or(path);
 
         // Open the worktree as its own repository to read HEAD.
@@ -224,9 +228,9 @@ fn is_worktree_current(wt_canonical: &Path, current_canonical: Option<&Path>) ->
 mod tests {
     use super::*;
     use std::fs;
-    use std::path::Path;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
     use tempfile::TempDir;
 
     /// Creates a temporary git repo with a single file committed.
@@ -512,20 +516,12 @@ mod tests {
         let _wt = repo.worktree("linked-wt", &wt_path, None).unwrap();
 
         let worktrees_dir = dir.path().join(".git").join("worktrees");
-        std::fs::set_permissions(
-            &worktrees_dir,
-            std::fs::Permissions::from_mode(0o000),
-        )
-        .unwrap();
+        std::fs::set_permissions(&worktrees_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
 
         let result = list_worktrees(dir.path());
 
         // Restore permissions so TempDir can clean up.
-        std::fs::set_permissions(
-            &worktrees_dir,
-            std::fs::Permissions::from_mode(0o755),
-        )
-        .unwrap();
+        std::fs::set_permissions(&worktrees_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         assert!(
             result.is_err(),

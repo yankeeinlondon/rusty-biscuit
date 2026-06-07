@@ -325,20 +325,12 @@ fn worktree_registry_error_is_propagated() {
     builder::build_git_repo_with_worktrees(dir.path(), 1);
 
     let worktrees_dir = dir.path().join(".git").join("worktrees");
-    std::fs::set_permissions(
-        &worktrees_dir,
-        std::fs::Permissions::from_mode(0o000),
-    )
-    .unwrap();
+    std::fs::set_permissions(&worktrees_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
 
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
     let result = handle.worktrees();
 
-    std::fs::set_permissions(
-        &worktrees_dir,
-        std::fs::Permissions::from_mode(0o755),
-    )
-    .unwrap();
+    std::fs::set_permissions(&worktrees_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     assert!(
         result.is_err(),
@@ -368,7 +360,6 @@ fn worktree_proxy_base_error_is_propagated() {
         "empty worktree gitdir must surface an error, got {result:?}"
     );
 }
-
 
 // ---------------------------------------------------------------------------
 // Discovery tri-state (git2)
@@ -714,7 +705,10 @@ fn ref_decorations_resolve_symbolic_remote_head() {
 
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
     let remotes = handle.remotes(true);
-    let origin = remotes.iter().find(|r| r.name == "origin").expect("origin present");
+    let origin = remotes
+        .iter()
+        .find(|r| r.name == "origin")
+        .expect("origin present");
     assert_eq!(
         origin.default_branch.as_deref(),
         Some("main"),
@@ -1468,7 +1462,9 @@ fn config_local_overrides_global() {
 
     // Point GIT_CONFIG_GLOBAL at the fake file so gix reads it.
     let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
-    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &global_config); }
+    unsafe {
+        std::env::set_var("GIT_CONFIG_GLOBAL", &global_config);
+    }
 
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
     let cfg = handle.config();
@@ -1507,7 +1503,9 @@ fn config_global_fallback_when_no_local_value() {
     .unwrap();
 
     let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
-    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &global_config); }
+    unsafe {
+        std::env::set_var("GIT_CONFIG_GLOBAL", &global_config);
+    }
 
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
     let cfg = handle.config();
@@ -1559,8 +1557,12 @@ fn config_system_global_local_precedence() {
 
     let original_system = std::env::var_os("GIT_CONFIG_SYSTEM");
     let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
-    unsafe { std::env::set_var("GIT_CONFIG_SYSTEM", &system_config); }
-    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &global_config); }
+    unsafe {
+        std::env::set_var("GIT_CONFIG_SYSTEM", &system_config);
+    }
+    unsafe {
+        std::env::set_var("GIT_CONFIG_GLOBAL", &global_config);
+    }
 
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
     let cfg = handle.config();
@@ -1606,8 +1608,12 @@ fn config_system_fallback_when_no_local_or_global_value() {
 
     let original_system = std::env::var_os("GIT_CONFIG_SYSTEM");
     let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
-    unsafe { std::env::set_var("GIT_CONFIG_SYSTEM", &system_config); }
-    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &global_config); }
+    unsafe {
+        std::env::set_var("GIT_CONFIG_SYSTEM", &system_config);
+    }
+    unsafe {
+        std::env::set_var("GIT_CONFIG_GLOBAL", &global_config);
+    }
 
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
     let cfg = handle.config();
@@ -1669,7 +1675,9 @@ fn config_all_twelve_keys_from_global_source() {
     let _ = &fake_home; // keep temp dir alive
 
     let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
-    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &global_config); }
+    unsafe {
+        std::env::set_var("GIT_CONFIG_GLOBAL", &global_config);
+    }
 
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
     let config = handle.config();
@@ -1711,7 +1719,9 @@ fn config_extra_system_file_is_lowest_precedence() {
     .unwrap();
 
     let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
-    unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", &global_config); }
+    unsafe {
+        std::env::set_var("GIT_CONFIG_GLOBAL", &global_config);
+    }
 
     let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
     let cfg = handle.config();
