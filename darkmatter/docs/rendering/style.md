@@ -358,7 +358,7 @@ Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax (top-l
 
 ## Component-Level Style (Sub-Spec #3)
 
-`style.table.*`, `style.images.*`, and `style.block-quote.*` lower directly into per-component [`ComponentPolicy`](crate::layout::ComponentPolicy) via `apply_component_style`. `ComponentPolicy` is the **single source of truth** for a component's `style:` layout and colors: a `renderable::layout::Layout` plus optional `color` / `bg_color` carried as [`StyleColor`](crate::style::StyleColor) (so opacity survives to HTML — see [Color & Background-Color](#color--background-color-sub-spec-5)). There is no parallel per-component color map. Each bucket maps to a dedicated `PageComponent` variant:
+`style.table.*`, `style.images.*`, and `style.block-quote.*` lower directly into per-component [`ComponentPolicy`](crate::layout::ComponentPolicy) via `apply_component_style`. `ComponentPolicy` is the **single source of truth** for a component's `style:` layout and colors: a `renderable::layout::Layout` plus optional `color` / `bg_color` carried as alpha-bearing [`PaintColor`](renderable::style::PaintColor) (so opacity survives to HTML — see [Color & Background-Color](#color--background-color-sub-spec-5)). The parsed `StyleColor` is lowered to `PaintColor` at the parser/apply boundary; no `StyleColor` survives on `ComponentPolicy`. There is no parallel per-component color map. Each bucket maps to a dedicated `PageComponent` variant:
 
 | Bucket | `PageComponent` variant |
 |---|---|
@@ -674,19 +674,24 @@ component's `ComponentPolicy` — the single source of truth, with no parallel
 color map:
 
 ```rust
-page_color: Option<StyleColor>,
-page_bg_color: Option<StyleColor>,
+page_color: Option<renderable::style::PaintColor>,
+page_bg_color: Option<renderable::style::PaintColor>,
 // per component, inside `component_policies: HashMap<PageComponent, ComponentPolicy>`:
-struct ComponentPolicy { layout: Layout, color: Option<StyleColor>, bg_color: Option<StyleColor> }
+struct ComponentPolicy {
+    layout: Layout,
+    color: Option<renderable::style::PaintColor>,
+    bg_color: Option<renderable::style::PaintColor>,
+}
 ```
 
-`StyleColor` carries optional opacity, which the renderable `Color`-typed
-`Style` cannot represent. The terminal drops it; the browser entry point reads a
-`darkmatter.style` hint `decorate_document` records and splices the `rgba(...)`
-declaration onto the rendered element (CSS source order wins over the opaque
-`rgb(...)` the fold emits).
+The parsed `StyleColor` (which carries optional Tailwind/hex opacity) is lowered
+to alpha-bearing `renderable::style::PaintColor` at the parser/apply boundary
+(`style/apply.rs`), so opacity rides in the paint's alpha channel rather than a
+side channel. The terminal reads `PaintColor::color` and ignores the alpha; the
+browser fold lowers the pair straight to `rgb(...)` (opaque) / `rgba(...)`
+(alpha) — there is no `darkmatter.style` hint and no post-render HTML rewrite.
 
-Page color is **inheritance**: `style.page.color` and `style.page.bg-color` are written onto the document root node so they inherit to all descendants. A component-level value overrides the page-level value for that component via `decorate_document`. If neither exists, no color rule or SGR is emitted.
+Page color is **inheritance**: `style.page.color` and `style.page.bg-color` are baked onto the document root node during the context-aware fold so they inherit to all descendants via `renderable`'s `InheritedStyle`. A component-level value overrides the page-level value for that component (page color is never copied onto component nodes). If neither exists, no color rule or SGR is emitted.
 
 There is no explicit inheritance clearing in v1 — the parser does not accept `"reset"`, so a component cannot opt out of page-level color. This keeps the implementation aligned with the accepted schema. A future parser extension may add a dedicated clear/reset value if documents need it.
 
@@ -694,10 +699,10 @@ There is no explicit inheritance clearing in v1 — the parser does not accept `
 
 Terminal output uses RGB-only colors:
 
-- `StyleColor.color.to_rgb()` returns `Some((r, g, b))` for fixed RGB values, which lowers to truecolor SGR (`38;2;r;g;b` / `48;2;r;g;b`) when color depth allows it.
+- `PaintColor::color.to_rgb()` returns `Some((r, g, b))` for fixed RGB values, which lowers to truecolor SGR (`38;2;r;g;b` / `48;2;r;g;b`) when color depth allows it.
 - `None` means no terminal SGR for this slot. This covers `Tailwind::{Transparent, Current, Inherit}` and other non-fixed color values.
 - `ColorDepth::None` emits no color SGR.
-- Opacity is **dropped** by the terminal — it is an HTML-only concern.
+- The `PaintColor` alpha is **ignored** by the terminal — it is an HTML-only concern.
 
 Component color is scoped at render boundaries:
 
@@ -713,7 +718,7 @@ Browser output preserves CSS-special colors where possible:
 
 | Color value | CSS output |
 |---|---|
-| RGB-capable | `rgb(r, g, b)` or `rgba(r, g, b, opacity / 100.0)` when opacity is present |
+| RGB-capable | `rgb(r, g, b)` when opaque, or `rgba(r, g, b, alpha / 255.0)` when the `PaintColor` alpha is non-opaque |
 | `Color::Tailwind(Tailwind::Transparent)` | `transparent` |
 | `Color::Tailwind(Tailwind::Current)` | `currentColor` |
 | `Color::Tailwind(Tailwind::Inherit)` | `inherit` |
@@ -744,24 +749,26 @@ Code blocks have no component-specific frontmatter color in this sub-spec (`styl
 ```rust
 // darkmatter::layout::DarkmatterPage — extended
 
+use renderable::style::PaintColor;
+
 impl DarkmatterPage {
     /// Set the page-level inherited foreground color.
-    pub fn with_page_color(self, color: StyleColor) -> Self;
+    pub fn with_page_color(self, color: PaintColor) -> Self;
     /// Set the page-level inherited background color.
-    pub fn with_page_bg_color(self, color: StyleColor) -> Self;
+    pub fn with_page_bg_color(self, color: PaintColor) -> Self;
     /// Set a component-level foreground color (overrides page-level inheritance).
-    pub fn with_component_color(self, component: PageComponent, color: StyleColor) -> Self;
+    pub fn with_component_color(self, component: PageComponent, color: PaintColor) -> Self;
     /// Set a component-level background color (overrides page-level inheritance).
-    pub fn with_component_bg_color(self, component: PageComponent, color: StyleColor) -> Self;
+    pub fn with_component_bg_color(self, component: PageComponent, color: PaintColor) -> Self;
 
     /// Effective page-level foreground color.
-    pub fn page_color(&self) -> Option<&StyleColor>;
+    pub fn page_color(&self) -> Option<&PaintColor>;
     /// Effective page-level background color.
-    pub fn page_bg_color(&self) -> Option<&StyleColor>;
+    pub fn page_bg_color(&self) -> Option<&PaintColor>;
     /// Effective foreground color for a component (component-level overrides page-level).
-    pub fn color_for(&self, component: PageComponent) -> Option<&StyleColor>;
+    pub fn color_for(&self, component: PageComponent) -> Option<&PaintColor>;
     /// Effective background color for a component (component-level overrides page-level).
-    pub fn bg_color_for(&self, component: PageComponent) -> Option<&StyleColor>;
+    pub fn bg_color_for(&self, component: PageComponent) -> Option<&PaintColor>;
 }
 
 // darkmatter::style — extended

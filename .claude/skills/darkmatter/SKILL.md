@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 751ea2392b8b3231-9d6c0450bcaf3373
-last_updated: 2026-06-06
+hash: 751ea2392b8b3231-435f290eb5c8feaa
+last_updated: 2026-06-07
 ---
 
 # darkmatter
@@ -183,9 +183,19 @@ the `biscuit-terminal` skill for terminal tree rendering.
   `PageAlignment`, `PageFill`, `WidthUnit`, and `PageComponent::Lists` have
   been deleted. `style:` frontmatter lowers **directly** into a per-component
   `ComponentPolicy` — a `renderable::layout::Layout` plus `color` / `bg_color`
-  kept as `StyleColor` so opacity survives to the HTML target. The `decorate`
-  pass projects layout and color onto the render-tree nodes'
-  `renderable::style::Style` (opacity rides along as a `darkmatter.style`
-  render hint for the browser), and the renderer folds perform all width,
-  padding, alignment, and CSS resolution. `DarkmatterPage` survives as a slim,
-  renderable-typed page frame.
+  carried as alpha-bearing `renderable::style::PaintColor`. The parsed
+  `StyleColor` is lowered to `PaintColor` at the parser/apply boundary
+  (`style/apply.rs`), so opacity rides in the paint's alpha channel; no
+  `StyleColor` survives on post-construction component types.
+- Production rendering is **one context-aware fold followed by one target fold**.
+  Darkmatter's `render_tree::build_context` (`TreeBuildContext`) bakes component
+  policy, page-inheriting color, alpha paint, hyperlink/image text layout,
+  structured link/image browser attrs, and HR defaults onto the nodes during
+  construction; the target fold then resolves all width, padding, alignment, and
+  CSS. The old post-fold `decorate` pass (`decorate_document` / `component_for`)
+  and the `darkmatter.style` / `darkmatter.li` render hints are **deleted** — the
+  browser fold lowers alpha straight to `rgba(...)` with no HTML rewrite, and a
+  malformed fenced code-block directive remains a fatal
+  `MarkdownError::InvalidLineRange` via the `validate_code_directives` preflight
+  the HTML entry points run over the folded tree. `DarkmatterPage` survives as a
+  slim, renderable-typed page frame.
