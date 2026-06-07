@@ -387,16 +387,18 @@ fn collect_commits_in_range(
             continue;
         };
 
+        // Git commit times are whole seconds; treat the commit as occurring at
+        // the start of its second and compare against the full-precision
+        // `since`/`until` instants. Truncating the bounds to seconds instead
+        // would make a 0-width window (`Duration::days(0)`, since == until ==
+        // now) wrongly include a commit from the current second.
         let commit_time = DateTime::from_timestamp(info.commit_time(), 0).unwrap_or_default();
-        // Git commit times have whole-second precision while `until` is
-        // sub-second `Utc::now()`; compare at second granularity and treat the
-        // upper bound as inclusive so a commit made in the current second is
-        // kept. Only strictly-future commits (clock skew, hand-set dates) are
-        // skipped.
-        if commit_time.timestamp() < since.timestamp() {
-            break;
-        }
-        if commit_time.timestamp() > until.timestamp() {
+        // `ByCommitTime` is a lazy frontier walk: a tip is always yielded
+        // before its parents, so an old HEAD can precede a newer ancestor.
+        // Filter out-of-range commits with `continue` rather than `break` —
+        // breaking on the first old commit would hide newer parents behind a
+        // skewed HEAD (matching the git2 baseline's full-ancestry scan).
+        if commit_time < since || commit_time > until {
             continue;
         }
 
