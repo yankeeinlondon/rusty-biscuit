@@ -154,6 +154,7 @@ sniff hardware --json      # Subcommand with JSON output
 - [Services](./services.md) - Init systems, service listing
 - [Extending](./extending.md) - Add new detection capabilities
 - [Architecture](../../../sniff/docs/sniff-library-architecture.md) - Cost model, shared-work design
+- If you are working with the `gitoxide` crate -- which is used in Sniff for all **git** operations -- then make sure you use the 'rust-devops' skill!
 
 ## Resources
 
