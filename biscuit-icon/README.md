@@ -161,18 +161,26 @@ A library and CLI which provide both SVG (_and in a subset of cases_) character 
     1. Normal Unicode Character
     2. Nerd Font Character
 
-2. A network lookup service that will get _and cache into a local DB_ any of the 200,000+ icons from Iconify on demand
+2. A network lookup service that will get _and cache into a local SQLite DB_ (at `~/.cache/biscuit-icon/icons.db`) any of the 200,000+ icons from Iconify on demand. The cache never expires; `icon cache clear` empties it.
 
 
-For most callers, the way they will interact with this library is through the `Icon` struct.
+Domain icons are accessed enum-first; each set also exposes a fallible
+string-convenience constructor on `Icon` (one per set, e.g. `Icon::os`,
+`Icon::emoji`). Any of the 200,000+ Iconify icons can be fetched at runtime
+with `Icon::iconify`, which consults the local SQLite cache first.
 
 ```rust
-// using built-in icons
-let phone = Icon::device("mobile_phone");
-let happy = Icon::emoji("happy");
+use biscuit_icon::Icon;
+use biscuit_icon::domain::{DomainIcon, Os};
 
-// from Iconify via network or cache
-let home = await Icon::iconify("mdi:home")?;
+// enum-first (infallible, compiled in)
+let finder = Os::Finder.icon();
+
+// string convenience layer (fallible: unknown names error)
+let happy = Icon::emoji("happy")?;
+
+// from Iconify via cache, falling back to the network
+let home = Icon::iconify("mdi:home").await?;
 ```
 
 The `Icon` struct then provides builder methods for stylizing the icon:
@@ -204,7 +212,11 @@ The CLI binary `icon` has an API surface of:
 
 ### Library
 
-- `iconify` crate provide handy procedural macro used for building Icon's domain icon sets.
+- Icon bodies come from the Iconify JSON API (`GET https://api.iconify.design/{prefix}.json?icons={name}`) via `reqwest`. Curated domain bodies are vendored offline under `assets/icons/` and embedded at compile time; the `iconify` crate is **not** used (its proc-macro returns full SVG strings from literals, whereas we store bodies + `viewBox` and assemble `<svg>` locally).
+- `renderable` for multi-target rendering (browser/markdown inline SVG).
+- `biscuit-terminal` for terminal rendering (the glyph → image → text ladder; SVG rasterization arrives transitively via its `resvg` dependency).
+- `rusqlite` (bundled) for the local network-lookup cache.
+- `strum` for enum ↔ string conversion across the domain sets.
 
 ### CLI
 
