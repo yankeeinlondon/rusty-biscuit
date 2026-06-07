@@ -4,8 +4,8 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-a4903f7320552e81
-last_updated: 2026-06-04
+hash: 1acc7c1c76b11142-b9004268e1a480de
+last_updated: 2026-06-06
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -76,7 +76,7 @@ Every curated package area defines these 12 recipes:
 | `test`         | Full L1 suite.                                                                                                                                                                                                                                                                                                                               |
 | `test-l2`      | Real-terminal tests. Pre-spawns one shared pane per backend via `biscuit-harness-broker`, exports `BISCUIT_SHARED_*_ID` env vars, runs nextest with `-j 1`, tears panes down in a trap. Tests use `<Backend>Harness::shared_or_spawn()` to attach to the pre-spawned pane and fall back to per-process spawning when the env var is missing. |
 | `test-l3`      | OS keyboard/mouse tests.                                                                                                                                                                                                                                                                                                                     |
-| `test-browser` | Headless browser tests.                                                                                                                                                                                                                                                                                                                      |
+| `test-browser` | Headless browser tests. Runs `-j 1` (one Chrome at a time); the tier gets a 5s `leak-timeout` override for Chrome teardown.                                                                                                                                                                                                                                                                                                                      |
 | `test-real`    | External resource tests.                                                                                                                                                                                                                                                                                                                     |
 | `lint`         | Clippy + fmt check.                                                                                                                                                                                                                                                                                                                          |
 | `bench`        | Criterion benchmarks (no-op if opted out).                                                                                                                                                                                                                                                                                                   |
@@ -127,6 +127,14 @@ reap them:
    test that exits while a child still holds its stdout/stderr **fails the run**.
    Clean tests are not slowed — only a leak waits the window out. Drop
    `result = "fail"` to downgrade leaks to a non-fatal warning.
+   - **Browser-tier override.** `test(/browser_/)` raises `leak-timeout` to
+     `5s`. Headless Chrome's helper/crashpad processes inherit the test's
+     stdout and need longer than 100ms to reap; without the grace they trip
+     spurious `LEAK-FAIL`s even though the test exits cleanly. `result = "fail"`
+     is kept so a genuinely runaway browser still fails. The tier also runs
+     `-j 1` (see below) so only one Chrome tears down at a time —
+     `#[serial(browser)]` cannot serialize them under nextest's
+     process-per-test model.
 2. **`just test-leaks` (post-run sweep, all platforms).** Wraps `just test` in
    `leak-sweep` (`tools/test-toolkit`, `--features leak-sweep`). It diffs the
    process list before/after the whole run and reports survivors whose
