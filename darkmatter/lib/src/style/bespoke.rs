@@ -1653,12 +1653,9 @@ mod tests {
         let md: Markdown = "![a](./local.png)".into();
         let output = page.render(&md).unwrap();
 
-        // The tree path applies `local_image_style` (width 40, Right) to the alt
-        // text itself, so the placeholder becomes `▉ IMAGE[<pad>a]` with the
-        // padding inside the brackets — a documented parity-difference from the
-        // legacy serializer, which padded the whole `▉ IMAGE[a]` string. The
-        // alt `a` (1 cell) right-aligns into 40 cells, so a substantial leading
-        // run of spaces precedes it inside the brackets.
+        // The tree path shapes the *complete* placeholder (width 40, Right):
+        // `▉ IMAGE[a]` is right-aligned within the 40-cell field, so the padding
+        // precedes the placeholder and the alt inside the brackets is untouched.
         let fallback_line = output
             .lines()
             .find(|l| l.contains("▉ IMAGE["))
@@ -1668,10 +1665,15 @@ mod tests {
             .and_then(|(_, rest)| rest.split_once(']'))
             .map(|(inner, _)| inner)
             .unwrap_or("");
-        let leading = inner.chars().take_while(|c| *c == ' ').count();
+        assert_eq!(
+            inner, "a",
+            "alt inside the brackets must be untouched: {fallback_line:?}"
+        );
+        let leading = fallback_line.chars().take_while(|c| *c == ' ').count();
+        let field_width = fallback_line.trim_end().chars().count();
         assert!(
-            leading >= 28 && inner.trim() == "a",
-            "alt should be right-padded to ~40 cells inside the placeholder, got {leading} leading: {fallback_line:?}"
+            leading >= 28 && field_width == 40,
+            "placeholder should be right-aligned within the 40-cell field, got {leading} leading, width {field_width}: {fallback_line:?}"
         );
     }
 

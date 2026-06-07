@@ -2418,8 +2418,8 @@ fn level2_style_images_local_style_colors_fallback_in_terminal() {
     );
 }
 
-/// `style.images.local-style.width: 40` + `alignment: right` must right-pad
-/// the local image fallback line to 40 visible cells.
+/// `style.images.local-style.width: 40` + `alignment: right` must right-align
+/// the *complete* fallback placeholder within 40 visible cells.
 #[test]
 #[serial(level2_terminal)]
 fn level2_style_images_local_style_width_alignment_in_terminal() {
@@ -2430,8 +2430,9 @@ fn level2_style_images_local_style_width_alignment_in_terminal() {
         return;
     };
 
-    // The tree path applies local image width/alignment to the alt text
-    // itself, so the placeholder is `▉ IMAGE[<pad>A]`.
+    // The tree path shapes the *complete* placeholder: `▉ IMAGE[A]` is
+    // right-aligned within the 40-cell field, so the padding precedes the
+    // placeholder and the alt inside the brackets is untouched.
     let fallback_line = frame
         .plain
         .lines()
@@ -2442,9 +2443,45 @@ fn level2_style_images_local_style_width_alignment_in_terminal() {
         .and_then(|(_, rest)| rest.split_once(']'))
         .map(|(inner, _)| inner)
         .unwrap_or("");
-    let leading_spaces = inner.chars().take_while(|c| *c == ' ').count();
+    assert_eq!(
+        inner, "A",
+        "alt inside the brackets must be untouched: {fallback_line:?}"
+    );
+    let leading_spaces = fallback_line.chars().take_while(|c| *c == ' ').count();
+    let field_width = fallback_line.trim_end().chars().count();
     assert!(
-        leading_spaces >= 28 && inner.trim() == "A",
-        "expected right-aligned width:40 alt text inside fallback, got {leading_spaces} leading: {fallback_line:?}"
+        leading_spaces >= 28 && field_width == 40,
+        "expected the complete placeholder right-aligned within 40 cells, got {leading_spaces} leading, width {field_width}: {fallback_line:?}"
+    );
+}
+
+/// A long alt under an exact `width` must truncate the *complete* placeholder
+/// to the field in a real terminal — the visible field must not overflow.
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_images_exact_width_truncates_long_alt_in_terminal() {
+    let body = "---\nstyle:\n  images:\n    local-style:\n      width: 12\n---\n\n\
+        ![A very long image alt text](./no-such-image.png)\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    // The exact 12-column field truncates with an ellipsis; the overflowing
+    // tail of the alt must be absent and the visible placeholder must fill
+    // exactly the field, framing included.
+    let placeholder_line = frame
+        .plain
+        .lines()
+        .find(|l| l.contains('…'))
+        .unwrap_or_else(|| panic!("placeholder line missing in plain capture:\n{}", frame.plain));
+    assert!(
+        !placeholder_line.contains("image alt text"),
+        "the overflowing alt tail must not appear in the visible field: {placeholder_line:?}"
+    );
+    assert_eq!(
+        placeholder_line.trim_end().chars().count(),
+        12,
+        "the complete visible placeholder must fill exactly the 12-column field: {placeholder_line:?}"
     );
 }

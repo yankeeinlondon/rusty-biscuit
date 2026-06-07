@@ -338,6 +338,13 @@ fn char_hyperlink_exact_width_truncates_long_label() {
 fn char_image_alt_exact_width_truncates_long_alt() {
     // Regression (review-1, finding 1): a local image's exact `width` truncates
     // a long alt-text placeholder rather than letting it overflow the field.
+    //
+    // Regression (review-2): the exact `width` governs the *complete* visible
+    // placeholder (block prefix + brackets), not the bare alt run. A six-column
+    // field must yield a six-column visible placeholder — framing included.
+    use biscuit_terminal::utils::block_constraint::visible_width;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
     let md = with_style(
         "images:\n  local-style:\n    width: 6\n",
         "![A very long image alt text](./local.png)\n",
@@ -350,6 +357,17 @@ fn char_image_alt_exact_width_truncates_long_alt() {
     assert!(
         !out.contains("image alt text"),
         "the overflowing tail of the alt text must be removed. out:\n{out}"
+    );
+    let placeholder_line = out
+        .lines()
+        .find(|l| l.contains('…'))
+        .expect("placeholder line present in output");
+    let visible = strip_escape_codes(placeholder_line);
+    assert_eq!(
+        visible_width(visible.trim_end()),
+        6,
+        "the complete visible placeholder must fill exactly the 6-column field, \
+         framing included. line: {visible:?}"
     );
 }
 
