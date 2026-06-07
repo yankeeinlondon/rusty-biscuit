@@ -45,3 +45,36 @@ jobs:
 
       - name: Run all canonical tiers
         run: just all
+
+  sniff-cross-platform:
+    name: Sniff cross-platform
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: sniff-cross-platform-${{ matrix.os }}
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run sniff library tests
+        run: cd sniff && just test
+
+      - name: Run sniff CLI tests
+        run: cd sniff && just test-l2
