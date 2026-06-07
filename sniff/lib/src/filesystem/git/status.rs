@@ -850,11 +850,9 @@ fn build_untracked_files(
 ///
 /// Avoids the cost of per-file diff stat computation and unified diff
 /// generation. Use this when you only need `is_dirty` and file counts.
-pub(crate) fn get_repo_status_counts(repo: &gix::Repository) -> (bool, usize) {
-    match get_repo_status_counts_detailed(repo) {
-        Ok((is_dirty, staged, unstaged, untracked)) => (is_dirty, staged + unstaged + untracked),
-        Err(_) => (false, 0),
-    }
+pub(crate) fn get_repo_status_counts(repo: &gix::Repository) -> crate::Result<(bool, usize)> {
+    let (is_dirty, staged, unstaged, untracked) = get_repo_status_counts_detailed(repo)?;
+    Ok((is_dirty, staged + unstaged + untracked))
 }
 
 /// Fast dirty check that stops at the first staged, unstaged, untracked, or

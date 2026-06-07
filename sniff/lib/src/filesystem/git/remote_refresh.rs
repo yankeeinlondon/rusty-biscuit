@@ -1,5 +1,4 @@
 //! Remote tracking, fetch, branch discovery, and worktree helpers.
-//! TEST EDIT
 //!
 //! This module covers configured remotes, refresh of remote-tracking refs via
 //! the user's `git` binary, locally cached remote branch lookups, local branch
@@ -23,11 +22,11 @@ fn ahead_behind(
     repo: &gix::Repository,
     local: gix::ObjectId,
     upstream: gix::ObjectId,
-) -> (usize, usize) {
-    (
-        count_reachable_excluding(repo, local, upstream),
-        count_reachable_excluding(repo, upstream, local),
-    )
+) -> crate::Result<(usize, usize)> {
+    Ok((
+        count_reachable_excluding(repo, local, upstream)?,
+        count_reachable_excluding(repo, upstream, local)?,
+    ))
 }
 
 /// Count commits reachable from `tip` once everything reachable from `hide` is
@@ -36,20 +35,30 @@ fn count_reachable_excluding(
     repo: &gix::Repository,
     tip: gix::ObjectId,
     hide: gix::ObjectId,
-) -> usize {
-    repo.rev_walk(Some(tip))
+) -> crate::Result<usize> {
+    let walk = repo
+        .rev_walk(Some(tip))
         .with_hidden(Some(hide))
         .all()
-        .map(|walk| walk.filter_map(Result::ok).count())
-        .unwrap_or(0)
+        .map_err(|e| SniffError::git("revwalk", e))?;
+    let mut count = 0;
+    for item in walk {
+        item.map_err(|e| SniffError::git("revwalk", e))?;
+        count += 1;
+    }
+    Ok(count)
 }
 
 /// True when `ancestor` is reachable from `descendant` (i.e. already merged):
 /// their merge base is `ancestor` itself.
-fn is_ancestor(repo: &gix::Repository, ancestor: gix::ObjectId, descendant: gix::ObjectId) -> bool {
+fn is_ancestor(
+    repo: &gix::Repository,
+    ancestor: gix::ObjectId,
+    descendant: gix::ObjectId,
+) -> crate::Result<bool> {
     repo.merge_base(ancestor, descendant)
         .map(|base| base.detach() == ancestor)
-        .unwrap_or(false)
+        .map_err(|e| SniffError::git("merge_base", e))
 }
 
 /// Gets git configuration (user info, GPG, signing).
@@ -60,8 +69,17 @@ fn is_ancestor(repo: &gix::Repository, ancestor: gix::ObjectId, descendant: gix:
 /// as a lowest-precedence (ProgramData-equivalent) fallback — matching the
 /// extra file libgit2 was given.
 pub(crate) fn get_git_config(repo: &gix::Repository) -> GitConfig {
+    get_git_config_with_extra(repo, extra_system_config())
+}
+
+/// Like [`get_git_config`], but accepts an injectable extra-system fallback so
+/// tests can verify all keys through the fallback path without depending on the
+/// production platform config file.
+fn get_git_config_with_extra(
+    repo: &gix::Repository,
+    extra: Option<gix::config::File<'static>>,
+) -> GitConfig {
     let snapshot = repo.config_snapshot();
-    let extra = extra_system_config();
 
     let string = |key: &str| -> Option<String> {
         snapshot.string(key).map(|v| v.to_string()).or_else(|| {
@@ -171,7 +189,7 @@ pub(crate) fn get_local_branches(
 
         let (ahead, behind) = match (is_current, tip, head_oid) {
             (true, _, _) => (0, 0),
-            (false, Some(tip), Some(head)) => ahead_behind(repo, tip, head),
+            (false, Some(tip), Some(head)) => ahead_behind(repo, tip, head).unwrap_or((0, 0)),
             _ => (0, 0),
         };
 
@@ -227,8 +245,8 @@ pub(crate) fn get_tracking_status(
         let remote = remote_id.detach();
 
         // behind: commits on the remote-tracking branch the local does not have.
-        let behind = count_reachable_excluding(repo, remote, local);
-        let ahead = push_relevant_ahead(repo, local, &remote_name);
+        let behind = count_reachable_excluding(repo, remote, local).unwrap_or(0);
+        let ahead = push_relevant_ahead(repo, local, &remote_name).unwrap_or(0);
 
         tracking.push(RemoteTrackingStatus {
             remote: remote_name,
@@ -248,7 +266,11 @@ pub(crate) fn get_tracking_status(
 /// count when the local branch has merged-forward commits that already
 /// exist on `origin/main` (or other remote branches), even if
 /// `origin/<branch>` itself is stale.
-fn push_relevant_ahead(repo: &gix::Repository, local: gix::ObjectId, remote_name: &str) -> usize {
+fn push_relevant_ahead(
+    repo: &gix::Repository,
+    local: gix::ObjectId,
+    remote_name: &str,
+) -> crate::Result<usize> {
     let prefix = format!("refs/remotes/{remote_name}/");
     let hidden: Vec<gix::ObjectId> = match repo.references() {
         Ok(platform) => match platform.prefixed(prefix.as_str()) {
@@ -261,11 +283,17 @@ fn push_relevant_ahead(repo: &gix::Repository, local: gix::ObjectId, remote_name
         Err(_) => Vec::new(),
     };
 
-    repo.rev_walk(Some(local))
+    let walk = repo
+        .rev_walk(Some(local))
         .with_hidden(hidden)
         .all()
-        .map(|walk| walk.filter_map(Result::ok).count())
-        .unwrap_or(0)
+        .map_err(|e| SniffError::git("revwalk", e))?;
+    let mut count = 0;
+    for item in walk {
+        item.map_err(|e| SniffError::git("revwalk", e))?;
+        count += 1;
+    }
+    Ok(count)
 }
 
 /// Retrieves all configured remotes with their URLs and hosting providers.
@@ -605,13 +633,13 @@ pub(crate) fn get_worktrees(
             let sha = wt_head.map(|o| o.to_string()).unwrap_or_default();
 
             let (ahead, behind) = match (wt_head, base_oid) {
-                (Some(wt), Some(base_id)) => ahead_behind(&base, wt, base_id),
+                (Some(wt), Some(base_id)) => ahead_behind(&base, wt, base_id)?,
                 _ => (0, 0),
             };
 
             // `merged` when the base already contains the worktree tip.
             let merged = match (wt_head, base_oid) {
-                (Some(wt), Some(base_id)) => is_ancestor(&base, wt, base_id),
+                (Some(wt), Some(base_id)) => is_ancestor(&base, wt, base_id)?,
                 _ => false,
             };
 
@@ -621,12 +649,12 @@ pub(crate) fn get_worktrees(
                 false
             } else {
                 match (wt_head, base_oid) {
-                    (Some(wt), Some(base_id)) => has_merge_conflicts(&base, wt, base_id),
+                    (Some(wt), Some(base_id)) => has_merge_conflicts(&base, wt, base_id)?,
                     _ => false,
                 }
             };
 
-            let (dirty, changed_files) = get_repo_status_counts(&worktree_repo);
+            let (dirty, changed_files) = get_repo_status_counts(&worktree_repo)?;
 
             Ok((
                 branch.clone(),
@@ -652,14 +680,19 @@ pub(crate) fn get_worktrees(
 /// Merge the worktree tip into the base in memory (no repository writes) and
 /// report whether the merge has unresolved conflicts — the gix equivalent of
 /// git2's `merge_commits` + `Index::has_conflicts`.
-fn has_merge_conflicts(repo: &gix::Repository, ours: gix::ObjectId, theirs: gix::ObjectId) -> bool {
+fn has_merge_conflicts(
+    repo: &gix::Repository,
+    ours: gix::ObjectId,
+    theirs: gix::ObjectId,
+) -> crate::Result<bool> {
     let labels = gix::merge::blob::builtin_driver::text::Labels::default();
-    match repo.merge_commits(ours, theirs, labels, gix::merge::commit::Options::default()) {
-        Ok(outcome) => outcome
-            .tree_merge
-            .has_unresolved_conflicts(gix::merge::tree::TreatAsUnresolved::git()),
-        Err(_) => false,
-    }
+    repo.merge_commits(ours, theirs, labels, gix::merge::commit::Options::default())
+        .map(|outcome| {
+            outcome
+                .tree_merge
+                .has_unresolved_conflicts(gix::merge::tree::TreatAsUnresolved::git())
+        })
+        .map_err(|e| SniffError::git("merge", e))
 }
 
 #[cfg(test)]
@@ -1014,7 +1047,7 @@ mod tests {
             .has_conflicts();
         assert!(git2_conflict, "git2 oracle: ours/theirs should conflict");
         assert!(
-            has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(theirs)),
+            has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(theirs)).unwrap(),
             "gix probe must agree: ours/theirs conflict"
         );
 
@@ -1032,7 +1065,7 @@ mod tests {
             "git2 oracle: ours/clean should not conflict"
         );
         assert!(
-            !has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(clean)),
+            !has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(clean)).unwrap(),
             "gix probe must agree: ours/clean is conflict-free"
         );
     }
@@ -1166,13 +1199,297 @@ mod tests {
         let file = extra_system_config_at(Some(&extra_path));
         assert!(file.is_some());
 
-        // get_git_config uses the snapshot (local) first, then falls back to
-        // extra_system_config. Local must win.
-        let config = get_git_config(&gix_repo);
+        // get_git_config_with_extra uses the snapshot (local) first, then falls
+        // back to the injected extra config. Local must win.
+        let config = get_git_config_with_extra(&gix_repo, file);
         assert_eq!(
             config.user_name.as_deref(),
             Some("Local Tester"),
             "local config must override extra system fallback"
+        );
+    }
+
+    #[test]
+    fn extra_system_config_fallback_reads_all_12_keys() {
+        // Isolate from the host's global gitconfig so the extra-system fallback
+        // is the only source for these keys.
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap();
+
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "content\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial", &tree, &[])
+            .unwrap();
+
+        // Create an extra-system config with all 12 keys; the repo has no local
+        // overrides, so every key must surface from the fallback.
+        let extra_path = dir.path().join("extra.gitconfig");
+        std::fs::write(
+            &extra_path,
+            "[user]\n\
+             \tname = Extra Name\n\
+             \temail = extra@sniff.test\n\
+             \tsigningkey = EXTRAKEY\n\
+             [gpg]\n\
+             \tuse-agent = true\n\
+             \tprogram = gpg-extra\n\
+             [credential]\n\
+             \thelper = store-extra\n\
+             [commit]\n\
+             \tgpgsign = true\n\
+             [tag]\n\
+             \tgpgsign = false\n\
+             [core]\n\
+             \tpager = less-extra\n\
+             [delta]\n\
+             \tsyntax-theme = DraculaExtra\n\
+             \tlight = true\n\
+             \tside-by-side = false\n",
+        )
+        .unwrap();
+
+        // Point HOME to an empty directory and GIT_CONFIG_GLOBAL to a nonexistent
+        // file so gix sees no system/global config.
+        let fake_home = TempDir::new().unwrap();
+        let original_home = std::env::var_os("HOME");
+        let original_global = std::env::var_os("GIT_CONFIG_GLOBAL");
+        unsafe {
+            std::env::set_var("HOME", fake_home.path());
+            std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
+        }
+
+        let gix_repo = gix::open(repo.workdir().unwrap()).unwrap();
+        let file = extra_system_config_at(Some(&extra_path));
+        assert!(file.is_some());
+
+        let config = get_git_config_with_extra(&gix_repo, file);
+
+        match original_home {
+            Some(h) => unsafe { std::env::set_var("HOME", h) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+        match original_global {
+            Some(g) => unsafe { std::env::set_var("GIT_CONFIG_GLOBAL", g) },
+            None => unsafe { std::env::remove_var("GIT_CONFIG_GLOBAL") },
+        }
+
+        assert_eq!(config.user_name.as_deref(), Some("Extra Name"));
+        assert_eq!(config.user_email.as_deref(), Some("extra@sniff.test"));
+        assert_eq!(config.gpg_use_agent, Some(true));
+        assert_eq!(config.gpg_program.as_deref(), Some("gpg-extra"));
+        assert_eq!(config.credential_helper.as_deref(), Some("store-extra"));
+        assert_eq!(config.signing_key.as_deref(), Some("EXTRAKEY"));
+        assert_eq!(config.commit_sign, Some(true));
+        assert_eq!(config.tag_sign, Some(false));
+        assert_eq!(config.pager.as_deref(), Some("less-extra"));
+        assert_eq!(config.delta_syntax_theme.as_deref(), Some("DraculaExtra"));
+        assert_eq!(config.delta_light, Some(true));
+        assert_eq!(config.delta_side_by_side, Some(false));
+    }
+
+    #[test]
+    fn corrupt_index_status_propagates_error() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "content\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial", &tree, &[])
+            .unwrap();
+
+        // Corrupt the index checksum so status detects a hash mismatch rather
+        // than hitting an early parse panic.
+        let index_path = dir.path().join(".git").join("index");
+        let mut index_bytes = std::fs::read(&index_path).unwrap();
+        if index_bytes.len() >= 20 {
+            let len = index_bytes.len();
+            index_bytes[len - 1] = index_bytes[len - 1].wrapping_add(1);
+        }
+        std::fs::write(&index_path, index_bytes).unwrap();
+
+        let gix_repo = gix::open(dir.path()).unwrap();
+        let result = crate::filesystem::git::status::get_repo_status_counts(&gix_repo);
+        assert!(
+            result.is_err(),
+            "corrupt index must cause status to return an error, not (false, 0)"
+        );
+    }
+
+    #[test]
+    fn corrupt_object_revwalk_propagates_error() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "content\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let initial = repo
+            .commit(Some("HEAD"), &sig, &sig, "Initial", &tree, &[])
+            .unwrap();
+
+        // Second commit so we have something to walk.
+        std::fs::write(&file_path, "second\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let second = repo
+            .commit(Some("HEAD"), &sig, &sig, "Second", &tree, &[&repo.find_commit(initial).unwrap()])
+            .unwrap();
+
+        // Corrupt the initial commit object (make writable first — git creates
+        // objects read-only).
+        let obj_hex = initial.to_string();
+        let obj_path = dir
+            .path()
+            .join(".git")
+            .join("objects")
+            .join(&obj_hex[..2])
+            .join(&obj_hex[2..]);
+        let mut perms = std::fs::metadata(&obj_path).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            perms.set_mode(0o644);
+        }
+        #[cfg(windows)]
+        {
+            perms.set_readonly(false);
+        }
+        std::fs::set_permissions(&obj_path, perms).unwrap();
+        std::fs::write(&obj_path, b"garbage").unwrap();
+
+        let gix_repo = gix::open(dir.path()).unwrap();
+        let result = count_reachable_excluding(&gix_repo, to_gix(second), to_gix(initial));
+        assert!(
+            result.is_err(),
+            "corrupt object must cause revwalk to return an error, not 0"
+        );
+    }
+
+    #[test]
+    fn corrupt_object_ancestry_propagates_error() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "content\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let initial = repo
+            .commit(Some("HEAD"), &sig, &sig, "Initial", &tree, &[])
+            .unwrap();
+
+        std::fs::write(&file_path, "second\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let second = repo
+            .commit(Some("HEAD"), &sig, &sig, "Second", &tree, &[&repo.find_commit(initial).unwrap()])
+            .unwrap();
+
+        // Corrupt the initial commit object so merge-base cannot read it.
+        let obj_hex = initial.to_string();
+        let obj_path = dir
+            .path()
+            .join(".git")
+            .join("objects")
+            .join(&obj_hex[..2])
+            .join(&obj_hex[2..]);
+        let mut perms = std::fs::metadata(&obj_path).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            perms.set_mode(0o644);
+        }
+        #[cfg(windows)]
+        {
+            perms.set_readonly(false);
+        }
+        std::fs::set_permissions(&obj_path, perms).unwrap();
+        std::fs::write(&obj_path, b"garbage").unwrap();
+
+        let gix_repo = gix::open(dir.path()).unwrap();
+        let result = is_ancestor(&gix_repo, to_gix(initial), to_gix(second));
+        assert!(
+            result.is_err(),
+            "corrupt object must cause ancestry check to return an error, not false"
+        );
+    }
+
+    #[test]
+    fn merge_failure_propagates_error() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "content\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let base = repo
+            .commit(Some("HEAD"), &sig, &sig, "Initial", &tree, &[])
+            .unwrap();
+
+        let ours = commit_detached(&repo, "test.txt", "ours\n", "ours", &[base]);
+        let theirs = commit_detached(&repo, "test.txt", "theirs\n", "theirs", &[base]);
+
+        // Corrupt one of the tip objects so merge_commits cannot read it.
+        let obj_hex = ours.to_string();
+        let obj_path = dir
+            .path()
+            .join(".git")
+            .join("objects")
+            .join(&obj_hex[..2])
+            .join(&obj_hex[2..]);
+        let mut perms = std::fs::metadata(&obj_path).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            perms.set_mode(0o644);
+        }
+        #[cfg(windows)]
+        {
+            perms.set_readonly(false);
+        }
+        std::fs::set_permissions(&obj_path, perms).unwrap();
+        std::fs::write(&obj_path, b"garbage").unwrap();
+
+        let gix_repo = gix::open(dir.path()).unwrap();
+        let result = has_merge_conflicts(&gix_repo, to_gix(ours), to_gix(theirs));
+        assert!(
+            result.is_err(),
+            "corrupt object must cause merge-conflict probe to return an error, not false"
         );
     }
 }
