@@ -100,7 +100,7 @@ let result = detect_with_config(config)?;
 | `ProgramsInfo` | 8 category fields with shared `ExecutableIndex` + parallel Rayon detection |
 | `ServicesInfo` | Init system + service list (via `ServiceManager::detect()`) |
 | `Package` | Package path, languages, managers, dependencies |
-| `GitRepo` | libgit2 handle from `GitRepo::discover(path)` |
+| `GitRepo` | Primary `gix::Repository` handle from trusted discovery; retains a transitional `git2::Repository` for unported phases. Basic accessors (root, HEAD, branch, worktree flags) are gix-backed. |
 | `get_current_worktree_name` | Early-return helper: returns the basename of the linked worktree directory, or `None` if in the main worktree |
 
 ## Shared-Work Highlights
