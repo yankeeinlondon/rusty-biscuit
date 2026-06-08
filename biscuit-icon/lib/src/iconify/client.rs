@@ -50,10 +50,23 @@ struct IconEntry {
     height: Option<u32>,
 }
 
+/// License metadata for an Iconify collection.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct License {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub spdx: String,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct CollectionMeta {
     #[serde(default)]
     name: String,
+    #[serde(default)]
+    license: Option<License>,
 }
 
 #[derive(Deserialize)]
@@ -110,11 +123,12 @@ impl IconifyClient {
         Ok(IconBody::new(entry.body.clone(), width, height))
     }
 
-    /// Fetches the list of Iconify set prefixes, each with its human title.
+    /// Fetches the list of Iconify set prefixes, each with its human title
+    /// and optional license.
     ///
     /// # Errors
     /// [`IconError::Fetch`] on transport/HTTP/parse failure.
-    pub async fn fetch_collections(&self) -> Result<Vec<(String, String)>> {
+    pub async fn fetch_collections(&self) -> Result<Vec<(String, String, Option<License>)>> {
         let url = Url::parse(&self.base)
             .map_err(|e| IconError::Fetch(e.to_string()))?
             .join("collections")
@@ -125,7 +139,7 @@ impl IconifyClient {
         }
         let map: std::collections::BTreeMap<String, CollectionMeta> =
             resp.json().await.map_err(|e| IconError::Fetch(e.to_string()))?;
-        Ok(map.into_iter().map(|(prefix, meta)| (prefix, meta.name)).collect())
+        Ok(map.into_iter().map(|(prefix, meta)| (prefix, meta.name, meta.license)).collect())
     }
 
     /// Searches the Iconify catalog for icons matching `query`.
@@ -222,10 +236,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_collections_lists_prefixes_and_titles() {
+    async fn fetch_collections_lists_prefixes_titles_and_licenses() {
         let server = MockServer::start().await;
         let json = serde_json::json!({
-            "mdi": { "name": "Material Design Icons" },
+            "mdi": { "name": "Material Design Icons", "license": { "title": "Apache License 2.0", "spdx": "Apache-2.0", "url": "https://github.com/Templarian/MaterialDesign/blob/master/LICENSE" } },
             "lucide": { "name": "Lucide" }
         });
         Mock::given(method("GET"))
@@ -235,8 +249,12 @@ mod tests {
             .await;
         let client = IconifyClient::with_base(server.uri());
         let sets = client.fetch_collections().await.unwrap();
-        assert!(sets.contains(&("mdi".into(), "Material Design Icons".into())));
-        assert!(sets.contains(&("lucide".into(), "Lucide".into())));
+        assert!(sets.contains(&(
+            "mdi".into(),
+            "Material Design Icons".into(),
+            Some(License { title: "Apache License 2.0".into(), spdx: "Apache-2.0".into(), url: Some("https://github.com/Templarian/MaterialDesign/blob/master/LICENSE".into()) })
+        )));
+        assert!(sets.contains(&("lucide".into(), "Lucide".into(), None)));
     }
 
     #[tokio::test]

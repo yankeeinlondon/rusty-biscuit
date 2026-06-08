@@ -155,7 +155,7 @@ impl IconCache {
             .execute(
                 "INSERT OR REPLACE INTO sets (prefix, title, license, fetched_at) \
                  VALUES (?1, ?2, ?3, datetime('now'))",
-                params![info.prefix, info.title, info.license.as_deref().unwrap_or_default()],
+                params![info.prefix, info.title, info.license.as_deref()],
             )
             .map(|_| ())
             .map_err(map_sql)
@@ -261,6 +261,16 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].prefix, "mdi");
         assert_eq!(hits[0].title, "Material Design");
+        assert_eq!(hits[0].license, Some("Apache-2.0".into()));
+    }
+
+    #[test]
+    fn set_metadata_preserves_null_license() {
+        let (_d, cache) = temp_cache();
+        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "Material Design".into(), license: None }).unwrap();
+        let hits = cache.all_sets().unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].license, None);
     }
 
     #[test]
