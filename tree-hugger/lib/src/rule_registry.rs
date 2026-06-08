@@ -92,22 +92,20 @@ impl RuleRegistry {
 
     /// Returns metadata for a rule, or default metadata if unknown.
     pub fn get_or_default(&self, rule_id: &str) -> RuleMetadata {
-        self.get(rule_id).cloned().unwrap_or_else(|| {
-            RuleMetadata {
-                id: rule_id.to_string(),
-                version: "0.0.0".to_string(),
-                title: format!("Lint rule: {rule_id}"),
-                category: DiagnosticCategory::Suspicious,
-                default_severity: DiagnosticSeverity::Warning,
-                confidence: DiagnosticConfidence::Medium,
-                languages: ProgrammingLanguage::all(),
-                enabled_by_default: true,
-                requires_experimental_semantics: false,
-                examples: Vec::new(),
-                caveats: Vec::new(),
-                needs_project_context: false,
-                aliases: Vec::new(),
-            }
+        self.get(rule_id).cloned().unwrap_or_else(|| RuleMetadata {
+            id: rule_id.to_string(),
+            version: "0.0.0".to_string(),
+            title: format!("Lint rule: {rule_id}"),
+            category: DiagnosticCategory::Suspicious,
+            default_severity: DiagnosticSeverity::Warning,
+            confidence: DiagnosticConfidence::Medium,
+            languages: ProgrammingLanguage::all(),
+            enabled_by_default: true,
+            requires_experimental_semantics: false,
+            examples: Vec::new(),
+            caveats: Vec::new(),
+            needs_project_context: false,
+            aliases: Vec::new(),
         })
     }
 
@@ -200,7 +198,9 @@ impl RuleRegistry {
                 fixed: Some("let x = 1;".to_string()),
                 language: ProgrammingLanguage::Rust,
             }],
-            caveats: vec!["Syntax errors may cascade and produce secondary diagnostics.".to_string()],
+            caveats: vec![
+                "Syntax errors may cascade and produce secondary diagnostics.".to_string(),
+            ],
             needs_project_context: false,
             aliases: Vec::new(),
         });
@@ -244,11 +244,14 @@ impl RuleRegistry {
             requires_experimental_semantics: false,
             examples: vec![RuleExample {
                 description: "Expect on Result".to_string(),
-                code: "let x: Result<i32, _> = Ok(1);\nlet _ = x.expect(\"should work\");".to_string(),
+                code: "let x: Result<i32, _> = Ok(1);\nlet _ = x.expect(\"should work\");"
+                    .to_string(),
                 fixed: None,
                 language: ProgrammingLanguage::Rust,
             }],
-            caveats: vec!["expect() with a descriptive message is acceptable in main binaries.".to_string()],
+            caveats: vec![
+                "expect() with a descriptive message is acceptable in main binaries.".to_string(),
+            ],
             needs_project_context: false,
             aliases: Vec::new(),
         });
@@ -281,7 +284,11 @@ impl RuleRegistry {
             category: DiagnosticCategory::Suspicious,
             default_severity: DiagnosticSeverity::Warning,
             confidence: DiagnosticConfidence::High,
-            languages: vec![ProgrammingLanguage::JavaScript, ProgrammingLanguage::TypeScript, ProgrammingLanguage::Php],
+            languages: vec![
+                ProgrammingLanguage::JavaScript,
+                ProgrammingLanguage::TypeScript,
+                ProgrammingLanguage::Php,
+            ],
             enabled_by_default: true,
             requires_experimental_semantics: false,
             examples: vec![RuleExample {
@@ -323,7 +330,10 @@ impl RuleRegistry {
             category: DiagnosticCategory::Suspicious,
             default_severity: DiagnosticSeverity::Warning,
             confidence: DiagnosticConfidence::High,
-            languages: vec![ProgrammingLanguage::JavaScript, ProgrammingLanguage::TypeScript],
+            languages: vec![
+                ProgrammingLanguage::JavaScript,
+                ProgrammingLanguage::TypeScript,
+            ],
             enabled_by_default: true,
             requires_experimental_semantics: false,
             examples: vec![RuleExample {
@@ -366,7 +376,10 @@ impl RuleRegistry {
             category: DiagnosticCategory::Suspicious,
             default_severity: DiagnosticSeverity::Warning,
             confidence: DiagnosticConfidence::High,
-            languages: vec![ProgrammingLanguage::JavaScript, ProgrammingLanguage::TypeScript],
+            languages: vec![
+                ProgrammingLanguage::JavaScript,
+                ProgrammingLanguage::TypeScript,
+            ],
             enabled_by_default: false,
             requires_experimental_semantics: false,
             examples: vec![RuleExample {
@@ -440,7 +453,8 @@ impl RuleRegistry {
                 language: ProgrammingLanguage::Rust,
             }],
             caveats: vec![
-                "False positives for symbols from external crates, macros, and generated code.".to_string(),
+                "False positives for symbols from external crates, macros, and generated code."
+                    .to_string(),
                 "Does not understand module boundaries or re-exports.".to_string(),
             ],
             needs_project_context: true,
@@ -464,7 +478,8 @@ impl RuleRegistry {
                 language: ProgrammingLanguage::Rust,
             }],
             caveats: vec![
-                "False positives for public API surfaces and symbols used via reflection.".to_string(),
+                "False positives for public API surfaces and symbols used via reflection."
+                    .to_string(),
             ],
             needs_project_context: true,
             aliases: Vec::new(),
@@ -513,9 +528,7 @@ impl RuleRegistry {
                 fixed: None,
                 language: ProgrammingLanguage::Rust,
             }],
-            caveats: vec![
-                "False positives for external crate modules and re-exports.".to_string(),
-            ],
+            caveats: vec!["False positives for external crate modules and re-exports.".to_string()],
             needs_project_context: true,
             aliases: Vec::new(),
         });
@@ -609,10 +622,16 @@ impl fmt::Display for RuleRegistryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DanglingAlias { alias, target } => {
-                write!(formatter, "Alias '{alias}' points to non-existent rule '{target}'")
+                write!(
+                    formatter,
+                    "Alias '{alias}' points to non-existent rule '{target}'"
+                )
             }
             Self::UndocumentedDefaultRule { rule_id } => {
-                write!(formatter, "Rule '{rule_id}' is enabled by default but has no examples")
+                write!(
+                    formatter,
+                    "Rule '{rule_id}' is enabled by default but has no examples"
+                )
             }
             Self::DuplicateRuleId { rule_id } => {
                 write!(formatter, "Duplicate rule ID: '{rule_id}'")
@@ -790,7 +809,13 @@ mod tests {
     fn allow_demotes_to_info() {
         let registry = RuleRegistry::new();
         let unwrap = registry.get("unwrap-call").unwrap();
-        let severity = apply_policy(unwrap, &[], &[], &[RuleSelector::Rule("unwrap-call".to_string())], false);
+        let severity = apply_policy(
+            unwrap,
+            &[],
+            &[],
+            &[RuleSelector::Rule("unwrap-call".to_string())],
+            false,
+        );
         assert_eq!(severity, DiagnosticSeverity::Info);
     }
 
@@ -798,7 +823,13 @@ mod tests {
     fn deny_promotes_to_error() {
         let registry = RuleRegistry::new();
         let unwrap = registry.get("unwrap-call").unwrap();
-        let severity = apply_policy(unwrap, &[RuleSelector::Rule("unwrap-call".to_string())], &[], &[], false);
+        let severity = apply_policy(
+            unwrap,
+            &[RuleSelector::Rule("unwrap-call".to_string())],
+            &[],
+            &[],
+            false,
+        );
         assert_eq!(severity, DiagnosticSeverity::Error);
     }
 
@@ -812,8 +843,17 @@ mod tests {
 
     #[test]
     fn rule_selector_parses() {
-        assert!(matches!(RuleSelector::parse("all").unwrap(), RuleSelector::All));
-        assert!(matches!(RuleSelector::parse("category:suspicious").unwrap(), RuleSelector::Category(DiagnosticCategory::Suspicious)));
-        assert!(matches!(RuleSelector::parse("unwrap-call").unwrap(), RuleSelector::Rule(_)));
+        assert!(matches!(
+            RuleSelector::parse("all").unwrap(),
+            RuleSelector::All
+        ));
+        assert!(matches!(
+            RuleSelector::parse("category:suspicious").unwrap(),
+            RuleSelector::Category(DiagnosticCategory::Suspicious)
+        ));
+        assert!(matches!(
+            RuleSelector::parse("unwrap-call").unwrap(),
+            RuleSelector::Rule(_)
+        ));
     }
 }

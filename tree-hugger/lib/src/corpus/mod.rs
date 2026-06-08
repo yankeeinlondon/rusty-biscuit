@@ -70,7 +70,10 @@ impl CorpusDiagnostic {
         let line = diagnostic.range.start_line;
         let kind = CorpusDiagnosticKind::from(diagnostic.kind);
         let severity = CorpusSeverity::from(diagnostic.severity);
-        let confidence = diagnostic.metadata.as_ref().map(|m| CorpusConfidence::from(m.confidence));
+        let confidence = diagnostic
+            .metadata
+            .as_ref()
+            .map(|m| CorpusConfidence::from(m.confidence));
 
         Self {
             rule,
@@ -186,13 +189,21 @@ impl ThresholdReport {
     }
 
     /// Records a diagnostic for a rule and checks against threshold.
-    pub fn record(&mut self, rule: &str, confidence: Option<CorpusConfidence>, threshold: Threshold) {
-        let entry = self.rules.entry(rule.to_string()).or_insert_with(|| RuleThreshold {
-            rule: rule.to_string(),
-            count: 0,
-            threshold,
-            within_threshold: true,
-        });
+    pub fn record(
+        &mut self,
+        rule: &str,
+        confidence: Option<CorpusConfidence>,
+        threshold: Threshold,
+    ) {
+        let entry = self
+            .rules
+            .entry(rule.to_string())
+            .or_insert_with(|| RuleThreshold {
+                rule: rule.to_string(),
+                count: 0,
+                threshold,
+                within_threshold: true,
+            });
         entry.count += 1;
 
         // High-confidence syntax rules must have zero diagnostics.
@@ -287,11 +298,8 @@ pub fn redact_paths(message: &str, corpus_root: &Path) -> String {
             line.split_whitespace()
                 .map(|word| {
                     // Replace absolute paths that start with corpus root or temp dir
-                    if (word.starts_with('/')
-                        || word.starts_with("\\")
-                        || word.contains(':'))
-                        && (word.starts_with(root_str.as_ref())
-                            || word.starts_with(&temp_prefix))
+                    if (word.starts_with('/') || word.starts_with("\\") || word.contains(':'))
+                        && (word.starts_with(root_str.as_ref()) || word.starts_with(&temp_prefix))
                     {
                         return "<REDACTED>".to_string();
                     }
@@ -309,7 +317,8 @@ pub fn redact_paths(message: &str, corpus_root: &Path) -> String {
 /// Sorts by rule, line, and message; deduplicates identical entries.
 pub fn normalize_diagnostics(diagnostics: &mut Vec<CorpusDiagnostic>) {
     diagnostics.sort_by(|a, b| {
-        a.rule.cmp(&b.rule)
+        a.rule
+            .cmp(&b.rule)
             .then_with(|| a.line.cmp(&b.line))
             .then_with(|| a.message.cmp(&b.message))
     });

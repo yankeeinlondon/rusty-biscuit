@@ -108,13 +108,10 @@ impl RepoDocuments {
     ///
     /// Returns `SniffError::NotARepository` if the path is not inside a git repo.
     pub fn new(path: &Path) -> Result<Self> {
-        let repo = git2::Repository::discover(path)
-            .map_err(|_| SniffError::NotARepository(path.to_path_buf()))?;
-
-        let repo_root = repo
-            .workdir()
-            .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?
-            .to_path_buf();
+        // Trust/permission/I/O/corruption failures surface via `?`; only genuine
+        // repository absence becomes `NotARepository`.
+        let repo_root = crate::filesystem::repo_root(path)?
+            .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?;
 
         let packages = detect_repo_packages(&repo_root);
 
@@ -267,8 +264,7 @@ pub fn detect_docs_from_root(
 /// Returns `None` when the directory is not inside a git repository.
 #[instrument(skip_all, fields(root = %root.display()))]
 pub fn detect_blast_radius_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
-    let repo = git2::Repository::discover(root).ok()?;
-    let repo_root = repo.workdir()?.to_path_buf();
+    let repo_root = crate::filesystem::repo_root(root).ok().flatten()?;
 
     let walker = WalkBuilder::new(&repo_root)
         .hidden(false)

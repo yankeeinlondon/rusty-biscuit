@@ -153,6 +153,15 @@ impl ProgrammingLanguage {
         }
     }
 
+    /// Returns true for all current programming-language variants.
+    ///
+    /// This predicate future-proofs against markup or data grammars
+    /// (e.g. CSS, HTML) that may be added later.
+    pub fn is_programming_language(&self) -> bool {
+        // Every supported grammar today is a programming language.
+        true
+    }
+
     /// Returns all supported languages.
     pub fn all() -> Vec<Self> {
         vec![
@@ -231,7 +240,7 @@ impl fmt::Display for ProgrammingLanguage {
 }
 
 /// Categorizes a discovered symbol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SymbolKind {
     Function,
     Method,

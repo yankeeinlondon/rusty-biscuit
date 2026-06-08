@@ -10,10 +10,10 @@ use std::path::Path;
 use biscuit_file::FileReference;
 use tempfile::TempDir;
 
-/// Initialise a fresh git repository at `path`.
+/// Initialize a fresh git repository at `path`.
 fn git_init(path: &Path) {
-    // Use git2 directly so we don't depend on a system git binary.
-    git2::Repository::init(path).expect("git init failed");
+    // Use gix directly so we don't depend on a system git binary.
+    gix::init(path).expect("git init failed");
 }
 
 #[test]

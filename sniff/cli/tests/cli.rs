@@ -1558,6 +1558,269 @@ fn test_commit_file_with_message(repo_path: &Path, relative: &str, content: &str
         .unwrap();
 }
 
+/// Overwrite the loose object file for `sha` with garbage so any decode fails.
+/// Git creates objects read-only, so make the file writable first.
+fn corrupt_loose_object(repo_path: &Path, sha: &str) {
+    let obj_path = repo_path
+        .join(".git")
+        .join("objects")
+        .join(&sha[..2])
+        .join(&sha[2..]);
+    let mut perms = std::fs::metadata(&obj_path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o644);
+    }
+    #[cfg(not(unix))]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&obj_path, perms).unwrap();
+    std::fs::write(&obj_path, b"garbage").unwrap();
+}
+
+/// Flip the trailing checksum byte of the index so a read detects the mismatch.
+fn corrupt_index(repo_path: &Path) {
+    let index_path = repo_path.join(".git").join("index");
+    let mut bytes = std::fs::read(&index_path).unwrap();
+    let len = bytes.len();
+    assert!(len >= 20, "index must have a trailing checksum to corrupt");
+    bytes[len - 1] = bytes[len - 1].wrapping_add(1);
+    std::fs::write(&index_path, bytes).unwrap();
+}
+
+/// A corrupt index must surface as a CLI failure through `repo has-merge-conflict`,
+/// not be reported as a clean "no conflicts" result.
+#[test]
+fn test_repo_has_merge_conflict_surfaces_corrupt_index() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    corrupt_index(&path);
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "has-merge-conflict",
+        ])
+        .assert()
+        .failure();
+}
+
+/// A corrupt commit object must surface as a CLI failure through `repo hash`,
+/// not be reported as "commit not found".
+#[test]
+fn test_repo_hash_surfaces_corrupt_commit_object() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let repo = git2::Repository::open(&path).unwrap();
+    let sha = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    corrupt_loose_object(&path, &sha);
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "hash", &sha])
+        .assert()
+        .failure();
+}
+
+/// Corrupt the HEAD commit object of a freshly-built test repo and return its
+/// path, so corruption surfaces through any history-reading command.
+fn repo_with_corrupt_head() -> (tempfile::TempDir, PathBuf) {
+    let (dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let repo = git2::Repository::open(&path).unwrap();
+    let sha = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    corrupt_loose_object(&path, &sha);
+    (dir, path)
+}
+
+/// A corrupt commit object must surface as a CLI failure through
+/// `repo git-status`, not be reported as a clean, empty history.
+#[test]
+fn test_repo_git_status_surfaces_corrupt_history() {
+    let (_dir, path) = repo_with_corrupt_head();
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "git-status"])
+        .assert()
+        .failure();
+}
+
+/// A corrupt commit object must surface as a CLI failure through
+/// `repo recent-commits`, not produce a successful but empty list.
+#[test]
+fn test_repo_recent_commits_surfaces_corrupt_history() {
+    let (_dir, path) = repo_with_corrupt_head();
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "recent-commits"])
+        .assert()
+        .failure();
+}
+
+/// A corrupt commit object must surface as a CLI failure through
+/// `repo source-code-changes`, not produce a successful but empty report.
+#[test]
+fn test_repo_source_code_changes_surfaces_corrupt_history() {
+    let (_dir, path) = repo_with_corrupt_head();
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "source-code-changes",
+        ])
+        .assert()
+        .failure();
+}
+
+/// Pack the loose ref for the checked-out branch into `packed-refs` and delete
+/// the loose file, mirroring `git pack-refs --all --prune`. Returns the branch.
+fn pack_and_prune_head_branch(repo_path: &Path) -> String {
+    let repo = git2::Repository::open(repo_path).unwrap();
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    let git = repo_path.join(".git");
+    let loose = git.join("refs").join("heads").join(&branch);
+    let oid = std::fs::read_to_string(&loose).unwrap().trim().to_string();
+    std::fs::write(
+        git.join("packed-refs"),
+        format!("# pack-refs with: peeled fully-peeled\n{oid} refs/heads/{branch}\n"),
+    )
+    .unwrap();
+    std::fs::remove_file(&loose).unwrap();
+    branch
+}
+
+/// A checked-out branch that lives only in `packed-refs` (after a pack + prune)
+/// must still be reported by `repo git-status`, not collapse to a null branch.
+#[test]
+fn test_repo_git_status_reports_packed_checkout_branch() {
+    let (_dir, path) = create_test_repo();
+    let branch = pack_and_prune_head_branch(&path);
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let json: Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(
+        json.get("current_branch").and_then(|v| v.as_str()),
+        Some(branch.as_str()),
+        "packed checked-out branch must appear in git-status JSON: {json}"
+    );
+}
+
+/// A malformed `refs/remotes/origin/main` must surface as a CLI failure through
+/// `repo git-status --branch origin/main`, not be reported as an empty history.
+#[test]
+fn test_repo_git_status_branch_surfaces_malformed_remote_ref() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let remote_ref = path
+        .join(".git")
+        .join("refs")
+        .join("remotes")
+        .join("origin")
+        .join("main");
+    std::fs::create_dir_all(remote_ref.parent().unwrap()).unwrap();
+    std::fs::write(&remote_ref, b"not a valid ref target\n").unwrap();
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--branch",
+            "origin/main",
+        ])
+        .assert()
+        .failure();
+}
+
+/// An absent branch whose name is hex but too short for an object-ID prefix
+/// (`add`, 3 chars) is genuine absence — `repo git-status --branch add`
+/// succeeds with empty history rather than failing as a malformed-SHA lookup.
+#[test]
+fn test_repo_git_status_branch_absent_short_hex_succeeds() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--branch",
+            "add",
+        ])
+        .assert()
+        .success();
+}
+
+/// A validly-shaped hex branch name that matches no object resolves to empty
+/// history, not a CLI failure.
+#[test]
+fn test_repo_git_status_branch_absent_valid_length_hex_succeeds() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--branch",
+            "abcdef12",
+        ])
+        .assert()
+        .success();
+}
+
+/// An absent non-hex branch name resolves to empty history, not a CLI failure.
+#[test]
+fn test_repo_git_status_branch_absent_ordinary_name_succeeds() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--branch",
+            "nonexistent",
+        ])
+        .assert()
+        .success();
+}
+
 /// Stage a file in the test repo (no commit).
 fn test_stage_file(repo_path: &Path, relative: &str, content: &str) {
     let full = repo_path.join(relative);
@@ -5572,12 +5835,7 @@ fn test_repo_area_inside_package_returns_package_name() {
     let (_dir, path) = create_cli_monorepo();
     let inside_pkg_a = path.join("pkg-a/lib/src");
     let assert = cargo_bin_cmd!("sniff")
-        .args([
-            "--base",
-            inside_pkg_a.to_str().unwrap(),
-            "repo",
-            "area",
-        ])
+        .args(["--base", inside_pkg_a.to_str().unwrap(), "repo", "area"])
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
@@ -5589,12 +5847,7 @@ fn test_repo_area_at_area_dir_returns_area_name() {
     let (_dir, path) = create_cli_monorepo();
     let area_dir = path.join("pkg-a");
     let assert = cargo_bin_cmd!("sniff")
-        .args([
-            "--base",
-            area_dir.to_str().unwrap(),
-            "repo",
-            "area",
-        ])
+        .args(["--base", area_dir.to_str().unwrap(), "repo", "area"])
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);

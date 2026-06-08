@@ -73,9 +73,7 @@ impl LanguageInventory {
     }
 
     /// Returns captures for a specific suite.
-    pub fn suite_captures(&self,
-        suite: NvimQuerySuite,
-    ) -> Option<&Vec<CaptureEntry>> {
+    pub fn suite_captures(&self, suite: NvimQuerySuite) -> Option<&Vec<CaptureEntry>> {
         self.captures.get(&suite)
     }
 
@@ -130,9 +128,7 @@ impl QueryInventory {
     }
 
     /// Returns the inventory for a language.
-    pub fn for_language(&self,
-        language: ProgrammingLanguage,
-    ) -> Option<&LanguageInventory> {
+    pub fn for_language(&self, language: ProgrammingLanguage) -> Option<&LanguageInventory> {
         self.languages.get(&language)
     }
 
@@ -148,9 +144,7 @@ impl QueryInventory {
     }
 
     /// Returns true if the inventory has any captures for the language.
-    pub fn has_language(&self,
-        language: ProgrammingLanguage,
-    ) -> bool {
+    pub fn has_language(&self, language: ProgrammingLanguage) -> bool {
         self.languages.contains_key(&language)
     }
 }
@@ -194,10 +188,7 @@ fn populate_locals_captures(inventory: &mut LanguageInventory, _language: Progra
     }
 }
 
-fn populate_highlights_captures(
-    inventory: &mut LanguageInventory,
-    _language: ProgrammingLanguage,
-) {
+fn populate_highlights_captures(inventory: &mut LanguageInventory, _language: ProgrammingLanguage) {
     // Highlights captures are not currently reused by Tree Hugger, but
     // they are inventoried for future use (e.g., syntax highlighting in
     // terminal output).
@@ -241,18 +232,13 @@ fn populate_highlights_captures(
                 pattern: desc.to_string(),
                 suite: NvimQuerySuite::Highlights,
                 reused: false,
-                notes: vec![
-                    "Not yet reused by Tree Hugger".to_string(),
-                ],
+                notes: vec!["Not yet reused by Tree Hugger".to_string()],
             },
         );
     }
 }
 
-fn populate_injections_captures(
-    inventory: &mut LanguageInventory,
-    _language: ProgrammingLanguage,
-) {
+fn populate_injections_captures(inventory: &mut LanguageInventory, _language: ProgrammingLanguage) {
     inventory.add(
         NvimQuerySuite::Injections,
         CaptureEntry {
@@ -275,10 +261,7 @@ fn populate_injections_captures(
     );
 }
 
-fn populate_folds_captures(
-    inventory: &mut LanguageInventory,
-    _language: ProgrammingLanguage,
-) {
+fn populate_folds_captures(inventory: &mut LanguageInventory, _language: ProgrammingLanguage) {
     inventory.add(
         NvimQuerySuite::Folds,
         CaptureEntry {
@@ -291,10 +274,7 @@ fn populate_folds_captures(
     );
 }
 
-fn populate_indents_captures(
-    inventory: &mut LanguageInventory,
-    _language: ProgrammingLanguage,
-) {
+fn populate_indents_captures(inventory: &mut LanguageInventory, _language: ProgrammingLanguage) {
     let indents = vec![
         ("indent.begin", "indentation increase"),
         ("indent.end", "indentation decrease"),

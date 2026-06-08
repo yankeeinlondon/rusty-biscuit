@@ -9,7 +9,12 @@ mod fixtures;
 
 #[test]
 fn test_detect_returns_hardware_info() {
-    let result = detect().unwrap();
+    // OS + hardware only; the full convenience detect() path is exercised by
+    // test_detect_completes_in_reasonable_time.
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new().without_network().without_filesystem(),
+    )
+    .unwrap();
     let os = result.os.expect("os should be present");
     assert!(!os.name.is_empty());
     let hardware = result.hardware.expect("hardware should be present");
@@ -18,16 +23,28 @@ fn test_detect_returns_hardware_info() {
 
 #[test]
 fn test_detect_with_custom_base_dir() {
-    let config = SniffConfig::new().base_dir(PathBuf::from("."));
-    let result = detect_with_config(config).unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .base_dir(PathBuf::from("."))
+            .without_os()
+            .without_hardware()
+            .without_network(),
+    )
+    .unwrap();
     assert!(result.filesystem.is_some());
 }
 
 #[test]
 fn test_detect_in_git_repo() {
     let (_dir, path) = fixtures::create_test_git_repo();
-    let config = SniffConfig::new().base_dir(path);
-    let result = detect_with_config(config).unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .base_dir(path)
+            .without_os()
+            .without_hardware()
+            .without_network(),
+    )
+    .unwrap();
     let fs = result.filesystem.unwrap();
     assert!(fs.git.is_some());
 }
@@ -35,8 +52,14 @@ fn test_detect_in_git_repo() {
 #[test]
 fn test_detect_cargo_workspace() {
     let (_dir, path) = fixtures::create_cargo_workspace();
-    let config = SniffConfig::new().base_dir(path);
-    let result = detect_with_config(config).unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .base_dir(path)
+            .without_os()
+            .without_hardware()
+            .without_network(),
+    )
+    .unwrap();
     let fs = result.filesystem.unwrap();
     assert!(fs.repo.is_some());
     let repo = fs.repo.unwrap();
@@ -62,7 +85,16 @@ fn test_detect_completes_in_reasonable_time() {
 
 #[test]
 fn test_serialization_roundtrip() {
-    let result = detect().unwrap();
+    // OS-only: this asserts os.name survives a JSON roundtrip. Skipping the
+    // other (heavier) domains keeps the suite's concurrent filesystem/network
+    // work down without changing what is exercised here.
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .without_hardware()
+            .without_network()
+            .without_filesystem(),
+    )
+    .unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let parsed: sniff::SniffResult = serde_json::from_str(&json).unwrap();
     let orig_os = result.os.expect("os should be present");
@@ -72,7 +104,15 @@ fn test_serialization_roundtrip() {
 
 #[test]
 fn test_performance_is_opt_in() {
-    let result = detect().unwrap();
+    // The performance report is a plan-level toggle independent of which
+    // domains run, so detect only OS to avoid an unnecessary monorepo scan.
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .without_hardware()
+            .without_network()
+            .without_filesystem(),
+    )
+    .unwrap();
     assert!(result.performance.is_none());
 }
 
@@ -112,8 +152,14 @@ fn test_skip_all_returns_minimal_result() {
 #[test]
 fn test_detect_mixed_languages() {
     let (_dir, path) = fixtures::create_mixed_language_dir();
-    let config = SniffConfig::new().base_dir(path);
-    let result = detect_with_config(config).unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .base_dir(path)
+            .without_os()
+            .without_hardware()
+            .without_network(),
+    )
+    .unwrap();
     let fs = result.filesystem.unwrap();
     assert!(fs.languages.is_some());
     let langs = fs.languages.unwrap();
@@ -123,8 +169,14 @@ fn test_detect_mixed_languages() {
 #[test]
 fn test_detect_pnpm_workspace() {
     let (_dir, path) = fixtures::create_pnpm_workspace();
-    let config = SniffConfig::new().base_dir(path);
-    let result = detect_with_config(config).unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .base_dir(path)
+            .without_os()
+            .without_hardware()
+            .without_network(),
+    )
+    .unwrap();
     let fs = result.filesystem.unwrap();
     assert!(fs.repo.is_some());
     let repo = fs.repo.unwrap();
@@ -138,8 +190,14 @@ fn test_detect_pnpm_workspace() {
 #[test]
 fn test_detect_language_uses_package_boundary_from_nested_workspace() {
     let (_dir, path) = fixtures::create_mixed_nested_workspace();
-    let config = SniffConfig::new().base_dir(path.join("server"));
-    let result = detect_with_config(config).unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .base_dir(path.join("server"))
+            .without_os()
+            .without_hardware()
+            .without_network(),
+    )
+    .unwrap();
     let filesystem = result.filesystem.unwrap();
     let languages = filesystem.languages.unwrap();
 
@@ -175,8 +233,9 @@ fn top_level_keys(result: &sniff::SniffResult) -> std::collections::HashSet<Stri
 
 #[test]
 fn test_skip_hardware_json_omits_hardware_key() {
-    // Regression test: JSON should NOT contain "hardware" key when skipped
-    let config = SniffConfig::new().skip_hardware();
+    // Regression test: JSON should NOT contain "hardware" key when skipped.
+    // Also skip filesystem (not asserted here) to avoid a monorepo scan.
+    let config = SniffConfig::new().skip_hardware().skip_filesystem();
     let result = detect_with_config(config).unwrap();
     let keys = top_level_keys(&result);
     assert!(
@@ -188,8 +247,9 @@ fn test_skip_hardware_json_omits_hardware_key() {
 
 #[test]
 fn test_skip_network_json_omits_network_key() {
-    // Regression test: JSON should NOT contain "network" key when skipped
-    let config = SniffConfig::new().skip_network();
+    // Regression test: JSON should NOT contain "network" key when skipped.
+    // Also skip filesystem (not asserted here) to avoid a monorepo scan.
+    let config = SniffConfig::new().skip_network().skip_filesystem();
     let result = detect_with_config(config).unwrap();
     let keys = top_level_keys(&result);
     assert!(
@@ -204,8 +264,9 @@ fn test_skip_network_json_omits_network_key() {
 
 #[test]
 fn test_skip_filesystem_json_omits_filesystem_key() {
-    // Regression test: JSON should NOT contain "filesystem" key when skipped
-    let config = SniffConfig::new().skip_filesystem();
+    // Regression test: JSON should NOT contain "filesystem" key when skipped.
+    // Also skip network (not asserted here) to keep the test cheap.
+    let config = SniffConfig::new().skip_filesystem().skip_network();
     let result = detect_with_config(config).unwrap();
     let keys = top_level_keys(&result);
     assert!(
@@ -240,8 +301,9 @@ fn test_hardware_only_json_contains_only_hardware() {
 
 #[test]
 fn test_partial_result_deserialization_roundtrip() {
-    // Regression test: Partial results should deserialize correctly
-    let config = SniffConfig::new().skip_hardware();
+    // Regression test: Partial results should deserialize correctly.
+    // Skip filesystem too (not asserted here) to avoid a monorepo scan.
+    let config = SniffConfig::new().skip_hardware().skip_filesystem();
     let result = detect_with_config(config).unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let parsed: sniff::SniffResult = serde_json::from_str(&json).unwrap();
@@ -464,10 +526,18 @@ fn test_linux_package_managers_finds_at_least_one() {
     }
 }
 
-/// Tests that the OS info from detect() includes package manager info.
+/// Tests that the default (full) OS request includes package manager info.
 #[test]
 fn test_os_includes_package_managers() {
-    let result = detect().unwrap();
+    // OS-only via the default OsRequest -- the same OS code path detect() runs,
+    // minus the unrelated hardware/network/filesystem work.
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .without_hardware()
+            .without_network()
+            .without_filesystem(),
+    )
+    .unwrap();
     let os = result.os.expect("os should be present");
 
     // On desktop platforms (macOS, Linux, Windows), package managers should be detected
@@ -487,10 +557,16 @@ fn test_os_includes_package_managers() {
     }
 }
 
-/// Tests that the OS info from detect() includes locale info.
+/// Tests that the default (full) OS request includes locale info.
 #[test]
 fn test_os_includes_locale() {
-    let result = detect().unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .without_hardware()
+            .without_network()
+            .without_filesystem(),
+    )
+    .unwrap();
     let os = result.os.expect("os should be present");
 
     assert!(
@@ -499,10 +575,16 @@ fn test_os_includes_locale() {
     );
 }
 
-/// Tests that the OS info from detect() includes time info.
+/// Tests that the default (full) OS request includes time info.
 #[test]
 fn test_os_includes_time_info() {
-    let result = detect().unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .without_hardware()
+            .without_network()
+            .without_filesystem(),
+    )
+    .unwrap();
     let os = result.os.expect("os should be present");
 
     assert!(
@@ -525,7 +607,13 @@ fn test_os_includes_time_info() {
 /// Tests that network info includes ip_addresses field with proper structure.
 #[test]
 fn test_network_has_ip_addresses_field() {
-    let result = detect().unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .without_os()
+            .without_hardware()
+            .without_filesystem(),
+    )
+    .unwrap();
     let network = result.network.expect("network should be present");
 
     if !network.permission_denied {
@@ -560,7 +648,13 @@ fn test_network_has_ip_addresses_field() {
 /// Tests that ip_addresses JSON serialization produces expected structure.
 #[test]
 fn test_network_ip_addresses_json_structure() {
-    let result = detect().unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .without_os()
+            .without_hardware()
+            .without_filesystem(),
+    )
+    .unwrap();
     let json = serde_json::to_string(&result).expect("SniffResult should serialize");
 
     // If network is present, JSON should have ip_addresses with v4/v6
@@ -627,7 +721,13 @@ fn test_network_ip_addresses_json_structure() {
 /// Tests that ip_addresses roundtrip through JSON correctly.
 #[test]
 fn test_network_ip_addresses_roundtrip() {
-    let result = detect().unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .without_os()
+            .without_hardware()
+            .without_filesystem(),
+    )
+    .unwrap();
     let json = serde_json::to_string(&result).expect("SniffResult should serialize");
     let parsed: sniff::SniffResult = serde_json::from_str(&json).expect("JSON should deserialize");
 
@@ -1016,7 +1116,13 @@ fn test_executable_index_parity_with_which_for_common_programs() {
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 #[test]
 fn test_network_primary_interface_is_populated() {
-    let result = detect().unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .without_os()
+            .without_hardware()
+            .without_filesystem(),
+    )
+    .unwrap();
     let network = result.network.expect("network should be present");
 
     let has_eligible_interface = !network.permission_denied
@@ -2204,4 +2310,74 @@ fn parallel_inventory_collects_all_classifications() {
             .all(|pair| pair[0].path <= pair[1].path),
         "classifications should be sorted by path"
     );
+}
+
+#[test]
+fn debug_skewed_git2_order() {
+    use git2::Repository;
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    let now_secs = chrono::Utc::now().timestamp();
+    std::fs::write(dir.path().join("init.txt"), "init").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("init.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let parent_sig =
+        git2::Signature::new("Test User", "test@test.com", &git2::Time::new(now_secs, 0)).unwrap();
+    let parent_oid = repo
+        .commit(
+            Some("HEAD"),
+            &parent_sig,
+            &parent_sig,
+            "recent parent",
+            &tree,
+            &[],
+        )
+        .unwrap();
+
+    let old_epoch = 946684800_i64;
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("src/main.rs")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let old_sig =
+        git2::Signature::new("Test User", "test@test.com", &git2::Time::new(old_epoch, 0)).unwrap();
+    let head_oid = repo
+        .commit(
+            Some("HEAD"),
+            &old_sig,
+            &old_sig,
+            "old head",
+            &tree,
+            &[&repo.find_commit(parent_oid).unwrap()],
+        )
+        .unwrap();
+
+    eprintln!("Parent: {} at {}", parent_oid, now_secs);
+    eprintln!("HEAD: {} at {}", head_oid, old_epoch);
+
+    let mut revwalk = repo.revwalk().unwrap();
+    revwalk.set_sorting(git2::Sort::TIME).unwrap();
+    revwalk.push_head().unwrap();
+
+    eprintln!("\nWith TIME sort:");
+    for oid in revwalk {
+        let oid = oid.unwrap();
+        let commit = repo.find_commit(oid).unwrap();
+        eprintln!(
+            "  {} at {}: {}",
+            oid,
+            commit.time().seconds(),
+            commit.message().unwrap().trim()
+        );
+    }
 }

@@ -54,8 +54,9 @@ impl ResolutionContext {
 ///
 /// Returns `Ok(None)` if no git repository is found.
 pub(crate) fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenceError> {
+    use gix::discover::upwards::Error as Up;
     trace!(?from, "searching for git root");
-    match git2::Repository::discover(from) {
+    match gix::discover(from) {
         Ok(repo) => {
             let workdir = repo.workdir().ok_or_else(|| {
                 FileReferenceError::Git("bare repository has no working directory".to_string())
@@ -63,7 +64,13 @@ pub(crate) fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenc
             debug!(?workdir, "found git root");
             Ok(Some(workdir.to_path_buf()))
         }
-        Err(e) if e.code() == git2::ErrorCode::NotFound => {
+        // Upward-search exhaustion is the only "not a repository" outcome;
+        // trust, permission, and corruption failures propagate as errors.
+        Err(gix::discover::Error::Discover(
+            Up::NoGitRepository { .. }
+            | Up::NoGitRepositoryWithinCeiling { .. }
+            | Up::NoGitRepositoryWithinFs { .. },
+        )) => {
             trace!("no git repository found");
             Ok(None)
         }

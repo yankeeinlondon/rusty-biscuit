@@ -6,19 +6,21 @@ pub mod corpus;
 pub mod dead_code;
 pub mod error;
 pub mod file;
+pub mod god_files;
 pub mod ignore_directives;
 pub mod package;
 pub mod queries;
 pub mod resolver;
 pub mod rule_registry;
+pub mod scanner;
 pub mod shared;
 
 // Re-export query subsystem for consumers
 pub use queries::{
-    compatibility::{find_hook_predicates, find_unsupported_predicates, CompatibilityRegistry},
-    drift::{check_all_drift, check_query_drift, summarize_drift, DriftItem, DriftReport},
-    inventory::{suite_for_kind, CaptureEntry, LanguageInventory, NvimQuerySuite, QueryInventory},
-    provenance::{all_query_provenance, query_provenance, QueryProvenance, TranslationStatus},
+    compatibility::{CompatibilityRegistry, find_hook_predicates, find_unsupported_predicates},
+    drift::{DriftItem, DriftReport, check_all_drift, check_query_drift, summarize_drift},
+    inventory::{CaptureEntry, LanguageInventory, NvimQuerySuite, QueryInventory, suite_for_kind},
+    provenance::{QueryProvenance, TranslationStatus, all_query_provenance, query_provenance},
 };
 
 pub use builtins::is_builtin;

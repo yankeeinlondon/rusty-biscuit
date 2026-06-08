@@ -186,11 +186,11 @@ The file-tree walk runs once inside the shared filesystem view and is reused by 
 
 Git status collection has three code paths selected by the request (`GitRepo::detect_with_request`):
 
-- **Dirty flag only** (`is_minimal()` — no commits, no file changes, no worktrees, no remote refresh; this is what `summary()` and `minimal()` request): one libgit2 status walk that resolves only whether the tree is dirty. The per-category `staged_count` / `unstaged_count` / `untracked_count` fields are left at `0`.
+- **Dirty flag only** (`is_minimal()` — no commits, no file changes, no worktrees, no remote refresh; this is what `summary()` and `minimal()` request): one gix status walk that resolves only whether the tree is dirty. The per-category `staged_count` / `unstaged_count` / `untracked_count` fields are left at `0`.
 - **Counts** (`include_file_changes: false` but not minimal — e.g. a request that also asks for commits or worktrees): one status walk that populates the staged/unstaged/untracked counts, without per-file detail (`get_repo_status_counts_detailed`).
 - **Full status** (`include_file_changes: true`): per-file change details including delta kind and line-level diff stats. An additional `include_file_diffs` flag further opts into full unified diff payloads (used by `deep()`).
 
-All three paths share the same `libgit2` repository handle opened once by `GitRepo::discover`. Note that **every** path runs a working-tree status walk: there is no request level that returns the repo root / branch without scanning the tree (that requires the Tier-3 `GitRepo::discover().repo_root()` handle directly).
+All three paths share the same `gix` repository handle opened once by `GitRepo::discover`. Note that **every** path runs a working-tree status walk: there is no request level that returns the repo root / branch without scanning the tree (that requires the Tier-3 `GitRepo::discover().repo_root()` handle directly).
 
 ### Parallel Program Detection with Shared Executable Index
 
