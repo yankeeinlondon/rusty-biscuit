@@ -2,7 +2,7 @@
 status: complete
 date: 2026-06-06
 owner: ken
-spec: renderable/features/2026-06-06-tree-features/spec.md
+spec: renderable/features/_completed/2026-06-06-tree-features/spec.md
 total_phases: 9
 packages:
     - renderable
