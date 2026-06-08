@@ -9,7 +9,7 @@ path = "src/lib.rs"
 
 [features]
 default = []
-image = []
+image = ["biscuit-terminal/image"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
