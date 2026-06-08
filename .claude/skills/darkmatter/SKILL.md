@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 751ea2392b8b3231-4f881740e58563f7
-last_updated: 2026-06-04
+hash: 751ea2392b8b3231-9ca2fad7c946f821
+last_updated: 2026-06-08
 ---
 
 # darkmatter
@@ -114,6 +114,12 @@ The compose pipeline runs in three phases:
 
 - Link normalization (absolute → portable paths).
 
+Context capture happens once at compose start, driven by `sniff` (OS, hardware,
+git repo structure, monorepo discovery, file changes, document inventory).
+Only the context groups actually referenced by the document are captured
+(demand-driven). The `--allow-ctx-override` CLI flag downgrades non-object
+`ctx` frontmatter errors to warnings.
+
 See `compose.md` for the full API, interpolation syntax, and transclusion details.
 
 ## Schema Validation
@@ -153,6 +159,7 @@ Open only the topic file needed for the task:
 | Topic | File |
 |-------|------|
 | Compose pipeline | `compose.md` |
+| Context variables (`ctx.*`: date/time, repo, file changes, OS, hardware, docs) | `darkmatter/docs/topics/context-variables.md` |
 | Schema validation | `darkmatter/docs/topics/schema-definition.md` |
 | Terminal rendering options | `terminal.md` |
 | Frontmatter model | `frontmatter.md` |
