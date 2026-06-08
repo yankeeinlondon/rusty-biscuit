@@ -40,10 +40,33 @@ fn offline_sets_includes_builtin_prefixes_and_cached_metadata() {
             prefix: "lucide".into(),
             title: "Lucide Icons".into(),
             license: Some("ISC".into()),
+            license_title: Some("ISC License".into()),
+            license_url: None,
         })
         .unwrap();
 
     let hits = catalog::offline_sets(&cache, "").unwrap();
     assert!(hits.iter().any(|s| s.prefix == "ic"));
     assert!(hits.iter().any(|s| s.prefix == "lucide" && s.title == "Lucide Icons"));
+}
+
+#[test]
+fn offline_sets_deduplicates_overlapping_prefixes() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = IconCache::open_at(dir.path().join("icons.db")).unwrap();
+    // "ic" is a built-in prefix; cache richer metadata for it.
+    cache
+        .put_set(&SetInfo {
+            prefix: "ic".into(),
+            title: "Iconify Collections".into(),
+            license: Some("MIT".into()),
+            license_title: Some("MIT License".into()),
+            license_url: Some("https://opensource.org/licenses/MIT".into()),
+        })
+        .unwrap();
+
+    let hits = catalog::offline_sets(&cache, "").unwrap();
+    let ic = hits.iter().find(|s| s.prefix == "ic").expect("ic prefix should be present");
+    assert_eq!(ic.title, "Iconify Collections", "cached metadata should replace built-in placeholder");
+    assert_eq!(ic.license, Some("MIT".into()));
 }

@@ -1,6 +1,6 @@
 //! Unified offline catalog: built-in domain icons plus the local SQLite cache.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::cache::{IconCache, SetInfo};
 use crate::error::Result;
@@ -37,29 +37,29 @@ pub fn offline_icons(cache: &IconCache, needle: &str, allowed_prefixes: &BTreeSe
 /// ## Errors
 /// [`IconError::Cache`] on SQLite failure.
 pub fn offline_sets(cache: &IconCache, needle: &str) -> Result<Vec<SetInfo>> {
-    let mut out = BTreeSet::new();
+    let mut out: BTreeMap<String, SetInfo> = BTreeMap::new();
 
     // Derive built-in set prefixes from curated domain ids.
     for id in crate::domain::all_iconify_ids() {
         if let Some((prefix, _)) = id.split_once(':') {
             let title = prefix.to_string();
             if needle.is_empty() || prefix.contains(needle) || title.contains(needle) {
-                out.insert(SetInfo { prefix: prefix.to_string(), title, license: None });
+                out.entry(prefix.to_string()).or_insert(SetInfo { prefix: prefix.to_string(), title, license: None, license_title: None, license_url: None });
             }
         }
     }
 
     for set in cache.search_sets(needle)? {
-        out.insert(set);
+        out.insert(set.prefix.clone(), set);
     }
 
     if needle.is_empty() {
         for set in cache.all_sets()? {
-            out.insert(set);
+            out.insert(set.prefix.clone(), set);
         }
     }
 
-    Ok(out.into_iter().collect())
+    Ok(out.into_values().collect())
 }
 
 fn id_contains(id: &str, needle: &str) -> bool {
