@@ -869,6 +869,188 @@ fn commits_for_branch_at_surfaces_branch_ref_to_missing_object() {
     );
 }
 
+#[test]
+fn commits_for_branch_at_surfaces_malformed_remote_tracking_ref() {
+    // A malformed `refs/remotes/origin/main` must surface rather than fall
+    // through to an empty history. `origin/main` is non-hex, so without a
+    // structured ref lookup the SHA-prefix probe would report it as absent.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+
+    let remote_ref = dir
+        .path()
+        .join(".git")
+        .join("refs")
+        .join("remotes")
+        .join("origin")
+        .join("main");
+    fs::create_dir_all(remote_ref.parent().unwrap()).unwrap();
+    fs::write(&remote_ref, b"not a valid ref target\n").unwrap();
+
+    assert!(
+        sniff::filesystem::commits_for_branch_at(dir.path(), "origin/main", 10).is_err(),
+        "malformed remote-tracking ref must surface through commits_for_branch_at"
+    );
+}
+
+#[test]
+fn commits_for_branch_at_surfaces_remote_tracking_ref_to_missing_object() {
+    // A remote-tracking ref that peels to a missing object is corruption.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+
+    let remote_ref = dir
+        .path()
+        .join(".git")
+        .join("refs")
+        .join("remotes")
+        .join("origin")
+        .join("main");
+    fs::create_dir_all(remote_ref.parent().unwrap()).unwrap();
+    fs::write(&remote_ref, b"0000000000000000000000000000000000000000\n").unwrap();
+
+    assert!(
+        sniff::filesystem::commits_for_branch_at(dir.path(), "origin/main", 10).is_err(),
+        "remote-tracking ref to a missing object must surface through commits_for_branch_at"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Packed checked-out branch parity (review-8 finding 1)
+//
+// After `git pack-refs --all --prune` the checked-out branch may exist only in
+// `packed-refs`. Branch name, current-branch flag, tracking status, and full
+// detection must be identical to the loose-ref shape.
+// ---------------------------------------------------------------------------
+
+/// Pack the loose ref for `branch` into `packed-refs` and delete the loose
+/// file, mirroring `git pack-refs --all --prune` for the checked-out branch.
+fn pack_and_prune_branch(repo_path: &Path, branch: &str) {
+    let git = repo_path.join(".git");
+    let loose = git.join("refs").join("heads").join(branch);
+    let oid = fs::read_to_string(&loose).unwrap().trim().to_string();
+    fs::write(
+        git.join("packed-refs"),
+        format!("# pack-refs with: peeled fully-peeled\n{oid} refs/heads/{branch}\n"),
+    )
+    .unwrap();
+    fs::remove_file(&loose).unwrap();
+}
+
+#[test]
+fn packed_checkout_branch_reports_name_tracking_and_detection() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 3);
+
+    // A remote + remote-tracking ref pointing at HEAD so tracking status has
+    // something to report (0 ahead / 0 behind — tips are equal).
+    repo.remote("origin", "https://github.com/o/r.git").unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.reference("refs/remotes/origin/main", head.id(), true, "remote tip")
+        .unwrap();
+
+    // refs/heads/main now lives only in packed-refs.
+    pack_and_prune_branch(dir.path(), "main");
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+
+    assert_eq!(
+        handle.current_branch().as_deref(),
+        Some("main"),
+        "a packed checked-out branch must still report its name"
+    );
+
+    let tracking = handle.try_tracking_status().unwrap();
+    let origin = tracking
+        .iter()
+        .find(|t| t.remote == "origin")
+        .expect("origin tracking present for packed branch");
+    assert_eq!((origin.ahead, origin.behind), (0, 0));
+
+    let info = handle.detect_with_request(&GitRequest::full()).unwrap();
+    assert_eq!(
+        info.current_branch.as_deref(),
+        Some("main"),
+        "full detection must carry the packed branch name"
+    );
+    // The checked-out branch is marked current: ahead/behind are zeroed for it.
+    let main = info
+        .branches
+        .iter()
+        .find(|b| b.name == "main")
+        .expect("main branch present in detection");
+    assert_eq!((main.ahead, main.behind), (0, 0));
+}
+
+// ---------------------------------------------------------------------------
+// Fallible HEAD error policy (review-8 finding 3)
+//
+// `try_branches`, `try_tracking_status`, and a metadata-producing detection
+// request must surface a missing/malformed HEAD instead of producing
+// successful-looking branch metadata with zeroed ahead/behind values.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn malformed_head_surfaces_through_try_branches() {
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+    fs::write(dir.path().join(".git").join("HEAD"), b"not a valid head\n").unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    assert!(
+        handle.try_branches().is_err(),
+        "malformed HEAD must surface through try_branches"
+    );
+}
+
+#[test]
+fn malformed_head_surfaces_through_try_tracking_status() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+    repo.remote("origin", "https://example.com/r.git").unwrap();
+    fs::write(dir.path().join(".git").join("HEAD"), b"not a valid head\n").unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    assert!(
+        handle.try_tracking_status().is_err(),
+        "malformed HEAD must surface through try_tracking_status"
+    );
+}
+
+#[test]
+fn malformed_head_surfaces_through_metadata_detection() {
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+    fs::write(dir.path().join(".git").join("HEAD"), b"not a valid head\n").unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    assert!(
+        handle.detect_with_request(&GitRequest::full()).is_err(),
+        "malformed HEAD must surface through a metadata-producing detection request"
+    );
+}
+
+#[test]
+fn detached_head_to_missing_object_surfaces_through_try_branches() {
+    // HEAD detaches to a missing object, so the branch name resolves to `None`
+    // (legitimately detached) but the HEAD-identity (`head_id`) lookup fails.
+    // Local branches still peel cleanly, so only the HEAD-identity query can
+    // surface the corruption — guarding the `head_id_opt` propagation.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+    fs::write(
+        dir.path().join(".git").join("HEAD"),
+        b"0000000000000000000000000000000000000000\n",
+    )
+    .unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    assert!(
+        handle.try_branches().is_err(),
+        "a detached HEAD naming a missing object must surface through try_branches"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Full detection + recent-commit corruption parity (review-7 finding 2)
 //
