@@ -1689,6 +1689,78 @@ fn test_repo_source_code_changes_surfaces_corrupt_history() {
         .failure();
 }
 
+/// Pack the loose ref for the checked-out branch into `packed-refs` and delete
+/// the loose file, mirroring `git pack-refs --all --prune`. Returns the branch.
+fn pack_and_prune_head_branch(repo_path: &Path) -> String {
+    let repo = git2::Repository::open(repo_path).unwrap();
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    let git = repo_path.join(".git");
+    let loose = git.join("refs").join("heads").join(&branch);
+    let oid = std::fs::read_to_string(&loose).unwrap().trim().to_string();
+    std::fs::write(
+        git.join("packed-refs"),
+        format!("# pack-refs with: peeled fully-peeled\n{oid} refs/heads/{branch}\n"),
+    )
+    .unwrap();
+    std::fs::remove_file(&loose).unwrap();
+    branch
+}
+
+/// A checked-out branch that lives only in `packed-refs` (after a pack + prune)
+/// must still be reported by `repo git-status`, not collapse to a null branch.
+#[test]
+fn test_repo_git_status_reports_packed_checkout_branch() {
+    let (_dir, path) = create_test_repo();
+    let branch = pack_and_prune_head_branch(&path);
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let json: Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(
+        json.get("current_branch").and_then(|v| v.as_str()),
+        Some(branch.as_str()),
+        "packed checked-out branch must appear in git-status JSON: {json}"
+    );
+}
+
+/// A malformed `refs/remotes/origin/main` must surface as a CLI failure through
+/// `repo git-status --branch origin/main`, not be reported as an empty history.
+#[test]
+fn test_repo_git_status_branch_surfaces_malformed_remote_ref() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let remote_ref = path
+        .join(".git")
+        .join("refs")
+        .join("remotes")
+        .join("origin")
+        .join("main");
+    std::fs::create_dir_all(remote_ref.parent().unwrap()).unwrap();
+    std::fs::write(&remote_ref, b"not a valid ref target\n").unwrap();
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--branch",
+            "origin/main",
+        ])
+        .assert()
+        .failure();
+}
+
 /// Stage a file in the test repo (no commit).
 fn test_stage_file(repo_path: &Path, relative: &str, content: &str) {
     let full = repo_path.join(relative);
