@@ -1552,7 +1552,12 @@ mod tests {
         let (dir, repo) = setup_repo();
         let branch = repo.head().unwrap().shorthand().unwrap().to_string();
 
-        let bad_ref = dir.path().join(".git").join("refs").join("heads").join("bad");
+        let bad_ref = dir
+            .path()
+            .join(".git")
+            .join("refs")
+            .join("heads")
+            .join("bad");
         std::fs::write(&bad_ref, "not-a-valid-ref\n").unwrap();
 
         let gix_repo = open_gix(&dir);
