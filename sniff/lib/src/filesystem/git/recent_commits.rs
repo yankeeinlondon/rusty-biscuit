@@ -211,7 +211,7 @@ pub fn get_recent_commits_by_duration(
     let since = until - duration;
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref());
+    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref())?;
     let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
 
     Ok(CommitDescSet {
@@ -238,7 +238,7 @@ pub fn get_recent_commits_in_range(
 
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref());
+    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref())?;
     let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
 
     Ok(CommitDescSet {
@@ -262,7 +262,7 @@ pub fn get_recent_commits_by_date(base_dir: &Path, date: NaiveDate) -> Result<Co
     let until = Utc::now();
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref());
+    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref())?;
     let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
     let period_label = format!("since {}", date);
 
@@ -307,7 +307,7 @@ pub fn get_recent_commits_by_hash(base_dir: &Path, hash: &str) -> Result<CommitD
 
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_from_hash_to_head(&repo, target_oid, repo_info.as_ref());
+    let commits = collect_commits_from_hash_to_head(&repo, target_oid, repo_info.as_ref())?;
     let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
     let short_hash = &hash[..hash.len().min(8)];
     let period_label = format!("since commit {}", short_hash);
@@ -341,7 +341,7 @@ pub fn get_recent_commits_by_count(base_dir: &Path, count: usize) -> Result<Comm
 
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_by_count(&repo, count, repo_info.as_ref());
+    let commits = collect_commits_by_count(&repo, count, repo_info.as_ref())?;
     let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
     let period_label = format!("last {} commits", count);
 
@@ -362,36 +362,31 @@ fn collect_commits_in_range(
     since: DateTime<Utc>,
     until: DateTime<Utc>,
     repo_info_opt: Option<&crate::filesystem::repo::RepoInfo>,
-) -> Vec<CommitDesc> {
+) -> Result<Vec<CommitDesc>> {
     let mut commits = Vec::new();
 
-    let Ok(head) = repo.head_id() else {
-        return commits;
+    let Some(head) = super::discovery::head_id_opt(repo)? else {
+        return Ok(commits);
     };
 
-    let Ok(walk) = repo
+    let walk = repo
         .rev_walk(Some(head))
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
         .use_commit_graph(Some(true))
         .all()
-    else {
-        return commits;
-    };
+        .map_err(|e| SniffError::git("revwalk", e))?;
 
-    let mut diff_cache = match repo.diff_resource_cache_for_tree_diff() {
-        Ok(c) => c,
-        Err(_) => return commits,
-    };
+    let mut diff_cache = repo
+        .diff_resource_cache_for_tree_diff()
+        .map_err(|e| SniffError::git("diff", e))?;
 
     let packages = repo_info_opt.and_then(|ri| ri.packages.as_ref());
     let is_monorepo = repo_info_opt.is_some_and(|ri| ri.is_monorepo);
 
     for info_result in walk {
-        let Ok(info) = info_result else {
-            continue;
-        };
+        let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
 
         // Git commit times are whole seconds; treat the commit as occurring at
         // the start of its second and compare against the full-precision
@@ -410,7 +405,7 @@ fn collect_commits_in_range(
 
         let sha = info.id.to_string();
         let files_raw =
-            super::discovery::get_commit_files_with_cache(repo, info.id, &mut diff_cache);
+            super::discovery::get_commit_files_with_cache_fallible(repo, info.id, &mut diff_cache)?;
         let files: Vec<CommitFileChange> = files_raw
             .iter()
             .map(|(p, k)| CommitFileChange {
@@ -419,12 +414,10 @@ fn collect_commits_in_range(
             })
             .collect();
 
-        let Ok(commit) = info.object() else {
-            continue;
-        };
-        let Ok(message_raw) = commit.message_raw() else {
-            continue;
-        };
+        let commit = info.object().map_err(|e| SniffError::git("object", e))?;
+        let message_raw = commit
+            .message_raw()
+            .map_err(|e| SniffError::git("message", e))?;
         let message = String::from_utf8_lossy(message_raw.trim());
         let (description, bullet_points) = parse_commit_message(&message);
 
@@ -465,7 +458,7 @@ fn collect_commits_in_range(
         });
     }
 
-    commits
+    Ok(commits)
 }
 
 /// Walk from HEAD down to (and including) `target_oid`, returning commits in
@@ -475,42 +468,37 @@ fn collect_commits_from_hash_to_head(
     repo: &gix::Repository,
     target_oid: gix::ObjectId,
     repo_info_opt: Option<&crate::filesystem::repo::RepoInfo>,
-) -> Vec<CommitDesc> {
+) -> Result<Vec<CommitDesc>> {
     let mut commits = Vec::new();
 
-    let Ok(head) = repo.head_id() else {
-        return commits;
+    let Some(head) = super::discovery::head_id_opt(repo)? else {
+        return Ok(commits);
     };
 
-    let Ok(walk) = repo
+    let walk = repo
         .rev_walk(Some(head))
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
         .use_commit_graph(Some(true))
         .all()
-    else {
-        return commits;
-    };
+        .map_err(|e| SniffError::git("revwalk", e))?;
 
-    let mut diff_cache = match repo.diff_resource_cache_for_tree_diff() {
-        Ok(c) => c,
-        Err(_) => return commits,
-    };
+    let mut diff_cache = repo
+        .diff_resource_cache_for_tree_diff()
+        .map_err(|e| SniffError::git("diff", e))?;
 
     let packages = repo_info_opt.and_then(|ri| ri.packages.as_ref());
     let is_monorepo = repo_info_opt.is_some_and(|ri| ri.is_monorepo);
 
     for info_result in walk {
-        let Ok(info) = info_result else {
-            continue;
-        };
+        let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
 
         let commit_time = DateTime::from_timestamp(info.commit_time(), 0).unwrap_or_default();
 
         let sha = info.id.to_string();
         let files_raw =
-            super::discovery::get_commit_files_with_cache(repo, info.id, &mut diff_cache);
+            super::discovery::get_commit_files_with_cache_fallible(repo, info.id, &mut diff_cache)?;
         let files: Vec<CommitFileChange> = files_raw
             .iter()
             .map(|(p, k)| CommitFileChange {
@@ -519,12 +507,10 @@ fn collect_commits_from_hash_to_head(
             })
             .collect();
 
-        let Ok(commit) = info.object() else {
-            continue;
-        };
-        let Ok(message_raw) = commit.message_raw() else {
-            continue;
-        };
+        let commit = info.object().map_err(|e| SniffError::git("object", e))?;
+        let message_raw = commit
+            .message_raw()
+            .map_err(|e| SniffError::git("message", e))?;
         let message = String::from_utf8_lossy(message_raw.trim());
         let (description, bullet_points) = parse_commit_message(&message);
 
@@ -570,7 +556,7 @@ fn collect_commits_from_hash_to_head(
         }
     }
 
-    commits
+    Ok(commits)
 }
 
 /// Walk HEAD newest-first and emit at most `count` commits.
@@ -578,28 +564,25 @@ fn collect_commits_by_count(
     repo: &gix::Repository,
     count: usize,
     repo_info_opt: Option<&crate::filesystem::repo::RepoInfo>,
-) -> Vec<CommitDesc> {
+) -> Result<Vec<CommitDesc>> {
     let mut commits = Vec::new();
 
-    let Ok(head) = repo.head_id() else {
-        return commits;
+    let Some(head) = super::discovery::head_id_opt(repo)? else {
+        return Ok(commits);
     };
 
-    let Ok(walk) = repo
+    let walk = repo
         .rev_walk(Some(head))
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
         .use_commit_graph(Some(true))
         .all()
-    else {
-        return commits;
-    };
+        .map_err(|e| SniffError::git("revwalk", e))?;
 
-    let mut diff_cache = match repo.diff_resource_cache_for_tree_diff() {
-        Ok(c) => c,
-        Err(_) => return commits,
-    };
+    let mut diff_cache = repo
+        .diff_resource_cache_for_tree_diff()
+        .map_err(|e| SniffError::git("diff", e))?;
 
     let packages = repo_info_opt.and_then(|ri| ri.packages.as_ref());
     let is_monorepo = repo_info_opt.is_some_and(|ri| ri.is_monorepo);
@@ -608,15 +591,13 @@ fn collect_commits_by_count(
         if commits.len() >= count {
             break;
         }
-        let Ok(info) = info_result else {
-            continue;
-        };
+        let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
 
         let commit_time = DateTime::from_timestamp(info.commit_time(), 0).unwrap_or_default();
 
         let sha = info.id.to_string();
         let files_raw =
-            super::discovery::get_commit_files_with_cache(repo, info.id, &mut diff_cache);
+            super::discovery::get_commit_files_with_cache_fallible(repo, info.id, &mut diff_cache)?;
         let files: Vec<CommitFileChange> = files_raw
             .iter()
             .map(|(p, k)| CommitFileChange {
@@ -625,12 +606,10 @@ fn collect_commits_by_count(
             })
             .collect();
 
-        let Ok(commit) = info.object() else {
-            continue;
-        };
-        let Ok(message_raw) = commit.message_raw() else {
-            continue;
-        };
+        let commit = info.object().map_err(|e| SniffError::git("object", e))?;
+        let message_raw = commit
+            .message_raw()
+            .map_err(|e| SniffError::git("message", e))?;
         let message = String::from_utf8_lossy(message_raw.trim());
         let (description, bullet_points) = parse_commit_message(&message);
 
@@ -671,7 +650,7 @@ fn collect_commits_by_count(
         });
     }
 
-    commits
+    Ok(commits)
 }
 
 // ---------------------------------------------------------------------------

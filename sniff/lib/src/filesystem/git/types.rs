@@ -510,6 +510,9 @@ impl GitRepo {
     }
 
     /// Returns cached ref decorations, computing them once on first access.
+    ///
+    /// Errors are suppressed: an unreadable ref store yields an empty map. For
+    /// error propagation, use [`Self::try_ref_decorations`].
     pub(crate) fn ref_decorations(
         &self,
     ) -> std::cell::Ref<'_, HashMap<gix::ObjectId, Vec<RefDecoration>>> {
@@ -522,6 +525,25 @@ impl GitRepo {
             *self.ref_decorations.borrow_mut() = Some(decorations);
         }
         std::cell::Ref::map(self.ref_decorations.borrow(), |opt| opt.as_ref().unwrap())
+    }
+
+    /// Fallible variant of [`Self::ref_decorations`].
+    ///
+    /// Propagates ref-store, ref-iteration, and peel failures as
+    /// [`SniffError::Git`] rather than caching a partial or empty map. On
+    /// success the result is cached for subsequent accessors.
+    pub(crate) fn try_ref_decorations(
+        &self,
+    ) -> Result<std::cell::Ref<'_, HashMap<gix::ObjectId, Vec<RefDecoration>>>> {
+        if self.ref_decorations.borrow().is_none() {
+            self.ensure_cache();
+            let decorations =
+                super::discovery::collect_ref_decorations_fallible(&self.gix.borrow())?;
+            *self.ref_decorations.borrow_mut() = Some(decorations);
+        }
+        Ok(std::cell::Ref::map(self.ref_decorations.borrow(), |opt| {
+            opt.as_ref().unwrap()
+        }))
     }
 }
 
@@ -767,7 +789,12 @@ impl GitRepo {
 
         let mut recent = if request.commit_count > 0 {
             self.ensure_cache();
-            super::discovery::get_recent_commits(&self.gix.borrow(), request.commit_count)
+            let decorations = self.try_ref_decorations()?;
+            super::discovery::get_recent_commits_fallible(
+                &self.gix.borrow(),
+                request.commit_count,
+                Some(&decorations),
+            )?
         } else {
             Vec::new()
         };

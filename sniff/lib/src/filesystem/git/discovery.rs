@@ -15,6 +15,58 @@ use crate::{Result, SniffError};
 
 use super::types::*;
 
+/// Resolve HEAD's commit id, distinguishing an unborn HEAD from a real failure.
+///
+/// `Ok(None)` means HEAD is unborn (a freshly-initialized branch with no
+/// commits) — a legitimately empty history. A missing/malformed `HEAD`,
+/// permission, I/O, or corruption failure surfaces as [`SniffError::Git`]
+/// rather than collapsing into an empty walk.
+pub(crate) fn head_id_opt(repo: &gix::Repository) -> Result<Option<gix::ObjectId>> {
+    match repo.head_id() {
+        Ok(id) => Ok(Some(id.detach())),
+        // Only an unborn branch is "no history"; the symbolic HEAD exists but
+        // its branch has no commits yet.
+        Err(gix::reference::head_id::Error::PeelToId(
+            gix::head::peel::into_id::Error::Unborn { .. },
+        )) => Ok(None),
+        Err(e) => Err(SniffError::git("head", e)),
+    }
+}
+
+/// Resolve a revision spec to a single object id, distinguishing a genuine
+/// "no object matches" (`Ok(None)`) from ambiguity, I/O, or corruption (`Err`).
+///
+/// `rev_parse_single` collapses every failure into one opaque error, so a
+/// failure is re-checked against a structured object-prefix lookup: a hex
+/// prefix that matches no object is true absence, while an ambiguous prefix or
+/// an object-database read error means the lookup failed for a reason other
+/// than absence and must surface.
+fn resolve_single_opt(repo: &gix::Repository, spec: &str) -> Result<Option<gix::ObjectId>> {
+    use gix::hash::prefix::from_hex::Error as HexError;
+
+    match repo.rev_parse_single(spec) {
+        Ok(id) => Ok(Some(id.detach())),
+        Err(err) => match gix::hash::Prefix::from_hex(spec) {
+            Ok(prefix) => match repo.objects.lookup_prefix(prefix, None) {
+                // No object carries this prefix — genuine absence.
+                Ok(None) => Ok(None),
+                // A unique or ambiguous match, or a read error: rev_parse did
+                // not fail merely because the object was absent.
+                _ => Err(SniffError::git("revparse", err)),
+            },
+            // A non-hex spec (e.g. a ref name) that did not resolve names no
+            // commit — genuine absence.
+            Err(HexError::Invalid) => Ok(None),
+            // A too-short/too-long hex prefix cannot be verified against the
+            // object database, so absence cannot be proven: surface the error
+            // rather than masquerade an ambiguous lookup as "not found".
+            Err(HexError::TooShort { .. } | HexError::TooLong { .. }) => {
+                Err(SniffError::git("revparse", err))
+            }
+        },
+    }
+}
+
 pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option<GitInfo>> {
     match GitRepo::discover(path)? {
         Some(handle) => handle.detect_full(deep, commit_count).map(Some),
@@ -128,58 +180,64 @@ pub(crate) fn collect_ref_decorations_fallible(
     Ok(decorations)
 }
 
-/// Gets the last N commits from HEAD using a gix revwalk.
-pub(crate) fn get_recent_commits(repo: &gix::Repository, count: usize) -> Vec<CommitInfo> {
-    get_recent_commits_with_decorations(repo, count, None)
-}
-
 /// Gets the last N commits from HEAD using a gix revwalk, with optional
 /// pre-computed ref decorations.
+///
+/// Errors are suppressed: an unreadable HEAD, revwalk, or commit object yields
+/// an empty or truncated history. For error propagation, use
+/// [`get_recent_commits_fallible`].
 pub(crate) fn get_recent_commits_with_decorations(
     repo: &gix::Repository,
     count: usize,
     ref_decorations: Option<&HashMap<gix::ObjectId, Vec<RefDecoration>>>,
 ) -> Vec<CommitInfo> {
+    get_recent_commits_fallible(repo, count, ref_decorations).unwrap_or_default()
+}
+
+/// Fallible variant of [`get_recent_commits_with_decorations`].
+///
+/// An unborn HEAD (no commits) is `Ok(empty)`. HEAD, revwalk creation, revwalk
+/// items, object decode, author, time, message, and ref-decoration failures
+/// propagate as [`SniffError::Git`] rather than truncating history into a
+/// successful-looking partial result.
+pub(crate) fn get_recent_commits_fallible(
+    repo: &gix::Repository,
+    count: usize,
+    ref_decorations: Option<&HashMap<gix::ObjectId, Vec<RefDecoration>>>,
+) -> Result<Vec<CommitInfo>> {
     let mut commits = Vec::new();
 
-    let Ok(head) = repo.head_id() else {
-        return commits;
+    let Some(head) = head_id_opt(repo)? else {
+        return Ok(commits);
     };
 
-    let Ok(walk) = repo
+    let walk = repo
         .rev_walk(Some(head))
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
         ))
         .use_commit_graph(Some(true))
         .all()
-    else {
-        return commits;
-    };
+        .map_err(|e| SniffError::git("revwalk", e))?;
 
     // Collect ref decorations once for all commits (if not provided).
     let cached = ref_decorations.cloned();
-    let decorations = cached.unwrap_or_else(|| collect_ref_decorations(repo));
+    let decorations = match cached {
+        Some(d) => d,
+        None => collect_ref_decorations_fallible(repo)?,
+    };
 
     for info_result in walk.take(count) {
-        let Ok(info) = info_result else {
-            continue;
-        };
-        let Ok(commit) = info.object() else {
-            continue;
-        };
+        let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
+        let commit = info.object().map_err(|e| SniffError::git("object", e))?;
 
         let refs = decorations.get(&info.id).cloned().unwrap_or_default();
 
-        let Ok(author) = commit.author() else {
-            continue;
-        };
-        let Ok(time) = commit.time() else {
-            continue;
-        };
-        let Ok(message) = commit.message_raw() else {
-            continue;
-        };
+        let author = commit.author().map_err(|e| SniffError::git("author", e))?;
+        let time = commit.time().map_err(|e| SniffError::git("commit_time", e))?;
+        let message = commit
+            .message_raw()
+            .map_err(|e| SniffError::git("message", e))?;
 
         commits.push(CommitInfo {
             sha: info.id.to_string(),
@@ -191,7 +249,7 @@ pub(crate) fn get_recent_commits_with_decorations(
         });
     }
 
-    commits
+    Ok(commits)
 }
 
 /// Resolves the base branch name and its commit OID for ahead/behind calculations.
@@ -308,12 +366,15 @@ pub(crate) fn get_commit_by_sha_fallible(
     sha_prefix: &str,
     ref_decorations: Option<&HashMap<gix::ObjectId, Vec<RefDecoration>>>,
 ) -> Result<Option<CommitInfo>> {
-    // A SHA that does not resolve is "no commit matches" — Ok(None).
-    let Ok(id) = repo.rev_parse_single(sha_prefix) else {
+    // A SHA that matches no object is "no commit matches" — Ok(None); an
+    // ambiguous prefix or an object-database read error surfaces instead.
+    let Some(oid) = resolve_single_opt(repo, sha_prefix)? else {
         debug!(sha = sha_prefix, "could not resolve SHA");
         return Ok(None);
     };
-    let object = id.object().map_err(|e| SniffError::git("object", e))?;
+    let object = repo
+        .find_object(oid)
+        .map_err(|e| SniffError::git("object", e))?;
     // A SHA naming a tree/blob is "no commit matches", not corruption.
     let Ok(commit) = object.try_into_commit() else {
         return Ok(None);
@@ -323,7 +384,6 @@ pub(crate) fn get_commit_by_sha_fallible(
         Some(d) => d.clone(),
         None => collect_ref_decorations_fallible(repo)?,
     };
-    let oid = id.detach();
     let refs = decorations.get(&oid).cloned().unwrap_or_default();
 
     let author = commit.author().map_err(|e| SniffError::git("author", e))?;
@@ -516,8 +576,9 @@ pub(crate) fn get_commits_for_path_fallible(
 ) -> Result<Vec<CommitInfo>> {
     let mut commits = Vec::new();
 
-    // An unborn HEAD has no history to walk — a legitimate empty result.
-    let Ok(head) = repo.head_id() else {
+    // An unborn HEAD has no history to walk — a legitimate empty result; a
+    // malformed/unreadable HEAD propagates instead.
+    let Some(head) = head_id_opt(repo)? else {
         return Ok(commits);
     };
 
@@ -608,15 +669,24 @@ pub(crate) fn get_commits_for_branch_fallible(
 ) -> Result<Vec<CommitInfo>> {
     let mut commits = Vec::new();
 
-    let start_oid = repo
-        .find_reference(&format!("refs/heads/{branch_name}"))
-        .ok()
-        .and_then(|r| r.into_fully_peeled_id().ok().map(|id| id.detach()))
-        .or_else(|| {
-            repo.rev_parse_single(branch_name)
-                .ok()
-                .map(|id| id.detach())
-        });
+    // Prefer a local branch ref. A missing local branch falls through to the
+    // ref/SHA fallback (so `origin/main` and bare SHAs still resolve), but a
+    // malformed branch ref, or one peeling to a missing object, must surface
+    // rather than silently producing an empty history.
+    let local = match repo.find_reference(&format!("refs/heads/{branch_name}")) {
+        Ok(r) => Some(r),
+        Err(gix::reference::find::existing::Error::NotFound { .. }) => None,
+        Err(e) => return Err(SniffError::git("find_reference", e)),
+    };
+
+    let start_oid = match local {
+        Some(r) => Some(
+            r.into_fully_peeled_id()
+                .map_err(|e| SniffError::git("peel", e))?
+                .detach(),
+        ),
+        None => resolve_single_opt(repo, branch_name)?,
+    };
 
     let Some(oid) = start_oid else {
         debug!(branch = %branch_name, "could not resolve branch ref for commit walk");
