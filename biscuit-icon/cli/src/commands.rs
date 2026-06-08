@@ -10,8 +10,6 @@ use color_eyre::eyre::{Result, eyre};
 
 use crate::args::{CacheAction, Commands};
 
-const ONLINE_ICON_LIMIT: usize = 20;
-
 /// Builds an Iconify client respecting the `ICONIFY_BASE_URL` env var.
 fn client_from_env() -> IconifyClient {
     if let Ok(base) = std::env::var("ICONIFY_BASE_URL") {

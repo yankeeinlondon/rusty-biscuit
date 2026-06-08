@@ -152,12 +152,12 @@ async fn icons_merges_offline_and_online_results() {
     let json = serde_json::json!({
         "icons": ["mdi:home", "lucide:home"],
         "total": 2,
-        "limit": 20,
     });
     Mock::given(method("GET"))
         .and(path("/search"))
         .and(query_param("query", "home"))
-        .and(query_param("limit", "20"))
+        .and(query_param("limit", "100"))
+        .and(query_param("start", "0"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json))
         .mount(&server)
         .await;
@@ -197,12 +197,12 @@ async fn icons_online_honors_from_filter() {
     let json = serde_json::json!({
         "icons": ["mdi:home", "lucide:home"],
         "total": 2,
-        "limit": 20,
     });
     Mock::given(method("GET"))
         .and(path("/search"))
         .and(query_param("query", "home"))
-        .and(query_param("limit", "20"))
+        .and(query_param("limit", "100"))
+        .and(query_param("start", "0"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json))
         .mount(&server)
         .await;
@@ -243,13 +243,13 @@ async fn icons_online_caches_search_results() {
     let search_json = serde_json::json!({
         "icons": ["custom:logo"],
         "total": 1,
-        "limit": 20,
     });
 
     Mock::given(method("GET"))
         .and(path("/search"))
         .and(query_param("query", "logo"))
-        .and(query_param("limit", "20"))
+        .and(query_param("limit", "100"))
+        .and(query_param("start", "0"))
         .respond_with(ResponseTemplate::new(200).set_body_json(search_json))
         .mount(&server)
         .await;
@@ -292,14 +292,58 @@ async fn icons_online_caches_search_results() {
 }
 
 #[tokio::test]
-async fn sets_merges_online_and_caches() {
+async fn icons_paginates_past_first_page() {
     let server = MockServer::start().await;
-    let json = serde_json::json!({
-        "custom": { "name": "Custom Set", "license": { "title": "MIT", "spdx": "MIT" } }
+
+    // Page 1
+    let page1 = serde_json::json!({
+        "icons": ["mdi:home", "lucide:home"],
+        "total": 3,
     });
     Mock::given(method("GET"))
-        .and(path("/collections"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .and(path("/search"))
+        .and(query_param("query", "home"))
+        .and(query_param("limit", "100"))
+        .and(query_param("start", "0"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page1))
+        .mount(&server)
+        .await;
+
+    // Page 2
+    let page2 = serde_json::json!({
+        "icons": ["fa:home"],
+        "total": 3,
+    });
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .and(query_param("query", "home"))
+        .and(query_param("limit", "100"))
+        .and(query_param("start", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page2))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/mdi.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"prefix":"mdi","width":24,"height":24,"icons":{"home":{"body":"<path d=\"M0 0\"/>"}}}"#
+        ))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/lucide.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"prefix":"lucide","width":24,"height":24,"icons":{"home":{"body":"<path d=\"M0 0\"/>"}}}"#
+        ))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/fa.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"prefix":"fa","width":24,"height":24,"icons":{"home":{"body":"<path d=\"M0 0\"/>"}}}"#
+        ))
         .mount(&server)
         .await;
 
@@ -308,13 +352,120 @@ async fn sets_merges_online_and_caches() {
         .unwrap()
         .env("HOME", home.path())
         .env("ICONIFY_BASE_URL", server.uri())
-        .args(["sets", "custom"])
+        .args(["icons", "home"])
         .output()
         .unwrap();
 
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("custom"), "expected online set in output; got: {}", stdout);
-    assert!(stdout.contains("Custom Set"), "expected set title in output; got: {}", stdout);
+    assert!(stdout.contains("mdi:home"), "expected mdi:home from page 1; got: {}", stdout);
+    assert!(stdout.contains("fa:home"), "expected fa:home from page 2; got: {}", stdout);
+}
+
+#[test]
+fn icons_no_filter_skips_online_search() {
+    let home = tempfile::tempdir().unwrap();
+    // No filter and a dead endpoint should still succeed because offline
+    // icons are listed and online search is skipped for empty queries.
+    Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", "http://127.0.0.1:1")
+        .args(["icons"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ic:baseline-apple"));
+}
+
+#[tokio::test]
+async fn icons_direct_lookup_fetches_and_caches() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/custom.json"))
+        .and(query_param("icons", "logo"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"prefix":"custom","width":24,"height":24,"icons":{"logo":{"body":"<path d=\"M0 0\"/>"}}}"#
+        ))
+        .mount(&server)
+        .await;
+
+    let home = tempfile::tempdir().unwrap();
+    // First call fetches directly via prefix:name.
+    let first = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .args(["icons", "custom:logo"])
+        .output()
+        .unwrap();
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        first.status.success(),
+        "first call failed. stdout={first_stdout}"
+    );
+    assert!(
+        first_stdout.contains("custom:logo"),
+        "expected custom:logo in first call stdout; got: {}",
+        first_stdout
+    );
+
+    // Second call with a dead server should still find the cached icon.
+    Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", "http://127.0.0.1:1")
+        .args(["icons", "custom:logo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("custom:logo"));
+}
+
+#[tokio::test]
+async fn sets_merges_online_and_caches() {
+    let server = MockServer::start().await;
+    let json = serde_json::json!({
+        "custom": { "name": "Custom Set", "license": { "title": "MIT", "spdx": "MIT" } },
+        "other": { "name": "Other Set" }
+    });
+    Mock::given(method("GET"))
+        .and(path("/collections"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .mount(&server)
+        .await;
+
+    let home = tempfile::tempdir().unwrap();
+    // First call fetches and caches.
+    let first = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .args(["sets", "custom"])
+        .output()
+        .unwrap();
+    let first_stdout = String::from_utf8(first.stdout).unwrap();
+    assert!(first_stdout.contains("custom"), "expected online set in output; got: {}", first_stdout);
+    assert!(first_stdout.contains("Custom Set"), "expected set title in output; got: {}", first_stdout);
+
+    // Second call with a dead endpoint and a *different* filter should still
+    // find the previously fetched set from cache.
+    let second = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", "http://127.0.0.1:1")
+        .args(["sets", "other"])
+        .output()
+        .unwrap();
+    let second_stdout = String::from_utf8(second.stdout).unwrap();
+    assert!(
+        second.status.success(),
+        "second offline call failed. stdout={}",
+        second_stdout
+    );
+    assert!(
+        second_stdout.contains("other"),
+        "expected cached set 'other' in offline output; got: {}",
+        second_stdout
+    );
 }
 
 #[test]

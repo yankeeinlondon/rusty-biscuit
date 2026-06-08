@@ -77,9 +77,7 @@ struct CollectionMeta {
 struct SearchResponse {
     icons: Vec<String>,
     #[serde(default)]
-    _total: usize,
-    #[serde(default)]
-    _limit: usize,
+    total: usize,
 }
 
 impl IconifyClient {
@@ -154,26 +152,42 @@ impl IconifyClient {
 
     /// Searches the Iconify catalog for icons matching `query`.
     ///
-    /// Returns up to `limit` `prefix:name` identifiers (default 20).
+    /// Paginates through all matching results (in batches of 100) and returns
+    /// every `prefix:name` identifier. An empty `query` is not supported by
+    /// the Iconify API and will return an error.
     ///
     /// # Errors
     /// [`IconError::Fetch`] on transport/HTTP/parse failure.
-    pub async fn search_icons(&self, query: &str, limit: Option<usize>) -> Result<Vec<String>> {
-        let mut url = Url::parse(&self.base)
-            .map_err(|e| IconError::Fetch(e.to_string()))?
-            .join("search")
-            .map_err(|e| IconError::Fetch(e.to_string()))?;
-        {
-            let mut qp = url.query_pairs_mut();
-            qp.append_pair("query", query);
-            qp.append_pair("limit", &limit.unwrap_or(20).to_string());
+    pub async fn search_icons(&self, query: &str) -> Result<Vec<String>> {
+        const BATCH: usize = 100;
+        let mut all = Vec::new();
+        let mut start = 0;
+
+        loop {
+            let mut url = Url::parse(&self.base)
+                .map_err(|e| IconError::Fetch(e.to_string()))?
+                .join("search")
+                .map_err(|e| IconError::Fetch(e.to_string()))?;
+            {
+                let mut qp = url.query_pairs_mut();
+                qp.append_pair("query", query);
+                qp.append_pair("limit", &BATCH.to_string());
+                qp.append_pair("start", &start.to_string());
+            }
+            let resp = self.http.get(url).send().await.map_err(|e| IconError::Fetch(e.to_string()))?;
+            if !resp.status().is_success() {
+                return Err(IconError::Fetch(format!("HTTP {}", resp.status())));
+            }
+            let data: SearchResponse = resp.json().await.map_err(|e| IconError::Fetch(e.to_string()))?;
+            let batch_len = data.icons.len();
+            all.extend(data.icons);
+            if batch_len == 0 || all.len() >= data.total {
+                break;
+            }
+            start += batch_len;
         }
-        let resp = self.http.get(url).send().await.map_err(|e| IconError::Fetch(e.to_string()))?;
-        if !resp.status().is_success() {
-            return Err(IconError::Fetch(format!("HTTP {}", resp.status())));
-        }
-        let data: SearchResponse = resp.json().await.map_err(|e| IconError::Fetch(e.to_string()))?;
-        Ok(data.icons)
+
+        Ok(all)
     }
 }
 
@@ -298,17 +312,17 @@ mod tests {
         let json = serde_json::json!({
             "icons": ["mdi:home", "lucide:home"],
             "total": 2,
-            "limit": 20,
         });
         Mock::given(method("GET"))
             .and(path("/search"))
             .and(query_param("query", "home"))
-            .and(query_param("limit", "10"))
+            .and(query_param("limit", "100"))
+            .and(query_param("start", "0"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json))
             .mount(&server)
             .await;
         let client = IconifyClient::with_base(server.uri());
-        let hits = client.search_icons("home", Some(10)).await.unwrap();
+        let hits = client.search_icons("home").await.unwrap();
         assert_eq!(hits, vec!["mdi:home", "lucide:home"]);
     }
 }
