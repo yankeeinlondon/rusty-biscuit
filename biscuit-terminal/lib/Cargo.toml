@@ -22,11 +22,11 @@ clap = ["dep:clap", "renderable/clap"]
 # round-tripping these values through JSON/YAML.
 serde = []
 # Enables SVG rasterization via resvg for terminal image rendering.
-image = ["dep:resvg"]
+image = ["dep:resvg", "dep:biscuit-visualized", "biscuit-visualized/image"]
 
 [dependencies]
 base64 = "0.22"
-biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["clap"] }
+biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["clap"], optional = true }
 ignore = "0.4"
 image = "0.25"
 renderable = { path = "../../renderable" }

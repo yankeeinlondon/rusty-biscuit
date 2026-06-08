@@ -9,17 +9,19 @@ path = "src/lib.rs"
 
 [features]
 clap = ["dep:clap"]
+# Enables SVG rasterization and Mermaid diagram rendering (both require resvg).
+image = ["dep:resvg", "dep:mermaid-rs-renderer"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"], optional = true }
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 thiserror = "2.0"
 tempfile = "3"
-resvg = "0.45"
+resvg = { version = "0.45", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
-mermaid-rs-renderer = "0.2"
+mermaid-rs-renderer = { version = "0.2", optional = true }
 layout-rs = "0.1"
 
 [dev-dependencies]

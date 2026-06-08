@@ -35,12 +35,14 @@ use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
     ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HintNamespace, NodeKind,
     ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
-    TerminalMermaidMode,
 };
+#[cfg(feature = "image")]
+use renderable::tree::TerminalMermaidMode;
 use renderable::tree::{ValidationError, ValidationMode, validate};
 
 use crate::components::block_quote::BlockQuote;
 use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
+#[cfg(feature = "image")]
 use crate::components::mermaid::MermaidDiagram;
 use crate::components::prose::Prose;
 use crate::components::renderable::TerminalRenderable;
@@ -1346,13 +1348,14 @@ impl Writer<'_> {
         meta: Option<&str>,
         attrs: &renderable::tree::NodeAttrs,
     ) -> Result<String, RenderError> {
-        let is_mermaid = lang
+        let _is_mermaid = lang
             .map(|l| l.eq_ignore_ascii_case("mermaid"))
             .unwrap_or(false);
 
         // Promotion is gated by the opt-in AND the ceiling: terminal Mermaid
         // rasterizes only at `Rich`, and only when the caller opted in.
-        if is_mermaid
+        #[cfg(feature = "image")]
+        if _is_mermaid
             && self.opts.context.mermaid_mode == TerminalMermaidMode::Image
             && self.opts.context.graphics_mode == GraphicsMode::Rich
         {
@@ -3863,6 +3866,7 @@ mod render_tree_tests {
     /// support guarantees the promotion fails (no protocol to target, or no
     /// rasterization deps) regardless of host capability.
     #[test]
+    #[cfg(feature = "image")]
     fn mermaid_promotion_failure_rejects_under_strict() {
         use crate::discovery::detection::ImageSupport;
         use renderable::tree::{GraphicsMode, TerminalMermaidMode};
