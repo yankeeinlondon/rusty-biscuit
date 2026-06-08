@@ -75,22 +75,31 @@ impl Style {
     /// Returns `None` when neither flip nor rotate is set.
     fn transform(&self, body: &IconBody) -> Option<String> {
         let (w, h) = (f64::from(body.width), f64::from(body.height));
+        let (left, top) = (f64::from(body.left), f64::from(body.top));
         let mut parts: Vec<String> = Vec::new();
         match self.flip {
-            Some(Flip::Horizontal) => parts.push(format!("translate({w} 0) scale(-1 1)")),
-            Some(Flip::Vertical) => parts.push(format!("translate(0 {h}) scale(1 -1)")),
-            Some(Flip::Both) => parts.push(format!("translate({w} {h}) scale(-1 -1)")),
+            Some(Flip::Horizontal) => parts.push(format!("translate({} 0) scale(-1 1)", 2.0 * left + w)),
+            Some(Flip::Vertical) => parts.push(format!("translate(0 {}) scale(1 -1)", 2.0 * top + h)),
+            Some(Flip::Both) => parts.push(format!("translate({} {}) scale(-1 -1)", 2.0 * left + w, 2.0 * top + h)),
             None => {}
         }
         match self.rotate {
             Some(Rotate::R90) => {
-                // Rotate around the original center, then translate so the
-                // swapped viewBox (0 0 h w) is filled without clipping.
-                parts.push(format!("translate({h} {w}) rotate(90) translate(-{w} -{h})", w = w / 2.0, h = h / 2.0));
+                // Rotate around the viewBox center, then translate so the
+                // swapped viewBox is filled without clipping.
+                parts.push(format!(
+                    "translate({} {}) rotate(90) translate(-{} -{})",
+                    left + h / 2.0, top + w / 2.0,
+                    left + w / 2.0, top + h / 2.0,
+                ));
             }
-            Some(Rotate::R180) => parts.push(format!("rotate(180 {} {})", w / 2.0, h / 2.0)),
+            Some(Rotate::R180) => parts.push(format!("rotate(180 {} {})", left + w / 2.0, top + h / 2.0)),
             Some(Rotate::R270) => {
-                parts.push(format!("translate({h} {w}) rotate(270) translate(-{w} -{h})", w = w / 2.0, h = h / 2.0));
+                parts.push(format!(
+                    "translate({} {}) rotate(270) translate(-{} -{})",
+                    left + h / 2.0, top + w / 2.0,
+                    left + w / 2.0, top + h / 2.0,
+                ));
             }
             None => {}
         }
@@ -101,6 +110,7 @@ impl Style {
     #[must_use]
     pub fn assemble(&self, body: &IconBody) -> String {
         let (w, h) = (body.width, body.height);
+        let (left, top) = (body.left, body.top);
         let (vw, vh) = match self.rotate {
             Some(Rotate::R90) | Some(Rotate::R270) => (h, w),
             _ => (w, h),
@@ -119,8 +129,8 @@ impl Style {
         };
         let view_rect = if self.view_box {
             format!(
-                "<rect width=\"{}\" height=\"{}\" fill=\"none\"/>",
-                vw, vh
+                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"none\"/>",
+                left, top, vw, vh
             )
         } else {
             String::new()
@@ -128,7 +138,7 @@ impl Style {
 
         format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" \
-             viewBox=\"0 0 {vw} {vh}\"{color_style}>{view_rect}{inner}</svg>",
+             viewBox=\"{left} {top} {vw} {vh}\"{color_style}>{view_rect}{inner}</svg>",
             escape_xml_attr(width),
             escape_xml_attr(height),
         )
@@ -241,7 +251,7 @@ mod tests {
     fn view_box_flag_emits_transparent_rect() {
         let style = Style { view_box: true, ..Style::default() };
         let svg = style.assemble(&body());
-        assert!(svg.contains("<rect width=\"24\" height=\"24\" fill=\"none\"/>"));
+        assert!(svg.contains("<rect x=\"0\" y=\"0\" width=\"24\" height=\"24\" fill=\"none\"/>"));
     }
 
     #[test]
@@ -261,5 +271,36 @@ mod tests {
     #[test]
     fn invalid_rotate_is_rejected() {
         assert!(Rotate::try_from("45").is_err());
+    }
+
+    #[test]
+    fn non_zero_origin_in_view_box() {
+        let body = IconBody::with_origin("<path d=\"M0 0\"/>", 32, 32, 10, 20);
+        let svg = Style::default().assemble(&body);
+        assert!(svg.contains("viewBox=\"10 20 32 32\""));
+    }
+
+    #[test]
+    fn non_zero_origin_flip_horizontal() {
+        let body = IconBody::with_origin("<path d=\"M0 0\"/>", 32, 32, 10, 20);
+        let style = Style { flip: Some(Flip::Horizontal), ..Style::default() };
+        let svg = style.assemble(&body);
+        assert!(svg.contains("translate(52 0) scale(-1 1)"));
+    }
+
+    #[test]
+    fn non_zero_origin_rotate_180() {
+        let body = IconBody::with_origin("<path d=\"M0 0\"/>", 32, 32, 10, 20);
+        let style = Style { rotate: Some(Rotate::R180), ..Style::default() };
+        let svg = style.assemble(&body);
+        assert!(svg.contains("rotate(180 26 36)"));
+    }
+
+    #[test]
+    fn non_zero_origin_view_box_rect() {
+        let body = IconBody::with_origin("<path d=\"M0 0\"/>", 32, 32, 10, 20);
+        let style = Style { view_box: true, ..Style::default() };
+        let svg = style.assemble(&body);
+        assert!(svg.contains("<rect x=\"10\" y=\"20\" width=\"32\" height=\"32\" fill=\"none\"/>"));
     }
 }

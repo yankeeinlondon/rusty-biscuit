@@ -219,10 +219,10 @@ impl TerminalRenderable for Icon {
         #[cfg(feature = "image")]
         {
             use biscuit_terminal::discovery::detection::ImageSupport;
-            if term.image_support != ImageSupport::None {
-                if let Ok(s) = self.render_image(term) {
-                    return s;
-                }
+            if term.image_support != ImageSupport::None
+                && let Ok(s) = self.render_image(term)
+            {
+                return s;
             }
         }
         Prose::new(self.id.clone()).render(term)
@@ -327,5 +327,36 @@ mod tests {
     fn icon_remembers_its_id() {
         let icon = Os::Apple.icon();
         assert_eq!(icon.id(), "ic:baseline-apple");
+    }
+
+    #[tokio::test]
+    async fn iconify_with_non_zero_origin_persists_through_cache() {
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let json = serde_json::json!({
+            "prefix": "custom",
+            "icons": { "logo": { "body": "<path d=\"M0 0\"/>", "left": 10, "top": 20, "width": 32, "height": 32 } }
+        });
+        Mock::given(method("GET"))
+            .and(path("/custom.json"))
+            .and(query_param("icons", "logo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cache = crate::cache::IconCache::open_at(dir.path().join("icons.db")).unwrap();
+        let client = crate::iconify::IconifyClient::with_base(server.uri());
+
+        let icon = Icon::iconify_with("custom:logo", &cache, &client).await.unwrap();
+        let svg = icon.svg();
+        assert!(svg.contains("viewBox=\"10 20 32 32\""), "expected non-zero viewBox in assembled SVG; got: {svg}");
+
+        // Ensure cache round-trip also preserves origin.
+        let cached = Icon::iconify_with("custom:logo", &cache, &client).await.unwrap();
+        let cached_svg = cached.svg();
+        assert!(cached_svg.contains("viewBox=\"10 20 32 32\""), "expected non-zero viewBox after cache hit; got: {cached_svg}");
     }
 }
