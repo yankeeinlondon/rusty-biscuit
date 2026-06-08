@@ -11,6 +11,8 @@ pub struct SetInfo {
     pub prefix: String,
     pub title: String,
     pub license: Option<String>,
+    pub license_title: Option<String>,
+    pub license_url: Option<String>,
 }
 
 /// A SQLite-backed cache of fetched Iconify icon bodies and set metadata.
@@ -48,6 +50,8 @@ impl IconCache {
                 prefix     TEXT NOT NULL,
                 name       TEXT NOT NULL,
                 body       TEXT NOT NULL,
+                left       INTEGER NOT NULL DEFAULT 0,
+                top        INTEGER NOT NULL DEFAULT 0,
                 width      INTEGER NOT NULL,
                 height     INTEGER NOT NULL,
                 fetched_at TEXT NOT NULL,
@@ -56,10 +60,12 @@ impl IconCache {
             CREATE INDEX IF NOT EXISTS idx_icons_name ON icons(name);
 
             CREATE TABLE IF NOT EXISTS sets (
-                prefix     TEXT PRIMARY KEY,
-                title      TEXT NOT NULL,
-                license    TEXT,
-                fetched_at TEXT NOT NULL
+                prefix          TEXT PRIMARY KEY,
+                title           TEXT NOT NULL,
+                license         TEXT,
+                license_title   TEXT,
+                license_url     TEXT,
+                fetched_at      TEXT NOT NULL
             );
             "#,
         )
@@ -94,9 +100,16 @@ impl IconCache {
     pub fn get(&self, prefix: &str, name: &str) -> Result<Option<IconBody>> {
         self.conn()?
             .query_row(
-                "SELECT body, width, height FROM icons WHERE prefix = ?1 AND name = ?2",
+                "SELECT body, left, top, width, height FROM icons WHERE prefix = ?1 AND name = ?2",
                 params![prefix, name],
-                |row| Ok(IconBody::new(row.get::<_, String>(0)?, row.get(1)?, row.get(2)?)),
+                |row| {
+                    let body = row.get::<_, String>(0)?;
+                    let left: i32 = row.get(1)?;
+                    let top: i32 = row.get(2)?;
+                    let width: u32 = row.get(3)?;
+                    let height: u32 = row.get(4)?;
+                    Ok(IconBody::with_origin(body, width, height, left, top))
+                },
             )
             .optional()
             .map_err(map_sql)
@@ -109,9 +122,9 @@ impl IconCache {
     pub fn put(&self, prefix: &str, name: &str, body: &IconBody) -> Result<()> {
         self.conn()?
             .execute(
-                "INSERT OR REPLACE INTO icons (prefix, name, body, width, height, fetched_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
-                params![prefix, name, body.body, body.width, body.height],
+                "INSERT OR REPLACE INTO icons (prefix, name, body, left, top, width, height, fetched_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))",
+                params![prefix, name, body.body, body.left, body.top, body.width, body.height],
             )
             .map(|_| ())
             .map_err(map_sql)
@@ -153,9 +166,15 @@ impl IconCache {
     pub fn put_set(&self, info: &SetInfo) -> Result<()> {
         self.conn()?
             .execute(
-                "INSERT OR REPLACE INTO sets (prefix, title, license, fetched_at) \
-                 VALUES (?1, ?2, ?3, datetime('now'))",
-                params![info.prefix, info.title, info.license.as_deref()],
+                "INSERT OR REPLACE INTO sets (prefix, title, license, license_title, license_url, fetched_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
+                params![
+                    info.prefix,
+                    info.title,
+                    info.license.as_deref(),
+                    info.license_title.as_deref(),
+                    info.license_url.as_deref()
+                ],
             )
             .map(|_| ())
             .map_err(map_sql)
@@ -169,7 +188,7 @@ impl IconCache {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT prefix, title, license FROM sets \
+                "SELECT prefix, title, license, license_title, license_url FROM sets \
                  WHERE prefix LIKE ?1 OR title LIKE ?1 ORDER BY prefix",
             )
             .map_err(map_sql)?;
@@ -180,6 +199,8 @@ impl IconCache {
                     prefix: row.get(0)?,
                     title: row.get(1)?,
                     license: row.get(2)?,
+                    license_title: row.get(3)?,
+                    license_url: row.get(4)?,
                 })
             })
             .map_err(map_sql)?;
@@ -193,7 +214,7 @@ impl IconCache {
     pub fn all_sets(&self) -> Result<Vec<SetInfo>> {
         let conn = self.conn()?;
         let mut stmt = conn
-            .prepare("SELECT prefix, title, license FROM sets ORDER BY prefix")
+            .prepare("SELECT prefix, title, license, license_title, license_url FROM sets ORDER BY prefix")
             .map_err(map_sql)?;
         let rows = stmt
             .query_map([], |row| {
@@ -201,6 +222,8 @@ impl IconCache {
                     prefix: row.get(0)?,
                     title: row.get(1)?,
                     license: row.get(2)?,
+                    license_title: row.get(3)?,
+                    license_url: row.get(4)?,
                 })
             })
             .map_err(map_sql)?;
@@ -256,7 +279,7 @@ mod tests {
     #[test]
     fn set_metadata_round_trips() {
         let (_d, cache) = temp_cache();
-        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "Material Design".into(), license: Some("Apache-2.0".into()) }).unwrap();
+        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "Material Design".into(), license: Some("Apache-2.0".into()), license_title: Some("Apache License 2.0".into()), license_url: None }).unwrap();
         let hits = cache.search_sets("material").unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].prefix, "mdi");
@@ -267,7 +290,7 @@ mod tests {
     #[test]
     fn set_metadata_preserves_null_license() {
         let (_d, cache) = temp_cache();
-        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "Material Design".into(), license: None }).unwrap();
+        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "Material Design".into(), license: None, license_title: None, license_url: None }).unwrap();
         let hits = cache.all_sets().unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].license, None);
@@ -277,7 +300,7 @@ mod tests {
     fn clear_empties_the_cache() {
         let (_d, cache) = temp_cache();
         cache.put("mdi", "home", &IconBody::new("<a/>", 24, 24)).unwrap();
-        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "M".into(), license: None }).unwrap();
+        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "M".into(), license: None, license_title: None, license_url: None }).unwrap();
         cache.clear().unwrap();
         assert_eq!(cache.get("mdi", "home").unwrap(), None);
         assert!(cache.all_sets().unwrap().is_empty());

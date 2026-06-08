@@ -48,6 +48,10 @@ struct IconEntry {
     width: Option<u32>,
     #[serde(default)]
     height: Option<u32>,
+    #[serde(default)]
+    left: Option<i32>,
+    #[serde(default)]
+    top: Option<i32>,
 }
 
 /// License metadata for an Iconify collection.
@@ -120,7 +124,9 @@ impl IconifyClient {
         let entry = data.icons.get(&name).ok_or_else(|| IconError::NotFound(id.to_string()))?;
         let width = entry.width.or(data.width).unwrap_or(16);
         let height = entry.height.or(data.height).unwrap_or(16);
-        Ok(IconBody::new(entry.body.clone(), width, height))
+        let left = entry.left.unwrap_or(0);
+        let top = entry.top.unwrap_or(0);
+        Ok(IconBody::with_origin(entry.body.clone(), width, height, left, top))
     }
 
     /// Fetches the list of Iconify set prefixes, each with its human title
@@ -219,6 +225,31 @@ mod tests {
         let body = client.fetch_body("mdi:home").await.unwrap();
         assert_eq!(body.body, "<path d=\"M0 0\"/>");
         assert_eq!(body.width, 24);
+        assert_eq!(body.left, 0);
+        assert_eq!(body.top, 0);
+    }
+
+    #[tokio::test]
+    async fn fetch_body_preserves_non_zero_view_box() {
+        let server = MockServer::start().await;
+        let json = serde_json::json!({
+            "prefix": "custom",
+            "icons": { "logo": { "body": "<path d=\"M0 0\"/>", "left": 10, "top": 20, "width": 32, "height": 32 } }
+        });
+        Mock::given(method("GET"))
+            .and(path("/custom.json"))
+            .and(query_param("icons", "logo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json))
+            .mount(&server)
+            .await;
+
+        let client = IconifyClient::with_base(server.uri());
+        let body = client.fetch_body("custom:logo").await.unwrap();
+        assert_eq!(body.left, 10);
+        assert_eq!(body.top, 20);
+        assert_eq!(body.width, 32);
+        assert_eq!(body.height, 32);
+        assert_eq!(body.view_box(), "10 20 32 32");
     }
 
     #[tokio::test]

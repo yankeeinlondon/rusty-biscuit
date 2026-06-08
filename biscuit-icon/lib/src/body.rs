@@ -12,19 +12,31 @@ pub struct IconBody {
     pub width: u32,
     /// Intrinsic height of the icon's coordinate system.
     pub height: u32,
+    /// X-origin of the view box (default 0).
+    #[serde(default)]
+    pub left: i32,
+    /// Y-origin of the view box (default 0).
+    #[serde(default)]
+    pub top: i32,
 }
 
 impl IconBody {
     /// Builds a body with an explicit coordinate system.
     #[must_use]
     pub fn new(body: impl Into<String>, width: u32, height: u32) -> Self {
-        Self { body: body.into(), width, height }
+        Self { body: body.into(), width, height, left: 0, top: 0 }
     }
 
-    /// The `viewBox` string, `"0 0 {width} {height}"`.
+    /// Builds a body with a non-zero view-box origin.
+    #[must_use]
+    pub fn with_origin(body: impl Into<String>, width: u32, height: u32, left: i32, top: i32) -> Self {
+        Self { body: body.into(), width, height, left, top }
+    }
+
+    /// The `viewBox` string, `"{left} {top} {width} {height}"`.
     #[must_use]
     pub fn view_box(&self) -> String {
-        format!("0 0 {} {}", self.width, self.height)
+        format!("{} {} {} {}", self.left, self.top, self.width, self.height)
     }
 }
 
