@@ -830,21 +830,6 @@ impl DarkmatterPage {
                 ambient_terminal_width()
             });
         }
-        // Honor the captured terminal's color depth whenever construction-time
-        // color may be emitted — i.e. whenever the build context is threaded
-        // (`!is_default_layout`). This rides the *construction-time application*
-        // decision, not the page-frame geometry one: a page that paints page or
-        // component color was built from a specific `Terminal`, so its baked SGR
-        // should follow that terminal's reported depth rather than re-detecting
-        // from the ambient environment (which would make
-        // `DarkmatterPage::new(&Terminal::new_optimistic(_))` paint different SGR
-        // in a headless env than in a truecolor terminal). The zero-config path
-        // leaves this unset so the renderer falls back to `ColorDepth::auto_detect`,
-        // preserving byte-for-byte parity with `Markdown::as_terminal(default)`.
-        // An explicit `with_color_depth` always wins.
-        if !self.is_default_layout() && options.color_depth.is_none() {
-            options.color_depth = Some(self.terminal_color_depth);
-        }
         options.include_line_numbers = self.line_numbers;
         options.color_mode = ctx.render_color_mode;
         options.hr_defaults = self.hr_defaults();
@@ -871,6 +856,23 @@ impl DarkmatterPage {
             local_image_style: self.local_image_style.as_ref(),
             hr_defaults: hr_defaults_owned.as_ref(),
         };
+
+        // Honor the captured terminal's color depth only when this page actually
+        // paints construction-time color. Page-level color always paints; a
+        // component / link / image color paints only when its node is present in
+        // the document. An *unmatched* policy bakes nothing, so it must not flip
+        // the renderer-wide color depth (review-3): otherwise an unmatched colored
+        // policy would make unrelated content — e.g. a fenced code block's syntax
+        // highlighting — emit the captured terminal's SGR where a no-policy page
+        // emits none. Keying off whether color is actually painted (not policy
+        // presence) keeps capability selection independent of unmatched policies,
+        // mirroring the page-frame width split (`has_frame_geometry`). The
+        // zero-config path leaves this unset so the renderer falls back to
+        // `ColorDepth::auto_detect`, preserving byte-for-byte parity with
+        // `Markdown::as_terminal(default)`. An explicit `with_color_depth` wins.
+        if options.color_depth.is_none() && self.paints_construction_color(md, &build_ctx) {
+            options.color_depth = Some(self.terminal_color_depth);
+        }
 
         // Delegate to the terminal renderer. When no layout builder has been
         // called we must NOT thread a build context — doing so leaks the
@@ -996,6 +998,47 @@ impl DarkmatterPage {
     }
 
     // ---------- ComponentPolicy merging ----------
+
+    /// Whether this page paints any construction-time color that should follow
+    /// the captured terminal's color depth.
+    ///
+    /// Page-level foreground/background always paint (content-independent). A
+    /// *component*, hyperlink, or image color paints only when its node is
+    /// actually present in the document — an *unmatched* policy bakes nothing.
+    /// Detection therefore folds the document with the same build context and
+    /// checks whether any node received a baked color, so an unmatched policy
+    /// cannot flip the renderer-wide color depth (review-3). The detection fold
+    /// is skipped unless a color source is configured, so the common
+    /// geometry-only and zero-config paths never pay for it.
+    fn paints_construction_color(
+        &self,
+        md: &Markdown,
+        build_ctx: &crate::markdown::render_tree::build_context::TreeBuildContext,
+    ) -> bool {
+        if self.page_color.is_some() || self.page_bg_color.is_some() {
+            return true;
+        }
+        let has_color_source = self
+            .component_policies
+            .values()
+            .any(|p| p.color.is_some() || p.bg_color.is_some())
+            || [
+                self.hyperlink_style.as_ref(),
+                self.local_hyperlink_style.as_ref(),
+                self.local_image_style.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|s| s.color.is_some() || s.bg_color.is_some());
+        if !has_color_source {
+            return false;
+        }
+        let (doc, _) =
+            crate::markdown::render_tree::entrypoints::to_render_document_with_context(
+                md, build_ctx,
+            );
+        node_subtree_has_baked_color(&doc.root)
+    }
 
     // ---------- Validation ----------
 
@@ -1286,6 +1329,23 @@ pub(crate) fn length_to_css_frame(
         TargetValue::Universal(Length::Percent(p)) => format!("{p}%"),
         _ => "0ch".to_string(),
     }
+}
+
+/// Whether `node` or any descendant carries a construction-baked foreground or
+/// background color.
+///
+/// At fold time a node's [`Style`](renderable::style::Style) color is set only
+/// by the build context's policy application — syntax highlighting and other
+/// render-time color are applied later, during the target fold — so this is a
+/// faithful signal of whether the page actually painted color during
+/// construction.
+fn node_subtree_has_baked_color(node: &renderable::tree::RenderNode) -> bool {
+    if let Some(style) = node.attrs.style()
+        && (style.color.is_some() || style.background.is_some())
+    {
+        return true;
+    }
+    node.children().iter().any(node_subtree_has_baked_color)
 }
 
 /// Whether every side of `edges` contributes no space (see [`length_is_zero`]).
@@ -1944,6 +2004,72 @@ mod tests {
         assert!(
             no_policy.lines().filter(|l| !l.trim().is_empty()).count() > 1,
             "test premise: the long line must wrap at the ambient width; got:\n{no_policy}",
+        );
+    }
+
+    /// Review-3 finding: capability selection (renderer-wide color depth) must
+    /// be independent of *unmatched* component-policy presence.
+    ///
+    /// The captured terminal reports `None` (no-color) depth, distinct from the
+    /// ambient depth the zero-config path resolves for the same content. A fenced
+    /// code block's syntax highlighting is color-bearing and *does* respond to a
+    /// `None` color depth (it emits no SGR), so the captured depth is observable.
+    ///
+    /// Adding an *unmatched* colored Tables policy must not flip the global color
+    /// depth to the captured `None`: the unmatched page must stay byte-identical
+    /// to the no-policy page, both emitting the code block's colored highlight.
+    /// Before the fix the unmatched policy made the page non-default, forcing the
+    /// captured `None` depth and stripping the code block's color — the two
+    /// diverged. The `painted != no_policy` guard proves the captured `None`
+    /// depth genuinely changes output (so the equality is meaningful), and that
+    /// the depth machinery still engages when construction *does* paint color.
+    ///
+    /// This is discriminating where the plain-prose parity test was not: prose
+    /// carries no content-driven color, so a flipped color depth left it
+    /// unchanged. The code block exposes the global capability difference.
+    #[test]
+    fn terminal_unmatched_policy_does_not_flip_color_depth_for_unrelated_content() {
+        use renderable::color::{Color, Tailwind};
+        use renderable::style::PaintColor;
+
+        // Captured terminal at a no-color depth, distinct from the ambient
+        // (truecolor) depth the zero-config path resolves in this harness.
+        let mut terminal = Terminal::new_optimistic(80);
+        terminal.color_depth = biscuit_terminal::discovery::detection::ColorDepth::None;
+        // A fenced code block whose syntax highlighting is color-bearing. No
+        // table, so the Tables policy is unmatched and bakes nothing.
+        let md: Markdown = "```rust\nfn main() { let x = 1; }\n```\n".into();
+
+        let no_policy = DarkmatterPage::new(&terminal).render(&md).unwrap();
+        let unmatched = DarkmatterPage::new(&terminal)
+            .with_component_color(
+                PageComponent::Tables,
+                PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+            )
+            .render(&md)
+            .unwrap();
+
+        assert_eq!(
+            no_policy, unmatched,
+            "an unmatched policy must not flip renderer-wide color depth",
+        );
+        assert!(
+            no_policy.contains("\x1b[38;2;"),
+            "test premise: the no-policy code block must emit color at the ambient \
+             depth; got: {no_policy:?}",
+        );
+
+        // Guard the test's own premise: the captured `None` depth *does* change
+        // output once construction actually paints color (here a page color), so
+        // the equality above is meaningful — had the unmatched policy wrongly
+        // forced the captured depth, `unmatched` would have diverged like this.
+        let painted = DarkmatterPage::new(&terminal)
+            .with_page_color(PaintColor::new(Color::Tailwind(Tailwind::Red500)))
+            .render(&md)
+            .unwrap();
+        assert_ne!(
+            painted, no_policy,
+            "test premise: the captured None depth must change painted output",
         );
     }
 

@@ -1319,6 +1319,37 @@ fn render_zero_config_page_to_tempfile(
     (dir, path)
 }
 
+/// Renders `body` through a [`DarkmatterPage`] carrying an *unmatched* colored
+/// `Tables` policy on a captured terminal that reports `None` (no-color) depth.
+///
+/// The document has no table, so the policy bakes nothing; per the review-3
+/// fix the unmatched policy must not flip the renderer-wide color depth to the
+/// captured `None`. The fenced code block must therefore still be syntax-
+/// highlighted (color-bearing) in the rendered bytes.
+fn render_unmatched_policy_page_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    use renderable::color::{Color, Tailwind};
+    use renderable::style::PaintColor;
+
+    let mut term = Terminal::new_optimistic(120);
+    term.color_depth = biscuit_terminal::discovery::detection::ColorDepth::None;
+    let md: Markdown = body.into();
+    let rendered = DarkmatterPage::new(&term)
+        .with_component_color(
+            darkmatter::layout::PageComponent::Tables,
+            PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+        )
+        .render(&md)
+        .expect("unmatched-policy DarkmatterPage::render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered).unwrap();
+    (dir, path)
+}
+
 /// Finding 7: the public `Markdown::as_terminal` entry must survive a real
 /// terminal — heading, prose, fenced-code body + language header, and SGR
 /// styling all reach the pane through the post-cutover tree path.
@@ -1348,6 +1379,50 @@ fn level2_public_as_terminal_entry_renders_in_real_terminal() {
     assert!(
         frame.raw.contains("\u{1b}["),
         "expected SGR styling in the public as_terminal capture. raw:\n{}",
+        frame.raw
+    );
+}
+
+/// Review-3 finding (High): an *unmatched* component policy must not flip the
+/// renderer-wide color depth — capability selection must be independent of
+/// policy presence. SGR color is terminal-observable, so this closes the
+/// review's request for Level 2 coverage of the color-depth defect (the Level 1
+/// parity test in `page.rs` exercises the byte string; this drives the bytes
+/// through a real WezTerm pane).
+///
+/// The page is built from a captured `None`-depth terminal and carries a colored
+/// `Tables` policy, but the document has no table — so the policy is unmatched
+/// and paints nothing. The fenced code block's syntax highlighting must survive
+/// to the real terminal as foreground color SGR. Before the fix the unmatched
+/// policy forced the captured `None` depth, stripping all color; the capture
+/// would then carry no `38;…` foreground sequence.
+#[test]
+#[serial(level2_terminal)]
+fn level2_unmatched_policy_keeps_code_color_in_real_terminal() {
+    let body = "Lead prose paragraph.\n\n```rust\nfn demo() { let x = 1; }\n```\n";
+    let Some((frame, _dir)) =
+        drive_pane(body, "unmatched_policy_color", render_unmatched_policy_page_to_tempfile)
+    else {
+        return;
+    };
+
+    // The code body must survive the round-trip.
+    assert!(
+        frame.plain.contains("demo"),
+        "code body token missing from real-terminal capture. plain:\n{}",
+        frame.plain
+    );
+
+    // Foreground syntax-highlight SGRs must survive into the real pane: an
+    // unmatched policy must NOT have forced the captured `None` depth (which
+    // would emit no color at all). WezTerm re-emits true color in the colon
+    // form; accept colon, semicolon, or 256-color.
+    assert!(
+        frame.raw.contains("\u{1b}[38;2;")
+            || frame.raw.contains("\u{1b}[38:2:")
+            || frame.raw.contains("\u{1b}[38;5;"),
+        "expected foreground syntax-highlight SGRs despite the unmatched colored policy; \
+         the policy must not flip color depth to the captured None. raw:\n{}",
         frame.raw
     );
 }
