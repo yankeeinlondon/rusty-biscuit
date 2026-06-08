@@ -1,15 +1,30 @@
 ---
-status: ready for planning and implementation
+status: complete
 reviewed: true
 date: 2026-06-04
+completed: 2026-06-07
 owner: ken
-parent: renderable/features/2026-06-02-tree-cutover/spec.md
+parent: renderable/features/_completed/2026-06-02-tree-cutover/spec.md
 child_specs:
-    - "2026-06-05-darkmatter-cutover"
-    - "2026-06-05-renderer-folds"
-    - "2026-06-05-tree-attrs"
-    - "2026-06-05-style-vocabulary"
+    - "2026-06-04-style-vocabulary"
+    - "2026-06-04-tree-attrs"
+    - "2026-06-04-renderer-folds"
+    - "2026-06-04-darkmatter-cutover"
+    - "2026-06-06-tree-features"
+    - "2026-06-06-tree-closeout"
 ---
+
+> **Status — complete (2026-06-07).** All seven architecture acceptance
+> criteria below are satisfied by code, tests, and the closeout audit
+> artifacts. The vocabulary, attr, fold, and darkmatter-cutover sub-specs landed
+> as the four `2026-06-04-*` children; the
+> [`2026-06-06-tree-features`](../2026-06-06-tree-features/spec.md) cutover
+> completed the production render tree before every target fold; and the
+> [`2026-06-06-tree-closeout`](../2026-06-06-tree-closeout/spec.md) closeout
+> produced the durable evidence (extension-hint inventory, production-traversal
+> inventory, page-frame decision, architecture/performance assertions,
+> verification record, and component assessment). See
+> [Architecture completion summary](#architecture-completion-summary).
 
 # CSS Box Architecture
 
@@ -100,10 +115,12 @@ compiling, but the pieces interlock.
 
 | Sub-spec | Area | Status |
 |---|---|---|
-| [`2026-06-04-style-vocabulary`](../2026-06-04-style-vocabulary/spec.md) | **Layout/Style vocabulary** — the CSS box model; geometry vs. paint; delete `Fill`; `padding` / `width` / `fit-content`; the defaulting contract. | **designed; ready for planning** |
-| [`2026-06-04-tree-attrs`](../2026-06-04-tree-attrs/spec.md) | **Tree attrs & inheritance** — typed sparse `NodeAttrs` (no per-node JSON round-trip), one canonical inheritance resolver, and a deterministic structural-invariant performance *gate*. | **designed; ready for planning** |
-| [`2026-06-04-renderer-folds`](../2026-06-04-renderer-folds/spec.md) | **One fold per target** — terminal + browser learn to paint the padding box, honor `fit-content`, and lower `padding`/`width`/`border`/`background`; provides the lowering that lets *darkmatter-cutover* retire `build_component_css`. | **designed; ready for planning** |
-| [`2026-06-04-darkmatter-cutover`](../2026-06-04-darkmatter-cutover/spec.md) | **darkmatter cutover** — `style:` lowers directly to `Layout`/`Style` attrs; delete `Page*`, the per-component `LayoutContext` math, the bespoke CSS, and every `#![allow(deprecated)]`. *Absorbs the original "style-based-alignment" work.* | **designed; ready for planning** |
+| [`2026-06-04-style-vocabulary`](../2026-06-04-style-vocabulary/spec.md) | **Layout/Style vocabulary** — the CSS box model; geometry vs. paint; delete `Fill`; `padding` / `width` / `fit-content`; the defaulting contract. | **complete** |
+| [`2026-06-04-tree-attrs`](../2026-06-04-tree-attrs/spec.md) | **Tree attrs & inheritance** — typed sparse `NodeAttrs` (no per-node JSON round-trip), one canonical inheritance resolver, and a deterministic structural-invariant performance *gate*. | **complete** |
+| [`2026-06-04-renderer-folds`](../2026-06-04-renderer-folds/spec.md) | **One fold per target** — terminal + browser learn to paint the padding box, honor `fit-content`, and lower `padding`/`width`/`border`/`background`; provides the lowering that lets *darkmatter-cutover* retire `build_component_css`. | **complete** |
+| [`2026-06-04-darkmatter-cutover`](../2026-06-04-darkmatter-cutover/spec.md) | **darkmatter cutover** — `style:` lowers directly to `Layout`/`Style` attrs; delete `Page*`, the per-component `LayoutContext` math, the bespoke CSS, and every `#![allow(deprecated)]`. *Absorbs the original "style-based-alignment" work.* | **complete** |
+| [`2026-06-06-tree-features`](../2026-06-06-tree-features/spec.md) | **Tree-features cutover** — completes the production render tree so a styled Darkmatter source builds one *complete* typed `Document` (alpha paint, sparse attr mutation, typed width-dependent text, construction-time policy, typed browser attrs) before every target fold; deletes decorate-time policy and post-render rewriting. | **complete** |
+| [`2026-06-06-tree-closeout`](../2026-06-06-tree-closeout/spec.md) | **Closeout** — durable audit/verification evidence: extension-hint inventory, production-traversal inventory, signed-off page-frame boundary, final architecture/performance assertions, green verification record, and the Biscuit Terminal component assessment. | **complete** |
 
 ## Sequencing contract
 
@@ -181,27 +198,71 @@ Deletion is the proof that there is one policy path.
 
 ## Acceptance criteria for the architecture program
 
-1. All child specs are present, linked from this overview, and ordered with
-   `depends-on` where applicable.
-2. `renderable::layout` / `renderable::style` express the CSS box vocabulary
-   without `Fill` or Darkmatter-specific page layout concepts.
-3. `NodeAttrs` stores layout/style sparsely, treats absence as default, and has
-   documented inheritance semantics.
-4. Terminal and browser renderers perform one traversal over attrs for box
+All seven are satisfied (2026-06-07).
+
+1. [x] All child specs are present, linked from this overview, and ordered with
+   `depends-on` where applicable. *(Four `2026-06-04-*` sub-specs plus the
+   concluding `tree-features` and `tree-closeout`; all linked above.)*
+2. [x] `renderable::layout` / `renderable::style` express the CSS box vocabulary
+   without `Fill` or Darkmatter-specific page layout concepts. *(`Fill` /
+   `RowFill` / `Margin` enum / `Page*` value types deleted; `Layout` is
+   `margin`/`padding`/`width`/`max_width`/`alignment`/`word_wrap`.)*
+3. [x] `NodeAttrs` stores layout/style sparsely, treats absence as default, and has
+   documented inheritance semantics. *(Typed sparse fields, absence == default,
+   `InheritedStyle` the sole text-appearance cascade.)*
+4. [x] Terminal and browser renderers perform one traversal over attrs for box
    layout and paint; duplicate per-target style lookup paths are deleted.
-5. Markdown and MarkdownPlus behavior is documented as target-specific
-   degradation rather than missing parity.
-6. Darkmatter `style:` v1 inputs lower directly to attrs, with deprecated
-   internal `Page*` / `LayoutContext` paths removed.
-7. Performance gates compare against the post-tree-cutover baseline and fail
+   *(`decorate.rs`, `component_for`, and `build_component_css` removed; one fold
+   per target — see `traversal-inventory.md`.)*
+5. [x] Markdown and MarkdownPlus behavior is documented as target-specific
+   degradation rather than missing parity. *(See D4 and the dialect-degradation
+   tests recorded in `verification-record.md` §6.)*
+6. [x] Darkmatter `style:` v1 inputs lower directly to attrs, with deprecated
+   internal `Page*` / `LayoutContext` component-policy paths removed. *(The
+   retained `LayoutContext` is the constrained viewport-only page frame; see the
+   page-frame decision in `tree-closeout/traversal-inventory.md`.)*
+7. [x] Performance gates compare against the post-tree-cutover baseline and fail
    on structural regressions outside explicitly documented fidelity exceptions.
+   *(Structural gate on the expanded styled corpus; trend data in
+   `performance-record.md`.)*
+
+## Architecture completion summary
+
+Per the closeout spec's requirement to state which behavior is which, the final
+topology classifies every rendering concern as exactly one of:
+
+- **First-class typed tree intent.** CSS box geometry (`Layout`: margin /
+  padding / width / max-width / alignment), paint (`Style`: alpha-bearing
+  `PaintColor` color/background, border, emphasis), width-dependent text intent
+  (`NodeAttrs::text_layout` on link/image/list-item nodes), typed browser
+  attributes (`NodeAttrs::browser`), and HR styling
+  (`NodeAttrs::thematic_break`). All are resolved once at construction and folded
+  per target with zero extension-bag round-trips.
+- **Target-specific degradation.** Markdown drops paint/geometry/browser-only
+  attrs; MarkdownPlus stays within its inline-HTML dialect policy (never a second
+  browser renderer); terminal degrades color depth and underline variants. This
+  is intentional asymmetry surfaced through `RenderStrictness` + diagnostics, not
+  missing parity.
+- **Retained page-frame responsibility (the one documented exception).**
+  `DarkmatterPage` is a slim viewport-level assembler — terminal/page width,
+  outer page margin/padding, full-page background, max-width centering,
+  `PageBackground::Pronounced` code-theme contrast, and browser page-wrapper
+  metadata/stylesheet assembly. **Option A**, signed off in
+  `tree-closeout/traversal-inventory.md`: it carries no component policy,
+  inspects no component node kinds, and mutates no component content (proven by
+  the focused page-frame tests).
+- **Intentionally terminal-only.** Inline image protocols (`TerminalImage`
+  behind `NodeKind::Image`), Mermaid terminal rasterization, `FileSystem` Nerd
+  Font icon selection, and the terminal-only utility components are accepted
+  specializations recorded in `tree-closeout/component-assessment.md`; none is on
+  the Darkmatter production path, so none blocks this architecture.
 
 ## Open Questions
 
-No architecture-blocking questions remain after this review. The remaining
-choices belong in child specs as implementation details, especially the exact
-`NodeAttrs` storage shape and the terminal algorithm for measuring
-`fit-content` after inline style lowering.
+No architecture-blocking questions remain. The one closeout decision that gated
+completion — the `DarkmatterPage` page-frame boundary (Option A vs Option B) —
+was resolved as **Option A** and signed off in
+[`../2026-06-06-tree-closeout/traversal-inventory.md`](../2026-06-06-tree-closeout/traversal-inventory.md).
 
 ## Relationship to prior work
 

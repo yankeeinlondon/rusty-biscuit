@@ -2,7 +2,7 @@
 status: ready for planning and implementation
 date: 2026-06-04
 owner: ken
-parent: renderable/features/2026-06-04-css-box-architecture/spec.md
+parent: renderable/features/_completed/2026-06-04-css-box-architecture/spec.md
 depends-on: renderable/features/2026-06-04-style-vocabulary/spec.md
 reviewed: true
 ---

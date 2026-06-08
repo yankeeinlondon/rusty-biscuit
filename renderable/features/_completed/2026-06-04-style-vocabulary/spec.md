@@ -3,7 +3,7 @@ status: ready for planning and implementation
 reviewed: true
 date: 2026-06-04
 owner: ken
-parent: renderable/features/2026-06-04-css-box-architecture/spec.md
+parent: renderable/features/_completed/2026-06-04-css-box-architecture/spec.md
 ---
 
 # Style Vocabulary — The CSS-Faithful Layout/Style Types
