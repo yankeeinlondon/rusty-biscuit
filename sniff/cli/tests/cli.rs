@@ -1630,6 +1630,65 @@ fn test_repo_hash_surfaces_corrupt_commit_object() {
         .failure();
 }
 
+/// Corrupt the HEAD commit object of a freshly-built test repo and return its
+/// path, so corruption surfaces through any history-reading command.
+fn repo_with_corrupt_head() -> (tempfile::TempDir, PathBuf) {
+    let (dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let repo = git2::Repository::open(&path).unwrap();
+    let sha = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    corrupt_loose_object(&path, &sha);
+    (dir, path)
+}
+
+/// A corrupt commit object must surface as a CLI failure through
+/// `repo git-status`, not be reported as a clean, empty history.
+#[test]
+fn test_repo_git_status_surfaces_corrupt_history() {
+    let (_dir, path) = repo_with_corrupt_head();
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "git-status"])
+        .assert()
+        .failure();
+}
+
+/// A corrupt commit object must surface as a CLI failure through
+/// `repo recent-commits`, not produce a successful but empty list.
+#[test]
+fn test_repo_recent_commits_surfaces_corrupt_history() {
+    let (_dir, path) = repo_with_corrupt_head();
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "recent-commits"])
+        .assert()
+        .failure();
+}
+
+/// A corrupt commit object must surface as a CLI failure through
+/// `repo source-code-changes`, not produce a successful but empty report.
+#[test]
+fn test_repo_source_code_changes_surfaces_corrupt_history() {
+    let (_dir, path) = repo_with_corrupt_head();
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "source-code-changes",
+        ])
+        .assert()
+        .failure();
+}
+
 /// Stage a file in the test repo (no commit).
 fn test_stage_file(repo_path: &Path, relative: &str, content: &str) {
     let full = repo_path.join(relative);
