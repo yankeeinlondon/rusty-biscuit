@@ -21,6 +21,8 @@ clap = ["dep:clap", "renderable/clap"]
 # RuleAlignment, RuleWeight}`). Off by default — opt in when persisting or
 # round-tripping these values through JSON/YAML.
 serde = []
+# Enables SVG rasterization via resvg for terminal image rendering.
+image = ["dep:resvg"]
 
 [dependencies]
 base64 = "0.22"
@@ -45,7 +47,7 @@ unic-langid = "0.9.6"
 viuer = { version = "0.11", features = ["print-file"] }
 
 # SVG rasterization for terminal image rendering
-resvg = "0.45"
+resvg = { version = "0.45", optional = true }
 
 # CLI argument parsing (optional, for ValueEnum derive)
 clap = { version = "4", features = ["derive"], optional = true }

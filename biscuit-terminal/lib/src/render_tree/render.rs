@@ -3769,6 +3769,7 @@ mod render_tree_tests {
     /// GraphicsMode::Rich on a Kitty-capable TTY should use the image tier
     /// when available.
     #[test]
+    #[cfg(feature = "image")]
     fn render_tree_thematic_break_rich_mode_uses_image_tier_when_available() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
@@ -3825,6 +3826,7 @@ mod render_tree_tests {
     /// support, forcing graphics upgrades the capability snapshot so the HR
     /// image tier still fires at `Rich`.
     #[test]
+    #[cfg(feature = "image")]
     fn render_tree_thematic_break_force_graphics_rasterizes_on_unsupported_terminal() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
