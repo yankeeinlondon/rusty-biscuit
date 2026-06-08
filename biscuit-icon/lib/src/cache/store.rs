@@ -43,33 +43,84 @@ impl IconCache {
     pub fn open_at(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let conn = Connection::open(&path).map_err(map_sql)?;
-        conn.execute_batch(
-            r#"
-            PRAGMA journal_mode = WAL;
-            CREATE TABLE IF NOT EXISTS icons (
-                prefix     TEXT NOT NULL,
-                name       TEXT NOT NULL,
-                body       TEXT NOT NULL,
-                left       INTEGER NOT NULL DEFAULT 0,
-                top        INTEGER NOT NULL DEFAULT 0,
-                width      INTEGER NOT NULL,
-                height     INTEGER NOT NULL,
-                fetched_at TEXT NOT NULL,
-                PRIMARY KEY (prefix, name)
-            );
-            CREATE INDEX IF NOT EXISTS idx_icons_name ON icons(name);
+        conn.execute_batch("PRAGMA journal_mode = WAL;")
+            .map_err(map_sql)?;
 
-            CREATE TABLE IF NOT EXISTS sets (
-                prefix          TEXT PRIMARY KEY,
-                title           TEXT NOT NULL,
-                license         TEXT,
-                license_title   TEXT,
-                license_url     TEXT,
-                fetched_at      TEXT NOT NULL
-            );
-            "#,
-        )
-        .map_err(map_sql)?;
+        let version: i32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap_or(0);
+
+        if version < 1 {
+            conn.execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS icons (
+                    prefix     TEXT NOT NULL,
+                    name       TEXT NOT NULL,
+                    body       TEXT NOT NULL,
+                    left       INTEGER NOT NULL DEFAULT 0,
+                    top        INTEGER NOT NULL DEFAULT 0,
+                    width      INTEGER NOT NULL,
+                    height     INTEGER NOT NULL,
+                    fetched_at TEXT NOT NULL,
+                    PRIMARY KEY (prefix, name)
+                );
+                CREATE INDEX IF NOT EXISTS idx_icons_name ON icons(name);
+
+                CREATE TABLE IF NOT EXISTS sets (
+                    prefix          TEXT PRIMARY KEY,
+                    title           TEXT NOT NULL,
+                    license         TEXT,
+                    license_title   TEXT,
+                    license_url     TEXT,
+                    fetched_at      TEXT NOT NULL
+                );
+                "#,
+            )
+            .map_err(map_sql)?;
+
+            // Migrate from previous schema: inspect columns and adapt.
+            let cols: Vec<String> = conn
+                .prepare("PRAGMA table_info(icons)")
+                .map_err(map_sql)?
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(map_sql)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(map_sql)?;
+
+            // Drop the legacy `view_box` column so inserts omitting it succeed.
+            if cols.contains(&"view_box".to_string()) {
+                conn.execute("ALTER TABLE icons DROP COLUMN view_box", [])
+                    .map_err(map_sql)?;
+            }
+            if !cols.contains(&"left".to_string()) {
+                conn.execute("ALTER TABLE icons ADD COLUMN left INTEGER NOT NULL DEFAULT 0", [])
+                    .map_err(map_sql)?;
+            }
+            if !cols.contains(&"top".to_string()) {
+                conn.execute("ALTER TABLE icons ADD COLUMN top INTEGER NOT NULL DEFAULT 0", [])
+                    .map_err(map_sql)?;
+            }
+
+            let set_cols: Vec<String> = conn
+                .prepare("PRAGMA table_info(sets)")
+                .map_err(map_sql)?
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(map_sql)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(map_sql)?;
+            if !set_cols.contains(&"license_title".to_string()) {
+                conn.execute("ALTER TABLE sets ADD COLUMN license_title TEXT", [])
+                    .map_err(map_sql)?;
+            }
+            if !set_cols.contains(&"license_url".to_string()) {
+                conn.execute("ALTER TABLE sets ADD COLUMN license_url TEXT", [])
+                    .map_err(map_sql)?;
+            }
+
+            conn.execute_batch("PRAGMA user_version = 1;")
+                .map_err(map_sql)?;
+        }
+
         drop(conn);
         Ok(Self { path })
     }
@@ -304,5 +355,88 @@ mod tests {
         cache.clear().unwrap();
         assert_eq!(cache.get("mdi", "home").unwrap(), None);
         assert!(cache.all_sets().unwrap().is_empty());
+    }
+
+    #[test]
+    fn migration_from_old_schema_adds_new_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("icons.db");
+
+        // Create a v0 schema database manually.
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE icons (
+                    prefix     TEXT NOT NULL,
+                    name       TEXT NOT NULL,
+                    body       TEXT NOT NULL,
+                    view_box   TEXT NOT NULL,
+                    width      INTEGER,
+                    height     INTEGER,
+                    fetched_at TEXT NOT NULL,
+                    PRIMARY KEY (prefix, name)
+                );
+                CREATE TABLE sets (
+                    prefix      TEXT PRIMARY KEY,
+                    title       TEXT,
+                    license     TEXT,
+                    fetched_at  TEXT NOT NULL
+                );
+                PRAGMA user_version = 0;
+                "#,
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO icons (prefix, name, body, view_box, width, height, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params!["mdi", "home", "<path/>", "0 0 24 24", 24, 24, "2024-01-01T00:00:00Z"],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sets (prefix, title, license, fetched_at) VALUES (?1, ?2, ?3, ?4)",
+                params!["mdi", "Material Design", "Apache-2.0", "2024-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        }
+
+        // Opening with the new code should migrate transparently.
+        let cache = IconCache::open_at(&path).unwrap();
+
+        // Old icon row should be readable with zero-origin defaults.
+        let body = cache.get("mdi", "home").unwrap().expect("old row readable");
+        assert_eq!(body.body, "<path/>");
+        assert_eq!(body.width, 24);
+        assert_eq!(body.height, 24);
+        assert_eq!(body.left, 0);
+        assert_eq!(body.top, 0);
+
+        // Old set row should be readable with null license extras.
+        let sets = cache.all_sets().unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].prefix, "mdi");
+        assert_eq!(sets[0].license, Some("Apache-2.0".into()));
+        assert_eq!(sets[0].license_title, None);
+        assert_eq!(sets[0].license_url, None);
+
+        // Writes to the new columns should succeed.
+        cache
+            .put("custom", "logo", &IconBody::with_origin("<path/>", 32, 32, 10, 20))
+            .unwrap();
+        let new_body = cache.get("custom", "logo").unwrap().expect("new row readable");
+        assert_eq!(new_body.left, 10);
+        assert_eq!(new_body.top, 20);
+
+        cache
+            .put_set(&SetInfo {
+                prefix: "lucide".into(),
+                title: "Lucide".into(),
+                license: Some("ISC".into()),
+                license_title: Some("ISC License".into()),
+                license_url: Some("https://opensource.org/licenses/ISC".into()),
+            })
+            .unwrap();
+        let new_sets = cache.search_sets("lucide").unwrap();
+        assert_eq!(new_sets[0].license_title, Some("ISC License".into()));
+        assert_eq!(new_sets[0].license_url, Some("https://opensource.org/licenses/ISC".into()));
     }
 }
