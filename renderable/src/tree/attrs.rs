@@ -1274,6 +1274,132 @@ impl BrowserAttrs {
     }
 }
 
+/// Visual kind of a horizontal rule.
+///
+/// A closed set shared by the terminal and browser renderers so the two cannot
+/// silently diverge on which spellings are recognized. Author text is parsed
+/// once at the Darkmatter fold boundary via [`HrKind::from_authored`]; an
+/// unrecognized spelling becomes `None` and the renderer falls back to its
+/// default rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HrKind {
+    Dashes,
+    Dots,
+    Waves,
+    LineStar,
+    LineCircle,
+    InsetLine,
+    CurtainRod,
+}
+
+impl HrKind {
+    /// Returns the canonical kebab-case spelling (the `data-hr-kind` value and
+    /// the serde representation).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HrKind::Dashes => "dashes",
+            HrKind::Dots => "dots",
+            HrKind::Waves => "waves",
+            HrKind::LineStar => "line-star",
+            HrKind::LineCircle => "line-circle",
+            HrKind::InsetLine => "inset-line",
+            HrKind::CurtainRod => "curtain-rod",
+        }
+    }
+
+    /// Parses an authored rule kind, returning `None` for unrecognized text.
+    #[must_use]
+    pub fn from_authored(value: &str) -> Option<Self> {
+        match value {
+            "dashes" => Some(HrKind::Dashes),
+            "dots" => Some(HrKind::Dots),
+            "waves" => Some(HrKind::Waves),
+            "line-star" => Some(HrKind::LineStar),
+            "line-circle" => Some(HrKind::LineCircle),
+            "inset-line" => Some(HrKind::InsetLine),
+            "curtain-rod" => Some(HrKind::CurtainRod),
+            _ => None,
+        }
+    }
+}
+
+/// Visual weight (thickness) of a horizontal rule.
+///
+/// See [`HrKind`] for the shared-enum rationale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HrWeight {
+    Thin,
+    Medium,
+    Thick,
+}
+
+impl HrWeight {
+    /// Returns the canonical lowercase spelling.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HrWeight::Thin => "thin",
+            HrWeight::Medium => "medium",
+            HrWeight::Thick => "thick",
+        }
+    }
+
+    /// Parses an authored weight, returning `None` for unrecognized text.
+    #[must_use]
+    pub fn from_authored(value: &str) -> Option<Self> {
+        match value {
+            "thin" => Some(HrWeight::Thin),
+            "medium" => Some(HrWeight::Medium),
+            "thick" => Some(HrWeight::Thick),
+            _ => None,
+        }
+    }
+}
+
+/// Horizontal placement of a horizontal rule within the content width.
+///
+/// `Full` stretches the rule across the whole width; `Left`/`Center`/`Right`
+/// position a non-full rule. The `"centered"` spelling is accepted as an alias
+/// for [`HrAlignment::Center`]. See [`HrKind`] for the shared-enum rationale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HrAlignment {
+    Full,
+    Left,
+    #[serde(alias = "centered")]
+    Center,
+    Right,
+}
+
+impl HrAlignment {
+    /// Returns the canonical lowercase spelling.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HrAlignment::Full => "full",
+            HrAlignment::Left => "left",
+            HrAlignment::Center => "center",
+            HrAlignment::Right => "right",
+        }
+    }
+
+    /// Parses an authored alignment, accepting `"centered"` as an alias for
+    /// `Center` and returning `None` for unrecognized text.
+    #[must_use]
+    pub fn from_authored(value: &str) -> Option<Self> {
+        match value {
+            "full" => Some(HrAlignment::Full),
+            "left" => Some(HrAlignment::Left),
+            "center" | "centered" => Some(HrAlignment::Center),
+            "right" => Some(HrAlignment::Right),
+            _ => None,
+        }
+    }
+}
+
 /// Typed thematic-break (horizontal-rule) styling for a
 /// [`NodeKind::ThematicBreak`].
 ///
@@ -1284,37 +1410,40 @@ impl BrowserAttrs {
 /// [`NodeAttrs::data`] extension bag keeps the shared renderers free of
 /// first-class extension-hint reads.
 ///
-/// `width` and `color` are free-form CSS-ish strings (e.g. `"80%"`,
-/// `"red-500"`, `"#ff0000"`): the renderers validate them against their own
-/// conservative whitelists before emitting, so the tree stores the authored
-/// value verbatim rather than a pre-parsed dimension or color.
+/// `kind`, `alignment`, and `weight` are closed enums ([`HrKind`],
+/// [`HrAlignment`], [`HrWeight`]) so the terminal and browser folds share one
+/// set of recognized spellings. `width` and `color` remain free-form CSS-ish
+/// strings (e.g. `"80%"`, `"red-500"`, `"#ff0000"`): the renderers validate
+/// them against their own conservative whitelists before emitting, so the tree
+/// stores the authored value verbatim rather than a pre-parsed dimension or
+/// color.
 ///
 /// [`NodeKind::ThematicBreak`]: crate::tree::NodeKind::ThematicBreak
 ///
 /// ## Examples
 ///
 /// ```
-/// use renderable::tree::{NodeAttrs, ThematicBreakAttrs};
+/// use renderable::tree::{HrKind, HrWeight, NodeAttrs, ThematicBreakAttrs};
 ///
 /// let mut attrs = NodeAttrs::default();
 /// attrs.set_thematic_break(&ThematicBreakAttrs {
-///     kind: Some("waves".into()),
-///     weight: Some("thick".into()),
+///     kind: Some(HrKind::Waves),
+///     weight: Some(HrWeight::Thick),
 ///     ..Default::default()
 /// });
-/// assert_eq!(attrs.thematic_break().unwrap().kind.as_deref(), Some("waves"));
+/// assert_eq!(attrs.thematic_break().unwrap().kind, Some(HrKind::Waves));
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThematicBreakAttrs {
-    /// Visual rule kind (e.g. `"dashes"`, `"waves"`, `"line-star"`).
+    /// Visual rule kind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    /// Horizontal alignment of the rule (e.g. `"full"`, `"center"`, `"left"`).
+    pub kind: Option<HrKind>,
+    /// Horizontal alignment of the rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub alignment: Option<String>,
-    /// Visual weight / thickness (`"thin"`, `"medium"`, `"thick"`).
+    pub alignment: Option<HrAlignment>,
+    /// Visual weight / thickness.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub weight: Option<String>,
+    pub weight: Option<HrWeight>,
     /// Rule width as an authored CSS-ish dimension (e.g. `"80%"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<String>,
@@ -2212,11 +2341,11 @@ impl NodeAttrs {
     /// ## Examples
     ///
     /// ```
-    /// use renderable::tree::{NodeAttrs, ThematicBreakAttrs};
+    /// use renderable::tree::{HrAlignment, NodeAttrs, ThematicBreakAttrs};
     ///
     /// let mut attrs = NodeAttrs::default();
     /// attrs.set_thematic_break(&ThematicBreakAttrs {
-    ///     alignment: Some("center".into()),
+    ///     alignment: Some(HrAlignment::Center),
     ///     ..Default::default()
     /// });
     /// assert!(attrs.thematic_break().is_some());

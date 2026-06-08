@@ -31,6 +31,7 @@ use crate::html::HtmlPage;
 use crate::html::attribute::{ClassDefinition, DomId, HtmlDataAttribute};
 use crate::html::tag::{BlockTag, HtmlAttribute, HtmlType, VoidTag};
 use crate::tree::attrs::NodeAttrs;
+use crate::tree::{HrAlignment, HrKind, HrWeight};
 use crate::tree::diagnostic::{Diagnostic, Severity};
 use crate::tree::document::Document;
 use crate::tree::error::{RenderError, RenderStrictness, Rendered};
@@ -554,8 +555,9 @@ impl Writer<'_> {
             }
             GraphicsMode::Vector | GraphicsMode::Rich => {
                 let svg = crate::tree::graphics::horizontal_rule_svg(
-                    hr.and_then(|h| h.kind.as_deref()),
-                    hr.and_then(|h| h.weight.as_deref()),
+                    hr.and_then(|h| h.kind),
+                    hr.and_then(|h| h.weight),
+                    hr.and_then(|h| h.alignment),
                     hr.and_then(|h| h.width.as_deref()),
                     hr.and_then(|h| h.color.as_deref()),
                     "0",
@@ -1955,8 +1957,9 @@ impl StreamWriter<'_> {
             }
             GraphicsMode::Vector | GraphicsMode::Rich => {
                 let svg = crate::tree::graphics::horizontal_rule_svg(
-                    hr.and_then(|h| h.kind.as_deref()),
-                    hr.and_then(|h| h.weight.as_deref()),
+                    hr.and_then(|h| h.kind),
+                    hr.and_then(|h| h.weight),
+                    hr.and_then(|h| h.alignment),
                     hr.and_then(|h| h.width.as_deref()),
                     hr.and_then(|h| h.color.as_deref()),
                     "0",
@@ -2249,9 +2252,9 @@ fn hr_data_attr_pairs(
         return Vec::new();
     };
     [
-        ("kind", hr.kind.as_deref()),
-        ("alignment", hr.alignment.as_deref()),
-        ("weight", hr.weight.as_deref()),
+        ("kind", hr.kind.map(HrKind::as_str)),
+        ("alignment", hr.alignment.map(HrAlignment::as_str)),
+        ("weight", hr.weight.map(HrWeight::as_str)),
         ("width", hr.width.as_deref()),
         ("color", hr.color.as_deref()),
     ]
@@ -3522,11 +3525,11 @@ mod tests {
     /// Vector/Rich those attrs drive an SVG instead.
     #[test]
     fn thematic_break_surfaces_darkmatter_hr_hints_as_data_attrs() {
-        use crate::tree::ThematicBreakAttrs;
+        use crate::tree::{HrKind, HrWeight, ThematicBreakAttrs};
         let mut hr = RenderNode::thematic_break();
         hr.attrs.set_thematic_break(&ThematicBreakAttrs {
-            kind: Some("waves".into()),
-            weight: Some("thick".into()),
+            kind: Some(HrKind::Waves),
+            weight: Some(HrWeight::Thick),
             ..Default::default()
         });
 

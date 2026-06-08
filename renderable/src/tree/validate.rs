@@ -1139,10 +1139,10 @@ mod tests {
 
     #[test]
     fn thematic_break_attrs_on_paragraph_is_an_error() {
-        use crate::tree::ThematicBreakAttrs;
+        use crate::tree::{HrKind, ThematicBreakAttrs};
         let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
         para.attrs.set_thematic_break(&ThematicBreakAttrs {
-            kind: Some("waves".into()),
+            kind: Some(HrKind::Waves),
             ..Default::default()
         });
         let root = RenderNode::root(vec![para]);
@@ -1157,11 +1157,11 @@ mod tests {
 
     #[test]
     fn thematic_break_attrs_on_thematic_break_is_valid() {
-        use crate::tree::ThematicBreakAttrs;
+        use crate::tree::{HrKind, HrWeight, ThematicBreakAttrs};
         let mut hr = RenderNode::thematic_break();
         hr.attrs.set_thematic_break(&ThematicBreakAttrs {
-            kind: Some("waves".into()),
-            weight: Some("thick".into()),
+            kind: Some(HrKind::Waves),
+            weight: Some(HrWeight::Thick),
             ..Default::default()
         });
         let root = RenderNode::root(vec![hr]);
