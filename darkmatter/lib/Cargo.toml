@@ -73,7 +73,7 @@ similar = { version = "2.6", features = ["inline"] }
 quick-xml = "0.39"
 
 # Terminal image rendering and mermaid diagrams (via biscuit-terminal)
-biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 
 # Hashing (for Mermaid diagram caching and markdown TOC)
 biscuit-hash = { path = "../../biscuit-hash/lib" }
