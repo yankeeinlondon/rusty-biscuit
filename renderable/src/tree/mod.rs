@@ -24,6 +24,7 @@
 mod attrs;
 mod diagnostic;
 mod document;
+pub mod embed;
 mod error;
 pub mod graphics;
 mod node;
@@ -37,6 +38,10 @@ pub use attrs::{
     TableColumnHints, TableTerminalHints, TaskHints, TaskState,
 };
 pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
+pub use embed::{
+    EMBED_CLOSE, EMBED_MARKER_SUFFIX, EMBED_OPEN_PREFIX, EmbedError, decode_embedded_open,
+    encode_embedded_subtree, is_embedded_close,
+};
 pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
 pub use error::{RenderError, RenderStrictness, Rendered};
 pub use graphics::horizontal_rule_svg;
