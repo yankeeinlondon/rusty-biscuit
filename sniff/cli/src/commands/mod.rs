@@ -21,10 +21,7 @@ use std::fmt::Write as FmtWrite;
 mod remote;
 mod repo;
 
-use remote::{
-    commit_url_from_repo, handle_pr_command, handle_remote_url, handle_shorthand,
-    resolve_origin_or_first_remote, resolve_remote_name,
-};
+use remote::{handle_pr_command, handle_remote_url, handle_shorthand};
 use repo::{
     RepoPackageAreasArgs, RepoPackagesArgs, handle_file_list_command, handle_repo_package_areas,
     handle_repo_packages,
@@ -189,12 +186,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
             let docs_filter = cmd.docs_filter();
 
-            let repo = git2::Repository::discover(&base)
-                .map_err(|e| format!("Not a git repository: {}", e))?;
-            let repo_root = repo
-                .workdir()
-                .ok_or("Bare repository not supported")?
-                .to_path_buf();
+            let repo_root = sniff::filesystem::repo_root(&base)?.ok_or("Not a git repository")?;
 
             let has_area_filter = !docs_filter.package_area.is_empty();
             let has_pkg_filter = !docs_filter.package.is_empty();
@@ -411,12 +403,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 output::print_json_value(json_val, perf.build_report().as_ref());
             } else {
                 // Extract document paths and render
-                let repo = git2::Repository::discover(&base)
-                    .map_err(|e| format!("Not a git repository: {}", e))?;
-                let repo_root = repo
-                    .workdir()
-                    .ok_or("Bare repository not supported")?
-                    .to_path_buf();
+                let repo_root =
+                    sniff::filesystem::repo_root(&base)?.ok_or("Not a git repository")?;
 
                 let doc_paths: Vec<std::path::PathBuf> = matched_docs
                     .iter()
@@ -483,9 +471,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         let dir = base_dir
                             .as_deref()
                             .unwrap_or_else(|| std::path::Path::new("."));
-                        let repo = git2::Repository::discover(dir)
-                            .map_err(|_| "No git repository found — provide a REMOTE argument or run from inside a git repo".to_string())?;
-                        resolve_origin_or_first_remote(&repo).ok_or(
+                        sniff::filesystem::preferred_remote_url(dir)?.ok_or(
                             "No git remotes found for this repository — provide a REMOTE argument",
                         )?
                     }
@@ -497,13 +483,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     return handle_shorthand(&remote, cli.json, cli.plain, cli.verbose, &perf)
                         .await;
                 } else {
-                    let url =
-                        resolve_remote_name(&remote, base_dir.as_deref()).ok_or_else(|| {
-                            format!(
-                                "Could not find remote '{}' in the current repository",
-                                remote
-                            )
-                        })?;
+                    let dir = base_dir
+                        .as_deref()
+                        .unwrap_or_else(|| std::path::Path::new("."));
+                    let url = sniff::filesystem::remote_url(dir, &remote)?.ok_or_else(|| {
+                        format!(
+                            "Could not find remote '{}' in the current repository",
+                            remote
+                        )
+                    })?;
                     return handle_remote_url(&url, cli.json, cli.plain, cli.verbose, &perf).await;
                 }
             }
@@ -524,11 +512,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
-                let repo = git2::Repository::discover(dir)
-                    .map_err(|e| format!("Not a git repository: {}", e))?;
-                let commit = sniff::filesystem::get_commit_by_sha(&repo, sha)
+                if sniff::filesystem::repo_root(dir)?.is_none() {
+                    return Err(format!("Not a git repository: {}", dir.display()).into());
+                }
+                let commit = sniff::filesystem::commit_by_sha_at(dir, sha)?
                     .ok_or_else(|| format!("Commit not found: {}", sha))?;
-                let files = sniff::filesystem::get_commit_files(&repo, &commit.sha);
+                let files = sniff::filesystem::commit_files_at(dir, &commit.sha)?;
 
                 if cli.json {
                     let json = serde_json::json!({
@@ -540,7 +529,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     });
                     output::print_json_value(json, perf.build_report().as_ref());
                 } else {
-                    let commit_url = commit_url_from_repo(&repo, &commit.sha);
+                    let commit_url = sniff::filesystem::commit_browser_url(dir, &commit.sha)?;
                     output::emit_text(
                         &output::render_hash_section(
                             &commit,
@@ -639,28 +628,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
-                let repo = match git2::Repository::discover(dir) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        if cli.json {
-                            let json = serde_json::json!({ "root": "" });
-                            output::print_json_value(json, perf.build_report().as_ref());
-                            std::process::exit(1);
-                        }
-                        return Err(format!("Not a git repository: {}", e).into());
-                    }
-                };
-                let Some(workdir) = repo.workdir() else {
+                let Some(workdir) = sniff::filesystem::repo_root(dir)? else {
                     if cli.json {
                         let json = serde_json::json!({ "root": "" });
                         output::print_json_value(json, perf.build_report().as_ref());
                         std::process::exit(1);
                     }
-                    perf.emit_stderr(None);
-                    std::process::exit(1);
+                    return Err(format!("Not a git repository: {}", dir.display()).into());
                 };
-                // git2's workdir() yields a trailing separator; collecting
-                // components drops it so downstream consumers get a clean path.
+                // Normalize by collecting components so the rendered path has no
+                // trailing separator, matching the prior output contract.
                 let workdir: std::path::PathBuf = workdir.components().collect();
                 if cli.json {
                     let json = serde_json::json!({
@@ -677,9 +654,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
-                let repo = git2::Repository::discover(dir)
-                    .map_err(|e| format!("Not a git repository: {}", e))?;
-                let conflicted = sniff::filesystem::git::detect_merge_conflicts(&repo);
+                if sniff::filesystem::repo_root(dir)?.is_none() {
+                    return Err(format!("Not a git repository: {}", dir.display()).into());
+                }
+                let conflicted = sniff::filesystem::merge_conflicts_at(dir)?;
                 let has_conflict = !conflicted.is_empty();
                 // Verbose conflict listing goes to stderr in BOTH json and
                 // text modes — it's diagnostic, not part of the contract
@@ -750,9 +728,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return handle_no_results(*no_error, on_error, cli.plain, &perf);
             }
-            crate::args::RepoAction::Worktrees {
-                md, list, csv, ..
-            } => {
+            crate::args::RepoAction::Worktrees { md, list, csv, .. } => {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
@@ -1098,9 +1074,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let dir = base_dir
             .as_deref()
             .unwrap_or_else(|| std::path::Path::new("."));
-        if let Ok(repo) = git2::Repository::discover(dir) {
+        {
             let scoped_commits =
-                sniff::filesystem::get_commits_for_path(&repo, path_prefix, history_count);
+                sniff::filesystem::commits_for_path_at(dir, path_prefix, history_count)?;
             if let Some(ref mut git) = filesystem.git {
                 git.recent = scoped_commits;
 
@@ -1173,10 +1149,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let dir = base_dir
                 .as_deref()
                 .unwrap_or_else(|| std::path::Path::new("."));
-            if let Ok(repo) = git2::Repository::discover(dir) {
-                git.recent =
-                    sniff::filesystem::get_commits_for_branch(&repo, &branch_name, history_count);
-            }
+            git.recent =
+                sniff::filesystem::commits_for_branch_at(dir, &branch_name, history_count)?;
 
             // Working-tree state belongs to the currently checked-out branch,
             // not the one being inspected — clear it so the output doesn't

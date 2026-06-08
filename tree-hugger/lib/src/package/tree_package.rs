@@ -78,11 +78,10 @@ impl TreePackage {
             // dominant language as the package's primary language.
             None => {
                 let files = collect_supported_files(&root_dir, &config.ignores)?;
-                let language = dominant_language(&files).ok_or_else(|| {
-                    TreeHuggerError::NoSourceFiles {
+                let language =
+                    dominant_language(&files).ok_or_else(|| TreeHuggerError::NoSourceFiles {
                         path: root_dir.clone(),
-                    }
-                })?;
+                    })?;
                 (language, files)
             }
         };

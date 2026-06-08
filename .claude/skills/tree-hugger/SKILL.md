@@ -34,12 +34,16 @@ Rust, TypeScript, JavaScript, Go, Python, Java, C#, C, C++, Swift, Scala, PHP, P
 | `lint --allow <rule>` | Demote rule to info |
 | `lint --strict` | Promote all warnings to errors |
 | `lint --experimental-semantics` | Enable experimental semantic rules |
+| `god-files [DIR]` | Identify oversized source files ripe for refactoring |
+| `god-files --high-risk` | Show only high-risk files |
 | `completions` | Generate shell completions (Bash, Zsh, Fish, PowerShell) |
 
 ### Library API (`TreeFile`)
 
 ```rust
 let file = TreeFile::new("src/lib.rs")?;
+file.source();              // Source text of the parsed file
+file.comment_ranges()?;     // Byte ranges of comment nodes
 file.symbols()?;            // All symbols
 file.symbol_records()?;     // v2 parse records
 file.symbol_index_v2()?;    // v2 parse->bind->semantic->docs pipeline output

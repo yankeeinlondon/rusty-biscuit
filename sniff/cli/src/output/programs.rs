@@ -629,12 +629,7 @@ pub fn build_programs_json(
             // Run all 8 categories concurrently. Nested rayon::join cooperates
             // with the inner par_iter calls via the shared thread pool.
             let ((editors, utilities), (lang_pms, os_pms)) = rayon::join(
-                || {
-                    rayon::join(
-                        || json_editors(programs),
-                        || json_utilities(programs),
-                    )
-                },
+                || rayon::join(|| json_editors(programs), || json_utilities(programs)),
                 || {
                     rayon::join(
                         || json_language_package_managers(programs),

@@ -679,7 +679,10 @@ mod github_tests {
             .mount(&server)
             .await;
 
-        let report = remote.fetch_report("test-owner", "test-repo").await.unwrap();
+        let report = remote
+            .fetch_report("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         // Run-shaped entries (started_at populated) rather than presence detection.
         assert_eq!(report.ci_cd.len(), 2);

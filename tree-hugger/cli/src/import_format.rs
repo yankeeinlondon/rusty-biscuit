@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, HashSet};
 
 use tree_hugger::{ImportSymbol, ProgrammingLanguage};
 
-
 pub(crate) fn group_imports(imports: &[ImportSymbol]) -> Vec<Vec<&ImportSymbol>> {
     let mut groups: BTreeMap<(usize, usize), Vec<&ImportSymbol>> = BTreeMap::new();
     for import in imports {
