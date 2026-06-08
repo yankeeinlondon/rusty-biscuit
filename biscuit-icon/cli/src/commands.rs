@@ -57,28 +57,29 @@ async fn icons(filter: Option<String>, from: Option<String>, nerd: bool) -> Resu
         }
     }
 
-    if offline.is_empty() {
-        // No offline matches: extend from the online catalog and cache results.
-        let client = IconifyClient::new();
-        match client.search_icons(&needle, Some(ONLINE_ICON_LIMIT)).await {
-            Ok(hits) => {
-                let hits: Vec<_> = hits
-                    .into_iter()
-                    .filter(|id| catalog_allowed_prefix(id, &allowed))
-                    .collect();
-                if hits.is_empty() {
-                    return Err(eyre!(
-                        "no icons match {needle:?}; try `icon <prefix:name>` to fetch directly"
-                    ));
-                }
-                for id in hits {
-                    match Icon::iconify(&id).await {
-                        Ok(icon) => println!("{}  {id}", render_icon(&icon, &term, nerd)),
-                        Err(err) => eprintln!("{id}: {err}"),
-                    }
+    // Always attempt online search and merge with offline results.
+    let client = IconifyClient::new();
+    match client.search_icons(&needle, Some(ONLINE_ICON_LIMIT)).await {
+        Ok(hits) => {
+            let seen: std::collections::HashSet<_> = offline.iter().cloned().collect();
+            let new_hits: Vec<_> = hits
+                .into_iter()
+                .filter(|id| catalog_allowed_prefix(id, &allowed) && !seen.contains(id))
+                .collect();
+            if offline.is_empty() && new_hits.is_empty() {
+                return Err(eyre!(
+                    "no icons match {needle:?}; try `icon <prefix:name>` to fetch directly"
+                ));
+            }
+            for id in new_hits {
+                match Icon::iconify(&id).await {
+                    Ok(icon) => println!("{}  {id}", render_icon(&icon, &term, nerd)),
+                    Err(err) => eprintln!("{id}: {err}"),
                 }
             }
-            Err(err) => {
+        }
+        Err(err) => {
+            if offline.is_empty() {
                 return Err(eyre!(
                     "no offline icons match {needle:?} and the online catalog is unavailable: {err}"
                 ));
@@ -113,7 +114,21 @@ async fn sets(filter: Option<String>) -> Result<()> {
                             Some(l.spdx.clone())
                         }
                     });
-                    let info = SetInfo { prefix: prefix.clone(), title: title.clone(), license: license_str };
+                    let license_title = license.as_ref().and_then(|l| {
+                        if l.title.is_empty() {
+                            None
+                        } else {
+                            Some(l.title.clone())
+                        }
+                    });
+                    let license_url = license.as_ref().and_then(|l| l.url.clone());
+                    let info = SetInfo {
+                        prefix: prefix.clone(),
+                        title: title.clone(),
+                        license: license_str,
+                        license_title,
+                        license_url,
+                    };
                     if let Err(err) = cache.put_set(&info) {
                         tracing::warn!("failed to cache set metadata for {prefix}: {err}");
                     }

@@ -156,6 +156,8 @@ fn completions_dynamic_includes_set_names() {
                 prefix: "ic-custom".into(),
                 title: "Custom Set".into(),
                 license: Some("MIT".into()),
+                license_title: None,
+                license_url: None,
             })
             .unwrap();
     }
@@ -197,6 +199,8 @@ fn completions_dynamic_from_csv_completes_active_segment() {
                 prefix: "ic-custom".into(),
                 title: "Custom Set".into(),
                 license: Some("MIT".into()),
+                license_title: None,
+                license_url: None,
             })
             .unwrap();
     }
@@ -237,6 +241,8 @@ fn completions_dynamic_default_command_from_csv_completes_active_segment() {
                 prefix: "ic-custom".into(),
                 title: "Custom Set".into(),
                 license: Some("MIT".into()),
+                license_title: None,
+                license_url: None,
             })
             .unwrap();
     }
