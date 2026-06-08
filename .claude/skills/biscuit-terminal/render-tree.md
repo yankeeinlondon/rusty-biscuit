@@ -53,12 +53,17 @@ implement `TreeRenderable`, `MarkdownRenderable`, `BrowserRenderable`, and
 `TerminalRenderable::render_tree_node`, with `render_tree_node` delegating to
 the same private projection helper as `TreeRenderable::render_tree`.
 
-Stage 3 closed the structural projection gap for nested components:
-`BlockQuote`, `StatusBlock`, and `FileSystem` now provide `render_tree_node`
+The structural projection gap for nested components is closed:
+`BlockQuote`, `StatusBlock`, and `FileSystem` provide `render_tree_node`
 overrides, and containers project migrated children structurally instead of
-falling back to ANSI-stripped text. `FileSystem::render` still uses its
-bespoke terminal path; that terminal flip is deferred to Stage 4 pending
-connector-list `Style` lowering and icon-name spacing parity.
+falling back to ANSI-stripped text. The connector-list per-item `Style` lowering
+gap is closed too (`render_tree_connector_list` applies each list item's
+`Paragraph` `Style`), so `FileSystem`'s terminal styling is at parity.
+`FileSystem::render` still uses its bespoke terminal path: that flip stays
+**deferred as an accepted specialization** — the target-agnostic projection emits
+portable Unicode icons and cannot reproduce the bespoke Nerd Font terminal icons.
+`FileSystem` is off the darkmatter production path, so this is not a blocker (CSS
+Box Architecture closeout disposition; see its `component-assessment.md`).
 
 The **projection layer** (`render_tree::projection`) converts
 `RenderableTerminalContent` into tree nodes:

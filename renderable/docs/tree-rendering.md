@@ -46,6 +46,13 @@ without a dependency cycle. The whole surface is `serde`-serializable to its own
 documented JSON format (it is *our* IR, not the parser's AST — it is not
 MDAST-compatible), which makes snapshotting, inspection, and tooling easy.
 
+> **Serde contract: same-version only.** The render-tree JSON is debug,
+> inspection, and same-process persistence output — not a promised cross-version
+> durable format. Typed sparse attrs (`layout`, `style`, `text_layout`,
+> `browser`, …) may add, rename, or re-shape fields between versions; default
+> values are elided, so an alpha-less tree still serializes as it did before
+> alpha paint existed. Round-trip a tree only with the version that wrote it.
+
 Three types form the model:
 
 - **`RenderNode { kind, span, attrs }`** — the node envelope.
@@ -238,6 +245,16 @@ have been removed.
 
 A few responsibilities sit deliberately **outside** the fold:
 
+- **The `DarkmatterPage` page frame** is the one documented exception to
+  "everything is the tree." It is a slim **viewport-level assembler** that wraps
+  the folded target output: terminal/page width, outer page margin/padding,
+  full-page background, max-width centering, `PageBackground::Pronounced`
+  code-theme contrast, and (for the browser) page-wrapper metadata and
+  stylesheet assembly. The closeout audit signed this off as **Option A** — the
+  frame carries **no** component policy, inspects **no** component node kinds,
+  and mutates **no** component content; it operates on the already-folded output
+  string / wrapper, never on the `RenderNode` tree. (See
+  `renderable/features/_completed/2026-06-06-tree-closeout/traversal-inventory.md`.)
 - **Frontmatter** is extracted by darkmatter and attached to the `Document`'s
   metadata above the fold — the fold does not re-parse YAML.
 - **`style:` frontmatter** is a darkmatter policy layer that applies page and

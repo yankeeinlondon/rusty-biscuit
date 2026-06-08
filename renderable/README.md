@@ -272,10 +272,12 @@ Word-wrapping strategies for text rendering.
 
 ## Migrating a Component to the Render Tree IR
 
-See [`docs/migrate-component-to-ir.md`](./docs/migrate-component-to-ir.md) for
-the canonical recipe — both the flip-from-bespoke (Variant A) and
-born-on-the-tree (Variant B) paths, escape-hatch rules, and the
-documentation-update obligations a migration carries with it.
+The document render pipeline is tree-native and the CSS Box Architecture
+migration is complete, so the prescriptive flip-guide that once lived here is
+retired. For the conceptual model — producers, the fold, and the
+one-fold-per-target contract — see [`docs/tree-rendering.md`](./docs/tree-rendering.md);
+for each component's current IR state and any remaining per-component `render()`
+work, see the IR State column in [`docs/components.md`](./docs/components.md).
 
 ## Usage
 

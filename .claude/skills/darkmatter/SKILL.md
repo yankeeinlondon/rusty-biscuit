@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 751ea2392b8b3231-435f290eb5c8feaa
+hash: 751ea2392b8b3231-84985c1573d91f23
 last_updated: 2026-06-07
 ---
 
@@ -198,4 +198,10 @@ the `biscuit-terminal` skill for terminal tree rendering.
   malformed fenced code-block directive remains a fatal
   `MarkdownError::InvalidLineRange` via the `validate_code_directives` preflight
   the HTML entry points run over the folded tree. `DarkmatterPage` survives as a
-  slim, renderable-typed page frame.
+  slim, renderable-typed page frame — the constrained **Option A** boundary
+  signed off by the CSS Box Architecture closeout
+  (`_completed/2026-06-06-tree-closeout`): a viewport-level assembler (page
+  width/margin/padding, full-page background, max-width centering,
+  `PageBackground::Pronounced` code-theme contrast, browser page-wrapper metadata
+  + stylesheet assembly) that wraps the *folded output*, carrying no component
+  policy, inspecting no component node kinds, and mutating no component content.

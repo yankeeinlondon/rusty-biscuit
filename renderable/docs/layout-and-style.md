@@ -229,12 +229,18 @@ Known gaps and loose ends:
   directly. The field is retained for API shape; remove it or wire a consumer.
 - **Terminal `max_width` caps the content box and the capped box is
   block-placed** (see §4) — symmetric with the browser, not a no-op.
-- **darkmatter's `LayoutContext` page-frame pass is retained.** `DarkmatterPage`
-  now builds a `renderable::layout::Layout` (see §7) and the document body
-  renders through the tree terminal renderer, but `apply_row_decoration` still
-  runs as the page-frame **post-pass** that wraps the rendered body in page-level
-  margins, padding, and background. This is a complementary step (page frame vs.
-  body content), not a "not yet on the tree" fallback.
+- **darkmatter's `LayoutContext` page-frame pass is retained — by decision, not
+  omission.** `DarkmatterPage` builds a `renderable::layout::Layout` (see §7) and
+  the document body renders through the tree terminal renderer, but
+  `apply_row_decoration` still runs as the page-frame **post-pass** that wraps the
+  rendered body in page-level margins, padding, and background. The closeout
+  audit signed this off as the constrained **Option A** slim page frame: it is a
+  viewport-level assembler operating on the *folded output*, carrying no
+  component policy, inspecting no component node kinds, and mutating no component
+  content (pinned by `page_frame_chrome_ignores_component_policy_content` and
+  `page_frame_vertical_margin_only_wraps_component_body`). This is a complementary
+  step (page frame vs. body content), not a "not yet on the tree" fallback. See
+  `renderable/features/_completed/2026-06-06-tree-closeout/traversal-inventory.md`.
 - **Drift is recorded, not eliminated.** The `render_comparison` `KNOWN_DRIFT`
   ledgers carry the tree-vs-bespoke divergences. Some entries are the tree path
   being *more* correct than the legacy bespoke renderer (e.g. applying vertical
