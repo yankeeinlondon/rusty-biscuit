@@ -34,6 +34,17 @@ leak-timeout = { period = "100ms", result = "fail" }
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# Headless-browser tests (`test(/browser_/)`) drive a real Chromium child whose
+# teardown is asynchronous: chromiumoxide kills the child via `kill_on_drop`,
+# but the OS reaping that closes its stdio pipes happens in the background and,
+# under heavy parallel load, routinely exceeds the default 100ms leak grace —
+# producing spurious `LEAK` failures even though every test exits cleanly (code
+# 0). Give the browser tier a longer leak grace; this only waits when a leak is
+# actually pending, so clean teardowns are not slowed.
+[[profile.default.overrides]]
+filter = 'test(/browser_/)'
+leak-timeout = { period = "3s", result = "fail" }
+
 [profile.ci]
 # Same behavior for CI environment
 retries = 3
@@ -47,3 +58,9 @@ junit = { path = "test-results.xml" }
 [[profile.ci.overrides]]
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
+
+# See the default-profile note above: headless-browser child teardown is async
+# and exceeds the 100ms grace under load.
+[[profile.ci.overrides]]
+filter = 'test(/browser_/)'
+leak-timeout = { period = "3s", result = "fail" }
