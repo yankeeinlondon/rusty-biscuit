@@ -37,7 +37,7 @@
 ///
 /// The emitted SVG is passed through unescaped (the browser renderer treats it
 /// as raw HTML). `width` and `color` can originate from untrusted document
-/// `darkmatter.hr.*` hints, so they are whitelist-validated by
+/// thematic-break styling, so they are whitelist-validated by
 /// [`is_safe_css_dimension`] / [`is_safe_css_color`] before interpolation. The
 /// accepted character sets contain none of `"`, `'`, `<`, `>`, or `;`, so a
 /// validated value cannot break out of the SVG `width` attribute, the inline

@@ -30,7 +30,7 @@ use crate::browser::fragment::{BrowserFragment, ComposableNode, Ready, write_att
 use crate::html::HtmlPage;
 use crate::html::attribute::{ClassDefinition, DomId, HtmlDataAttribute};
 use crate::html::tag::{BlockTag, HtmlAttribute, HtmlType, VoidTag};
-use crate::tree::attrs::{HintNamespace, NodeAttrs};
+use crate::tree::attrs::NodeAttrs;
 use crate::tree::diagnostic::{Diagnostic, Severity};
 use crate::tree::document::Document;
 use crate::tree::error::{RenderError, RenderStrictness, Rendered};
@@ -527,43 +527,37 @@ impl Writer<'_> {
     /// Builds the `<hr>` or styled SVG for a [`NodeKind::ThematicBreak`].
     ///
     /// Under [`GraphicsMode::Off`] the node degrades to a plain `<hr>`
-    /// carrying any `darkmatter.hr.*` hints as `data-hr-*` attributes so the
-    /// styled rule is still user-observable. Under [`GraphicsMode::Vector`]
-    /// and [`GraphicsMode::Rich`] the hints drive an inline SVG whose
+    /// carrying any typed [`ThematicBreakAttrs`] as `data-hr-*` attributes so
+    /// the styled rule is still user-observable. Under [`GraphicsMode::Vector`]
+    /// and [`GraphicsMode::Rich`] those attrs drive an inline SVG whose
     /// primitives reference CSS custom properties (`--hr-weight`,
     /// `--hr-color`, `--hr-width`) so page-level overrides take effect.
+    ///
+    /// [`ThematicBreakAttrs`]: crate::tree::ThematicBreakAttrs
     fn render_thematic_break(&self, attrs: &NodeAttrs) -> BrowserFragment<Ready> {
         use crate::tree::GraphicsMode;
 
+        let hr = attrs.thematic_break_ref();
         match self.opts.graphics_mode {
             GraphicsMode::Off => {
                 let mut fragment = BrowserFragment::new().define_as_void_tag(VoidTag::Hr);
                 for attr in node_attributes(attrs, is_inline_void_tag(&VoidTag::Hr)) {
                     fragment = fragment.add_attribute(attr);
                 }
-                const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-                for key in ["kind", "alignment", "weight", "width", "color"] {
-                    if let Some(value) = attrs.get_hint(HR_NS, key).and_then(|v| v.as_str()) {
-                        fragment = fragment.add_attribute(HtmlAttribute::Data(
-                            HtmlDataAttribute::new(format!("hr-{key}")),
-                            value.to_string(),
-                        ));
-                    }
+                for (key, value) in hr_data_attr_pairs(hr) {
+                    fragment = fragment.add_attribute(HtmlAttribute::Data(
+                        HtmlDataAttribute::new(format!("hr-{key}")),
+                        value.to_string(),
+                    ));
                 }
                 fragment.finalize()
             }
             GraphicsMode::Vector | GraphicsMode::Rich => {
-                const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-                let style = attrs.get_hint(HR_NS, "kind").and_then(|v| v.as_str());
-                let weight = attrs.get_hint(HR_NS, "weight").and_then(|v| v.as_str());
-                let width = attrs.get_hint(HR_NS, "width").and_then(|v| v.as_str());
-                let color = attrs.get_hint(HR_NS, "color").and_then(|v| v.as_str());
-
                 let svg = crate::tree::graphics::horizontal_rule_svg(
-                    style,
-                    weight,
-                    width,
-                    color,
+                    hr.and_then(|h| h.kind.as_deref()),
+                    hr.and_then(|h| h.weight.as_deref()),
+                    hr.and_then(|h| h.width.as_deref()),
+                    hr.and_then(|h| h.color.as_deref()),
                     "0",
                     "0",
                 );
@@ -1947,28 +1941,26 @@ impl StreamWriter<'_> {
     fn write_thematic_break(&mut self, attrs: &NodeAttrs) {
         use crate::tree::GraphicsMode;
 
+        let hr = attrs.thematic_break_ref();
         match self.opts.graphics_mode {
             GraphicsMode::Off => {
                 let mut out = node_attributes(attrs, is_inline_void_tag(&VoidTag::Hr));
-                const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-                for key in ["kind", "alignment", "weight", "width", "color"] {
-                    if let Some(value) = attrs.get_hint(HR_NS, key).and_then(|v| v.as_str()) {
-                        out.push(HtmlAttribute::Data(
-                            HtmlDataAttribute::new(format!("hr-{key}")),
-                            value.to_string(),
-                        ));
-                    }
+                for (key, value) in hr_data_attr_pairs(hr) {
+                    out.push(HtmlAttribute::Data(
+                        HtmlDataAttribute::new(format!("hr-{key}")),
+                        value.to_string(),
+                    ));
                 }
                 self.write_void_tag(&VoidTag::Hr, &out);
             }
             GraphicsMode::Vector | GraphicsMode::Rich => {
-                const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-                let style = attrs.get_hint(HR_NS, "kind").and_then(|v| v.as_str());
-                let weight = attrs.get_hint(HR_NS, "weight").and_then(|v| v.as_str());
-                let width = attrs.get_hint(HR_NS, "width").and_then(|v| v.as_str());
-                let color = attrs.get_hint(HR_NS, "color").and_then(|v| v.as_str());
                 let svg = crate::tree::graphics::horizontal_rule_svg(
-                    style, weight, width, color, "0", "0",
+                    hr.and_then(|h| h.kind.as_deref()),
+                    hr.and_then(|h| h.weight.as_deref()),
+                    hr.and_then(|h| h.width.as_deref()),
+                    hr.and_then(|h| h.color.as_deref()),
+                    "0",
+                    "0",
                 );
                 self.buf.push_str(&svg);
             }
@@ -2245,6 +2237,27 @@ fn is_inline_block_tag(tag: &BlockTag) -> bool {
 /// Returns `true` for [`VoidTag`] variants that represent inline elements.
 fn is_inline_void_tag(tag: &VoidTag) -> bool {
     matches!(tag, VoidTag::Br | VoidTag::Img)
+}
+
+/// Collects the set `(suffix, value)` pairs for a thematic break's `data-hr-*`
+/// degradation attributes, in a fixed key order shared by the fragment and
+/// streaming HR paths so both emit byte-identical `<hr>` output.
+fn hr_data_attr_pairs(
+    hr: Option<&crate::tree::ThematicBreakAttrs>,
+) -> Vec<(&'static str, &str)> {
+    let Some(hr) = hr else {
+        return Vec::new();
+    };
+    [
+        ("kind", hr.kind.as_deref()),
+        ("alignment", hr.alignment.as_deref()),
+        ("weight", hr.weight.as_deref()),
+        ("width", hr.width.as_deref()),
+        ("color", hr.color.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(key, value)| value.map(|v| (key, v)))
+    .collect()
 }
 
 /// Translates a node's [`NodeAttrs`] into HTML attributes: `id` to the `id`
@@ -3503,15 +3516,19 @@ mod tests {
     }
 
     /// Review-4 finding 2: under GraphicsMode::Off a `<hr>` produced from
-    /// darkmatter's HR-attribute fold must surface its `darkmatter.hr.*`
-    /// hints as `data-hr-*` HTML attributes so the styled rule is still
-    /// user-observable. Under Vector/Rich the hints drive an SVG instead.
+    /// darkmatter's HR-attribute fold must surface its typed
+    /// [`ThematicBreakAttrs`](crate::tree::ThematicBreakAttrs) as `data-hr-*`
+    /// HTML attributes so the styled rule is still user-observable. Under
+    /// Vector/Rich those attrs drive an SVG instead.
     #[test]
     fn thematic_break_surfaces_darkmatter_hr_hints_as_data_attrs() {
+        use crate::tree::ThematicBreakAttrs;
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
-        hr.attrs.set_hint(ns, "weight", serde_json::json!("thick"));
+        hr.attrs.set_thematic_break(&ThematicBreakAttrs {
+            kind: Some("waves".into()),
+            weight: Some("thick".into()),
+            ..Default::default()
+        });
 
         let off = html_with_graphics_mode(&hr, crate::tree::GraphicsMode::Off);
         assert!(

@@ -12,14 +12,14 @@ use thiserror::Error;
 /// Namespaces provide a structured way to organize hints without key collisions.
 /// The full key is constructed as `"{namespace}.{key}"`.
 ///
-/// The `data` bag is **extension-only**: it carries package-local namespaces
-/// such as `darkmatter.hr.*`. First-class renderable presentation —
-/// layout, style, and the per-component hints — lives in typed
-/// [`NodeAttrs`] fields, and the validator rejects stale `renderable.*` keys in
-/// `data`. Use a custom namespace such as `HintNamespace("myapp.custom")` for
-/// your own hints. The `renderable.*` constants below are retained only for
-/// compatibility and testing; do not route new first-class attributes through
-/// them.
+/// The `data` bag is **extension-only**: it carries opaque package-local
+/// namespaces such as a custom `myapp.custom.*`. First-class renderable
+/// presentation — layout, style, the per-component hints, and thematic-break
+/// styling — lives in typed [`NodeAttrs`] fields, and the validator rejects
+/// stale `renderable.*` keys in `data`. Use a custom namespace such as
+/// `HintNamespace("myapp.custom")` for your own hints. The `renderable.*`
+/// constants below are retained only for compatibility and testing; do not
+/// route new first-class attributes through them.
 ///
 /// ## Examples
 ///
@@ -1274,6 +1274,70 @@ impl BrowserAttrs {
     }
 }
 
+/// Typed thematic-break (horizontal-rule) styling for a
+/// [`NodeKind::ThematicBreak`].
+///
+/// Attaches to a node as the sparse [`NodeAttrs::thematic_break`] field and is
+/// the terminal and browser renderers' single typed source for HR appearance:
+/// the rule `kind`, `alignment`, `weight`, `width`, and `color` Darkmatter's
+/// HR-attribute fold authors. Carrying these in a typed field instead of the
+/// [`NodeAttrs::data`] extension bag keeps the shared renderers free of
+/// first-class extension-hint reads.
+///
+/// `width` and `color` are free-form CSS-ish strings (e.g. `"80%"`,
+/// `"red-500"`, `"#ff0000"`): the renderers validate them against their own
+/// conservative whitelists before emitting, so the tree stores the authored
+/// value verbatim rather than a pre-parsed dimension or color.
+///
+/// [`NodeKind::ThematicBreak`]: crate::tree::NodeKind::ThematicBreak
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::{NodeAttrs, ThematicBreakAttrs};
+///
+/// let mut attrs = NodeAttrs::default();
+/// attrs.set_thematic_break(&ThematicBreakAttrs {
+///     kind: Some("waves".into()),
+///     weight: Some("thick".into()),
+///     ..Default::default()
+/// });
+/// assert_eq!(attrs.thematic_break().unwrap().kind.as_deref(), Some("waves"));
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThematicBreakAttrs {
+    /// Visual rule kind (e.g. `"dashes"`, `"waves"`, `"line-star"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Horizontal alignment of the rule (e.g. `"full"`, `"center"`, `"left"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alignment: Option<String>,
+    /// Visual weight / thickness (`"thin"`, `"medium"`, `"thick"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<String>,
+    /// Rule width as an authored CSS-ish dimension (e.g. `"80%"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<String>,
+    /// Rule color as an authored color spelling (e.g. `"red-500"`, `"#ff0000"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
+impl ThematicBreakAttrs {
+    /// Returns `true` when no thematic-break attribute is set.
+    ///
+    /// Used as the sparsity predicate by
+    /// [`NodeAttrs::retain_non_default_thematic_break`].
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.kind.is_none()
+            && self.alignment.is_none()
+            && self.weight.is_none()
+            && self.width.is_none()
+            && self.color.is_none()
+    }
+}
+
 /// Optional presentational attributes carried by every render node.
 ///
 /// All fields are optional; the [`Default`] value is an empty set of
@@ -1281,7 +1345,7 @@ impl BrowserAttrs {
 /// `browser`, the two hot per-node hints (`sequence_join`,
 /// `list_marker_policy`), and the per-kind `component` hint group — lives in
 /// typed sparse fields, so reads cost no serde round-trip. `data` carries only
-/// package-local extension namespaces (e.g. `darkmatter.hr.*`).
+/// opaque package-local extension namespaces (e.g. a custom `myapp.custom.*`).
 ///
 /// ## Examples
 ///
@@ -1327,8 +1391,13 @@ pub struct NodeAttrs {
     /// Typed browser-target attributes, when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<Box<BrowserAttrs>>,
-    /// Extension-namespace structured data keyed by name (e.g.
-    /// `darkmatter.hr.*`). Not used for first-class `renderable.*` hints.
+    /// Typed thematic-break (horizontal-rule) styling; valid only on a
+    /// [`NodeKind::ThematicBreak`](crate::tree::NodeKind::ThematicBreak) node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thematic_break: Option<Box<ThematicBreakAttrs>>,
+    /// Extension-namespace structured data keyed by name. Carries only opaque
+    /// package-local hints (e.g. a custom `myapp.custom.*` namespace), not
+    /// first-class `renderable.*` presentation.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub data: BTreeMap<String, serde_json::Value>,
 }
@@ -2137,6 +2206,71 @@ impl NodeAttrs {
         }
     }
 
+    /// Stores [`ThematicBreakAttrs`] as the typed
+    /// [`NodeAttrs::thematic_break`] field.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{NodeAttrs, ThematicBreakAttrs};
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_thematic_break(&ThematicBreakAttrs {
+    ///     alignment: Some("center".into()),
+    ///     ..Default::default()
+    /// });
+    /// assert!(attrs.thematic_break().is_some());
+    /// ```
+    pub fn set_thematic_break(&mut self, attrs: &ThematicBreakAttrs) {
+        self.thematic_break = Some(Box::new(attrs.clone()));
+    }
+
+    /// Reads the [`ThematicBreakAttrs`] stored on this node, if any.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// assert!(NodeAttrs::default().thematic_break().is_none());
+    /// ```
+    #[must_use]
+    pub fn thematic_break(&self) -> Option<ThematicBreakAttrs> {
+        self.thematic_break.as_deref().cloned()
+    }
+
+    /// Borrowed accessor for renderer hot paths (no clone).
+    ///
+    /// Returns `None` when no thematic-break attributes are set.
+    #[must_use]
+    pub fn thematic_break_ref(&self) -> Option<&ThematicBreakAttrs> {
+        self.thematic_break.as_deref()
+    }
+
+    /// Returns a mutable reference to this node's [`ThematicBreakAttrs`],
+    /// allocating a default one only if the field is absent.
+    ///
+    /// Same sparsity caveat as [`style_mut_or_default`](Self::style_mut_or_default);
+    /// call
+    /// [`retain_non_default_thematic_break`](Self::retain_non_default_thematic_break)
+    /// afterwards.
+    pub fn thematic_break_mut_or_default(&mut self) -> &mut ThematicBreakAttrs {
+        self.thematic_break
+            .get_or_insert_with(|| Box::new(ThematicBreakAttrs::default()))
+    }
+
+    /// Drops an empty [`ThematicBreakAttrs`] box (see
+    /// [`ThematicBreakAttrs::is_empty`]), restoring sparsity.
+    pub fn retain_non_default_thematic_break(&mut self) {
+        if self
+            .thematic_break
+            .as_deref()
+            .is_some_and(ThematicBreakAttrs::is_empty)
+        {
+            self.thematic_break = None;
+        }
+    }
+
     /// Stores a [`SequenceJoin`] policy as the typed
     /// [`NodeAttrs::sequence_join`] field.
     ///
@@ -2388,8 +2522,8 @@ mod tests {
     #[test]
     fn extension_hint_still_uses_data() {
         let mut attrs = NodeAttrs::default();
-        attrs.set_hint(HintNamespace("darkmatter.hr"), "kind", json!("solid"));
-        assert!(attrs.data.contains_key("darkmatter.hr.kind"));
+        attrs.set_hint(HintNamespace("myapp.custom"), "kind", json!("solid"));
+        assert!(attrs.data.contains_key("myapp.custom.kind"));
     }
 
     #[test]
@@ -3012,8 +3146,8 @@ mod tests {
         super::reset_hint_accesses();
 
         attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2)); // renderable-owned
-        attrs.set_hint(HintNamespace("darkmatter.hr"), "kind", json!("solid")); // extension
-        let _ = attrs.get_hint(HintNamespace("darkmatter.hr"), "kind"); // extension
+        attrs.set_hint(HintNamespace("myapp.custom"), "kind", json!("solid")); // extension
+        let _ = attrs.get_hint(HintNamespace("myapp.custom"), "kind"); // extension
         let _ = attrs.remove_hint(HintNamespace::LAYOUT, "margin_top"); // renderable-owned
 
         let (renderable_owned, extension) = super::hint_accesses();
@@ -3026,7 +3160,7 @@ mod tests {
     /// with a nested styled span (inline style inheritance), a progress widget,
     /// a two-column widget, a list (marker policy + list hints), a task item, a
     /// table (column + title + terminal striping hints + a typed data cell), a
-    /// code block, and one `darkmatter.hr` extension hint. The first-class
+    /// code block, and one opaque package-local extension hint. The first-class
     /// presentation rides on typed fields; only the extension hint lives in the
     /// bag, so a behaving fold touches `data` zero times for `renderable.*`.
     #[cfg(test)]
@@ -3089,8 +3223,8 @@ mod tests {
             ..Default::default()
         });
 
-        // List with a marker policy and list hints; one task item carries a
-        // `darkmatter.hr` extension hint to populate the bag.
+        // List with a marker policy and list hints; one task item carries an
+        // opaque package-local extension hint to populate the bag.
         let mut task_item = RenderNode::list_item(Some(false), vec![RenderNode::paragraph(vec![
             RenderNode::text("todo"),
         ])]);
@@ -3104,7 +3238,7 @@ mod tests {
         });
         task_item
             .attrs
-            .set_hint(HintNamespace("darkmatter.hr"), "kind", json!("solid"));
+            .set_hint(HintNamespace("myapp.custom"), "kind", json!("solid"));
         let mut list = RenderNode::list(false, None, vec![task_item]);
         list.attrs.set_list_marker_policy(ListMarkerPolicy::None);
         list.attrs.set_list_hints(&ListRenderHints {

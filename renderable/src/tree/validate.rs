@@ -423,6 +423,20 @@ fn check_node(
         ));
     }
 
+    // Thematic-break styling is supported only on a ThematicBreak node; the
+    // terminal and browser renderers read it only when folding that kind.
+    if node.attrs.thematic_break_ref().is_some()
+        && !matches!(node.kind, NodeKind::ThematicBreak)
+    {
+        report.findings.push(error(
+            format!(
+                "thematic-break attributes are permitted only on a ThematicBreak node, found on {}",
+                kind_name(&node.kind),
+            ),
+            span.clone(),
+        ));
+    }
+
     // Kind-specific browser sub-groups: a link group belongs only on a Link
     // node, an image group only on an Image node. The remaining browser fields
     // (inline_style, data/aria attrs) apply to any node, and the validated name
@@ -1059,12 +1073,13 @@ mod tests {
     }
 
     #[test]
-    fn darkmatter_extension_key_in_data_is_allowed() {
-        // Non-`renderable.` namespaces are package-local extensions and pass.
+    fn extension_namespace_key_in_data_is_allowed() {
+        // Non-`renderable.` namespaces are opaque package-local extensions and
+        // pass; only `renderable.*` keys are rejected as stale.
         let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
         para.attrs
             .data
-            .insert("darkmatter.hr.kind".into(), serde_json::json!("solid"));
+            .insert("myapp.custom.kind".into(), serde_json::json!("solid"));
         let root = RenderNode::root(vec![para]);
         let report = validate(&root, ValidationMode::Full);
         assert!(report.is_empty(), "extension-namespace keys must pass");
@@ -1117,6 +1132,39 @@ mod tests {
             RenderNode::paragraph(vec![link, image]),
             RenderNode::list(false, None, vec![item]),
         ]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    // ── Typed thematic-break placement ────────────────────────────────────
+
+    #[test]
+    fn thematic_break_attrs_on_paragraph_is_an_error() {
+        use crate::tree::ThematicBreakAttrs;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_thematic_break(&ThematicBreakAttrs {
+            kind: Some("waves".into()),
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("thematic-break attributes are permitted only")),
+            "thematic-break attributes on a Paragraph must be an error",
+        );
+    }
+
+    #[test]
+    fn thematic_break_attrs_on_thematic_break_is_valid() {
+        use crate::tree::ThematicBreakAttrs;
+        let mut hr = RenderNode::thematic_break();
+        hr.attrs.set_thematic_break(&ThematicBreakAttrs {
+            kind: Some("waves".into()),
+            weight: Some("thick".into()),
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![hr]);
         assert!(ensure_valid(&root).is_ok());
     }
 

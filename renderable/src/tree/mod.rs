@@ -38,6 +38,7 @@ pub use attrs::{
     ImageDecoding, ImageLoading, LinkBrowserAttrs, LinkRelation, LinkTarget, ListMarkerPolicy,
     ListRenderHints, NodeAttrs, ProgressHints, SequenceJoin, TableCellHints, TableColumnHints,
     TableHints, TableTerminalHints, TaskHints, TaskState, TextLayoutHints, TextOverflow,
+    ThematicBreakAttrs,
 };
 // Test-only instrumentation (gated): exposed so a downstream crate's perf-gate
 // test can observe the `NodeAttrs::data` hint-access counter while folding a
