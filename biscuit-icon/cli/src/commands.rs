@@ -12,11 +12,26 @@ use crate::args::{CacheAction, Commands};
 
 const ONLINE_ICON_LIMIT: usize = 20;
 
+/// Builds an Iconify client respecting the `ICONIFY_BASE_URL` env var.
+fn client_from_env() -> IconifyClient {
+    if let Ok(base) = std::env::var("ICONIFY_BASE_URL") {
+        IconifyClient::with_base(base)
+    } else {
+        IconifyClient::new()
+    }
+}
+
 /// Runs the resolved command.
 pub async fn run(command: Commands, nerd: bool) -> Result<()> {
+    let client = client_from_env();
+    run_with_client(command, nerd, &client).await
+}
+
+/// Runs the resolved command with an injectable Iconify client (used in tests).
+pub async fn run_with_client(command: Commands, nerd: bool, client: &IconifyClient) -> Result<()> {
     match command {
-        Commands::Icons { filter, from } => icons(filter, from, nerd).await,
-        Commands::Sets { filter } => sets(filter).await,
+        Commands::Icons { filter, from } => icons(filter, from, nerd, client).await,
+        Commands::Sets { filter } => sets(filter, client).await,
         Commands::Cache { action: CacheAction::Clear } => {
             IconCache::open_default()?.clear()?;
             println!("cache cleared");
@@ -26,7 +41,7 @@ pub async fn run(command: Commands, nerd: bool) -> Result<()> {
     }
 }
 
-async fn icons(filter: Option<String>, from: Option<String>, nerd: bool) -> Result<()> {
+async fn icons(filter: Option<String>, from: Option<String>, nerd: bool, client: &IconifyClient) -> Result<()> {
     let term = Terminal::new();
     let needle = filter.unwrap_or_default();
 
@@ -35,6 +50,8 @@ async fn icons(filter: Option<String>, from: Option<String>, nerd: bool) -> Resu
         .map(|s| s.split(',').map(str::trim).filter(|p| !p.is_empty()).map(String::from).collect())
         .unwrap_or_default();
 
+    let cache = IconCache::open_default()?;
+
     // A `prefix:name` filter is a direct lookup+render, but `--from` still applies.
     if needle.contains(':') {
         if !catalog_allowed_prefix(&needle, &allowed) {
@@ -42,24 +59,31 @@ async fn icons(filter: Option<String>, from: Option<String>, nerd: bool) -> Resu
                 "{needle:?} is not in the allowed set; try `icon --from <csv> <prefix:name>`"
             ));
         }
-        let icon = lookup_icon(&needle).await?;
+        let icon = lookup_icon(&needle, &cache, client).await?;
         println!("{}  {needle}", render_icon(&icon, &term, nerd));
         return Ok(());
     }
 
-    let cache = IconCache::open_default()?;
     let offline = catalog::offline_icons(&cache, &needle, &allowed)?;
 
     for id in &offline {
-        match lookup_icon(id).await {
+        match lookup_icon(id, &cache, client).await {
             Ok(icon) => println!("{}  {id}", render_icon(&icon, &term, nerd)),
             Err(err) => eprintln!("{id}: {err}"),
         }
     }
 
-    // Always attempt online search and merge with offline results.
-    let client = IconifyClient::new();
-    match client.search_icons(&needle, Some(ONLINE_ICON_LIMIT)).await {
+    // Skip online search when there is no filter (empty query is not supported
+    // by the Iconify search endpoint).
+    if needle.is_empty() {
+        if offline.is_empty() {
+            return Err(eyre!("no icons available offline"));
+        }
+        return Ok(());
+    }
+
+    // Paginate through online search results and merge with offline results.
+    match client.search_icons(&needle).await {
         Ok(hits) => {
             let seen: std::collections::HashSet<_> = offline.iter().cloned().collect();
             let new_hits: Vec<_> = hits
@@ -72,7 +96,7 @@ async fn icons(filter: Option<String>, from: Option<String>, nerd: bool) -> Resu
                 ));
             }
             for id in new_hits {
-                match Icon::iconify(&id).await {
+                match Icon::iconify_with(&id, &cache, client).await {
                     Ok(icon) => println!("{}  {id}", render_icon(&icon, &term, nerd)),
                     Err(err) => eprintln!("{id}: {err}"),
                 }
@@ -90,18 +114,46 @@ async fn icons(filter: Option<String>, from: Option<String>, nerd: bool) -> Resu
     Ok(())
 }
 
-async fn sets(filter: Option<String>) -> Result<()> {
+async fn sets(filter: Option<String>, client: &IconifyClient) -> Result<()> {
     let needle = filter.unwrap_or_default().to_lowercase();
     let cache = IconCache::open_default()?;
 
     let mut offline = catalog::offline_sets(&cache, &needle)?;
     offline.sort_by(|a, b| a.prefix.cmp(&b.prefix));
 
-    let client = IconifyClient::new();
     let online = client.fetch_collections().await;
 
     match online {
         Ok(sets) => {
+            // Cache every fetched collection so the full catalog is available
+            // for later offline filters, then filter only for presentation.
+            for (prefix, title, license) in &sets {
+                let license_str = license.as_ref().and_then(|l| {
+                    if l.spdx.is_empty() {
+                        None
+                    } else {
+                        Some(l.spdx.clone())
+                    }
+                });
+                let license_title = license.as_ref().and_then(|l| {
+                    if l.title.is_empty() {
+                        None
+                    } else {
+                        Some(l.title.clone())
+                    }
+                });
+                let license_url = license.as_ref().and_then(|l| l.url.clone());
+                let info = SetInfo {
+                    prefix: prefix.clone(),
+                    title: title.clone(),
+                    license: license_str,
+                    license_title,
+                    license_url,
+                };
+                if let Err(err) = cache.put_set(&info) {
+                    tracing::warn!("failed to cache set metadata for {prefix}: {err}");
+                }
+            }
             for (prefix, title, license) in sets {
                 if needle.is_empty()
                     || prefix.to_lowercase().contains(&needle)
@@ -129,9 +181,6 @@ async fn sets(filter: Option<String>) -> Result<()> {
                         license_title,
                         license_url,
                     };
-                    if let Err(err) = cache.put_set(&info) {
-                        tracing::warn!("failed to cache set metadata for {prefix}: {err}");
-                    }
                     offline.retain(|s| s.prefix != prefix);
                     offline.push(info);
                 }
@@ -155,11 +204,11 @@ async fn sets(filter: Option<String>) -> Result<()> {
 
 /// Resolves an identifier to an [`Icon`], preferring the embedded domain
 /// catalog so offline listings do not trigger network fetches.
-async fn lookup_icon(id: &str) -> Result<Icon> {
+async fn lookup_icon(id: &str, cache: &IconCache, client: &IconifyClient) -> Result<Icon> {
     if let Some(icon) = biscuit_icon::domain::icon_for_id(id) {
         Ok(icon)
     } else {
-        Ok(Icon::iconify(id).await?)
+        Ok(Icon::iconify_with(id, cache, client).await?)
     }
 }
 

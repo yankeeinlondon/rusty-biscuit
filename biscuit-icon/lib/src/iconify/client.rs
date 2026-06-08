@@ -83,16 +83,20 @@ struct SearchResponse {
 }
 
 impl IconifyClient {
-    /// Builds a client targeting the public Iconify API.
+    /// Builds a client targeting the public Iconify API with a 10-second timeout.
     #[must_use]
     pub fn new() -> Self {
-        Self { http: reqwest::Client::new(), base: DEFAULT_BASE.to_string() }
+        Self::with_base(DEFAULT_BASE)
     }
 
     /// Builds a client targeting a custom base URL (used in tests).
     #[must_use]
     pub fn with_base(base: impl Into<String>) -> Self {
-        Self { http: reqwest::Client::new(), base: base.into() }
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self { http, base: base.into() }
     }
 
     /// Fetches a single icon body by `prefix:name`.
