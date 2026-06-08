@@ -1470,12 +1470,13 @@ mod tests {
         let output = page.render(&md).unwrap();
 
         // Width 10 + Left alignment over text "hi" (2 cells) must pad with
-        // 8 trailing spaces. The optimistic terminal falls back to the
-        // tree renderer's `[label](url)` no-OSC8 form, so the padded label
-        // sits inside the brackets alongside `(https://example.com)`.
+        // 8 trailing spaces. The page was built from an optimistic terminal and
+        // carries hyperlink styling, so it renders through that terminal's
+        // capabilities (Option A: a configured page uses its captured terminal),
+        // emitting the padded label inside an OSC8 hyperlink.
         assert!(
-            output.contains("hi        ") && output.contains("(https://example.com)"),
-            "padded display text not present. output={:?}",
+            output.contains("hi        ") && output.contains("]8;;https://example.com"),
+            "padded display text inside an OSC8 hyperlink not present. output={:?}",
             output
         );
     }

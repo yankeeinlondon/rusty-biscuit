@@ -803,14 +803,17 @@ impl DarkmatterPage {
 
         // Build derived TerminalOptions.
         let mut options = self.options.clone();
-        // Cap max_width — and so render through an optimistic terminal at the
-        // page width — whenever any page-frame layout OR per-component policy is
-        // configured. `LayoutContext` no longer carries the component-policy map
-        // (it is baked into the tree by the fold), so the component-policy signal
-        // is read straight off the page here. The zero-config path leaves this
-        // unset to keep byte-for-byte parity with `Markdown::as_terminal(default)`.
-        if ctx.needs_decoration() || self.max_width().is_some() || !self.component_policies.is_empty()
-        {
+        // Cap max_width — and so render through the page's captured (optimistic)
+        // terminal at the page width — whenever the page is *configured* at all
+        // (`!is_default_layout`), not when component policies specifically
+        // exist. The width cap is how a configured page renders through its
+        // captured terminal's width and capabilities; gating it on the broad
+        // "is this a zero-config page" signal (rather than policy presence)
+        // means an *unmatched* policy cannot, on its own, behave differently
+        // from any other configured page (review-1 finding 2). The zero-config
+        // path leaves this unset to keep byte-for-byte parity with
+        // `Markdown::as_terminal(default)`.
+        if !self.is_default_layout() {
             options.max_width = Some(ctx.effective_width);
         }
         // Honor the captured terminal's color depth on the decorated layout
@@ -869,7 +872,12 @@ impl DarkmatterPage {
         }
         .map_err(|e| PageRenderError::Render(e.to_string()))?;
 
-        if !ctx.needs_decoration() && self.component_policies.is_empty() {
+        // Row decoration (vertical-rhythm normalization + margin/padding/
+        // background rows) is a page-frame concern. Component policies produce
+        // no row decoration — they are baked onto nodes — so the decision keys
+        // off page geometry alone; an unmatched policy must not trigger the
+        // decorated path (review-1 finding 2).
+        if !ctx.needs_decoration() {
             return Ok(result.output);
         }
 
@@ -960,11 +968,12 @@ impl DarkmatterPage {
             .map_err(|e| PageRenderError::Render(e.to_string()))?
         };
 
-        if !ctx.needs_decoration()
-            && self.component_policies.is_empty()
-            && self.stylesheet().is_none()
-            && self.page_meta().is_none()
-        {
+        // The page wrapper `<div>` carries page-frame geometry, the page
+        // stylesheet, and page `<meta>`. Component policies are lowered to
+        // inline CSS on the component elements themselves, never the wrapper, so
+        // their presence must not add a wrapper an unmatched policy would not
+        // need (review-1 finding 2).
+        if !ctx.needs_decoration() && self.stylesheet().is_none() && self.page_meta().is_none() {
             return Ok(body);
         }
 
@@ -974,6 +983,26 @@ impl DarkmatterPage {
     // ---------- ComponentPolicy merging ----------
 
     // ---------- Validation ----------
+
+    /// Whether the page frame defines its own content-box geometry: non-default
+    /// margins, padding, full-page background, max-width, or line numbers.
+    ///
+    /// The terminal width cap keys off this rather than [`Self::is_default_layout`]
+    /// so the page-frame width decision depends only on frame geometry, never on
+    /// node-baked construction inputs (component policies, page/component colors,
+    /// hyperlink/image styles, HR defaults). An unmatched component policy
+    /// therefore cannot change frame width behavior (review-2 finding 2): it
+    /// still threads the build context, but the frame renders at the same width
+    /// it would with no policy. The zero-config (no-geometry) path leaves
+    /// `max_width` unset, preserving byte-for-byte parity with
+    /// `Markdown::as_terminal(default)`.
+    fn has_frame_geometry(&self) -> bool {
+        !edges_is_zero(&self.page_margin)
+            || !edges_is_zero(&self.page_padding)
+            || self.page_background != PageBackground::Transparent
+            || self.page_max_width.is_some()
+            || self.line_numbers
+    }
 
     /// Whether all layout fields are at their defaults.
     ///
@@ -1805,13 +1834,12 @@ mod tests {
         );
     }
 
-    /// Page-frame boundary (closeout Option A): the page frame reads only the
-    /// *presence* of component policies (to decide whether to cap `max_width`),
-    /// never their content — it carries no component policy itself. Two pages
-    /// with identical frame geometry but different component-policy *content*,
-    /// rendering a document whose nodes none of those policies match, must
-    /// produce byte-identical output: the frame chrome cannot vary with which
-    /// component a policy targets or what color it sets.
+    /// Page-frame boundary (closeout Option A): the page frame is independent of
+    /// component policy entirely — neither its presence nor its content. Two
+    /// pages with identical frame geometry but different component-policy
+    /// *content*, rendering a document whose nodes none of those policies match,
+    /// must produce byte-identical output: the frame chrome cannot vary with
+    /// which component a policy targets or what color it sets.
     #[test]
     fn page_frame_chrome_ignores_component_policy_content() {
         use renderable::color::{Color, Tailwind};
@@ -1883,6 +1911,61 @@ mod tests {
             core(&base_out),
             core(&tall_out),
             "vertical margin must only add blank rows; the component body must be unchanged",
+        );
+    }
+
+    /// Review-1 finding 2: an *unmatched* component policy — one whose target
+    /// component is absent from the document — must not change terminal output
+    /// versus no policy at all. Frame decisions (width cap, row decoration) key
+    /// off page geometry, never policy presence, so a policy with no node to
+    /// bake onto leaves the rendered bytes identical.
+    #[test]
+    fn terminal_unmatched_component_policy_matches_no_policy() {
+        use renderable::color::{Color, Tailwind};
+        use renderable::style::PaintColor;
+
+        let term = Terminal::new_optimistic(80);
+        // No table in the document: the Tables policy has nothing to bake onto.
+        let md: Markdown = "# Title\n\nA plain paragraph, no table here.\n".into();
+
+        let no_policy = DarkmatterPage::new(&term).render(&md).unwrap();
+        let unmatched = DarkmatterPage::new(&term)
+            .with_component_color(
+                PageComponent::Tables,
+                PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+            )
+            .render(&md)
+            .unwrap();
+
+        assert_eq!(
+            no_policy, unmatched,
+            "an unmatched component policy must not change terminal output vs no policy",
+        );
+    }
+
+    /// Review-1 finding 2: the browser analogue — an unmatched component policy
+    /// must produce byte-identical HTML to no policy (no spurious page wrapper,
+    /// no per-component CSS), since the unmatched policy bakes onto no node.
+    #[test]
+    fn browser_unmatched_component_policy_matches_no_policy() {
+        use renderable::color::{Color, Tailwind};
+        use renderable::style::PaintColor;
+
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown = "# Title\n\nA plain paragraph, no table here.\n".into();
+
+        let no_policy = DarkmatterPage::new(&term).render_to_browser(&md).unwrap();
+        let unmatched = DarkmatterPage::new(&term)
+            .with_component_color(
+                PageComponent::Tables,
+                PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+            )
+            .render_to_browser(&md)
+            .unwrap();
+
+        assert_eq!(
+            no_policy, unmatched,
+            "an unmatched component policy must not change browser HTML vs no policy",
         );
     }
 
@@ -2268,8 +2351,12 @@ mod tests {
         assert!(html.contains("background-color: rgb(245,245,245)"));
     }
 
+    /// Component policies whose target components are absent from the document
+    /// (here: no table, no block quote) must not add a page wrapper. The wrapper
+    /// is page-frame chrome; an unmatched policy adds no per-component CSS and so
+    /// no wrapper (review-1 finding 2).
     #[test]
-    fn browser_render_with_component_alignment_css() {
+    fn browser_render_with_unmatched_alignment_policy_adds_no_wrapper() {
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term)
             .with_component_policy(PageComponent::Tables, align_policy(renderable::layout::Alignment::Center))
@@ -2277,13 +2364,15 @@ mod tests {
         let md: Markdown = "# Hello\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
-        // Fold-based behavior emits a wrapper div but not bespoke per-component CSS.
-        assert!(html.contains("<div class=\"darkmatter-page\""));
+        assert!(
+            !html.contains("<div class=\"darkmatter-page\""),
+            "an unmatched component policy must not add a page wrapper; html={html}"
+        );
         assert!(html.contains("Hello"));
     }
 
     #[test]
-    fn browser_render_with_component_fill_css() {
+    fn browser_render_with_unmatched_fill_policy_adds_no_wrapper() {
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term)
             .with_component_policy(PageComponent::CodeBlocks, max_width_policy(60))
@@ -2291,8 +2380,10 @@ mod tests {
         let md: Markdown = "# Hello\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
-        // Fold-based behavior emits a wrapper div but not bespoke per-component CSS.
-        assert!(html.contains("<div class=\"darkmatter-page\""));
+        assert!(
+            !html.contains("<div class=\"darkmatter-page\""),
+            "an unmatched component policy must not add a page wrapper; html={html}"
+        );
         assert!(html.contains("Hello"));
     }
 
@@ -2629,8 +2720,13 @@ mod tests {
         let md: Markdown = "- item\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
-        // Fold-based behavior emits a wrapper div but not bespoke per-component CSS.
-        assert!(html.contains("<div class=\"darkmatter-page\""));
+        // The matched `li` max-width lowers to inline CSS on the `<li>`; no page
+        // wrapper is added for a component-policy-only page (review-1 finding 2).
+        assert!(
+            !html.contains("<div class=\"darkmatter-page\""),
+            "component policy alone must not add a page wrapper; html={html}"
+        );
+        assert!(html.contains("max-width:30ch"), "li max-width must be inline; html={html}");
         assert!(html.contains("item"));
     }
 
@@ -2642,8 +2738,12 @@ mod tests {
         let md: Markdown = "- item\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
-        // Fold-based behavior emits a wrapper div but not bespoke per-component CSS.
-        assert!(html.contains("<div class=\"darkmatter-page\""));
+        // The `ul` left margin lowers to inline CSS on the `<ul>`; no wrapper.
+        assert!(
+            !html.contains("<div class=\"darkmatter-page\""),
+            "component policy alone must not add a page wrapper; html={html}"
+        );
+        assert!(html.contains("margin-left:4ch"), "ul left margin must be inline; html={html}");
         assert!(html.contains("item"));
     }
 
@@ -2913,8 +3013,21 @@ mod tests {
         let md: Markdown = "# Hello\n\n> Quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
-        // Fold-based behavior emits a wrapper div but not bespoke per-component CSS.
-        assert!(html.contains("<div class=\"darkmatter-page\""));
+        // Matched component policies lower to inline CSS on the component
+        // elements (the fold), not to a page wrapper or a stylesheet rule. The
+        // page has no frame geometry, so no wrapper is added (review-1 finding 2).
+        assert!(
+            !html.contains("<div class=\"darkmatter-page\""),
+            "component policy alone must not add a page wrapper; html={html}"
+        );
+        assert!(
+            html.contains("<table style=\"color:rgb(251, 44, 54)\""),
+            "table component color must appear as inline CSS; html={html}"
+        );
+        assert!(
+            html.contains("background-color:rgb(43, 127, 255)"),
+            "block-quote component bg-color must appear as inline CSS; html={html}"
+        );
         assert!(html.contains("Hello"));
         assert!(html.contains("Quote"));
     }
@@ -3014,8 +3127,16 @@ mod tests {
         let md: Markdown = "# Hello\n\n> Quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
-        // Fold-based behavior emits a wrapper div but not bespoke per-component CSS.
-        assert!(html.contains("<div class=\"darkmatter-page\""));
+        // The CSS-special keywords pass straight through to inline CSS on the
+        // component elements; no page wrapper (review-1 finding 2).
+        assert!(
+            !html.contains("<div class=\"darkmatter-page\""),
+            "component policy alone must not add a page wrapper; html={html}"
+        );
+        assert!(
+            html.contains("color:transparent") && html.contains("color:currentColor"),
+            "special color keywords must reach inline CSS; html={html}"
+        );
         assert!(html.contains("Hello"));
         assert!(html.contains("Quote"));
     }
@@ -3032,8 +3153,18 @@ mod tests {
         let md: Markdown = "- one\n\n1. two\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
-        // Fold-based behavior emits a wrapper div but not bespoke per-component CSS.
-        assert!(html.contains("<div class=\"darkmatter-page\""));
+        // Per-list colors lower to inline CSS on the `<ul>`/`<ol>`/`<li>`; no
+        // page wrapper for a component-policy-only page (review-1 finding 2).
+        assert!(
+            !html.contains("<div class=\"darkmatter-page\""),
+            "component policy alone must not add a page wrapper; html={html}"
+        );
+        assert!(
+            html.contains("<ul style=\"color:rgb(251, 44, 54)\"")
+                && html.contains("<ol style=\"color:rgb(43, 127, 255)\"")
+                && html.contains("color:rgb(0, 201, 80)"),
+            "ul/ol/li component colors must be inline; html={html}"
+        );
         assert!(html.contains("one"));
         assert!(html.contains("two"));
     }
@@ -3163,10 +3294,10 @@ mod tests {
 
     #[test]
     fn browser_hr_color_emits_rule_for_svg_target() {
-        // `style.hr.color` reaches the SVG via CSS `color` inheritance →
-        // the SVG primitives reference `currentColor` through
-        // `var(--hr-color, currentColor)`. Under the fold-based behavior
-        // the per-component CSS rule is no longer emitted.
+        // `style.hr.color` is baked onto the thematic-break node and lowered
+        // into the SVG's `--hr-color` custom property (and the primitives'
+        // `var(--hr-color, …)` fallback), so the rule paints red without any
+        // page wrapper or per-component stylesheet rule (review-1 finding 2).
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term)
             .with_component_color(PageComponent::Hr, red_color());
@@ -3174,8 +3305,14 @@ mod tests {
 
         let html = page.render_to_browser(&md).unwrap();
 
-        // Fold-based behavior: no bespoke per-component CSS.
-        assert!(html.contains("<div class=\"darkmatter-page\""));
+        assert!(
+            !html.contains("<div class=\"darkmatter-page\""),
+            "component policy alone must not add a page wrapper; html={html}"
+        );
+        assert!(
+            html.contains("--hr-color: rgb(251, 44, 54)"),
+            "hr component color must reach the SVG `--hr-color`; html={html}"
+        );
     }
 
     #[test]
