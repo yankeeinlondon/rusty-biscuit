@@ -14,7 +14,20 @@ dirs = "6"
 ec4rs = "1"
 futures = { version = "0.3", optional = true }
 getifaddrs = "0.6.0"
-git2 = "0.20.3"
+# Production git access is pure-Rust gix; git2 (libgit2) is retained only as a
+# dev-dependency for building deterministic test/benchmark fixtures.
+gix = { version = "=0.84.0", default-features = false, features = [
+    "sha1",
+    "revision",
+    "status",
+    "blob-diff",
+    "dirwalk",
+    "excludes",
+    "parallel",
+    # Needed for the worktree merge-conflict probe (R5): unmerged worktree
+    # branches are merged in-memory (no repository writes) to detect conflicts.
+    "merge",
+] }
 hyperpolyglot = "0.1.7"
 ignore = "0.4"
 libc = "0.2"
@@ -58,9 +71,12 @@ winreg = "0.55"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+# Used only to build deterministic git fixtures in tests/benches.
+git2 = "0.20.3"
 proptest = "1"
 serial_test = "3"
 tempfile = "3"
+test-toolkit = { path = "../../tools/test-toolkit" }
 tokio = { version = "1", features = ["rt", "macros"] }
 wiremock = "0.6"
 

@@ -105,3 +105,34 @@ pub fn cargo_monorepo(package_count: usize) -> Fixture {
     builder::build_cargo_monorepo(&root, package_count);
     Fixture { dir, path: root }
 }
+
+/// Git repo fixture with `count` linked worktrees for fan-out benchmarks.
+///
+/// See [`builder::build_git_repo_with_worktrees`] for the precise layout.
+pub fn git_repo_with_worktrees(count: usize) -> Fixture {
+    let dir = TempDir::new().expect("tempdir for git_repo_with_worktrees");
+    let root = dir.path().to_path_buf();
+    builder::build_git_repo_with_worktrees(&root, count);
+    Fixture { dir, path: root }
+}
+
+/// Deep linear-history git repo fixture, optionally with a commit-graph.
+///
+/// When `with_commit_graph` is true the fixture shells out to `git` to write
+/// `.git/objects/info/commit-graph`. Returns `None` when a commit-graph was
+/// requested but no `git` executable is available, so graph benchmarks can skip
+/// with a clear message instead of measuring a graph-absent repo as if present.
+///
+/// See [`builder::build_deep_history_repo`] for the precise layout.
+pub fn deep_history_repo(commits: usize, with_commit_graph: bool) -> Option<Fixture> {
+    if with_commit_graph && !builder::git_available() {
+        return None;
+    }
+    let dir = TempDir::new().expect("tempdir for deep_history_repo");
+    let root = dir.path().to_path_buf();
+    builder::build_deep_history_repo(&root, commits);
+    if with_commit_graph && !builder::write_commit_graph(&root) {
+        return None;
+    }
+    Some(Fixture { dir, path: root })
+}
