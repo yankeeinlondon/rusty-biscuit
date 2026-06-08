@@ -15,6 +15,10 @@ Two source forms are accepted:
 ::file-links <glob>
 ```
 
+The keyword `::file-links` must be followed by ASCII whitespace or the end of
+the line; near-miss prose such as `::file-linksXYZ`, `::file-links-extra`, or
+`::file-links2` is left untouched and is **not** parsed as a directive.
+
 The glob is resolved relative to the containing document. Only files matching
 the glob **and** passing the extension filter are included.
 
@@ -77,6 +81,12 @@ Any candidate file (after following symlinks) that resolves outside this
 boundary is ignored. This prevents `..` escapes and symlink-based traversal
 attacks.
 
+An **in-bound** symlink — one whose target also resolves within the boundary —
+is kept under the **path it was matched at**, not its canonical target. For
+example a matched `docs/alias.pdf -> ../assets/report.pdf` renders (and links)
+as `docs/alias.pdf`. The canonical target is used only for the boundary check
+and for deduplication.
+
 ## Root Rendering
 
 The rendered tree uses the common ancestor of all matched files as its root.
@@ -89,6 +99,21 @@ The root line shows:
   otherwise
 
 Every file in the tree is wrapped in an OSC8 hyperlink when rendered to a TTY.
+
+### Lossless Rendering Through Compose
+
+Compose produces a Markdown document, but the directive's styling (dimmed
+prefix, highlighted target, repository/folder icons, italic dotfiles, dimmed
+gitignored entries, and OSC8 links) cannot be expressed in portable CommonMark.
+To avoid losing any of it, the directive embeds the fully-styled `FileSystem`
+render subtree into the composed document via
+[`renderable::tree::embed`](../../../renderable/docs/tree-rendering.md): the
+subtree is projected once at compose time (no second filesystem walk) and the
+render-tree fold splices it back when the composed document is rendered, so
+terminal and browser output reproduce the live component exactly — color and
+all. Consumers that render the composed Markdown without darkmatter's fold see
+the embedded **portable fallback**: a plain nested link list between the
+embedding markers.
 
 ## Empty Results
 

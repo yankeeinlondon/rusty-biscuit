@@ -206,4 +206,4 @@ md compose doc.md \
 
 ## Issues
 
-- The compose transform report (warnings from the library compose pipeline) is still discarded in CLI output; only reference validation issues are surfaced.
+_(none known)_
