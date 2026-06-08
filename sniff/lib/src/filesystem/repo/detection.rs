@@ -111,6 +111,26 @@ impl<'a> PackageBuildContext<'a> {
     }
 }
 
+/// Returns `true` when `root` contains at least one file that could make a
+/// workspace detector succeed.
+///
+/// Every detector in [`detect_repo_inner_with_shared`] short-circuits to
+/// `None` unless its marker file is present directly in `root`. Checking these
+/// names up front lets us avoid building the manifest index (a full recursive
+/// walk) for directories that cannot possibly be a workspace root.
+fn has_workspace_marker(root: &Path) -> bool {
+    const MARKERS: [&str; 7] = [
+        "Cargo.toml",          // cargo workspace
+        "nx.json",             // nx
+        "turbo.json",          // turborepo
+        "pnpm-workspace.yaml", // pnpm workspaces
+        "package.json",        // npm / yarn workspaces
+        "yarn.lock",           // yarn workspaces
+        "lerna.json",          // lerna
+    ];
+    MARKERS.iter().any(|name| root.join(name).exists())
+}
+
 pub(crate) fn detect_repo_inner_with_shared(
     root: &Path,
     structure_only: bool,
@@ -118,8 +138,15 @@ pub(crate) fn detect_repo_inner_with_shared(
     shared_repo_inventory: Option<&FileInventory>,
 ) -> Result<(Option<RepoInfo>, Option<FileInventory>)> {
     // Build manifest index once for the entire tree unless the caller already
-    // provided the shared view from a higher-level walk.
-    let manifest_index = if structure_only || shared_manifest_index.is_some() {
+    // provided the shared view from a higher-level walk. Skip the (potentially
+    // very expensive) tree walk entirely when `root` has no workspace marker
+    // file: without one, every detector below returns `None`, so the index
+    // would never be consumed. This keeps `detect_repo` on a non-repo directory
+    // -- e.g. a large system temp dir -- from walking unrelated subtrees.
+    let manifest_index = if structure_only
+        || shared_manifest_index.is_some()
+        || !has_workspace_marker(root)
+    {
         None
     } else {
         Some(ManifestIndex::build(root))
