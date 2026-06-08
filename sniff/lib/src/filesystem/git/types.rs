@@ -615,27 +615,38 @@ impl GitRepo {
 
     /// Current branch name (`None` for detached or unborn HEAD).
     ///
-    /// Reads `.git/HEAD` directly and checks for the loose branch ref file
-    /// so a corrupt packed-refs file cannot suppress the branch name. The
-    /// active checkout branch is always stored as a loose ref, so the file
-    /// check is sufficient.
+    /// Errors are suppressed: an unreadable or malformed HEAD reports `None`.
+    /// For error propagation, use [`Self::try_current_branch`].
     pub fn current_branch(&self) -> Option<String> {
-        let head_path = self.git_dir.join("HEAD");
-        let contents = std::fs::read_to_string(&head_path)
-            .map_err(|e| {
-                debug!(path = %head_path.display(), error = %e, "could not read HEAD");
-                e
-            })
-            .ok()?;
-        let line = contents.trim();
-        let name = line.strip_prefix("ref: refs/heads/")?.to_string();
-        // Unborn HEAD names a branch that does not yet have a ref file.
-        let branch_ref_path = self.git_dir.join("refs").join("heads").join(&name);
-        if branch_ref_path.is_file() {
-            Some(name)
-        } else {
-            None
-        }
+        self.try_current_branch().ok().flatten()
+    }
+
+    /// Fallible current branch name.
+    ///
+    /// `Ok(None)` means HEAD is detached or unborn — a branch genuinely is not
+    /// checked out. A missing or malformed HEAD, permission, I/O, or corruption
+    /// failure surfaces as [`SniffError::Git`] rather than collapsing to `None`.
+    ///
+    /// Resolves through gix's HEAD query, which reads packed refs, so a branch
+    /// that exists only in `packed-refs` (after `git pack-refs --all --prune`)
+    /// still reports its name.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`SniffError::Git`] for any HEAD read or parse failure that is
+    /// not a legitimate detached/unborn state.
+    pub fn try_current_branch(&self) -> Result<Option<String>> {
+        use gix::bstr::ByteSlice;
+        use gix::head::Kind;
+
+        let repo = self.gix.borrow();
+        let head = repo.head().map_err(|e| SniffError::git("head", e))?;
+        let name = match head.kind {
+            Kind::Symbolic(reference) => reference.name,
+            Kind::Unborn(_) | Kind::Detached { .. } => return Ok(None),
+        };
+        let full = name.as_bstr().to_str_lossy();
+        Ok(full.strip_prefix("refs/heads/").map(str::to_string))
     }
 
     /// Whether the working directory is a linked worktree.
@@ -728,7 +739,7 @@ impl GitRepo {
     /// [`SniffError::Git`] rather than suppressing them.
     pub fn try_branches(&self) -> Result<Vec<LocalBranchInfo>> {
         self.ensure_cache();
-        let current = self.current_branch();
+        let current = self.try_current_branch()?;
         super::remote_refresh::get_local_branches_fallible(&self.gix.borrow(), current.as_deref())
     }
 
@@ -746,7 +757,7 @@ impl GitRepo {
     /// [`SniffError::Git`] rather than suppressing them.
     pub fn try_tracking_status(&self) -> Result<Vec<RemoteTrackingStatus>> {
         self.ensure_cache();
-        let current = self.current_branch();
+        let current = self.try_current_branch()?;
         super::remote_refresh::get_tracking_status_fallible(&self.gix.borrow(), current.as_deref())
     }
 

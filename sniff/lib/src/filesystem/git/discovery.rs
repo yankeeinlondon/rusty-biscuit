@@ -67,6 +67,31 @@ fn resolve_single_opt(repo: &gix::Repository, spec: &str) -> Result<Option<gix::
     }
 }
 
+/// Resolve a non-local-branch specifier to a starting commit id.
+///
+/// A remote-tracking name (e.g. `origin/main`) is resolved by structured
+/// `refs/remotes/<name>` lookup so a malformed ref, or one peeling to a missing
+/// object, surfaces as [`SniffError::Git`] instead of collapsing into an empty
+/// history. Only when no such ref exists is the input treated as a possible
+/// hex SHA via the object-prefix probe; a non-hex name that matches no ref is
+/// genuine absence (`Ok(None)`).
+fn resolve_remote_or_sha(
+    repo: &gix::Repository,
+    branch_name: &str,
+) -> Result<Option<gix::ObjectId>> {
+    match repo.find_reference(&format!("refs/remotes/{branch_name}")) {
+        Ok(r) => Ok(Some(
+            r.into_fully_peeled_id()
+                .map_err(|e| SniffError::git("peel", e))?
+                .detach(),
+        )),
+        Err(gix::reference::find::existing::Error::NotFound { .. }) => {
+            resolve_single_opt(repo, branch_name)
+        }
+        Err(e) => Err(SniffError::git("find_reference", e)),
+    }
+}
+
 pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option<GitInfo>> {
     match GitRepo::discover(path)? {
         Some(handle) => handle.detect_full(deep, commit_count).map(Some),
@@ -670,9 +695,9 @@ pub(crate) fn get_commits_for_branch_fallible(
     let mut commits = Vec::new();
 
     // Prefer a local branch ref. A missing local branch falls through to the
-    // ref/SHA fallback (so `origin/main` and bare SHAs still resolve), but a
-    // malformed branch ref, or one peeling to a missing object, must surface
-    // rather than silently producing an empty history.
+    // remote-tracking/SHA fallback (so `origin/main` and bare SHAs still
+    // resolve), but a malformed branch ref, or one peeling to a missing object,
+    // must surface rather than silently producing an empty history.
     let local = match repo.find_reference(&format!("refs/heads/{branch_name}")) {
         Ok(r) => Some(r),
         Err(gix::reference::find::existing::Error::NotFound { .. }) => None,
@@ -685,7 +710,7 @@ pub(crate) fn get_commits_for_branch_fallible(
                 .map_err(|e| SniffError::git("peel", e))?
                 .detach(),
         ),
-        None => resolve_single_opt(repo, branch_name)?,
+        None => resolve_remote_or_sha(repo, branch_name)?,
     };
 
     let Some(oid) = start_oid else {

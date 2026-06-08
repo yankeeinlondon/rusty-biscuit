@@ -160,8 +160,10 @@ pub(crate) fn get_local_branches_fallible(
 ) -> crate::Result<Vec<LocalBranchInfo>> {
     let mut branches = Vec::new();
 
-    // HEAD commit OID for ahead/behind calculations.
-    let head_oid = repo.head_id().ok().map(|id| id.detach());
+    // HEAD commit OID for ahead/behind calculations. An unborn HEAD is `None`
+    // (no commits to compare against); a malformed/unreadable HEAD surfaces
+    // rather than zeroing ahead/behind on a successful-looking branch list.
+    let head_oid = super::discovery::head_id_opt(repo)?;
 
     let platform = repo
         .references()
