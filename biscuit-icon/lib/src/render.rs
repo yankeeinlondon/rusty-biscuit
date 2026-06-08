@@ -17,7 +17,8 @@ struct IconPayload {
     nerd_font: Option<String>,
     unicode: Option<String>,
     text: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[cfg(feature = "image")]
     svg: String,
     #[serde(default)]
     nerd_font_preferred: bool,
@@ -31,11 +32,19 @@ impl TreeRenderable for Icon {
     /// degradation ladder encoded in the JSON payload (Nerd Font → Unicode →
     /// image → text identifier).
     fn render_tree(&self) -> RenderNode {
+        #[cfg(feature = "image")]
         let payload = IconPayload {
             nerd_font: self.nerd_font_char().map(|c| c.to_string()),
             unicode: self.unicode_char().map(|c| c.to_string()),
             text: self.id.clone(),
             svg: self.svg(),
+            nerd_font_preferred: self.nerd_font,
+        };
+        #[cfg(not(feature = "image"))]
+        let payload = IconPayload {
+            nerd_font: self.nerd_font_char().map(|c| c.to_string()),
+            unicode: self.unicode_char().map(|c| c.to_string()),
+            text: self.id.clone(),
             nerd_font_preferred: self.nerd_font,
         };
         let json = serde_json::to_string(&payload).unwrap_or_default();
@@ -51,6 +60,7 @@ impl TreeRenderable for Icon {
 mod tests {
     use super::*;
     use crate::domain::DomainIcon;
+    use renderable::tree::RenderStrictness;
     use renderable::tree::render::{
         render_browser_node, render_markdown_node, BrowserRenderOptions, MarkdownDialect,
         MarkdownRenderOptions, RawHtmlPolicy,
@@ -77,6 +87,22 @@ mod tests {
         };
         let rendered = render_markdown_node(&node, &opts).unwrap();
         assert!(rendered.output.contains("<svg"));
+    }
+
+    #[test]
+    fn markdown_commonmark_strict_rejects_raw_html() {
+        let icon = crate::domain::Os::Apple.icon();
+        let node = icon.render_tree();
+        let opts = MarkdownRenderOptions {
+            dialect: MarkdownDialect::Markdown,
+            strictness: RenderStrictness::Strict,
+            ..Default::default()
+        };
+        let result = render_markdown_node(&node, &opts);
+        assert!(
+            result.is_err(),
+            "expected error when rendering raw HTML under Markdown with Strict"
+        );
     }
 
     #[test]
@@ -151,6 +177,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "image")]
     fn tree_payload_includes_svg_for_image_tier() {
         use renderable::tree::TreeRenderable;
 
@@ -170,6 +197,33 @@ mod tests {
         };
         let payload = ext.as_ref().expect("expected payload");
         assert!(payload.contains("svg"), "expected SVG field in payload");
+        assert!(
+            payload.contains("ic:baseline-apple"),
+            "expected text identifier in payload"
+        );
+    }
+
+    #[test]
+    #[cfg(not(feature = "image"))]
+    fn tree_payload_omits_svg_without_image_feature() {
+        use renderable::tree::TreeRenderable;
+
+        let icon = crate::domain::Os::Apple.icon();
+        let tree = icon.render_tree();
+
+        let root = match &tree.kind {
+            renderable::tree::NodeKind::Root { children } => children,
+            _ => panic!("expected root node"),
+        };
+        let ext = match &root[0].kind {
+            renderable::tree::NodeKind::Extended { token, payload, .. } => {
+                assert_eq!(token, "icon");
+                payload
+            }
+            _ => panic!("expected extended node"),
+        };
+        let payload = ext.as_ref().expect("expected payload");
+        assert!(!payload.contains("svg"), "expected no SVG field in payload without image feature");
         assert!(
             payload.contains("ic:baseline-apple"),
             "expected text identifier in payload"

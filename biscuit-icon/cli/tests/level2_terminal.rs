@@ -55,24 +55,6 @@ fn run_icon(harness: &mut TmuxHarness, args: &str) -> CapturedFrame {
     harness.capture().expect("capture failed")
 }
 
-/// Counts lines that contain at least one printable, non-prompt character
-/// — a coarse "rows occupied" measure when image protocol bytes have been
-/// stripped by the host terminal.
-#[cfg(feature = "image")]
-fn occupied_row_count(plain: &str) -> usize {
-    plain
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter(|l| !looks_like_only_prompt(l))
-        .count()
-}
-
-#[cfg(feature = "image")]
-fn looks_like_only_prompt(line: &str) -> bool {
-    let trimmed = line.trim_end();
-    trimmed.ends_with('$') || trimmed.ends_with('%') || trimmed.ends_with('#')
-}
-
 // ------------------------------------------------------------------
 // Unicode glyph output
 // ------------------------------------------------------------------
@@ -171,6 +153,13 @@ fn level2_image_protocol_fallback_renders_graphics() {
         "Kitty or WezTerm"
     );
 
+    // Skip if the available terminal does not advertise image support.
+    let term = biscuit_terminal::terminal::Terminal::new();
+    if term.image_support == biscuit_terminal::discovery::detection::ImageSupport::None {
+        eprintln!("skipping: terminal does not advertise image support");
+        return;
+    }
+
     // Prefer Kitty when both are available.
     if kitty_available {
         let mut guard = SHARED_KITTY
@@ -181,7 +170,7 @@ fn level2_image_protocol_fallback_renders_graphics() {
 
         let home = tempfile::tempdir().unwrap();
         let cmd = format!(
-            "HOME='{}' PATH='{}' icon icons apple\n",
+            "HOME='{}' PATH='{}' icon icons ic:baseline-apple\n",
             home.path().display(),
             path_with_icon_bin(),
         );
@@ -212,12 +201,9 @@ fn level2_image_protocol_fallback_renders_graphics() {
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
 
-    let pre = harness.capture().expect("pre-capture failed");
-    let pre_rows = occupied_row_count(&pre.plain);
-
     let home = tempfile::tempdir().unwrap();
     let cmd = format!(
-        "HOME='{}' PATH='{}' icon icons apple\n",
+        "HOME='{}' PATH='{}' icon icons ic:baseline-apple\n",
         home.path().display(),
         path_with_icon_bin(),
     );
@@ -227,15 +213,11 @@ fn level2_image_protocol_fallback_renders_graphics() {
 
     let has_kitty = frame.raw.contains("\x1b_G");
     let has_iterm = frame.raw.contains("1337");
-    let post_rows = occupied_row_count(&frame.plain);
-    let observed_delta = post_rows.saturating_sub(pre_rows);
-    let geometry_ok = observed_delta > 0;
 
     assert!(
-        has_kitty || has_iterm || geometry_ok,
-        "WezTerm image render: neither protocol bytes nor pane-row growth observed. \
-         osc_kitty={has_kitty} osc_iterm={has_iterm} pre_rows={pre_rows} post_rows={post_rows} \
-         delta={observed_delta}\nraw_first_400={:?}\nplain:\n{}",
+        has_kitty || has_iterm,
+        "WezTerm image render: neither Kitty nor iTerm image protocol escape sequences found. \
+         osc_kitty={has_kitty} osc_iterm={has_iterm}\nraw_first_400={:?}\nplain:\n{}",
         &frame.raw.chars().take(400).collect::<String>(),
         frame.plain,
     );

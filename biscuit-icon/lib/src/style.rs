@@ -210,6 +210,34 @@ mod tests {
     }
 
     #[test]
+    fn flip_vertical_emits_scale() {
+        let style = Style { flip: Some(Flip::Vertical), ..Style::default() };
+        let svg = style.assemble(&body());
+        assert!(svg.contains("translate(0 24) scale(1 -1)"));
+    }
+
+    #[test]
+    fn flip_both_emits_scale() {
+        let style = Style { flip: Some(Flip::Both), ..Style::default() };
+        let svg = style.assemble(&body());
+        assert!(svg.contains("translate(24 24) scale(-1 -1)"));
+    }
+
+    #[test]
+    fn rotate_180_emits_rotate() {
+        let style = Style { rotate: Some(Rotate::R180), ..Style::default() };
+        let svg = style.assemble(&body());
+        assert!(svg.contains("rotate(180 12 12)"));
+    }
+
+    #[test]
+    fn rotate_270_emits_rotate() {
+        let style = Style { rotate: Some(Rotate::R270), ..Style::default() };
+        let svg = style.assemble(&body());
+        assert!(svg.contains("rotate(270)"));
+    }
+
+    #[test]
     fn view_box_flag_emits_transparent_rect() {
         let style = Style { view_box: true, ..Style::default() };
         let svg = style.assemble(&body());
