@@ -33,9 +33,10 @@
 use renderable::color::TerminalCodeContext;
 use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
-    ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, InheritedStyle, NodeKind,
-    ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
-    TableTerminalHints, TerminalMermaidMode, TextLayoutHints, TextOverflow,
+    ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HrAlignment, HrKind,
+    HrWeight, InheritedStyle, NodeKind, ProgressHints, RenderError, RenderNode, RenderStrictness,
+    Rendered, Severity, TableColumnHints, TableTerminalHints, TerminalMermaidMode, TextLayoutHints,
+    TextOverflow,
 };
 use renderable::tree::{ValidationError, ValidationMode, validate};
 
@@ -2007,8 +2008,10 @@ fn wrap_column_lines(rendered: &str, width: u32) -> String {
 /// terminal renderer would emit a plain rule for every HR regardless of
 /// authored attributes (review-4 finding 2).
 ///
-/// Unknown enum values fall back to the [`HorizontalRule`] defaults so a
-/// malformed `kind: dashse` still produces output rather than panicking.
+/// `kind`/`alignment`/`weight` are the shared [`HrKind`]/[`HrAlignment`]/
+/// [`HrWeight`] enums; an unrecognized authored spelling becomes `None` at the
+/// fold boundary, so a malformed `kind: dashse` leaves the rule at its default
+/// rather than panicking.
 ///
 /// [`ThematicBreakAttrs`]: renderable::tree::ThematicBreakAttrs
 /// [`NodeAttrs::thematic_break`]: renderable::tree::NodeAttrs::thematic_break
@@ -2018,36 +2021,31 @@ fn horizontal_rule_from_attrs(attrs: &renderable::tree::NodeAttrs) -> Horizontal
         return rule;
     };
 
-    if let Some(kind) = hr.kind.as_deref() {
-        rule = match kind {
-            "dashes" => rule.style(RuleStyle::Dashes),
-            "dots" => rule.style(RuleStyle::Dots),
-            "waves" => rule.style(RuleStyle::Waves),
-            "line-star" => rule.style(RuleStyle::LineStar),
-            "line-circle" => rule.style(RuleStyle::LineCircle),
-            "inset-line" => rule.style(RuleStyle::InsetLine),
-            "curtain-rod" => rule.style(RuleStyle::CurtainRod),
-            _ => rule,
-        };
+    if let Some(kind) = hr.kind {
+        rule = rule.style(match kind {
+            HrKind::Dashes => RuleStyle::Dashes,
+            HrKind::Dots => RuleStyle::Dots,
+            HrKind::Waves => RuleStyle::Waves,
+            HrKind::LineStar => RuleStyle::LineStar,
+            HrKind::LineCircle => RuleStyle::LineCircle,
+            HrKind::InsetLine => RuleStyle::InsetLine,
+            HrKind::CurtainRod => RuleStyle::CurtainRod,
+        });
     }
-    if let Some(alignment) = hr.alignment.as_deref() {
-        rule = match alignment {
-            "full" => rule.alignment(RuleAlignment::Full),
-            // `center` is the `style.hr` schema-canonical spelling (projected by
-            // page-level HR defaults); `centered` is the inline-attribute alias.
-            "center" | "centered" => rule.alignment(RuleAlignment::Centered),
-            "left" => rule.alignment(RuleAlignment::Left),
-            "right" => rule.alignment(RuleAlignment::Right),
-            _ => rule,
-        };
+    if let Some(alignment) = hr.alignment {
+        rule = rule.alignment(match alignment {
+            HrAlignment::Full => RuleAlignment::Full,
+            HrAlignment::Center => RuleAlignment::Centered,
+            HrAlignment::Left => RuleAlignment::Left,
+            HrAlignment::Right => RuleAlignment::Right,
+        });
     }
-    if let Some(weight) = hr.weight.as_deref() {
-        rule = match weight {
-            "thin" => rule.weight(RuleWeight::Thin),
-            "medium" => rule.weight(RuleWeight::Medium),
-            "thick" => rule.weight(RuleWeight::Thick),
-            _ => rule,
-        };
+    if let Some(weight) = hr.weight {
+        rule = rule.weight(match weight {
+            HrWeight::Thin => RuleWeight::Thin,
+            HrWeight::Medium => RuleWeight::Medium,
+            HrWeight::Thick => RuleWeight::Thick,
+        });
     }
     if let Some(width) = hr.width.as_deref() {
         rule = rule.width(width);
@@ -4685,7 +4683,7 @@ mod render_tree_tests {
 
         let mut hr = RenderNode::thematic_break();
         hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
-            kind: Some("waves".into()),
+            kind: Some(HrKind::Waves),
             ..Default::default()
         });
 
@@ -4708,26 +4706,20 @@ mod render_tree_tests {
         );
     }
 
-    /// `horizontal_rule_from_attrs` must accept both the `style.hr`
-    /// schema-canonical `center` (projected by page-level HR defaults) and the
-    /// inline-attribute alias `centered`, mapping both to
-    /// [`RuleAlignment::Centered`]. Without the `center` arm a page-default
-    /// centered rule would silently fall back to `Full`.
+    /// `horizontal_rule_from_attrs` maps the shared [`HrAlignment::Center`]
+    /// (the canonical spelling both the `centered` inline alias and the
+    /// `style.hr` page default parse to) onto [`RuleAlignment::Centered`].
+    /// Without that arm a page-default centered rule would silently fall back
+    /// to `Full`.
     #[test]
-    fn horizontal_rule_from_attrs_accepts_center_and_centered() {
-        for alignment in ["center", "centered"] {
-            let mut attrs = renderable::tree::NodeAttrs::default();
-            attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
-                alignment: Some(alignment.into()),
-                ..Default::default()
-            });
-            let rule = horizontal_rule_from_attrs(&attrs);
-            assert_eq!(
-                *rule.rule_alignment(),
-                RuleAlignment::Centered,
-                "{alignment:?} must map to RuleAlignment::Centered",
-            );
-        }
+    fn horizontal_rule_from_attrs_centers_on_hr_alignment_center() {
+        let mut attrs = renderable::tree::NodeAttrs::default();
+        attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+            alignment: Some(HrAlignment::Center),
+            ..Default::default()
+        });
+        let rule = horizontal_rule_from_attrs(&attrs);
+        assert_eq!(*rule.rule_alignment(), RuleAlignment::Centered);
     }
 
     /// A `NodeKind::ThematicBreak` with no hints must still render through
@@ -4753,7 +4745,7 @@ mod render_tree_tests {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
         hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
-            kind: Some("waves".into()),
+            kind: Some(HrKind::Waves),
             ..Default::default()
         });
 
@@ -4785,7 +4777,7 @@ mod render_tree_tests {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
         hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
-            kind: Some("waves".into()),
+            kind: Some(HrKind::Waves),
             ..Default::default()
         });
 
@@ -4813,7 +4805,7 @@ mod render_tree_tests {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
         hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
-            kind: Some("waves".into()),
+            kind: Some(HrKind::Waves),
             ..Default::default()
         });
 
@@ -4845,7 +4837,7 @@ mod render_tree_tests {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
         hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
-            kind: Some("waves".into()),
+            kind: Some(HrKind::Waves),
             ..Default::default()
         });
 
