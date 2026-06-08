@@ -21,21 +21,40 @@
 //!   `…_browser_…`): folding that same corpus through the real
 //!   `render_tree_{terminal,html}_with_context` entry points must perform
 //!   **zero** `renderable.*` `NodeAttrs::data` round-trips. Every first-class
-//!   hint is read from a typed field; only Darkmatter's own `darkmatter.hr`
-//!   extension hint touches the bag, and that increments the *extension*
-//!   counter, never the renderable-owned one.
+//!   hint — including thematic-break styling, which now rides the typed
+//!   [`thematic_break`](renderable::tree::NodeAttrs::thematic_break) field — is
+//!   read from a typed field, so the styled production path touches the bag for
+//!   neither the renderable-owned *nor* the extension counter. A deliberate
+//!   post-render probe proves the counter is still live.
 //!
 //! The counter is renderable's `hint-access-counter` instrumentation, enabled
 //! for this crate's test build via the `[dev-dependencies]` renderable feature
 //! re-declaration. It is a thread-local, so every `reset`/`render`/`read` trio
 //! must stay on one thread — which it does, since each test runs synchronously.
+//!
+//! The zero-access gate certifies all three of the closeout spec's structural
+//! performance properties (spec section 6) at once, because they collapse to a
+//! single observable: a `renderable.*` bag access.
+//!
+//! - **Zero first-class extension-bag access** is the counter's first slot.
+//! - **Zero per-node formatted hint keys** follows directly: the only
+//!   `format!("{ns}.{key}")` calls live inside `NodeAttrs::{set,get,remove}_hint`,
+//!   which are exactly what the counter records — zero accesses means zero
+//!   per-node key formatting on the fold path.
+//! - **Zero typed-attr serde round-trips** is a type-level guarantee: typed
+//!   attrs are read through their typed accessors (`layout_ref`, `style_ref`,
+//!   `text_layout_ref`, `browser_ref`, `thematic_break_ref`, …), none of which
+//!   touch `serde`. A regression that re-introduced a JSON round-trip for a
+//!   first-class hint would have to go through the bag and trip the counter.
 
 use biscuit_terminal::render_tree::{
     TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
 };
 use biscuit_terminal::terminal::Terminal;
 use renderable::tree::{
-    BrowserRenderOptions, Document, NodeKind, RenderNode, hint_accesses, render_browser_document_html,
+    BrowserRenderOptions, Document, HintNamespace, MarkdownDialect, MarkdownRenderOptions,
+    NodeAttrs, NodeKind, RenderNode, hint_accesses, render_browser_document,
+    render_browser_document_html, render_markdown_document, render_markdown_node,
     reset_hint_accesses,
 };
 
@@ -54,13 +73,19 @@ use crate::style::{
 };
 
 /// A `style:`-frontmatter document exercising every typed group the gate
-/// claims to cover:
+/// claims to cover, expanded to the closeout spec's performance-corpus list
+/// (spec section 6) so the production styled path reads every typed branch:
 ///
-/// - **alpha paint + component color:** `block-quote.bg-color: red-500/50`;
+/// - **alpha background paint:** `block-quote.bg-color: red-500/50`;
+/// - **alpha foreground paint:** `block-quote.color: slate-200/50`;
 /// - **page-inheriting color:** `page.color: slate-200` (attached to the root);
-/// - **component policy layout:** `table.alignment: center`;
+/// - **page-frame padding/max-width:** `page.top-padding` / `page.left-padding`
+///   / `page.max-width` (viewport concerns owned by the page frame);
+/// - **component policy layout (alignment + fixed/max width):**
+///   `table.alignment: center` + `table.width: 40`, `block-quote.max-width: 50`;
 /// - **exact text layout:** `hyperlinks.width: 20`;
 /// - **max text layout:** `li.max-width: 40` + `li.alignment: right`;
+/// - **ordered-list layout:** `ol.max-width: 40` (an `ol` in the body);
 /// - **image text layout + color:** `images.local-style: { color, width }`;
 /// - **typed browser link attrs / data-* / inline style:** the structured link
 ///   directive (`class`, `target`, `prompt`, custom `data-*`, `style`);
@@ -70,14 +95,22 @@ const STYLED_CORPUS: &str = "\
 style:
     page:
         color: slate-200
+        top-padding: 1
+        left-padding: 2
+        max-width: 100
     block-quote:
         bg-color: red-500/50
+        color: slate-200/50
+        max-width: 50
     table:
         alignment: center
+        width: 40
     hyperlinks:
         width: 20
     li:
         alignment: right
+        max-width: 40
+    ol:
         max-width: 40
     images:
         local-style:
@@ -93,6 +126,9 @@ style:
 
 - Item one
 - Item two
+
+1. First
+2. Second
 
 [Click](https://example.com \"class='btn' style='color: blue;' target='_blank' prompt='Run it' data-id='42'\")
 
@@ -147,6 +183,7 @@ fn build_context<'a>(
 /// Whether each typed group is populated somewhere in the built tree.
 #[derive(Default, Debug)]
 struct Coverage {
+    layout: bool,
     alpha_paint: bool,
     component_policy: bool,
     text_layout: bool,
@@ -178,6 +215,7 @@ fn coverage(root: &RenderNode) -> Coverage {
     }
 
     fn walk(node: &RenderNode, cov: &mut Coverage) {
+        cov.layout |= node.attrs.layout_ref().is_some();
         cov.alpha_paint |= has_alpha(node);
         // Component policy is observable as a baked Style or Layout on a
         // container node the fold attaches policy to.
@@ -216,12 +254,16 @@ fn build_styled_document() -> Document {
     doc
 }
 
-/// The styled corpus must populate every typed group the zero-access gate below
-/// claims to exercise; otherwise `renderable_owned == 0` would pass vacuously.
+/// Production-entry structural assertion (closeout spec section 5, AC6): a
+/// styled Darkmatter source's *initial* `Document` — before any fold runs —
+/// already carries layout, paint, text-layout, and browser attrs as typed
+/// fields. This both proves the "complete typed Document" thesis and guards the
+/// zero-access gate below from passing vacuously on an empty corpus.
 #[test]
 fn styled_corpus_populates_every_typed_group() {
     let doc = build_styled_document();
     let cov = coverage(&doc.root);
+    assert!(cov.layout, "corpus must carry typed Layout: {cov:?}");
     assert!(cov.alpha_paint, "corpus must carry alpha paint: {cov:?}");
     assert!(
         cov.component_policy,
@@ -243,10 +285,11 @@ fn styled_corpus_populates_every_typed_group() {
 }
 
 /// Folding the styled corpus through the real terminal entry point must not
-/// round-trip any renderable-owned hint through [`NodeAttrs::data`]. Component
-/// policy, alpha paint, and text-layout all ride typed fields; the only bag
-/// traffic is the terminal renderer probing the `---` node's package-local
-/// `darkmatter.hr` hints, which is an *extension* namespace.
+/// round-trip any hint through [`NodeAttrs::data`]. Component policy, alpha
+/// paint, text-layout, and thematic-break styling all ride typed fields, so the
+/// styled production path performs **zero** bag round-trips of either kind. A
+/// deliberate post-render probe proves the counter is live, so the zero is real
+/// and not a silently disabled counter.
 #[test]
 fn styled_terminal_path_does_zero_renderable_owned_hint_roundtrips() {
     let md = corpus_md();
@@ -266,10 +309,20 @@ fn styled_terminal_path_does_zero_renderable_owned_hint_roundtrips() {
         renderable_owned, 0,
         "the styled terminal path must read every first-class hint from a typed field",
     );
+    assert_eq!(
+        extension, 0,
+        "now that HR styling rides the typed `thematic_break` field, the styled \
+         terminal path performs zero extension-bag round-trips too",
+    );
+
+    // Liveness guard: the zeros above must be real, not a silently disabled
+    // counter. A deliberate probe must still register on the extension slot.
+    reset_hint_accesses();
+    let probe = NodeAttrs::default();
+    let _ = probe.get_hint(HintNamespace("liveness.probe"), "k");
     assert!(
-        extension > 0,
-        "the `---` node's `darkmatter.hr` extension hints must be probed, \
-         proving the counter is live (not silently disabled)",
+        hint_accesses().1 > 0,
+        "the hint-access counter must be live (probe should have incremented it)",
     );
 }
 
@@ -294,10 +347,12 @@ fn styled_browser_path_does_zero_renderable_owned_hint_roundtrips() {
     );
 }
 
-/// Rendering one built tree at different terminal widths and to the browser
-/// must not mutate the input tree: the renderers resolve width-dependent
-/// text-layout against their own fold context, never by rewriting the stored
-/// tree. Pins the spec's immutable-tree contract across targets and widths.
+/// Rendering one built tree through **all four targets** — Terminal (at two
+/// widths), Browser, Markdown, and MarkdownPlus — must not mutate the input
+/// tree: each renderer resolves width-dependent text-layout against its own
+/// fold context, never by rewriting the stored tree. Pins the spec's
+/// immutable-tree contract (closeout spec section 5, AC6) across every target
+/// and width.
 #[test]
 fn rendering_does_not_mutate_the_tree_across_targets_and_widths() {
     let doc = build_styled_document();
@@ -324,5 +379,136 @@ fn rendering_does_not_mutate_the_tree_across_targets_and_widths() {
     let _ = render_browser_document_html(&doc, &BrowserRenderOptions::default())
         .expect("browser render");
 
+    for dialect in [MarkdownDialect::Markdown, MarkdownDialect::MarkdownPlus] {
+        let opts = MarkdownRenderOptions {
+            dialect,
+            ..MarkdownRenderOptions::default()
+        };
+        let _ = render_markdown_document(&doc, &opts).expect("markdown render");
+    }
+
     assert_eq!(doc, pristine, "rendering must not mutate the input tree");
+}
+
+/// The two browser surfaces must agree on style and attributes for the styled
+/// production corpus: the streaming final-string path
+/// (`render_browser_document_html`) and the fragment-tree path
+/// (`render_browser_document(...).output.render()`) emit byte-identical HTML, so
+/// a component composing through `BrowserFragment`s sees exactly what the
+/// document fold emits (closeout spec section 5, AC6: "browser fragment and
+/// streaming output agree for style and attributes"). The shared synthetic
+/// corpus is also pinned in `renderable`; this pins the real Darkmatter entry.
+#[test]
+fn styled_browser_fragment_and_streaming_paths_agree() {
+    let doc = build_styled_document();
+    let opts = BrowserRenderOptions::default();
+
+    let streamed = render_browser_document_html(&doc, &opts)
+        .expect("streaming browser render")
+        .output;
+    let via_fragments = render_browser_document(&doc, &opts)
+        .expect("fragment browser render")
+        .output
+        .render();
+
+    assert_eq!(
+        streamed, via_fragments,
+        "the streaming and fragment browser paths must emit identical HTML",
+    );
+}
+
+/// Markdown-dialect degradation on the styled production corpus (closeout spec
+/// section 5, AC8). Portable [`MarkdownDialect::Markdown`] drops paint,
+/// geometry, and browser-only attributes; [`MarkdownDialect::MarkdownPlus`]
+/// stays within its documented HTML dialect policy and never becomes a second
+/// browser renderer — its links and images keep their plain Markdown spelling
+/// because the structured browser attrs have no MarkdownPlus form.
+///
+/// The assertions run on the rendered **body** ([`render_markdown_node`] over
+/// the root), not the whole document, so the preserved raw frontmatter — which
+/// legitimately contains `color:` / `bg-color:` style keys — does not
+/// false-positive the "no paint" checks.
+#[test]
+fn markdown_dialects_degrade_within_policy() {
+    let doc = build_styled_document();
+
+    // Paint, inline CSS, browser attrs, and inline HTML tags that must never
+    // survive the portable-Markdown body.
+    const FORBIDDEN: &[&str] = &[
+        "rgb(", "rgba(", "style=", "color:", "background", "data-", "target=",
+        "class=", "<a ", "<img", "<span",
+    ];
+
+    let portable = render_markdown_node(&doc.root, &MarkdownRenderOptions::default())
+        .expect("portable markdown render")
+        .output;
+    for needle in FORBIDDEN {
+        assert!(
+            !portable.contains(needle),
+            "portable Markdown must drop `{needle}`. body:\n{portable}",
+        );
+    }
+    assert!(
+        portable.contains("[Click](https://example.com)"),
+        "the link must degrade to its plain Markdown spelling. body:\n{portable}",
+    );
+    assert!(
+        portable.contains("![A](./local.png)"),
+        "the image must degrade to its plain Markdown spelling. body:\n{portable}",
+    );
+
+    let plus_opts = MarkdownRenderOptions {
+        dialect: MarkdownDialect::MarkdownPlus,
+        ..MarkdownRenderOptions::default()
+    };
+    let plus = render_markdown_node(&doc.root, &plus_opts)
+        .expect("markdown-plus render")
+        .output;
+    // MarkdownPlus must not widen a link/image into a browser `<a>`/`<img>`:
+    // those browser-only attrs have no MarkdownPlus form, so both stay plain.
+    assert!(
+        plus.contains("[Click](https://example.com)") && !plus.contains("<a "),
+        "MarkdownPlus must keep the link plain (no browser <a>). body:\n{plus}",
+    );
+    assert!(
+        plus.contains("![A](./local.png)") && !plus.contains("<img"),
+        "MarkdownPlus must keep the image plain (no browser <img>). body:\n{plus}",
+    );
+}
+
+/// `InheritedStyle` is the sole text-appearance inheritance path (closeout spec
+/// section 5: "`InheritedStyle` is the sole text-appearance inheritance
+/// contract"). Proven end-to-end on the browser fold, where a second
+/// inheritance path would surface as a re-declared or leaked property:
+///
+/// - the page foreground color is declared exactly once (on the wrapping
+///   element) and reaches descendants through the CSS cascade — the
+///   block-quote's child paragraph never re-declares `color`;
+/// - box-paint never inherits: the block-quote's `background-color` does not
+///   appear on its child paragraph, which carries no `style` at all.
+///
+/// The `InheritedStyle` resolver's field-level contract (only `color` +
+/// `emphasis` inherit; `background` / `border` / geometry do not) is unit-tested
+/// in `renderable::tree::inherit`; this pins the same contract through the real
+/// styled production fold.
+#[test]
+fn inherited_style_is_the_sole_text_appearance_path() {
+    let doc = build_styled_document();
+    let html = render_browser_document_html(&doc, &BrowserRenderOptions::default())
+        .expect("browser render")
+        .output;
+
+    // The page color (`slate-200`) is declared once and inherits via the
+    // cascade; a second push-down path would re-emit it on descendants.
+    assert_eq!(
+        html.matches("color:rgb(226, 232, 240)").count(),
+        1,
+        "the page color must be declared once and inherit via the cascade. html:\n{html}",
+    );
+    // The block-quote's child paragraph carries no style of its own: neither the
+    // inherited foreground nor the non-inheriting background leaks onto it.
+    assert!(
+        html.contains("<p>A quoted paragraph.</p>"),
+        "the block-quote child paragraph must carry no inherited/leaked style. html:\n{html}",
+    );
 }

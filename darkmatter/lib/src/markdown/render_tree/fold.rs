@@ -40,8 +40,8 @@
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use renderable::tree::{
     ColumnAlign, Diagnostic, Document, DocumentMetadata, Frontmatter as TreeFrontmatter,
-    FrontmatterFormat, HeadingDepth, HintNamespace, NodeKind, Provenance, RenderNode,
-    SourceDescriptor, SourceId, SourceLocation, SourceSpan,
+    FrontmatterFormat, HeadingDepth, NodeKind, Provenance, RenderNode, SourceDescriptor, SourceId,
+    SourceLocation, SourceSpan, ThematicBreakAttrs,
 };
 use std::ops::Range;
 
@@ -336,7 +336,8 @@ pub fn fold_markdown_with_frontmatter(
 /// paragraph that the block-extension processor lifted from the event stream.
 ///
 /// The returned node has [`Provenance::Generated`] (it was synthesized from a
-/// paragraph) and carries the parsed `darkmatter.hr.*` hints. `body_range`
+/// paragraph) and carries the parsed HR styling in the typed
+/// [`ThematicBreakAttrs`] field. `body_range`
 /// must point at the original paragraph body bytes — not the wider
 /// `End(Paragraph)` range — so the produced
 /// [`renderable::tree::SourceLocation`] is byte-identical to the retired
@@ -354,26 +355,14 @@ fn lower_hr_attrs_to_node(
             bytes: body_range,
         }),
     };
-    let hr_ns = HintNamespace("darkmatter.hr");
-    if let Some(kind) = attrs.kind.as_ref().or(attrs.legacy_style.as_ref()) {
-        node.attrs.set_hint(hr_ns, "kind", serde_json::json!(kind));
-    }
-    if let Some(alignment) = attrs.alignment {
-        node.attrs
-            .set_hint(hr_ns, "alignment", serde_json::json!(alignment));
-    }
-    if let Some(weight) = attrs.weight {
-        node.attrs
-            .set_hint(hr_ns, "weight", serde_json::json!(weight));
-    }
-    if let Some(width) = attrs.width {
-        node.attrs
-            .set_hint(hr_ns, "width", serde_json::json!(width));
-    }
-    if let Some(color) = attrs.color {
-        node.attrs
-            .set_hint(hr_ns, "color", serde_json::json!(color));
-    }
+    node.attrs.set_thematic_break(&ThematicBreakAttrs {
+        // The canonical `kind` key wins over the deprecated `style:` alias.
+        kind: attrs.kind.or(attrs.legacy_style),
+        alignment: attrs.alignment,
+        weight: attrs.weight,
+        width: attrs.width,
+        color: attrs.color,
+    });
     node
 }
 
@@ -397,8 +386,8 @@ fn lower_hr_attrs_to_node(
 ///    range is mapped back to the original source through the rewriter's
 ///    provenance table.
 ///
-/// HR-attribute paragraphs fold to a [`NodeKind::ThematicBreak`] with
-/// `darkmatter.hr.*` hints (and [`Provenance::Generated`] because the event was
+/// HR-attribute paragraphs fold to a [`NodeKind::ThematicBreak`] with typed
+/// [`ThematicBreakAttrs`] (and [`Provenance::Generated`] because the event was
 /// synthesized from a paragraph). The body fold sees only Markdown content;
 /// darkmatter's already extracted frontmatter flows into
 /// [`DocumentMetadata::frontmatter`].
@@ -1544,15 +1533,9 @@ mod tests {
             None
         }
         let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
-        let ns = renderable::tree::HintNamespace("darkmatter.hr");
-        assert_eq!(
-            hr.attrs.get_hint(ns, "kind"),
-            Some(&serde_json::json!("waves"))
-        );
-        assert_eq!(
-            hr.attrs.get_hint(ns, "width"),
-            Some(&serde_json::json!("50%"))
-        );
+        let tb = hr.attrs.thematic_break_ref().expect("HR styling attached");
+        assert_eq!(tb.kind.as_deref(), Some("waves"));
+        assert_eq!(tb.width.as_deref(), Some("50%"));
         // Generated provenance: this HR was synthesized from a paragraph.
         assert_eq!(hr.span.provenance, Provenance::Generated);
         assert!(hr.span.location.is_some());
@@ -1621,10 +1604,9 @@ mod tests {
         }
         let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
         assert_eq!(hr.span.provenance, Provenance::Parsed);
-        let ns = renderable::tree::HintNamespace("darkmatter.hr");
         assert!(
-            hr.attrs.get_hint(ns, "kind").is_none(),
-            "plain rule must not carry HR hints"
+            hr.attrs.thematic_break_ref().is_none(),
+            "plain rule must not carry HR styling"
         );
     }
 

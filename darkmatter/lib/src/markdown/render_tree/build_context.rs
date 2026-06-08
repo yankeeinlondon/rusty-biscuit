@@ -451,41 +451,37 @@ fn exact_width_overflow(has_exact_width: bool) -> renderable::tree::TextOverflow
     }
 }
 
-/// Fills missing `darkmatter.hr.*` hints on a [`NodeKind::ThematicBreak`] from
-/// `defaults`, reproducing the legacy bare-rule default contract.
+/// Fills missing [`ThematicBreakAttrs`] fields on a [`NodeKind::ThematicBreak`]
+/// from `defaults`, reproducing the legacy bare-rule default contract: an
+/// inline `{:hr …}` directive wins per-field, and page-level defaults fill only
+/// the fields the author left unset.
+///
+/// [`ThematicBreakAttrs`]: renderable::tree::ThematicBreakAttrs
 fn apply_hr_defaults(node: &mut RenderNode, ctx: &TreeBuildContext) {
-    use renderable::tree::HintNamespace;
-
     let Some(defaults) = ctx.hr_defaults else {
         return;
     };
-    let ns = HintNamespace("darkmatter.hr");
-    if let Some(kind) = defaults.kind.as_ref().or(defaults.legacy_style.as_ref()) {
-        set_hint_if_absent(node, ns, "kind", kind);
+    let tb = node.attrs.thematic_break_mut_or_default();
+    if tb.kind.is_none() {
+        // The canonical `kind` wins over the deprecated `style:` alias.
+        tb.kind = defaults
+            .kind
+            .clone()
+            .or_else(|| defaults.legacy_style.clone());
     }
-    if let Some(alignment) = defaults.alignment.as_ref() {
-        set_hint_if_absent(node, ns, "alignment", alignment);
+    if tb.alignment.is_none() {
+        tb.alignment = defaults.alignment.clone();
     }
-    if let Some(weight) = defaults.weight.as_ref() {
-        set_hint_if_absent(node, ns, "weight", weight);
+    if tb.weight.is_none() {
+        tb.weight = defaults.weight.clone();
     }
-    if let Some(width) = defaults.width.as_ref() {
-        set_hint_if_absent(node, ns, "width", width);
+    if tb.width.is_none() {
+        tb.width = defaults.width.clone();
     }
-    if let Some(color) = defaults.color.as_ref() {
-        set_hint_if_absent(node, ns, "color", color);
+    if tb.color.is_none() {
+        tb.color = defaults.color.clone();
     }
-}
-
-fn set_hint_if_absent(
-    node: &mut RenderNode,
-    ns: renderable::tree::HintNamespace,
-    key: &str,
-    value: &str,
-) {
-    if node.attrs.get_hint(ns, key).is_none() {
-        node.attrs.set_hint(ns, key, serde_json::json!(value));
-    }
+    node.attrs.retain_non_default_thematic_break();
 }
 
 // ───────────────────── structured link/image directives ────────────────────
@@ -970,9 +966,8 @@ mod structural_tests {
         let doc = fold_test("---\n", &ctx);
         let hr = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::ThematicBreak))
             .expect("thematic break");
-        let ns = renderable::tree::HintNamespace("darkmatter.hr");
         assert_eq!(
-            hr.attrs.get_hint(ns, "kind").and_then(|v| v.as_str()),
+            hr.attrs.thematic_break_ref().and_then(|h| h.kind.as_deref()),
             Some("waves")
         );
     }
