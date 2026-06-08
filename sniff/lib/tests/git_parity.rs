@@ -780,7 +780,10 @@ fn ambiguous_prefix(repo_path: &Path) -> String {
             return pair[0][..shared].to_string();
         }
     }
-    panic!("no ambiguous object prefix found among {} objects", ids.len());
+    panic!(
+        "no ambiguous object prefix found among {} objects",
+        ids.len()
+    );
 }
 
 #[test]
@@ -916,6 +919,58 @@ fn commits_for_branch_at_surfaces_remote_tracking_ref_to_missing_object() {
 }
 
 // ---------------------------------------------------------------------------
+// Unresolved-branch absence is Ok(empty), never an error (review-9 finding 2)
+//
+// An absent branch must not be inferred as a corrupt SHA from its characters.
+// A name that is non-hex, too short, or too long for an object-ID prefix is
+// genuine branch absence, not an operational failure.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn commits_for_branch_at_absent_short_hex_is_empty() {
+    // `add` is hex but 3 chars — below gix's 4-char minimum object-ID prefix.
+    // It must be treated as an absent branch, not a malformed-SHA error.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+
+    let commits = sniff::filesystem::commits_for_branch_at(dir.path(), "add", 10)
+        .expect("absent short-hex branch name must be Ok(empty)");
+    assert!(
+        commits.is_empty(),
+        "absent branch must produce empty history"
+    );
+}
+
+#[test]
+fn commits_for_branch_at_absent_valid_length_hex_is_empty() {
+    // A validly-shaped hex prefix that matches no object resolves to empty
+    // history rather than an error.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+
+    let commits = sniff::filesystem::commits_for_branch_at(dir.path(), "abcdef12", 10)
+        .expect("absent valid-length-hex branch name must be Ok(empty)");
+    assert!(
+        commits.is_empty(),
+        "absent branch must produce empty history"
+    );
+}
+
+#[test]
+fn commits_for_branch_at_absent_ordinary_branch_is_empty() {
+    // A non-hex absent branch name returns empty history.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+
+    let commits = sniff::filesystem::commits_for_branch_at(dir.path(), "nonexistent", 10)
+        .expect("absent ordinary branch name must be Ok(empty)");
+    assert!(
+        commits.is_empty(),
+        "absent branch must produce empty history"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Packed checked-out branch parity (review-8 finding 1)
 //
 // After `git pack-refs --all --prune` the checked-out branch may exist only in
@@ -1027,6 +1082,51 @@ fn malformed_head_surfaces_through_metadata_detection() {
     assert!(
         handle.detect_with_request(&GitRequest::full()).is_err(),
         "malformed HEAD must surface through a metadata-producing detection request"
+    );
+}
+
+#[test]
+fn malformed_head_surfaces_through_minimal_detection() {
+    // `minimal()` skips branch/tracking collection, so the fallible HEAD query
+    // at the top of `detect_with_request` is the only place its corruption can
+    // surface — it must not return `Ok` with `current_branch: None`.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+    fs::write(dir.path().join(".git").join("HEAD"), b"not a valid head\n").unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    assert!(
+        handle.detect_with_request(&GitRequest::minimal()).is_err(),
+        "malformed HEAD must surface through a minimal detection request"
+    );
+}
+
+#[test]
+fn malformed_head_surfaces_through_summary_detection() {
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+    fs::write(dir.path().join(".git").join("HEAD"), b"not a valid head\n").unwrap();
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    assert!(
+        handle.detect_with_request(&GitRequest::summary()).is_err(),
+        "malformed HEAD must surface through a summary detection request"
+    );
+}
+
+#[test]
+fn missing_head_surfaces_through_minimal_detection() {
+    // Delete HEAD *after* discovery so the detection call itself — not the
+    // discovery step — exercises the failure path.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+
+    let handle = GitRepo::discover(dir.path()).unwrap().expect("repo found");
+    fs::remove_file(dir.path().join(".git").join("HEAD")).unwrap();
+
+    assert!(
+        handle.detect_with_request(&GitRequest::minimal()).is_err(),
+        "a HEAD missing at detection time must surface through a minimal request"
     );
 }
 
