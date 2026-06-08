@@ -21,6 +21,8 @@ pub mod nerd {
         pub const UTILS: char = '\u{f19fc}';
         /// `docs` or `documentation` directory.
         pub const DOCS: char = '\u{ebdf}';
+        /// Repository root directory (used when the root starts at the repo root).
+        pub const REPO: char = '\u{f1d3}'; // Git icon
     }
 
     /// File icons.
@@ -63,6 +65,14 @@ pub mod nerd {
         pub const YAML: char = '\u{e8eb}';
         /// JSON files (`.json`).
         pub const JSON: char = '\u{eb0f}';
+        /// PDF files (`.pdf`).
+        pub const PDF: char = '\u{f1c1}';
+        /// Word files (`.doc`, `.docx`).
+        pub const WORD: char = '\u{f1c2}';
+        /// Excel files (`.xls`, `.xlsx`).
+        pub const EXCEL: char = '\u{f1c3}';
+        /// Plain-text files (`.txt`).
+        pub const TEXT: char = '\u{f1c9}';
     }
 
     /// Special file icons (deprecated, use `file` module instead).
@@ -97,5 +107,13 @@ pub mod unicode {
         pub const BASE: char = '\u{1F4C4}'; // 📄
         /// Symlink indicator.
         pub const SYMLINK: char = '@';
+        /// Plain-text files (`.txt`).
+        pub const TEXT: char = '\u{1F4DD}'; // 📝
+        /// PDF files (`.pdf`).
+        pub const PDF: char = '\u{1F4D5}'; // 📕
+        /// Word documents (`.doc`, `.docx`).
+        pub const WORD: char = '\u{1F4D8}'; // 📘
+        /// Excel spreadsheets (`.xls`, `.xlsx`).
+        pub const EXCEL: char = '\u{1F4D7}'; // 📗
     }
 }
