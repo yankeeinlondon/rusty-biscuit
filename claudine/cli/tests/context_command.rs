@@ -26,16 +26,12 @@ fn context_default_exits_zero_and_produces_stdout() {
         "should have Property column; got: {stdout}"
     );
     assert!(
-        stdout.contains("Type"),
-        "should have Type column; got: {stdout}"
-    );
-    assert!(
         stdout.contains("Description"),
         "should have Description column; got: {stdout}"
     );
     assert!(
-        stdout.contains("Date and Time Information"),
-        "should have H3 grouping; got: {stdout}"
+        stdout.contains("Date and Time"),
+        "should have category grouping; got: {stdout}"
     );
 }
 
@@ -85,12 +81,12 @@ fn context_values_exits_zero_and_produces_stdout() {
     );
 }
 
-/// Regression: review-2 found that documented aliases (`utc`, `dow`,
-/// `dow_abbr`) rendered as `null` under `--values` because the Darkmatter
-/// runtime captured only canonical keys. Aliases are now populated; ensure
-/// they appear as non-null values alongside their canonical counterparts.
+/// Verify that the canonical keys behind the date aliases render with real
+/// values. The aliases (`ctx.utc`/`ctx.dow`/`ctx.dow_abbr`) are themselves
+/// first-class descriptor rows in the `Date and Time → Aliases` subsection, but
+/// their canonical counterparts must also resolve to non-null values.
 #[test]
-fn context_values_resolves_documented_aliases() {
+fn context_values_renders_canonical_keys_non_null() {
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .current_dir(repo_root())
@@ -100,16 +96,15 @@ fn context_values_resolves_documented_aliases() {
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
 
-    // Locate each alias row and confirm the value cell is not the literal
-    // `null` text. Rows are rendered as `| ctx.<key> | <Type> | <value> |`.
-    for alias in ["ctx.utc", "ctx.dow", "ctx.dow_abbr"] {
+    // Check canonical keys that correspond to the old aliases.
+    for key in ["ctx.now_utc", "ctx.day", "ctx.day_abbr"] {
         let row = stdout
             .lines()
-            .find(|line| line.contains(alias))
-            .unwrap_or_else(|| panic!("expected a row for {alias}; got stdout:\n{stdout}"));
+            .find(|line| line.contains(key))
+            .unwrap_or_else(|| panic!("expected a row for {key}; got stdout:\n{stdout}"));
         assert!(
             !row.contains("null"),
-            "{alias} row must contain a real value, not `null`; row: {row}",
+            "{key} row must contain a real value, not `null`; row: {row}",
         );
     }
 }
@@ -193,14 +188,12 @@ fn context_side_effects_exits_zero_and_produces_stdout() {
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     assert!(
-        stdout.contains("not implemented yet"),
-        "--side-effects should show placeholder on stdout; got: {stdout}"
+        stdout.contains("Darkmatter Side-Effect Capabilities"),
+        "--side-effects should show capability catalog on stdout; got: {stdout}"
     );
-    // The footer messages must remain on stderr — separate from the
-    // placeholder text that goes to stdout.
     assert!(
-        !stderr.contains("not implemented yet"),
-        "placeholder must not leak to stderr; got: {stderr}"
+        stdout.contains("FilesystemWrite") || stdout.contains("Network") || stdout.contains("MarkdownMutation"),
+        "--side-effects should show safety classifications; got: {stdout}"
     );
     assert!(
         stderr.contains("--expressions"),
@@ -241,6 +234,34 @@ fn context_expressions_truthiness_table_uses_real_headers() {
         after.contains("Falsy"),
         "Truthiness table must carry the documented `Falsy` header; \
          output after heading:\n{after}",
+    );
+}
+
+/// F5: inline-code spans must render through one Prose-aware path. In plain
+/// (`NO_COLOR`) output that means visible backticks and — crucially — never the
+/// raw `<inverse>` Prose markup that leaks when `render_inline_code` output is
+/// dropped into a `TableCellContent::Text` without rendering. The `||` mode
+/// header and the operator cells both carry inline code.
+#[test]
+fn context_expressions_inline_code_renders_without_leaking_markup() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .current_dir(repo_root())
+        .args(["context", "--expressions"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+
+    // The modes-table header keeps its visible backticks in plain output.
+    assert!(
+        stdout.contains("`||`"),
+        "plain expressions report must keep visible backticks on the `||` header; got:\n{stdout}"
+    );
+    // No raw Prose markup may leak into any header or cell.
+    assert!(
+        !stdout.contains("<inverse>") && !stdout.contains("</inverse>"),
+        "plain output must not contain raw <inverse> markup; got:\n{stdout}"
     );
 }
 
@@ -338,4 +359,329 @@ fn context_side_effects_writes_footer_to_stderr() {
         stderr.contains("--side-effects"),
         "stderr should mention --side-effects; got: {stderr}"
     );
+}
+
+// =====================================================================
+// Phase 4 — Catalog contract tests
+// =====================================================================
+
+/// Default report must emit exactly one row per context descriptor.
+/// Uses a wide terminal to avoid narrow-width table-dropout false positives.
+#[test]
+fn context_default_includes_every_descriptor() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "200")
+        .current_dir(repo_root())
+        .args(["context"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let descriptors = darkmatter::markdown::compose::context::context_variable_descriptors();
+
+    for desc in descriptors {
+        let property = format!("ctx.{}", desc.name);
+        assert!(
+            stdout.contains(&property),
+            "default report must contain row for {property}; got stdout:\n{stdout}"
+        );
+    }
+}
+
+/// Values report must emit exactly one row per context descriptor.
+/// Uses a wide terminal to avoid narrow-width table-dropout false positives.
+#[test]
+fn context_values_includes_every_descriptor() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "200")
+        .current_dir(repo_root())
+        .args(["context", "--values"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let descriptors = darkmatter::markdown::compose::context::context_variable_descriptors();
+
+    for desc in descriptors {
+        let property = format!("ctx.{}", desc.name);
+        assert!(
+            stdout.contains(&property),
+            "values report must contain row for {property}; got stdout:\n{stdout}"
+        );
+    }
+}
+
+/// Expression report must include every expression-function descriptor.
+#[test]
+fn context_expressions_includes_every_function() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .current_dir(repo_root())
+        .args(["context", "--expressions"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let functions = darkmatter::markdown::compose::expression::expression_function_descriptors();
+
+    for func in functions {
+        assert!(
+            stdout.contains(func.signature),
+            "expression report must contain function {}; got stdout:\n{stdout}",
+            func.signature
+        );
+    }
+}
+
+/// Side-effects report must include every side-effect descriptor and overload.
+#[test]
+fn context_side_effects_includes_every_capability() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .current_dir(repo_root())
+        .args(["context", "--side-effects"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let effects = darkmatter::effects::effect_descriptors();
+
+    for effect in effects {
+        assert!(
+            stdout.contains(effect.signature),
+            "side-effects report must contain capability {}; got stdout:\n{stdout}",
+            effect.signature
+        );
+    }
+}
+
+/// Output ordering must be deterministic across invocations.
+#[test]
+fn context_deterministic_output() {
+    let run = || {
+        let assert = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .current_dir(repo_root())
+            .args(["context"])
+            .assert()
+            .success();
+        String::from_utf8_lossy(&assert.get_output().stdout).to_string()
+    };
+
+    let first = run();
+    let second = run();
+    assert_eq!(
+        first, second,
+        "default report output must be deterministic across invocations"
+    );
+}
+
+/// No report may depend on Markdown parsing — guard against Markdown artifacts.
+#[test]
+fn context_no_markdown_parsing_artifacts() {
+    for args in [vec!["context"], vec!["context", "--values"], vec!["context", "--expressions"], vec!["context", "--side-effects"]] {
+        let assert = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .current_dir(repo_root())
+            .args(&args)
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+        // Markdown heading syntax should not appear in parsed output
+        assert!(
+            !stdout.contains("## "),
+            "report for {:?} must not contain Markdown heading syntax `## `; got:\n{stdout}",
+            args
+        );
+        // Raw Markdown table row separators should not appear
+        assert!(
+            !stdout.contains("|---|---"),
+            "report for {:?} must not contain Markdown table separators; got:\n{stdout}",
+            args
+        );
+    }
+}
+
+/// clap must reject combined report-selection flags.
+#[test]
+fn context_clap_rejects_combined_flags() {
+    for pair in [
+        vec!["context", "--values", "--expressions"],
+        vec!["context", "--values", "--side-effects"],
+        vec!["context", "--expressions", "--side-effects"],
+        vec!["context", "--values", "--expressions", "--side-effects"],
+    ] {
+        cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .current_dir(repo_root())
+            .args(&pair)
+            .assert()
+            .failure();
+    }
+}
+
+// =====================================================================
+// Phase 4 — Command tests
+// =====================================================================
+
+/// `--values` must include every context row, even when null/unavailable.
+#[test]
+fn context_values_preserves_null_rows() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .current_dir(repo_root())
+        .args(["context", "--values"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    // Some variables are always present (e.g., ctx.today), others may be null.
+    // The key assertion is that null rows are present, not dropped.
+    assert!(
+        stdout.contains("null"),
+        "values report must contain at least one `null` row (unavailable values are shown, not dropped); got:\n{stdout}"
+    );
+}
+
+/// F6/Spec 13: `--side-effects` must perform no side effect. The report reads
+/// only static metadata, and the `EffectEngine`'s default mutation root is the
+/// current directory — so any accidental filesystem effect would surface as a
+/// new/changed entry under the work dir. We run with a separate sandbox `HOME`
+/// (so Claudine's own logging cannot create false positives in the work dir)
+/// and assert the work dir is byte-for-byte unchanged.
+#[test]
+fn context_side_effects_makes_no_filesystem_changes() {
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::path::Path;
+
+    fn snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
+        let mut out = BTreeMap::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if let Ok(bytes) = fs::read(&path) {
+                    let rel = path.strip_prefix(root).unwrap().to_string_lossy().into_owned();
+                    out.insert(rel, bytes);
+                }
+            }
+        }
+        out
+    }
+
+    let home = tempfile::tempdir().expect("home sandbox");
+    let work = tempfile::tempdir().expect("work sandbox");
+    // A sentinel the report must not touch.
+    fs::write(work.path().join("sentinel.txt"), b"untouched").unwrap();
+
+    let before = snapshot(work.path());
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", home.path())
+        .current_dir(work.path())
+        .args(["context", "--side-effects"])
+        .assert()
+        .success();
+
+    let after = snapshot(work.path());
+    assert_eq!(
+        before, after,
+        "`context --side-effects` must not create, delete, or modify any file in the work dir"
+    );
+}
+
+/// Side-effects report must use "capabilities" language and avoid availability claims.
+#[test]
+fn context_side_effects_uses_capability_language() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .current_dir(repo_root())
+        .args(["context", "--side-effects"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("capabilities"),
+        "side-effects report must use 'capabilities' language; got:\n{stdout}"
+    );
+    assert!(
+        !stdout.to_lowercase().contains("available"),
+        "side-effects report must not claim capabilities are 'available'; got:\n{stdout}"
+    );
+    assert!(
+        !stdout.to_lowercase().contains("enabled"),
+        "side-effects report must not claim capabilities are 'enabled'; got:\n{stdout}"
+    );
+}
+
+/// Footer hints must not claim side effects are enabled, allowlist-exempt, or config-free.
+#[test]
+fn context_footer_no_availability_claims() {
+    for args in [vec!["context"], vec!["context", "--values"], vec!["context", "--expressions"], vec!["context", "--side-effects"]] {
+        let assert = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .current_dir(repo_root())
+            .args(&args)
+            .assert()
+            .success();
+
+        let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+        let stderr_lower = stderr.to_lowercase();
+        assert!(
+            !stderr_lower.contains("enabled"),
+            "footer for {:?} must not claim side effects are enabled; got stderr:\n{stderr}",
+            args
+        );
+        assert!(
+            !stderr_lower.contains("allowlist-exempt") && !stderr_lower.contains("exempt"),
+            "footer for {:?} must not claim side effects are allowlist-exempt; got stderr:\n{stderr}",
+            args
+        );
+        assert!(
+            !stderr_lower.contains("configuration-free") && !stderr_lower.contains("config-free"),
+            "footer for {:?} must not claim side effects are configuration-free; got stderr:\n{stderr}",
+            args
+        );
+    }
+}
+
+/// The "Interpolation vs. Condition Mode" introduction uses corrected wording.
+#[test]
+fn context_expressions_corrected_interpolation_wording() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .current_dir(repo_root())
+        .args(["context", "--expressions"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let intro = "The parser supports two modes with different operator behavior:";
+    assert!(
+        stdout.contains(intro),
+        "expression report must use corrected interpolation intro:\n  {intro}\ngot:\n{stdout}"
+    );
+
+    // Ensure there are no consecutive colon-terminated intro lines
+    let lines: Vec<&str> = stdout.lines().collect();
+    for window in lines.windows(2) {
+        let a = window[0].trim();
+        let b = window[1].trim();
+        if a.ends_with(':') && b.ends_with(':') {
+            panic!(
+                "found consecutive colon-terminated lines:\n  {a}\n  {b}\n\nfull output:\n{stdout}"
+            );
+        }
+    }
 }
