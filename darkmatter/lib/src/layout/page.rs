@@ -1805,6 +1805,87 @@ mod tests {
         );
     }
 
+    /// Page-frame boundary (closeout Option A): the page frame reads only the
+    /// *presence* of component policies (to decide whether to cap `max_width`),
+    /// never their content — it carries no component policy itself. Two pages
+    /// with identical frame geometry but different component-policy *content*,
+    /// rendering a document whose nodes none of those policies match, must
+    /// produce byte-identical output: the frame chrome cannot vary with which
+    /// component a policy targets or what color it sets.
+    #[test]
+    fn page_frame_chrome_ignores_component_policy_content() {
+        use renderable::color::{Color, Tailwind};
+        use renderable::style::PaintColor;
+
+        let term = Terminal::new_optimistic(80);
+        // A document with no table and no block quote: neither policy below has
+        // a node to bake onto, so any output difference could only come from the
+        // frame inspecting policy content — which it must not do.
+        let md: Markdown = "# Title\n\nA plain paragraph with no components.\n".into();
+
+        let page_a = DarkmatterPage::new(&term)
+            .with_margin_top(2)
+            .with_margin_left(3)
+            .with_component_color(
+                PageComponent::Tables,
+                PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+            );
+        let page_b = DarkmatterPage::new(&term)
+            .with_margin_top(2)
+            .with_margin_left(3)
+            .with_component_bg_color(
+                PageComponent::BlockQuotes,
+                PaintColor::new(Color::Tailwind(Tailwind::Blue500)),
+            );
+
+        let out_a = page_a.render(&md).unwrap();
+        let out_b = page_b.render(&md).unwrap();
+        assert_eq!(
+            out_a, out_b,
+            "page-frame output must depend on policy *presence*, not policy content",
+        );
+    }
+
+    /// Page-frame boundary (closeout Option A): vertical margin is pure additive
+    /// chrome. The frame wraps the folded body; it does not traverse or rewrite
+    /// component content. Adding top/bottom margin to an otherwise identical
+    /// page must only prepend/append blank rows, leaving the component body
+    /// (heading, block quote, list, code) byte-identical.
+    #[test]
+    fn page_frame_vertical_margin_only_wraps_component_body() {
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown =
+            "# Heading\n\n> A quoted line.\n\n- one\n- two\n\n```rust\nlet x = 1;\n```\n".into();
+
+        // Both pages share the same left margin (so both take the decorated path
+        // at the same effective width); only the vertical margin differs.
+        let base = DarkmatterPage::new(&term).with_margin_left(3);
+        let taller = DarkmatterPage::new(&term)
+            .with_margin_left(3)
+            .with_margin_top(2)
+            .with_margin_bottom(2);
+
+        let base_out = base.render(&md).unwrap();
+        let tall_out = taller.render(&md).unwrap();
+
+        // Strip leading/trailing fully-blank rows (the only thing vertical
+        // margin adds), then the component body must be identical.
+        let core = |s: &str| -> String {
+            let lines: Vec<&str> = s.lines().collect();
+            let start = lines.iter().position(|l| !l.trim().is_empty());
+            let end = lines.iter().rposition(|l| !l.trim().is_empty());
+            match (start, end) {
+                (Some(a), Some(b)) => lines[a..=b].join("\n"),
+                _ => String::new(),
+            }
+        };
+        assert_eq!(
+            core(&base_out),
+            core(&tall_out),
+            "vertical margin must only add blank rows; the component body must be unchanged",
+        );
+    }
+
     #[test]
     fn renderable_trait_with_markdown() {
         let term = Terminal::new_optimistic(80);

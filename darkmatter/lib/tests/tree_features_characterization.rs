@@ -1,5 +1,5 @@
 //! Pre-change characterization of the behaviors the *Tree Features* cutover
-//! (`renderable/features/2026-06-06-tree-features/`) is about to re-architect.
+//! (`renderable/features/_completed/2026-06-06-tree-features/`) re-architected.
 //!
 //! Phase 1 of that plan captures the current observable output so every later
 //! phase's snapshot or output change can be classified as **intended** or

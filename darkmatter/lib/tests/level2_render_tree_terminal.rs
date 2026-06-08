@@ -580,9 +580,9 @@ fn level2_tree_dim_renders_dim_sgr_in_real_terminal() {
 
 /// `--- { style: waves }` must render the **styled** horizontal rule —
 /// distinguishable from a plain rule — and must not leak the raw markdown
-/// source as visible text. Without the terminal renderer consuming the
-/// `darkmatter.hr.*` hints, the rule degrades to the default dashed style;
-/// this test enforces that the renderer honors the `style: waves` hint
+/// source as visible text. Without the terminal renderer consuming the typed
+/// `thematic_break` styling, the rule degrades to the default dashed style;
+/// this test enforces that the renderer honors the `style: waves` attribute
 /// (review-4 finding 2).
 #[test]
 #[serial(level2_terminal)]

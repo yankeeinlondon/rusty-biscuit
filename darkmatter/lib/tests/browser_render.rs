@@ -21,8 +21,9 @@ use darkmatter::markdown::output::HtmlOptions;
 use darkmatter::markdown::render_tree::{TerminalCodeRenderer, fold_markdown_to_document};
 use darkmatter::markdown::render_tree::svg_sanitizer::sanitize_svg;
 use renderable::tree::{
-    BrowserMermaidMode, BrowserRenderOptions, GraphicsMode, HintNamespace, RawHtmlPolicy,
-    RenderNode, RenderStrictness, SourceDescriptor, render_browser_document, render_browser_node,
+    BrowserMermaidMode, BrowserRenderOptions, GraphicsMode, RawHtmlPolicy, RenderNode,
+    RenderStrictness, SourceDescriptor, ThematicBreakAttrs, render_browser_document,
+    render_browser_node,
 };
 use serial_test::serial;
 use std::rc::Rc;
@@ -67,10 +68,12 @@ async fn browser_code_block_background_computes_in_browser() {
 /// at the given graphics tier.
 fn waves_hr_fragment(mode: GraphicsMode) -> String {
     let mut hr = RenderNode::thematic_break();
-    let ns = HintNamespace("darkmatter.hr");
-    hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
-    hr.attrs.set_hint(ns, "weight", serde_json::json!("thick"));
-    hr.attrs.set_hint(ns, "color", serde_json::json!("red"));
+    hr.attrs.set_thematic_break(&ThematicBreakAttrs {
+        kind: Some("waves".into()),
+        weight: Some("thick".into()),
+        color: Some("red".into()),
+        ..Default::default()
+    });
 
     let opts = BrowserRenderOptions {
         graphics_mode: mode,
@@ -127,21 +130,15 @@ async fn browser_hr_waves_svg_computes_in_browser() {
 /// attribute/markup-breaking payloads, at `Rich`.
 fn hostile_hr_fragment() -> String {
     let mut hr = RenderNode::thematic_break();
-    let ns = HintNamespace("darkmatter.hr");
-    hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
-    // A `color` that, if interpolated unescaped, breaks out of the SVG attribute
-    // and injects an `<img onerror>` sibling.
-    hr.attrs.set_hint(
-        ns,
-        "color",
-        serde_json::json!(r#"red"><img src=x onerror="window.__pwned=1">"#),
-    );
-    // A `width` that, if interpolated unescaped, injects a `<script>` element.
-    hr.attrs.set_hint(
-        ns,
-        "width",
-        serde_json::json!(r#"100%"><script>window.__pwned=1</script>"#),
-    );
+    hr.attrs.set_thematic_break(&ThematicBreakAttrs {
+        kind: Some("waves".into()),
+        // A `color` that, if interpolated unescaped, breaks out of the SVG
+        // attribute and injects an `<img onerror>` sibling.
+        color: Some(r#"red"><img src=x onerror="window.__pwned=1">"#.into()),
+        // A `width` that, if interpolated unescaped, injects a `<script>`.
+        width: Some(r#"100%"><script>window.__pwned=1</script>"#.into()),
+        ..Default::default()
+    });
 
     let opts = BrowserRenderOptions {
         graphics_mode: GraphicsMode::Rich,
@@ -153,7 +150,7 @@ fn hostile_hr_fragment() -> String {
         .render()
 }
 
-/// Review-5 finding 1: hostile `darkmatter.hr.*` `width` / `color` hints must
+/// Review-5 finding 1: hostile thematic-break `width` / `color` values must
 /// not be able to escape the styled-HR SVG attribute/markup context. This drives
 /// a real headless Chromium and proves the hostile payload neither parses into
 /// an injected `<img>`/`<script>` node nor corrupts the SVG: the `.darkmatter-hr`
