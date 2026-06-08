@@ -240,7 +240,7 @@ Known gaps and loose ends:
   content (pinned by `page_frame_chrome_ignores_component_policy_content` and
   `page_frame_vertical_margin_only_wraps_component_body`). This is a complementary
   step (page frame vs. body content), not a "not yet on the tree" fallback. See
-  `renderable/features/_completed/2026-06-06-tree-closeout/traversal-inventory.md`.
+  `renderable/features/2026-06-06-tree-closeout/traversal-inventory.md`.
 - **Drift is recorded, not eliminated.** The `render_comparison` `KNOWN_DRIFT`
   ledgers carry the tree-vs-bespoke divergences. Some entries are the tree path
   being *more* correct than the legacy bespoke renderer (e.g. applying vertical

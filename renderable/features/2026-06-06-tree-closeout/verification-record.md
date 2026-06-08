@@ -3,8 +3,8 @@ status: complete
 date: 2026-06-07
 owner: ken
 phase: 4
-plan: renderable/features/_completed/2026-06-06-tree-closeout/plan.md
-spec: renderable/features/_completed/2026-06-06-tree-closeout/spec.md
+plan: renderable/features/2026-06-06-tree-closeout/plan.md
+spec: renderable/features/2026-06-06-tree-closeout/spec.md
 commit: a1264547d
 host_os: macOS (Darwin 25.5.0)
 harness_backends_present:

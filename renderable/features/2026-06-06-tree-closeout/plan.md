@@ -3,7 +3,7 @@ status: complete
 date: 2026-06-06
 completed: 2026-06-07
 owner: ken
-spec: renderable/features/_completed/2026-06-06-tree-closeout/spec.md
+spec: renderable/features/2026-06-06-tree-closeout/spec.md
 depends_on: renderable/features/_completed/2026-06-06-tree-features/plan.md
 total_phases: 6
 packages:
@@ -14,9 +14,9 @@ packages:
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1:
-    - renderable/features/_completed/2026-06-06-tree-closeout/extension-hint-inventory.md
-    - renderable/features/_completed/2026-06-06-tree-closeout/traversal-inventory.md
-    - renderable/features/_completed/2026-06-06-tree-closeout/component-assessment.md
+    - renderable/features/2026-06-06-tree-closeout/extension-hint-inventory.md
+    - renderable/features/2026-06-06-tree-closeout/traversal-inventory.md
+    - renderable/features/2026-06-06-tree-closeout/component-assessment.md
 skills_files_updated_during_phase_1: []
 packages_touched_during_phase_1: []
 source_files_during_phase_2:
@@ -37,8 +37,8 @@ source_files_during_phase_2:
     - darkmatter/lib/tests/browser_render.rs
     - darkmatter/lib/tests/level2_render_tree_terminal.rs
 docs_updated_during_phase_2:
-    - renderable/features/_completed/2026-06-06-tree-closeout/extension-hint-inventory.md
-    - renderable/features/_completed/2026-06-06-tree-closeout/traversal-inventory.md
+    - renderable/features/2026-06-06-tree-closeout/extension-hint-inventory.md
+    - renderable/features/2026-06-06-tree-closeout/traversal-inventory.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
 packages_touched_during_phase_2:
@@ -51,7 +51,7 @@ source_files_during_phase_3:
     - darkmatter/lib/benches/render_pipeline_steps.rs
 docs_updated_during_phase_3: []
 docs_created_during_phase_3:
-    - renderable/features/_completed/2026-06-06-tree-closeout/performance-record.md
+    - renderable/features/2026-06-06-tree-closeout/performance-record.md
 skills_files_updated_during_phase_3: []
 packages_touched_during_phase_3:
     - biscuit-terminal
@@ -61,7 +61,7 @@ source_files_during_phase_4:
     - .config/nextest.toml
 docs_updated_during_phase_4: []
 docs_created_during_phase_4:
-    - renderable/features/_completed/2026-06-06-tree-closeout/verification-record.md
+    - renderable/features/2026-06-06-tree-closeout/verification-record.md
 skills_files_updated_during_phase_4: []
 packages_touched_during_phase_4:
     - renderable
@@ -70,7 +70,7 @@ packages_touched_during_phase_4:
     - darkmatter-cli
 source_files_during_phase_5: []
 docs_updated_during_phase_5:
-    - renderable/features/_completed/2026-06-06-tree-closeout/component-assessment.md
+    - renderable/features/2026-06-06-tree-closeout/component-assessment.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
 packages_touched_during_phase_5: []

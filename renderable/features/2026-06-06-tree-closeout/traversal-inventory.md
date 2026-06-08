@@ -2,7 +2,7 @@
 status: complete
 date: 2026-06-06
 owner: ken
-spec: renderable/features/_completed/2026-06-06-tree-closeout/spec.md
+spec: renderable/features/2026-06-06-tree-closeout/spec.md
 phase: 1
 ---
 
@@ -60,7 +60,7 @@ Explicit `rg` checks for every deleted traversal named by the spec
 | Mechanism | Result |
 |---|---|
 | `decorate_document` (or an equivalent post-fold component-lookup walk) | **Absent.** The only match is `build_context.rs:183`, a doc-comment on `apply_node_policy` noting it *replaces* the deleted `decorate_document` walk. `apply_node_policy` is a construction-time helper called inside the fold, not a post-fold traversal. |
-| Component-policy `LayoutContext` traversal | **Absent.** `LayoutContext` (`context.rs:24-48`) holds only viewport/page concerns; it carries no component-policy map and performs no recursive walk. The component-policy *signal* (`ctx.needs_decoration() \|\| … \|\| !self.component_policies.is_empty()`) is read straight off the page in `page.rs:812` to decide whether to cap `max_width` — it is not a tree traversal. |
+| Component-policy `LayoutContext` traversal | **Absent.** `LayoutContext` (`context.rs:24-48`) holds only viewport/page concerns; it carries no component-policy map and performs no recursive walk. The `max_width` cap is gated purely on page-frame geometry (`DarkmatterPage::has_frame_geometry`, review-2 finding 2), and the captured-terminal color depth is selected only when the page *actually paints* construction-time color (`DarkmatterPage::paints_construction_color`, review-3 finding) — component-policy *presence* has no bearing on either width or capability selection. An unmatched policy threads the build context but changes neither the content-box width nor the renderer-wide color depth. Neither gate performs a tree traversal. |
 | Opacity or attribute sentinel injection | **Absent.** See the [extension-hint inventory](extension-hint-inventory.md#negative-searches). Alpha rides the typed `PaintColor` channel; no sentinel collection pass exists. |
 | Post-render HTML opening-tag mutation | **Absent.** `rg 'rewrite_html\|mutate_html\|post_render\|post_fold\|opening_tag_mutation'` returns nothing. The browser fold emits each opening tag once, with typed attrs + validated `inline_style` in place; there is no second pass. |
 | Pre-render link/image text replacement | **Absent.** Link children and image alt are attached as typed attrs / structural children during construction. The terminal renderer shapes its projection (label width/alignment, `▉ IMAGE[alt]` placeholder) without mutating the tree; pinned by `render_tree_text_layout_does_not_mutate_tree_across_widths`. |
@@ -135,8 +135,28 @@ policy and does not traverse/mutate document components
 - `page_frame_chrome_ignores_component_policy_content` — two pages with
   identical frame geometry but different component-policy *content*,
   rendering a document none of those policies match, produce byte-identical
-  output. This pins that the frame reads only the *presence* of policies (the
-  `!component_policies.is_empty()` `max_width` signal), never their content.
+  output. This pins that the frame chrome is independent of which component a
+  policy targets or what it sets.
+- `terminal_unmatched_policy_does_not_cap_width_to_captured_terminal`
+  (review-2 finding 2) — with the captured terminal *wider* than the ambient
+  width and a wrapping document line, an unmatched component policy on an
+  otherwise zero-geometry page produces byte-identical output to a no-policy
+  page. This pins that the `max_width` content-box cap is gated on page-frame
+  geometry alone (`has_frame_geometry`), never on component-policy presence:
+  the policy still threads the build context (so a *matched* policy bakes its
+  attrs), but an unmatched policy cannot widen the content box.
+- `terminal_unmatched_policy_does_not_flip_color_depth_for_unrelated_content`
+  (review-3 finding) — with the captured terminal at a no-color depth distinct
+  from the ambient depth, an unmatched colored component policy on an otherwise
+  zero-geometry page produces byte-identical output to a no-policy page; a
+  fenced code block keeps its syntax-highlight color. This pins that
+  renderer-wide color-depth selection is gated on whether the page *actually
+  paints* construction-time color (`paints_construction_color`), never on
+  component-policy presence — closing the capability analog of the review-2
+  width leak. The real-terminal Level 2 test
+  `level2_unmatched_policy_keeps_code_color_in_real_terminal`
+  (`darkmatter/lib/tests/level2_render_tree_terminal.rs`) verifies the same
+  color survives a WezTerm pane.
 - `page_frame_vertical_margin_only_wraps_component_body` — adding top/bottom
   margin to an otherwise identical page only prepends/appends blank rows; the
   folded component body (heading, block quote, list, code) stays

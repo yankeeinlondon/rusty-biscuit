@@ -2,7 +2,7 @@
 status: complete
 date: 2026-06-06
 owner: ken
-spec: renderable/features/_completed/2026-06-06-tree-closeout/spec.md
+spec: renderable/features/2026-06-06-tree-closeout/spec.md
 phase: 1
 ---
 
