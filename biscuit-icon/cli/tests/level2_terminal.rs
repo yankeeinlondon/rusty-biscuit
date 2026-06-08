@@ -9,18 +9,16 @@ use std::path::PathBuf;
 use biscuit_test_harness::{
     CapturedFrame, TerminalHarness, wait_for_prompt,
 };
-#[cfg(feature = "image")]
-use biscuit_test_harness::kitty::KittyHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 #[cfg(feature = "image")]
 use biscuit_test_harness::wezterm::WezTermHarness;
+#[cfg(feature = "image")]
+use image::GenericImageView;
 use serial_test::serial;
 use test_toolkit::{Level, require_level};
 
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
-#[cfg(feature = "image")]
-static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 
 /// Returns the absolute path to the `icon` binary under test.
 fn icon_bin() -> PathBuf {
@@ -145,50 +143,9 @@ fn level2_text_fallback_shows_identifier() {
 #[serial(level2_terminal)]
 #[cfg(feature = "image")]
 fn level2_image_protocol_fallback_renders_graphics() {
-    let kitty_available = KittyHarness::available();
     let wezterm_available = WezTermHarness::available();
-    require_level!(
-        Level::L2,
-        kitty_available || wezterm_available,
-        "Kitty or WezTerm"
-    );
+    require_level!(Level::L2, wezterm_available, "WezTerm");
 
-    // Skip if the available terminal does not advertise image support.
-    let term = biscuit_terminal::terminal::Terminal::new();
-    if term.image_support == biscuit_terminal::discovery::detection::ImageSupport::None {
-        eprintln!("skipping: terminal does not advertise image support");
-        return;
-    }
-
-    // Prefer Kitty when both are available.
-    if kitty_available {
-        let mut guard = SHARED_KITTY
-            .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn Kitty"));
-        let harness = guard.as_mut().expect("shared Kitty harness present");
-        harness.send_text(b"clear\n").expect("clear failed");
-        harness.settle();
-
-        let home = tempfile::tempdir().unwrap();
-        let cmd = format!(
-            "HOME='{}' PATH='{}' icon icons ic:baseline-apple\n",
-            home.path().display(),
-            path_with_icon_bin(),
-        );
-        harness.send_text(cmd.as_bytes()).expect("send_text failed");
-        let _ = wait_for_prompt(harness);
-        let frame = harness.capture().expect("capture failed");
-
-        let has_kitty = frame.raw.contains("\x1b_G");
-        let has_iterm = frame.raw.contains("1337");
-        assert!(
-            has_kitty || has_iterm,
-            "expected image protocol escape sequences; raw:\n{}",
-            frame.raw
-        );
-        return;
-    }
-
-    // Fall back to WezTerm.
     static SHARED_WEZTERM: biscuit_test_harness::shared::SharedHarness<
         biscuit_test_harness::wezterm::WezTermHarness,
     > = biscuit_test_harness::shared::SharedHarness::new();
@@ -201,26 +158,50 @@ fn level2_image_protocol_fallback_renders_graphics() {
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
 
+    // Pre-populate the cache with a bright red icon so the pixel assertion
+    // is image-specific — a red rectangle is unmistakable against any terminal
+    // background and cannot be confused with shell text.
     let home = tempfile::tempdir().unwrap();
+    {
+        let cache_dir = home.path().join(".cache").join("biscuit-icon");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        let cache = biscuit_icon::cache::IconCache::open_at(cache_dir.join("icons.db")).unwrap();
+        cache
+            .put(
+                "test",
+                "red-witness",
+                &biscuit_icon::IconBody::new(r#"<rect width="24" height="24" fill="red"/>"#, 24, 24),
+            )
+            .unwrap();
+    }
+
     let cmd = format!(
-        "HOME='{}' PATH='{}' icon icons ic:baseline-apple\n",
+        "HOME='{}' PATH='{}' icon icons test:red-witness\n",
         home.path().display(),
         path_with_icon_bin(),
     );
     harness.send_text(cmd.as_bytes()).expect("send_text failed");
     let _ = wait_for_prompt(harness);
-    let frame = harness.capture().expect("capture failed");
 
-    let has_kitty = frame.raw.contains("\x1b_G");
-    let has_iterm = frame.raw.contains("1337");
+    let png_bytes = harness
+        .capture_window_png()
+        .expect("png capture call failed")
+        .expect("window capture returned None; screen recording permission may be missing");
 
-    assert!(
-        has_kitty || has_iterm,
-        "WezTerm image render: neither Kitty nor iTerm image protocol escape sequences found. \
-         osc_kitty={has_kitty} osc_iterm={has_iterm}\nraw_first_400={:?}\nplain:\n{}",
-        &frame.raw.chars().take(400).collect::<String>(),
-        frame.plain,
-    );
+    let img = image::load_from_memory(&png_bytes).expect("decode png");
+    let mut found_red = false;
+    'outer: for y in 0..img.height() {
+        for x in 0..img.width() {
+            let pixel = img.get_pixel(x, y);
+            // Look for a bright red pixel (R high, G and B low) that could
+            // only come from the rendered SVG witness.
+            if pixel[0] > 200 && pixel[1] < 50 && pixel[2] < 50 {
+                found_red = true;
+                break 'outer;
+            }
+        }
+    }
+    assert!(found_red, "expected bright red pixels in WezTerm capture; image may not have rendered");
 }
 
 // ------------------------------------------------------------------
