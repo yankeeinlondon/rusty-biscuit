@@ -1761,6 +1761,66 @@ fn test_repo_git_status_branch_surfaces_malformed_remote_ref() {
         .failure();
 }
 
+/// An absent branch whose name is hex but too short for an object-ID prefix
+/// (`add`, 3 chars) is genuine absence — `repo git-status --branch add`
+/// succeeds with empty history rather than failing as a malformed-SHA lookup.
+#[test]
+fn test_repo_git_status_branch_absent_short_hex_succeeds() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--branch",
+            "add",
+        ])
+        .assert()
+        .success();
+}
+
+/// A validly-shaped hex branch name that matches no object resolves to empty
+/// history, not a CLI failure.
+#[test]
+fn test_repo_git_status_branch_absent_valid_length_hex_succeeds() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--branch",
+            "abcdef12",
+        ])
+        .assert()
+        .success();
+}
+
+/// An absent non-hex branch name resolves to empty history, not a CLI failure.
+#[test]
+fn test_repo_git_status_branch_absent_ordinary_name_succeeds() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--branch",
+            "nonexistent",
+        ])
+        .assert()
+        .success();
+}
+
 /// Stage a file in the test repo (no commit).
 fn test_stage_file(repo_path: &Path, relative: &str, content: &str) {
     let full = repo_path.join(relative);
