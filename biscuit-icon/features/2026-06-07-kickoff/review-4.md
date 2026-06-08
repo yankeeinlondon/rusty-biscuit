@@ -56,7 +56,27 @@ Gate the SVG payload and rasterization capability behind the feature, and make
 the relevant terminal image dependencies optional, or revise the specification
 before release.
 
-### 3. Medium: Offline set listing is not deduplicated by prefix
+### 3. Medium: Online icon search is skipped whenever any offline match exists
+
+The `icons` command calls Iconify search only when the merged built-in/cache
+result is empty. A common query such as `home` therefore prints only curated or
+previously cached matches and never reaches the rest of the Iconify catalog,
+even while online. This contradicts the listing boundary that makes the full
+catalog available through the API when online.
+
+Evidence:
+
+- `cli/src/commands.rs:50-60` renders the offline result first.
+- `cli/src/commands.rs:60-87` guards the entire online search with
+  `offline.is_empty()`.
+- `spec.md:287-289` requires online listings to reach the full Iconify catalog.
+
+Merge bounded online search results with offline results, deduplicate by id,
+and retain the current offline fallback when the request fails. Add a wiremock
+CLI/integration test where one offline match exists and additional online
+matches must still be returned and cached.
+
+### 4. Medium: Offline set listing is not deduplicated by prefix
 
 `offline_sets` documents prefix deduplication but uses `BTreeSet<SetInfo>`.
 `SetInfo` ordering includes title and license, so a built-in placeholder and a
@@ -72,7 +92,7 @@ Evidence:
 Use a map keyed by prefix, with cached metadata replacing built-in placeholders,
 and test an overlapping prefix such as `ic`.
 
-### 4. Medium: Non-zero Iconify view boxes are discarded
+### 5. Medium: Non-zero Iconify view boxes are discarded
 
 The client models only width and height, while the cache omits the specified
 `view_box` column. Any Iconify entry with non-zero `left` or `top` coordinates is
@@ -84,11 +104,13 @@ Evidence:
 - `lib/src/iconify/client.rs:120-123` constructs `IconBody` from dimensions only.
 - `lib/src/cache/store.rs:47-55` stores no view box.
 - `spec.md:229-239` requires persisted view-box data.
+- Iconify defines optional `left` and `top` view-box coordinates:
+  <https://iconify.design/docs/types/iconify-icon.html>.
 
 Represent and persist the complete view box, add a matching schema migration,
 and test a non-zero-origin API fixture through fetch, cache, and SVG assembly.
 
-### 5. Medium: Set attribution metadata is still partially discarded
+### 6. Medium: Set attribution metadata is still partially discarded
 
 The client now correctly parses license title, SPDX identifier, and URL, but the
 CLI reduces that object to SPDX alone before caching. This does not preserve the
@@ -103,7 +125,7 @@ Evidence:
 Persist a structured representation or dedicated columns for the complete
 license metadata and add a round-trip test.
 
-### 6. Low: Several styling branches remain untested
+### 7. Low: Several styling branches remain untested
 
 SVG assembly has direct tests for horizontal flip and 90-degree rotation only.
 Vertical/both flips and 180/270-degree rotations have distinct transform math,
@@ -134,6 +156,7 @@ denied fallback test.
 | Image-protocol fallback | Level 2 attempted | **Level mismatch: WezTerm assertion permits text-only false positives** |
 | Visually rendered icon/name output | Level 2 | Appropriate for non-image tiers |
 | `--from` filtering and CSV completion | Level 1 | Appropriate |
+| Online icon catalog search | Level 1 | Incomplete: any offline hit suppresses online results |
 | Offline built-in/cache icon listings | Level 1 | Appropriate |
 | Offline set listings | Level 1 | Broken same-prefix deduplication is untested |
 | Styled CLI errors | Level 2 | Appropriate |
@@ -146,3 +169,7 @@ denied fallback test.
 - `just test-l2`: reported 6 passes and 12 skips. The image test passed on the
   available WezTerm path, but its assertion is not sufficient evidence of image
   rendering.
+- `cargo tree -p biscuit-icon -i resvg@0.45.1`: confirmed `resvg` is present in
+  the default dependency graph through `biscuit-terminal`.
+- A `--no-default-features` test confirmed the render-tree payload still includes
+  SVG image data when `image` is disabled.
