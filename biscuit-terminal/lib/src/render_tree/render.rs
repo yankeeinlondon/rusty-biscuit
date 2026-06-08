@@ -33,10 +33,9 @@
 use renderable::color::TerminalCodeContext;
 use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
-    ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HintNamespace,
-    InheritedStyle, NodeKind, ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered,
-    Severity, TableColumnHints, TableTerminalHints, TerminalMermaidMode, TextLayoutHints,
-    TextOverflow,
+    ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, InheritedStyle, NodeKind,
+    ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
+    TableTerminalHints, TerminalMermaidMode, TextLayoutHints, TextOverflow,
 };
 use renderable::tree::{ValidationError, ValidationMode, validate};
 
@@ -1997,35 +1996,30 @@ fn wrap_column_lines(rendered: &str, width: u32) -> String {
     wrap_lines(lines, &WordWrap::WrapProse(None, None), width).join("\n")
 }
 
-/// Builds a [`HorizontalRule`] from `darkmatter.hr.*` hints on a
+/// Builds a [`HorizontalRule`] from the typed [`ThematicBreakAttrs`] on a
 /// [`NodeKind::ThematicBreak`] node.
 ///
 /// Darkmatter's fold lowers HR-attribute paragraphs (e.g.
 /// `--- { kind: waves, weight: thick }`) into a [`NodeKind::ThematicBreak`]
-/// whose [`NodeAttrs::data`] carries string-valued hints under the
-/// `darkmatter.hr` namespace — see
-/// `renderable/features/2026-05-20-darkmatter-tree/span-aware-processor-design.md`.
-/// The visual rule kind lives under the canonical `kind` hint (legacy `style`
-/// is normalized to `kind` during the fold). Without consuming those hints the
+/// whose typed [`NodeAttrs::thematic_break`] field carries the authored styling.
+/// The visual rule kind lives under the canonical `kind` field (legacy `style`
+/// is normalized to `kind` during the fold). Without consuming those attrs the
 /// terminal renderer would emit a plain rule for every HR regardless of
 /// authored attributes (review-4 finding 2).
 ///
 /// Unknown enum values fall back to the [`HorizontalRule`] defaults so a
 /// malformed `kind: dashse` still produces output rather than panicking.
 ///
-/// [`NodeAttrs::data`]: renderable::tree::NodeAttrs
+/// [`ThematicBreakAttrs`]: renderable::tree::ThematicBreakAttrs
+/// [`NodeAttrs::thematic_break`]: renderable::tree::NodeAttrs::thematic_break
 fn horizontal_rule_from_attrs(attrs: &renderable::tree::NodeAttrs) -> HorizontalRule {
-    const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-
-    let hint_str = |key: &str| -> Option<String> {
-        attrs
-            .get_hint(HR_NS, key)
-            .and_then(|v| v.as_str().map(str::to_string))
+    let mut rule = HorizontalRule::new();
+    let Some(hr) = attrs.thematic_break_ref() else {
+        return rule;
     };
 
-    let mut rule = HorizontalRule::new();
-    if let Some(kind) = hint_str("kind") {
-        rule = match kind.as_str() {
+    if let Some(kind) = hr.kind.as_deref() {
+        rule = match kind {
             "dashes" => rule.style(RuleStyle::Dashes),
             "dots" => rule.style(RuleStyle::Dots),
             "waves" => rule.style(RuleStyle::Waves),
@@ -2036,8 +2030,8 @@ fn horizontal_rule_from_attrs(attrs: &renderable::tree::NodeAttrs) -> Horizontal
             _ => rule,
         };
     }
-    if let Some(alignment) = hint_str("alignment") {
-        rule = match alignment.as_str() {
+    if let Some(alignment) = hr.alignment.as_deref() {
+        rule = match alignment {
             "full" => rule.alignment(RuleAlignment::Full),
             // `center` is the `style.hr` schema-canonical spelling (projected by
             // page-level HR defaults); `centered` is the inline-attribute alias.
@@ -2047,18 +2041,18 @@ fn horizontal_rule_from_attrs(attrs: &renderable::tree::NodeAttrs) -> Horizontal
             _ => rule,
         };
     }
-    if let Some(weight) = hint_str("weight") {
-        rule = match weight.as_str() {
+    if let Some(weight) = hr.weight.as_deref() {
+        rule = match weight {
             "thin" => rule.weight(RuleWeight::Thin),
             "medium" => rule.weight(RuleWeight::Medium),
             "thick" => rule.weight(RuleWeight::Thick),
             _ => rule,
         };
     }
-    if let Some(width) = hint_str("width") {
+    if let Some(width) = hr.width.as_deref() {
         rule = rule.width(width);
     }
-    if let Some(color) = hint_str("color") {
+    if let Some(color) = hr.color.as_deref() {
         rule = rule.color(color);
     }
     rule
@@ -4676,10 +4670,11 @@ mod render_tree_tests {
         );
     }
 
-    /// Review-4 finding 2: a `NodeKind::ThematicBreak` carrying
-    /// `darkmatter.hr.*` hints must render the corresponding styled rule,
-    /// not collapse to the default dashed rule. Without this wiring the
-    /// fold's HR-attribute storage would never reach the user's terminal.
+    /// Review-4 finding 2: a `NodeKind::ThematicBreak` carrying typed
+    /// [`ThematicBreakAttrs`](renderable::tree::ThematicBreakAttrs) must render
+    /// the corresponding styled rule, not collapse to the default dashed rule.
+    /// Without this wiring the fold's HR-attribute storage would never reach the
+    /// user's terminal.
     ///
     /// The test uses a text-tier terminal (`ImageSupport::None`) so the
     /// `HorizontalRule`'s SVG-to-Kitty image tier is bypassed and the
@@ -4687,11 +4682,12 @@ mod render_tree_tests {
     #[test]
     fn render_tree_thematic_break_consumes_darkmatter_hr_hints() {
         use crate::discovery::detection::ImageSupport;
-        use renderable::tree::HintNamespace;
 
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+            kind: Some("waves".into()),
+            ..Default::default()
+        });
 
         let term = Terminal::builder()
             .width(40)
@@ -4719,12 +4715,12 @@ mod render_tree_tests {
     /// centered rule would silently fall back to `Full`.
     #[test]
     fn horizontal_rule_from_attrs_accepts_center_and_centered() {
-        use renderable::tree::HintNamespace;
-
-        let ns = HintNamespace("darkmatter.hr");
         for alignment in ["center", "centered"] {
             let mut attrs = renderable::tree::NodeAttrs::default();
-            attrs.set_hint(ns, "alignment", serde_json::json!(alignment));
+            attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+                alignment: Some(alignment.into()),
+                ..Default::default()
+            });
             let rule = horizontal_rule_from_attrs(&attrs);
             assert_eq!(
                 *rule.rule_alignment(),
@@ -4756,8 +4752,10 @@ mod render_tree_tests {
     fn render_tree_thematic_break_off_mode_suppresses_image_tier() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+            kind: Some("waves".into()),
+            ..Default::default()
+        });
 
         let term = Terminal::builder()
             .width(40)
@@ -4786,8 +4784,10 @@ mod render_tree_tests {
     fn render_tree_thematic_break_rich_mode_uses_image_tier_when_available() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+            kind: Some("waves".into()),
+            ..Default::default()
+        });
 
         let term = Terminal::builder()
             .width(40)
@@ -4812,8 +4812,10 @@ mod render_tree_tests {
     fn render_tree_thematic_break_vector_mode_uses_text_tier() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+            kind: Some("waves".into()),
+            ..Default::default()
+        });
 
         let term = Terminal::builder()
             .width(40)
@@ -4842,8 +4844,10 @@ mod render_tree_tests {
     fn render_tree_thematic_break_force_graphics_rasterizes_on_unsupported_terminal() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+            kind: Some("waves".into()),
+            ..Default::default()
+        });
 
         let term = Terminal::builder()
             .width(40)

@@ -13,13 +13,13 @@
 //! terminal renderer.
 
 use renderable::color::{Color, Tailwind};
-use renderable::layout::{Layout, TargetValue};
-use renderable::style::{PerMode, Style, TextEmphasis};
+use renderable::layout::{Alignment, Edges, Layout, Length, TargetValue, Width};
+use renderable::style::{Border, Opacity, PaintColor, PerMode, Style, TextEmphasis};
 use renderable::tree::{
     CodeRenderHints, ColumnAlign, ColumnsHints, Document, DocumentMetadata, HeadingDepth,
     HintNamespace, ListMarkerPolicy, ListRenderHints, NodeAttrs, ProgressHints, RenderNode,
     SourceRegistry, TableCellHints, TableColumnHints, TableTerminalHints, TaskHints, TaskState,
-    hint_accesses, reset_hint_accesses,
+    TextLayoutHints, TextOverflow, hint_accesses, reset_hint_accesses,
 };
 
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_document};
@@ -29,9 +29,17 @@ use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_docum
 /// nested styled span (inline style inheritance), a progress widget, a
 /// two-column widget, a list (marker policy + list hints), a task item, a table
 /// (column + title + terminal striping hints + a typed data cell), a code
-/// block, and one `darkmatter.hr` extension hint. First-class presentation
-/// rides on typed fields; only the extension hint touches the bag, so a
-/// behaving fold touches `data` zero times for `renderable.*`.
+/// block, and one opaque package-local extension hint.
+///
+/// Per the closeout spec's performance-corpus list (spec section 6), it also
+/// carries the full CSS box vocabulary so the fold reads every typed `Layout`
+/// and `Style` field: alpha foreground+background paint (degraded to opaque by
+/// the terminal), a box combining `padding`, `border`, `Width::Fixed`,
+/// `max_width`, and center `alignment`, a separate `Width::FitContent` block, an
+/// ordered list, and a link + image carrying width-dependent `TextLayoutHints`.
+/// First-class presentation rides on typed fields; only the extension hint
+/// touches the bag, so a behaving fold touches `data` zero times for
+/// `renderable.*`.
 fn styled_corpus_document() -> Document {
     let red = Style {
         color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
@@ -83,8 +91,8 @@ fn styled_corpus_document() -> Document {
         ..Default::default()
     });
 
-    // List with a marker policy and list hints; one task item carries a
-    // `darkmatter.hr` extension hint to populate the bag.
+    // List with a marker policy and list hints; one task item carries an opaque
+    // package-local extension hint to populate the bag.
     let mut task_item = RenderNode::list_item(
         Some(false),
         vec![RenderNode::paragraph(vec![RenderNode::text("todo")])],
@@ -94,7 +102,7 @@ fn styled_corpus_document() -> Document {
     });
     task_item
         .attrs
-        .set_hint(HintNamespace("darkmatter.hr"), "kind", serde_json::json!("solid"));
+        .set_hint(HintNamespace("myapp.custom"), "kind", serde_json::json!("solid"));
     let mut list = RenderNode::list(false, None, vec![task_item]);
     list.attrs.set_list_marker_policy(ListMarkerPolicy::None);
     list.attrs.set_list_hints(&ListRenderHints {
@@ -136,11 +144,74 @@ fn styled_corpus_document() -> Document {
         highlight: true,
     });
 
+    // A box exercising the whole CSS box vocabulary in one node: alpha
+    // foreground + background (the terminal degrades both to opaque), a border,
+    // padding, a fixed content width, a max-width cap, and center alignment.
+    let alpha_fg =
+        PaintColor::new(Color::Tailwind(Tailwind::Slate200)).with_opacity(Opacity::new(128));
+    let alpha_bg =
+        PaintColor::new(Color::Tailwind(Tailwind::Red500)).with_opacity(Opacity::new(64));
+    let mut boxed = RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
+        "boxed",
+    )])]);
+    boxed.attrs.set_layout(&Layout {
+        margin: Edges::all(Length::ch(1)),
+        padding: Edges::all(Length::ch(2)),
+        width: Width::Fixed(TargetValue::universal(Length::ch(40))),
+        max_width: Some(TargetValue::universal(Length::ch(60))),
+        alignment: Alignment::Center,
+        ..Layout::default()
+    });
+    boxed.attrs.set_style(&Style {
+        color: Some(TargetValue::universal(PerMode::universal(alpha_fg))),
+        background: Some(TargetValue::universal(PerMode::universal(alpha_bg))),
+        border: Some(Border::default()),
+        ..Style::default()
+    });
+
+    // A fit-content block (the orthogonal width mode to the box's Fixed) under a
+    // max-width cap, so both `Width` arms are read by the fold.
+    let mut fit = RenderNode::paragraph(vec![RenderNode::text("fit-content")]);
+    fit.attrs.set_layout(&Layout {
+        width: Width::FitContent,
+        max_width: Some(TargetValue::universal(Length::ch(30))),
+        ..Layout::default()
+    });
+
+    // An ordered list (the unordered list above is marker-policy driven).
+    let ordered = RenderNode::list(
+        true,
+        Some(1),
+        vec![RenderNode::list_item(
+            None,
+            vec![RenderNode::paragraph(vec![RenderNode::text("first")])],
+        )],
+    );
+
+    // A link with an exact-width text-layout field and an image with a
+    // max-width-capped placeholder, so the width-dependent `TextLayoutHints`
+    // branch is read for both inline kinds.
+    let mut link = RenderNode::link("https://example.com", None, vec![RenderNode::text("link")]);
+    link.attrs.set_text_layout(&TextLayoutHints {
+        width: Some(TargetValue::universal(Length::ch(20))),
+        alignment: Alignment::Right,
+        overflow: TextOverflow::Truncate,
+        ..Default::default()
+    });
+    let mut image = RenderNode::image("img.png", None, "an image alt");
+    image.attrs.set_text_layout(&TextLayoutHints {
+        max_width: Some(TargetValue::universal(Length::ch(10))),
+        overflow: TextOverflow::Truncate,
+        ..Default::default()
+    });
+    let link_para = RenderNode::paragraph(vec![link, RenderNode::text(" "), image]);
+
     Document {
         sources: SourceRegistry::default(),
         metadata: DocumentMetadata::default(),
         root: RenderNode::root(vec![
-            heading, styled_para, progress, columns, list, table, code,
+            heading, styled_para, progress, columns, list, table, code, boxed, fit, ordered,
+            link_para,
         ]),
     }
 }
@@ -148,7 +219,7 @@ fn styled_corpus_document() -> Document {
 /// Folding the styled corpus to the terminal must not round-trip any
 /// renderable-owned hint through `NodeAttrs::data`. Every first-class hint is a
 /// typed field, so the renderable-owned counter stays at zero; the corpus's
-/// lone `darkmatter.hr` extension hint is permitted and does not affect it.
+/// lone opaque package-local extension hint is permitted and does not affect it.
 #[test]
 fn terminal_fold_does_zero_renderable_owned_hint_roundtrips() {
     let doc = styled_corpus_document();
