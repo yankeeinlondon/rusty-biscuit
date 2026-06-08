@@ -32,20 +32,30 @@
 //! re-declaration. It is a thread-local, so every `reset`/`render`/`read` trio
 //! must stay on one thread — which it does, since each test runs synchronously.
 //!
-//! The zero-access gate certifies all three of the closeout spec's structural
-//! performance properties (spec section 6) at once, because they collapse to a
-//! single observable: a `renderable.*` bag access.
+//! What the zero-access gate directly proves is the single observable it
+//! measures: the styled production fold performs **zero `renderable.*`
+//! `NodeAttrs::data` bag accesses**. Two of the closeout spec's three structural
+//! performance properties (spec section 6) reduce to exactly that observable:
 //!
-//! - **Zero first-class extension-bag access** is the counter's first slot.
+//! - **Zero first-class extension-bag access** *is* the counter's first slot.
 //! - **Zero per-node formatted hint keys** follows directly: the only
 //!   `format!("{ns}.{key}")` calls live inside `NodeAttrs::{set,get,remove}_hint`,
 //!   which are exactly what the counter records — zero accesses means zero
 //!   per-node key formatting on the fold path.
-//! - **Zero typed-attr serde round-trips** is a type-level guarantee: typed
-//!   attrs are read through their typed accessors (`layout_ref`, `style_ref`,
-//!   `text_layout_ref`, `browser_ref`, `thematic_break_ref`, …), none of which
-//!   touch `serde`. A regression that re-introduced a JSON round-trip for a
-//!   first-class hint would have to go through the bag and trip the counter.
+//!
+//! The third property — **zero typed-attr serde round-trips** — is **not**
+//! mechanically certified by this counter, and the gate does not claim it is.
+//! The counter only observes the `data` bag; nothing here would catch code that
+//! serialized a typed attr *directly* (e.g. `serde_json::to_value(layout_ref)`)
+//! without touching the bag. What upholds the no-serde-on-the-hot-path property
+//! is the convention that every first-class hint is read through its typed
+//! accessor (`layout_ref`, `style_ref`, `text_layout_ref`, `browser_ref`,
+//! `thematic_break_ref`, …), none of which call `serde` — a code-review
+//! invariant, not a type-level one. The counter is a strong *backstop*: the most
+//! likely regression (re-routing a hint through the `data` bag, which does
+//! serialize) would trip it. Closing the residual gap would require
+//! instrumenting serde conversions on the production fold and a same-corpus
+//! before/after Criterion baseline (see `performance-record.md`).
 
 use biscuit_terminal::render_tree::{
     TerminalRenderContext, TerminalRenderOptions, render_terminal_document,

@@ -40,8 +40,8 @@
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use renderable::tree::{
     ColumnAlign, Diagnostic, Document, DocumentMetadata, Frontmatter as TreeFrontmatter,
-    FrontmatterFormat, HeadingDepth, NodeKind, Provenance, RenderNode, SourceDescriptor, SourceId,
-    SourceLocation, SourceSpan, ThematicBreakAttrs,
+    FrontmatterFormat, HeadingDepth, HrAlignment, HrKind, HrWeight, NodeKind, Provenance,
+    RenderNode, SourceDescriptor, SourceId, SourceLocation, SourceSpan, ThematicBreakAttrs,
 };
 use std::ops::Range;
 
@@ -357,9 +357,16 @@ fn lower_hr_attrs_to_node(
     };
     node.attrs.set_thematic_break(&ThematicBreakAttrs {
         // The canonical `kind` key wins over the deprecated `style:` alias.
-        kind: attrs.kind.or(attrs.legacy_style),
-        alignment: attrs.alignment,
-        weight: attrs.weight,
+        // Author text is parsed to the shared enums here, at the single fold
+        // boundary; an unrecognized spelling becomes `None` and the renderers
+        // fall back to their defaults.
+        kind: attrs
+            .kind
+            .or(attrs.legacy_style)
+            .as_deref()
+            .and_then(HrKind::from_authored),
+        alignment: attrs.alignment.as_deref().and_then(HrAlignment::from_authored),
+        weight: attrs.weight.as_deref().and_then(HrWeight::from_authored),
         width: attrs.width,
         color: attrs.color,
     });
@@ -1534,7 +1541,7 @@ mod tests {
         }
         let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
         let tb = hr.attrs.thematic_break_ref().expect("HR styling attached");
-        assert_eq!(tb.kind.as_deref(), Some("waves"));
+        assert_eq!(tb.kind, Some(HrKind::Waves));
         assert_eq!(tb.width.as_deref(), Some("50%"));
         // Generated provenance: this HR was synthesized from a paragraph.
         assert_eq!(hr.span.provenance, Provenance::Generated);

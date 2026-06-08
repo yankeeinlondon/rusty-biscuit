@@ -835,8 +835,8 @@ use renderable::tree::{NodeKind, RenderNode};
         let (doc, _diags) = to_render_document(&md);
         let hr = find_hr(&doc.root).expect("HR-attribute paragraph must fold to a ThematicBreak");
         assert_eq!(
-            hr.attrs.thematic_break_ref().and_then(|h| h.kind.as_deref()),
-            Some("waves"),
+            hr.attrs.thematic_break_ref().and_then(|h| h.kind),
+            Some(renderable::tree::HrKind::Waves),
             "HR-attribute styling must survive to_render_document",
         );
     }

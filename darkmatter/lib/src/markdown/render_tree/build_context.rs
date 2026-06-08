@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use renderable::layout::{Layout, TargetValue};
 use renderable::style::{PaintColor, PerMode, Style};
-use renderable::tree::{NodeKind, RenderNode};
+use renderable::tree::{HrAlignment, HrKind, HrWeight, NodeKind, RenderNode};
 
 use crate::layout::{ComponentPolicy, PageComponent};
 use crate::markdown::inline::HorizontalRuleAttrs;
@@ -463,17 +463,23 @@ fn apply_hr_defaults(node: &mut RenderNode, ctx: &TreeBuildContext) {
     };
     let tb = node.attrs.thematic_break_mut_or_default();
     if tb.kind.is_none() {
-        // The canonical `kind` wins over the deprecated `style:` alias.
+        // The canonical `kind` wins over the deprecated `style:` alias. Author
+        // text is parsed to the shared enum here; an unrecognized spelling
+        // stays `None`.
         tb.kind = defaults
             .kind
-            .clone()
-            .or_else(|| defaults.legacy_style.clone());
+            .as_deref()
+            .or(defaults.legacy_style.as_deref())
+            .and_then(HrKind::from_authored);
     }
     if tb.alignment.is_none() {
-        tb.alignment = defaults.alignment.clone();
+        tb.alignment = defaults
+            .alignment
+            .as_deref()
+            .and_then(HrAlignment::from_authored);
     }
     if tb.weight.is_none() {
-        tb.weight = defaults.weight.clone();
+        tb.weight = defaults.weight.as_deref().and_then(HrWeight::from_authored);
     }
     if tb.width.is_none() {
         tb.width = defaults.width.clone();
@@ -967,8 +973,8 @@ mod structural_tests {
         let hr = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::ThematicBreak))
             .expect("thematic break");
         assert_eq!(
-            hr.attrs.thematic_break_ref().and_then(|h| h.kind.as_deref()),
-            Some("waves")
+            hr.attrs.thematic_break_ref().and_then(|h| h.kind),
+            Some(renderable::tree::HrKind::Waves)
         );
     }
 
