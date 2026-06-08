@@ -736,6 +736,241 @@ fn merge_conflicts_at_surfaces_corrupt_index() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Fallible revision-resolution corruption parity (review-7 finding 1)
+//
+// The fallible entry points must only collapse genuine not-found / unborn /
+// detached cases into None/empty. Malformed refs, refs targeting a missing
+// object, and ambiguous lookups must surface as errors rather than masquerade
+// as absence.
+// ---------------------------------------------------------------------------
+
+/// Full hex object IDs of every loose object in the repository.
+fn loose_object_ids(repo_path: &Path) -> Vec<String> {
+    let objects = repo_path.join(".git").join("objects");
+    let mut ids = Vec::new();
+    for entry in fs::read_dir(&objects).unwrap() {
+        let entry = entry.unwrap();
+        let dir_name = entry.file_name().into_string().unwrap();
+        if dir_name.len() != 2 || !entry.path().is_dir() {
+            continue; // skip `info/`, `pack/`, etc.
+        }
+        for file in fs::read_dir(entry.path()).unwrap() {
+            let rest = file.unwrap().file_name().into_string().unwrap();
+            ids.push(format!("{dir_name}{rest}"));
+        }
+    }
+    ids
+}
+
+/// A SHA prefix shared by at least two distinct objects, so it resolves
+/// ambiguously. With >16 loose objects a 1-char collision is guaranteed by the
+/// pigeonhole principle; the shared prefix of the first colliding sorted pair is
+/// returned.
+fn ambiguous_prefix(repo_path: &Path) -> String {
+    let mut ids = loose_object_ids(repo_path);
+    ids.sort();
+    for pair in ids.windows(2) {
+        let shared = pair[0]
+            .chars()
+            .zip(pair[1].chars())
+            .take_while(|(a, b)| a == b)
+            .count();
+        if shared >= 1 {
+            return pair[0][..shared].to_string();
+        }
+    }
+    panic!("no ambiguous object prefix found among {} objects", ids.len());
+}
+
+#[test]
+fn commit_by_sha_at_surfaces_ambiguous_prefix() {
+    // An ambiguous prefix is not "no commit matches" — it must surface rather
+    // than collapse into Ok(None).
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 20);
+
+    let prefix = ambiguous_prefix(dir.path());
+    assert!(
+        sniff::filesystem::commit_by_sha_at(dir.path(), &prefix).is_err(),
+        "ambiguous prefix {prefix:?} must surface through commit_by_sha_at"
+    );
+}
+
+#[test]
+fn commit_by_sha_at_returns_none_for_unmatched_prefix() {
+    // A well-formed hex prefix that matches no object is genuine absence.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+
+    let result = sniff::filesystem::commit_by_sha_at(dir.path(), "deadbeef").unwrap();
+    assert!(
+        result.is_none(),
+        "an unmatched SHA prefix must be Ok(None), got {result:?}"
+    );
+}
+
+#[test]
+fn commits_for_path_at_surfaces_malformed_head() {
+    // A malformed HEAD is corruption, not an unborn branch.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+
+    fs::write(dir.path().join(".git").join("HEAD"), b"not a valid head\n").unwrap();
+
+    assert!(
+        sniff::filesystem::commits_for_path_at(dir.path(), "", 10).is_err(),
+        "malformed HEAD must surface through commits_for_path_at"
+    );
+}
+
+#[test]
+fn commits_for_branch_at_surfaces_malformed_branch_ref() {
+    // A malformed requested branch ref must surface rather than fall through to
+    // an empty history.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+
+    fs::write(
+        dir.path()
+            .join(".git")
+            .join("refs")
+            .join("heads")
+            .join("broken"),
+        b"not a valid ref target\n",
+    )
+    .unwrap();
+
+    assert!(
+        sniff::filesystem::commits_for_branch_at(dir.path(), "broken", 10).is_err(),
+        "malformed branch ref must surface through commits_for_branch_at"
+    );
+}
+
+#[test]
+fn commits_for_branch_at_surfaces_branch_ref_to_missing_object() {
+    // A branch ref that peels to a missing object is corruption, not absence.
+    let dir = TempDir::new().unwrap();
+    let _repo = build_linear_main(dir.path(), 2);
+
+    fs::write(
+        dir.path()
+            .join(".git")
+            .join("refs")
+            .join("heads")
+            .join("broken"),
+        b"0000000000000000000000000000000000000000\n",
+    )
+    .unwrap();
+
+    assert!(
+        sniff::filesystem::commits_for_branch_at(dir.path(), "broken", 10).is_err(),
+        "branch ref to a missing object must surface through commits_for_branch_at"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Full detection + recent-commit corruption parity (review-7 finding 2)
+//
+// The primary detection API and every recent-commit query return `Result`, so
+// repository corruption must surface as an error instead of a successful but
+// empty/partial history.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn detect_git_with_request_surfaces_corrupt_history() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+    let sha = head_sha(&repo);
+
+    corrupt_loose_object(dir.path(), &sha);
+
+    let request = GitRequest::full().commit_count(10);
+    assert!(
+        detect_git_with_request(dir.path(), &request).is_err(),
+        "corrupt history must surface through detect_git_with_request"
+    );
+}
+
+#[test]
+fn recent_commits_by_count_surfaces_corrupt_history() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+    let sha = head_sha(&repo);
+
+    corrupt_loose_object(dir.path(), &sha);
+
+    assert!(
+        sniff::filesystem::get_recent_commits_by_count(dir.path(), 10).is_err(),
+        "corrupt history must surface through get_recent_commits_by_count"
+    );
+}
+
+#[test]
+fn recent_commits_by_duration_surfaces_corrupt_history() {
+    use chrono::Duration;
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+    let sha = head_sha(&repo);
+
+    corrupt_loose_object(dir.path(), &sha);
+
+    assert!(
+        sniff::filesystem::get_recent_commits_by_duration(dir.path(), Duration::weeks(520), "5y")
+            .is_err(),
+        "corrupt history must surface through get_recent_commits_by_duration"
+    );
+}
+
+#[test]
+fn recent_commits_in_range_surfaces_corrupt_history() {
+    use chrono::{TimeZone, Utc};
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+    let sha = head_sha(&repo);
+
+    corrupt_loose_object(dir.path(), &sha);
+
+    let since = Utc.timestamp_opt(0, 0).unwrap();
+    let until = Utc::now();
+    assert!(
+        sniff::filesystem::get_recent_commits_in_range(dir.path(), since, until, "all").is_err(),
+        "corrupt history must surface through get_recent_commits_in_range"
+    );
+}
+
+#[test]
+fn recent_commits_by_date_surfaces_corrupt_history() {
+    use chrono::NaiveDate;
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+    let sha = head_sha(&repo);
+
+    corrupt_loose_object(dir.path(), &sha);
+
+    let date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+    assert!(
+        sniff::filesystem::get_recent_commits_by_date(dir.path(), date).is_err(),
+        "corrupt history must surface through get_recent_commits_by_date"
+    );
+}
+
+#[test]
+fn recent_commits_by_hash_surfaces_corrupt_history() {
+    let dir = TempDir::new().unwrap();
+    let repo = build_linear_main(dir.path(), 2);
+    let sha = head_sha(&repo);
+
+    corrupt_loose_object(dir.path(), &sha);
+
+    // Targeting HEAD itself skips the merge-base reachability probe, so the
+    // corruption surfaces through the history collector rather than the probe.
+    assert!(
+        sniff::filesystem::get_recent_commits_by_hash(dir.path(), &sha).is_err(),
+        "corrupt history must surface through get_recent_commits_by_hash"
+    );
+}
+
 #[test]
 fn ref_decorations_match_git2_for_branches_and_tags() {
     let dir = TempDir::new().unwrap();
