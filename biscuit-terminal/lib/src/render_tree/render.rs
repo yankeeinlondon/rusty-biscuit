@@ -148,6 +148,30 @@ pub fn render_terminal_document(
     render_terminal_node(&doc.root, opts)
 }
 
+/// Deserialized payload for the `"icon"` extension token.
+#[derive(serde::Deserialize)]
+struct IconPayload {
+    nerd_font: Option<String>,
+    unicode: Option<String>,
+    text: String,
+    #[serde(default)]
+    svg: String,
+    #[serde(default)]
+    nerd_font_preferred: bool,
+}
+
+/// Writes SVG markup to a temporary file and renders it via the terminal image
+/// protocol.
+fn render_svg_string(svg: &str, term: &crate::terminal::Terminal) -> std::io::Result<String> {
+    use std::io::Write;
+
+    let mut file = tempfile::Builder::new().suffix(".svg").tempfile()?;
+    file.write_all(svg.as_bytes())?;
+    let img = TerminalImage::new(file.path())
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    Ok(img.render(term))
+}
+
 /// Threads render options and accumulating diagnostics through the recursion.
 struct Writer<'a> {
     opts: &'a TerminalRenderOptions,
@@ -884,8 +908,11 @@ impl Writer<'_> {
             // legacy span-class path in `apply_classes`. An unrecognized token
             // renders its children as plain inline content.
             NodeKind::Extended {
-                token, children, ..
+                token, children, payload,
             } => {
+                if token.as_ref() == "icon" {
+                    return self.render_icon_payload(payload, term);
+                }
                 let inner = self.render_inline(children, effective)?;
                 let mut child_effective = effective.clone();
                 match token.as_ref() {
@@ -1448,6 +1475,36 @@ impl Writer<'_> {
         let image = TerminalImage::new(&full_path).ok()?.with_alt_text(alt);
         let output = image.render(&term);
         (!output.is_empty()).then_some(output)
+    }
+
+    /// Renders an `"icon"` extended node by walking the degradation ladder
+    /// encoded in the JSON payload.
+    fn render_icon_payload(
+        &self,
+        payload: &Option<String>,
+        term: &crate::terminal::Terminal,
+    ) -> Result<String, RenderError> {
+        let Some(payload) = payload else {
+            return Ok(String::new());
+        };
+        let icon: IconPayload = match serde_json::from_str(payload) {
+            Ok(i) => i,
+            Err(_) => return Ok(payload.clone()),
+        };
+
+        if icon.nerd_font_preferred && let Some(ref nerd) = icon.nerd_font {
+            return Ok(nerd.clone());
+        }
+        if let Some(ref unicode) = icon.unicode {
+            return Ok(unicode.clone());
+        }
+        if !icon.svg.is_empty()
+            && !matches!(term.image_support, ImageSupport::None)
+            && let Ok(s) = render_svg_string(&icon.svg, term)
+        {
+            return Ok(s);
+        }
+        Ok(icon.text)
     }
 
     /// Renders a code block as a dim, indented panel.

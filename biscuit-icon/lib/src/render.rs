@@ -9,10 +9,41 @@ use renderable::tree::{RenderNode, TreeRenderable};
 
 use crate::icon::Icon;
 
+/// Structured payload for the `"icon"` extension token, carrying all rungs of
+/// the terminal degradation ladder so the shared renderer can pick the best
+/// available representation at render time.
+#[derive(serde::Serialize)]
+struct IconPayload {
+    nerd_font: Option<String>,
+    unicode: Option<String>,
+    text: String,
+    #[serde(default)]
+    svg: String,
+    #[serde(default)]
+    nerd_font_preferred: bool,
+}
+
 impl TreeRenderable for Icon {
-    /// Projects the icon into a single inline raw-HTML node carrying the SVG.
+    /// Projects the icon into a canonical render tree.
+    ///
+    /// Browser and markdown targets fold the inner `Html` node into inline SVG.
+    /// Terminal targets recognize the `"icon"` extension token and walk the
+    /// degradation ladder encoded in the JSON payload (Nerd Font → Unicode →
+    /// image → text identifier).
     fn render_tree(&self) -> RenderNode {
-        RenderNode::root(vec![RenderNode::html(self.svg(), false)])
+        let payload = IconPayload {
+            nerd_font: self.nerd_font_char().map(|c| c.to_string()),
+            unicode: self.unicode_char().map(|c| c.to_string()),
+            text: self.id.clone(),
+            svg: self.svg(),
+            nerd_font_preferred: self.nerd_font,
+        };
+        let json = serde_json::to_string(&payload).unwrap_or_default();
+        RenderNode::root(vec![RenderNode::extended(
+            "icon",
+            vec![RenderNode::html(self.svg(), false)],
+            Some(json),
+        )])
     }
 }
 
@@ -69,21 +100,79 @@ mod tests {
     }
 
     #[test]
-    fn tree_renders_to_terminal_through_shared_adapter() {
+    fn tree_renders_unicode_glyph_to_terminal_through_shared_adapter() {
         use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
         use renderable::tree::TreeRenderable;
 
-        let icon = crate::domain::Os::Apple.icon();
+        let icon = crate::domain::Emoji::Happy.icon();
         let tree = icon.render_tree();
         let opts = TerminalRenderOptions::default();
         let rendered = render_terminal_node(&tree, &opts).unwrap();
 
-        // The tree projection emits an inline SVG HTML node; when folded to
-        // terminal via the shared adapter it must contain the SVG markup.
         assert!(
-            rendered.output.contains("<svg"),
-            "expected SVG in tree-rendered terminal output; got: {}",
+            rendered.output.contains('\u{1F600}'),
+            "expected Unicode grinning face in tree-rendered terminal output; got: {}",
             rendered.output
+        );
+    }
+
+    #[test]
+    fn tree_renders_identifier_to_terminal_through_shared_adapter() {
+        use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
+        use renderable::tree::TreeRenderable;
+
+        let icon = crate::domain::Os::Finder.icon();
+        let tree = icon.render_tree();
+        let opts = TerminalRenderOptions::default();
+        let rendered = render_terminal_node(&tree, &opts).unwrap();
+
+        assert!(
+            rendered.output.contains("hugeicons:apple-finder"),
+            "expected icon identifier in tree-rendered terminal output; got: {}",
+            rendered.output
+        );
+    }
+
+    #[test]
+    fn tree_renders_nerd_font_glyph_to_terminal_through_shared_adapter() {
+        use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
+        use renderable::tree::TreeRenderable;
+
+        let icon = crate::domain::DevOps::Github.icon().nerd_font(true);
+        let tree = icon.render_tree();
+        let opts = TerminalRenderOptions::default();
+        let rendered = render_terminal_node(&tree, &opts).unwrap();
+
+        assert!(
+            rendered.output.contains('\u{f09b}'),
+            "expected Nerd Font github glyph in tree-rendered terminal output; got: {}",
+            rendered.output
+        );
+    }
+
+    #[test]
+    fn tree_payload_includes_svg_for_image_tier() {
+        use renderable::tree::TreeRenderable;
+
+        let icon = crate::domain::Os::Apple.icon();
+        let tree = icon.render_tree();
+
+        let root = match &tree.kind {
+            renderable::tree::NodeKind::Root { children } => children,
+            _ => panic!("expected root node"),
+        };
+        let ext = match &root[0].kind {
+            renderable::tree::NodeKind::Extended { token, payload, .. } => {
+                assert_eq!(token, "icon");
+                payload
+            }
+            _ => panic!("expected extended node"),
+        };
+        let payload = ext.as_ref().expect("expected payload");
+        assert!(payload.contains("svg"), "expected SVG field in payload");
+        assert!(
+            payload.contains("ic:baseline-apple"),
+            "expected text identifier in payload"
         );
     }
 }
