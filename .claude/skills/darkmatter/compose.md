@@ -21,6 +21,7 @@ The darkmatter compose pipeline provides document preparation through three phas
 - `::file ./doc.md` - Include markdown with recursive processing
 - `::code ./main.rs` - Include as fenced code block
 - `::toc-linking` - Generate heading link lists from external documents' raw source headings
+- `::file-links` - Discover document files and render as a linked file tree
 - `prologue` / `epilogue` - Frontmatter-driven file includes
 - `when="..."` conditions, cycle detection, depth limits
 - Heading re-leveling for included markdown (H6 overflow handled gracefully)
@@ -236,6 +237,10 @@ The transclusion phase runs after Inline Pre when a source file path is provided
 
 <!-- Include as fenced code block -->
 ::code ./main.rs
+
+<!-- Discover document files and render as linked tree -->
+::file-links "docs/**/*.md"
+::file-links --dir reports --depth 1
 
 <!-- Conditional include -->
 ::file ./appendix.md when="include_appendix"

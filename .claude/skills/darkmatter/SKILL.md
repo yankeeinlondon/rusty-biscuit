@@ -104,7 +104,7 @@ The compose pipeline runs in three phases:
 
 **Transclusion** (concurrent):
 
-- `::file`, `::code`, `::toc-linking`, `prologue`/`epilogue`
+- `::file`, `::code`, `::toc-linking`, `::file-links`, `prologue`/`epilogue`
 
 **Inline Post** (serial):
 
