@@ -73,8 +73,11 @@ fn resolve_single_opt(repo: &gix::Repository, spec: &str) -> Result<Option<gix::
 /// `refs/remotes/<name>` lookup so a malformed ref, or one peeling to a missing
 /// object, surfaces as [`SniffError::Git`] instead of collapsing into an empty
 /// history. Only when no such ref exists is the input treated as a possible
-/// hex SHA via the object-prefix probe; a non-hex name that matches no ref is
-/// genuine absence (`Ok(None)`).
+/// hex SHA — and only when it has a valid object-ID prefix shape. A name that
+/// is non-hex or of invalid prefix length (e.g. an absent branch like `add`)
+/// is genuine branch absence (`Ok(None)`), not a malformed SHA lookup; an
+/// unresolved branch must never be inferred as a corrupt SHA from its
+/// characters alone.
 fn resolve_remote_or_sha(
     repo: &gix::Repository,
     branch_name: &str,
@@ -86,7 +89,13 @@ fn resolve_remote_or_sha(
                 .detach(),
         )),
         Err(gix::reference::find::existing::Error::NotFound { .. }) => {
-            resolve_single_opt(repo, branch_name)
+            // Probe the object database only for SHA-shaped input. A name that
+            // cannot form an object-ID prefix names no commit by definition, so
+            // it is absence rather than a verifiable-against-the-odb SHA.
+            match gix::hash::Prefix::from_hex(branch_name) {
+                Ok(_) => resolve_single_opt(repo, branch_name),
+                Err(_) => Ok(None),
+            }
         }
         Err(e) => Err(SniffError::git("find_reference", e)),
     }
@@ -146,7 +155,9 @@ pub(crate) fn collect_ref_decorations_fallible(
     let platform = repo
         .references()
         .map_err(|e| SniffError::git("references", e))?;
-    let iter = platform.all().map_err(|e| SniffError::git("references", e))?;
+    let iter = platform
+        .all()
+        .map_err(|e| SniffError::git("references", e))?;
 
     for reference in iter {
         let reference = reference.map_err(|e| SniffError::git("references", e))?;
@@ -259,7 +270,9 @@ pub(crate) fn get_recent_commits_fallible(
         let refs = decorations.get(&info.id).cloned().unwrap_or_default();
 
         let author = commit.author().map_err(|e| SniffError::git("author", e))?;
-        let time = commit.time().map_err(|e| SniffError::git("commit_time", e))?;
+        let time = commit
+            .time()
+            .map_err(|e| SniffError::git("commit_time", e))?;
         let message = commit
             .message_raw()
             .map_err(|e| SniffError::git("message", e))?;
@@ -412,7 +425,9 @@ pub(crate) fn get_commit_by_sha_fallible(
     let refs = decorations.get(&oid).cloned().unwrap_or_default();
 
     let author = commit.author().map_err(|e| SniffError::git("author", e))?;
-    let time = commit.time().map_err(|e| SniffError::git("commit_time", e))?;
+    let time = commit
+        .time()
+        .map_err(|e| SniffError::git("commit_time", e))?;
     let message = commit
         .message_raw()
         .map_err(|e| SniffError::git("message", e))?;
@@ -502,7 +517,11 @@ pub(crate) fn get_commit_files_with_cache_fallible(
                 .map_err(|e| SniffError::git("object", e))?
                 .try_into_commit()
                 .map_err(|e| SniffError::git("object", e))?;
-            Some(parent_commit.tree().map_err(|e| SniffError::git("tree", e))?)
+            Some(
+                parent_commit
+                    .tree()
+                    .map_err(|e| SniffError::git("tree", e))?,
+            )
         }
         None => None,
     };
@@ -639,7 +658,9 @@ pub(crate) fn get_commits_for_path_fallible(
         let refs = decorations.get(&info.id).cloned().unwrap_or_default();
 
         let author = commit.author().map_err(|e| SniffError::git("author", e))?;
-        let time = commit.time().map_err(|e| SniffError::git("commit_time", e))?;
+        let time = commit
+            .time()
+            .map_err(|e| SniffError::git("commit_time", e))?;
         let message = commit
             .message_raw()
             .map_err(|e| SniffError::git("message", e))?;
@@ -735,7 +756,9 @@ pub(crate) fn get_commits_for_branch_fallible(
         let refs = decorations.get(&info.id).cloned().unwrap_or_default();
 
         let author = commit.author().map_err(|e| SniffError::git("author", e))?;
-        let time = commit.time().map_err(|e| SniffError::git("commit_time", e))?;
+        let time = commit
+            .time()
+            .map_err(|e| SniffError::git("commit_time", e))?;
         let message = commit
             .message_raw()
             .map_err(|e| SniffError::git("message", e))?;

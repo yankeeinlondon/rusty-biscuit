@@ -791,7 +791,13 @@ impl GitRepo {
     /// - `include_worktrees`: false skips worktree enumeration
     /// - `refresh_remote_tracking`: true fetches remote refs (network)
     pub fn detect_with_request(&self, request: &GitRequest) -> Result<GitInfo> {
-        let current_branch = self.current_branch();
+        // Resolve the branch fallibly: a missing or malformed HEAD must surface
+        // for every detection preset, not only the metadata-producing ones.
+        // `minimal()`/`summary()` skip branch/tracking collection below, so this
+        // is the only point where their HEAD corruption can be detected. The
+        // result is reused for branch/tracking collection to avoid re-reading
+        // HEAD per accessor.
+        let current_branch = self.try_current_branch()?;
         let is_minimal = request.is_minimal();
 
         if request.refresh_remote_tracking {
@@ -874,13 +880,21 @@ impl GitRepo {
         };
 
         let branches = if wants_metadata {
-            self.try_branches()?
+            self.ensure_cache();
+            super::remote_refresh::get_local_branches_fallible(
+                &self.gix.borrow(),
+                current_branch.as_deref(),
+            )?
         } else {
             Vec::new()
         };
 
         let tracking = if wants_metadata {
-            self.try_tracking_status()?
+            self.ensure_cache();
+            super::remote_refresh::get_tracking_status_fallible(
+                &self.gix.borrow(),
+                current_branch.as_deref(),
+            )?
         } else {
             Vec::new()
         };
