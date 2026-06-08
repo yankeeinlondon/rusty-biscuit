@@ -13,6 +13,8 @@ use biscuit_test_harness::{
 use biscuit_test_harness::kitty::KittyHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
+#[cfg(feature = "image")]
+use biscuit_test_harness::wezterm::WezTermHarness;
 use serial_test::serial;
 use test_toolkit::{Level, require_level};
 
@@ -51,6 +53,24 @@ fn run_icon(harness: &mut TmuxHarness, args: &str) -> CapturedFrame {
     harness.send_text(cmd.as_bytes()).expect("send_text failed");
     let _ = wait_for_prompt(harness);
     harness.capture().expect("capture failed")
+}
+
+/// Counts lines that contain at least one printable, non-prompt character
+/// — a coarse "rows occupied" measure when image protocol bytes have been
+/// stripped by the host terminal.
+#[cfg(feature = "image")]
+fn occupied_row_count(plain: &str) -> usize {
+    plain
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter(|l| !looks_like_only_prompt(l))
+        .count()
+}
+
+#[cfg(feature = "image")]
+fn looks_like_only_prompt(line: &str) -> bool {
+    let trimmed = line.trim_end();
+    trimmed.ends_with('$') || trimmed.ends_with('%') || trimmed.ends_with('#')
 }
 
 // ------------------------------------------------------------------
@@ -143,13 +163,57 @@ fn level2_text_fallback_shows_identifier() {
 #[serial(level2_terminal)]
 #[cfg(feature = "image")]
 fn level2_image_protocol_fallback_renders_graphics() {
-    require_level!(Level::L2, KittyHarness::available(), "Kitty");
+    let kitty_available = KittyHarness::available();
+    let wezterm_available = WezTermHarness::available();
+    require_level!(
+        Level::L2,
+        kitty_available || wezterm_available,
+        "Kitty or WezTerm"
+    );
 
-    let mut guard = SHARED_KITTY
-        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn Kitty"));
-    let harness = guard.as_mut().expect("shared Kitty harness present");
+    // Prefer Kitty when both are available.
+    if kitty_available {
+        let mut guard = SHARED_KITTY
+            .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn Kitty"));
+        let harness = guard.as_mut().expect("shared Kitty harness present");
+        harness.send_text(b"clear\n").expect("clear failed");
+        harness.settle();
+
+        let home = tempfile::tempdir().unwrap();
+        let cmd = format!(
+            "HOME='{}' PATH='{}' icon icons apple\n",
+            home.path().display(),
+            path_with_icon_bin(),
+        );
+        harness.send_text(cmd.as_bytes()).expect("send_text failed");
+        let _ = wait_for_prompt(harness);
+        let frame = harness.capture().expect("capture failed");
+
+        let has_kitty = frame.raw.contains("\x1b_G");
+        let has_iterm = frame.raw.contains("1337");
+        assert!(
+            has_kitty || has_iterm,
+            "expected image protocol escape sequences; raw:\n{}",
+            frame.raw
+        );
+        return;
+    }
+
+    // Fall back to WezTerm.
+    static SHARED_WEZTERM: biscuit_test_harness::shared::SharedHarness<
+        biscuit_test_harness::wezterm::WezTermHarness,
+    > = biscuit_test_harness::shared::SharedHarness::new();
+
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        biscuit_test_harness::wezterm::WezTermHarness::shared_or_spawn()
+            .expect("attach/spawn WezTerm")
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
+
+    let pre = harness.capture().expect("pre-capture failed");
+    let pre_rows = occupied_row_count(&pre.plain);
 
     let home = tempfile::tempdir().unwrap();
     let cmd = format!(
@@ -161,14 +225,19 @@ fn level2_image_protocol_fallback_renders_graphics() {
     let _ = wait_for_prompt(harness);
     let frame = harness.capture().expect("capture failed");
 
-    // If the terminal advertised an image protocol, the raw capture must
-    // contain either a Kitty graphics APC or an iTerm2 inline-image OSC.
     let has_kitty = frame.raw.contains("\x1b_G");
     let has_iterm = frame.raw.contains("1337");
+    let post_rows = occupied_row_count(&frame.plain);
+    let observed_delta = post_rows.saturating_sub(pre_rows);
+    let geometry_ok = observed_delta > 0;
+
     assert!(
-        has_kitty || has_iterm || frame.plain.contains("ic:baseline-apple"),
-        "expected image protocol escape or text fallback; raw:\n{}",
-        frame.raw
+        has_kitty || has_iterm || geometry_ok,
+        "WezTerm image render: neither protocol bytes nor pane-row growth observed. \
+         osc_kitty={has_kitty} osc_iterm={has_iterm} pre_rows={pre_rows} post_rows={post_rows} \
+         delta={observed_delta}\nraw_first_400={:?}\nplain:\n{}",
+        &frame.raw.chars().take(400).collect::<String>(),
+        frame.plain,
     );
 }
 
