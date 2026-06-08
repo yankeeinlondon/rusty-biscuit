@@ -1372,3 +1372,126 @@ fn level2_zero_config_page_render_renders_in_real_terminal() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// `::file-links` directive Level 2 coverage (review-1 findings 1 + 2)
+//
+// The directive's user-observable output — a styled FileSystem tree with a
+// dimmed root prefix, a highlighted target directory, and OSC8 file links —
+// is produced by composing the directive and then rendering the composed
+// document. The compose path now carries the FileSystem render subtree
+// losslessly via `renderable::tree::embed`, so this drives the FULL pipeline
+// (compose → fold → terminal) into a real WezTerm pane and asserts the visible
+// hierarchy, the dimmed-prefix SGR, and the OSC8 link bytes survive — coverage
+// the Level 1 component-config tests could not provide.
+// ---------------------------------------------------------------------------
+
+/// Builds a temp repo fixture, composes a `::file-links` directive through the
+/// full default pipeline, renders the composed document to terminal bytes, and
+/// `cat`s them into the shared WezTerm pane. Returns the captured frame and the
+/// fixture tempdir (kept alive so the `.ansi` file outlives the `cat`). Skips
+/// (returns `None`) when WezTerm is unavailable.
+fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempfile::TempDir)> {
+    use darkmatter::markdown::compose::ComposeOptions;
+    use darkmatter::markdown::output::terminal::{DimMode, HyperlinkMode, TerminalImageMode};
+
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return None;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
+    }
+
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join(".git")).unwrap();
+    let topics = dir.path().join("docs").join("topics");
+    fs::create_dir_all(&topics).unwrap();
+    fs::write(topics.join("alpha.md"), "# Alpha\n").unwrap();
+    fs::write(topics.join("beta.md"), "# Beta\n").unwrap();
+
+    let root = dir.path().join("root.md");
+    fs::write(&root, "# Root\n\n::file-links docs/topics/*.md\n").unwrap();
+
+    let md = Markdown::try_from(root.as_path()).unwrap();
+    let (composed, _report) = md
+        .compose_with(ComposeOptions::new().with_source_file(&root))
+        .expect("compose ::file-links");
+
+    // `TerminalOptions` is `#[non_exhaustive]`; build from the default and force
+    // the capabilities the assertions depend on (truecolor, dim, OSC8 links).
+    let mut options = TerminalOptions::default();
+    options.color_mode = ColorMode::Dark;
+    options.color_depth = Some(ColorDepth::TrueColor);
+    options.image_mode = TerminalImageMode::Never;
+    options.dim_mode = DimMode::Always;
+    options.hyperlink_mode = HyperlinkMode::Always;
+    options.max_width = Some(100);
+    let rendered = composed.as_terminal(options).expect("render composed ::file-links");
+
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered).unwrap();
+
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().unwrap();
+    run_with_sentinel(harness, "clear");
+    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+    Some((frame, dir))
+}
+
+/// Review-1 findings 1 + 2: composing `::file-links` and rendering the result
+/// in a real terminal must reproduce the styled FileSystem tree — the target
+/// directory name and matched files are visible, the dimmed root prefix emits
+/// the dim SGR, OSC8 file links reach the pane, and the embedding marker never
+/// leaks as visible text.
+#[test]
+#[serial(level2_terminal)]
+fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
+    let Some((frame, _dir)) = run_file_links_in_pane("file_links") else {
+        return;
+    };
+
+    // Visible hierarchy: the target directory and both matched files.
+    for token in &["topics", "alpha.md", "beta.md"] {
+        assert!(
+            frame.plain.contains(token),
+            "::file-links token {token:?} missing from real-terminal capture. plain:\n{}",
+            frame.plain
+        );
+    }
+
+    // The embedding marker must never surface as visible text.
+    assert!(
+        !frame.plain.contains("bt:render-tree"),
+        "embedding marker leaked into visible capture. plain:\n{}",
+        frame.plain
+    );
+
+    // The dimmed root prefix (`/docs/`) emits the dim SGR (`ESC [ 2 m`); accept
+    // any position within a combined run, matching the other dim L2 tests.
+    let has_dim = frame.raw.contains("\u{1b}[2m")
+        || frame.raw.contains("\u{1b}[2;")
+        || frame.raw.contains(";2m")
+        || frame.raw.contains(";2;");
+    assert!(
+        has_dim,
+        "expected dim SGR for the dimmed root prefix; raw:\n{}",
+        frame.raw
+    );
+
+    // OSC8 hyperlinks for the matched files survive into the real pane. WezTerm
+    // re-emits hyperlink escapes in its `--escapes` capture, so the introducer
+    // and the `file://` destination both reach the raw frame.
+    assert!(
+        frame.raw.contains("\u{1b}]8;;"),
+        "expected OSC8 hyperlink introducer in the capture; raw:\n{}",
+        frame.raw
+    );
+    assert!(
+        frame.raw.contains("file://"),
+        "expected an OSC8 `file://` link target in the capture; raw:\n{}",
+        frame.raw
+    );
+}
