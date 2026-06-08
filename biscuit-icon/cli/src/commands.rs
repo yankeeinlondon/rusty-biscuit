@@ -30,17 +30,22 @@ async fn icons(filter: Option<String>, from: Option<String>, nerd: bool) -> Resu
     let term = Terminal::new();
     let needle = filter.unwrap_or_default();
 
-    // A `prefix:name` filter is a direct lookup+render.
-    if needle.contains(':') {
-        let icon = lookup_icon(&needle).await?;
-        println!("{}  {needle}", render_icon(&icon, &term, nerd));
-        return Ok(());
-    }
-
     let allowed: BTreeSet<String> = from
         .as_ref()
         .map(|s| s.split(',').map(str::trim).filter(|p| !p.is_empty()).map(String::from).collect())
         .unwrap_or_default();
+
+    // A `prefix:name` filter is a direct lookup+render, but `--from` still applies.
+    if needle.contains(':') {
+        if !catalog_allowed_prefix(&needle, &allowed) {
+            return Err(eyre!(
+                "{needle:?} is not in the allowed set; try `icon --from <csv> <prefix:name>`"
+            ));
+        }
+        let icon = lookup_icon(&needle).await?;
+        println!("{}  {needle}", render_icon(&icon, &term, nerd));
+        return Ok(());
+    }
 
     let cache = IconCache::open_default()?;
     let offline = catalog::offline_icons(&cache, &needle, &allowed)?;
@@ -96,18 +101,24 @@ async fn sets(filter: Option<String>) -> Result<()> {
 
     match online {
         Ok(sets) => {
-            for (prefix, title) in sets {
+            for (prefix, title, license) in sets {
                 if needle.is_empty()
                     || prefix.to_lowercase().contains(&needle)
                     || title.to_lowercase().contains(&needle)
                 {
-                    let _ = cache.put_set(&SetInfo {
-                        prefix: prefix.clone(),
-                        title: title.clone(),
-                        license: None,
+                    let license_str = license.as_ref().and_then(|l| {
+                        if l.spdx.is_empty() {
+                            None
+                        } else {
+                            Some(l.spdx.clone())
+                        }
                     });
+                    let info = SetInfo { prefix: prefix.clone(), title: title.clone(), license: license_str };
+                    if let Err(err) = cache.put_set(&info) {
+                        tracing::warn!("failed to cache set metadata for {prefix}: {err}");
+                    }
                     offline.retain(|s| s.prefix != prefix);
-                    offline.push(SetInfo { prefix, title, license: None });
+                    offline.push(info);
                 }
             }
         }

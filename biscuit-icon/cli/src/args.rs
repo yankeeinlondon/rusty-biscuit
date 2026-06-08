@@ -27,7 +27,7 @@ pub struct Cli {
     pub filter: Option<String>,
 
     /// Limit to these sets when using the default `icons` command.
-    #[arg(long, value_name = "CSV")]
+    #[arg(long, value_name = "CSV", add = ArgValueCompleter::new(set_name_completer))]
     pub from: Option<String>,
 }
 
@@ -39,13 +39,13 @@ pub enum Commands {
         #[arg(value_name = "FILTER", add = ArgValueCompleter::new(icon_name_completer))]
         filter: Option<String>,
         /// Limit to these sets (comma-separated prefixes), e.g. `fa,mdi`.
-        #[arg(long, value_name = "CSV")]
+        #[arg(long, value_name = "CSV", add = ArgValueCompleter::new(set_name_completer))]
         from: Option<String>,
     },
     /// List Iconify set names, optionally filtered.
     Sets {
         /// Substring to match against set prefixes/titles.
-        #[arg(value_name = "FILTER")]
+        #[arg(value_name = "FILTER", add = ArgValueCompleter::new(set_name_completer))]
         filter: Option<String>,
     },
     /// Cache maintenance.
@@ -86,4 +86,54 @@ fn icon_name_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
     }
 
     ids.into_iter().take(100).map(CompletionCandidate::new).collect()
+}
+
+/// Offers icon-set prefixes matching the current token, merging built-in
+/// domain prefixes with cached set metadata. Completion never fails the shell.
+///
+/// When the current value contains commas (e.g. `--from mdi,ic`) only the
+/// active segment after the last comma is completed; the already-entered
+/// prefix is preserved in each candidate.
+fn set_name_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
+    let current_str = current.to_string_lossy();
+    let (prefix, needle) = match current_str.rfind(',') {
+        Some(idx) => (&current_str[..=idx], &current_str[idx + 1..]),
+        None => ("", current_str.as_ref()),
+    };
+    let needle = needle.to_lowercase();
+    let mut prefixes = BTreeSet::new();
+
+    // Collect built-in prefixes from the domain catalog.
+    for id in biscuit_icon::domain::all_iconify_ids() {
+        if let Some((p, _)) = id.split_once(':')
+            && p.to_lowercase().contains(&needle)
+        {
+            prefixes.insert(p.to_string());
+        }
+    }
+
+    // Merge cached set prefixes.
+    if let Ok(cache) = biscuit_icon::cache::IconCache::open_default() {
+        if let Ok(sets) = cache.all_sets() {
+            for set in sets {
+                if set.prefix.to_lowercase().contains(&needle) {
+                    prefixes.insert(set.prefix);
+                }
+            }
+        }
+        // Also include prefixes from cached icons even if no set metadata exists.
+        if let Ok(cached) = cache.cached_prefixes() {
+            for p in cached {
+                if p.to_lowercase().contains(&needle) {
+                    prefixes.insert(p);
+                }
+            }
+        }
+    }
+
+    prefixes
+        .into_iter()
+        .take(50)
+        .map(|p| CompletionCandidate::new(format!("{prefix}{p}")))
+        .collect()
 }
