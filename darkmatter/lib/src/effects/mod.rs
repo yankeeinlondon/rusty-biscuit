@@ -5,10 +5,14 @@
 //! composing a document never invokes a side effect. Only an external
 //! orchestrator (e.g. Claudine's lifecycle stack) drives it.
 
+pub mod catalog;
 mod error;
 mod fs_write;
 mod verbs;
 
+pub use catalog::{
+    effect_descriptors, EffectDescriptor, EffectSafety, EFFECT_DESCRIPTORS,
+};
 pub use error::EffectError;
 
 use std::path::{Path, PathBuf};

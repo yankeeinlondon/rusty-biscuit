@@ -64,6 +64,7 @@
 //! topic.
 
 pub mod ast;
+pub mod catalog;
 pub mod ctx;
 pub mod functions;
 pub mod lexer;
@@ -71,6 +72,10 @@ pub mod parser;
 pub mod resolve_ctx;
 
 pub use ast::{BinaryOp, Expr};
+pub use catalog::{
+    expression_function_descriptors, ExpressionFunctionDescriptor,
+    EXPRESSION_FUNCTION_DESCRIPTORS,
+};
 pub use ctx::CtxLookup;
 pub use resolve_ctx::ResolutionContext;
 pub use lexer::{
