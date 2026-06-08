@@ -1894,22 +1894,33 @@ style:
         kind: waves
 ---
 
-Lead
+hr_waves_lead_anchor
 
 ---
 
-Trail
+hr_waves_tail_anchor
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    // Force the text tier: in a graphics-capable terminal the styled HR
+    // rasterizes to an image and no glyph reaches a text row (review-1
+    // finding 3). The assertion is also anchored between sentinels so a stray
+    // `~` from the shell prompt cannot satisfy it.
+    let Some((frame, _)) = run_md_env(body, "--max-width 60", &[("TERMINAL_IMAGES", "0")]) else {
         return;
     };
 
-    let has_waves = frame.plain.contains('\u{224B}') || frame.plain.contains('~');
+    let Some((plain, _)) =
+        locate_hr_between_sentinels(&frame, "hr_waves_lead_anchor", "hr_waves_tail_anchor")
+    else {
+        panic!(
+            "expected a waves HR rule row between the sentinels but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame.plain, frame.raw
+        );
+    };
+
     assert!(
-        has_waves,
-        "style.hr.kind: waves must produce the waves glyph (`≋` or `~`). plain:\n{}",
-        frame.plain
+        plain.contains('\u{224B}') || plain.contains('~'),
+        "style.hr.kind: waves must produce the waves glyph (`≋` or `~`) on the rule row; got: {plain:?}",
     );
 }
 
@@ -1926,7 +1937,11 @@ style:
         weight: thick
 ---
 
+hr_weight_lead_anchor
+
 ---
+
+hr_weight_tail_anchor
 "#;
     let body_thin = r#"---
 style:
@@ -1935,39 +1950,49 @@ style:
         weight: thin
 ---
 
+hr_weight_lead_anchor
+
 ---
+
+hr_weight_tail_anchor
 "#;
 
-    let Some((frame_thick, _)) = run_md(body_thick, "--max-width 60") else {
+    // Force the text tier so the weight difference appears as glyphs rather than
+    // pixels, and isolate the rule row between sentinels so the comparison
+    // cannot accidentally match the (per-invocation distinct) command echo
+    // (review-1 finding 3).
+    let Some((frame_thick, _)) =
+        run_md_env(body_thick, "--max-width 60", &[("TERMINAL_IMAGES", "0")])
+    else {
         return;
     };
-    let Some((frame_thin, _)) = run_md(body_thin, "--max-width 60") else {
+    let Some((frame_thin, _)) =
+        run_md_env(body_thin, "--max-width 60", &[("TERMINAL_IMAGES", "0")])
+    else {
         return;
     };
 
-    let thick_rule_line = frame_thick
-        .plain
-        .lines()
-        .find(|l| l.contains('\u{2501}') || l.contains('\u{254D}') || l.contains('-'))
-        .map(str::to_string)
-        .unwrap_or_default();
-    let thin_rule_line = frame_thin
-        .plain
-        .lines()
-        .find(|l| l.contains('\u{2500}') || l.contains('\u{254C}') || l.contains('-'))
-        .map(str::to_string)
-        .unwrap_or_default();
+    let Some((thick_rule_line, _)) =
+        locate_hr_between_sentinels(&frame_thick, "hr_weight_lead_anchor", "hr_weight_tail_anchor")
+    else {
+        panic!(
+            "expected a thick HR rule row but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame_thick.plain, frame_thick.raw
+        );
+    };
+    let Some((thin_rule_line, _)) =
+        locate_hr_between_sentinels(&frame_thin, "hr_weight_lead_anchor", "hr_weight_tail_anchor")
+    else {
+        panic!(
+            "expected a thin HR rule row but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame_thin.plain, frame_thin.raw
+        );
+    };
 
-    assert!(
-        !thick_rule_line.is_empty() && !thin_rule_line.is_empty(),
-        "expected rule line in both captures.\nthick plain:\n{}\nthin plain:\n{}",
-        frame_thick.plain,
-        frame_thin.plain
-    );
     assert_ne!(
         thick_rule_line.trim(),
         thin_rule_line.trim(),
-        "thick and thin HR weights must render visibly different glyphs"
+        "thick and thin HR weights must render visibly different glyphs",
     );
 }
 
@@ -2018,16 +2043,25 @@ hr_color_lead_anchor
 hr_color_tail_anchor
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    // Force the text tier: in a graphics-capable terminal (WezTerm supports the
+    // Kitty graphics protocol) a styled HR rasterizes to an image, so the text
+    // rule row — and the foreground SGR this test asserts — never appears. The
+    // color is a text-rule property, so it must be exercised on the text tier
+    // (review-1 finding 3).
+    let Some((frame, _)) = run_md_env(body, "--max-width 60", &[("TERMINAL_IMAGES", "0")]) else {
         return;
     };
 
     let Some((_plain, raw)) =
         locate_hr_between_sentinels(&frame, "hr_color_lead_anchor", "hr_color_tail_anchor")
     else {
-        // Capture missed the rule line (scroll/timing). Treat as a skip
-        // rather than a failure to keep Level 2 tests stable across hosts.
-        return;
+        // The harness was available and `md` completed (we have a frame), so a
+        // missing rule row is a real failure of a terminal-visible requirement,
+        // not an environment skip (review-1 finding 3).
+        panic!(
+            "expected an HR rule row between the sentinels but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame.plain, frame.raw
+        );
     };
 
     let red_semi = "\x1b[38;2;251;44;54m";
@@ -2058,14 +2092,22 @@ hr_bg_lead_anchor
 hr_bg_tail_anchor
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    // Force the text tier so the rule paints as a real row (see the color test):
+    // a graphics-capable terminal would rasterize the styled HR to an image and
+    // the background SGR would never reach a text row (review-1 finding 3).
+    let Some((frame, _)) = run_md_env(body, "--max-width 60", &[("TERMINAL_IMAGES", "0")]) else {
         return;
     };
 
     let Some((_plain, raw)) =
         locate_hr_between_sentinels(&frame, "hr_bg_lead_anchor", "hr_bg_tail_anchor")
     else {
-        return;
+        // Harness available + `md` completed: a missing rule row is a real
+        // failure, not an environment skip (review-1 finding 3).
+        panic!(
+            "expected an HR rule row between the sentinels but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame.plain, frame.raw
+        );
     };
 
     let bg_present = raw.contains("\x1b[48;2;") || raw.contains("\x1b[48:2:");
@@ -2112,10 +2154,16 @@ hr_align_lead_anchor
 hr_align_tail_anchor
 "#;
 
-    let Some((frame_center, _)) = run_md(centered, "--max-width 60") else {
+    // Force the text tier: a rasterized HR encodes alignment in pixels, not in
+    // leading whitespace, so the indent comparison this test makes is only
+    // meaningful on the text rule (review-1 finding 3).
+    let Some((frame_center, _)) =
+        run_md_env(centered, "--max-width 60", &[("TERMINAL_IMAGES", "0")])
+    else {
         return;
     };
-    let Some((frame_left, _)) = run_md(left, "--max-width 60") else {
+    let Some((frame_left, _)) = run_md_env(left, "--max-width 60", &[("TERMINAL_IMAGES", "0")])
+    else {
         return;
     };
     let Some((plain_center, _)) = locate_hr_between_sentinels(
@@ -2123,12 +2171,20 @@ hr_align_tail_anchor
         "hr_align_lead_anchor",
         "hr_align_tail_anchor",
     ) else {
-        return;
+        // Harness available + `md` completed: a missing rule row is a real
+        // failure, not an environment skip (review-1 finding 3).
+        panic!(
+            "expected a centered HR rule row but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame_center.plain, frame_center.raw
+        );
     };
     let Some((plain_left, _)) =
         locate_hr_between_sentinels(&frame_left, "hr_align_lead_anchor", "hr_align_tail_anchor")
     else {
-        return;
+        panic!(
+            "expected a left-aligned HR rule row but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame_left.plain, frame_left.raw
+        );
     };
 
     let center_indent = plain_center.chars().take_while(|c| *c == ' ').count();
@@ -2159,13 +2215,21 @@ hr_width_lead_anchor
 hr_width_tail_anchor
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    // Force the text tier: a rasterized HR encodes its width in pixels, so the
+    // visible-glyph-count cap this test asserts only applies to the text rule
+    // (review-1 finding 3).
+    let Some((frame, _)) = run_md_env(body, "--max-width 60", &[("TERMINAL_IMAGES", "0")]) else {
         return;
     };
     let Some((plain, _)) =
         locate_hr_between_sentinels(&frame, "hr_width_lead_anchor", "hr_width_tail_anchor")
     else {
-        return;
+        // Harness available + `md` completed: a missing rule row is a real
+        // failure, not an environment skip (review-1 finding 3).
+        panic!(
+            "expected an HR rule row between the sentinels but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame.plain, frame.raw
+        );
     };
 
     // Count only the visible rule glyphs (skip the left padding). Dashes

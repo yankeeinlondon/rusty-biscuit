@@ -21,9 +21,9 @@ use darkmatter::markdown::output::HtmlOptions;
 use darkmatter::markdown::render_tree::{TerminalCodeRenderer, fold_markdown_to_document};
 use darkmatter::markdown::render_tree::svg_sanitizer::sanitize_svg;
 use renderable::tree::{
-    BrowserMermaidMode, BrowserRenderOptions, GraphicsMode, RawHtmlPolicy, RenderNode,
-    RenderStrictness, SourceDescriptor, ThematicBreakAttrs, render_browser_document,
-    render_browser_node,
+    BrowserMermaidMode, BrowserRenderOptions, GraphicsMode, HrAlignment, HrKind, HrWeight,
+    RawHtmlPolicy, RenderNode, RenderStrictness, SourceDescriptor, ThematicBreakAttrs,
+    render_browser_document, render_browser_node,
 };
 use serial_test::serial;
 use std::rc::Rc;
@@ -69,14 +69,35 @@ async fn browser_code_block_background_computes_in_browser() {
 fn waves_hr_fragment(mode: GraphicsMode) -> String {
     let mut hr = RenderNode::thematic_break();
     hr.attrs.set_thematic_break(&ThematicBreakAttrs {
-        kind: Some("waves".into()),
-        weight: Some("thick".into()),
+        kind: Some(HrKind::Waves),
+        weight: Some(HrWeight::Thick),
         color: Some("red".into()),
         ..Default::default()
     });
 
     let opts = BrowserRenderOptions {
         graphics_mode: mode,
+        ..BrowserRenderOptions::default()
+    };
+    render_browser_node(&hr, &opts)
+        .expect("render hr")
+        .output
+        .render()
+}
+
+/// Renders a dashed thematic break at the given alignment and a narrow authored
+/// width (`50%`) to a `Rich`-tier browser fragment, used to prove the SVG honors
+/// horizontal placement rather than always centering (review-1 finding 1).
+fn aligned_hr_fragment(alignment: HrAlignment) -> String {
+    let mut hr = RenderNode::thematic_break();
+    hr.attrs.set_thematic_break(&ThematicBreakAttrs {
+        alignment: Some(alignment),
+        width: Some("50%".into()),
+        ..Default::default()
+    });
+
+    let opts = BrowserRenderOptions {
+        graphics_mode: GraphicsMode::Rich,
         ..BrowserRenderOptions::default()
     };
     render_browser_node(&hr, &opts)
@@ -126,12 +147,95 @@ async fn browser_hr_waves_svg_computes_in_browser() {
     }
 }
 
+/// Renders an aligned narrow rule and returns its browser-resolved
+/// `(margin-left, margin-right, width-ratio)`. The width ratio is the rule's
+/// used pixel width divided by its containing block (`body`) width, so a
+/// stretched-to-full rule resolves to ~1.0 and a narrow `50%` rule to ~0.5.
+async fn hr_geometry(harness: &mut ChromeHarness, alignment: HrAlignment) -> (f64, f64, f64) {
+    let doc = wrap_fragment(&aligned_hr_fragment(alignment), "#ffffff");
+    harness.render_html(&doc).await.expect("render html");
+    let left = px(&harness
+        .computed_style(".darkmatter-hr", "margin-left")
+        .await
+        .expect("margin-left"));
+    let right = px(&harness
+        .computed_style(".darkmatter-hr", "margin-right")
+        .await
+        .expect("margin-right"));
+    let rule_width = px(&harness
+        .computed_style(".darkmatter-hr", "width")
+        .await
+        .expect("width"));
+    let block_width = px(&harness
+        .computed_style("body", "width")
+        .await
+        .expect("body width"));
+    assert!(block_width > 0.0, "containing block must have a positive used width");
+    (left, right, rule_width / block_width)
+}
+
+/// Review-1 finding 1: a non-full authored width (`50%`) must honor the
+/// `alignment` attribute instead of always centering. Review-2 finding 1: a
+/// `full` rule must stretch across the whole width even though `50%` is
+/// authored. This drives a real headless Chromium and asserts both the
+/// browser-resolved left/right margins (`auto` margins resolve to the remaining
+/// space, so horizontal placement is observable) and the used width relative to
+/// the containing block: `left`/`center`/`right` stay narrow (~50%) while `full`
+/// fills it (~100%).
+#[tokio::test]
+#[serial(browser)]
+async fn browser_hr_alignment_positions_narrow_rule() {
+    if !require_browser() {
+        return;
+    }
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+
+    // Left-anchored: no left margin, the slack collapses to the right; the rule
+    // honors the authored 50% width.
+    let (l, r, w) = hr_geometry(&mut harness, HrAlignment::Left).await;
+    assert!(
+        l < 1.0 && r > 1.0,
+        "left alignment must anchor left (ml≈0, mr>0); got ml={l}, mr={r}",
+    );
+    assert!((w - 0.5).abs() < 0.02, "left rule must stay narrow (~50%); got width ratio {w}");
+
+    // Right-anchored: the mirror image.
+    let (l, r, w) = hr_geometry(&mut harness, HrAlignment::Right).await;
+    assert!(
+        r < 1.0 && l > 1.0,
+        "right alignment must anchor right (mr≈0, ml>0); got ml={l}, mr={r}",
+    );
+    assert!((w - 0.5).abs() < 0.02, "right rule must stay narrow (~50%); got width ratio {w}");
+
+    // Centered: equal slack on both sides.
+    let (l, r, w) = hr_geometry(&mut harness, HrAlignment::Center).await;
+    assert!(
+        l > 1.0 && r > 1.0 && (l - r).abs() < 1.0,
+        "center alignment must split the slack evenly; got ml={l}, mr={r}",
+    );
+    assert!((w - 0.5).abs() < 0.02, "center rule must stay narrow (~50%); got width ratio {w}");
+
+    // Full: zero horizontal margin and stretched to the whole containing block,
+    // overriding the authored 50% width (review-2 finding 1).
+    let (l, r, w) = hr_geometry(&mut harness, HrAlignment::Full).await;
+    assert!(
+        l < 1.0 && r < 1.0,
+        "full alignment must use zero horizontal margin; got ml={l}, mr={r}",
+    );
+    assert!(
+        (w - 1.0).abs() < 0.02,
+        "full rule must fill the containing block (~100%), not the authored 50%; got width ratio {w}",
+    );
+}
+
 /// Renders a thematic break whose `width` / `color` hints carry hostile
 /// attribute/markup-breaking payloads, at `Rich`.
 fn hostile_hr_fragment() -> String {
     let mut hr = RenderNode::thematic_break();
     hr.attrs.set_thematic_break(&ThematicBreakAttrs {
-        kind: Some("waves".into()),
+        kind: Some(HrKind::Waves),
         // A `color` that, if interpolated unescaped, breaks out of the SVG
         // attribute and injects an `<img onerror>` sibling.
         color: Some(r#"red"><img src=x onerror="window.__pwned=1">"#.into()),
