@@ -7,7 +7,7 @@ Notable crates used by the `biscuit-icon` library and the `icon` CLI, and why.
 | Crate | Why |
 |-------|-----|
 | `renderable` (path) | Multi-target render tree; `Icon` implements `TreeRenderable` to emit inline SVG for the browser/markdown targets, and `TerminalRenderable` for the terminal ladder. |
-| `biscuit-terminal` (path) | Terminal rendering (glyph → image → text ladder). Its own `resvg` usage is gated behind the `image` feature, but `resvg` still arrives transitively through `biscuit-visualized`. |
+| `biscuit-terminal` (path) | Terminal rendering (glyph → image → text ladder). The `image` feature gates both the direct `resvg` dependency and the `biscuit-visualized` dependency (which brings in `resvg` for Mermaid/graph rendering). When `image` is off, the default build contains no `resvg`. |
 | `rusqlite` (bundled) | Local on-disk cache (`~/.cache/biscuit-icon/icons.db`) of network-fetched Iconify bodies **and** set metadata. The `bundled` feature compiles SQLite in, avoiding a system dependency. |
 | `reqwest` (0.12) | Iconify JSON API client (`GET /{prefix}.json?icons={name}`, `/collections`, `/search?query=…`), used by both runtime lookups and the dev-only `populate_assets` binary. |
 | `strum` / `strum_macros` | Enum ↔ string conversion (`Display`/`EnumString`/`EnumIter`) for every domain set, powering the string-convenience constructors. |
