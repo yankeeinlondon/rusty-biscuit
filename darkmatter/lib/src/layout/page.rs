@@ -803,30 +803,45 @@ impl DarkmatterPage {
 
         // Build derived TerminalOptions.
         let mut options = self.options.clone();
-        // Cap max_width — and so render through the page's captured (optimistic)
-        // terminal at the page width — whenever the page is *configured* at all
-        // (`!is_default_layout`), not when component policies specifically
-        // exist. The width cap is how a configured page renders through its
-        // captured terminal's width and capabilities; gating it on the broad
-        // "is this a zero-config page" signal (rather than policy presence)
-        // means an *unmatched* policy cannot, on its own, behave differently
-        // from any other configured page (review-1 finding 2). The zero-config
-        // path leaves this unset to keep byte-for-byte parity with
+        // Setting `max_width` selects the captured (optimistic) terminal —
+        // carrying both its *width* and its *capabilities* (OSC8 hyperlinks,
+        // color depth) — while leaving it unset auto-detects the ambient terminal
+        // (see `terminal_options_from_terminal_options`). Those two concerns are
+        // resolved independently here:
+        //
+        //   * Capability selection rides *construction-time application*: any
+        //     baked attribute (colors, hyperlink/image styles, component
+        //     policies — `!is_default_layout`) needs the captured terminal's
+        //     capabilities to render faithfully.
+        //   * The *content-box width* is a page-frame decision: it follows the
+        //     captured width only when the frame defines its own geometry
+        //     (`has_frame_geometry`); otherwise it stays at the ambient width.
+        //
+        // So a construction-only page (e.g. an *unmatched* component policy, or a
+        // page color) renders through the captured terminal's capabilities but at
+        // the ambient width — identical content-box width to a no-policy page, so
+        // an unmatched policy cannot widen it (review-2 finding 2). The zero-config
+        // path leaves `max_width` unset for byte-for-byte parity with
         // `Markdown::as_terminal(default)`.
         if !self.is_default_layout() {
-            options.max_width = Some(ctx.effective_width);
+            options.max_width = Some(if self.has_frame_geometry() {
+                ctx.effective_width
+            } else {
+                ambient_terminal_width()
+            });
         }
-        // Honor the captured terminal's color depth on the decorated layout
-        // path, mirroring the captured-width handling above: the page was
-        // constructed from a specific `Terminal`, so renders that go through
-        // its layout pipeline should follow that terminal's reported depth
-        // rather than re-detecting from the ambient environment (which would
-        // make `DarkmatterPage::new(&Terminal::new_optimistic(_))` paint
-        // different SGR in a headless env than in a truecolor terminal).
-        // The zero-config path deliberately leaves this unset so the renderer
-        // falls back to `ColorDepth::auto_detect`, preserving byte-for-byte
-        // parity with `Markdown::as_terminal(default)`. An explicit
-        // `with_color_depth` always wins.
+        // Honor the captured terminal's color depth whenever construction-time
+        // color may be emitted — i.e. whenever the build context is threaded
+        // (`!is_default_layout`). This rides the *construction-time application*
+        // decision, not the page-frame geometry one: a page that paints page or
+        // component color was built from a specific `Terminal`, so its baked SGR
+        // should follow that terminal's reported depth rather than re-detecting
+        // from the ambient environment (which would make
+        // `DarkmatterPage::new(&Terminal::new_optimistic(_))` paint different SGR
+        // in a headless env than in a truecolor terminal). The zero-config path
+        // leaves this unset so the renderer falls back to `ColorDepth::auto_detect`,
+        // preserving byte-for-byte parity with `Markdown::as_terminal(default)`.
+        // An explicit `with_color_depth` always wins.
         if !self.is_default_layout() && options.color_depth.is_none() {
             options.color_depth = Some(self.terminal_color_depth);
         }
@@ -1284,6 +1299,17 @@ fn edges_is_zero(edges: &renderable::layout::Edges) -> bool {
 /// Saturating cast from u32 terminal width to u16, clamped to `u16::MAX`.
 fn clamp_width(width: u32) -> u16 {
     width.min(u16::MAX as u32) as u16
+}
+
+/// The ambient terminal width the zero-config path renders at.
+///
+/// A construction-only page (baked attributes but no frame geometry) renders
+/// through the captured terminal's *capabilities* but must keep its content box
+/// at this ambient width, so an unmatched component policy cannot widen it
+/// (review-2 finding 2). This matches the width `Markdown::as_terminal(default)`
+/// resolves, since both fall back to `Terminal::default()`'s detection.
+fn ambient_terminal_width() -> u16 {
+    clamp_width(Terminal::default().width())
 }
 
 impl TerminalRenderable for DarkmatterPage {
@@ -1870,7 +1896,54 @@ mod tests {
         let out_b = page_b.render(&md).unwrap();
         assert_eq!(
             out_a, out_b,
-            "page-frame output must depend on policy *presence*, not policy content",
+            "page-frame output must be independent of component-policy content",
+        );
+    }
+
+    /// Review-2 finding 2: the page-frame width cap must key off frame geometry
+    /// alone, never component-policy presence. With the captured terminal wider
+    /// than the ambient auto-detected width and a document line long enough to
+    /// wrap at the ambient width, an *unmatched* component policy on an
+    /// otherwise zero-geometry page must produce byte-identical output to a
+    /// no-policy page: both render the content box at the ambient width.
+    ///
+    /// This is discriminating where the 80==80 parity test was not: before the
+    /// fix, the unmatched policy made the page non-default, capping `max_width`
+    /// to the captured 200-wide terminal so the long line would *not* wrap,
+    /// while the no-policy page wrapped at the ambient width — the two diverged.
+    #[test]
+    fn terminal_unmatched_policy_does_not_cap_width_to_captured_terminal() {
+        use renderable::color::{Color, Tailwind};
+        use renderable::style::PaintColor;
+
+        // Captured terminal far wider than the ambient (~80) auto-detect, with no
+        // frame geometry: width must stay ambient-driven for both pages.
+        let term = Terminal::new_optimistic(200);
+        // A long single-paragraph line that wraps at ~80 columns but fits on one
+        // line at 200. No table, so the Tables policy is unmatched.
+        let md: Markdown = "The quick brown fox jumps over the lazy dog, and then the \
+            quick brown fox jumps over the lazy dog once more for good wrapping measure."
+            .into();
+
+        let no_policy = DarkmatterPage::new(&term).render(&md).unwrap();
+        let unmatched = DarkmatterPage::new(&term)
+            .with_component_color(
+                PageComponent::Tables,
+                PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+            )
+            .render(&md)
+            .unwrap();
+
+        assert_eq!(
+            no_policy, unmatched,
+            "an unmatched policy must not cap the content box to the captured terminal width",
+        );
+        // Guard the test's own premise: the no-policy render wrapped at the
+        // ambient width (more than one line), so a 200-wide cap *would* have
+        // changed it — proving this test can discriminate the regression.
+        assert!(
+            no_policy.lines().filter(|l| !l.trim().is_empty()).count() > 1,
+            "test premise: the long line must wrap at the ambient width; got:\n{no_policy}",
         );
     }
 
