@@ -141,6 +141,14 @@ struct Fold {
     source: SourceId,
     /// Diagnostics accumulated during the fold.
     diagnostics: Vec<Diagnostic>,
+    /// While `true`, events are swallowed: the fold is inside an embedded
+    /// render-tree region (see [`renderable::tree::embed`]) whose decoded
+    /// subtree has already been spliced in, so the portable fallback between
+    /// the markers is dropped.
+    embed_suppress: bool,
+    /// Drops the `End(HtmlBlock)` that closes the embedded region's closing
+    /// marker, whose `Start(HtmlBlock)` was swallowed while suppressed.
+    embed_skip_html_block_end: bool,
 }
 
 impl Fold {
@@ -180,6 +188,18 @@ impl Fold {
     /// for [`BlockExtensionEvent::Standard`](super::block_extension::BlockExtensionEvent::Standard)
     /// events while routing lifted HR-attribute events separately.
     pub(super) fn feed_event(&mut self, event: Event<'_>, range: Range<usize>) {
+        if self.embed_suppress {
+            // Inside an embedded render-tree region: the decoded subtree was
+            // already spliced at the opening marker, so swallow the portable
+            // fallback until the closing marker.
+            if let Event::Html(html) = &event
+                && renderable::tree::is_embedded_close(html)
+            {
+                self.embed_suppress = false;
+                self.embed_skip_html_block_end = true;
+            }
+            return;
+        }
         match event {
             Event::Start(tag) => self.start(tag, range),
             Event::End(tag_end) => self.end(&tag_end, range),
@@ -268,6 +288,8 @@ pub fn fold_markdown_to_document_with_metadata(
         }],
         source: source_id,
         diagnostics: Vec::new(),
+        embed_suppress: false,
+        embed_skip_html_block_end: false,
     };
 
     for (event, range) in Parser::new_ext(input, options).into_offset_iter() {
@@ -435,6 +457,8 @@ pub fn fold_markdown_spanned_with_frontmatter(
         }],
         source: source_id,
         diagnostics: Vec::new(),
+        embed_suppress: false,
+        embed_skip_html_block_end: false,
     };
 
     // 3. Plain fold. `Fold::end` dispatches `~~…~~` containers to `Extended`
@@ -569,7 +593,14 @@ impl Fold {
 
     /// Handles an `Event::End`, popping the innermost frame into a finished
     /// node and appending it to the new innermost frame.
-    fn end(&mut self, _tag_end: &TagEnd, range: Range<usize>) {
+    fn end(&mut self, tag_end: &TagEnd, range: Range<usize>) {
+        // Drop the embedded region's closing-marker `End(HtmlBlock)`: its
+        // `Start(HtmlBlock)` was swallowed while suppressed, so no frame backs
+        // it and popping here would corrupt the stack.
+        if self.embed_skip_html_block_end && matches!(tag_end, TagEnd::HtmlBlock) {
+            self.embed_skip_html_block_end = false;
+            return;
+        }
         // Never pop the root sentinel.
         if self.stack.len() <= 1 {
             self.diagnostics.push(Diagnostic::structural(
@@ -599,6 +630,26 @@ impl Fold {
                     if let NodeKind::Html { value: line, .. } = &child.kind {
                         value.push_str(line);
                     }
+                }
+                // An embedded render-tree opening marker splices its decoded
+                // subtree in place of the comment and suppresses the portable
+                // fallback that follows. A malformed marker falls through to
+                // the ordinary raw-HTML path.
+                if let Some(node) = renderable::tree::decode_embedded_open(&value) {
+                    // A subtree projected as a `Root` contributes its children;
+                    // `Root` may appear only at the document top level. Other
+                    // node kinds splice in directly, carrying the marker's span.
+                    if let NodeKind::Root { children } = node.kind {
+                        for child in children {
+                            self.push_child(child);
+                        }
+                    } else {
+                        let mut node = node;
+                        node.span = span;
+                        self.push_child(node);
+                    }
+                    self.embed_suppress = true;
+                    return;
                 }
                 let mut node = RenderNode::html(value, true);
                 node.span = span;
@@ -1144,6 +1195,57 @@ mod tests {
     }
 
     #[test]
+    fn embedded_render_tree_marker_splices_decoded_subtree_and_drops_fallback() {
+        use renderable::style::{Style, TextEmphasis};
+        use renderable::tree::encode_embedded_subtree;
+
+        // A styled span whose dim weight + class have no plain-Markdown form.
+        let mut span =
+            RenderNode::span(vec!["fs-dir".to_string()], vec![RenderNode::text("topics")]);
+        span.attrs.set_style(&Style {
+            emphasis: TextEmphasis {
+                dim: true,
+                ..TextEmphasis::default()
+            },
+            ..Style::default()
+        });
+        let block = encode_embedded_subtree(&span).unwrap();
+        let input = format!("Intro\n\n{block}\n\nOutro\n");
+
+        let (doc, _diags) = fold(&input);
+
+        fn collect<'a>(node: &'a RenderNode, out: &mut Vec<&'a RenderNode>) {
+            if matches!(&node.kind, NodeKind::Span { .. })
+                && node.attrs.classes.iter().any(|c| c == "fs-dir")
+            {
+                out.push(node);
+            }
+            for child in node.children() {
+                collect(child, out);
+            }
+        }
+        let mut spans = Vec::new();
+        collect(&doc.root, &mut spans);
+        assert_eq!(spans.len(), 1, "decoded span spliced exactly once");
+        assert!(
+            spans[0].attrs.style().unwrap().emphasis.dim,
+            "dim styling survived the round-trip"
+        );
+
+        // The raw marker comment is consumed, not left as an Html node, and the
+        // portable fallback paragraph is dropped in favor of the decoded span.
+        fn has_marker_html(node: &RenderNode) -> bool {
+            if let NodeKind::Html { value, .. } = &node.kind
+                && value.contains("bt:render-tree")
+            {
+                return true;
+            }
+            node.children().iter().any(has_marker_html)
+        }
+        assert!(!has_marker_html(&doc.root), "marker comments are consumed");
+    }
+
+    #[test]
     fn footnote_reference_and_definition_fold_to_real_nodes() {
         let (doc, diags) = fold("A claim.[^note]\n\n[^note]: The supporting detail.\n");
         assert!(diags.is_empty(), "footnotes fold without diagnostics");
@@ -1286,6 +1388,8 @@ mod tests {
             }],
             source: SourceId(0),
             diagnostics: Vec::new(),
+            embed_suppress: false,
+            embed_skip_html_block_end: false,
         };
         fold.task_marker(true, 0..3);
         assert_eq!(fold.diagnostics.len(), 1);

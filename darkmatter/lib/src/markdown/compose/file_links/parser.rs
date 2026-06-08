@@ -33,7 +33,7 @@ pub fn parse_file_links_directives(
         let line = &content[line_start..line_end];
         let trimmed = line.trim();
 
-        if trimmed.starts_with("::file-links") {
+        if is_file_links_keyword(trimmed) {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
             if !is_in_code_region(first_non_ws, &code_regions) {
                 let indent = &content[line_start..first_non_ws];
@@ -58,6 +58,22 @@ pub fn parse_file_links_directives(
     }
 
     Ok(directives)
+}
+
+/// Whether a trimmed line opens with the exact `::file-links` keyword.
+///
+/// The keyword must be followed by ASCII whitespace or the end of the line, so
+/// near-miss prose like `::file-linksXYZ`, `::file-links-extra`, or
+/// `::file-links2` is left untouched rather than parsed as a directive.
+fn is_file_links_keyword(trimmed: &str) -> bool {
+    const KEYWORD: &str = "::file-links";
+    match trimmed.strip_prefix(KEYWORD) {
+        Some(rest) => rest
+            .chars()
+            .next()
+            .is_none_or(|c| c.is_ascii_whitespace()),
+        None => false,
+    }
 }
 
 /// Scan backward from `pos` to infer the indentation a flush-left directive
@@ -437,6 +453,40 @@ mod tests {
     fn rejects_unknown_option() {
         let err =
             parse_file_links_directives("::file-links --dir a --bogus 1\n").unwrap_err();
+        assert!(matches!(err, FileLinksError::ParseDirective { .. }));
+    }
+
+    #[test]
+    fn ignores_keyword_with_trailing_suffix() {
+        // `::file-linksXYZ` must not be treated as a directive: the keyword
+        // requires whitespace or end-of-line immediately after it.
+        let directives = parse_file_links_directives("::file-linksXYZ\n").unwrap();
+        assert!(directives.is_empty());
+    }
+
+    #[test]
+    fn ignores_hyphenated_near_miss() {
+        let directives = parse_file_links_directives("::file-links-extra docs/*.md\n").unwrap();
+        assert!(directives.is_empty());
+    }
+
+    #[test]
+    fn ignores_numeric_near_miss() {
+        let directives = parse_file_links_directives("::file-links2 docs/*.md\n").unwrap();
+        assert!(directives.is_empty());
+    }
+
+    #[test]
+    fn ignores_shorter_near_miss() {
+        let directives = parse_file_links_directives("::file-link docs/*.md\n").unwrap();
+        assert!(directives.is_empty());
+    }
+
+    #[test]
+    fn accepts_keyword_with_only_trailing_newline_as_missing_target() {
+        // Bare `::file-links` (keyword + EOL) is still recognized as a directive
+        // and surfaces a missing-target parse error, not silent prose.
+        let err = parse_file_links_directives("::file-links\n").unwrap_err();
         assert!(matches!(err, FileLinksError::ParseDirective { .. }));
     }
 

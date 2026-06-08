@@ -117,7 +117,6 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, trace, warn};
 
 use cache::operation::CacheableOperation;
-use renderable::markdown::MarkdownRenderable;
 use shell_expansion::{apply_replacements_in_reverse, execute_directive_detailed};
 
 /// Shorten an absolute path for display in diagnostics.
@@ -375,6 +374,10 @@ enum PreparedTransclusion {
         order: usize,
         span: std::ops::Range<usize>,
         directive: file_links::FileLinksDirective,
+        /// Discovery result captured during preparation and carried into the
+        /// concurrent resolve stage, so the filesystem is walked once per
+        /// directive rather than re-discovered.
+        render: file_links::FileLinksRender,
     },
 }
 
@@ -1842,43 +1845,42 @@ impl Markdown {
         for directive in directives {
             match file_links::discover(directive, &options.source) {
                 Ok(result) => {
-                    if result.render.is_none() {
-                        // Empty result: strict mode inserts a subtle notice,
-                        // permissive mode removes the directive with a warning.
-                        if options.fail_fast {
-                            let mut fixed_report = ComposeReport::new();
-                            fixed_report.transclusions_skipped = 1;
-                            prepared.push(PreparedTransclusion::FixedReplace {
-                                order: *next_order,
-                                span: directive.span.clone(),
-                                replacement: "_No matching files_".to_string(),
-                                report: fixed_report,
-                            });
-                        } else {
-                            let mut fixed_report = ComposeReport::new();
-                            fixed_report.transclusions_skipped = 1;
-                            fixed_report.add_warning(
-                                ComposeWarning::new(
-                                    "file_links",
-                                    format!(
-                                        "No matching files for ::file-links directive at line {}",
-                                        directive.line
-                                    ),
-                                )
-                                .at_line(directive.line),
-                            );
-                            prepared.push(PreparedTransclusion::FixedReplace {
-                                order: *next_order,
-                                span: directive.span.clone(),
-                                replacement: String::new(),
-                                report: fixed_report,
-                            });
-                        }
-                    } else {
+                    if let Some(render) = result.render {
                         prepared.push(PreparedTransclusion::FileLinks {
                             order: *next_order,
                             span: directive.span.clone(),
                             directive: directive.clone(),
+                            render,
+                        });
+                    } else if options.fail_fast {
+                        // Empty result: strict mode inserts a subtle notice,
+                        // permissive mode removes the directive with a warning.
+                        let mut fixed_report = ComposeReport::new();
+                        fixed_report.transclusions_skipped = 1;
+                        prepared.push(PreparedTransclusion::FixedReplace {
+                            order: *next_order,
+                            span: directive.span.clone(),
+                            replacement: "_No matching files_".to_string(),
+                            report: fixed_report,
+                        });
+                    } else {
+                        let mut fixed_report = ComposeReport::new();
+                        fixed_report.transclusions_skipped = 1;
+                        fixed_report.add_warning(
+                            ComposeWarning::new(
+                                "file_links",
+                                format!(
+                                    "No matching files for ::file-links directive at line {}",
+                                    directive.line
+                                ),
+                            )
+                            .at_line(directive.line),
+                        );
+                        prepared.push(PreparedTransclusion::FixedReplace {
+                            order: *next_order,
+                            span: directive.span.clone(),
+                            replacement: String::new(),
+                            report: fixed_report,
                         });
                     }
                     *next_order += 1;
@@ -2281,48 +2283,56 @@ impl Markdown {
                 order,
                 span,
                 directive,
+                render,
             } => {
-                let result = file_links::discover(&directive, &options.source)
-                    .map_err(crate::markdown::types::MarkdownError::FileLinks)?;
+                // Discovery already ran during preparation; `render` carries its
+                // result so the filesystem is not walked a second time here.
+                let mut fs =
+                    biscuit_terminal::components::filesystem::FileSystem::new(&render.component_root)
+                        .map_err(|e| {
+                            crate::markdown::types::MarkdownError::Transform(format!(
+                                "failed to create FileSystem for ::file-links at line {}: {e}",
+                                directive.line
+                            ))
+                        })?;
+                fs = fs
+                    .document_extensions()
+                    .included_paths(&render.included_paths)
+                    .with_file_links()
+                    .italicize_dot_files(true)
+                    .dim_gitignore(true)
+                    .show_root(true);
+                if !render.dimmed_prefix.is_empty() {
+                    fs = fs.with_dimmed_root_prefix(&render.dimmed_prefix);
+                }
+                if !render.target_name.is_empty() {
+                    fs = fs.with_root_display_name(&render.target_name);
+                }
+                if render.uses_repo_icon {
+                    fs = fs.with_root_icon(
+                        biscuit_terminal::components::filesystem::RootIconKind::Repository,
+                    );
+                }
+                fs.ensure_tree_built();
 
-                let replacement = if let Some(render) = result.render {
-                    let mut fs = biscuit_terminal::components::filesystem::FileSystem::new(
-                        &render.component_root,
-                    )
-                    .map_err(|e| {
-                        crate::markdown::types::MarkdownError::Transform(format!(
-                            "failed to create FileSystem for ::file-links at line {}: {e}",
-                            directive.line
-                        ))
-                    })?;
-                    fs = fs
-                        .document_extensions()
-                        .included_paths(&render.included_paths)
-                        .with_file_links()
-                        .italicize_dot_files(true)
-                        .dim_gitignore(true)
-                        .show_root(true);
-                    if !render.dimmed_prefix.is_empty() {
-                        fs = fs.with_dimmed_root_prefix(&render.dimmed_prefix);
-                    }
-                    if !render.target_name.is_empty() {
-                        fs = fs.with_root_display_name(&render.target_name);
-                    }
-                    if render.uses_repo_icon {
-                        fs = fs.with_root_icon(
-                            biscuit_terminal::components::filesystem::RootIconKind::Repository,
-                        );
-                    }
-                    fs.ensure_tree_built();
-                    let rendered = fs.render_markdown();
-                    indent::indent_text(
-                        &rendered,
-                        &directive.indent,
-                        directive.inferred_indent.as_deref(),
-                    )
-                } else {
-                    String::new()
-                };
+                // Carry the fully-styled render subtree through the composed
+                // document losslessly: the fold splices it back so terminal and
+                // browser rendering reproduce the live component (color, dim,
+                // icons), while plain-Markdown consumers see the embedded
+                // portable fallback. See `renderable::tree::embed`.
+                use renderable::tree::{TreeRenderable, encode_embedded_subtree};
+                let node = fs.render_tree();
+                let embedded = encode_embedded_subtree(&node).map_err(|e| {
+                    crate::markdown::types::MarkdownError::Transform(format!(
+                        "failed to embed ::file-links render tree at line {}: {e}",
+                        directive.line
+                    ))
+                })?;
+                let replacement = indent::indent_text(
+                    &embedded,
+                    &directive.indent,
+                    directive.inferred_indent.as_deref(),
+                );
 
                 let mut file_links_report = ComposeReport::new();
                 file_links_report.transclusions_applied = 1;
@@ -6161,6 +6171,78 @@ Rounded: {{ round(pi) }}"#;
             assert!(text.contains("b.txt"), "content: {text}");
             assert!(!text.contains("::file-links"), "directive should be replaced: {text}");
             assert_eq!(report.transclusions_applied, 1);
+        }
+
+        /// End-to-end: composing a `::file-links` directive through the full
+        /// default pipeline embeds the FileSystem render subtree, and rendering
+        /// the composed document to a terminal reproduces the styled tree —
+        /// OSC8 hyperlinks and dim styling survive the round-trip, and the
+        /// embedding marker never leaks into rendered output.
+        #[test]
+        fn embedded_subtree_round_trips_through_compose_then_terminal_render() {
+            use crate::markdown::highlighting::{ColorMode, ThemePair};
+            use crate::markdown::output::terminal::{
+                ColorDepth, DimMode, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode,
+                TerminalOptions,
+            };
+
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs").join("topics");
+            std::fs::create_dir_all(&docs).unwrap();
+            std::fs::write(docs.join("alpha.md"), "# Alpha\n").unwrap();
+            std::fs::write(docs.join("beta.md"), "# Beta\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links docs/topics/*.md\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            // Full default pipeline (cleanup + normalization enabled) proves the
+            // embedded block survives end to end.
+            let (composed, _report) = md
+                .compose_with(ComposeOptions::new().with_source_file(&root))
+                .unwrap();
+            assert!(
+                composed.content().contains("bt:render-tree"),
+                "composed doc should carry the embedded subtree: {}",
+                composed.content()
+            );
+
+            let options = TerminalOptions {
+                code_theme: ThemePair::OneHalf,
+                prose_theme: ThemePair::OneHalf,
+                color_mode: ColorMode::Dark,
+                include_line_numbers: false,
+                color_depth: Some(ColorDepth::TrueColor),
+                image_mode: TerminalImageMode::Never,
+                base_path: None,
+                italic_mode: ItalicMode::Always,
+                dim_mode: DimMode::Always,
+                max_width: Some(100),
+                mermaid_mode: MermaidMode::Off,
+                hyperlink_mode: HyperlinkMode::Always,
+                hr_defaults: None,
+            };
+            let output = composed.as_terminal(options).unwrap();
+
+            assert!(
+                !output.contains("bt:render-tree"),
+                "embedding marker leaked into rendered output: {output:?}"
+            );
+            assert!(output.contains("alpha.md"), "missing file: {output:?}");
+            assert!(output.contains("beta.md"), "missing file: {output:?}");
+            assert!(
+                output.contains("\x1b]8;;"),
+                "OSC8 hyperlink did not survive: {output:?}"
+            );
+            assert!(
+                output.contains("file://"),
+                "file:// link target did not survive: {output:?}"
+            );
+            assert!(
+                output.contains("\x1b[2m"),
+                "dim styling (dimmed root prefix) did not survive: {output:?}"
+            );
         }
 
         #[test]

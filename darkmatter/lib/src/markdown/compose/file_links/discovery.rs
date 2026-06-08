@@ -6,7 +6,7 @@
 //! [`FileSystem`](biscuit_terminal::components::filesystem::FileSystem)
 //! component.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use globset::GlobBuilder;
@@ -114,7 +114,7 @@ fn discover_glob(
 
     let (literal_prefix, walk_base) = split_glob_prefix(glob, source_dir);
 
-    let mut candidates = BTreeSet::new();
+    let mut candidates = BTreeMap::new();
     if walk_base.is_dir() {
         walk_recursive(
             &walk_base,
@@ -136,7 +136,7 @@ fn discover_glob(
         );
     }
 
-    let candidates_vec: Vec<PathBuf> = candidates.into_iter().collect();
+    let candidates_vec: Vec<PathBuf> = candidates.into_values().collect();
     let component_root = match common_ancestor(&candidates_vec) {
         Some(root) => root,
         None => return Ok((Vec::new(), walk_base)),
@@ -191,7 +191,7 @@ fn discover_dir(
     }
     let component_root = canonicalize(&target);
 
-    let mut candidates = BTreeSet::new();
+    let mut candidates = BTreeMap::new();
     collect_files(
         &target,
         Some(depth),
@@ -201,18 +201,26 @@ fn discover_dir(
         |_relative, _canonical| true,
     );
 
-    Ok((candidates.into_iter().collect(), component_root))
+    Ok((candidates.into_values().collect(), component_root))
 }
 
 // ── Shared walking / filtering ─────────────────────────────────────────────
 
-/// Walks `root` and collects canonical file paths that pass all filters.
+/// Walks `root` and collects matching files keyed by their canonical target.
+///
+/// The map value is each file's *display path* — the canonicalized parent
+/// directory joined with the entry's own (lexical) name. For ordinary files
+/// this equals the canonical path; for an in-bound symlinked file it preserves
+/// the alias name under its real directory, so the rendered tree and hyperlink
+/// represent the matched file rather than its canonical target. The map key is
+/// the true canonical target, used for the boundary check, self-exclusion, and
+/// deduplication.
 ///
 /// ## Filtering
 ///
 /// - Only regular files (symlinks followed for type detection).
 /// - Extension must be in [`ALLOWED_EXTENSIONS`] (case-insensitive).
-/// - Canonical path must be within `boundary`.
+/// - Canonical target must be within `boundary`.
 /// - The source document itself is excluded.
 /// - Symlinked directories that resolve outside the boundary are not descended
 ///   into; symlinked files that escape are dropped.
@@ -224,7 +232,7 @@ fn collect_files(
     max_depth: Option<u32>,
     boundary: &Path,
     source_canonical: &Path,
-    out: &mut BTreeSet<PathBuf>,
+    out: &mut BTreeMap<PathBuf, PathBuf>,
     extra_filter: impl Fn(&Path, &Path) -> bool,
 ) {
     walk_recursive(
@@ -249,13 +257,18 @@ fn walk_recursive(
     max_depth: Option<u32>,
     boundary: &Path,
     source_canonical: &Path,
-    out: &mut BTreeSet<PathBuf>,
+    out: &mut BTreeMap<PathBuf, PathBuf>,
     extra_filter: &impl Fn(&Path, &Path) -> bool,
 ) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
     };
+
+    // The directory is always a real directory (symlinked directories are not
+    // descended into), so its canonical form is the stable parent for each
+    // entry's display path.
+    let dir_canonical = canonicalize(dir);
 
     for entry in entries.flatten() {
         let entry_path = entry.path();
@@ -268,7 +281,7 @@ fn walk_recursive(
 
         let canonical = canonicalize(&entry_path);
 
-        // Boundary check (catches symlink escapes).
+        // Boundary check on the canonical target (catches symlink escapes).
         if !is_within_boundary(&canonical, boundary) {
             continue;
         }
@@ -290,7 +303,17 @@ fn walk_recursive(
             }
             let relative = entry_path.strip_prefix(base).unwrap_or(&entry_path);
             if extra_filter(relative, &canonical) {
-                out.insert(canonical);
+                // Display path keeps the entry's lexical name under its real
+                // directory; deduplicate on the canonical target, preferring
+                // the lexically smallest alias for determinism.
+                let display = dir_canonical.join(entry.file_name());
+                out.entry(canonical)
+                    .and_modify(|existing| {
+                        if display < *existing {
+                            *existing = display.clone();
+                        }
+                    })
+                    .or_insert(display);
             }
         } else if metadata.is_dir() {
             // Don't follow symlinked directories.
@@ -727,6 +750,46 @@ mod tests {
         assert!(result.render.is_none());
     }
 
+    // ── Symlinks (in-bound vs escaping) ──────────────────────────────────────
+
+    #[cfg(unix)]
+    #[test]
+    fn inbound_symlinked_file_keeps_lexical_alias_path() {
+        // docs/alias.pdf -> ../assets/report.pdf (both inside the repo).
+        // The matched alias must render under `docs/alias.pdf`, not under the
+        // canonical target `assets/report.pdf`.
+        let dir = TempDir::new().unwrap();
+        make_repo(&dir);
+        write_file(&dir.path().join("assets"), "report.pdf", "");
+        let docs = dir.path().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        std::os::unix::fs::symlink("../assets/report.pdf", docs.join("alias.pdf")).unwrap();
+        let source = write_file(dir.path(), "index.md", "");
+
+        let result = discover_content("::file-links docs/*.pdf\n", &source).unwrap();
+        let render = result.render.expect("expected the in-bound symlink to match");
+        assert_eq!(render.target_name, "docs");
+        assert_eq!(render.included_paths, vec![PathBuf::from("alias.pdf")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn escaping_symlinked_file_is_dropped() {
+        // docs/escape.pdf -> <outside repo>/secret.pdf must be filtered out by
+        // the boundary check on the canonical target.
+        let dir = TempDir::new().unwrap();
+        make_repo(&dir);
+        let outside = TempDir::new().unwrap();
+        let secret = write_file(outside.path(), "secret.pdf", "");
+        let docs = dir.path().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        std::os::unix::fs::symlink(&secret, docs.join("escape.pdf")).unwrap();
+        let source = write_file(dir.path(), "index.md", "");
+
+        let result = discover_content("::file-links docs/*.pdf\n", &source).unwrap();
+        assert!(result.render.is_none(), "escaping symlink must be excluded");
+    }
+
     // ── Source context ───────────────────────────────────────────────────────
 
     #[test]
@@ -799,7 +862,7 @@ mod tests {
         // result set is stable and unique.
         let result = discover_content("::file-links *.md\n", &source).unwrap();
         let render = result.render.unwrap();
-        let unique: BTreeSet<_> = render.included_paths.iter().collect();
+        let unique: std::collections::BTreeSet<_> = render.included_paths.iter().collect();
         assert_eq!(unique.len(), render.included_paths.len());
     }
 
