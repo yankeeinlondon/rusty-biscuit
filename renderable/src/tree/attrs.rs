@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::wrap_policy::WordWrap;
+
 /// A namespace for extension render hints stored in [`NodeAttrs::data`].
 ///
 /// Namespaces provide a structured way to organize hints without key collisions.
@@ -614,6 +616,12 @@ pub struct TableColumnHints {
     pub drop_note: Option<String>,
     /// Whether all cells in this column align uniformly.
     pub uniform_alignment: bool,
+    /// Per-column word-wrap policy override.
+    ///
+    /// `None` leaves the column at its type-derived default. A `Some` value
+    /// must round-trip so render-tree consumers preserve bespoke break
+    /// behavior.
+    pub word_wrap: Option<WordWrap>,
 }
 
 /// Render hints for a single projected [`NodeKind::TableCell`] node.
@@ -3024,6 +3032,7 @@ mod tests {
                 droppable: true,
                 drop_note: Some("notes hidden".into()),
                 uniform_alignment: true,
+                word_wrap: Some(WordWrap::BespokeProse(Some(8), vec!['_', '.'], None)),
             },
         );
 
@@ -3035,6 +3044,10 @@ mod tests {
         assert!(hints.droppable);
         assert_eq!(hints.drop_note.as_deref(), Some("notes hidden"));
         assert!(hints.uniform_alignment);
+        assert_eq!(
+            hints.word_wrap,
+            Some(WordWrap::BespokeProse(Some(8), vec!['_', '.'], None)),
+        );
     }
 
     /// A column may be droppable without carrying a drop note — the

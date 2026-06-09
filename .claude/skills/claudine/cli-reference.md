@@ -1,3 +1,7 @@
+---
+hash: ef46db3751d8e999-e316cdb49ab5f3e3
+last_updated: 2026-06-08
+---
 # Claudine CLI Reference
 
 Complete command documentation with examples and options.
@@ -431,6 +435,91 @@ claudine completions zsh > ~/.zfunc/_claudine
 # Fish
 claudine completions fish > ~/.config/fish/completions/claudine.fish
 ```
+
+---
+
+## `claudine context`
+
+Show Darkmatter's runtime context variables, expression engine, and side-effect capabilities.
+
+```bash
+claudine context [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| *(none)* | Display the complete context-variable catalog |
+| `--values` | Display live captured values for each variable |
+| `--expressions` | Display the expression engine's operators and functions |
+| `--side-effects` | Display the side-effect capability catalog |
+
+The flags `--values`, `--expressions`, and `--side-effects` are mutually exclusive.
+
+### Default report
+
+Lists every context variable exposed by Darkmatter, grouped by category and subsection:
+
+| Column | Content |
+|--------|---------|
+| `Property` | Canonical variable name prefixed with `ctx.` |
+| `Type` | Display type (`String`, `DateTime`, `Boolean`, etc.) |
+| `Description` | Short description of the variable |
+
+Context variable categories include date/time, repository metadata, file changes, languages, documents, operating system, and hardware. The `Property` and `Type` column widths are computed once across the entire catalog and reused for every section.
+
+### `--values` report
+
+Same sections and column layout as the default report, but replaces `Description` with `Value`. Values are captured once per invocation through Darkmatter's runtime context API. Missing or unavailable values render as a dimmed `null` rather than being dropped.
+
+Value formatting:
+- strings render as their raw value
+- booleans and numbers render textually
+- arrays render as comma-separated items
+- objects render as compact serialized JSON
+- null or unavailable values render as `null`
+
+### `--expressions` report
+
+Displays the expression-language overview followed by the complete typed function catalog.
+
+The overview covers operator precedence, truthiness rules, unary/comparison/arithmetic operators, variable access syntax (`ctx.today`, `env.HOME`, dot and bracket forms), the two parser modes (interpolation vs. condition), and null propagation behavior.
+
+The function catalog is grouped by category (Type Predicates, Math, Collection, String Predicates, String Mutations, Date Formatting, Date Validators, Logical, Type Conversion, Filesystem) with columns:
+
+| Column | Content |
+|--------|---------|
+| `Function` | Canonical snake_case signature |
+| `Description` | Behavior and return-value summary |
+
+### `--side-effects` report
+
+Displays Darkmatter's complete side-effect capability catalog. This is documentation-only — no capabilities are invoked, probed, or checked for availability.
+
+Capabilities are grouped by category (Frontmatter Mutations, File & Directory, Network) with columns:
+
+| Column | Content |
+|--------|---------|
+| `Capability` | Canonical signature, including all overloaded arities |
+| `Description` | Behavior and return-value summary |
+| `Safety` | Applicable constraint (`FilesystemWrite`, `Network`, `MarkdownMutation`) |
+
+Catalog-wide constraints communicated in the report:
+- the report is documentation only and does not invoke side effects
+- only an external orchestrator invokes side effects
+- filesystem writes are restricted to the configured mutation root
+- network operations are restricted by the deny-all-by-default host allowlist
+- Markdown mutations honor Darkmatter's auto-rehash behavior
+- catalog membership does not imply authorization or availability
+
+### Rendering contract
+
+All reports share a consistent terminal layout:
+- Tables fill the available terminal width up to a maximum of **140 visible cells** total, including 1ch left and right margins, borders, separators, and content
+- At widths below 140ch, tables use the available width without intentional overflow
+- The **minimum supported terminal width is 53 visible cells**. At or above 53 cells every report renders all of its required columns by wrapping — no column is dropped and no Claudine-specific narrow layout is introduced. (The `--expressions` and `--side-effects` reports hold narrower unbreakable tokens and keep all columns well below 53; 53 is the binding floor for the default and `--values` reports.)
+- Below 53 cells the terminal is unsupported: the shared `Table` component's own constrained-width behavior applies and it may emit its width-error diagnostic instead of a table. Widen the terminal to 53 or more cells to restore full rendering.
+- Backtick-delimited inline code renders with inverse styling in styled output and visible backticks in plain/`--plain`/`NO_COLOR` mode
+- Unordered lists use `- ` bullets with hanging indentation for wrapped continuation lines
 
 ---
 
