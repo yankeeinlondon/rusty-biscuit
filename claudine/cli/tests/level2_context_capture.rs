@@ -24,7 +24,8 @@
 //!   descriptions render with the inverse SGR (`\x1b[7m`), never literal
 //!   backticks/markup.
 //! - **unordered list** — operator lists render with the `- ` marker and a
-//!   hanging indent on wrapped continuation lines.
+//!   hanging indent on wrapped continuation lines, surrounded by exactly one
+//!   blank line on each side.
 //!
 //! ## Per-report narrow widths
 //!
@@ -170,6 +171,59 @@ fn assert_fills_to_140_cap_with_right_margin(frame: &CapturedFrame) {
         (138..=139).contains(&max),
         "filling report must reach the 140 cap minus its 1ch right margin \
          (expected 138..=139 visible cells); got {max}.\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+/// Asserts the unordered list bracketed by the `heading` line and the
+/// `next_heading` line is surrounded by exactly one blank line on each side.
+///
+/// The spec requires exactly one blank line before and after every unordered
+/// list. Earlier iterations double-spaced these lists because the caller emitted
+/// its own `log::data("")` on top of the blank line the list helper already
+/// owns. Counting blanks from the bytes the emulator actually displayed guards
+/// that contract: the line directly after `heading` must be blank and the next
+/// must open the list (`- `), and the line directly before `next_heading` must
+/// be blank while the line above it still carries list content.
+fn assert_list_single_blank_lines(frame: &CapturedFrame, heading: &str, next_heading: &str) {
+    let lines: Vec<&str> = frame.plain.lines().map(|l| l.trim_end()).collect();
+    let find = |label: &str| {
+        lines
+            .iter()
+            .position(|l| l.trim() == label)
+            .unwrap_or_else(|| panic!("heading `{label}` not found.\nplain:\n{}", frame.plain))
+    };
+    let h = find(heading);
+    let n = find(next_heading);
+    assert!(
+        n >= h + 4,
+        "expected a list between `{heading}` and `{next_heading}`.\nplain:\n{}",
+        frame.plain,
+    );
+
+    // Exactly one blank line before the list.
+    assert!(
+        lines[h + 1].is_empty(),
+        "expected one blank line directly after `{heading}`.\nplain:\n{}",
+        frame.plain,
+    );
+    assert!(
+        lines[h + 2].trim_start().starts_with("- "),
+        "expected the list to open one line below the blank (a double blank before \
+         the `{heading}` list).\nplain:\n{}",
+        frame.plain,
+    );
+
+    // Exactly one blank line after the list.
+    assert!(
+        lines[n - 1].is_empty(),
+        "expected one blank line directly before `{next_heading}`.\nplain:\n{}",
+        frame.plain,
+    );
+    assert!(
+        !lines[n - 2].is_empty(),
+        "expected list content directly above the trailing blank (a double blank \
+         after the list preceding `{next_heading}`).\nplain:\n{}",
         frame.plain,
     );
 }
@@ -385,7 +439,8 @@ fn level2_context_values_caps_at_140_in_wide_tmux() {
 
 /// `--expressions` narrow (`COLUMNS=100`, below its ~114 natural width so
 /// wrapping is active): the `` `||` `` mode header renders inverse, operator
-/// lists use the `- ` marker with a hanging indent, and rows fit the pane.
+/// lists use the `- ` marker with a hanging indent, each list is surrounded by
+/// exactly one blank line, and rows fit the pane.
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
@@ -424,6 +479,11 @@ fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
         "wrapped list items must hang-indent past the `- ` bullet.\nplain:\n{}",
         frame.plain,
     );
+
+    // The comparison-operator list is bracketed by the `Comparison Operators`
+    // and `Arithmetic Operators` headings and must carry exactly one blank line
+    // on each side (spec: one blank before and after every unordered list).
+    assert_list_single_blank_lines(&frame, "Comparison Operators", "Arithmetic Operators");
 
     assert!(
         max_visible_width(&frame) <= 100,
@@ -544,11 +604,13 @@ fn level2_context_side_effects_caps_at_140_in_wide_tmux() {
 // The minimum supported terminal width is 53 cells (see the spec's "Narrow
 // Terminals" clause). At that floor the binding default and values reports must
 // preserve every required column by wrapping — never drop a column and never
-// emit the planner width-error string. The expression and side-effect reports
-// hold narrower unbreakable tokens and preserve their columns below the floor;
-// they are exercised at 50 here. Each case captures a real terminal and asserts
-// box glyphs, the 1ch left margin, no planner diagnostic, that all required
-// headers survive, representative content renders, and rows fit the pane.
+// emit the planner width-error string. The expression report holds narrower
+// unbreakable tokens and preserves its columns below the floor (exercised at
+// 50); the side-effect report's `MarkdownMutation` safety token binds it to the
+// shared 53 floor, so it is exercised there. Each case captures a real terminal
+// and asserts box glyphs, the 1ch left margin, no planner diagnostic, that all
+// required headers survive, representative content renders, and rows fit the
+// pane.
 
 /// The minimum supported terminal width, in cells, at which every report keeps
 /// all required columns. Mirrors `MIN_SUPPORTED_REPORT_WIDTH` in the renderer.
@@ -604,15 +666,16 @@ fn level2_context_default_preserves_columns_at_min_width_in_tmux() {
     );
 }
 
-/// `--values` at 60 columns (its live-data floor — captured values are
-/// host-dependent and can exceed the static catalog's intrinsic width): wraps,
-/// no planner diagnostic, keeps all three columns (`Property`/`Type`/`Value`),
-/// and renders the bottom `ctx.gpu` row.
+/// `--values` at the minimum supported width (53 columns): wraps, no planner
+/// diagnostic, keeps all three columns (`Property`/`Type`/`Value`), and renders
+/// the bottom `ctx.gpu` row. The spec binds the default *and* values reports to
+/// the same 53-cell floor, so this report is exercised at that floor — not a
+/// looser per-report width.
 #[test]
 #[serial(level2_terminal)]
-fn level2_context_values_preserves_columns_constrained_60_in_tmux() {
+fn level2_context_values_preserves_columns_at_min_width_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
-    let frame = capture_context(&["--values"], 60, 400);
+    let frame = capture_context(&["--values"], MIN_SUPPORTED_WIDTH, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
     assert_no_planner_diagnostic(&frame);
@@ -623,7 +686,11 @@ fn level2_context_values_preserves_columns_constrained_60_in_tmux() {
         frame.plain,
     );
     let max = max_visible_width(&frame);
-    assert!(max <= 60, "rows must fit the 60-col pane; max={max}.\nplain:\n{}", frame.plain);
+    assert!(
+        max <= MIN_SUPPORTED_WIDTH as usize,
+        "rows must fit the {MIN_SUPPORTED_WIDTH}-col pane; max={max}.\nplain:\n{}",
+        frame.plain,
+    );
 }
 
 /// `--expressions` at 50 columns (below the shared floor — its narrower

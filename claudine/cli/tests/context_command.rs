@@ -365,96 +365,153 @@ fn context_side_effects_writes_footer_to_stderr() {
 // Phase 4 — Catalog contract tests
 // =====================================================================
 
-/// Default report must emit exactly one row per context descriptor.
-/// Uses a wide terminal to avoid narrow-width table-dropout false positives.
+/// Strips ANSI SGR escape sequences so a captured table cell compares as plain
+/// text. Even under `NO_COLOR` the centered `Type` column can carry a trailing
+/// reset; the first cell (the canonical identifier / signature column these
+/// tests parse) is otherwise clean.
+fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            // Consume a CSI sequence: ESC '[' … final byte in `@`..=`~`.
+            for next in chars.by_ref() {
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// The trimmed, de-styled first table-column cell of every box-drawing data row.
+/// Header rows, wrapped continuation rows (blank first cell), and non-table
+/// lines fall out. This is the column carrying each report's canonical
+/// identifier (`ctx.NAME`) or signature, so duplicate, missing, or stray rows
+/// are visible here even though presence-only `contains` checks would miss them.
+fn first_column_cells(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let mut segments = line.split('│');
+            segments.next()?; // discard the left-margin segment before the first border
+            let cell = strip_ansi(segments.next()?).trim().to_string();
+            (!cell.is_empty()).then_some(cell)
+        })
+        .collect()
+}
+
+/// Asserts `actual` is a permutation of `expected` — exactly one rendered row
+/// per descriptor, with no missing, extra, or duplicate identifiers. Reports
+/// each failure class separately so a regression is immediately diagnosable.
+fn assert_one_row_each(kind: &str, expected: &[String], actual: &[String]) {
+    use std::collections::BTreeMap;
+
+    let mut want: BTreeMap<&str, usize> = BTreeMap::new();
+    for id in expected {
+        *want.entry(id.as_str()).or_default() += 1;
+    }
+    let mut got: BTreeMap<&str, usize> = BTreeMap::new();
+    for id in actual {
+        *got.entry(id.as_str()).or_default() += 1;
+    }
+
+    let duplicates: Vec<&str> = got
+        .iter()
+        .filter_map(|(&id, &count)| (count > 1).then_some(id))
+        .collect();
+    let missing: Vec<&str> = want.keys().filter(|id| !got.contains_key(*id)).copied().collect();
+    let extra: Vec<&str> = got.keys().filter(|id| !want.contains_key(*id)).copied().collect();
+
+    assert!(
+        duplicates.is_empty() && missing.is_empty() && extra.is_empty(),
+        "{kind} must render exactly one row per descriptor.\n  \
+         duplicate: {duplicates:?}\n  missing: {missing:?}\n  extra: {extra:?}"
+    );
+}
+
+/// Runs `claudine context <args>` at a wide terminal (200 cells) so no canonical
+/// identifier wraps, then returns the rendered first-column cells.
+fn context_first_column_cells(args: &[&str]) -> Vec<String> {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "200")
+        .current_dir(repo_root())
+        .args(args)
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    first_column_cells(&stdout)
+}
+
+/// Default report must emit exactly one row per context descriptor — no missing,
+/// extra, or duplicate. A wide terminal keeps every `ctx.` identifier on one
+/// line so the first column can be parsed intact.
 #[test]
 fn context_default_includes_every_descriptor() {
-    let assert = cargo_bin_cmd!("claudine")
-        .env("NO_COLOR", "1")
-        .env("COLUMNS", "200")
-        .current_dir(repo_root())
-        .args(["context"])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let descriptors = darkmatter::markdown::compose::context::context_variable_descriptors();
+    let expected: Vec<String> = descriptors.iter().map(|d| format!("ctx.{}", d.name)).collect();
 
-    for desc in descriptors {
-        let property = format!("ctx.{}", desc.name);
-        assert!(
-            stdout.contains(&property),
-            "default report must contain row for {property}; got stdout:\n{stdout}"
-        );
-    }
+    let actual: Vec<String> = context_first_column_cells(&["context"])
+        .into_iter()
+        .filter(|cell| cell.starts_with("ctx."))
+        .collect();
+
+    assert_one_row_each("default report", &expected, &actual);
 }
 
-/// Values report must emit exactly one row per context descriptor.
-/// Uses a wide terminal to avoid narrow-width table-dropout false positives.
+/// Values report must emit exactly one row per context descriptor — no missing,
+/// extra, or duplicate.
 #[test]
 fn context_values_includes_every_descriptor() {
-    let assert = cargo_bin_cmd!("claudine")
-        .env("NO_COLOR", "1")
-        .env("COLUMNS", "200")
-        .current_dir(repo_root())
-        .args(["context", "--values"])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let descriptors = darkmatter::markdown::compose::context::context_variable_descriptors();
+    let expected: Vec<String> = descriptors.iter().map(|d| format!("ctx.{}", d.name)).collect();
 
-    for desc in descriptors {
-        let property = format!("ctx.{}", desc.name);
-        assert!(
-            stdout.contains(&property),
-            "values report must contain row for {property}; got stdout:\n{stdout}"
-        );
-    }
+    let actual: Vec<String> = context_first_column_cells(&["context", "--values"])
+        .into_iter()
+        .filter(|cell| cell.starts_with("ctx."))
+        .collect();
+
+    assert_one_row_each("values report", &expected, &actual);
 }
 
-/// Expression report must include every expression-function descriptor.
+/// Expression report must render exactly one row per expression-function
+/// descriptor. The report interleaves several tables (operators, modes,
+/// truthiness, functions), so the first-column cells are filtered to the
+/// signature set before asserting one row per function.
 #[test]
 fn context_expressions_includes_every_function() {
-    let assert = cargo_bin_cmd!("claudine")
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
-        .args(["context", "--expressions"])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let functions = darkmatter::markdown::compose::expression::expression_function_descriptors();
+    let expected: Vec<String> = functions.iter().map(|f| f.signature.to_string()).collect();
+    let signatures: std::collections::HashSet<&str> =
+        functions.iter().map(|f| f.signature).collect();
 
-    for func in functions {
-        assert!(
-            stdout.contains(func.signature),
-            "expression report must contain function {}; got stdout:\n{stdout}",
-            func.signature
-        );
-    }
+    let actual: Vec<String> = context_first_column_cells(&["context", "--expressions"])
+        .into_iter()
+        .filter(|cell| signatures.contains(cell.as_str()))
+        .collect();
+
+    assert_one_row_each("expression report", &expected, &actual);
 }
 
-/// Side-effects report must include every side-effect descriptor and overload.
+/// Side-effects report must render exactly one row per side-effect descriptor
+/// (overloaded arities are folded into one signature per the catalog).
 #[test]
 fn context_side_effects_includes_every_capability() {
-    let assert = cargo_bin_cmd!("claudine")
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
-        .args(["context", "--side-effects"])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let effects = darkmatter::effects::effect_descriptors();
+    let expected: Vec<String> = effects.iter().map(|e| e.signature.to_string()).collect();
+    let signatures: std::collections::HashSet<&str> =
+        effects.iter().map(|e| e.signature).collect();
 
-    for effect in effects {
-        assert!(
-            stdout.contains(effect.signature),
-            "side-effects report must contain capability {}; got stdout:\n{stdout}",
-            effect.signature
-        );
-    }
+    let actual: Vec<String> = context_first_column_cells(&["context", "--side-effects"])
+        .into_iter()
+        .filter(|cell| signatures.contains(cell.as_str()))
+        .collect();
+
+    assert_one_row_each("side-effects report", &expected, &actual);
 }
 
 /// Output ordering must be deterministic across invocations.

@@ -430,7 +430,6 @@ fn render_expressions_unary(term: &Terminal) {
 fn render_expressions_comparison(term: &Terminal) {
     let heading = Prose::new("<blue><b>Comparison Operators</b></blue>");
     log::data(&heading.render(term));
-    log::data("");
 
     let items = [
         "`==` and `!=` compare scalar string representations",
@@ -447,7 +446,6 @@ fn render_expressions_comparison(term: &Terminal) {
 fn render_expressions_arithmetic(term: &Terminal) {
     let heading = Prose::new("<blue><b>Arithmetic Operators</b></blue>");
     log::data(&heading.render(term));
-    log::data("");
 
     let items = [
         "`+`, `-`, `*`, `/`, `%` require numeric operands",
@@ -534,7 +532,6 @@ fn render_expressions_modes(term: &Terminal) {
     }
 
     log::data(&render_table_within_contract(&table, term));
-    log::data("");
 
     let consequence_items = [
         "`when=\"a || b\"` is logical OR and evaluates to a boolean",
@@ -637,7 +634,6 @@ fn render_side_effects_report() {
         "This report documents Darkmatter's side-effect capabilities. It is documentation-only and does not invoke any side effects.",
     );
     log::data(&intro.render(&term));
-    log::data("");
 
     let constraint_items = [
         "this report is documentation only and does not invoke side effects",
