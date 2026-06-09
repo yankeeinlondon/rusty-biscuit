@@ -12,14 +12,30 @@
 //!
 //! ## Mechanism
 //!
-//! Each test:
-//! 1. Folds a small fixture through the render-tree pipeline directly (so we
+//! Most tests pre-render in-process and replay the bytes into the pane:
+//! 1. Fold a small fixture through the render-tree pipeline directly (so we
 //!    test the canonical tree → terminal path, not the legacy
 //!    `for_terminal` event-stream serializer).
-//! 2. Writes the rendered output to a temp file.
-//! 3. Spawns a WezTerm pane and runs `cat <tempfile>` so the bytes are
+//! 2. Write the rendered output to a temp file.
+//! 3. Spawn a WezTerm pane and run `cat <tempfile>` so the bytes are
 //!    actually emitted into a real terminal.
-//! 4. Captures the rendered frame and asserts on visible structure.
+//! 4. Capture the rendered frame and assert on visible structure.
+//!
+//! ### Capability-detection tests render *inside* the pane
+//!
+//! Pre-rendering in the cargo-test process is wrong for any capability the
+//! renderer resolves from the ambient terminal at render time — most notably
+//! OSC8 hyperlink support, which `DarkmatterPage`'s no-geometry path decides
+//! via `Terminal::default()` detection that short-circuits to "no OSC8"
+//! whenever `is_tty()` is false. A cargo-test process has no controlling tty,
+//! so an in-process render has already decided OSC8 is off before its bytes
+//! ever reach the pane. These tests therefore execute the *renderer itself*
+//! inside the terminal: [`drive_render_probe`] re-execs this test binary as a
+//! foreground command in the pane (with `DM_L2_RENDER_PROBE` set so the
+//! [`level2_render_probe_entrypoint`] test renders the page straight to the
+//! real-tty stdout), giving terminal detection a real TTY to observe. Keeping
+//! the probe inside the integration-test executable avoids adding a production
+//! `bin` target to the Darkmatter library package.
 //!
 //! Tests skip cleanly when `WEZTERM_UNIX_SOCKET` is not set or the
 //! `wezterm` binary is missing. Set `BISCUIT_TEST_LEVEL_REQUIRED=2` in the
@@ -44,13 +60,14 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
-use darkmatter::layout::DarkmatterPage;
+use darkmatter::layout::{ComponentPolicy, DarkmatterPage, PageComponent};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
 use darkmatter::markdown::output::{ColorDepth, TerminalOptions};
 use darkmatter::markdown::render_tree::{
     TerminalCodeRenderer, fold_markdown_spanned_with_frontmatter, fold_markdown_to_document,
 };
+use renderable::layout::Alignment;
 use renderable::tree::{RenderStrictness, SourceDescriptor};
 use serial_test::serial;
 use std::fs;
@@ -381,6 +398,125 @@ fn foreground_color_set(frame: &CapturedFrame) -> Vec<String> {
     set.sort();
     set.dedup();
     set
+}
+
+/// Environment variable that switches this test binary into render-probe mode.
+/// `drive_render_probe` sets it (to the variant) when it re-execs the binary
+/// inside the pane; [`level2_render_probe_entrypoint`] reads it.
+const RENDER_PROBE_ENV: &str = "DM_L2_RENDER_PROBE";
+
+/// A table (the layout-only policy target) plus unrelated capability-bearing
+/// content: a syntax-highlighted code block and an OSC8 hyperlink. The probe
+/// renders this through `DarkmatterPage::render` so the capture can compare the
+/// `no-policy` and `matched` variants' real-terminal capability output.
+const RENDER_PROBE_FIXTURE: &str = "| A | B |\n|---|---|\n| 1 | 2 |\n\n\
+                                    ```rust\nfn demo() { let x = 1; }\n```\n\n\
+                                    [link](https://example.com)\n";
+
+/// Renders [`RENDER_PROBE_FIXTURE`] to stdout for `variant` (`no-policy` /
+/// `matched`).
+///
+/// `Terminal::default()` detects the ambient terminal (width, color depth,
+/// OSC8). Pinning TrueColor keeps the color axis deterministic; the OSC8 axis is
+/// left to ambient detection on purpose — that is the capability this probe
+/// exists to exercise against a real pane. The `matched` variant adds a
+/// *matched* layout-only `Tables` center-alignment policy (the document's table
+/// matches it). Centering is layout-only and bakes no color, so a correct
+/// renderer leaves the unrelated code block's color and the link's OSC8 behavior
+/// identical to `no-policy`.
+fn render_probe_to_stdout(variant: &str) {
+    let term = Terminal::default();
+    let md: Markdown = RENDER_PROBE_FIXTURE.into();
+
+    let mut page = DarkmatterPage::new(&term).with_color_depth(ColorDepth::TrueColor);
+    if variant == "matched" {
+        let mut policy = ComponentPolicy::default();
+        policy.layout.alignment = Alignment::Center;
+        page = page.with_component_policy(PageComponent::Tables, policy);
+    }
+
+    let rendered = page.render(&md).expect("DarkmatterPage::render");
+    print!("{rendered}");
+}
+
+/// Render-probe entry point. When this test binary is spawned with
+/// [`RENDER_PROBE_ENV`] set (as `drive_render_probe` does inside the pane), it
+/// renders the named variant straight to the real-tty stdout and exits, so
+/// `DarkmatterPage::render` resolves OSC8 against the actual terminal. With the
+/// variable unset (an ordinary suite run) it is an inert pass.
+///
+/// Living inside the integration-test executable keeps the probe test-only — it
+/// adds no production `bin` target to the Darkmatter library package.
+#[test]
+fn level2_render_probe_entrypoint() {
+    let Ok(variant) = std::env::var(RENDER_PROBE_ENV) else {
+        return;
+    };
+    render_probe_to_stdout(&variant);
+    // Flush before exiting so libtest's trailing summary never races the
+    // rendered bytes the pane capture asserts on.
+    use std::io::Write;
+    std::io::stdout().flush().ok();
+    std::process::exit(0);
+}
+
+/// Runs the render probe for `variant` (`no-policy` / `matched`) by re-executing
+/// **this test binary** as a foreground command inside the shared WezTerm pane,
+/// with [`RENDER_PROBE_ENV`] set so [`level2_render_probe_entrypoint`] renders
+/// the page to the pane's real tty instead of running the suite. Returns `None`
+/// when WezTerm is unavailable (the test should skip).
+fn drive_render_probe(variant: &str) -> Option<CapturedFrame> {
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return None;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
+    }
+
+    let exe = std::env::current_exe().expect("resolve current test executable");
+
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().unwrap();
+
+    run_with_sentinel(harness, "clear");
+    // `--nocapture` lets the probe's `print!` reach the pane stdout; `--exact`
+    // selects only the probe entry point so the rest of the suite never runs in
+    // the spawned process.
+    let cmd = format!(
+        "{RENDER_PROBE_ENV}={variant} {} --exact level2_render_probe_entrypoint --nocapture --test-threads=1",
+        exe.display()
+    );
+    Some(run_with_sentinel(harness, &cmd))
+}
+
+/// Every OSC8 hyperlink **opener** carrying a URI — `ESC ] 8 ; ; <uri>` up to
+/// its `ESC`/ST terminator — found in `raw`. `wezterm cli get-text --escapes`
+/// re-emits the full opener including the URI, so this exposes the hyperlink
+/// *metadata* the ANSI-stripped `plain` view hides. The empty closer
+/// (`ESC ] 8 ; ;` with no URI) is dropped so only real links are compared.
+fn osc8_openers(raw: &str) -> Vec<String> {
+    const INTRO: &str = "\u{1b}]8;;";
+    let mut out = Vec::new();
+    let mut rest = raw;
+    while let Some(start) = rest.find(INTRO) {
+        let after = &rest[start..];
+        // The opener ends at the next ESC (ST is `ESC \`).
+        let end = after[1..]
+            .find('\u{1b}')
+            .map(|i| i + 1)
+            .unwrap_or(after.len());
+        let opener = &after[..end];
+        if opener.len() > INTRO.len() {
+            out.push(opener.to_string());
+        }
+        rest = &after[end..];
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Review-13: rich fenced code blocks are a user-observable terminal feature
@@ -1426,36 +1562,6 @@ fn render_unmatched_policy_page_to_tempfile(
     (dir, path)
 }
 
-/// Renders `body` through a [`DarkmatterPage`] carrying a *matched* layout-only
-/// `Tables` center-alignment policy, pinning TrueColor to match
-/// [`render_no_policy_page_to_tempfile`].
-///
-/// The document contains a table, so the policy matches and centers it — but
-/// centering is layout-only and bakes no color. Per review-5 finding 1 a matched
-/// layout policy must not change the renderer-wide capability profile, so the
-/// unrelated code block's colors and the link's hyperlink behavior must stay
-/// identical to the no-policy render.
-fn render_matched_layout_policy_page_to_tempfile(
-    body: &str,
-    name: &str,
-) -> (tempfile::TempDir, std::path::PathBuf) {
-    let mut policy = darkmatter::layout::ComponentPolicy::default();
-    policy.layout.alignment = renderable::layout::Alignment::Center;
-
-    let term = Terminal::new_optimistic(120);
-    let md: Markdown = body.into();
-    let rendered = DarkmatterPage::new(&term)
-        .with_color_depth(ColorDepth::TrueColor)
-        .with_component_policy(darkmatter::layout::PageComponent::Tables, policy)
-        .render(&md)
-        .expect("matched-layout-policy DarkmatterPage::render");
-
-    let dir = tempdir().unwrap();
-    let path = dir.path().join(format!("{name}.ansi"));
-    fs::write(&path, rendered).unwrap();
-    (dir, path)
-}
-
 /// Finding 7: the public `Markdown::as_terminal` entry must survive a real
 /// terminal — heading, prose, fenced-code body + language header, and SGR
 /// styling all reach the pane through the post-cutover tree path.
@@ -1549,37 +1655,77 @@ fn level2_unmatched_policy_matches_no_policy_color_in_real_terminal() {
 /// Review-5 finding 1 (High): a *matched* layout-only component policy must not
 /// change the renderer-wide capability profile — neither rendered color nor
 /// hyperlink behavior — of unrelated content. This is the real-terminal
-/// companion to the Level 1 capability-signature test in `page.rs`; the Level 1
-/// tests pin TrueColor and never inspect hyperlink escapes, so the OSC8 axis was
-/// previously unverified in a real pane (the review's named gap).
+/// companion to the Level 1 capability-signature test in `page.rs`.
 ///
-/// Both pages pin TrueColor and render the same fixture (a table + a syntax-
-/// highlighted code block + a hyperlink); one also centers the table via a
-/// layout-only policy the table matches. Driving both through a real WezTerm
-/// pane and comparing the captured foreground colors *and* the link's visible
-/// representation proves the matched layout changes no capability: the colored
-/// code is identical and the link renders the same way. Before the fix the
-/// matched layout routed the render through the optimistic terminal, handing the
-/// unrelated code TrueColor and the unrelated link an OSC8 escape the ambient
-/// terminal never advertised.
+/// ## Why the render runs *inside* the pane
+///
+/// The no-geometry page path resolves hyperlink (OSC8) capability through
+/// `Terminal::default()` detection at render time, which returns "no OSC8"
+/// whenever `is_tty()` is false (`biscuit-terminal`'s `osc8_link_support`). A
+/// cargo-test process has no controlling tty, so an *in-process* render — even
+/// when its bytes are later `cat` into a pane — has already decided OSC8 is off:
+/// the real terminal never participates in the hyperlink decision (review-6
+/// finding 1). The earlier version compared only the ANSI-stripped `plain` view
+/// for the substring `example.com`, which a capture that discards hyperlink
+/// metadata, or a regression that degrades both renders identically, would still
+/// pass.
+///
+/// So both variants are rendered by [`drive_render_probe`] — which re-execs this
+/// test binary's [`level2_render_probe_entrypoint`] as a foreground command
+/// *inside* the WezTerm pane (a real tty). Each renders the identical fixture (a
+/// table + a syntax-highlighted code block + a hyperlink); `matched` also
+/// centers the table via a layout-only policy the table matches. The assertions
+/// then compare the captured foreground colors **and** the actual OSC8 hyperlink
+/// openers (`wezterm cli get-text --escapes` re-emits the full opener including
+/// the URI, verified), proving the matched layout changes no capability: the
+/// colored code is byte-identical and the link emits the same real OSC8 escape.
+///
+/// ## What this does and does not catch
+///
+/// In a fully OSC8-capable terminal both variants emit OSC8, so this test does
+/// not by itself catch the *promotion* regression (a matched policy forcing the
+/// optimistic profile) — that regression is only observable where the ambient
+/// terminal lacks a capability the optimistic profile would force, which is the
+/// Level 1 `capability_signature` test's job (it renders with `is_tty()` false
+/// so ambient and optimistic diverge). This test supplies the complementary
+/// real-terminal evidence the Level 1 test cannot: that `DarkmatterPage::render`
+/// emits a well-formed OSC8 hyperlink a real terminal honors, and that the
+/// matched layout policy leaves it — and the unrelated code color — untouched.
 #[test]
 #[serial(level2_terminal)]
 fn level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal() {
-    let body = "| A | B |\n|---|---|\n| 1 | 2 |\n\n\
-                ```rust\nfn demo() { let x = 1; }\n```\n\n\
-                [link](https://example.com)\n";
-    let Some((no_policy_frame, _d1)) =
-        drive_pane(body, "no_policy_caps", render_no_policy_page_to_tempfile)
-    else {
+    let Some(no_policy_frame) = drive_render_probe("no-policy") else {
         return;
     };
-    let Some((matched_frame, _d2)) = drive_pane(
-        body,
-        "matched_layout_caps",
-        render_matched_layout_policy_page_to_tempfile,
-    ) else {
+    let Some(matched_frame) = drive_render_probe("matched") else {
         return;
     };
+
+    // Premise: the policy actually matched the table — centering shifts the
+    // header row right, so the matched capture has leading whitespace the
+    // no-policy capture lacks. (A no-op policy would make the parity checks
+    // below vacuous.)
+    let table_header = |frame: &CapturedFrame| {
+        frame
+            .plain
+            .lines()
+            .find(|l| l.contains("A") && l.contains("B") && l.contains('\u{2502}'))
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                panic!(
+                    "table header row missing from real-terminal capture. plain:\n{}",
+                    frame.plain
+                )
+            })
+    };
+    let no_policy_header = table_header(&no_policy_frame);
+    let matched_header = table_header(&matched_frame);
+    assert!(
+        !no_policy_header.starts_with(' ') && matched_header.starts_with(' '),
+        "test premise: the matched layout policy must center the table (leading whitespace) \
+         while the no-policy render does not.\nno-policy header:{no_policy_header:?}\n\
+         matched header:{matched_header:?}",
+    );
 
     // The code body must survive both round-trips.
     for frame in [&no_policy_frame, &matched_frame] {
@@ -1605,17 +1751,31 @@ fn level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal(
          unrelated content"
     );
 
-    // Hyperlink axis: the link's visible representation must be identical. Under
-    // the ambient (non-OSC8) capability profile both render the plain markdown
-    // link, so the URL text is visible in both panes; a regression that promoted
-    // the matched-layout page to the optimistic OSC8 profile would hide the URL
-    // behind a hyperlink escape in one pane but not the other.
-    let no_policy_url = no_policy_frame.plain.contains("example.com");
-    let matched_url = matched_frame.plain.contains("example.com");
+    // Hyperlink axis (discriminating, real-terminal): the page emitted a real
+    // OSC8 hyperlink the pane honored, and the capture re-emits its URI. This is
+    // non-vacuous evidence — it fails if the hyperlink metadata is absent from
+    // the capture or the link degraded to plain text.
+    let no_policy_links = osc8_openers(&no_policy_frame.raw);
+    let matched_links = osc8_openers(&matched_frame.raw);
+    assert!(
+        no_policy_links.iter().any(|l| l.contains("https://example.com")),
+        "test premise: the no-policy page must emit a real OSC8 hyperlink in the pane; \
+         openers: {no_policy_links:?}\nraw:\n{}",
+        no_policy_frame.raw
+    );
+    // The URL lives in OSC8 metadata, so the visible (plain) row carries the
+    // label, not the URL — confirming the hyperlink is genuinely active.
+    assert!(
+        !no_policy_frame.plain.contains("example.com"),
+        "the OSC8 URL must live in hyperlink metadata, not visible text. plain:\n{}",
+        no_policy_frame.plain
+    );
+    // Parity: the matched layout-only policy must emit the byte-identical OSC8
+    // opener set — it changes no hyperlink capability.
     assert_eq!(
-        no_policy_url, matched_url,
-        "a matched layout-only policy must not change the real-terminal hyperlink behavior of \
-         unrelated content"
+        no_policy_links, matched_links,
+        "a matched layout-only policy must not change the real-terminal OSC8 hyperlink behavior \
+         of unrelated content",
     );
 }
 
