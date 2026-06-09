@@ -801,35 +801,12 @@ impl DarkmatterPage {
             self.page_bg_color,
         )?;
 
-        // Build derived TerminalOptions.
+        // Build derived TerminalOptions. `max_width` is deliberately left unset:
+        // it would select the optimistic pre-render terminal (its capabilities
+        // *and* width). The page keeps width and capability selection independent
+        // — width is pinned below via the page-frame geometry decision, color
+        // depth rides `options.color_depth` (review-4 finding 1).
         let mut options = self.options.clone();
-        // Setting `max_width` selects the captured (optimistic) terminal —
-        // carrying both its *width* and its *capabilities* (OSC8 hyperlinks,
-        // color depth) — while leaving it unset auto-detects the ambient terminal
-        // (see `terminal_options_from_terminal_options`). Those two concerns are
-        // resolved independently here:
-        //
-        //   * Capability selection rides *construction-time application*: any
-        //     baked attribute (colors, hyperlink/image styles, component
-        //     policies — `!is_default_layout`) needs the captured terminal's
-        //     capabilities to render faithfully.
-        //   * The *content-box width* is a page-frame decision: it follows the
-        //     captured width only when the frame defines its own geometry
-        //     (`has_frame_geometry`); otherwise it stays at the ambient width.
-        //
-        // So a construction-only page (e.g. an *unmatched* component policy, or a
-        // page color) renders through the captured terminal's capabilities but at
-        // the ambient width — identical content-box width to a no-policy page, so
-        // an unmatched policy cannot widen it (review-2 finding 2). The zero-config
-        // path leaves `max_width` unset for byte-for-byte parity with
-        // `Markdown::as_terminal(default)`.
-        if !self.is_default_layout() {
-            options.max_width = Some(if self.has_frame_geometry() {
-                ctx.effective_width
-            } else {
-                ambient_terminal_width()
-            });
-        }
         options.include_line_numbers = self.line_numbers;
         options.color_mode = ctx.render_color_mode;
         options.hr_defaults = self.hr_defaults();
@@ -857,34 +834,62 @@ impl DarkmatterPage {
             hr_defaults: hr_defaults_owned.as_ref(),
         };
 
-        // Honor the captured terminal's color depth only when this page actually
-        // paints construction-time color. Page-level color always paints; a
-        // component / link / image color paints only when its node is present in
-        // the document. An *unmatched* policy bakes nothing, so it must not flip
-        // the renderer-wide color depth (review-3): otherwise an unmatched colored
-        // policy would make unrelated content — e.g. a fenced code block's syntax
-        // highlighting — emit the captured terminal's SGR where a no-policy page
-        // emits none. Keying off whether color is actually painted (not policy
-        // presence) keeps capability selection independent of unmatched policies,
-        // mirroring the page-frame width split (`has_frame_geometry`). The
-        // zero-config path leaves this unset so the renderer falls back to
-        // `ColorDepth::auto_detect`, preserving byte-for-byte parity with
-        // `Markdown::as_terminal(default)`. An explicit `with_color_depth` wins.
-        if options.color_depth.is_none() && self.paints_construction_color(md, &build_ctx) {
-            options.color_depth = Some(self.terminal_color_depth);
-        }
-
-        // Delegate to the terminal renderer. When no layout builder has been
-        // called we must NOT thread a build context — doing so leaks the
-        // page's captured terminal width into component width resolution and
-        // breaks byte-for-byte equivalence with `Markdown::as_terminal(default)`
-        // (the zero-config tree path), which performs its own width
-        // auto-detection.
         let result = if self.is_default_layout() {
+            // Zero-config path: byte-for-byte parity with
+            // `Markdown::as_terminal(default)`. No build context is threaded —
+            // doing so would leak the page's captured width into component width
+            // resolution and break that equivalence.
             crate::markdown::render_tree::entrypoints::render_tree_terminal(md, &options)
         } else {
-            crate::markdown::render_tree::entrypoints::render_tree_terminal_with_context(
-                md, &options, &build_ctx,
+            // Build the typed Document ONCE (acceptance criterion 3: one tree
+            // build followed by one target fold). The same owned tree feeds the
+            // construction-color probe and the terminal fold — no second
+            // construction fold (review-4 finding 2).
+            let (doc, fold_diagnostics) =
+                crate::markdown::render_tree::entrypoints::to_render_document_with_context(
+                    md, &build_ctx,
+                );
+
+            let paints = self.paints_construction_color(&doc);
+            // Honor the captured terminal's color depth only when this page
+            // actually paints construction-time color. Page-level color always
+            // paints; a *matched* component / link / image color paints only when
+            // its node is present in the document. An *unmatched* policy bakes
+            // nothing, so it must leave the depth unset and render unrelated
+            // content at ambient detection — keeping capability selection
+            // independent of policy presence (review-3/4). An explicit
+            // `with_color_depth` wins.
+            if options.color_depth.is_none() && paints {
+                options.color_depth = Some(self.terminal_color_depth);
+            }
+
+            let has_geometry = self.has_frame_geometry();
+            // Width follows page-frame geometry only: the captured
+            // `effective_width` when the frame defines its own geometry,
+            // otherwise the ambient width (so an unmatched policy cannot widen
+            // the content box — review-2 finding 2).
+            let content_width = if has_geometry {
+                ctx.effective_width
+            } else {
+                ambient_terminal_width()
+            };
+            // The optimistic (TrueColor + OSC8) capability profile is selected by
+            // page-frame geometry alone — a *deliberate* frame configuration —
+            // never by a matched component policy. A matched layout / text-layout
+            // policy (e.g. a centered table) bakes its attr onto its own node and
+            // is resolved there by the target fold; it must not promote the whole
+            // document to optimistic capabilities and so hand unrelated content
+            // TrueColor or OSC8 the ambient terminal never advertised
+            // (review-5 finding 1). Painted construction color still pins the
+            // captured color *depth* above via `paints`, independent of this
+            // profile.
+            let optimistic_capabilities = has_geometry;
+            crate::markdown::render_tree::entrypoints::render_page_terminal_document(
+                &doc,
+                fold_diagnostics,
+                &options,
+                content_width,
+                optimistic_capabilities,
             )
         }
         .map_err(|e| PageRenderError::Render(e.to_string()))?;
@@ -999,45 +1004,41 @@ impl DarkmatterPage {
 
     // ---------- ComponentPolicy merging ----------
 
-    /// Whether this page paints any construction-time color that should follow
-    /// the captured terminal's color depth.
+    /// Reads the **already-built** `doc` (the single construction fold the caller
+    /// passes in) for whether construction baked a foreground/background color: a
+    /// page color, or a *matched* component / hyperlink / image color. Drives the
+    /// captured color-depth override.
     ///
-    /// Page-level foreground/background always paint (content-independent). A
-    /// *component*, hyperlink, or image color paints only when its node is
-    /// actually present in the document — an *unmatched* policy bakes nothing.
-    /// Detection therefore folds the document with the same build context and
-    /// checks whether any node received a baked color, so an unmatched policy
-    /// cannot flip the renderer-wide color depth (review-3). The detection fold
-    /// is skipped unless a color source is configured, so the common
-    /// geometry-only and zero-config paths never pay for it.
-    fn paints_construction_color(
-        &self,
-        md: &Markdown,
-        build_ctx: &crate::markdown::render_tree::build_context::TreeBuildContext,
-    ) -> bool {
-        if self.page_color.is_some() || self.page_bg_color.is_some() {
-            return true;
+    /// Style colors are written onto a node *only* by the build context's policy
+    /// application — the empty-context fold bakes none — so their presence is a
+    /// faithful signal that the page's color configuration matched content.
+    ///
+    /// The capability *profile* (TrueColor + OSC8) is deliberately **not** keyed
+    /// off this signal: a matched policy must stay local to its node and never
+    /// promote unrelated content to optimistic capabilities (review-5 finding 1).
+    /// Profile selection keys off page-frame geometry alone (see
+    /// [`Self::has_frame_geometry`]).
+    ///
+    /// The read-only walk is skipped unless a color was not already painted at
+    /// page level and a component / link / image policy source is configured, so
+    /// geometry-only, page-color-only, and zero-config pages never pay for it.
+    fn paints_construction_color(&self, doc: &renderable::tree::Document) -> bool {
+        let mut paints = self.page_color.is_some() || self.page_bg_color.is_some();
+        if !paints && self.has_node_policy_source() {
+            scan_painted_color(&doc.root, &mut paints);
         }
-        let has_color_source = self
-            .component_policies
-            .values()
-            .any(|p| p.color.is_some() || p.bg_color.is_some())
-            || [
-                self.hyperlink_style.as_ref(),
-                self.local_hyperlink_style.as_ref(),
-                self.local_image_style.as_ref(),
-            ]
-            .into_iter()
-            .flatten()
-            .any(|s| s.color.is_some() || s.bg_color.is_some());
-        if !has_color_source {
-            return false;
-        }
-        let (doc, _) =
-            crate::markdown::render_tree::entrypoints::to_render_document_with_context(
-                md, build_ctx,
-            );
-        node_subtree_has_baked_color(&doc.root)
+        paints
+    }
+
+    /// Whether any component, hyperlink, or image policy is configured — the
+    /// sources that can bake a per-node attribute. Gates the baked-attribute walk
+    /// in [`Self::capability_signals`]; with no such source there is nothing to
+    /// find, so the walk is skipped.
+    fn has_node_policy_source(&self) -> bool {
+        !self.component_policies.is_empty()
+            || self.hyperlink_style.is_some()
+            || self.local_hyperlink_style.is_some()
+            || self.local_image_style.is_some()
     }
 
     // ---------- Validation ----------
@@ -1054,6 +1055,12 @@ impl DarkmatterPage {
     /// it would with no policy. The zero-config (no-geometry) path leaves
     /// `max_width` unset, preserving byte-for-byte parity with
     /// `Markdown::as_terminal(default)`.
+    ///
+    /// The optimistic terminal capability profile (TrueColor + OSC8) keys off
+    /// this too (review-5 finding 1): only deliberate frame geometry — never a
+    /// matched component policy — promotes the whole document to optimistic
+    /// capabilities, so a matched layout (e.g. a centered table) cannot hand
+    /// unrelated content color or hyperlinks the ambient terminal never offered.
     fn has_frame_geometry(&self) -> bool {
         !edges_is_zero(&self.page_margin)
             || !edges_is_zero(&self.page_padding)
@@ -1331,21 +1338,30 @@ pub(crate) fn length_to_css_frame(
     }
 }
 
-/// Whether `node` or any descendant carries a construction-baked foreground or
-/// background color.
+/// Sets `paints` when `node` or any descendant carries a construction-baked
+/// foreground/background color (see
+/// [`DarkmatterPage::paints_construction_color`]).
 ///
-/// At fold time a node's [`Style`](renderable::style::Style) color is set only
-/// by the build context's policy application — syntax highlighting and other
-/// render-time color are applied later, during the target fold — so this is a
-/// faithful signal of whether the page actually painted color during
-/// construction.
-fn node_subtree_has_baked_color(node: &renderable::tree::RenderNode) -> bool {
+/// At fold time a node's [`Style`](renderable::style::Style) color is written
+/// only by the build context's policy application — syntax highlighting and the
+/// renderer's own default shaping happen later, during the target fold — so its
+/// presence here is a faithful signal that the page's color configuration
+/// matched content during construction. Layout and text-layout attrs are
+/// intentionally ignored: they resolve locally on their own node and do not
+/// select the capability profile (review-5 finding 1).
+fn scan_painted_color(node: &renderable::tree::RenderNode, paints: &mut bool) {
+    if *paints {
+        return;
+    }
     if let Some(style) = node.attrs.style()
         && (style.color.is_some() || style.background.is_some())
     {
-        return true;
+        *paints = true;
+        return;
     }
-    node.children().iter().any(node_subtree_has_baked_color)
+    for child in node.children() {
+        scan_painted_color(child, paints);
+    }
 }
 
 /// Whether every side of `edges` contributes no space (see [`length_is_zero`]).
@@ -1363,11 +1379,11 @@ fn clamp_width(width: u32) -> u16 {
 
 /// The ambient terminal width the zero-config path renders at.
 ///
-/// A construction-only page (baked attributes but no frame geometry) renders
-/// through the captured terminal's *capabilities* but must keep its content box
-/// at this ambient width, so an unmatched component policy cannot widen it
-/// (review-2 finding 2). This matches the width `Markdown::as_terminal(default)`
-/// resolves, since both fall back to `Terminal::default()`'s detection.
+/// A construction-only page (baked attributes but no frame geometry) keeps its
+/// content box at this ambient width, so an unmatched component policy cannot
+/// widen it (review-2 finding 2). This matches the width
+/// `Markdown::as_terminal(default)` resolves, since both fall back to
+/// `Terminal::default()`'s detection.
 fn ambient_terminal_width() -> u16 {
     clamp_width(Terminal::default().width())
 }
@@ -2007,69 +2023,180 @@ mod tests {
         );
     }
 
-    /// Review-3 finding: capability selection (renderer-wide color depth) must
+    /// Review-4 finding 1: capability selection (renderer-wide color depth) must
     /// be independent of *unmatched* component-policy presence.
     ///
-    /// The captured terminal reports `None` (no-color) depth, distinct from the
-    /// ambient depth the zero-config path resolves for the same content. A fenced
-    /// code block's syntax highlighting is color-bearing and *does* respond to a
-    /// `None` color depth (it emits no SGR), so the captured depth is observable.
+    /// The color depth is pinned explicitly so the parity holds regardless of the
+    /// harness's ambient detection — the test must pass even under ambient
+    /// no-color. A fenced code block's syntax highlighting is color-bearing and
+    /// responds to the depth (no SGR at `None`, truecolor SGR at `TrueColor`), so
+    /// it exposes any capability difference between the two pages.
     ///
-    /// Adding an *unmatched* colored Tables policy must not flip the global color
-    /// depth to the captured `None`: the unmatched page must stay byte-identical
-    /// to the no-policy page, both emitting the code block's colored highlight.
-    /// Before the fix the unmatched policy made the page non-default, forcing the
-    /// captured `None` depth and stripping the code block's color — the two
-    /// diverged. The `painted != no_policy` guard proves the captured `None`
-    /// depth genuinely changes output (so the equality is meaningful), and that
-    /// the depth machinery still engages when construction *does* paint color.
-    ///
-    /// This is discriminating where the plain-prose parity test was not: prose
-    /// carries no content-driven color, so a flipped color depth left it
-    /// unchanged. The code block exposes the global capability difference.
+    /// Before the fix, an unmatched policy made the page non-default, routing the
+    /// render through the optimistic pre-render terminal (TrueColor) and so
+    /// changing the colored rendering of unrelated content versus the no-policy
+    /// page. Both depths must now produce byte-identical output with and without
+    /// the unmatched policy.
     #[test]
     fn terminal_unmatched_policy_does_not_flip_color_depth_for_unrelated_content() {
         use renderable::color::{Color, Tailwind};
         use renderable::style::PaintColor;
 
-        // Captured terminal at a no-color depth, distinct from the ambient
-        // (truecolor) depth the zero-config path resolves in this harness.
-        let mut terminal = Terminal::new_optimistic(80);
-        terminal.color_depth = biscuit_terminal::discovery::detection::ColorDepth::None;
+        let term = Terminal::new_optimistic(80);
         // A fenced code block whose syntax highlighting is color-bearing. No
         // table, so the Tables policy is unmatched and bakes nothing.
         let md: Markdown = "```rust\nfn main() { let x = 1; }\n```\n".into();
 
-        let no_policy = DarkmatterPage::new(&terminal).render(&md).unwrap();
-        let unmatched = DarkmatterPage::new(&terminal)
-            .with_component_color(
+        let render_pair = |depth: ColorDepth| {
+            let no_policy = DarkmatterPage::new(&term)
+                .with_color_depth(depth)
+                .render(&md)
+                .unwrap();
+            let unmatched = DarkmatterPage::new(&term)
+                .with_color_depth(depth)
+                .with_component_color(
+                    PageComponent::Tables,
+                    PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+                )
+                .render(&md)
+                .unwrap();
+            (no_policy, unmatched)
+        };
+
+        // No-color depth: neither page may emit foreground SGR, and the unmatched
+        // page must stay byte-identical. (Before the fix the unmatched policy
+        // re-introduced TrueColor here via the optimistic terminal.)
+        let (no_policy_none, unmatched_none) = render_pair(ColorDepth::None);
+        assert_eq!(
+            no_policy_none, unmatched_none,
+            "an unmatched policy must not flip renderer-wide color depth",
+        );
+        assert!(
+            !no_policy_none.contains("\x1b[38"),
+            "no-color depth must strip foreground SGR; got: {no_policy_none:?}",
+        );
+
+        // TrueColor depth: the highlighted code must be byte-identical with and
+        // without the unmatched policy — the policy changes no capability.
+        let (no_policy_true, unmatched_true) = render_pair(ColorDepth::TrueColor);
+        assert_eq!(
+            no_policy_true, unmatched_true,
+            "an unmatched policy must not change colored rendering of unrelated content",
+        );
+        assert!(
+            no_policy_true.contains("\x1b[38;2;"),
+            "test premise: TrueColor depth must emit truecolor SGR; got: {no_policy_true:?}",
+        );
+    }
+
+    /// Counts the renderer-wide capability signals in a terminal render: how many
+    /// truecolor, 256-color, 3/4-bit foreground SGRs, and OSC8 hyperlink openers
+    /// it carries. Layout shifts (e.g. a centered table's leading spaces) add no
+    /// escape sequences, so two renders that differ only in matched layout share
+    /// this signature iff they share a capability profile.
+    fn capability_signature(s: &str) -> (usize, usize, usize, usize) {
+        let truecolor = s.matches("\x1b[38;2;").count();
+        let palette = s.matches("\x1b[38;5;").count();
+        let osc8 = s.matches("\x1b]8;;").count();
+        let basic: usize = (0u8..8)
+            .map(|n| {
+                s.matches(&format!("\x1b[3{n}m")).count()
+                    + s.matches(&format!("\x1b[9{n}m")).count()
+            })
+            .sum();
+        (truecolor, palette, osc8, basic)
+    }
+
+    /// Review-5 finding 1 (High): a *matched* layout-only component policy must
+    /// not change the renderer-wide capability profile (color depth, OSC8) of
+    /// unrelated content. Centering a table is layout-only — it bakes no color —
+    /// so the fenced code block's highlight colors and the link's OSC8 behavior
+    /// must be identical with and without the policy.
+    ///
+    /// Before the fix a matched layout policy set `applies = true`, routing the
+    /// whole document through the optimistic (TrueColor + OSC8) profile, so
+    /// unrelated content gained colors and hyperlinks the ambient terminal never
+    /// advertised. The capability *signature* ignores the table's centering
+    /// whitespace, so it isolates the capability change from the layout change.
+    #[test]
+    fn terminal_matched_layout_policy_does_not_change_unrelated_capabilities() {
+        let term = Terminal::new_optimistic(120);
+        // A table (the matched, layout-only policy target) plus unrelated
+        // capability-bearing content: a color-highlighted code block and an OSC8
+        // hyperlink.
+        let md: Markdown = "| A | B |\n|---|---|\n| 1 | 2 |\n\n\
+            ```rust\nfn main() { let x = 1; }\n```\n\n\
+            [link](https://example.com)\n"
+            .into();
+
+        let no_policy = DarkmatterPage::new(&term).render(&md).unwrap();
+        let matched = DarkmatterPage::new(&term)
+            .with_component_policy(
                 PageComponent::Tables,
-                PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+                align_policy(renderable::layout::Alignment::Center),
             )
             .render(&md)
             .unwrap();
 
-        assert_eq!(
-            no_policy, unmatched,
-            "an unmatched policy must not flip renderer-wide color depth",
-        );
-        assert!(
-            no_policy.contains("\x1b[38;2;"),
-            "test premise: the no-policy code block must emit color at the ambient \
-             depth; got: {no_policy:?}",
+        // Premise: the policy actually matched the table — centering shifts the
+        // table rows, so the two renders are not byte-identical. (A no-op policy
+        // would make the capability comparison below vacuous.)
+        assert_ne!(
+            no_policy, matched,
+            "test premise: the layout policy must match the table and change its rendering",
         );
 
-        // Guard the test's own premise: the captured `None` depth *does* change
-        // output once construction actually paints color (here a page color), so
-        // the equality above is meaningful — had the unmatched policy wrongly
-        // forced the captured depth, `unmatched` would have diverged like this.
-        let painted = DarkmatterPage::new(&terminal)
+        // Premise: the optimistic profile — reached only by deliberate geometry —
+        // *does* carry truecolor or OSC8 for this fixture, so a regression that
+        // wrongly selected it for the matched layout policy would be observable.
+        let optimistic = DarkmatterPage::new(&term).with_margin_left(1).render(&md).unwrap();
+        let opt_sig = capability_signature(&optimistic);
+        assert!(
+            opt_sig.0 > 0 || opt_sig.2 > 0,
+            "test premise: the optimistic profile must carry truecolor or OSC8 here; sig={opt_sig:?}",
+        );
+
+        // The matched layout-only policy must leave the renderer-wide capability
+        // profile of unrelated content unchanged.
+        assert_eq!(
+            capability_signature(&no_policy),
+            capability_signature(&matched),
+            "a matched layout-only policy must not change the capability profile \
+             (color/OSC8) of unrelated content",
+        );
+    }
+
+    /// When the page *does* paint construction color and no explicit depth is
+    /// pinned, the render honors the captured terminal's color depth — proving
+    /// the construction-color probe engages and selects the captured capability.
+    ///
+    /// The same page color rendered against a captured `None`-depth terminal and
+    /// a captured `TrueColor` terminal must diverge: the former strips all color,
+    /// the latter keeps it.
+    #[test]
+    fn terminal_painted_color_engages_captured_color_depth() {
+        use renderable::color::{Color, Tailwind};
+        use renderable::style::PaintColor;
+
+        let md: Markdown = "```rust\nfn main() { let x = 1; }\n```\n".into();
+
+        let mut none_term = Terminal::new_optimistic(80);
+        none_term.color_depth = biscuit_terminal::discovery::detection::ColorDepth::None;
+        let painted_none = DarkmatterPage::new(&none_term)
             .with_page_color(PaintColor::new(Color::Tailwind(Tailwind::Red500)))
             .render(&md)
             .unwrap();
+
+        // `new_optimistic` reports TrueColor depth.
+        let true_term = Terminal::new_optimistic(80);
+        let painted_true = DarkmatterPage::new(&true_term)
+            .with_page_color(PaintColor::new(Color::Tailwind(Tailwind::Red500)))
+            .render(&md)
+            .unwrap();
+
         assert_ne!(
-            painted, no_policy,
-            "test premise: the captured None depth must change painted output",
+            painted_none, painted_true,
+            "painting construction color must engage the captured terminal depth",
         );
     }
 
