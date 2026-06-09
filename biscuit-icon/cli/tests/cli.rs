@@ -592,6 +592,20 @@ fn icons_no_filter_lists_offline_only() {
         .stdout(predicate::str::contains("ic:baseline-apple"));
 }
 
+#[test]
+fn bare_invocation_dispatches_default_icons_command() {
+    let home = tempfile::tempdir().unwrap();
+    // No subcommand and no filter must still run the default `icons` command
+    // (listing offline icons), not print help and exit.
+    Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", "http://127.0.0.1:1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ic:baseline-apple"));
+}
+
 #[tokio::test]
 async fn icons_direct_lookup_fetches_and_caches() {
     let server = MockServer::start().await;
@@ -841,12 +855,31 @@ async fn sets_shows_unknown_for_missing_total() {
     assert!(stdout.contains("Unknown"), "expected 'Unknown' for missing total; got: {}", stdout);
 }
 
+/// Returns the trailing (`Cached`) cell of the table row whose `Prefix` cell
+/// equals `prefix`. The four-column rows are `Set │ Prefix │ Total │ Cached`,
+/// so the last non-empty cell of a bordered row is its cached count. ANSI
+/// styling (the alternating-row stripe) is stripped before parsing.
+fn cached_cell(stdout: &str, prefix: &str) -> String {
+    let plain = biscuit_test_harness::strip_ansi(stdout);
+    let row = plain
+        .lines()
+        .find(|l| l.contains('│') && l.split('│').any(|c| c.trim() == prefix))
+        .unwrap_or_else(|| panic!("row for prefix {prefix:?} not found in:\n{plain}"));
+    row.split('│')
+        .map(str::trim)
+        .rfind(|c| !c.is_empty())
+        .unwrap_or_else(|| panic!("no cells in row {row:?}"))
+        .to_string()
+}
+
 #[tokio::test]
 async fn sets_shows_cached_counts() {
     let server = MockServer::start().await;
+    // Shared "acme" token so a single filter matches exactly these two sets and
+    // no built-in prefix, keeping the rendered table deterministic.
     let json = serde_json::json!({
-        "test": { "name": "Test Set", "total": 100 },
-        "empty": { "name": "Empty Set", "total": 50 }
+        "acme-full": { "name": "Acme Full", "total": 100 },
+        "acme-empty": { "name": "Acme Empty", "total": 50 }
     });
     Mock::given(method("GET"))
         .and(path("/collections"))
@@ -855,28 +888,93 @@ async fn sets_shows_cached_counts() {
         .await;
 
     let home = tempfile::tempdir().unwrap();
-    // Pre-seed the cache with icons for the "test" prefix only.
+    // Pre-seed the cache with three icons for "acme-full" and none for "acme-empty".
     {
         let cache_dir = home.path().join(".cache").join("biscuit-icon");
         std::fs::create_dir_all(&cache_dir).unwrap();
         let cache = biscuit_icon::cache::IconCache::open_at(cache_dir.join("icons.db")).unwrap();
-        cache.put("test", "icon1", &biscuit_icon::IconBody::new("<path/>", 24, 24)).unwrap();
-        cache.put("test", "icon2", &biscuit_icon::IconBody::new("<path/>", 24, 24)).unwrap();
-        cache.put("test", "icon3", &biscuit_icon::IconBody::new("<path/>", 24, 24)).unwrap();
+        cache.put("acme-full", "icon1", &biscuit_icon::IconBody::new("<path/>", 24, 24)).unwrap();
+        cache.put("acme-full", "icon2", &biscuit_icon::IconBody::new("<path/>", 24, 24)).unwrap();
+        cache.put("acme-full", "icon3", &biscuit_icon::IconBody::new("<path/>", 24, 24)).unwrap();
     }
 
     let output = Command::cargo_bin("icon")
         .unwrap()
         .env("HOME", home.path())
         .env("ICONIFY_BASE_URL", server.uri())
-        .args(["sets"])
+        // Force a single, tall table so both rows render and can be parsed.
+        .env("BISCUIT_TERM_WIDTH", "70")
+        .env("BISCUIT_TERM_HEIGHT", "20")
+        .args(["sets", "acme"])
         .output()
         .unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("Test Set"), "expected Test Set; got: {}", stdout);
-    assert!(stdout.contains("Empty Set"), "expected Empty Set; got: {}", stdout);
-    // "test" has 3 cached icons, "empty" has 0.
-    assert!(stdout.contains('3'), "expected cached count 3 for test; got: {}", stdout);
+    assert!(stdout.contains("Acme Full"), "expected Acme Full; got: {}", stdout);
+    assert!(stdout.contains("Acme Empty"), "expected Acme Empty; got: {}", stdout);
+    assert_eq!(
+        cached_cell(&stdout, "acme-full"),
+        "3",
+        "acme-full row should show Cached = 3; got:\n{stdout}"
+    );
+    assert_eq!(
+        cached_cell(&stdout, "acme-empty"),
+        "0",
+        "acme-empty row should show Cached = 0; got:\n{stdout}"
+    );
+}
+
+#[tokio::test]
+async fn sets_online_success_with_no_match_errors() {
+    let server = MockServer::start().await;
+    let json = serde_json::json!({
+        "mdi": { "name": "Material Design", "total": 7000 }
+    });
+    Mock::given(method("GET"))
+        .and(path("/collections"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .mount(&server)
+        .await;
+
+    let home = tempfile::tempdir().unwrap();
+    // The fetch succeeds but the filter matches no online, built-in, or cached
+    // set. The command must error rather than print a header-only empty table.
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .args(["sets", "zzznomatch"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "expected non-zero exit for no match");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(!stdout.contains('│'), "expected no table to be rendered; got:\n{stdout}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("no icon sets match"),
+        "expected no-match error; got:\n{stderr}"
+    );
+}
+
+#[tokio::test]
+async fn sets_offline_with_no_match_errors() {
+    let home = tempfile::tempdir().unwrap();
+    // Network is unreachable and no built-in or cached set matches the filter,
+    // so the established offline error contract applies.
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", "http://127.0.0.1:1")
+        .args(["sets", "zzznomatch"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "expected non-zero exit when offline with no match");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(!stdout.contains('│'), "expected no table to be rendered; got:\n{stdout}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("no offline set listings available"),
+        "expected offline no-result error; got:\n{stderr}"
+    );
 }
 
 #[tokio::test]

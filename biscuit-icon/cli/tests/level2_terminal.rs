@@ -299,6 +299,187 @@ fn level2_listing_includes_multiple_names() {
 }
 
 // ------------------------------------------------------------------
+// `sets` table layout
+// ------------------------------------------------------------------
+
+/// Seeds an isolated `$HOME` cache with set metadata so an offline `icon sets`
+/// run renders deterministic rows. `cached` seeds N icon rows per prefix so the
+/// `Cached` column has known values.
+fn seed_sets(
+    home: &std::path::Path,
+    sets: &[(&str, &str, Option<usize>)],
+    cached: &[(&str, usize)],
+) {
+    let cache_dir = home.join(".cache").join("biscuit-icon");
+    std::fs::create_dir_all(&cache_dir).unwrap();
+    let cache = biscuit_icon::cache::IconCache::open_at(cache_dir.join("icons.db")).unwrap();
+    for (prefix, title, total) in sets {
+        cache
+            .put_set(&biscuit_icon::cache::SetInfo {
+                prefix: (*prefix).into(),
+                title: (*title).into(),
+                license: None,
+                license_title: None,
+                license_url: None,
+                total: *total,
+            })
+            .unwrap();
+    }
+    for (prefix, count) in cached {
+        for i in 0..*count {
+            cache
+                .put(prefix, &format!("icon{i}"), &biscuit_icon::IconBody::new("<path/>", 24, 24))
+                .unwrap();
+        }
+    }
+}
+
+/// Runs `icon sets <filter>` against an isolated, offline cache at a fixed
+/// terminal size so the chosen layout is deterministic.
+fn run_sets(
+    harness: &mut TmuxHarness,
+    home: &std::path::Path,
+    filter: &str,
+    width: u32,
+    height: u32,
+) -> CapturedFrame {
+    // Invoke the freshly-built binary by absolute path: a globally-installed
+    // `icon` earlier on `$PATH` would otherwise shadow it and run stale code.
+    let cmd = format!(
+        "HOME='{}' ICONIFY_BASE_URL='http://127.0.0.1:1' \
+         BISCUIT_TERM_WIDTH={width} BISCUIT_TERM_HEIGHT={height} '{}' sets {filter}\n",
+        home.display(),
+        icon_bin().display(),
+    );
+    harness.send_text(cmd.as_bytes()).expect("send_text failed");
+    let _ = wait_for_prompt(harness);
+    harness.capture().expect("capture failed")
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_sets_single_table_renders() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+    harness.send_text(b"clear\n").expect("clear failed");
+    harness.settle();
+
+    let home = tempfile::tempdir().unwrap();
+    // The "zz" token matches no built-in prefix, so only these rows appear.
+    seed_sets(
+        home.path(),
+        &[
+            ("zzalpha", "ZZ Alpha", None),
+            ("zzbeta", "ZZ Beta", Some(42)),
+            ("zztest", "ZZ Test", Some(1_234_567)),
+        ],
+        &[("zzbeta", 2)],
+    );
+
+    // 70 cols < MIN_SPLIT_WIDTH and 20 rows of height keep a single table.
+    let frame = run_sets(harness, home.path(), "zz", 70, 20);
+
+    assert!(
+        frame.plain.contains('│') && frame.plain.contains('─'),
+        "expected box-drawing borders in real terminal; got:\n{}",
+        frame.plain
+    );
+
+    // Headers render left-to-right in column order.
+    let header = frame
+        .plain
+        .lines()
+        .find(|l| {
+            l.contains("Set") && l.contains("Prefix") && l.contains("Total") && l.contains("Cached")
+        })
+        .unwrap_or_else(|| panic!("header row not found in:\n{}", frame.plain));
+    let pos = |needle: &str| header.find(needle).expect("header column present");
+    assert!(
+        pos("Set") < pos("Prefix") && pos("Prefix") < pos("Total") && pos("Total") < pos("Cached"),
+        "columns out of order in header: {header:?}",
+    );
+
+    // The large total is rendered with thousands separators in the real terminal.
+    assert!(
+        frame.plain.contains("1,234,567"),
+        "expected thousands-separated total; got:\n{}",
+        frame.plain
+    );
+
+    // The second data row (zzbeta) carries an alternating-row background SGR.
+    let raw_lines: Vec<&str> = frame.raw.lines().collect();
+    let striped = frame
+        .plain
+        .lines()
+        .enumerate()
+        .find(|(_, p)| p.contains('│') && p.contains("zzbeta"))
+        .and_then(|(i, _)| raw_lines.get(i).map(|r| (*r).to_string()))
+        .unwrap_or_else(|| panic!("striped zzbeta row not found in:\n{}", frame.plain));
+    assert!(
+        striped.contains("\x1b[48;2;")
+            || striped.contains("\x1b[48:2:")
+            || striped.contains("\x1b[48;5;"),
+        "expected alternating-row background SGR; raw row: {striped:?}",
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_sets_split_table_renders() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+    harness.send_text(b"clear\n").expect("clear failed");
+    harness.settle();
+
+    let home = tempfile::tempdir().unwrap();
+    let seeded: Vec<(String, String, Option<usize>)> = (0..6)
+        .map(|i| (format!("zz{i}"), format!("ZZ {i}"), Some(i * 100)))
+        .collect();
+    let seeded_refs: Vec<(&str, &str, Option<usize>)> = seeded
+        .iter()
+        .map(|(p, t, total)| (p.as_str(), t.as_str(), *total))
+        .collect();
+    seed_sets(home.path(), &seeded_refs, &[]);
+
+    // Wide enough for two tables, short enough that 6 rows exceed the budget.
+    let frame = run_sets(harness, home.path(), "zz", 110, 6);
+
+    // Two tables side by side: a header-rule line carries both an inner-right
+    // tee (end of the left table) and an inner-left tee (start of the right).
+    assert!(
+        frame.plain.lines().any(|l| l.contains('┤') && l.contains('├')),
+        "expected side-by-side split layout; got:\n{}",
+        frame.plain
+    );
+
+    for i in 0..6 {
+        assert!(
+            frame.plain.contains(&format!("zz{i}")),
+            "expected zz{i} in split output; got:\n{}",
+            frame.plain
+        );
+    }
+
+    // Column-major split: zz0 (top of left table) and zz3 (top of right table)
+    // share the first data row, with zz0 to the left of zz3.
+    let first_row = frame
+        .plain
+        .lines()
+        .find(|l| l.contains("zz0") && l.contains("zz3"))
+        .unwrap_or_else(|| panic!("expected zz0 and zz3 on one row; got:\n{}", frame.plain));
+    assert!(
+        first_row.find("zz0").unwrap() < first_row.find("zz3").unwrap(),
+        "expected column-major order (zz0 left of zz3): {first_row:?}",
+    );
+}
+
+// ------------------------------------------------------------------
 // Styled errors
 // ------------------------------------------------------------------
 
