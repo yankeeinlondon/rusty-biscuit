@@ -62,6 +62,7 @@ async fn browser_code_block_background_computes_in_browser() {
         bg, "rgb(255, 255, 255)",
         "browser-computed .code-block background-color should be the inverted (github-light) panel color",
     );
+    harness.shutdown().await;
 }
 
 /// Renders a `style: waves` thematic break to a browser-renderer HTML fragment
@@ -145,6 +146,7 @@ async fn browser_hr_waves_svg_computes_in_browser() {
             "{mode:?}: waves <path> must parse into the DOM with a resolved stroke-width; got {stroke:?}",
         );
     }
+    harness.shutdown().await;
 }
 
 /// Renders an aligned narrow rule and returns its browser-resolved
@@ -228,6 +230,7 @@ async fn browser_hr_alignment_positions_narrow_rule() {
         (w - 1.0).abs() < 0.02,
         "full rule must fill the containing block (~100%), not the authored 50%; got width ratio {w}",
     );
+    harness.shutdown().await;
 }
 
 /// Renders a thematic break whose `width` / `color` hints carry hostile
@@ -302,6 +305,7 @@ async fn browser_hr_hostile_attrs_inject_no_nodes() {
             "hostile HR hint injected a <{injected}> node into the DOM",
         );
     }
+    harness.shutdown().await;
 }
 
 /// Review-3 finding 2: browser Mermaid at `Rich` with promotion enabled must
@@ -343,6 +347,7 @@ async fn browser_mermaid_static_svg_computes_in_browser() {
         display != "<no-match>",
         "promoted Mermaid <svg> must exist as DOM in the browser; got {display:?}",
     );
+    harness.shutdown().await;
 }
 
 /// Folds a `mermaid` fence to a render tree and renders it through the browser
@@ -416,6 +421,7 @@ async fn browser_mermaid_tree_path_static_svg_computes_in_browser() {
         display != "<no-match>",
         "tree-path promoted Mermaid <svg> must exist as DOM in the browser; got {display:?}",
     );
+    harness.shutdown().await;
 }
 
 /// A hostile SVG, as if a future `mermaid-rs-renderer` path (or an unescaped
@@ -486,6 +492,7 @@ async fn browser_sanitized_mermaid_svg_injects_no_active_markup() {
             "sanitizer let a <{injected}> node into the DOM",
         );
     }
+    harness.shutdown().await;
 }
 
 /// A hostile SVG that smuggles external references through CSS surfaces rather
@@ -548,6 +555,7 @@ async fn browser_sanitized_mermaid_svg_strips_external_css_references() {
         !rect_filter.contains("attacker"),
         "external filter reference reached the DOM; got {rect_filter:?}",
     );
+    harness.shutdown().await;
 }
 
 /// Review-5 finding 2 (fidelity): sanitizing a *real* promoted Mermaid diagram
@@ -668,6 +676,7 @@ async fn browser_component_blockquote_bg_opacity_computes_rgba() {
         bg, "rgba(255, 0, 0, 0.5)",
         "component bg-color opacity must compute to rgba in a real browser; got {bg}",
     );
+    harness.shutdown().await;
 }
 
 /// A component `color` must compute to the declared `rgb(...)` in a real browser.
@@ -691,6 +700,7 @@ async fn browser_component_table_color_computes_rgb() {
         color, "rgb(255, 0, 0)",
         "component color must compute to rgb in a real browser; got {color}",
     );
+    harness.shutdown().await;
 }
 
 /// A percentage page `max-width` must be accepted by the browser and resolved
@@ -719,6 +729,7 @@ async fn browser_page_max_width_percent_computes_against_viewport() {
     if max_width.ends_with("px") {
         assert!(px(&max_width) > 0.0, "resolved max-width must be positive; got {max_width}");
     }
+    harness.shutdown().await;
 }
 
 /// Review-2 finding (High) — "add a browser-tier computed-style test for a
@@ -764,6 +775,7 @@ async fn browser_component_table_width_percent_resolves_against_container() {
              block (page max-width {page_max}); got ratio {ratio}",
         );
     }
+    harness.shutdown().await;
 }
 
 /// A centered table (`alignment: center` + `max-width`) must compute equal,
@@ -790,6 +802,7 @@ async fn browser_table_center_alignment_computes_equal_margins() {
         .expect("computed style query");
     assert_eq!(left, right, "centered table must have equal auto margins; got {left} / {right}");
     assert!(px(&left) > 0.0, "centered table margins must be non-zero; got {left}");
+    harness.shutdown().await;
 }
 
 /// Review-4 finding (High) — "Browser page max-width centering". A page
@@ -833,6 +846,7 @@ async fn browser_page_max_width_centers_frame() {
         max_width.ends_with("px") && px(&max_width) > 0.0,
         "page max-width must resolve to a positive used px width; got {max_width}",
     );
+    harness.shutdown().await;
 }
 
 /// Review-1 finding 2: a per-image `style='color: blue;'` title directive must
@@ -872,6 +886,7 @@ async fn browser_local_image_per_node_css_overrides_frontmatter() {
         title, "<no-match>",
         "raw `style='...'` directive must not survive as an HTML title attribute",
     );
+    harness.shutdown().await;
 }
 
 /// Review-1 finding 3: a page-level `color` must inherit, in a real browser, to
@@ -902,6 +917,7 @@ async fn browser_page_color_inherits_to_descendants() {
             "{selector} must inherit the page foreground in a real browser; got {color}",
         );
     }
+    harness.shutdown().await;
 }
 
 /// Review-1 finding 3: with only a page color set, a component (table) must not
@@ -927,6 +943,7 @@ async fn browser_page_color_not_copied_onto_component() {
         color, "rgb(251, 44, 54)",
         "table must inherit the page color (not a copied per-component value); got {color}",
     );
+    harness.shutdown().await;
 }
 
 /// Review-2: a translucent page background must be painted **only** by the page
@@ -972,6 +989,7 @@ async fn browser_translucent_page_background_painted_only_by_frame() {
             "{selector} must not carry a copied page background; got {bg}",
         );
     }
+    harness.shutdown().await;
 }
 
 /// A list `left-margin` must compute to a non-zero px margin in a real browser.
@@ -995,4 +1013,5 @@ async fn browser_list_left_margin_computes() {
         margin_left.ends_with("px") && px(&margin_left) > 0.0,
         "list left-margin must compute to a non-zero px margin; got {margin_left}",
     );
+    harness.shutdown().await;
 }

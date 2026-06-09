@@ -161,6 +161,44 @@ let status = Status::from_prose("this is a <b>test</b>")
     .state(StatusState::Success);
 ```
 
+### Prose in Table Cells
+
+`TableCellContent::StyledProse(Box<Prose>)` lets a [`Table`](../../lib/src/components/table/README.md)
+cell carry inline Prose without pre-rendering it to terminal bytes during
+construction. Build a cell with `Prose::new(...).into()`:
+
+```rust
+use biscuit_terminal::prelude::*;
+use biscuit_terminal::components::table::{Table, TableColumn};
+
+let table = Table::new()
+    .with_columns(vec![TableColumn::new("Feature"), TableColumn::new("Status")])
+    .with_data(vec![vec![
+        Prose::new("**Bold** feature").into(),
+        Prose::new("[docs](https://example.com) — _ready_").into(),
+    ]]);
+```
+
+Resolution is target-aware and follows the same render tree the standalone Prose
+component uses:
+
+- **Render tree** (Browser/Markdown, and the terminal tree path) — the cell
+  projects Prose's parsed inline `RenderNode` children directly via
+  `Prose::to_render_nodes()`, so semantic emphasis, links, and supported style
+  attributes survive into `<td>` and into the GFM/MarkdownPlus table cell. A
+  top-level fenced-code child degrades to escaped literal text so the projected
+  table still passes render-tree validation.
+- **Terminal bespoke path** — each `StyledProse` cell resolves to
+  `Text(prose.render(term))` exactly **once**, before width planning, so the
+  ANSI-aware table machinery measures by visible width and styles never bleed
+  into borders, padding, or adjacent rows.
+
+**Table-owned layout rule.** Prose's own outer `Layout` (margins, alignment,
+word-wrap) is intentionally *not* promoted to nested cell layout — the table
+owns all cell geometry. Only Prose's inline content participates in the cell;
+column width, alignment, and wrapping come from the `TableColumn`. The cell hint
+records `kind == "styled_prose"` with a null `raw_value`.
+
 ### Key API
 
 | Method | Description |

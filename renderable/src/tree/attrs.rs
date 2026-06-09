@@ -642,7 +642,7 @@ pub struct TableColumnHints {
 /// ```
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct TableCellHints {
-    /// Cell kind: `"text"`, `"integer"`, `"float"`, or `"currency"`.
+    /// Cell kind: `"text"`, `"integer"`, `"float"`, `"currency"`, or `"styled_prose"`.
     pub kind: String,
     /// The original typed value, preserved as JSON.
     pub raw_value: serde_json::Value,
