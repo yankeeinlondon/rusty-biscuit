@@ -51,10 +51,39 @@
 //!   no longer leaks into the browser alt, honoring "source content is never
 //!   mutated during construction."
 //!
-//! The terminal characterization snapshots (`char_hyperlink_*`,
-//! `char_list_item_*`) and `char_terminal_drops_component_alpha` are unchanged:
-//! width-dependent text layout and alpha degradation already match the typed
+//! At Phase 8 the terminal characterization snapshots (`char_hyperlink_*`,
+//! `char_list_item_*`) and `char_terminal_drops_component_alpha` were unchanged:
+//! width-dependent text layout and alpha degradation already matched the typed
 //! `TextLayoutHints` / `PaintColor` resolution.
+//!
+//! ## Tree-closeout review: re-baselined terminal snapshots (accepted)
+//!
+//! Two later tree-closeout fixes deliberately decoupled page *capabilities* and
+//! *content width* from component-policy presence, keying both on page-frame
+//! geometry alone (`DarkmatterPage::render`, review-2 finding 2 / review-5
+//! finding 1):
+//!
+//! - `fix(darkmatter): gate page-frame width cap on frame geometry` — a page
+//!   carrying only component `style:` (no margin/padding/max-width) resolves its
+//!   content box at the **ambient** width, not the captured frame width.
+//! - `fix(darkmatter): reuse owned render tree across page probe and fold` —
+//!   `optimistic_capabilities` (TrueColor + OSC8) is now selected by frame
+//!   geometry alone, never by a matched component policy.
+//!
+//! These re-baselined three of the terminal snapshots, all accepted as intended:
+//!
+//! - **`char_hyperlink_exact_width` / `char_hyperlink_max_width`**: the
+//!   component-only `hyperlinks.*` page has no frame geometry, so it no longer
+//!   promotes the document to OSC8. The padded/truncated label is unchanged
+//!   (`TextLayoutHints` still apply); only the link emission degrades to the
+//!   non-OSC8 `[label](url)` markdown fallback the ambient terminal advertises.
+//! - **`char_list_item_right_alignment` / `char_list_item_center_alignment`**:
+//!   the component-only `li.*` page resolves at the ambient content width rather
+//!   than the captured frame width, so right/center placement pads against the
+//!   wider ambient field (right padding stays exactly twice the center padding).
+//!
+//! `char_terminal_drops_component_alpha` is still unchanged — both its renders
+//! shift identically, so the equality it asserts holds.
 //!
 //! ## Known stale snapshots (do not "fix" here)
 //!
