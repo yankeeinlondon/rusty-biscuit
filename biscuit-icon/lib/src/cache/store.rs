@@ -51,7 +51,14 @@ impl IconCache {
             .unwrap_or(0);
 
         if version < 1 {
-            conn.execute_batch(
+            // The whole v0→v1 step — table creation, origin conversion, column
+            // drops, and the version bump — runs in one transaction so a
+            // failure mid-migration rolls back to v0 rather than advertising a
+            // partially-migrated schema. `user_version` is part of the database
+            // header and is itself transactional.
+            let tx = conn.transaction().map_err(map_sql)?;
+
+            tx.execute_batch(
                 r#"
                 CREATE TABLE IF NOT EXISTS icons (
                     prefix     TEXT NOT NULL,
@@ -80,7 +87,7 @@ impl IconCache {
             .map_err(map_sql)?;
 
             // Migrate from previous schema: inspect columns and adapt.
-            let cols: Vec<String> = conn
+            let cols: Vec<String> = tx
                 .prepare("PRAGMA table_info(icons)")
                 .map_err(map_sql)?
                 .query_map([], |row| row.get::<_, String>(1))
@@ -93,17 +100,16 @@ impl IconCache {
             let has_top = cols.contains(&"top".to_string());
 
             if !has_left {
-                conn.execute("ALTER TABLE icons ADD COLUMN left INTEGER NOT NULL DEFAULT 0", [])
+                tx.execute("ALTER TABLE icons ADD COLUMN left INTEGER NOT NULL DEFAULT 0", [])
                     .map_err(map_sql)?;
             }
             if !has_top {
-                conn.execute("ALTER TABLE icons ADD COLUMN top INTEGER NOT NULL DEFAULT 0", [])
+                tx.execute("ALTER TABLE icons ADD COLUMN top INTEGER NOT NULL DEFAULT 0", [])
                     .map_err(map_sql)?;
             }
 
             if has_view_box {
-                let tx = conn.transaction().map_err(map_sql)?;
-                {
+                let updates: Vec<(i64, i32, i32)> = {
                     let mut stmt = tx
                         .prepare("SELECT rowid, view_box FROM icons")
                         .map_err(map_sql)?;
@@ -112,31 +118,28 @@ impl IconCache {
                             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
                         })
                         .map_err(map_sql)?;
-                    let updates: Vec<(i64, i32, i32)> = rows
-                        .map(|r| {
-                            let (rowid, view_box) = r?;
-                            let mut parts = view_box.split_whitespace();
-                            let left = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                            let top = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-                            Ok((rowid, left, top))
-                        })
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                        .map_err(map_sql)?;
-                    drop(stmt);
-                    for (rowid, left, top) in updates {
-                        tx.execute(
-                            "UPDATE icons SET left = ?1, top = ?2 WHERE rowid = ?3",
-                            params![left, top, rowid],
-                        )
-                        .map_err(map_sql)?;
-                    }
+                    rows.map(|r| {
+                        let (rowid, view_box) = r?;
+                        let mut parts = view_box.split_whitespace();
+                        let left = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                        let top = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                        Ok((rowid, left, top))
+                    })
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(map_sql)?
+                };
+                for (rowid, left, top) in updates {
+                    tx.execute(
+                        "UPDATE icons SET left = ?1, top = ?2 WHERE rowid = ?3",
+                        params![left, top, rowid],
+                    )
+                    .map_err(map_sql)?;
                 }
-                tx.commit().map_err(map_sql)?;
-                conn.execute("ALTER TABLE icons DROP COLUMN view_box", [])
+                tx.execute("ALTER TABLE icons DROP COLUMN view_box", [])
                     .map_err(map_sql)?;
             }
 
-            let set_cols: Vec<String> = conn
+            let set_cols: Vec<String> = tx
                 .prepare("PRAGMA table_info(sets)")
                 .map_err(map_sql)?
                 .query_map([], |row| row.get::<_, String>(1))
@@ -144,16 +147,17 @@ impl IconCache {
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(map_sql)?;
             if !set_cols.contains(&"license_title".to_string()) {
-                conn.execute("ALTER TABLE sets ADD COLUMN license_title TEXT", [])
+                tx.execute("ALTER TABLE sets ADD COLUMN license_title TEXT", [])
                     .map_err(map_sql)?;
             }
             if !set_cols.contains(&"license_url".to_string()) {
-                conn.execute("ALTER TABLE sets ADD COLUMN license_url TEXT", [])
+                tx.execute("ALTER TABLE sets ADD COLUMN license_url TEXT", [])
                     .map_err(map_sql)?;
             }
 
-            conn.execute_batch("PRAGMA user_version = 1;")
+            tx.execute_batch("PRAGMA user_version = 1;")
                 .map_err(map_sql)?;
+            tx.commit().map_err(map_sql)?;
         }
 
         if version < 2 {
@@ -750,6 +754,75 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(version, 2);
+    }
+
+    #[test]
+    fn v1_migration_rolls_back_on_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("icons.db");
+
+        // A v0 database whose `view_box` column is indexed. SQLite refuses to
+        // `DROP COLUMN` an indexed column, so the v0→v1 step fails partway
+        // through (after the `left`/`top` columns are added and origins are
+        // converted). This proves the whole step is one transaction.
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE icons (
+                    prefix     TEXT NOT NULL,
+                    name       TEXT NOT NULL,
+                    body       TEXT NOT NULL,
+                    view_box   TEXT NOT NULL,
+                    width      INTEGER,
+                    height     INTEGER,
+                    fetched_at TEXT NOT NULL,
+                    PRIMARY KEY (prefix, name)
+                );
+                CREATE INDEX idx_icons_view_box ON icons(view_box);
+                CREATE TABLE sets (
+                    prefix      TEXT PRIMARY KEY,
+                    title       TEXT,
+                    license     TEXT,
+                    fetched_at  TEXT NOT NULL
+                );
+                PRAGMA user_version = 0;
+                "#,
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO icons (prefix, name, body, view_box, width, height, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params!["mdi", "home", "<path/>", "10 20 32 32", 32, 32, "2024-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        }
+
+        let result = IconCache::open_at(&path);
+        assert!(result.is_err(), "migration should fail when view_box cannot be dropped");
+
+        // Rollback must leave both schema and version exactly as they were.
+        let conn = Connection::open(&path).unwrap();
+        let version: i32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 0, "user_version must stay at 0 after a rolled-back migration");
+
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(icons)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(cols.contains(&"view_box".to_string()), "view_box must survive rollback");
+        assert!(!cols.contains(&"left".to_string()), "added left column must roll back");
+        assert!(!cols.contains(&"top".to_string()), "added top column must roll back");
+
+        // The original row data must be intact.
+        let body: String = conn
+            .query_row("SELECT body FROM icons WHERE prefix = 'mdi'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(body, "<path/>");
     }
 
     #[test]
