@@ -135,86 +135,147 @@ pub fn effect_descriptors() -> &'static [EffectDescriptor] {
     EFFECT_DESCRIPTORS
 }
 
+/// One invocable side-effect verb: its canonical signature and a thin adapter
+/// that exercises the real [`EffectEngine`] method behind it.
+///
+/// Effects have no string dispatcher — they are typed methods on
+/// `EffectEngine`. This registry is the authoritative set of *dispatchable
+/// verbs*: each `exercise` closure calls the real method (so a renamed or
+/// removed verb fails to compile), and the descriptor catalog must match it
+/// signature-for-signature (enforced by
+/// `verb_signature_set_equals_descriptor_signature_set`). Adding a verb here
+/// without a descriptor — or a descriptor without a verb — fails that test.
+pub struct EffectVerb {
+    /// Canonical signature including arity; matches an [`EffectDescriptor`].
+    pub signature: &'static str,
+    /// Invokes the verb against a prepared sandbox engine, returning the verb's
+    /// value (or, for `http_post`, `null` once the deny-all allowlist refuses
+    /// it). Returning `Err` means the verb is unreachable.
+    pub exercise: fn(&super::EffectEngine) -> Result<serde_json::Value, super::EffectError>,
+}
+
+/// The authoritative table of dispatchable side-effect verbs.
+pub const EFFECT_VERBS: &[EffectVerb] = &[
+    EffectVerb {
+        signature: "set_frontmatter(file, prop, value)",
+        exercise: |e| e.set_frontmatter("d.md", "status", serde_json::json!("x")),
+    },
+    EffectVerb {
+        signature: "merge_frontmatter(file, obj)",
+        exercise: |e| e.merge_frontmatter("d.md", serde_json::json!({"k": 1})),
+    },
+    EffectVerb {
+        signature: "delete_frontmatter(file, prop)",
+        exercise: |e| e.delete_frontmatter("d.md", "owner"),
+    },
+    EffectVerb {
+        signature: "increment_frontmatter(file, prop)",
+        exercise: |e| e.increment_frontmatter("d.md", "phase"),
+    },
+    EffectVerb {
+        signature: "decrement_frontmatter(file, prop)",
+        exercise: |e| e.decrement_frontmatter("d.md", "phase"),
+    },
+    EffectVerb {
+        signature: "append_frontmatter(file, prop, value)",
+        exercise: |e| e.append_frontmatter("d.md", "tags", serde_json::json!("b")),
+    },
+    EffectVerb {
+        signature: "prepend_frontmatter(file, prop, value)",
+        exercise: |e| e.prepend_frontmatter("d.md", "tags", serde_json::json!("z")),
+    },
+    EffectVerb {
+        signature: "ensure_file(file)",
+        exercise: |e| e.ensure_file("new.txt").map(serde_json::Value::String),
+    },
+    EffectVerb {
+        signature: "ensure_file(file, content)",
+        exercise: |e| {
+            e.ensure_file_with_content("new2.txt", "x")
+                .map(serde_json::Value::String)
+        },
+    },
+    EffectVerb {
+        signature: "ensure_dir(dir)",
+        exercise: |e| e.ensure_dir("sub").map(serde_json::Value::String),
+    },
+    EffectVerb {
+        signature: "append_line(file, text)",
+        exercise: |e| e.append_line("log.txt", "x").map(serde_json::Value::String),
+    },
+    EffectVerb {
+        signature: "append_jsonl(file, obj)",
+        exercise: |e| {
+            e.append_jsonl("log.jsonl", serde_json::json!({"k": 1}))
+                .map(serde_json::Value::String)
+        },
+    },
+    EffectVerb {
+        signature: "http_post(url, body)",
+        // Reachable, but the deny-all allowlist refuses it before any network
+        // access. A refusal proves reachability; any other error is a failure.
+        exercise: |e| match e.http_post("https://example.com/hook", b"{}".to_vec()) {
+            Err(super::EffectError::HostNotAllowed(_)) => Ok(serde_json::Value::Null),
+            other => other,
+        },
+    },
+];
+
+/// Returns all dispatchable side-effect verbs.
+pub fn effect_verbs() -> &'static [EffectVerb] {
+    EFFECT_VERBS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::{EffectEngine, EffectError};
-    use serde_json::json;
+    use crate::effects::EffectEngine;
+    use std::collections::HashSet;
 
-    /// Every descriptor signature must map to a real, reachable
-    /// [`EffectEngine`] verb.
+    /// Exact, bidirectional parity between the verb registry and the
+    /// descriptor catalog.
     ///
-    /// Effects have no string dispatcher — they are typed methods on
-    /// `EffectEngine` — so there is no name registry to enumerate. Instead of
-    /// comparing two hand-maintained signature lists, this test *invokes* the
-    /// verb behind each descriptor against a sandbox mutation root. A descriptor
-    /// whose verb was renamed or removed fails to compile or to run; a new
-    /// descriptor with no exercised verb hits the `_` arm and fails. The verb
-    /// behind a signature is the source of truth; the descriptor only documents
-    /// it.
+    /// [`EFFECT_VERBS`] is the authoritative set of dispatchable verbs (each
+    /// entry calls a real `EffectEngine` method), so set equality fails in
+    /// *both* directions: adding a verb without a descriptor, or a descriptor
+    /// (including a new overload) without a verb.
     #[test]
-    fn every_descriptor_signature_maps_to_a_reachable_verb() {
+    fn verb_signature_set_equals_descriptor_signature_set() {
+        let verbs: HashSet<&str> = EFFECT_VERBS.iter().map(|v| v.signature).collect();
+        let descriptors: HashSet<&str> =
+            EFFECT_DESCRIPTORS.iter().map(|d| d.signature).collect();
+
+        let verbs_without_descriptors: Vec<_> = verbs.difference(&descriptors).collect();
+        let descriptors_without_verbs: Vec<_> = descriptors.difference(&verbs).collect();
+
+        assert!(
+            verbs_without_descriptors.is_empty(),
+            "verbs without descriptors: {verbs_without_descriptors:?}"
+        );
+        assert!(
+            descriptors_without_verbs.is_empty(),
+            "descriptors without verbs: {descriptors_without_verbs:?}"
+        );
+    }
+
+    /// Every registered verb must invoke a real, reachable `EffectEngine`
+    /// method. A verb whose method was renamed or removed fails to compile or
+    /// to run against the sandbox. The deny-all allowlist refuses `http_post`
+    /// before any network access, so the test performs no I/O off the sandbox.
+    #[test]
+    fn every_verb_maps_to_a_reachable_method() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::write(
             dir.path().join("d.md"),
             "---\nphase: 1\ntags: [a]\nowner: ken\n---\nBody\n",
         )
         .unwrap();
-        // Deny-all allowlist (the default): `http_post` is reachable but is
-        // refused before any network access, so the test performs no I/O off
-        // the sandbox.
         let eng = EffectEngine::builder().mutation_root(dir.path()).build();
 
-        for desc in EFFECT_DESCRIPTORS {
-            match desc.signature {
-                "set_frontmatter(file, prop, value)" => {
-                    eng.set_frontmatter("d.md", "status", json!("x")).unwrap();
-                }
-                "merge_frontmatter(file, obj)" => {
-                    eng.merge_frontmatter("d.md", json!({"k": 1})).unwrap();
-                }
-                "delete_frontmatter(file, prop)" => {
-                    eng.delete_frontmatter("d.md", "owner").unwrap();
-                }
-                "increment_frontmatter(file, prop)" => {
-                    eng.increment_frontmatter("d.md", "phase").unwrap();
-                }
-                "decrement_frontmatter(file, prop)" => {
-                    eng.decrement_frontmatter("d.md", "phase").unwrap();
-                }
-                "append_frontmatter(file, prop, value)" => {
-                    eng.append_frontmatter("d.md", "tags", json!("b")).unwrap();
-                }
-                "prepend_frontmatter(file, prop, value)" => {
-                    eng.prepend_frontmatter("d.md", "tags", json!("z")).unwrap();
-                }
-                "ensure_file(file)" => {
-                    eng.ensure_file("new.txt").unwrap();
-                }
-                "ensure_file(file, content)" => {
-                    eng.ensure_file_with_content("new2.txt", "x").unwrap();
-                }
-                "ensure_dir(dir)" => {
-                    eng.ensure_dir("sub").unwrap();
-                }
-                "append_line(file, text)" => {
-                    eng.append_line("log.txt", "x").unwrap();
-                }
-                "append_jsonl(file, obj)" => {
-                    eng.append_jsonl("log.jsonl", json!({"k": 1})).unwrap();
-                }
-                "http_post(url, body)" => {
-                    // Reachable, but deny-all refuses it before any network hit.
-                    let err = eng.http_post("https://example.com/hook", b"{}").unwrap_err();
-                    assert!(
-                        matches!(err, EffectError::HostNotAllowed(_)),
-                        "http_post must be refused by the deny-all allowlist, not error otherwise: {err:?}"
-                    );
-                }
-                other => panic!(
-                    "descriptor signature has no exercised EffectEngine verb: {other}"
-                ),
-            }
+        for verb in EFFECT_VERBS {
+            (verb.exercise)(&eng).unwrap_or_else(|e| {
+                panic!("verb `{}` is not reachable: {e:?}", verb.signature)
+            });
         }
     }
 

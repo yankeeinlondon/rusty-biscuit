@@ -263,6 +263,7 @@ impl EffectEngine {
 
     /// `http_post(url, body)` -> object with `status` and `body`.
     pub fn http_post(&self, url: &str, body: impl Into<Vec<u8>>) -> Result<Value, EffectError> {
+        crate::effects::record_network_attempt();
         let url = url::Url::parse(url).map_err(|e| EffectError::InvalidUrl(e.to_string()))?;
         let mut policy = FetchPolicy::deny_all();
         for host in self.allowed_hosts() {

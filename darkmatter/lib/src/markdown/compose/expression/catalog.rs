@@ -352,11 +352,24 @@ pub fn expression_function_descriptors() -> &'static [ExpressionFunctionDescript
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::compose::expression::functions::{
+        dispatchable_canonical_names, LAZY_OPERATOR_NAMES,
+    };
     use crate::markdown::compose::expression::{
         evaluate, parse, EvaluationLookup, ResolutionContext,
     };
     use serde_json::Value;
     use std::collections::HashSet;
+
+    /// The canonical function name (text before `(`) of each descriptor.
+    /// Overloaded signatures (e.g. `frontmatter(file)` and
+    /// `frontmatter(file, prop)`) collapse to one name.
+    fn descriptor_canonical_names() -> HashSet<&'static str> {
+        EXPRESSION_FUNCTION_DESCRIPTORS
+            .iter()
+            .map(|d| d.signature.split('(').next().unwrap())
+            .collect()
+    }
 
     /// A lookup that supplies a [`ResolutionContext`] so the filesystem
     /// dispatch surface (`dispatch_fs`) is reachable — without one,
@@ -384,16 +397,56 @@ mod tests {
         evaluate(&expr, lookup).err()
     }
 
+    /// Exact, bidirectional parity between descriptors and the runtime.
+    ///
+    /// The runtime side is [`dispatchable_canonical_names`], which enumerates
+    /// the two dispatch tables [`dispatch`]/[`dispatch_fs`] actually consult
+    /// plus the lazy logical operators — not a list maintained beside the
+    /// dispatcher. Set equality fails in *both* directions:
+    ///
+    /// - adding a callable function (a `PURE_FUNCTIONS`/`FS_FUNCTIONS` entry or
+    ///   a `LAZY_OPERATOR_NAMES` operator) without a descriptor, and
+    /// - adding a descriptor without a callable function.
+    #[test]
+    fn descriptor_name_set_equals_dispatchable_runtime_name_set() {
+        let descriptors = descriptor_canonical_names();
+        let runtime: HashSet<&str> = dispatchable_canonical_names().into_iter().collect();
+
+        let missing_descriptors: Vec<_> = runtime.difference(&descriptors).collect();
+        let extra_descriptors: Vec<_> = descriptors.difference(&runtime).collect();
+
+        assert!(
+            missing_descriptors.is_empty(),
+            "dispatchable functions without descriptors: {missing_descriptors:?}"
+        );
+        assert!(
+            extra_descriptors.is_empty(),
+            "descriptors without a dispatchable function: {extra_descriptors:?}"
+        );
+    }
+
+    /// The lazy logical operators must genuinely resolve at runtime, so their
+    /// presence in `LAZY_OPERATOR_NAMES` (and the parity set above) is real.
+    #[test]
+    fn lazy_operators_are_dispatchable() {
+        let lookup = FsLookup {
+            ctx: ResolutionContext::new(std::env::temp_dir()),
+        };
+        for name in LAZY_OPERATOR_NAMES {
+            let err = dispatch_error(name, &lookup);
+            assert!(
+                err.as_deref().map(|e| !e.contains("Unknown function")).unwrap_or(true),
+                "lazy operator `{name}` must dispatch; got error: {err:?}"
+            );
+        }
+    }
+
     /// Every descriptor must name a function the real evaluator dispatches.
     ///
-    /// Rather than comparing two hand-maintained lists, this drives the actual
-    /// `evaluate` → `evaluate_function` → `dispatch_fs`/`dispatch` pipeline.
-    /// Renaming a descriptor without a matching runtime arm — or deleting a
-    /// runtime arm a descriptor still claims — makes the call return
-    /// `Unknown function` and fails here. (The reverse direction — a runtime arm
-    /// with no descriptor — cannot be enumerated from `match` arms; the
-    /// command-level `context_expressions_includes_every_function` test plus the
-    /// `unknown_function_is_rejected` canary anchor that gap.)
+    /// Complements the set-equality test above with an end-to-end proof: it
+    /// drives the actual `evaluate` → `evaluate_function` →
+    /// `dispatch_fs`/`dispatch` pipeline, so a descriptor whose handler was
+    /// removed returns `Unknown function` and fails here.
     #[test]
     fn every_descriptor_is_dispatchable_at_runtime() {
         let lookup = FsLookup {

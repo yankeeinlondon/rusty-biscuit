@@ -11,11 +11,46 @@ mod fs_write;
 mod verbs;
 
 pub use catalog::{
-    effect_descriptors, EffectDescriptor, EffectSafety, EFFECT_DESCRIPTORS,
+    effect_descriptors, effect_verbs, EffectDescriptor, EffectSafety, EffectVerb,
+    EFFECT_DESCRIPTORS, EFFECT_VERBS,
 };
 pub use error::EffectError;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Counts every [`EffectEngine`] constructed in this process. Used as test
+/// instrumentation to prove that documentation-only paths (e.g. Claudine's
+/// `context --side-effects` report) never instantiate an effect engine.
+static ENGINE_BUILD_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Counts every network attempt made by [`EffectEngine::http_post`], including
+/// attempts the allowlist refuses before any socket is opened. Used as test
+/// instrumentation to prove metadata-only paths attempt no network.
+static NETWORK_ATTEMPT_COUNT: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn record_network_attempt() {
+    NETWORK_ATTEMPT_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Returns how many [`EffectEngine`] instances have been built this process.
+///
+/// Test instrumentation; compare a before/after delta around a code path to
+/// assert it constructed no engine.
+#[doc(hidden)]
+pub fn engine_build_count() -> u64 {
+    ENGINE_BUILD_COUNT.load(Ordering::Relaxed)
+}
+
+/// Returns how many network attempts [`EffectEngine::http_post`] has made this
+/// process (including allowlist-refused attempts).
+///
+/// Test instrumentation; compare a before/after delta around a code path to
+/// assert it attempted no network.
+#[doc(hidden)]
+pub fn network_attempt_count() -> u64 {
+    NETWORK_ATTEMPT_COUNT.load(Ordering::Relaxed)
+}
 
 /// The mutating side-effect engine. Construct via [`EffectEngine::builder`].
 #[derive(Clone, Debug)]
@@ -77,6 +112,7 @@ impl EffectEngineBuilder {
         self
     }
     pub fn build(self) -> EffectEngine {
+        ENGINE_BUILD_COUNT.fetch_add(1, Ordering::Relaxed);
         EffectEngine {
             mutation_root: self.mutation_root,
             allowed_hosts: self.allowed_hosts,
