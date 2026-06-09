@@ -805,6 +805,7 @@ async fn browser_prose_cell_color_computes() {
         color, "rgb(128, 0, 0)",
         "the colored Prose run must compute its color inside the <td>"
     );
+    harness.shutdown().await;
 }
 
 #[tokio::test]
@@ -826,6 +827,7 @@ async fn browser_prose_cell_background_computes() {
         bg, "rgb(255, 127, 80)",
         "the background Prose run must compute its coral background inside the <td>"
     );
+    harness.shutdown().await;
 }
 
 #[tokio::test]
@@ -848,4 +850,5 @@ async fn browser_prose_cell_underline_computes() {
         "the underlined Prose run must compute an underline decoration inside \
          the <td>, got: {decoration:?}"
     );
+    harness.shutdown().await;
 }
