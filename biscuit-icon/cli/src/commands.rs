@@ -194,6 +194,14 @@ async fn sets(filter: Option<String>, client: &IconifyClient) -> Result<()> {
 
     offline.sort_by(|a, b| a.prefix.cmp(&b.prefix));
 
+    // A successful online fetch that matches nothing leaves no rows. Preserve
+    // the command's no-result error contract rather than rendering an empty
+    // table. (The offline-fallback branch above already errors when the network
+    // is down and no offline rows exist.)
+    if offline.is_empty() {
+        return Err(eyre!("no icon sets match {needle:?}"));
+    }
+
     let prefixes: Vec<String> = offline.iter().map(|s| s.prefix.clone()).collect();
     let counts = cache.cached_icon_counts(&prefixes)?;
 
