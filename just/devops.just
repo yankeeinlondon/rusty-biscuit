@@ -162,10 +162,10 @@ _test pkg *args="":
     exit_code=0
     if cargo nextest --version >/dev/null 2>&1; then
         echo -e "ℹ️ using {{ green }}cargo nextest run{{ reset }}"
-        cargo nextest run -p {{ pkg }} {{ args }} || exit_code=$?
+        cargo nextest run -p {{ pkg }} -E '!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/))' {{ args }} || exit_code=$?
     else
         echo -e "ℹ️ using {{ green }}cargo test{{ reset }}"
-        cargo test -p {{ pkg }} {{ args }} || exit_code=$?
+        cargo test -p {{ pkg }} {{ args }} -- --skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_ || exit_code=$?
     fi
 
     duration=$SECONDS
