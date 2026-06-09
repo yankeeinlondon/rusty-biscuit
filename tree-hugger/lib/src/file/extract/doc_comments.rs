@@ -2,7 +2,6 @@
 
 use super::*;
 
-
 /// Extracts doc comment from preceding sibling nodes.
 ///
 /// Doc comments can appear:

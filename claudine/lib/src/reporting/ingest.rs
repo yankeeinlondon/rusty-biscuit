@@ -71,6 +71,10 @@ struct PreparedEvent {
     anonymous_session_fallback: bool,
     /// Whether this event came from an interactive (TTY) session.
     interactive: Option<bool>,
+    /// Claudine's own process ID, captured once at wrapper startup.
+    claudine_pid: Option<i64>,
+    /// Immediate child PID returned by the wrapper spawn operation.
+    agent_pid: Option<i64>,
 }
 
 /// Sync JSONL event logs into the SQLite reporting index.
@@ -426,6 +430,8 @@ fn prepare_event(path: &Path, source_offset: i64, meta: EventMeta) -> Result<Pre
             .get("interactive")
             .and_then(Value::as_str)
             .map(|v| v == "true"),
+        claudine_pid: meta.env.claudine_pid.map(i64::from),
+        agent_pid: meta.agent_pid.map(i64::from),
     };
 
     Ok(prepared)
@@ -495,14 +501,16 @@ fn insert_event(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<bool> {
             notification_message, error, model, permission_mode, head_sha, is_dirty,
             memory_available_bytes, hostname, prompt_text, tool_input_json,
             tool_response_json, input_tokens, output_tokens, total_tokens,
-            cache_read_tokens, cost_usd, extra_json, env_json, anonymous_session
+            cache_read_tokens, cost_usd, extra_json, env_json, anonymous_session,
+            claudine_pid, agent_pid
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10, ?11, ?12, ?13,
             ?14, ?15, ?16, ?17, ?18, ?19,
             ?20, ?21, ?22, ?23, ?24, ?25,
             ?26, ?27, ?28, ?29, ?30, ?31,
-            ?32, ?33, ?34, ?35, ?36, ?37
+            ?32, ?33, ?34, ?35, ?36, ?37,
+            ?38, ?39
         )
         "#,
         params![
@@ -543,6 +551,8 @@ fn insert_event(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<bool> {
             row.extra_json,
             row.env_json,
             row.anonymous_session_fallback,
+            row.claudine_pid,
+            row.agent_pid,
         ],
     )?;
 
@@ -563,12 +573,13 @@ fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
             branch, package_area, package, model, permission_mode, hostname, primary_language,
             event_count, turn_count, tool_call_count, tool_error_count, turn_error_count,
             subagent_count, total_input_tokens, total_output_tokens, total_tokens,
-            total_cache_read_tokens, total_cost_usd, interactive
+            total_cache_read_tokens, total_cost_usd, interactive, claudine_pid, agent_pid
         ) VALUES (
             ?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7,
             ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1,
             ?15, ?16, ?17, ?18, ?19,
-            ?20, ?21, ?22, ?23, ?24, ?25
+            ?20, ?21, ?22, ?23, ?24, ?25,
+            ?26, ?27
         )
         ON CONFLICT(session_key) DO UPDATE SET
             session_id = COALESCE(excluded.session_id, sessions.session_id),
@@ -586,6 +597,8 @@ fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
             hostname = COALESCE(excluded.hostname, sessions.hostname),
             primary_language = COALESCE(excluded.primary_language, sessions.primary_language),
             interactive = COALESCE(excluded.interactive, sessions.interactive),
+            claudine_pid = COALESCE(excluded.claudine_pid, sessions.claudine_pid),
+            agent_pid = COALESCE(excluded.agent_pid, sessions.agent_pid),
             event_count = sessions.event_count + 1,
             turn_count = sessions.turn_count + excluded.turn_count,
             tool_call_count = sessions.tool_call_count + excluded.tool_call_count,
@@ -624,6 +637,8 @@ fn upsert_session(tx: &Transaction<'_>, row: &PreparedEvent) -> Result<()> {
             row.cache_read_tokens.unwrap_or(0),
             row.cost_usd.unwrap_or(0.0),
             row.interactive,
+            row.claudine_pid,
+            row.agent_pid,
         ],
     )?;
 
@@ -639,7 +654,7 @@ fn rebuild_sessions(tx: &Transaction<'_>) -> Result<()> {
             branch, package_area, package, model, permission_mode, hostname, primary_language,
             event_count, turn_count, tool_call_count, tool_error_count, turn_error_count,
             subagent_count, total_input_tokens, total_output_tokens, total_tokens,
-            total_cache_read_tokens, total_cost_usd, interactive
+            total_cache_read_tokens, total_cost_usd, interactive, claudine_pid, agent_pid
         )
         SELECT
             session_key,
@@ -670,7 +685,9 @@ fn rebuild_sessions(tx: &Transaction<'_>) -> Result<()> {
             COALESCE(SUM(cost_usd), 0),
             MAX(CASE WHEN json_extract(extra_json, '$.interactive') = 'true' THEN 1
                      WHEN json_extract(extra_json, '$.interactive') = 'false' THEN 0
-                     ELSE NULL END)
+                     ELSE NULL END),
+            MAX(claudine_pid),
+            MAX(agent_pid)
         FROM events
         GROUP BY session_key;
         "#,
@@ -920,5 +937,108 @@ mod tests {
 
         assert_eq!(summary.files_scanned, 0);
         assert_eq!(summary.events_inserted, 0);
+    }
+
+    /// Phase 4 — `claudine_pid` and `agent_pid` are written to the events table.
+    #[test]
+    fn pid_fields_are_ingested_into_events() {
+        let dir = tempdir().unwrap();
+        let (logs_dir, mut conn) = open_store(&dir);
+
+        let mut meta = sample_meta();
+        meta.env.claudine_pid = Some(11_111);
+        meta.agent_pid = Some(22_222);
+
+        let log_path = logs_dir.join("2026-04-03.jsonl");
+        fs::write(
+            &log_path,
+            format!("{}\n", serde_json::to_string(&meta).unwrap()),
+        )
+        .unwrap();
+
+        sync(&mut conn, &logs_dir, crate::reporting::SyncRequest::All).unwrap();
+
+        let (claudine_pid, agent_pid): (Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT claudine_pid, agent_pid FROM events LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(claudine_pid, Some(11_111));
+        assert_eq!(agent_pid, Some(22_222));
+    }
+
+    /// Phase 4 — missing `agent_pid` is stored as NULL, not fabricated.
+    #[test]
+    fn missing_agent_pid_is_null_in_database() {
+        let dir = tempdir().unwrap();
+        let (logs_dir, mut conn) = open_store(&dir);
+
+        let mut meta = sample_meta();
+        meta.env.claudine_pid = Some(11_111);
+        meta.agent_pid = None;
+
+        let log_path = logs_dir.join("2026-04-03.jsonl");
+        fs::write(
+            &log_path,
+            format!("{}\n", serde_json::to_string(&meta).unwrap()),
+        )
+        .unwrap();
+
+        sync(&mut conn, &logs_dir, crate::reporting::SyncRequest::All).unwrap();
+
+        let (claudine_pid, agent_pid): (Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT claudine_pid, agent_pid FROM events LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(claudine_pid, Some(11_111));
+        assert_eq!(agent_pid, None);
+    }
+
+    /// Phase 4 — session aggregation surfaces the maximum PID values.
+    #[test]
+    fn pid_fields_are_aggregated_into_sessions() {
+        let dir = tempdir().unwrap();
+        let (logs_dir, mut conn) = open_store(&dir);
+
+        let mut meta1 = sample_meta();
+        meta1.session_id = Some("session-a".to_string());
+        meta1.env.claudine_pid = Some(11_111);
+        meta1.agent_pid = Some(22_222);
+
+        let mut meta2 = sample_meta();
+        meta2.session_id = Some("session-a".to_string());
+        meta2.env.claudine_pid = Some(11_111);
+        meta2.agent_pid = Some(33_333);
+
+        let log_path = logs_dir.join("2026-04-03.jsonl");
+        fs::write(
+            &log_path,
+            format!(
+                "{}\n{}\n",
+                serde_json::to_string(&meta1).unwrap(),
+                serde_json::to_string(&meta2).unwrap()
+            ),
+        )
+        .unwrap();
+
+        sync(&mut conn, &logs_dir, crate::reporting::SyncRequest::All).unwrap();
+
+        let (claudine_pid, agent_pid): (Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT claudine_pid, agent_pid FROM sessions LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(claudine_pid, Some(11_111));
+        assert_eq!(agent_pid, Some(33_333));
     }
 }

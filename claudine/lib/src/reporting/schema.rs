@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::Result;
 
-const SCHEMA_VERSION: &str = "4";
+const SCHEMA_VERSION: &str = "5";
 
 /// Initialize the reporting schema if it does not exist yet.
 pub(crate) fn initialize(conn: &Connection) -> Result<()> {
@@ -61,6 +61,8 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
             total_tokens INTEGER,
             cache_read_tokens INTEGER,
             cost_usd REAL,
+            claudine_pid INTEGER,
+            agent_pid INTEGER,
             extra_json TEXT NOT NULL,
             env_json TEXT NOT NULL,
             PRIMARY KEY (source_file, source_offset)
@@ -92,7 +94,9 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
             total_output_tokens INTEGER NOT NULL DEFAULT 0,
             total_tokens INTEGER NOT NULL DEFAULT 0,
             total_cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-            total_cost_usd REAL NOT NULL DEFAULT 0
+            total_cost_usd REAL NOT NULL DEFAULT 0,
+            claudine_pid INTEGER,
+            agent_pid INTEGER
         );
         "#,
     )?;
@@ -107,6 +111,9 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
     }
     if prev < "4" {
         migrate_to_v4(conn)?;
+    }
+    if prev < "5" {
+        migrate_to_v5(conn)?;
     }
 
     conn.execute(
@@ -245,6 +252,22 @@ fn migrate_to_v4(conn: &Connection) -> Result<()> {
     ensure_column(conn, "events", "anonymous_session", "INTEGER DEFAULT 0")?;
 
     // Re-ingest to backfill
+    conn.execute("DELETE FROM ingestion_state", [])?;
+    conn.execute("DELETE FROM sessions", [])?;
+    conn.execute("DELETE FROM events", [])?;
+
+    Ok(())
+}
+
+fn migrate_to_v5(conn: &Connection) -> Result<()> {
+    // Capture Claudine wrapper PIDs for correlation with system telemetry.
+    ensure_column(conn, "events", "claudine_pid", "INTEGER")?;
+    ensure_column(conn, "events", "agent_pid", "INTEGER")?;
+    ensure_column(conn, "sessions", "claudine_pid", "INTEGER")?;
+    ensure_column(conn, "sessions", "agent_pid", "INTEGER")?;
+
+    // The reporting database is a derived cache of JSONL logs, so clearing the
+    // indexed tables is the safest way to backfill newly-added columns.
     conn.execute("DELETE FROM ingestion_state", [])?;
     conn.execute("DELETE FROM sessions", [])?;
     conn.execute("DELETE FROM events", [])?;
@@ -415,6 +438,11 @@ mod tests {
         // v4 columns
         assert!(event_columns.contains(&"anonymous_session".to_string()));
         assert!(session_columns.contains(&"interactive".to_string()));
+        // v5 columns
+        assert!(event_columns.contains(&"claudine_pid".to_string()));
+        assert!(event_columns.contains(&"agent_pid".to_string()));
+        assert!(session_columns.contains(&"claudine_pid".to_string()));
+        assert!(session_columns.contains(&"agent_pid".to_string()));
 
         let event_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))

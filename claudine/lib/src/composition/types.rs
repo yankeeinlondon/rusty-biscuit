@@ -635,6 +635,15 @@ pub struct CompositionExecutionRequest {
     /// preserve the legacy hard-fail contract for `--repo`. `None` (or
     /// no prep context at all) means no failure happened during prep.
     pub prep_launch_detection_error: Option<String>,
+    /// Whether the caller already emitted the execution header up front.
+    ///
+    /// `compose` / `inline-compose` resolve the agent eagerly (prompting
+    /// when ambiguous) and render the execution line *before* the
+    /// expensive prepare/compose work, so the user sees it immediately.
+    /// When `true`, the executor must not re-emit the header. When
+    /// `false` (the dry-run-unresolved corner and sequence steps) the
+    /// executor emits it after resolving the target itself.
+    pub header_emitted: bool,
 }
 
 /// Describes where the sequence definition was found.

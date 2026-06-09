@@ -182,6 +182,7 @@ pub(crate) fn apply_inline_closure(
             dispatch_context,
             None,
             true,
+            result.agent_pid,
         );
     } else {
         emit_minimal_composition_summary(
@@ -190,6 +191,7 @@ pub(crate) fn apply_inline_closure(
             profile,
             env_context,
             dispatch_context,
+            None,
         );
     }
 

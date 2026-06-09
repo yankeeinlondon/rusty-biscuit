@@ -4,12 +4,11 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use git2::Repository;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, instrument};
+use tracing::instrument;
 
 use crate::filesystem::docs::{MarkdownMeta, detect_blast_radius_docs};
-use crate::filesystem::git::get_commit_files;
+use crate::filesystem::git::{GitRepo, get_commit_files};
 pub use crate::filesystem::path_kind::{is_documentation_path, is_source_code_path};
 use crate::filesystem::repo::detect_repo;
 use crate::{Result, SniffError};
@@ -70,16 +69,16 @@ pub fn collect_changed_paths(
     base_dir: &Path,
     query: &ChangedPathQuery,
 ) -> Result<ChangedPathResult> {
-    let repo = Repository::discover(base_dir)
-        .map_err(|_| SniffError::NotARepository(base_dir.to_path_buf()))?;
-    let repo_root = repo
-        .workdir()
-        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?
-        .to_path_buf();
+    let git_repo = GitRepo::discover(base_dir)?
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    let repo_root = git_repo.repo_root().to_path_buf();
 
     let raw_paths = match query.scope {
-        ChangeScope::LastCommit => collect_last_commit_paths(&repo),
-        _ => collect_working_tree_paths(&repo, query.scope)?,
+        ChangeScope::LastCommit => {
+            let repo = crate::filesystem::git::open::trusted_open(&repo_root)?;
+            collect_last_commit_paths(&repo)
+        }
+        _ => collect_working_tree_paths(&git_repo, query.scope)?,
     };
 
     let mut paths: Vec<PathBuf> = raw_paths
@@ -167,37 +166,30 @@ pub fn collect_changed_paths(
 }
 
 /// Collect paths from working tree status (Dirty/Staged/Unstaged).
-fn collect_working_tree_paths(repo: &Repository, scope: ChangeScope) -> Result<Vec<PathBuf>> {
-    let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(true);
-    opts.recurse_untracked_dirs(true);
+///
+/// Uses the shared gix status implementation so blast-radius and detailed git
+/// status share a single classification source of truth.
+fn collect_working_tree_paths(repo: &GitRepo, scope: ChangeScope) -> Result<Vec<PathBuf>> {
+    use crate::filesystem::git::FileStatus;
 
-    let statuses = repo.statuses(Some(&mut opts))?;
+    let file_changes = repo.file_changes()?;
     let mut seen = HashSet::new();
     let mut paths = Vec::new();
 
-    for entry in statuses.iter() {
-        let status = entry.status();
-        let path = match entry.path() {
-            Some(p) => PathBuf::from(p),
-            None => continue,
-        };
+    for change in file_changes {
+        let include = matches!(
+            (scope, change.status),
+            (ChangeScope::Dirty, _)
+                | (ChangeScope::Staged, FileStatus::Staged | FileStatus::Both)
+                | (
+                    ChangeScope::Unstaged,
+                    FileStatus::Modified | FileStatus::Both | FileStatus::Conflicted,
+                )
+                | (ChangeScope::Untracked, FileStatus::Untracked)
+        );
 
-        let is_staged =
-            status.is_index_new() || status.is_index_modified() || status.is_index_deleted();
-        let is_unstaged = status.is_wt_modified() || status.is_wt_deleted();
-        let is_untracked = status.is_wt_new();
-
-        let include = match scope {
-            ChangeScope::Dirty => is_staged || is_unstaged || is_untracked,
-            ChangeScope::Staged => is_staged,
-            ChangeScope::Unstaged => is_unstaged,
-            ChangeScope::Untracked => is_untracked,
-            ChangeScope::LastCommit => unreachable!(),
-        };
-
-        if include && seen.insert(path.clone()) {
-            paths.push(path);
+        if include && seen.insert(change.path.clone()) {
+            paths.push(change.path);
         }
     }
 
@@ -205,31 +197,15 @@ fn collect_working_tree_paths(repo: &Repository, scope: ChangeScope) -> Result<V
 }
 
 /// Collect paths from the HEAD commit.
-fn collect_last_commit_paths(repo: &Repository) -> Vec<PathBuf> {
-    let head_sha = repo
-        .head()
-        .map_err(|e| {
-            debug!(error = %e, "Failed to get repository HEAD");
-            e
-        })
-        .ok()
-        .and_then(|h| {
-            h.peel_to_commit()
-                .map_err(|e| {
-                    debug!(error = %e, "Failed to peel HEAD to commit");
-                    e
-                })
-                .ok()
-        })
-        .map(|c| c.id().to_string());
+fn collect_last_commit_paths(repo: &gix::Repository) -> Vec<PathBuf> {
+    let Ok(head_id) = repo.head_id() else {
+        return Vec::new();
+    };
 
-    match head_sha {
-        Some(sha) => get_commit_files(repo, &sha)
-            .into_iter()
-            .map(|(path, _kind)| path)
-            .collect(),
-        None => Vec::new(),
-    }
+    get_commit_files(repo, head_id.into())
+        .into_iter()
+        .map(|(path, _kind)| path)
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -295,7 +271,6 @@ mod tests {
 
         #[test]
         fn collect_dirty_returns_paths_in_real_repo() {
-            // This repo has dirty files (we're on a feature branch with changes)
             let result = collect_changed_paths(
                 Path::new("."),
                 &ChangedPathQuery {
@@ -307,7 +282,6 @@ mod tests {
                 },
             );
             assert!(result.is_ok());
-            // Paths should be sorted
             let r = result.unwrap();
             let sorted: Vec<_> = {
                 let mut v = r.paths.clone();
@@ -400,7 +374,7 @@ mod tests {
     /// Returns (TempDir, repo_path).
     fn create_temp_repo() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path()).unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
 
         // Configure git identity for commits
         let mut config = repo.config().unwrap();
@@ -426,7 +400,7 @@ mod tests {
         }
         std::fs::write(&full, content).unwrap();
 
-        let repo = Repository::open(repo_path).unwrap();
+        let repo = git2::Repository::open(repo_path).unwrap();
         let mut index = repo.index().unwrap();
         index.add_path(Path::new(relative)).unwrap();
         index.write().unwrap();
@@ -447,7 +421,7 @@ mod tests {
         }
         std::fs::write(&full, content).unwrap();
 
-        let repo = Repository::open(repo_path).unwrap();
+        let repo = git2::Repository::open(repo_path).unwrap();
         let mut index = repo.index().unwrap();
         index.add_path(Path::new(relative)).unwrap();
         index.write().unwrap();
@@ -459,15 +433,11 @@ mod tests {
         #[test]
         fn staged_scope_only_returns_staged_files() {
             let (_dir, path) = create_temp_repo();
-            // Commit both files first
             commit_file(&path, "src/main.rs", "fn main() {}");
             commit_file(&path, "src/lib.rs", "pub fn lib() {}");
 
-            // Stage a modification to main.rs
             stage_file(&path, "src/main.rs", "fn main() { updated }");
-            // Modify lib.rs without staging (unstaged only)
             std::fs::write(path.join("src/lib.rs"), "pub fn lib() { modified }").unwrap();
-            // Create an untracked file
             std::fs::write(path.join("src/new.rs"), "fn new() {}").unwrap();
 
             let result = collect_changed_paths(
@@ -488,10 +458,8 @@ mod tests {
         #[test]
         fn unstaged_scope_only_returns_modified_files() {
             let (_dir, path) = create_temp_repo();
-            // Commit and then modify without staging
             commit_file(&path, "src/main.rs", "fn main() {}");
             std::fs::write(path.join("src/main.rs"), "fn main() { modified }").unwrap();
-            // Create an untracked file (should NOT be in unstaged)
             std::fs::write(path.join("src/new.rs"), "fn new() {}").unwrap();
 
             let result = collect_changed_paths(
@@ -512,15 +480,11 @@ mod tests {
         #[test]
         fn dirty_scope_returns_staged_unstaged_and_untracked() {
             let (_dir, path) = create_temp_repo();
-            // Commit all files first
             commit_file(&path, "src/a.rs", "a");
             commit_file(&path, "src/b.rs", "b");
 
-            // Stage a modification to a.rs
             stage_file(&path, "src/a.rs", "a modified");
-            // Modify b.rs without staging (unstaged)
             std::fs::write(path.join("src/b.rs"), "b modified").unwrap();
-            // Untracked file
             std::fs::write(path.join("src/c.rs"), "c").unwrap();
 
             let result = collect_changed_paths(
@@ -587,9 +551,8 @@ mod tests {
             let (_dir, path) = create_temp_repo();
             commit_file(&path, "src/old.rs", "old code");
 
-            // Delete and stage the deletion
             std::fs::remove_file(path.join("src/old.rs")).unwrap();
-            let repo = Repository::open(&path).unwrap();
+            let repo = git2::Repository::open(&path).unwrap();
             let mut index = repo.index().unwrap();
             index.remove_path(Path::new("src/old.rs")).unwrap();
             index.write().unwrap();
@@ -634,10 +597,8 @@ mod tests {
         #[test]
         fn exact_package_match_filters_paths() {
             let (_dir, path) = create_temp_repo();
-            // sniff/lib → package name "sniff-lib", homelab/lib → "homelab-lib"
             make_workspace(&path, &["sniff/lib", "homelab/lib"]);
 
-            // Dirty files in both packages
             std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
             std::fs::write(path.join("homelab/lib/src/lib.rs"), "// dirty").unwrap();
 
@@ -791,11 +752,9 @@ mod tests {
         #[test]
         fn matched_document_returned() {
             let (_dir, path) = create_temp_repo();
-            // Commit a source file, then dirty it
             commit_file(&path, "src/main.rs", "fn main() {}");
             std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
 
-            // Create a docs directory with a document referencing src/main.rs
             let doc_content = "---\ntitle: Guide\nblast_radius:\n  - src/main.rs\n---\n# Guide\n";
             commit_file(&path, "docs/guide.md", doc_content);
 
@@ -808,11 +767,9 @@ mod tests {
         #[test]
         fn unmatched_document_not_returned() {
             let (_dir, path) = create_temp_repo();
-            // Dirty a source file
             commit_file(&path, "src/main.rs", "fn main() {}");
             std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
 
-            // Doc references a DIFFERENT file
             let doc_content = "---\ntitle: Other\nblast_radius:\n  - src/other.rs\n---\n# Other\n";
             commit_file(&path, "docs/other.md", doc_content);
 
@@ -852,7 +809,6 @@ mod tests {
         #[test]
         fn no_changed_files_returns_empty() {
             let (_dir, path) = create_temp_repo();
-            // Everything is committed, nothing dirty
             let doc_content = "---\ntitle: Guide\nblast_radius:\n  - src/main.rs\n---\n# Guide\n";
             commit_file(&path, "docs/guide.md", doc_content);
             commit_file(&path, "src/main.rs", "fn main() {}");
@@ -865,18 +821,14 @@ mod tests {
         #[test]
         fn staged_scope_only_matches_staged_changes() {
             let (_dir, path) = create_temp_repo();
-            // Create two source files
             commit_file(&path, "src/a.rs", "a");
             commit_file(&path, "src/b.rs", "b");
 
-            // Doc references both
             let doc_content =
                 "---\ntitle: Guide\nblast_radius:\n  - src/a.rs\n  - src/b.rs\n---\n# Guide\n";
             commit_file(&path, "docs/guide.md", doc_content);
 
-            // Only stage changes to a.rs
             stage_file(&path, "src/a.rs", "a modified");
-            // Modify b.rs without staging (unstaged only)
             std::fs::write(path.join("src/b.rs"), "b modified").unwrap();
 
             let matched =
@@ -891,7 +843,6 @@ mod tests {
             commit_file(&path, "src/main.rs", "fn main() {}");
             std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
 
-            // Doc uses ./src/main.rs (should be normalized to src/main.rs)
             let doc_content = "---\ntitle: Guide\nblast_radius:\n  - ./src/main.rs\n---\n# Guide\n";
             commit_file(&path, "docs/guide.md", doc_content);
 

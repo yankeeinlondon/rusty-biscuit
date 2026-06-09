@@ -404,7 +404,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 - Validates provider binary availability before spawn (with provider docs URL in errors).
 - Filters sensitive env vars whose names contain `API_KEY` or `TOKEN` unless explicitly included.
 - Reports removed env variable names to stderr (names only, sorted/unique).
-- Injects `AGENT`, `YOLO`, `INTERACTIVE`, `AGENT_PARAMS`, `CLAUDINE_SESSION_ID`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
+- Injects `AGENT`, `YOLO`, `INTERACTIVE`, `AGENT_PARAMS`, `CLAUDINE_SESSION_ID`, `CLAUDINE_PID`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
 - `--mcp` resolves repo defaults if `<repo>/.claudine/mcp.json` exists, otherwise user defaults; `--use` appends explicit IDs or aliases and also enables MCP mode.
 - Non-interactive Codex, Gemini, and OpenCode runs also strip catalog-resolvable `#tags` from the prompt and activate the matching servers.
 - Writes a synthetic JSONL summary event per session for reporting completeness.
@@ -542,5 +542,6 @@ Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` /
 | `INTERACTIVE` | Injected by wrapper: interactivity flag |
 | `AGENT_PARAMS` | Injected by wrapper: provider-specific args |
 | `CLAUDINE_SESSION_ID` | Injected by wrapper: session identifier |
+| `CLAUDINE_PID` | Injected by wrapper: Claudine's own process ID |
 | `PACKAGE_AREA` | Injected by wrapper: monorepo package area (when resolvable) |
 | `PACKAGE` | Injected by wrapper: monorepo package (when resolvable) |

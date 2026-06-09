@@ -196,8 +196,7 @@ fn test_diagnostic_confidence_ordering() {
     // Each should serialize/deserialize correctly
     for confidence in confidences {
         let json = serde_json::to_string(&confidence).expect("serialize");
-        let deserialized: DiagnosticConfidence =
-            serde_json::from_str(&json).expect("deserialize");
+        let deserialized: DiagnosticConfidence = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(confidence, deserialized);
     }
 }

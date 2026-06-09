@@ -113,6 +113,7 @@ pub(crate) fn run_structured_composition(
         )?
     };
     let telemetry = stream_result.telemetry;
+    let agent_pid = stream_result.agent_pid;
     let mut summary = stream_result.data;
 
     let had_streamed_assistant =
@@ -130,6 +131,7 @@ pub(crate) fn run_structured_composition(
         had_streamed_assistant,
         section_stream,
         telemetry,
+        agent_pid,
     })
 }
 

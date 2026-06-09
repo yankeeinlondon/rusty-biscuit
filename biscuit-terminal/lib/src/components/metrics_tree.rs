@@ -257,29 +257,77 @@ impl MetricsTree {
     ///
     /// Connectors and glyphs fold to ASCII when `unicode` is false; the visible
     /// column widths are computed from the pre-markup strings so styling never
-    /// shifts alignment.
-    fn build_markup(&self, unicode: bool) -> String {
+    /// shifts alignment. `available_width` is the visible width the row must fit
+    /// (already net of any outer border); the label column is capped to it so a
+    /// single long label cannot push the value column past the wrap point.
+    fn build_markup(&self, unicode: bool, available_width: usize) -> String {
         let glyphs = Glyphs::for_terminal(unicode);
 
         let mut rows = Vec::new();
         collect_rows(&self.root, String::new(), String::new(), true, unicode, &glyphs, &mut rows);
 
-        let label_w = rows.iter().map(|r| r.label.chars().count()).max().unwrap_or(0);
+        let raw_label_w = rows.iter().map(|r| r.label.chars().count()).max().unwrap_or(0);
         let num_w = rows.iter().map(|r| r.num.chars().count()).max().unwrap_or(0);
         let unit_w = rows.iter().map(|r| r.unit.chars().count()).max().unwrap_or(0);
         let share_w = rows.iter().map(|r| r.share.chars().count()).max().unwrap_or(0);
 
+        // The right-hand columns are fixed: two-space gap, value (mantissa +
+        // unit), two-space gap, share, then the widest row decoration (calls /
+        // hot marker / note). Cap the label column so even the longest label
+        // leaves room for them on one line — otherwise one verbose label (a
+        // `::shell` command, say) inflates the shared column and every row's
+        // value wraps. `MIN_LABEL_W` keeps labels legible on absurdly narrow
+        // widths rather than collapsing to the ellipsis.
+        const MIN_LABEL_W: usize = 8;
+        let decoration_w = rows
+            .iter()
+            .map(|r| row_decoration_width(r, &glyphs, &self.highlight_label))
+            .max()
+            .unwrap_or(0);
+        let fixed_cols = 2 + num_w + unit_w + 2 + share_w + decoration_w;
+        let max_label_w = available_width.saturating_sub(fixed_cols).max(MIN_LABEL_W);
+        let label_w = raw_label_w.min(max_label_w);
+
         let mut body = String::new();
         for row in &rows {
-            let mut label = format!("{:<label_w$}", row.label);
+            let truncated = truncate_to_width(&row.label, label_w, unicode);
+            let mut label = format!("{truncated:<label_w$}");
             if row.emphasize {
                 label = format!("<b>{label}</b>");
             }
-            let value = format!("{:>num_w$}{:<unit_w$}", row.num, row.unit);
+            // Pad the mantissa and unit to their column widths BEFORE wrapping
+            // in markup: widths were computed from the bare strings, so any tag
+            // counted into them would skew the value column.
+            let num = format!("{:>num_w$}", row.num);
+            // Microsecond units read grey rather than dim — at µs granularity the
+            // row is negligible, and grey keeps the suffix legible where dim can
+            // wash out entirely. `us` is the ASCII fold of `µs`. Coarser units
+            // stay dim. The trailing pad spaces sit inside the tag harmlessly.
+            let unit_tag = if matches!(row.unit.as_str(), "µs" | "us") {
+                "grey"
+            } else {
+                "dim"
+            };
+            let unit = format!("<{unit_tag}>{:<unit_w$}</{unit_tag}>", row.unit);
+            // A hot row's whole value (mantissa and unit) reads red so the
+            // dominant cost is scannable. The styled unit nests inside the red so
+            // the markup stays well-formed (`<red>…<dim>…</dim>…</red>`).
+            let value = if row.hot {
+                format!("<red>{num}{unit}</red>")
+            } else {
+                format!("{num}{unit}")
+            };
             // Escape the literal `<` in `<1%` so Prose's tag tokenizer treats it
             // as text rather than an opening tag (the backslash is invisible, so
-            // the column width computed above still holds).
+            // the column width computed above still holds). Sub-percent slivers
+            // are dimmed to recede; the dim wraps the padded+escaped cell so the
+            // right-align spaces stay outside the visible glyphs.
             let share = format!("{:>share_w$}", row.share).replace('<', "\\<");
+            let share = if row.share == "<1%" {
+                format!("<dim>{share}</dim>")
+            } else {
+                share
+            };
             body.push_str(&format!("{label}  {value}  {share}"));
             if let Some(calls) = row.calls.filter(|c| *c > 1) {
                 body.push_str(&format!("  <dim>{}{calls}</dim>", glyphs.times));
@@ -411,14 +459,17 @@ fn collect_rows(
 }
 
 /// Format a duration using the most readable unit for the magnitude.
+///
+/// Every unit carries exactly one decimal place so the mantissae line up in the
+/// value column regardless of magnitude.
 fn fmt_duration(d: Duration) -> String {
     let micros = d.as_micros();
     if micros < 1_000 {
-        format!("{}µs", micros)
+        format!("{:.1}µs", micros as f64)
     } else if micros < 1_000_000 {
         format!("{:.1}ms", micros as f64 / 1_000.0)
     } else {
-        format!("{:.2}s", d.as_secs_f64())
+        format!("{:.1}s", d.as_secs_f64())
     }
 }
 
@@ -446,13 +497,52 @@ fn split_unit(value: &str) -> (String, String) {
     (value[..boundary].to_string(), value[boundary..].to_string())
 }
 
+/// Visible width of the trailing decorations appended after a row's share cell:
+/// the run-count multiplier, the hot marker, and the dim note. Mirrors exactly
+/// what `build_markup` emits so the label cap reserves the right amount.
+fn row_decoration_width(row: &RenderRow, glyphs: &Glyphs, highlight_label: &str) -> usize {
+    let mut width = 0;
+    if let Some(calls) = row.calls.filter(|c| *c > 1) {
+        // "  {times}{calls}"
+        width += 2 + glyphs.times.chars().count() + calls.to_string().chars().count();
+    }
+    if row.hot {
+        // " {highlight} {label}"
+        width += 1 + glyphs.highlight.chars().count() + 1 + highlight_label.chars().count();
+    }
+    if let Some(note) = &row.note {
+        // " {note}"
+        width += 1 + note.chars().count();
+    }
+    width
+}
+
+/// Truncate a label to at most `max` visible chars, appending an ellipsis when
+/// it overflows. The connector prefix sits at the head of `label`, so trimming
+/// the tail keeps the tree structure intact. Plain text only — called before
+/// any Prose markup is wrapped around the result.
+fn truncate_to_width(label: &str, max: usize, unicode: bool) -> String {
+    if label.chars().count() <= max {
+        return label.to_string();
+    }
+    let ellipsis = if unicode { "…" } else { "..." };
+    let ellipsis_w = ellipsis.chars().count();
+    if max <= ellipsis_w {
+        return label.chars().take(max).collect();
+    }
+    let kept: String = label.chars().take(max - ellipsis_w).collect();
+    format!("{kept}{ellipsis}")
+}
+
 impl TerminalRenderable for MetricsTree {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
-        Prose::new(self.build_markup(true)).render_optimistic(term_width)
+        let width = term_width.unwrap_or(80) as usize;
+        Prose::new(self.build_markup(true, width)).render_optimistic(term_width)
     }
 
     fn render(&self, term: &Terminal) -> String {
-        Prose::new(self.build_markup(term.supports_unicode)).render(term)
+        let width = term.width() as usize;
+        Prose::new(self.build_markup(term.supports_unicode, width)).render(term)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -521,6 +611,49 @@ mod tests {
             ],
         )
         .emphasized()
+    }
+
+    #[test]
+    fn long_label_does_not_overflow_or_wrap_other_rows() {
+        // A single verbose label (e.g. a `::shell` command) must be truncated so
+        // it cannot inflate the shared label column and push every row's value
+        // past the wrap point. Regression for the perf tree rendering every row
+        // on two lines once a long command appeared.
+        let long = "shell · sniff repo staged-files -v --plain --on-error \"No staged files; nothing to do\"";
+        let root = MetricNode::branch(
+            "Performance",
+            MetricValue::Duration(Duration::from_millis(100)),
+            MetricShare::Full,
+            vec![
+                MetricNode::leaf(
+                    long,
+                    MetricValue::Duration(Duration::from_millis(80)),
+                    MetricShare::Of(0.8),
+                ),
+                MetricNode::leaf(
+                    "short",
+                    MetricValue::Duration(Duration::from_millis(20)),
+                    MetricShare::Of(0.2),
+                ),
+            ],
+        );
+        let width = 80usize;
+        let plain = strip_ansi(&MetricsTree::new(root).render_optimistic(Some(width as u32)));
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert!(
+                line.chars().count() <= width,
+                "row exceeds available width ({} cols):\n{line:?}",
+                line.chars().count()
+            );
+        }
+        // The long label is trimmed with an ellipsis but its value stays on the
+        // same row (no wrap), and the short row keeps its full value too.
+        let long_row = plain
+            .lines()
+            .find(|l| l.contains("shell ·"))
+            .expect("long row present");
+        assert!(long_row.contains('…'), "long label should be truncated:\n{long_row}");
+        assert!(long_row.contains("80.0ms"), "long row value wrapped away:\n{long_row}");
     }
 
     #[test]
@@ -726,6 +859,160 @@ mod tests {
         assert!(plain.contains("+- "), "ASCII connector missing:\n{plain}");
         assert!(plain.contains("# HOT"), "ASCII marker missing:\n{plain}");
         assert!(plain.contains("x2"), "ASCII calls missing:\n{plain}");
-        assert!(plain.contains("900us"), "ASCII duration unit missing:\n{plain}");
+        assert!(plain.contains("900.0us"), "ASCII duration unit missing:\n{plain}");
+    }
+
+    #[test]
+    fn microsecond_unit_renders_grey_not_dim() {
+        // µs units read grey; coarser units stay dim. Assert the µs row carries a
+        // foreground-color SGR (grey is a web color → `38;...`) on its unit,
+        // distinct from the bare `\x1b[2m` dim used for ms.
+        let root = MetricNode::branch(
+            "Total",
+            MetricValue::Duration(Duration::from_millis(100)),
+            MetricShare::Full,
+            vec![
+                MetricNode::leaf(
+                    "fast",
+                    MetricValue::Duration(Duration::from_micros(45)),
+                    MetricShare::Of(0.01),
+                ),
+                MetricNode::leaf(
+                    "slow",
+                    MetricValue::Duration(Duration::from_millis(60)),
+                    MetricShare::Of(0.6),
+                ),
+            ],
+        );
+        let colored = MetricsTree::new(root).render_optimistic(Some(80));
+        let micro_line = colored
+            .lines()
+            .find(|l| strip_ansi(l).contains("fast"))
+            .expect("µs row present");
+        let ms_line = colored
+            .lines()
+            .find(|l| strip_ansi(l).contains("slow"))
+            .expect("ms row present");
+        // The µs unit is a foreground color (grey), not the plain dim attribute.
+        assert!(
+            micro_line.contains("38;"),
+            "µs unit must carry a grey fg-color SGR:\n{micro_line:?}"
+        );
+        // The ms unit still uses dim.
+        assert!(
+            ms_line.contains("\u{1b}[2m"),
+            "ms unit must stay dim:\n{ms_line:?}"
+        );
+    }
+
+    #[test]
+    fn unit_suffix_renders_dim() {
+        // build_markup is private; render WITH color and inspect the raw SGR.
+        // The dim attribute is `\x1b[2m` and must wrap every unit suffix.
+        let colored = MetricsTree::new(sample_tree()).render_optimistic(Some(80));
+        assert!(
+            colored.contains("\u{1b}[2m"),
+            "unit suffix must emit dim SGR (\\x1b[2m):\n{colored:?}"
+        );
+    }
+
+    #[test]
+    fn hot_row_value_renders_red() {
+        // Per repo lore `<red>` emits 3-bit `\x1b[31m`, never truecolor `38;2;`.
+        let root = MetricNode::branch(
+            "Total",
+            MetricValue::Duration(Duration::from_millis(100)),
+            MetricShare::Full,
+            vec![
+                MetricNode::leaf(
+                    "hot stage",
+                    MetricValue::Duration(Duration::from_millis(90)),
+                    MetricShare::Of(0.9),
+                )
+                .with_marker(MetricMarker::Highlight),
+            ],
+        );
+        let colored = MetricsTree::new(root).render_optimistic(Some(80));
+        assert!(
+            colored.contains("\u{1b}[31m"),
+            "hot value must emit 3-bit red SGR (\\x1b[31m):\n{colored:?}"
+        );
+        assert!(
+            !colored.contains("38;2;"),
+            "red must stay 3-bit, not truecolor:\n{colored:?}"
+        );
+        // The red must enclose the hot row's value: the red SGR appears on the
+        // line carrying the value, ahead of its reset, on the hot label's row.
+        let hot_line = colored
+            .lines()
+            .find(|l| strip_ansi(l).contains("hot stage"))
+            .expect("hot row present");
+        assert!(
+            hot_line.contains("\u{1b}[31m"),
+            "red SGR must sit on the hot row:\n{hot_line:?}"
+        );
+    }
+
+    #[test]
+    fn sub_percent_share_renders_dim() {
+        // The 45µs parse leaf is well under 1% of 100ms, so its share reads
+        // `<1%` and must carry the dim attribute. Assert the `1%` glyphs are
+        // preceded by a dim SGR with no intervening reset — i.e. the sliver text
+        // itself is emitted while dim is active, not merely that dim appears
+        // somewhere on the (unit-dimmed) row.
+        let colored = MetricsTree::new(sample_tree()).render_optimistic(Some(80));
+        let parse_line = colored
+            .lines()
+            .find(|l| strip_ansi(l).contains("parse"))
+            .expect("parse row present");
+        assert!(
+            strip_ansi(parse_line).contains("<1%"),
+            "parse share must read <1%:\n{parse_line:?}"
+        );
+        let pct_at = parse_line.find('%').expect("percent glyph present");
+        let prefix = &parse_line[..pct_at];
+        let last_dim = prefix.rfind("\u{1b}[2m");
+        let last_reset = prefix
+            .rfind("\u{1b}[0m")
+            .or_else(|| prefix.rfind("\u{1b}[22m"));
+        assert!(
+            matches!((last_dim, last_reset), (Some(d), reset) if reset.is_none_or(|r| r < d)),
+            "sub-percent sliver must render under an open dim SGR:\n{parse_line:?}"
+        );
+    }
+
+    #[test]
+    fn nested_red_dim_on_hot_unit_renders_without_corrupting_columns() {
+        // The hot row's unit is both red (value) and dim (unit), nested
+        // `<red>…<dim>…</dim>…</red>`. Stripping ANSI must still leave the unit
+        // column aligned with the non-hot rows.
+        let root = MetricNode::branch(
+            "Total",
+            MetricValue::Duration(Duration::from_millis(100)),
+            MetricShare::Full,
+            vec![
+                MetricNode::leaf(
+                    "hot stage",
+                    MetricValue::Duration(Duration::from_millis(90)),
+                    MetricShare::Of(0.9),
+                )
+                .with_marker(MetricMarker::Highlight),
+                MetricNode::leaf(
+                    "cool stage",
+                    MetricValue::Duration(Duration::from_millis(10)),
+                    MetricShare::Of(0.1),
+                ),
+            ],
+        );
+        let plain = strip_ansi(&MetricsTree::new(root).render_optimistic(Some(80)));
+        let unit_columns: Vec<usize> = plain
+            .lines()
+            .filter_map(|l| l.find("ms").map(|idx| l[..idx].chars().count()))
+            .collect();
+        assert!(unit_columns.len() >= 2, "expected multiple ms rows:\n{plain}");
+        assert!(
+            unit_columns.iter().all(|c| *c == unit_columns[0]),
+            "nested red+dim hot unit broke column alignment: {unit_columns:?}\n{plain}"
+        );
     }
 }

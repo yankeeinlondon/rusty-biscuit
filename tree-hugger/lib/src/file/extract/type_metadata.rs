@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 /// Finds a Rust type node among the children of a parameter or other node.
 ///
 /// Rust has many type node kinds: primitive_type, type_identifier, reference_type,
@@ -458,7 +457,11 @@ pub(crate) fn extract_typescript_enum_variants(node: Node<'_>, source: &str) -> 
 }
 
 /// Extracts type metadata from Go type_spec nodes.
-pub(crate) fn extract_go_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+pub(crate) fn extract_go_type_metadata(
+    node: Node<'_>,
+    node_kind: &str,
+    source: &str,
+) -> Option<TypeMetadata> {
     if node_kind != "type_spec" && node_kind != "type_declaration" {
         return None;
     }
@@ -881,7 +884,11 @@ pub(crate) fn extract_java_interface_methods(node: Node<'_>, source: &str) -> Ve
 // ============================================================================
 
 /// Extracts type metadata from C struct or enum declarations.
-pub(crate) fn extract_c_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+pub(crate) fn extract_c_type_metadata(
+    node: Node<'_>,
+    node_kind: &str,
+    source: &str,
+) -> Option<TypeMetadata> {
     let mut metadata = TypeMetadata::new();
 
     match node_kind {

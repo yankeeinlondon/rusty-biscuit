@@ -1701,9 +1701,9 @@ def my_func():
     tree_file.experimental_semantics = true;
     let diagnostics = tree_file.lint_diagnostics();
 
-    let undefined_property = diagnostics
-        .iter()
-        .find(|d| d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'property'"));
+    let undefined_property = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'property'")
+    });
     assert!(
         undefined_property.is_none(),
         "Builtin decorator 'property' should NOT be flagged as undefined"

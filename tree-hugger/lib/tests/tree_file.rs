@@ -3001,7 +3001,10 @@ fn semantic_analysis_runs_for_reference_query_languages() {
     // PHP, Perl, and Zsh references queries were broken and silently disabled
     // semantic analysis. They must now compile and run without error.
     for (name, content) in [
-        ("refs.php", "<?php\nfunction foo() {\n    $x = Bar::BAZ;\n}\n"),
+        (
+            "refs.php",
+            "<?php\nfunction foo() {\n    $x = Bar::BAZ;\n}\n",
+        ),
         ("refs.pl", "my $x = foo();\nFoo::bar();\n"),
         ("refs.zsh", "foo=1\necho $foo\nmyfunc arg\n"),
     ] {
@@ -3034,8 +3037,7 @@ fn forced_typescript_preserves_tsx_grammar() {
 
     // Forcing TypeScript on a .tsx file must still use the TSX grammar so the
     // JSX parses cleanly and the symbol is extracted.
-    let tree_file =
-        TreeFile::with_language(&path, Some(ProgrammingLanguage::TypeScript)).unwrap();
+    let tree_file = TreeFile::with_language(&path, Some(ProgrammingLanguage::TypeScript)).unwrap();
     let symbols = tree_file.symbols().unwrap();
 
     assert!(
