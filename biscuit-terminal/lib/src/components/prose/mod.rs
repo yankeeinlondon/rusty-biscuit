@@ -656,10 +656,11 @@ mod tests {
             .build();
         let prose = Prose::new("<double-underline>important text</double-underline>");
         let result = prose.render(&term);
-        // Tree renderer emits a trailing reset even when the span produced no
-        // visible SGR because the terminal lacks underline support.
-        assert_eq!(result, "important text\x1b[0m", "got: {result:?}");
-        assert!(!result.contains("\x1b[4"), "got: {result:?}");
+        // The span produces no visible SGR (the terminal lacks underline
+        // support), so it opens nothing and emits no stray reset — the output is
+        // the bare text with no escapes.
+        assert_eq!(result, "important text", "got: {result:?}");
+        assert!(!result.contains("\x1b["), "got: {result:?}");
     }
 
     #[test]

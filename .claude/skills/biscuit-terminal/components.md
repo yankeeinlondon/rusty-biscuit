@@ -140,6 +140,7 @@ Key features:
 - Data via `with_data(vec![vec!["cell".into()]])` or `add_row()` (`&mut self`, returns `()`)
 - Extra cells beyond defined columns are rendered as additional columns
 - Alignment defaults come from `ColumnType` (text left, numeric right); wrapping is resolved per cell/column strategy
+- `TableCellContent::StyledProse(Box<Prose>)` (`Prose::new(...).into()`) embeds capability-aware inline styling, links, and emphasis in a cell. The tree path projects Prose's semantic inline nodes; the terminal bespoke path resolves each cell to `Text(prose.render(term))` once before width planning. The table owns cell geometry — Prose's own `Layout` is not applied.
 
 ## Lists (OrderedList, UnorderedList)
 

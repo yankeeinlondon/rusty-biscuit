@@ -40,6 +40,10 @@ You are a planning agent. Convert the following documents into a high confidence
 
 - Save the plan as "{{ctx.repo_root}}{{area}}/{{dir}}/{{plan}}" in the same directory as the design document(s).
 - Add frontmatter to the plan document and set:
+    - `agent` set this to "{{env.AGENT}}"
     - `phases` property to the number of phases defined in this plan
-    - `created` add the date in YYYY-MM-DD format
-    - `start_phase` set this to the starting phase number; usually 1 but may be 0 sometimes
+    - `created` add the date in YYYY-MM-DD format: "{{ctx.today}}"
+    - `start_phase` set this to the starting phase number; usually 1 but may be 0 in some edge cases
+    ::block when="ctx.in_monorepo"
+    - `blast_radius` set this to the packages in the monorepo which you expect this plan to mutate
+    ::end-block

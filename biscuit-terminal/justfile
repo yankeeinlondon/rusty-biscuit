@@ -75,9 +75,9 @@ test-l3 *args="":
     @just _test_l3 {{ LIBRARY }} {{ args }}
     @just _test_l3 {{ CLI }} {{ args }}
 
-# not applicable today; planned alongside the BrowserRenderable target
+# Headless-browser tests (computed-style parity for BrowserRenderable output).
 test-browser:
-    @echo "test-browser: not applicable for biscuit-terminal yet"
+    @just _test_browser {{ LIBRARY }}
 
 # not applicable: biscuit-terminal has no real-resource tier
 test-real:

@@ -1,18 +1,15 @@
-//! PTY/real-terminal capture tests for `claudine context`.
+//! PTY smoke tests for `claudine context` styling (Level 1).
 //!
-//! These tests address the third High finding in
-//! `claudine/features/2026-05-23-context/review-2.md`: the styled footer
-//! messages and styled headings/tables are user-visible behavior that
-//! cannot be verified by in-process unit tests. The integration tests in
-//! `context_command.rs` run with `NO_COLOR=1` and only verify routing and
-//! content. These tests spawn `claudine context` under a PTY with a
-//! 256-color terminal so the renderer emits its full SGR pipeline, and
-//! assert the styling escapes are present where the spec requires them.
+//! These spawn `claudine context` under a manufactured PTY (`expectrl`) with a
+//! 256-color `TERM` so the renderer emits its SGR pipeline, then assert escapes
+//! are present in the byte stream. A PTY is *not* a real terminal emulator: it
+//! does not run inside WezTerm/Kitty/tmux and does not capture a rendered pane,
+//! so under the repo's taxonomy this is **Level 1** (process I/O), not Level 2.
+//! Genuine real-terminal pane capture for these reports lives in
+//! `level2_context_capture.rs`.
 //!
-//! The tests follow the gating and harness pattern established by
-//! `level2_validation_reporter_pty.rs` — `#![cfg(unix)]` and gated by
-//! `require_level!(Level::L2, pty_available(), ...)` so they skip cleanly
-//! when no PTY is available and panic when `BISCUIT_TEST_LEVEL_REQUIRED=2`.
+//! Gated by `require_level!(Level::L1, pty_available(), ...)` so it skips
+//! cleanly when no PTY is available.
 
 #![cfg(unix)]
 
@@ -83,8 +80,8 @@ fn run_context_under_pty(args: &[&str]) -> String {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_context_default_emits_sgr_styling_in_output() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn l1_pty_context_default_emits_sgr_styling_in_output() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let transcript = run_context_under_pty(&[]);
 
     assert!(
@@ -110,8 +107,8 @@ fn level2_pty_context_default_emits_sgr_styling_in_output() {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_context_footer_uses_blue_for_flag_names() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn l1_pty_context_footer_uses_blue_for_flag_names() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let transcript = run_context_under_pty(&[]);
 
     // The footer hint reads roughly:
@@ -146,8 +143,8 @@ fn level2_pty_context_footer_uses_blue_for_flag_names() {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_context_renders_table_box_drawing() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn l1_pty_context_renders_table_box_drawing() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let transcript = run_context_under_pty(&[]);
 
     // `biscuit-terminal::Table` draws its borders with Unicode box-drawing
@@ -165,20 +162,21 @@ fn level2_pty_context_renders_table_box_drawing() {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level2_pty_context_values_resolves_aliases_with_styling() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn l1_pty_context_values_renders_canonical_keys_with_styling() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let transcript = run_context_under_pty(&["--values"]);
 
-    // Locate the row for `ctx.utc` (alias for `now_utc`) and confirm the
-    // value cell is not the dim `null` rendering. The renderer emits
-    // `null` only when the underlying value is missing; the alias fix
-    // populates it so the row must show a real value.
-    let utc_line = transcript
-        .lines()
-        .find(|line| line.contains("ctx.utc"))
-        .unwrap_or_else(|| panic!("expected `ctx.utc` row; transcript: {transcript:?}"));
-    assert!(
-        !utc_line.contains("null"),
-        "ctx.utc row must show a real value, not `null`; row: {utc_line:?}",
-    );
+    // The canonical keys behind the date aliases always carry real values.
+    // (The aliases themselves are separate `Date and Time → Aliases` rows; this
+    // check targets their canonical counterparts.)
+    for key in ["ctx.now_utc", "ctx.day", "ctx.day_abbr"] {
+        let line = transcript
+            .lines()
+            .find(|line| line.contains(key))
+            .unwrap_or_else(|| panic!("expected `{key}` row; transcript: {transcript:?}"));
+        assert!(
+            !line.contains("null"),
+            "{key} row must show a real value, not `null`; row: {line:?}",
+        );
+    }
 }

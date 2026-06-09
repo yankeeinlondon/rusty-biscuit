@@ -973,7 +973,7 @@ impl Writer<'_> {
                 let mut child_effective = effective.clone();
                 child_effective.emphasis.italic = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
-                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Strong { children } => {
@@ -981,7 +981,7 @@ impl Writer<'_> {
                 let mut child_effective = effective.clone();
                 child_effective.emphasis.bold = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
-                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Delete { children } => {
@@ -989,7 +989,7 @@ impl Writer<'_> {
                 let mut child_effective = effective.clone();
                 child_effective.emphasis.strikethrough = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
-                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Span { children } => {
@@ -1005,11 +1005,9 @@ impl Writer<'_> {
                         let open = style::text_appearance_sgr(&child_effective, term);
                         // Reset, then restore the ancestor appearance so the
                         // run after the span keeps the inherited color/emphasis.
-                        let close = format!(
-                            "{}{}",
-                            style::SGR_RESET,
-                            style::text_appearance_sgr(effective, term),
-                        );
+                        // An empty `open` (e.g. a no-color terminal) closes to
+                        // nothing rather than a stray reset.
+                        let close = style::appearance_close(&open, effective, term);
                         Ok(format!("{open}{styled}{close}"))
                     }
                     None => {
@@ -1022,7 +1020,7 @@ impl Writer<'_> {
                 let mut child_effective = effective.clone();
                 child_effective.emphasis.dim = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
-                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{value}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Link {
@@ -1044,11 +1042,7 @@ impl Writer<'_> {
                     inner
                 } else {
                     let open = style::text_appearance_sgr(&link_effective, term);
-                    let close = format!(
-                        "{}{}",
-                        style::SGR_RESET,
-                        style::text_appearance_sgr(effective, term),
-                    );
+                    let close = style::appearance_close(&open, effective, term);
                     format!("{open}{inner}{close}")
                 };
                 // Typed `text_layout` pads/truncates the visible *label* before
@@ -1088,11 +1082,7 @@ impl Writer<'_> {
                                 placeholder
                             } else {
                                 let open = style::text_appearance_sgr(&img_effective, term);
-                                let close = format!(
-                                    "{}{}",
-                                    style::SGR_RESET,
-                                    style::text_appearance_sgr(effective, term),
-                                );
+                                let close = style::appearance_close(&open, effective, term);
                                 format!("{open}{placeholder}{close}")
                             }
                         }
@@ -1141,7 +1131,7 @@ impl Writer<'_> {
                     _ => return Ok(inner),
                 }
                 let open = style::text_appearance_sgr(&child_effective, term);
-                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                let close = style::appearance_close(&open, effective, term);
                 Ok(format!("{open}{inner}{close}"))
             }
             // A non-inline node appearing in an inline position is a
@@ -2284,7 +2274,7 @@ fn apply_classes(inner: &str, classes: &[String], effective: &Style, term: &crat
     };
     let child_effective = style.inherited_from(effective);
     let open = style::text_appearance_sgr(&child_effective, term);
-    let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+    let close = style::appearance_close(&open, effective, term);
     format!("{open}{inner}{close}")
 }
 
@@ -2397,6 +2387,11 @@ fn build_table_column(
     if let Some(w) = hints.fixed_width {
         col = col.with_fixed_width(w as usize);
     }
+    // Restore the per-column wrap override so the render-tree planner and cell
+    // wrapper break long tokens the same way the bespoke planner did.
+    if let Some(wrap) = &hints.word_wrap {
+        col = col.with_word_wrap(wrap.clone());
+    }
     col = col.with_when(conditional_from_hint(hints.conditional));
     col = col.with_uniform_alignment(hints.uniform_alignment);
     // Reconstruct droppability from the authoritative `droppable` flag. A
@@ -2445,6 +2440,7 @@ fn reconstruct_cell(attrs: &renderable::tree::NodeAttrs, text: String) -> TableC
                 _ => TableCellContent::Text(text),
             }
         }
+        "styled_prose" => TableCellContent::Text(text),
         // "text" and anything unrecognized keep the rendered text.
         _ => TableCellContent::Text(text),
     }
