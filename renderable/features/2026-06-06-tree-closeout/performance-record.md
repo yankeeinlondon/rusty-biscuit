@@ -50,6 +50,31 @@ Both structural corpora were expanded to the spec section 6 feature list:
   fixed/max width (`table.width`, `block-quote.max-width`), page padding/
   max-width, and an ordered list with `ol.max-width`.
 
+## Construction-fold topology (review-4)
+
+The review-3 capability probe (`paints_construction_color`) built a **second**
+throwaway `Document` to inspect for baked color, so any styled page that
+configured a component / link / image color source paid two complete
+construction folds plus a tree walk before the target fold. Review-4 collapses
+this: `DarkmatterPage::render` builds the `Document` **once** and the probe
+(`capability_signals`) reads that same owned tree (a single read-only walk,
+gated on a configured node-policy source). Net effect on the styled terminal
+page path:
+
+- **One fewer construction fold** for pages that configure a component / link /
+  image color or style source (the common styled case). Page-color-only,
+  geometry-only, and zero-config pages were already single-fold and are
+  unchanged.
+- The target topology is restored to one construction fold + one target fold
+  (plus the read-only capability probe and the page frame, both excluded by
+  acceptance criterion 3). See the [traversal inventory](traversal-inventory.md)
+  T6 row.
+
+The `styled_production/page_styled/terminal` median below was anchored under the
+review-3 double-fold design; it should be **re-anchored** on a fresh run and is
+expected to be unchanged-to-faster for color-source pages. As elsewhere here,
+the structural gate — not wall-clock — remains the acceptance authority.
+
 ## Criterion timings (trend only, non-gating)
 
 Short local runs, release profile, optimistic 120-col terminal, macOS
