@@ -25,7 +25,8 @@
 //!   backticks/markup.
 //! - **unordered list** — operator lists render with the `- ` marker and a
 //!   hanging indent on wrapped continuation lines, surrounded by exactly one
-//!   blank line on each side.
+//!   blank line on each side, and reserve a 1ch right margin so list lines
+//!   never reach the full pane width.
 //!
 //! ## Per-report narrow widths
 //!
@@ -224,6 +225,61 @@ fn assert_list_single_blank_lines(frame: &CapturedFrame, heading: &str, next_hea
         !lines[n - 2].is_empty(),
         "expected list content directly above the trailing blank (a double blank \
          after the list preceding `{next_heading}`).\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+/// Asserts every line belonging to an unordered list fits within
+/// `pane_width - 1` visible cells — the 1ch right margin the spec reserves for
+/// list content (spec.md "Unordered Lists").
+///
+/// A frame-wide `max_visible_width <= pane_width` check cannot prove this: a
+/// list line that consumed the reserved margin cell (reaching the full pane
+/// width) would still pass it. This isolates the list lines and holds them to
+/// the tighter `pane_width - 1` bound.
+///
+/// List lines are the contiguous block opened by a `- ` marker and closed by
+/// the next blank line — markers and their hanging-indent continuations, but
+/// not the surrounding prose paragraphs, which carry no right margin. The
+/// caller must pick a width at which the list genuinely wraps so the bound is
+/// exercised rather than trivially satisfied; the assertion requires at least
+/// one wrapped continuation line as a guard.
+fn assert_list_lines_reserve_right_margin(frame: &CapturedFrame, pane_width: u32) {
+    let limit = pane_width as usize - 1;
+    let mut in_list = false;
+    let mut markers = 0usize;
+    let mut continuations = 0usize;
+    for raw in frame.plain.lines() {
+        let line = raw.trim_end();
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("- ") {
+            in_list = true;
+            markers += 1;
+        } else if trimmed.is_empty() {
+            in_list = false;
+        }
+        if in_list {
+            if !trimmed.starts_with("- ") {
+                continuations += 1;
+            }
+            let width = visible_width(line) as usize;
+            assert!(
+                width <= limit,
+                "list line must fit within pane_width - 1 ({limit}) to reserve the \
+                 1ch right margin; got {width}.\nline: {line:?}\nplain:\n{}",
+                frame.plain,
+            );
+        }
+    }
+    assert!(
+        markers > 0,
+        "expected at least one `- ` list marker.\nplain:\n{}",
+        frame.plain,
+    );
+    assert!(
+        continuations > 0,
+        "expected the list to wrap (a hanging-indent continuation line) so the \
+         right-margin bound is exercised, not trivially met.\nplain:\n{}",
         frame.plain,
     );
 }
@@ -533,6 +589,22 @@ fn level2_context_expressions_caps_at_140_in_wide_tmux() {
     );
 }
 
+/// `--expressions` at 65 columns: every unordered-list line stays within the
+/// pane's `width - 1` envelope, proving the 1ch right margin the spec reserves
+/// for list content. 65 is chosen deliberately: one operator item
+/// (`+ performs string concatenation when either operand is a string`) is
+/// exactly 65 cells wide, so only the reserved margin forces it to wrap. A
+/// regression dropping the margin would let it fill the full 65-cell pane and
+/// fail the bound — the discrimination a frame-wide `<= width` check lacks.
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_expressions_list_reserves_right_margin_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&["--expressions"], 65, 320);
+
+    assert_list_lines_reserve_right_margin(&frame, 65);
+}
+
 // ---------------------------------------------------------------------------
 // Side-effects report
 // ---------------------------------------------------------------------------
@@ -595,6 +667,22 @@ fn level2_context_side_effects_caps_at_140_in_wide_tmux() {
 
     assert_box_glyphs_and_left_margin(&frame);
     assert_fills_to_140_cap_with_right_margin(&frame);
+}
+
+/// `--side-effects` at 60 columns: every constraint-list line stays within the
+/// pane's `width - 1` envelope, proving the 1ch right margin the spec reserves
+/// for list content. 60 is chosen deliberately: one constraint item
+/// (`Markdown mutations honor Darkmatter's auto-rehash behavior`) is exactly 60
+/// cells wide, so only the reserved margin forces it to wrap. A regression
+/// dropping the margin would let it fill the full 60-cell pane and fail the
+/// bound. 60 also clears the report's 53-cell table floor.
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_side_effects_list_reserves_right_margin_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&["--side-effects"], 60, 200);
+
+    assert_list_lines_reserve_right_margin(&frame, 60);
 }
 
 // ---------------------------------------------------------------------------
