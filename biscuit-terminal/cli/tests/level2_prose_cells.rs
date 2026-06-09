@@ -106,6 +106,157 @@ fn carries_red_fg(row: &str) -> bool {
         || row.contains("\x1b[38;5;")
 }
 
+/// Applies one SGR parameter list to the running bold flag. An empty list
+/// (`ESC[m`) is a full reset. `1` sets bold; `0`/`22` clear it.
+///
+/// SGR has two levels of structure: `;` separates parameters, `:` separates
+/// *subparameters within one self-contained parameter*. Extended colors take
+/// both forms — the ITU colon form `38:2::r:g:b` is one `;`-parameter whose
+/// channels never bleed into the next, while the legacy semicolon form
+/// `38;2;r;g;b` spreads channels across several `;`-parameters. Either way the
+/// channel values (one of which may equal `1`) must not be read as the bold
+/// attribute, so colon groups are inspected only at their leading subparameter
+/// and a semicolon `38`/`48` introducer consumes its following channel
+/// parameters.
+fn apply_sgr_bold(params: &str, bold: &mut bool) {
+    if params.is_empty() {
+        *bold = false;
+        return;
+    }
+    let groups: Vec<&str> = params.split(';').collect();
+    let mut k = 0;
+    while k < groups.len() {
+        let group = groups[k];
+        if group.contains(':') {
+            // Self-contained ITU subparameter group (e.g. `38:2::r:g:b`): only
+            // its leading subparameter is an attribute code; the channels stay
+            // inside this group and cannot toggle bold.
+            match group.split(':').next() {
+                Some("1") => *bold = true,
+                Some("0") | Some("22") => *bold = false,
+                _ => {}
+            }
+        } else {
+            match group {
+                "0" => *bold = false,
+                "1" => *bold = true,
+                "22" => *bold = false,
+                // Legacy semicolon extended color: skip its channel parameters
+                // so a channel equal to `1` is not misread as bold.
+                "38" | "48" => {
+                    k += match groups.get(k + 1) {
+                        Some(&"2") => 4, // 2;r;g;b
+                        Some(&"5") => 2, // 5;n
+                        _ => 0,
+                    };
+                }
+                _ => {}
+            }
+        }
+        k += 1;
+    }
+}
+
+/// Reconstructs the running bold state cell-by-cell across a captured raw row.
+///
+/// Walks `row`, applying each SGR sequence (`ESC [ … m`) to a running bold flag
+/// and pairing every *visible* character with the flag's value at that point.
+/// Non-SGR escape sequences — the cursor moves the bespoke path emits, OSC-8
+/// link wrappers — are consumed without producing a cell. This is the basis for
+/// asserting that styling covers the content cells but stops before the trailing
+/// padding and border, rather than merely proving bold appears *somewhere* on
+/// the row.
+fn bold_run_cells(row: &str) -> Vec<(char, bool)> {
+    let chars: Vec<char> = row.chars().collect();
+    let mut cells = Vec::new();
+    let mut bold = false;
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '\x1b' {
+            cells.push((chars[i], bold));
+            i += 1;
+            continue;
+        }
+        match chars.get(i + 1) {
+            // CSI: ESC [ params <final byte 0x40..=0x7E>. Only `m` is an SGR.
+            Some('[') => {
+                let mut j = i + 2;
+                while j < chars.len() && !('\u{40}'..='\u{7e}').contains(&chars[j]) {
+                    j += 1;
+                }
+                if j >= chars.len() {
+                    break; // malformed, unterminated CSI
+                }
+                if chars[j] == 'm' {
+                    let params: String = chars[i + 2..j].iter().collect();
+                    apply_sgr_bold(&params, &mut bold);
+                }
+                i = j + 1;
+            }
+            // OSC: ESC ] … (BEL | ST). Consumed without emitting cells.
+            Some(']') => {
+                let mut j = i + 2;
+                while j < chars.len() {
+                    if chars[j] == '\u{07}' {
+                        j += 1;
+                        break;
+                    }
+                    if chars[j] == '\x1b' && chars.get(j + 1) == Some(&'\\') {
+                        j += 2;
+                        break;
+                    }
+                    j += 1;
+                }
+                i = j;
+            }
+            // Two-byte escape (e.g. ST `ESC \`) or a trailing ESC.
+            _ => i += 2,
+        }
+    }
+    cells
+}
+
+/// Asserts the bold run inside captured raw `row` covers every cell of `needle`
+/// yet is off across the trailing padding and the trailing border glyph — the
+/// styled run must not bleed past its content into the cell padding, the box
+/// border, or (the border being the row's last visible cell) the next row.
+///
+/// Reconstructs per-cell bold state from the row's SGR transitions, so it
+/// accepts whatever reset encoding the terminal used (`ESC[0m`, `ESC[22m`, or an
+/// elided/coalesced form) rather than requiring one literal sequence.
+fn assert_bold_contained(row: &str, needle: &str) {
+    let cells = bold_run_cells(row);
+    let visible: String = cells.iter().map(|(c, _)| *c).collect();
+    let byte_start = visible.find(needle).unwrap_or_else(|| {
+        panic!("content {needle:?} not found in the visible cells of row: {row:?}")
+    });
+    let content_start = visible[..byte_start].chars().count();
+    let content_end = content_start + needle.chars().count();
+
+    for (ch, is_bold) in &cells[content_start..content_end] {
+        assert!(
+            *is_bold,
+            "content cell {ch:?} of {needle:?} must be bold: {row:?}",
+        );
+    }
+
+    let last_border = cells
+        .iter()
+        .rposition(|(c, _)| *c == '│')
+        .unwrap_or_else(|| panic!("row carries no trailing border glyph: {row:?}"));
+    assert!(
+        last_border >= content_end,
+        "the trailing border must sit after the content {needle:?}: {row:?}",
+    );
+    for (ch, is_bold) in &cells[content_end..=last_border] {
+        assert!(
+            !*is_bold,
+            "trailing padding/border cell {ch:?} after {needle:?} must not be bold \
+             (styling bled past the content): {row:?}",
+        );
+    }
+}
+
 /// Asserts a styled Prose cell's capability-resolved SGR survives to the real
 /// terminal and that the box geometry stays intact: the bold cell carries a
 /// bold attribute, the colored cell a red foreground, and the visible borders
@@ -140,9 +291,9 @@ fn assert_prose_cell_styled<H: TerminalHarness>(harness: &mut H) {
 /// Asserts a word-wrapped styled Prose cell keeps every wrapped visual line
 /// bordered and bold. A single bold run `<b>alpha bravo charlie</b>` wraps into
 /// three visual lines under a narrow column; each must stay inside the box
-/// (checked on `frame.plain`) and retain the bold attribute (checked on the raw
-/// row), proving wrap geometry and per-line style containment in a real
-/// terminal.
+/// (checked on `frame.plain`) and keep the bold run contained to its content
+/// cells — off across the trailing padding and border (checked on the raw row),
+/// proving wrap geometry and per-line style containment in a real terminal.
 fn assert_prose_cell_wraps_styled<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(
         harness,
@@ -156,16 +307,14 @@ fn assert_prose_cell_wraps_styled<H: TerminalHarness>(harness: &mut H) {
                 frame.plain
             )
         });
-        assert!(
-            sgr_carries_bold(&row),
-            "wrapped line {word:?} must keep its bold attribute: {row:?}"
-        );
+        assert_bold_contained(&row, word);
     }
 }
 
 /// Asserts an explicit hard line break inside one styled run renders as two
 /// bordered, bold visual lines. `<b>line one\nline two</b>` (CLI `\n` becomes a
-/// newline) must keep each line inside the box and carrying bold, proving a
+/// newline) must keep each line inside the box with its bold run contained to
+/// the content cells — off across the trailing padding and border — proving a
 /// styled run that crosses a newline does not bleed into the border or the next
 /// visual line.
 fn assert_prose_cell_multiline_styled<H: TerminalHarness>(harness: &mut H) {
@@ -178,10 +327,7 @@ fn assert_prose_cell_multiline_styled<H: TerminalHarness>(harness: &mut H) {
         let row = cell_row(&frame, phrase).unwrap_or_else(|| {
             panic!("missing raw multiline {phrase:?}.\nplain:\n{}", frame.plain)
         });
-        assert!(
-            sgr_carries_bold(&row),
-            "multiline {phrase:?} must keep its bold attribute: {row:?}"
-        );
+        assert_bold_contained(&row, phrase);
     }
 }
 
@@ -205,27 +351,12 @@ fn assert_prose_rows_independently_styled<H: TerminalHarness>(harness: &mut H) {
         carries_red_fg(&red_row),
         "the second Prose row must carry red: {red_row:?}"
     );
-    // The bold run must turn off after its text and before the row's trailing
-    // border, and must not re-open afterward — proving it cannot bleed into the
-    // padding, the border glyph, or the next row. The WezTerm harness warns a
-    // literal `ESC[0m` may be re-emitted as an explicit bold-off (`ESC[22m`) or
-    // elided across captures, so this asserts ordering and accepts either
-    // documented bold-off form rather than depending on one capture byte.
-    let text_end = bold_row
-        .find("alphaword")
-        .expect("the bold cell text must appear in its raw row")
-        + "alphaword".len();
-    let tail = &bold_row[text_end..];
-    let reset_at = tail
-        .find("\x1b[0m")
-        .or_else(|| tail.find("\x1b[22m"))
-        .unwrap_or_else(|| {
-            panic!("the bold run must turn off (ESC[0m or ESC[22m) after its text: {bold_row:?}")
-        });
-    assert!(
-        !sgr_carries_bold(&tail[reset_at..]),
-        "no bold may re-open after the row's reset, before the border: {bold_row:?}"
-    );
+    // The bold run must be contained to its content cells — off across the
+    // trailing padding and the row's trailing border — proving it cannot bleed
+    // into the padding, the border glyph, or the next row. Reconstructing the
+    // per-cell bold state accepts whatever bold-off encoding the terminal used
+    // (the WezTerm harness may re-emit `ESC[0m` as `ESC[22m` or elide it).
+    assert_bold_contained(&bold_row, "alphaword");
 }
 
 /// Asserts the cursor-alignment bespoke path renders a styled Prose cell with
@@ -360,4 +491,64 @@ fn level2_prose_cells_in_tmux() {
         "expected no raw escape bytes in the tmux multiline plain capture.\nplain:\n{}",
         frame.plain,
     );
+}
+
+/// L1 unit coverage for the [`assert_bold_contained`] SGR-state reconstruction.
+///
+/// The real-terminal (L2) tests cannot run without a usable controlling TTY, so
+/// these prove the *assertion itself* has no false-positive window — bold
+/// bleeding into the padding or border, or a bold border, must be rejected —
+/// against synthetic rows that mirror the SGR forms WezTerm/Kitty re-emit on
+/// capture (semicolon and ITU colon, with the documented bold-off encodings).
+#[cfg(test)]
+mod bold_containment {
+    use super::assert_bold_contained;
+
+    /// Runs `assert_bold_contained` and reports whether it accepted the row,
+    /// swallowing the panic so negative cases can assert rejection.
+    fn accepts(row: &str, needle: &str) -> bool {
+        std::panic::catch_unwind(|| assert_bold_contained(row, needle)).is_ok()
+    }
+
+    #[test]
+    fn accepts_bold_reset_before_padding_and_border() {
+        // `ESC[1m`content`ESC[0m`, padding, then the trailing border.
+        assert!(accepts("│ \x1b[1malpha\x1b[0m    │", "alpha"));
+    }
+
+    #[test]
+    fn accepts_explicit_bold_off_encoding() {
+        // WezTerm may re-emit the reset as an explicit bold-off (`ESC[22m`).
+        assert!(accepts("│ \x1b[1mline one\x1b[22m  │", "line one"));
+    }
+
+    #[test]
+    fn accepts_itu_colon_color_plus_bold() {
+        // Bold + red maroon in ITU colon form on the content, reset before the
+        // border. A `0` color channel must not be read as a bold-off, and the
+        // `38:2:…` channels must not be read as bold.
+        assert!(accepts(
+            "│ \x1b[1;38:2::128:0:0mAlice\x1b[0m   │",
+            "Alice"
+        ));
+    }
+
+    #[test]
+    fn rejects_bold_bleeding_into_padding_and_border() {
+        // No reset after the content: bold runs through the padding and border.
+        assert!(!accepts("│ \x1b[1malpha    │", "alpha"));
+    }
+
+    #[test]
+    fn rejects_bold_border_after_reset() {
+        // Reset after the content, but a fresh bold re-opens over the trailing
+        // border — the exact false positive the old reset-ordering check missed.
+        assert!(!accepts("│ \x1b[1malpha\x1b[0m   \x1b[1m│", "alpha"));
+    }
+
+    #[test]
+    fn rejects_non_bold_content() {
+        // The content carries no bold at all — must not be accepted.
+        assert!(!accepts("│ alpha\x1b[0m    │", "alpha"));
+    }
 }
