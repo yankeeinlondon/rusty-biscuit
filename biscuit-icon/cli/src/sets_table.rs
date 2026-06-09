@@ -258,6 +258,41 @@ mod tests {
     }
 
     #[test]
+    fn long_prefix_wraps_within_column_keeping_counts() {
+        // A prefix longer than the Prefix column's 20-char max must wrap onto a
+        // continuation line at a break character rather than push the count
+        // columns off screen. The full Total stays visible on the row.
+        let rows = vec![SetRow {
+            prefix: "streamlineplump-emojibits".into(),
+            title: "Stream".into(),
+            total: Some(1_234_567),
+            cached: 7,
+        }];
+        let t = term(100, 30);
+        let output = render_sets(&rows, &t);
+        let lines: Vec<&str> = output.lines().collect();
+
+        // The full count value renders in full, not clipped by the wide prefix.
+        assert!(
+            output.contains("1,234,567"),
+            "full Total must remain visible alongside a wrapped prefix; got:\n{output}"
+        );
+
+        // The prefix tail lands on a continuation line that neither repeats the
+        // leading prefix segment nor the title.
+        let continuation = lines
+            .iter()
+            .find(|l| l.contains("emojibits") && !l.contains("streamlineplump"))
+            .unwrap_or_else(|| {
+                panic!("prefix did not wrap onto a continuation line:\n{output}")
+            });
+        assert!(
+            !continuation.contains("Stream"),
+            "continuation line must not repeat the title: {continuation:?}"
+        );
+    }
+
+    #[test]
     fn no_raw_prose_markup_in_output() {
         let rows = test_rows(3);
         let t = term(80, 10);
