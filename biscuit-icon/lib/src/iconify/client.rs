@@ -152,42 +152,71 @@ impl IconifyClient {
 
     /// Searches the Iconify catalog for icons matching `query`.
     ///
-    /// Paginates through all matching results (in batches of 100) and returns
-    /// every `prefix:name` identifier. An empty `query` is not supported by
-    /// the Iconify API and will return an error.
+    /// Paginates through matching results (in batches of 100) and returns
+    /// `prefix:name` identifiers together with the total match count reported
+    /// by the API. An empty `query` is not supported by the Iconify API and
+    /// will return an error.
+    ///
+    /// When `max_results` is `Some(n)`, at most `n` identifiers are returned.
+    /// When `prefixes` is non-empty, the search is restricted to those prefixes.
     ///
     /// # Errors
     /// [`IconError::Fetch`] on transport/HTTP/parse failure.
-    pub async fn search_icons(&self, query: &str) -> Result<Vec<String>> {
+    pub async fn search_icons(
+        &self,
+        query: &str,
+        max_results: Option<usize>,
+        prefixes: Option<&[String]>,
+    ) -> Result<(Vec<String>, usize)> {
         const BATCH: usize = 100;
+        let limit = max_results.unwrap_or(usize::MAX);
         let mut all = Vec::new();
         let mut start = 0;
+        let mut total = 0;
 
         loop {
+            if all.len() >= limit {
+                all.truncate(limit);
+                break;
+            }
+
             let mut url = Url::parse(&self.base)
                 .map_err(|e| IconError::Fetch(e.to_string()))?
                 .join("search")
                 .map_err(|e| IconError::Fetch(e.to_string()))?;
             {
-                let mut qp = url.query_pairs_mut();
-                qp.append_pair("query", query);
-                qp.append_pair("limit", &BATCH.to_string());
-                qp.append_pair("start", &start.to_string());
+            let mut qp = url.query_pairs_mut();
+            qp.append_pair("query", query);
+            qp.append_pair("limit", &BATCH.to_string());
+            qp.append_pair("start", &start.to_string());
+            if let Some(prefs) = prefixes && !prefs.is_empty() {
+                if prefs.len() == 1 {
+                    qp.append_pair("prefix", &prefs[0]);
+                } else {
+                    qp.append_pair("prefixes", &prefs.join(","));
+                }
             }
-            let resp = self.http.get(url).send().await.map_err(|e| IconError::Fetch(e.to_string()))?;
-            if !resp.status().is_success() {
-                return Err(IconError::Fetch(format!("HTTP {}", resp.status())));
-            }
-            let data: SearchResponse = resp.json().await.map_err(|e| IconError::Fetch(e.to_string()))?;
-            let batch_len = data.icons.len();
-            all.extend(data.icons);
-            if batch_len == 0 || all.len() >= data.total {
-                break;
-            }
-            start += batch_len;
+        }
+        let resp = self.http.get(url).send().await.map_err(|e| IconError::Fetch(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(IconError::Fetch(format!("HTTP {}", resp.status())));
+        }
+        let data: SearchResponse = resp.json().await.map_err(|e| IconError::Fetch(e.to_string()))?;
+        let batch_len = data.icons.len();
+        total = data.total;
+        all.extend(data.icons);
+        if all.len() > limit {
+            all.truncate(limit);
+            break;
+        }
+        let effective_total = std::cmp::min(total, limit);
+        if batch_len == 0 || all.len() >= effective_total {
+            break;
+        }
+        start += batch_len;
         }
 
-        Ok(all)
+        Ok((all, total))
     }
 }
 
@@ -322,7 +351,79 @@ mod tests {
             .mount(&server)
             .await;
         let client = IconifyClient::with_base(server.uri());
-        let hits = client.search_icons("home").await.unwrap();
+        let (hits, total) = client.search_icons("home", None, None).await.unwrap();
         assert_eq!(hits, vec!["mdi:home", "lucide:home"]);
+        assert_eq!(total, 2);
+    }
+
+    #[tokio::test]
+    async fn search_icons_respects_max_results() {
+        let server = MockServer::start().await;
+        let mut icons = Vec::new();
+        for i in 0..100 {
+            icons.push(format!("mdi:icon-{i}"));
+        }
+        let json = serde_json::json!({
+            "icons": icons,
+            "total": 1000,
+        });
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .and(query_param("query", "home"))
+            .and(query_param("limit", "100"))
+            .and(query_param("start", "0"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = IconifyClient::with_base(server.uri());
+        let (hits, total) = client.search_icons("home", Some(50), None).await.unwrap();
+        assert_eq!(hits.len(), 50);
+        assert_eq!(total, 1000);
+    }
+
+    #[tokio::test]
+    async fn search_icons_passes_single_prefix() {
+        let server = MockServer::start().await;
+        let json = serde_json::json!({
+            "icons": ["mdi:home"],
+            "total": 1,
+        });
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .and(query_param("query", "home"))
+            .and(query_param("prefix", "mdi"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json))
+            .mount(&server)
+            .await;
+
+        let client = IconifyClient::with_base(server.uri());
+        let prefixes = vec!["mdi".to_string()];
+        let (hits, total) = client.search_icons("home", None, Some(&prefixes)).await.unwrap();
+        assert_eq!(hits, vec!["mdi:home"]);
+        assert_eq!(total, 1);
+    }
+
+    #[tokio::test]
+    async fn search_icons_passes_multiple_prefixes() {
+        let server = MockServer::start().await;
+        let json = serde_json::json!({
+            "icons": ["mdi:home"],
+            "total": 1,
+        });
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .and(query_param("query", "home"))
+            .and(query_param("prefixes", "mdi,lucide"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json))
+            .mount(&server)
+            .await;
+
+        let client = IconifyClient::with_base(server.uri());
+        let prefixes = vec!["mdi".to_string(), "lucide".to_string()];
+        let (hits, total) = client.search_icons("home", None, Some(&prefixes)).await.unwrap();
+        assert_eq!(hits, vec!["mdi:home"]);
+        assert_eq!(total, 1);
     }
 }
