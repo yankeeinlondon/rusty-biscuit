@@ -33,7 +33,8 @@ pub(crate) fn errors(
                       AND p.timestamp <= e.timestamp
                     ORDER BY p.timestamp DESC LIMIT 1)
                ) AS prompt_text,
-               e.tool_input_json, e.notification_message, e.extra_json
+               e.tool_input_json, e.notification_message, e.extra_json,
+               e.claudine_pid, e.agent_pid
         FROM events e
         LEFT JOIN sessions s ON e.session_key = s.session_key
         "#,
@@ -58,6 +59,8 @@ pub(crate) fn errors(
             row.get::<_, Option<String>>(10)?,
             row.get::<_, Option<String>>(11)?,
             row.get::<_, Option<String>>(12)?,
+            row.get::<_, Option<i64>>(13)?,
+            row.get::<_, Option<i64>>(14)?,
         ))
     })?;
 
@@ -77,6 +80,8 @@ pub(crate) fn errors(
             tool_input_json,
             notification_message,
             extra_json,
+            claudine_pid,
+            agent_pid,
         ) = row?;
         errors.push(ErrorRecord {
             timestamp: parse_timestamp(&timestamp)?,
@@ -92,6 +97,8 @@ pub(crate) fn errors(
             tool_input: parse_json_value(tool_input_json),
             notification_message,
             extra: parse_json_value(extra_json),
+            claudine_pid: claudine_pid.and_then(|v| v.try_into().ok()),
+            agent_pid: agent_pid.and_then(|v| v.try_into().ok()),
         });
     }
 

@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 pub(crate) fn is_block_like_dead_code_container(kind: &str) -> bool {
     kind.contains("block")
         || kind.contains("body")
@@ -330,7 +329,11 @@ pub(crate) fn body_span_for_declaration(node: Node<'_>) -> Option<TextSpan> {
         .map(text_span_for_node)
 }
 
-pub(crate) fn symbol_kind_v2_for_node(record: &SymbolRecord, node: Node<'_>, source: &str) -> SymbolKindV2 {
+pub(crate) fn symbol_kind_v2_for_node(
+    record: &SymbolRecord,
+    node: Node<'_>,
+    source: &str,
+) -> SymbolKindV2 {
     match node.kind() {
         "type_alias_declaration" => SymbolKindV2::TypeAlias,
         "method_definition" => {

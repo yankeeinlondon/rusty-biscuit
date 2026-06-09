@@ -193,6 +193,8 @@ mod tests {
             total_tokens: 0,
             total_cache_read_tokens: 0,
             total_cost_usd: 0.0,
+            claudine_pid: None,
+            agent_pid: None,
         }];
 
         let metrics = summarize_metrics(3, 0, 0, 0, &sessions, &[], &[]);

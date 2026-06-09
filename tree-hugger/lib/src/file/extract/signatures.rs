@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 /// Extracts function signature from a function/method node.
 pub(crate) fn extract_signature(
     node: Node<'_>,
@@ -268,7 +267,11 @@ pub(crate) fn find_go_type_node(node: Node<'_>) -> Option<Node<'_>> {
         .find(|child| GO_TYPE_KINDS.contains(&child.kind()))
 }
 
-pub(crate) fn extract_js_parameter(node: Node<'_>, kind: &str, source: &str) -> Option<ParameterInfo> {
+pub(crate) fn extract_js_parameter(
+    node: Node<'_>,
+    kind: &str,
+    source: &str,
+) -> Option<ParameterInfo> {
     // Check if this is a rest/variadic parameter
     let is_rest = kind == "rest_pattern" || find_child_by_kind(node, "rest_pattern").is_some();
 
@@ -533,7 +536,11 @@ pub(crate) fn extract_swift_visibility(node: Node<'_>, source: &str) -> Option<V
 }
 
 /// Extracts whether a function/method is static.
-pub(crate) fn extract_is_static(node: Node<'_>, language: ProgrammingLanguage, source: &str) -> bool {
+pub(crate) fn extract_is_static(
+    node: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> bool {
     match language {
         ProgrammingLanguage::Java | ProgrammingLanguage::CSharp => {
             extract_java_csharp_is_static(node, source)
@@ -1350,7 +1357,10 @@ pub(crate) fn extract_swift_parameters(node: Node<'_>, source: &str) -> Vec<Para
 }
 
 /// Extracts a single Swift parameter.
-pub(crate) fn extract_swift_single_parameter(node: Node<'_>, source: &str) -> Option<ParameterInfo> {
+pub(crate) fn extract_swift_single_parameter(
+    node: Node<'_>,
+    source: &str,
+) -> Option<ParameterInfo> {
     // Swift parameters can have external and internal names
     // We want the internal name (second identifier) or the only identifier
     let identifiers: Vec<_> = {

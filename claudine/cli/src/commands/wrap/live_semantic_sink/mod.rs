@@ -112,6 +112,13 @@ pub(crate) struct LiveSemanticSink {
     env: EnvironmentContext,
     cwd: PathBuf,
     home: Option<PathBuf>,
+    /// Immediate child PID captured after a successful provider spawn.
+    ///
+    /// `None` until the wrapper spawns the provider; the parser-builder
+    /// closure sets it once spawn returns so every live dispatched/logged
+    /// record carries `EventMeta.agent_pid`. `claudine_pid` rides along in
+    /// `env` and needs no separate slot here.
+    agent_pid: Option<u32>,
     verbosity: Verbosity,
     pending_task_progress: Option<String>,
     session_id: Option<String>,
@@ -181,6 +188,7 @@ impl LiveSemanticSink {
             env,
             cwd: cwd.to_path_buf(),
             home: dirs::home_dir(),
+            agent_pid: None,
             verbosity,
             pending_task_progress: None,
             session_id: None,
@@ -261,6 +269,7 @@ impl LiveSemanticSink {
             env,
             cwd: cwd.to_path_buf(),
             home: dirs::home_dir(),
+            agent_pid: None,
             verbosity,
             pending_task_progress: None,
             session_id: None,
@@ -320,6 +329,14 @@ impl LiveSemanticSink {
     /// thread while the sink itself is shared with the stderr log bridge.
     pub(crate) fn set_output_text_sink(&mut self, emit: OutputTextFn) {
         self.emit_output_text = Some(emit);
+    }
+
+    /// Record the spawned provider's immediate child PID.
+    ///
+    /// Called by the parser-builder closure after a successful spawn so that
+    /// the live dispatched and logged records carry `EventMeta.agent_pid`.
+    pub(crate) fn set_agent_pid(&mut self, agent_pid: Option<u32>) {
+        self.agent_pid = agent_pid;
     }
 
     /// Wire a JSONL logger invoked for every [`SemanticEvent`] the sink
@@ -617,10 +634,13 @@ impl LiveSemanticSink {
             },
         );
         // Override fields that belong to the live sink but wouldn't be
-        // populated by `semantic_event_to_event_meta` alone.
+        // populated by `semantic_event_to_event_meta` alone. `agent_pid` is
+        // known only after spawn, so the sink stamps it here rather than the
+        // shared helper (which always emits `None`).
         DispatchEventMeta {
             event: agentic,
             cwd: Some(self.cwd.display().to_string()),
+            agent_pid: self.agent_pid,
             ..meta
         }
     }
@@ -2165,6 +2185,58 @@ mod tests {
                 Some(&Value::String("stream_semantic_event".into()))
             );
         }
+    }
+
+    /// Review-1 Finding 1 — live dispatched/logged records must carry
+    /// `agent_pid` once the wrapper has stamped the spawned child PID.
+    ///
+    /// The same `DispatchEventMeta` is handed to both the JSONL logger and
+    /// the hook dispatcher (step 7 of `on_semantic_event`), so asserting the
+    /// logged copy proves the dispatched hook/action context too. Before
+    /// `set_agent_pid`, records stay `None`; after, they carry the PID.
+    #[test]
+    fn live_records_carry_agent_pid_after_set() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let logged: Arc<StdMutex<Vec<DispatchEventMeta>>> = Arc::new(StdMutex::new(Vec::new()));
+
+        let logger = {
+            let captured = logged.clone();
+            Box::new(move |_event: &SemanticEvent, meta: &DispatchEventMeta| {
+                captured.lock().unwrap().push(meta.clone());
+            })
+        };
+
+        let mut sink = make_sink(lines, dispatched).with_event_logger(logger);
+
+        // Before spawn the wrapper has no child PID to report.
+        sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: Some("bash".into()),
+            id: Some("t1".into()),
+            input: None,
+            extra: json!({}),
+        });
+
+        sink.set_agent_pid(Some(98_765));
+
+        sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: Some("bash".into()),
+            id: Some("t2".into()),
+            input: None,
+            extra: json!({}),
+        });
+
+        let collected = logged.lock().unwrap().clone();
+        assert_eq!(collected.len(), 2);
+        assert_eq!(
+            collected[0].agent_pid, None,
+            "records before set_agent_pid must omit agent_pid"
+        );
+        assert_eq!(
+            collected[1].agent_pid,
+            Some(98_765),
+            "records after set_agent_pid must carry the spawned child PID"
+        );
     }
 
     #[test]

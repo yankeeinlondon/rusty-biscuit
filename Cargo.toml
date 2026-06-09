@@ -8,6 +8,8 @@ members = [
     "biscuit-file/lib",
     "biscuit-hash/cli",
     "biscuit-hash/lib",
+    "biscuit-icon/cli",
+    "biscuit-icon/lib",
     "biscuit-location/cli",
     "biscuit-location/lib",
     "biscuit-speaks/cli",

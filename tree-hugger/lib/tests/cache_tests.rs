@@ -154,10 +154,14 @@ fn test_in_process_cache_capacity_eviction() {
     );
 
     // One of the first two should have been evicted
-    let count = [cache.get_parse_tree("key1").is_some(), cache.get_parse_tree("key2").is_some(), cache.get_parse_tree("key3").is_some()]
-        .iter()
-        .filter(|b| **b)
-        .count();
+    let count = [
+        cache.get_parse_tree("key1").is_some(),
+        cache.get_parse_tree("key2").is_some(),
+        cache.get_parse_tree("key3").is_some(),
+    ]
+    .iter()
+    .filter(|b| **b)
+    .count();
     assert_eq!(count, 2, "Cache should only hold 2 entries");
 }
 
@@ -165,8 +169,14 @@ fn test_in_process_cache_capacity_eviction() {
 fn test_in_process_cache_stats_tracking() {
     let cache = InProcessCache::new(8);
 
-    cache.record_hit(CacheHitInfo::hit(AnalysisPass::Parse, std::time::Duration::from_millis(1)));
-    cache.record_hit(CacheHitInfo::hit(AnalysisPass::Bind, std::time::Duration::from_millis(2)));
+    cache.record_hit(CacheHitInfo::hit(
+        AnalysisPass::Parse,
+        std::time::Duration::from_millis(1),
+    ));
+    cache.record_hit(CacheHitInfo::hit(
+        AnalysisPass::Bind,
+        std::time::Duration::from_millis(2),
+    ));
     cache.record_hit(CacheHitInfo::miss(
         AnalysisPass::Semantic,
         CacheInvalidationReason::SourceChanged,
@@ -183,7 +193,10 @@ fn test_in_process_cache_stats_tracking() {
 fn test_in_process_cache_hit_history() {
     let cache = InProcessCache::new(8);
 
-    cache.record_hit(CacheHitInfo::hit(AnalysisPass::Parse, std::time::Duration::from_millis(1)));
+    cache.record_hit(CacheHitInfo::hit(
+        AnalysisPass::Parse,
+        std::time::Duration::from_millis(1),
+    ));
 
     let history = cache.hit_history();
     assert_eq!(history.len(), 1);
@@ -247,7 +260,9 @@ fn test_persistent_cache_roundtrip() {
         created_at_epoch_ms: 0,
     };
 
-    cache.put("test_key", &snapshot).expect("put should succeed");
+    cache
+        .put("test_key", &snapshot)
+        .expect("put should succeed");
     let retrieved: SymbolSnapshot = cache.get("test_key").expect("get should return a value");
     assert_eq!(retrieved.key.file_hash, "abc");
 }
@@ -472,14 +487,8 @@ fn test_enabled_rules_fingerprint_deterministic() {
 
 #[test]
 fn test_enabled_rules_fingerprint_order_sensitive() {
-    let fp1 = enabled_rules_fingerprint(&[
-        "unwrap-call".to_string(),
-        "dbg-macro".to_string(),
-    ]);
-    let fp2 = enabled_rules_fingerprint(&[
-        "dbg-macro".to_string(),
-        "unwrap-call".to_string(),
-    ]);
+    let fp1 = enabled_rules_fingerprint(&["unwrap-call".to_string(), "dbg-macro".to_string()]);
+    let fp2 = enabled_rules_fingerprint(&["dbg-macro".to_string(), "unwrap-call".to_string()]);
     assert_ne!(fp1, fp2);
 }
 

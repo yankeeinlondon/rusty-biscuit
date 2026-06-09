@@ -73,9 +73,7 @@ impl CompatibilityRegistry {
     }
 
     /// Looks up a predicate by name (without `#` prefix).
-    pub fn get(&self,
-        name: &str,
-    ) -> Option<&PredicateCompatibility> {
+    pub fn get(&self, name: &str) -> Option<&PredicateCompatibility> {
         self.entries.get(name)
     }
 
@@ -104,8 +102,7 @@ impl CompatibilityRegistry {
         self.entries.insert(entry.name.clone(), entry);
     }
 
-    fn register_builtins(&mut self,
-    ) {
+    fn register_builtins(&mut self) {
         // --- Native predicates (tree-sitter Rust supports these) ---
         self.register(PredicateCompatibility {
             name: "eq".to_string(),
@@ -189,7 +186,8 @@ impl CompatibilityRegistry {
             status: CompatibilityStatus::RequiresHook,
             upstream_description: "Neovim-specific type test".to_string(),
             hook_name: Some("postprocess_is".to_string()),
-            guidance: "Neovim-specific. Rewrite using standard predicates or post-process matches.".to_string(),
+            guidance: "Neovim-specific. Rewrite using standard predicates or post-process matches."
+                .to_string(),
         });
         self.register(PredicateCompatibility {
             name: "has-ancestor".to_string(),
@@ -197,15 +195,18 @@ impl CompatibilityRegistry {
             status: CompatibilityStatus::RequiresHook,
             upstream_description: "Check if node has an ancestor of given type".to_string(),
             hook_name: Some("postprocess_has_ancestor".to_string()),
-            guidance: "Not supported natively. Use a post-query traversal or rewrite the pattern.".to_string(),
+            guidance: "Not supported natively. Use a post-query traversal or rewrite the pattern."
+                .to_string(),
         });
         self.register(PredicateCompatibility {
             name: "not-has-ancestor".to_string(),
             kind: PredicateKind::Predicate,
             status: CompatibilityStatus::RequiresHook,
-            upstream_description: "Check that node does not have an ancestor of given type".to_string(),
+            upstream_description: "Check that node does not have an ancestor of given type"
+                .to_string(),
             hook_name: Some("postprocess_not_has_ancestor".to_string()),
-            guidance: "Not supported natively. Use a post-query traversal or rewrite the pattern.".to_string(),
+            guidance: "Not supported natively. Use a post-query traversal or rewrite the pattern."
+                .to_string(),
         });
 
         // --- Unsupported (must not be silently dropped) ---
@@ -215,7 +216,8 @@ impl CompatibilityRegistry {
             status: CompatibilityStatus::Unsupported,
             upstream_description: "Create a range from two captures".to_string(),
             hook_name: None,
-            guidance: "Not supported. Remove from query or restructure to avoid range creation.".to_string(),
+            guidance: "Not supported. Remove from query or restructure to avoid range creation."
+                .to_string(),
         });
         self.register(PredicateCompatibility {
             name: "strip".to_string(),
@@ -238,11 +240,7 @@ fn extract_predicate_name(line: &str, start: usize) -> Option<&str> {
     let end = rest.find('?').or_else(|| rest.find('!'))?;
     let name = &rest[..end];
     let clean = name.trim();
-    if clean.is_empty() {
-        None
-    } else {
-        Some(clean)
-    }
+    if clean.is_empty() { None } else { Some(clean) }
 }
 
 /// Checks if a query text contains unsupported predicates.
@@ -373,9 +371,6 @@ mod tests {
             CompatibilityStatus::RequiresHook.to_string(),
             "requires-hook"
         );
-        assert_eq!(
-            CompatibilityStatus::Unsupported.to_string(),
-            "unsupported"
-        );
+        assert_eq!(CompatibilityStatus::Unsupported.to_string(), "unsupported");
     }
 }

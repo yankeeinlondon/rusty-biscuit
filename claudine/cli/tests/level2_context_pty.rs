@@ -127,7 +127,12 @@ fn level2_pty_context_footer_uses_blue_for_flag_names() {
         let offset = transcript.find(flag).unwrap_or_else(|| {
             panic!("expected footer to mention `{flag}`; transcript: {transcript:?}")
         });
-        let window_start = offset.saturating_sub(32);
+        // Walk the start back to a char boundary: the footer may contain
+        // multi-byte nerd-font glyphs, so a raw byte offset can land mid-glyph.
+        let mut window_start = offset.saturating_sub(32);
+        while window_start > 0 && !transcript.is_char_boundary(window_start) {
+            window_start -= 1;
+        }
         let window = &transcript[window_start..offset];
         let has_basic_blue = window.contains("\x1b[34");
         let has_truecolor_or_256 = window.contains("\x1b[38;");

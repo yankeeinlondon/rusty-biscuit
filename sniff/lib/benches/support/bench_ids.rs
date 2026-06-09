@@ -23,6 +23,16 @@ pub const CI_BENCH_IDS: &[&str] = &[
     "filesystem_repo/repo_structure_monorepo",
     "inventory/programs_detect",
     "network/interfaces_only",
+    // Representative git_ops rows for the gitoxide migration. High-cardinality
+    // rows (status `1000`, `worktree_fanout`, deep revwalks, commit-graph
+    // variants) stay opt-in and out of the CI subset.
+    "git_ops/discover",
+    "git_ops/status_dirty_flag/100",
+    "git_ops/status_file_changes/100",
+    "git_ops/config_read",
+    // Migration-critical git_ops IDs (spec §5.5).
+    "git_ops/revwalk_recent_gated/nograph",
+    "git_ops/worktree_fanout/4",
 ];
 
 /// Build a Criterion-compatible regex that matches every ID in

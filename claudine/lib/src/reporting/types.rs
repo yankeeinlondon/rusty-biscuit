@@ -184,6 +184,20 @@ pub struct SessionInfo {
     pub total_tokens: u64,
     pub total_cache_read_tokens: u64,
     pub total_cost_usd: f64,
+    /// Claudine's own process ID, captured once at wrapper startup.
+    ///
+    /// Report and query output: a stable nullable field. `null` means no
+    /// Claudine PID was recorded for this session's rows (e.g. pre-feature
+    /// history). The key is always emitted, never skipped.
+    #[serde(default)]
+    pub claudine_pid: Option<u32>,
+    /// Immediate child PID returned by the wrapper spawn operation.
+    ///
+    /// Report and query output: a stable nullable field. `null` means no
+    /// provider child PID was available for this session's rows. The key is
+    /// always emitted, never skipped.
+    #[serde(default)]
+    pub agent_pid: Option<u32>,
 }
 
 /// Session list wrapper for JSON output.
@@ -212,6 +226,16 @@ pub struct ErrorRecord {
     /// Raw extra JSON from the event, used as fallback context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra: Option<JsonValue>,
+    /// Claudine's own process ID for the row's session, or `null`.
+    ///
+    /// Stable nullable query output: always emitted.
+    #[serde(default)]
+    pub claudine_pid: Option<u32>,
+    /// Spawned provider child PID for the row's session, or `null`.
+    ///
+    /// Stable nullable query output: always emitted.
+    #[serde(default)]
+    pub agent_pid: Option<u32>,
 }
 
 /// Error list wrapper for JSON output.
@@ -326,6 +350,94 @@ pub struct SessionEvent {
     /// Environment context snapshot.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env: Option<JsonValue>,
+    /// Claudine's own process ID for this event row, or `null`.
+    ///
+    /// Stable nullable query output: always emitted.
+    #[serde(default)]
+    pub claudine_pid: Option<u32>,
+    /// Spawned provider child PID for this event row, or `null`.
+    ///
+    /// Stable nullable query output: always emitted.
+    #[serde(default)]
+    pub agent_pid: Option<u32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn sample_session() -> SessionInfo {
+        SessionInfo {
+            session_key: "k".into(),
+            session_id: None,
+            provider: Provider::Claude,
+            started_at: Utc.timestamp_opt(0, 0).unwrap(),
+            ended_at: Utc.timestamp_opt(0, 0).unwrap(),
+            duration_seconds: 0,
+            cwd: None,
+            repo_name: None,
+            repo_org: None,
+            branch: None,
+            package_area: None,
+            package: None,
+            model: None,
+            permission_mode: None,
+            hostname: None,
+            primary_language: None,
+            event_count: 0,
+            turn_count: 0,
+            tool_call_count: 0,
+            tool_error_count: 0,
+            turn_error_count: 0,
+            subagent_count: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cost_usd: 0.0,
+            claudine_pid: None,
+            agent_pid: None,
+        }
+    }
+
+    /// Review-1 Finding 2 — report output exposes a stable nullable
+    /// `agent_pid` (and `claudine_pid`): the key is present and `null`, not
+    /// omitted, so machine consumers can tell "no PID" from "old schema".
+    #[test]
+    fn session_info_emits_null_pids_not_omitted() {
+        let json = serde_json::to_value(sample_session()).unwrap();
+        assert!(json.get("agent_pid").is_some(), "agent_pid key must exist");
+        assert!(json["agent_pid"].is_null(), "agent_pid must be null when absent");
+        assert!(json["claudine_pid"].is_null(), "claudine_pid must be null when absent");
+    }
+
+    /// Review-1 Finding 3 — event-row query DTOs expose stable nullable PID
+    /// columns sourced from the `events` table.
+    #[test]
+    fn error_record_emits_null_pids_not_omitted() {
+        let record = ErrorRecord {
+            timestamp: Utc.timestamp_opt(0, 0).unwrap(),
+            provider: Provider::Claude,
+            event: AgenticEvent::ToolError,
+            session_key: "k".into(),
+            session_id: None,
+            repo_name: None,
+            tool_name: None,
+            model: None,
+            error: "boom".into(),
+            prompt: None,
+            tool_input: None,
+            notification_message: None,
+            extra: None,
+            claudine_pid: Some(42),
+            agent_pid: None,
+        };
+        let json = serde_json::to_value(&record).unwrap();
+        assert_eq!(json["claudine_pid"], 42);
+        assert!(json.get("agent_pid").is_some(), "agent_pid key must exist");
+        assert!(json["agent_pid"].is_null(), "agent_pid must be null when absent");
+    }
 }
 
 /// Full detail for a single session.

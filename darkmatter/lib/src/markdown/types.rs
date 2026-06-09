@@ -71,6 +71,10 @@ pub enum MarkdownError {
     #[error("TOC linking error: {0}")]
     TocLinking(#[from] crate::markdown::compose::TocLinkingError),
 
+    /// File-links directive pipeline error.
+    #[error("File-links error: {0}")]
+    FileLinks(#[from] crate::markdown::compose::FileLinksError),
+
     /// Shell expansion pipeline error.
     #[error("Shell expansion failed: {0}")]
     ShellExpansion(#[from] Box<crate::markdown::compose::ShellExpansionError>),
@@ -182,6 +186,7 @@ impl BlockError for MarkdownError {
             MarkdownError::PageBlock(inner) => inner.status_block(term),
             MarkdownError::ShellBlock(inner) => inner.status_block(term),
             MarkdownError::TocLinking(inner) => inner.status_block(term),
+            MarkdownError::FileLinks(inner) => inner.status_block(term),
             MarkdownError::Reference(inner) => inner.status_block(term),
             MarkdownError::CtxMerge(inner) => inner.status_block(term),
 

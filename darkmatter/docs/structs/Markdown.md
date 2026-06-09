@@ -194,7 +194,7 @@ A document can reference external assets through hyperlinks, images, transclusio
 |----------|----------------|-------------|
 | Hyperlinks | `[text](url)` | `<a href="url">` |
 | Images | `![alt](src)` | `<img src="url">` |
-| Transclusions | `::file`, `::code`, `::url` | -- |
+| Transclusions | `::file`, `::code`, `::url`, `::file-links` | -- |
 | CSS | -- | `<style>`, `@import` |
 | Scripts | -- | `<script>`, `<script src="...">` |
 | Fonts | -- | `<link ... as="font">`, `@font-face` |
@@ -202,7 +202,7 @@ A document can reference external assets through hyperlinks, images, transclusio
 
 ### Transclusion Queries
 
-**`has_transclusions() -> bool`** returns `true` if the document contains any transclusion directives (`::file`, `::code`, `::url`, `::toc-linking`, `prologue`, or `epilogue`).
+**`has_transclusions() -> bool`** returns `true` if the document contains any transclusion directives (`::file`, `::code`, `::url`, `::toc-linking`, `::file-links`, `prologue`, or `epilogue`).
 
 **`transclusions() -> MarkdownResult<Vec<TransclusionRef>>`** returns all transclusion references with provenance. This is a local query; use `transclusion_graph()` for recursive traversal.
 
@@ -210,7 +210,7 @@ Each `TransclusionRef` includes:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `kind` | `TransclusionRefKind` | `File`, `Code`, `Url`, `TocLinking`, `Prologue`, `Epilogue` |
+| `kind` | `TransclusionRefKind` | `File`, `Code`, `Url`, `TocLinking`, `FileLinks`, `Prologue`, `Epilogue` |
 | `raw_target` | `String` | The target as written in the directive |
 | `resolved_target` | `Option<String>` | Resolved path using `biscuit_file::FileReference` semantics (supports `@repo-root` paths) |
 | `options` | `TransclusionRefOptions` | Directive options (when, replace, quotation, etc.) |

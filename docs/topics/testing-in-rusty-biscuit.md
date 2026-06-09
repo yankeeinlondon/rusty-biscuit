@@ -4,7 +4,7 @@
 
 We use [just](https://just.systems/) in all of the package areas (and root) of Rusty Biscuit to automate all of the common operations and that includes testing (as well as lint testing).
 
-The root `justfile` is the normal entry point when you want to run a lifecycle command across the curated package-area list:
+The root `justfile` is the normal entry point for repository-wide lifecycle commands:
 
 ```bash
 # Fast L1 subset — excludes slow, L2, L3, browser, and real-resource tests
@@ -19,14 +19,21 @@ just coverage
 just all
 ```
 
-Those root recipes iterate the curated `areas` list in the root `justfile`; they do not imply every Cargo workspace member is covered. The authoritative package list is still `cargo metadata --no-deps --format-version 1`, and the authoritative package-area inventory is `sniff repo`.
+Root `just test` is package-based: it discovers every workspace member with
+`cargo metadata --no-deps --format-version 1`, runs each package's Level-1
+tests, continues after ordinary failures, and prints a package-level failure
+summary before returning non-zero. Ctrl+C stops immediately and returns `130`.
+Other root lifecycle recipes still iterate the curated `areas` list.
+
+`just check-test-interrupts` verifies the same Ctrl+C contract for every
+package-area justfile that exposes a public `test` recipe.
 
 Most root lifecycle recipes also accept area names when you want a narrower run:
 
 ```bash
 # Run sanity for specific package areas
 just sanity darkmatter claudine
-# Run L1 tests for a specific package area
+# Run L1 tests for a package or every package under an area path
 just test biscuit-file
 # Generate coverage for a specific package area
 just coverage biscuit-terminal
@@ -98,6 +105,7 @@ Rusty Biscuit uses a small set of testing terms consistently across package area
 - **Package**: a Cargo package from `cargo metadata`, such as `darkmatter` or `darkmatter-cli`.
 - **Package area**: a repo area, usually with a `lib` and `cli` split, such as `darkmatter/` or `biscuit-file/`.
 - **Curated area list**: the root `justfile`'s lifecycle list. It is practical orchestration scope, not a complete workspace manifest.
+- **Workspace test run**: root `just test`, which uses Cargo metadata rather than the curated area list and aggregates failures by package.
 - **Level 1 / L1**: ordinary in-process tests. These should be deterministic, fast enough for regular local use, and should not require a real terminal, browser, external device, or external API.
 - **Sanity**: the fast L1 subset used for frequent confidence checks. It runs library and binary tests while excluding test names or module paths that contain `level2_`, `level3_`, `browser_`, `real_`, or `slow_`.
 - **Slow L1**: an otherwise ordinary test whose runtime makes it inappropriate for `sanity`; name it with `slow_`.

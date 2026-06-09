@@ -311,6 +311,26 @@ The guiding principle: keep target-specific lowering in the renderers, not in th
 fold, and let MarkdownPlus and Browser preserve richer behavior when portable
 Markdown cannot.
 
+## Embedding a styled subtree in Markdown — `renderable::tree::embed`
+
+A text-to-text Markdown pipeline (such as darkmatter's compose) cannot carry the
+styling a `Style` expresses — color, dim, icon spans — because portable
+CommonMark has no form for it. When a component's output must round-trip through
+such a pipeline **losslessly**, embed its projected subtree instead of
+serializing it to lossy Markdown:
+
+- `encode_embedded_subtree(&node)` serializes the subtree into a Markdown-safe
+  block: an HTML-comment marker carrying the hex-encoded subtree, a portable
+  Markdown fallback, and a closing marker.
+- A fold that recognizes the markers (`decode_embedded_open` / `is_embedded_close`)
+  splices the **exact** decoded subtree back in and drops the fallback; a fold or
+  consumer that does not recognize them simply renders the portable fallback.
+
+Because the styling is carried structurally (not re-derived) and the component is
+not re-run, the round-trip is both lossless and free of recomputation — no second
+filesystem walk, no color-identity loss. This is the mechanism behind darkmatter's
+`::file-links` directive, and it is reusable by any `TreeRenderable` component.
+
 ## See also
 
 - [`components.md`](./components.md) — the component catalog and per-target

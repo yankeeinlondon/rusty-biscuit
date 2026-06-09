@@ -72,6 +72,23 @@ fn redact_session_id(input: &str) -> String {
     )
 }
 
+fn redact_claudine_pid(input: &str) -> String {
+    const PREFIX: &str = "CLAUDINE_PID=";
+    let mut result = input.to_string();
+    let mut search_from = 0;
+    while let Some(start) = result[search_from..].find(PREFIX) {
+        let start = search_from + start;
+        let value_start = start + PREFIX.len();
+        let value_end = result[value_start..]
+            .find(|c: char| !c.is_ascii_digit())
+            .map(|i| value_start + i)
+            .unwrap_or(result.len());
+        result.replace_range(value_start..value_end, "<redacted>");
+        search_from = start + PREFIX.len() + "<redacted>".len();
+    }
+    result
+}
+
 fn redact_temp_home(input: &str) -> String {
     const MARKER: &str = "HOME=/var/folders/";
     let Some(start) = input.find(MARKER) else {
@@ -452,7 +469,7 @@ exit 0
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let redacted = redact_workspace_paths(
         workspace.path(),
-        &redact_temp_home(&redact_session_id(&strip_ansi(&stderr))),
+        &redact_claudine_pid(&redact_temp_home(&redact_session_id(&strip_ansi(&stderr)))),
     );
     insta::assert_snapshot!(redacted);
 }
@@ -1527,6 +1544,199 @@ printf '%s' 'Final assistant response' > "$LAST"
         1
     );
     assert!(log_contents.contains("\"provider_summary\":{\"raw_summary\""));
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — PID capture end-to-end verification
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn wrapper_injects_claudine_pid_into_provider_env() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    let env_path = workspace.path().join("env.txt");
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+{
+  printf 'CLAUDINE_PID=%s\n' "$CLAUDINE_PID"
+  if [ -n "${AGENT_PID:-}" ]; then
+    printf 'HAS_AGENT_PID=1\n'
+  else
+    printf 'HAS_AGENT_PID=0\n'
+  fi
+} > "$CLAUDINE_ENV_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ENV_FILE", &env_path)
+        .args(["codex", "--", "--version"])
+        .assert()
+        .success();
+
+    let env_lines = fs::read_to_string(&env_path).unwrap();
+    assert!(
+        env_lines.contains("CLAUDINE_PID="),
+        "provider must receive CLAUDINE_PID; got: {env_lines}"
+    );
+    let claudine_pid_value = env_lines
+        .lines()
+        .find(|l| l.starts_with("CLAUDINE_PID="))
+        .and_then(|l| l.strip_prefix("CLAUDINE_PID="))
+        .unwrap_or("");
+    assert!(
+        !claudine_pid_value.is_empty(),
+        "CLAUDINE_PID must not be empty; got: {env_lines}"
+    );
+    assert!(
+        claudine_pid_value.parse::<u32>().is_ok(),
+        "CLAUDINE_PID must be a valid PID; got: {env_lines}"
+    );
+    assert!(
+        env_lines.contains("HAS_AGENT_PID=0"),
+        "provider must not receive AGENT_PID in its environment; got: {env_lines}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_structured_summary_includes_pids_in_jsonl() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"thread.started","thread_id":"thread-pid-test"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"pid test"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":5},"duration_ms":1000,"status":"completed"}'
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["codex", "--model", "codex-mini", "test prompt"])
+        .assert()
+        .success();
+
+    let log_path = today_log_path(&fake_home);
+    let log_contents = fs::read_to_string(log_path).unwrap();
+
+    let summary_line = log_contents
+        .lines()
+        .find(|line| line.contains("\"synthetic_kind\":\"stream_wrapper_summary\""))
+        .expect("summary event should be written");
+
+    let summary: serde_json::Value = serde_json::from_str(summary_line).unwrap();
+
+    let claudine_pid = summary
+        .get("env")
+        .and_then(|e| e.get("claudine_pid"))
+        .and_then(|v| v.as_u64());
+    assert!(
+        claudine_pid.is_some(),
+        "summary event must include env.claudine_pid; got: {summary_line}"
+    );
+
+    let agent_pid = summary.get("agent_pid").and_then(|v| v.as_u64());
+    assert!(
+        agent_pid.is_some(),
+        "summary event must include agent_pid after successful spawn; got: {summary_line}"
+    );
+
+    // Review-1 Finding 1: live per-event records (not just the lifecycle
+    // summary) must carry agent_pid once the child has spawned. These are the
+    // synthetic `stream_semantic_event` rows the sink logs for every event.
+    let semantic_line = log_contents
+        .lines()
+        .find(|line| line.contains("\"synthetic_kind\":\"stream_semantic_event\""))
+        .expect("at least one live semantic event should be logged");
+    let semantic: serde_json::Value = serde_json::from_str(semantic_line).unwrap();
+    assert!(
+        semantic.get("agent_pid").and_then(|v| v.as_u64()).is_some(),
+        "live semantic event must include agent_pid after spawn; got: {semantic_line}"
+    );
+    assert!(
+        semantic
+            .get("env")
+            .and_then(|e| e.get("claudine_pid"))
+            .and_then(|v| v.as_u64())
+            .is_some(),
+        "live semantic event must include env.claudine_pid; got: {semantic_line}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_dry_run_does_not_fabricate_agent_pid_in_jsonl() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+echo "SHOULD NOT RUN"
+exit 1
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["codex", "--dry-run", "--", "--version"])
+        .assert()
+        .success();
+
+    let log_path = today_log_path(workspace.path());
+    assert!(
+        !log_path.exists(),
+        "dry run must not create a JSONL log file; found: {log_path:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_missing_binary_does_not_fabricate_agent_pid_in_jsonl() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // Do NOT create a codex binary — binary resolution will fail.
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["codex", "--", "--version"])
+        .assert()
+        .failure();
+
+    let log_path = today_log_path(workspace.path());
+    assert!(
+        !log_path.exists(),
+        "failed binary resolution must not create a JSONL log file; found: {log_path:?}"
+    );
 }
 
 #[cfg(unix)]

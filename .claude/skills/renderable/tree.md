@@ -276,6 +276,17 @@ pub trait CodeRenderer {
   (browser). These live in the `biscuit-terminal` crate — see the
   biscuit-terminal skill's *Render Tree* topic.
 
+## Embedding subtrees in Markdown — `tree::embed`
+
+`encode_embedded_subtree(&node)` serializes a fully-styled subtree into a
+Markdown-safe block (an HTML-comment marker carrying the hex-encoded subtree, a
+portable Markdown fallback, then a closing marker). A fold that recognizes the
+markers (`decode_embedded_open` / `is_embedded_close`) splices the **exact**
+decoded subtree back in and drops the fallback; an unaware consumer renders the
+fallback. Use it to round-trip styling that plain Markdown cannot express
+(color, dim, icons) through a text-to-text pipeline **losslessly and without
+recomputation** — the mechanism behind darkmatter's `::file-links` directive.
+
 ## Darkmatter Fold (production)
 
 `darkmatter::markdown::render_tree` folds a `pulldown-cmark` 0.13 event stream

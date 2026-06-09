@@ -24,6 +24,7 @@
 mod attrs;
 mod diagnostic;
 mod document;
+pub mod embed;
 mod error;
 pub mod graphics;
 mod inherit;
@@ -46,6 +47,10 @@ pub use attrs::{
 #[cfg(any(test, feature = "hint-access-counter"))]
 pub use attrs::{hint_accesses, reset_hint_accesses};
 pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
+pub use embed::{
+    EMBED_CLOSE, EMBED_MARKER_SUFFIX, EMBED_OPEN_PREFIX, EmbedError, decode_embedded_open,
+    encode_embedded_subtree, is_embedded_close,
+};
 pub use inherit::InheritedStyle;
 pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
 pub use error::{RenderError, RenderStrictness, Rendered};
