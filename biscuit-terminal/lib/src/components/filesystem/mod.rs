@@ -7765,10 +7765,10 @@ mod tests {
             if node.name() == name {
                 return Some(node);
             }
-            if let TreeNode::Dir { children, .. } = node {
-                if let Some(found) = find_node(children, name) {
-                    return Some(found);
-                }
+            if let TreeNode::Dir { children, .. } = node
+                && let Some(found) = find_node(children, name)
+            {
+                return Some(found);
             }
         }
         None
