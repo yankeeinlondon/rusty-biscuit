@@ -1,6 +1,7 @@
 use crate::commands::color_parse::parse_color;
 use crate::commands::shared::{detect_terminal_honoring_force_color, print_example_command};
 use crate::commands::{CliContext, Run};
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use clap::Args as ClapArgs;
@@ -40,6 +41,18 @@ pub struct TableArgs {
     /// A comma-separated row of cells; repeat for multiple rows.
     #[arg(long = "row")]
     pub rows: Vec<String>,
+
+    /// A comma-separated row whose cells are parsed as [`Prose`] markup, so
+    /// inline tags (`<b>`, `<red>`, `<a href=…>`, …) become capability-resolved
+    /// `StyledProse` cells. Repeat for multiple rows; appended after `--row`.
+    #[arg(long = "prose-row")]
+    pub prose_rows: Vec<String>,
+
+    /// Render through the cursor-alignment bespoke path
+    /// (`Table::prefer_cursor_alignment`) instead of the standard tree layout.
+    /// Only meaningful for the terminal target on a TTY.
+    #[arg(long = "cursor-align")]
+    pub cursor_align: bool,
 
     /// Optional table title. Renders as a caption above the table on every
     /// target (terminal caption line, HTML `<caption>`, Markdown plain-text
@@ -111,7 +124,7 @@ impl Run for TableArgs {
             self.rows
         };
 
-        let data: Vec<Vec<TableCellContent>> = rows
+        let mut data: Vec<Vec<TableCellContent>> = rows
             .iter()
             .map(|row| {
                 row.split(',')
@@ -120,7 +133,21 @@ impl Run for TableArgs {
             })
             .collect();
 
+        // `--prose-row` cells are parsed as Prose markup so inline tags become
+        // capability-resolved `StyledProse` cells. Appended after the plain rows.
+        for row in &self.prose_rows {
+            let cells: Vec<TableCellContent> = row
+                .split(',')
+                .map(|cell| TableCellContent::from(Prose::new(cell.trim())))
+                .collect();
+            data.push(cells);
+        }
+
         let mut table = Table::new().with_columns(columns).with_data(data);
+
+        if self.cursor_align {
+            table = table.prefer_cursor_alignment();
+        }
 
         if let Some(title) = self.title.as_ref() {
             table = table.with_title(title.clone());
