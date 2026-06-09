@@ -77,6 +77,7 @@
 
 // Submodules
 pub mod error;
+pub mod gitignore;
 pub mod icons;
 pub mod metrics;
 pub mod tree_chars;
@@ -84,6 +85,7 @@ pub mod tree_node;
 
 // Re-exports for backward compatibility
 pub use error::FileSystemError;
+pub use gitignore::GitignoreMatcher;
 pub use metrics::{FileMetrics, MetricKind};
 pub use tree_node::TreeNode;
 
@@ -719,6 +721,17 @@ impl FileSystem {
         self
     }
 
+    /// Injects an already-built tree, bypassing the filesystem walk.
+    ///
+    /// [`ensure_tree_built`](Self::ensure_tree_built) becomes a no-op once a tree
+    /// is present, so a caller that has already discovered the entries (for
+    /// example darkmatter's `::file-links` resolver) can supply them directly and
+    /// avoid a second filesystem traversal.
+    pub fn with_prebuilt_tree(mut self, tree: Vec<TreeNode>) -> Self {
+        self.tree = Some(tree);
+        self
+    }
+
     /// Sets a dimmed prefix rendered on the root line before the target name.
     ///
     /// When set, the root header renders as `{icon} {dim}{prefix}{reset}{target}`
@@ -1311,11 +1324,13 @@ impl FileSystem {
     pub fn ensure_tree_built(&mut self) {
         if self.tree.is_none() {
             let mut total_entries = 0;
+            let matcher = GitignoreMatcher::for_root(&self.root_path);
             self.tree = Some(self.build_tree_recursive(
                 &self.root_path.clone(),
                 Path::new(""),
                 0,
                 &mut total_entries,
+                &matcher,
             ));
         }
     }
@@ -1351,14 +1366,15 @@ impl FileSystem {
     /// against the [`included_paths`](Self::included_paths) allowlist. At the
     /// top level `rel_path` is empty.
     ///
-    /// For now, uses `std::fs` directly. The `ignore` crate integration
-    /// will be added in Phase 8 for proper `.gitignore` support.
+    /// gitignore status for each entry is computed via `matcher`, a
+    /// [`GitignoreMatcher`] built once for the whole tree.
     fn build_tree_recursive(
         &self,
         path: &Path,
         rel_path: &Path,
         depth: u32,
         total_entries: &mut u32,
+        matcher: &GitignoreMatcher,
     ) -> Vec<TreeNode> {
         // Respect max_depth (depth 0 = root level, so we check if we've exceeded)
         if depth >= self.max_depth {
@@ -1427,6 +1443,8 @@ impl FileSystem {
                 (file_type.is_dir(), file_type.is_file())
             };
 
+            let is_ignored = matcher.is_ignored(&file_path, is_dir);
+
             // Determine if this is a dot file/dir
             let is_dot = file_name.starts_with('.');
 
@@ -1459,6 +1477,7 @@ impl FileSystem {
                         &rel_file_path,
                         depth + 1,
                         total_entries,
+                        matcher,
                     )
                 };
 
@@ -1481,7 +1500,7 @@ impl FileSystem {
                 entries.push(TreeNode::Dir {
                     name: file_name,
                     children,
-                    is_ignored: false, // Will be set properly with ignore crate in Phase 8
+                    is_ignored,
                     is_symlink,
                     has_error: false,
                     at_depth_limit,
@@ -1506,7 +1525,7 @@ impl FileSystem {
                 };
                 entries.push(TreeNode::File {
                     name: file_name,
-                    is_ignored: false, // Will be set properly with ignore crate in Phase 8
+                    is_ignored,
                     is_symlink,
                     metrics: file_metrics,
                 });
@@ -7729,15 +7748,89 @@ mod tests {
 
         let node = fs.render_tree();
         let classes = collect_classes(&node);
-        // Gitignore handling is heuristic; only assert the dim/class pair
-        // when ignored.txt was actually flagged as ignored.
-        if classes.iter().any(|c| c == CLASS_IGNORED) {
-            let style = first_entry_style(&node, "ignored.txt").expect("style");
-            assert!(
-                style.emphasis.dim,
-                "gitignored entry should be dim — got: {style:?}",
-            );
+        assert!(
+            classes.iter().any(|c| c == CLASS_IGNORED),
+            "expected fs-ignored class in: {classes:?}",
+        );
+        let style = first_entry_style(&node, "ignored.txt").expect("style");
+        assert!(
+            style.emphasis.dim,
+            "gitignored entry should be dim — got: {style:?}",
+        );
+    }
+
+    /// Walks `nodes` (and children) for the first entry named `name`.
+    fn find_node<'a>(nodes: &'a [TreeNode], name: &str) -> Option<&'a TreeNode> {
+        for node in nodes {
+            if node.name() == name {
+                return Some(node);
+            }
+            if let TreeNode::Dir { children, .. } = node {
+                if let Some(found) = find_node(children, name) {
+                    return Some(found);
+                }
+            }
         }
+        None
+    }
+
+    #[test]
+    fn gitignore_matcher_flags_ignored_entries() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(temp.path().join(".gitignore"), "target/\n*.log\n").unwrap();
+        std::fs::write(temp.path().join("keep.md"), "x").unwrap();
+        std::fs::write(temp.path().join("debug.log"), "x").unwrap();
+        std::fs::create_dir_all(temp.path().join("target")).unwrap();
+        std::fs::write(temp.path().join("target/out.bin"), "x").unwrap();
+
+        let mut fs = FileSystem::new(temp.path())
+            .expect("fs")
+            .dim_gitignore(true);
+        fs.ensure_tree_built();
+        let tree = fs.tree().expect("tree");
+
+        assert!(
+            !find_node(tree, "keep.md").expect("keep.md").is_ignored(),
+            "keep.md should not be ignored",
+        );
+        assert!(
+            find_node(tree, "debug.log").expect("debug.log").is_ignored(),
+            "debug.log should be ignored by *.log",
+        );
+        assert!(
+            find_node(tree, "target").expect("target").is_ignored(),
+            "target dir should be ignored by target/",
+        );
+    }
+
+    #[test]
+    fn with_prebuilt_tree_is_used_verbatim() {
+        let child = TreeNode::File {
+            name: "child.rs".to_string(),
+            is_ignored: false,
+            is_symlink: false,
+            metrics: None,
+        };
+        let injected = vec![TreeNode::Dir {
+            name: "src".to_string(),
+            children: vec![child],
+            is_ignored: false,
+            is_symlink: false,
+            has_error: false,
+            at_depth_limit: false,
+            metrics: None,
+        }];
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+        // A real on-disk entry that must NOT appear, proving the walk is skipped.
+        std::fs::write(temp.path().join("on_disk.txt"), "x").unwrap();
+
+        let mut fs = FileSystem::new(temp.path())
+            .expect("fs")
+            .with_prebuilt_tree(injected.clone());
+        fs.ensure_tree_built();
+
+        assert_eq!(fs.tree(), Some(&injected));
     }
 
     /// Suggested #9 — highlight-green wins over directory bold-blue (the
