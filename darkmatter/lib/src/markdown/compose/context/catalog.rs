@@ -32,8 +32,8 @@ pub enum ContextValueType {
     NestedMarkdownList,
     /// Object/map shape.
     Object,
-    /// Value may be `null` when unavailable.
-    Nullable,
+    /// Value of the inner type that may be `null` when unavailable.
+    Nullable(&'static ContextValueType),
 }
 
 /// Descriptor for a single runtime context variable.
@@ -409,7 +409,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "package_root",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "Absolute path to current package root (monorepo only).",
         category: "Repository",
         subsection: "Packages",
@@ -417,7 +417,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "package_area_root",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "Absolute path to current package area root (monorepo only).",
         category: "Repository",
         subsection: "Packages",
@@ -457,7 +457,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "current_package",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "Name of the package containing the current working directory.",
         category: "Repository",
         subsection: "Packages",
@@ -465,7 +465,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "current_package_area",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "Name of the package area containing the current working directory.",
         category: "Repository",
         subsection: "Packages",
@@ -691,7 +691,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "programming_language",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "Primary programming language for the current scope.",
         category: "Languages",
         subsection: "",
@@ -699,7 +699,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "package_manager",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "Primary package manager for the current scope.",
         category: "Languages",
         subsection: "",
@@ -732,7 +732,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "docs_skill",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "Path to the best-matching skill file for the current scope.",
         category: "Documents",
         subsection: "",
@@ -741,7 +741,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     // ── Operating System ────────────────────────────────────────────
     ContextVariableDescriptor {
         name: "os",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "Operating system name (Windows, macOS, Linux).",
         category: "Operating System",
         subsection: "",
@@ -757,7 +757,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "os_package_manager",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "Primary system package manager.",
         category: "Operating System",
         subsection: "",
@@ -774,7 +774,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     // ── Hardware ────────────────────────────────────────────────────
     ContextVariableDescriptor {
         name: "memory_total",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "Total system memory as human-readable string.",
         category: "Hardware",
         subsection: "",
@@ -782,7 +782,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "memory_used",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "Percentage of memory currently in use.",
         category: "Hardware",
         subsection: "",
@@ -790,7 +790,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "memory_avail",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "Available memory as human-readable string.",
         category: "Hardware",
         subsection: "",
@@ -798,7 +798,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "cpu_cores",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::Integer),
         description: "Number of logical CPU cores.",
         category: "Hardware",
         subsection: "",
@@ -806,7 +806,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "cpu_arch",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "CPU architecture string.",
         category: "Hardware",
         subsection: "",
@@ -814,7 +814,7 @@ pub const CONTEXT_VARIABLE_DESCRIPTORS: &[ContextVariableDescriptor] = &[
     },
     ContextVariableDescriptor {
         name: "gpu",
-        display_type: ContextValueType::Nullable,
+        display_type: ContextValueType::Nullable(&ContextValueType::String),
         description: "GPU name(s) or null when unavailable.",
         category: "Hardware",
         subsection: "",
