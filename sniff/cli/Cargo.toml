@@ -40,6 +40,8 @@ url = "2"
 assert_cmd = "2"
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 expectrl = "0.8"
+# Only to snapshot worktrees into commits when building CLI test repos —
+# gix has no worktree-staging write API. See sniff-lib's dev-dep note.
 git2 = "0.20"
 insta = { version = "1", features = ["json"] }
 predicates = "3"
