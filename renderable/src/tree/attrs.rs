@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::wrap_policy::WordWrap;
+
 /// A namespace for render hints stored in [`NodeAttrs::data`].
 ///
 /// Namespaces provide a structured way to organize hints without key collisions.
@@ -524,6 +526,16 @@ pub struct TableColumnHints {
     pub drop_note: Option<String>,
     /// Whether all cells in this column align uniformly.
     pub uniform_alignment: bool,
+    /// Per-column word-wrap policy override.
+    ///
+    /// `None` leaves the column at its type-derived default. A `Some` value
+    /// must round-trip so the render-tree planner and cell wrapper honor the
+    /// same break behavior the bespoke [`Table`] planner does — without it a
+    /// custom policy (e.g. breaking long identifiers on `_`/`.`) is silently
+    /// lost in the tree and narrow tables fail to lay out.
+    ///
+    /// [`Table`]: crate::tree::RenderNode
+    pub word_wrap: Option<WordWrap>,
 }
 
 /// Render hints for a single projected [`NodeKind::TableCell`] node.
@@ -1190,6 +1202,17 @@ impl NodeAttrs {
         } else {
             self.remove_hint(HintNamespace::TABLE, &key("uniform_alignment"));
         }
+
+        match hints
+            .word_wrap
+            .as_ref()
+            .and_then(|wrap| serde_json::to_value(wrap).ok())
+        {
+            Some(value) => self.set_hint(HintNamespace::TABLE, &key("word_wrap"), value),
+            None => {
+                self.remove_hint(HintNamespace::TABLE, &key("word_wrap"));
+            }
+        }
     }
 
     /// Reads [`TableColumnHints`] for column `index` from the
@@ -1242,6 +1265,10 @@ impl NodeAttrs {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
+        let word_wrap = self
+            .get_hint(HintNamespace::TABLE, &key("word_wrap"))
+            .and_then(|value| serde_json::from_value(value.clone()).ok());
+
         TableColumnHints {
             min_width: read_width("min_width"),
             max_width: read_width("max_width"),
@@ -1250,6 +1277,7 @@ impl NodeAttrs {
             droppable,
             drop_note,
             uniform_alignment,
+            word_wrap,
         }
     }
 
@@ -1999,6 +2027,7 @@ mod tests {
                 droppable: true,
                 drop_note: Some("notes hidden".into()),
                 uniform_alignment: true,
+                word_wrap: Some(WordWrap::BespokeProse(Some(8), vec!['_', '.'], None)),
             },
         );
 
@@ -2010,6 +2039,13 @@ mod tests {
         assert!(hints.droppable);
         assert_eq!(hints.drop_note.as_deref(), Some("notes hidden"));
         assert!(hints.uniform_alignment);
+        // The per-column wrap policy must survive the attribute round-trip, or
+        // the render-tree planner reverts to the default policy and narrow
+        // tables fail to lay out.
+        assert_eq!(
+            hints.word_wrap,
+            Some(WordWrap::BespokeProse(Some(8), vec!['_', '.'], None)),
+        );
     }
 
     /// A column may be droppable without carrying a drop note — the
