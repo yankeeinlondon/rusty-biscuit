@@ -384,6 +384,69 @@ pub(crate) fn render_tree_terminal_with_context(
     ))
 }
 
+/// Renders an already-built [`Document`] for [`DarkmatterPage::render`](crate::layout::DarkmatterPage::render),
+/// pinning the content-box width **independently** of terminal capability
+/// selection.
+///
+/// The page builds its `Document` once and passes the same owned tree here, so
+/// there is no second construction fold (acceptance criterion 3: one tree build,
+/// one target fold).
+///
+/// Unlike [`render_tree_terminal_with_context`], this keeps the content-box
+/// width and the terminal capability profile **independent** instead of
+/// encoding both through [`TerminalOptions::max_width`].
+///
+/// `max_width` selects the optimistic pre-render [`Terminal`] — carrying both a
+/// width *and* a full capability profile (TrueColor, OSC8). The page splits the
+/// two concerns:
+///
+///   * `optimistic_capabilities` selects the capability profile. The page sets
+///     it for *deliberate frame geometry only* — never a matched component
+///     policy — so a centered table or other matched layout cannot promote
+///     unrelated content to optimistic TrueColor + OSC8 the ambient terminal
+///     never advertised (review-5 finding 1). A geometry frame still reaches the
+///     optimistic profile faithfully; a no-geometry page (matched policy or not)
+///     renders at the ambient capabilities a no-policy page would.
+///   * `content_width` is pinned afterwards regardless of that profile, so a
+///     no-geometry page can render at the ambient width independent of the
+///     selected capabilities — a split `max_width` alone cannot express. Painted
+///     construction color still rides `options.color_depth` (the captured
+///     depth), applied by the adapter over the selected base.
+///
+/// Color depth, when the page paints construction color, still rides
+/// `options.color_depth` and is applied by the adapter over the selected base.
+///
+/// ## Errors
+///
+/// Propagates any fatal [`RenderError`] from [`render_terminal_document`].
+pub(crate) fn render_page_terminal_document(
+    doc: &Document,
+    fold_diagnostics: Vec<Diagnostic>,
+    options: &TerminalOptions,
+    content_width: u16,
+    optimistic_capabilities: bool,
+) -> PipelineRenderResult<String> {
+    // Select the capability profile via the adapter's optimistic/ambient base,
+    // then pin the content width independently on top.
+    let mut capability_options = options.clone();
+    capability_options.max_width = optimistic_capabilities.then_some(content_width);
+    let mut term_opts = terminal_options_from_terminal_options(&capability_options);
+    // Pin only the content-box width. Set it on both the context and its
+    // terminal snapshot so a component reading either agrees on the width,
+    // independent of the capability profile selected above.
+    let width = u32::from(content_width);
+    term_opts.context.terminal.fixed_width = Some(width);
+    term_opts.context.width = width;
+    term_opts.context.available_width = width;
+    term_opts.context.image_placeholder = ImagePlaceholder::Block;
+    let rendered = render_terminal_document(doc, &term_opts)?;
+    Ok(PipelineResult::new(
+        rendered.output,
+        fold_diagnostics,
+        rendered.diagnostics,
+    ))
+}
+
 /// Renders a [`Markdown`] back to a Markdown string via the render-tree
 /// pipeline.
 ///
