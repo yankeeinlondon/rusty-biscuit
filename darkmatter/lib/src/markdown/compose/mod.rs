@@ -6439,6 +6439,63 @@ Rounded: {{ round(pi) }}"#;
         }
 
         #[test]
+        fn dir_target_regular_file_errors_strict() {
+            // `--dir` pointed at a regular file is a syntax error, not an empty
+            // directory: strict mode fails the compose with a clear diagnostic.
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            std::fs::write(dir.path().join("report.pdf"), "pdf\n").unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links --dir report.pdf\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_fail_fast(true)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let err = md.compose_with(options).unwrap_err();
+            assert!(
+                err.to_string().contains("not a directory"),
+                "expected a not-a-directory error, got: {err}"
+            );
+        }
+
+        #[test]
+        fn dir_target_regular_file_warns_permissive() {
+            // Permissive mode removes the directive and records the real
+            // not-a-directory diagnostic instead of an empty/misleading warning.
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            std::fs::write(dir.path().join("report.pdf"), "pdf\n").unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links --dir report.pdf\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_ignore_invalid_references(Some(true))
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(
+                !text.contains("::file-links"),
+                "directive should be removed: {text}"
+            );
+            assert_eq!(report.transclusions_skipped, 1);
+            assert!(
+                report
+                    .warnings
+                    .iter()
+                    .any(|w| w.message.contains("not a directory")),
+                "expected not-a-directory warning: {:?}",
+                report.warnings
+            );
+        }
+
+        #[test]
         fn operation_disabling_leaves_directive_intact() {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path().join("root.md");

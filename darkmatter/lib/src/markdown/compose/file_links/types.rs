@@ -104,6 +104,10 @@ pub enum FileLinksError {
     #[error("Target directory '{path}' does not exist (line {line})")]
     TargetNotFound { path: String, line: usize },
 
+    /// The `--dir` target exists but is not a directory.
+    #[error("Target '{path}' is not a directory (line {line})")]
+    TargetNotDirectory { path: String, line: usize },
+
     /// A glob pattern failed to compile.
     #[error("Invalid glob pattern '{pattern}' at line {line}: {message}")]
     InvalidGlob {
@@ -165,6 +169,16 @@ impl biscuit_terminal::errors::BlockError for FileLinksError {
                     "<dim>Path:</dim> <cyan>{path}</cyan>\n<dim>Line:</dim> {line}"
                 ))
                 .hint("Confirm the directory exists relative to the document."),
+
+            FileLinksError::TargetNotDirectory { path, line } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "FileLinksError",
+                    "target is not a directory",
+                ))
+                .body(format!(
+                    "<dim>Path:</dim> <cyan>{path}</cyan>\n<dim>Line:</dim> {line}"
+                ))
+                .hint("<cyan>--dir</cyan> requires a directory; use a glob (e.g. <cyan>::file-links \"docs/*.md\"</cyan>) to match a file."),
 
             FileLinksError::InvalidGlob {
                 pattern,

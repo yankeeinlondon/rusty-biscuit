@@ -182,4 +182,48 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn marks_entries_ignored_by_a_nested_gitignore_below_the_root() {
+        // A `.gitignore` deeper than the component root must scope to its own
+        // directory: `private/.gitignore` dims `private/secret.md` but the
+        // identically-named `public/secret.md` stays tracked.
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::create_dir_all(dir.path().join("private")).unwrap();
+        std::fs::create_dir_all(dir.path().join("public")).unwrap();
+        std::fs::write(dir.path().join("private/.gitignore"), "secret.md\n").unwrap();
+        std::fs::write(dir.path().join("private/secret.md"), "").unwrap();
+        std::fs::write(dir.path().join("public/secret.md"), "").unwrap();
+
+        let tree = build_included_tree(&render_for(
+            dir.path(),
+            &["private/secret.md", "public/secret.md"],
+        ));
+
+        let private_secret = find(&tree, &["private", "secret.md"]).expect("private/secret.md");
+        let public_secret = find(&tree, &["public", "secret.md"]).expect("public/secret.md");
+        assert!(
+            private_secret.is_ignored(),
+            "nested .gitignore must dim the entry in its own directory",
+        );
+        assert!(
+            !public_secret.is_ignored(),
+            "the nested rule must not leak into a sibling directory",
+        );
+    }
+
+    /// Walks `nodes` following `path` segment by segment, returning the matching
+    /// leaf node.
+    fn find<'a>(nodes: &'a [TreeNode], path: &[&str]) -> Option<&'a TreeNode> {
+        let (head, rest) = path.split_first()?;
+        let node = nodes.iter().find(|n| n.name() == *head)?;
+        if rest.is_empty() {
+            return Some(node);
+        }
+        match node {
+            TreeNode::Dir { children, .. } => find(children, rest),
+            _ => None,
+        }
+    }
 }

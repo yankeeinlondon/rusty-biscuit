@@ -189,6 +189,15 @@ fn discover_dir(
             line,
         });
     }
+    // `--dir` requires a directory. Without this guard a regular-file target
+    // falls through to `read_dir()`, whose error is silently dropped, yielding
+    // an empty (and misdiagnosed) match instead of a syntax error.
+    if !target.is_dir() {
+        return Err(FileLinksError::TargetNotDirectory {
+            path: path.to_string(),
+            line,
+        });
+    }
     let component_root = canonicalize(&target);
 
     let mut candidates = BTreeMap::new();
@@ -680,6 +689,18 @@ mod tests {
         let err =
             discover_content("::file-links --dir nonexistent\n", &source).unwrap_err();
         assert!(matches!(err, FileLinksError::TargetNotFound { .. }));
+    }
+
+    #[test]
+    fn dir_target_regular_file_errors() {
+        let dir = TempDir::new().unwrap();
+        make_repo(&dir);
+        write_file(dir.path(), "report.pdf", "pdf");
+        let source = write_file(dir.path(), "index.md", "");
+
+        let err =
+            discover_content("::file-links --dir report.pdf\n", &source).unwrap_err();
+        assert!(matches!(err, FileLinksError::TargetNotDirectory { .. }));
     }
 
     #[test]
