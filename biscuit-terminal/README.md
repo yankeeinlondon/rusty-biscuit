@@ -60,7 +60,10 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
     - [`Section`](./docs/components/section.md)
     - [`Status`](./docs/components/status.md)
     - `StatusBlock`
-    - [`Table`](./docs/components/table.md)
+    - [`Table`](./docs/components/table.md) — typed cell content including
+      `StyledProse` cells that embed capability-aware inline Prose (links,
+      emphasis, color) without pre-rendering to terminal bytes; see
+      [Prose in table cells](./docs/components/prose.md#prose-in-table-cells)
     - [`TerminalImage`](./docs/components/terminal_image.md)
     - [`TextBlock`](./docs/components/text_block.md)
     - [`Todo`](./docs/components/todo.md)
