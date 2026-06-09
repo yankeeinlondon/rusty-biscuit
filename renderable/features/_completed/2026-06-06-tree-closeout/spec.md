@@ -2,7 +2,7 @@
 status: complete
 reviewed: true
 date: 2026-06-06
-completed: 2026-06-08
+completed: 2026-06-07
 owner: ken
 parent: renderable/features/_completed/2026-06-04-css-box-architecture/spec.md
 depends-on:

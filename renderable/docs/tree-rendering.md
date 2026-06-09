@@ -254,7 +254,7 @@ A few responsibilities sit deliberately **outside** the fold:
   frame carries **no** component policy, inspects **no** component node kinds,
   and mutates **no** component content; it operates on the already-folded output
   string / wrapper, never on the `RenderNode` tree. (See
-  `renderable/features/2026-06-06-tree-closeout/traversal-inventory.md`.)
+  `renderable/features/_completed/2026-06-06-tree-closeout/traversal-inventory.md`.)
 - **Frontmatter** is extracted by darkmatter and attached to the `Document`'s
   metadata above the fold — the fold does not re-parse YAML.
 - **`style:` frontmatter** is a darkmatter policy layer that applies page and
