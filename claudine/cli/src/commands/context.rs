@@ -61,16 +61,24 @@ fn group_context_descriptors(
 
 fn group_expression_descriptors(
 ) -> Vec<(&'static str, Vec<&'static ExpressionFunctionDescriptor>)> {
+    // The catalog is physically laid out by implementation grouping, so a
+    // single category (e.g. `Math`, `Collection`) can appear in non-adjacent
+    // runs. Consolidate every category into one group, ordered by first
+    // appearance, then honor each descriptor's `order` as the stable display
+    // order within the category.
     let mut groups: Vec<(&'static str, Vec<&'static ExpressionFunctionDescriptor>)> = Vec::new();
-    let mut current_cat: Option<&'static str> = None;
 
     for desc in expression_function_descriptors() {
-        if current_cat != Some(desc.category) {
-            current_cat = Some(desc.category);
-            groups.push((desc.category, Vec::new()));
+        match groups.iter_mut().find(|(cat, _)| *cat == desc.category) {
+            Some((_, funcs)) => funcs.push(desc),
+            None => groups.push((desc.category, vec![desc])),
         }
-        groups.last_mut().unwrap().1.push(desc);
     }
+
+    for (_, funcs) in &mut groups {
+        funcs.sort_by_key(|f| f.order);
+    }
+
     groups
 }
 
@@ -138,10 +146,22 @@ fn format_value(value: &serde_json::Value, term: &Terminal) -> String {
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::Array(arr) => {
-            let items: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
+            let items: Vec<String> = arr.iter().map(|v| format_array_element(v, term)).collect();
             items.join(", ")
         }
         serde_json::Value::Object(_) => value.to_string(),
+    }
+}
+
+/// Formats a single array element for the values report.
+///
+/// Scalar elements use the same plain rules as top-level values (e.g. a string
+/// renders as `alpha`, not the JSON-quoted `"alpha"`). Nested arrays and objects
+/// retain compact JSON serialization, since there is no flat plain form for them.
+fn format_array_element(value: &serde_json::Value, term: &Terminal) -> String {
+    match value {
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => value.to_string(),
+        scalar => format_value(scalar, term),
     }
 }
 
@@ -924,6 +944,61 @@ mod tests {
         assert!(
             type_width >= max_type,
             "Type width ({type_width}) must cover longest type ({max_type})"
+        );
+    }
+
+    /// The expression report groups the complete function catalog by metadata
+    /// category — each category emitted exactly once, even though the catalog is
+    /// physically laid out by implementation grouping (so `Math` and `Collection`
+    /// appear in non-adjacent runs). Within each category the signatures must
+    /// follow the descriptors' stable `order`, not catalog position.
+    #[test]
+    fn expression_groups_consolidate_categories_in_metadata_order() {
+        use std::collections::HashSet;
+
+        let groups = group_expression_descriptors();
+
+        let mut seen = HashSet::new();
+        for (category, _) in &groups {
+            assert!(
+                seen.insert(*category),
+                "category `{category}` emitted more than once",
+            );
+        }
+
+        for (category, functions) in &groups {
+            let orders: Vec<usize> = functions.iter().map(|f| f.order).collect();
+            let mut expected = orders.clone();
+            expected.sort_unstable();
+            assert_eq!(
+                orders, expected,
+                "category `{category}` signatures must follow metadata order; got {orders:?}",
+            );
+        }
+    }
+
+    /// Scalar array elements render with plain values — strings without JSON
+    /// quotes — while nested arrays/objects keep compact JSON serialization.
+    #[test]
+    fn format_value_renders_arrays_plainly() {
+        let term = Terminal::new_optimistic(200);
+
+        assert_eq!(
+            format_value(&serde_json::json!(["alpha", "beta"]), &term),
+            "alpha, beta",
+        );
+        assert_eq!(
+            format_value(&serde_json::json!([1, 2, 3]), &term),
+            "1, 2, 3",
+        );
+        assert_eq!(
+            format_value(&serde_json::json!([true, false]), &term),
+            "true, false",
+        );
+        // Nested structured elements keep compact JSON.
+        assert_eq!(
+            format_value(&serde_json::json!([{"k": 1}, ["x"]]), &term),
+            r#"{"k":1}, ["x"]"#,
         );
     }
 
