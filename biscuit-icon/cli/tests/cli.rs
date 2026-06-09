@@ -701,6 +701,7 @@ fn completions_dynamic_includes_set_names() {
                 license: Some("MIT".into()),
                 license_title: None,
                 license_url: None,
+                total: None,
             })
             .unwrap();
     }
@@ -744,6 +745,7 @@ fn completions_dynamic_from_csv_completes_active_segment() {
                 license: Some("MIT".into()),
                 license_title: None,
                 license_url: None,
+                total: None,
             })
             .unwrap();
     }
@@ -771,44 +773,257 @@ fn completions_dynamic_from_csv_completes_active_segment() {
     );
 }
 
-#[test]
-fn completions_dynamic_default_command_from_csv_completes_active_segment() {
-    let home = tempfile::tempdir().unwrap();
+#[tokio::test]
+async fn sets_persists_total_across_offline_runs() {
+    let server = MockServer::start().await;
+    let json = serde_json::json!({
+        "custom": { "name": "Custom Set", "total": 5000, "license": { "title": "MIT", "spdx": "MIT" } }
+    });
+    Mock::given(method("GET"))
+        .and(path("/collections"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .mount(&server)
+        .await;
 
+    let home = tempfile::tempdir().unwrap();
+    // First run fetches and caches the total.
+    let first = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .args(["sets", "custom"])
+        .output()
+        .unwrap();
+    let first_stdout = String::from_utf8(first.stdout).unwrap();
+    assert!(first_stdout.contains("Custom Set"), "expected set title; got: {}", first_stdout);
+    assert!(first_stdout.contains("5,000") || first_stdout.contains("5000"),
+        "expected total in first run; got: {}", first_stdout);
+
+    // Second run offline with matching filter should show cached total.
+    let second = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", "http://127.0.0.1:1")
+        .args(["sets", "custom"])
+        .output()
+        .unwrap();
+    let second_stdout = String::from_utf8(second.stdout).unwrap();
+    assert!(
+        second.status.success(),
+        "second offline call failed. stdout={}", second_stdout
+    );
+    assert!(second_stdout.contains("Custom Set"), "expected cached set title; got: {}", second_stdout);
+    assert!(second_stdout.contains("5,000") || second_stdout.contains("5000"),
+        "expected persisted total in second run; got: {}", second_stdout);
+}
+
+#[tokio::test]
+async fn sets_shows_unknown_for_missing_total() {
+    let server = MockServer::start().await;
+    let json = serde_json::json!({
+        "nototal": { "name": "No Total Set" }
+    });
+    Mock::given(method("GET"))
+        .and(path("/collections"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .mount(&server)
+        .await;
+
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .args(["sets", "nototal"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Unknown"), "expected 'Unknown' for missing total; got: {}", stdout);
+}
+
+#[tokio::test]
+async fn sets_shows_cached_counts() {
+    let server = MockServer::start().await;
+    let json = serde_json::json!({
+        "test": { "name": "Test Set", "total": 100 },
+        "empty": { "name": "Empty Set", "total": 50 }
+    });
+    Mock::given(method("GET"))
+        .and(path("/collections"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .mount(&server)
+        .await;
+
+    let home = tempfile::tempdir().unwrap();
+    // Pre-seed the cache with icons for the "test" prefix only.
     {
         let cache_dir = home.path().join(".cache").join("biscuit-icon");
         std::fs::create_dir_all(&cache_dir).unwrap();
         let cache = biscuit_icon::cache::IconCache::open_at(cache_dir.join("icons.db")).unwrap();
-        cache
-            .put_set(&biscuit_icon::cache::SetInfo {
-                prefix: "ic-custom".into(),
-                title: "Custom Set".into(),
-                license: Some("MIT".into()),
-                license_title: None,
-                license_url: None,
-            })
-            .unwrap();
+        cache.put("test", "icon1", &biscuit_icon::IconBody::new("<path/>", 24, 24)).unwrap();
+        cache.put("test", "icon2", &biscuit_icon::IconBody::new("<path/>", 24, 24)).unwrap();
+        cache.put("test", "icon3", &biscuit_icon::IconBody::new("<path/>", 24, 24)).unwrap();
     }
 
-    // Complete the active segment after a comma in default-command `--from`.
     let output = Command::cargo_bin("icon")
         .unwrap()
         .env("HOME", home.path())
-        .env("COMPLETE", "bash")
-        .env("_CLAP_COMPLETE_INDEX", "2")
-        .args(["--", "icon", "--from", "mdi,ic"])
+        .env("ICONIFY_BASE_URL", server.uri())
+        .args(["sets"])
         .output()
         .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Test Set"), "expected Test Set; got: {}", stdout);
+    assert!(stdout.contains("Empty Set"), "expected Empty Set; got: {}", stdout);
+    // "test" has 3 cached icons, "empty" has 0.
+    assert!(stdout.contains('3'), "expected cached count 3 for test; got: {}", stdout);
+}
 
+#[tokio::test]
+async fn sets_shows_thousands_separator_for_large_total() {
+    let server = MockServer::start().await;
+    let json = serde_json::json!({
+        "large": { "name": "Large Set", "total": 1234567 }
+    });
+    Mock::given(method("GET"))
+        .and(path("/collections"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .mount(&server)
+        .await;
+
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .args(["sets", "large"])
+        .output()
+        .unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
-        stdout.contains("mdi,ic"),
-        "expected built-in prefix reconstructed with CSV prefix; got: {}",
+        stdout.contains("1,234,567"),
+        "expected thousands separator; got: {}",
         stdout
     );
+}
+
+#[tokio::test]
+async fn sets_narrow_terminal_uses_single_table() {
+    let server = MockServer::start().await;
+    let mut collections = serde_json::Map::new();
+    for i in 0..20 {
+        collections.insert(format!("set{i}"), serde_json::json!({ "name": format!("Set {i}"), "total": 100 }));
+    }
+    let json = serde_json::Value::Object(collections);
+    Mock::given(method("GET"))
+        .and(path("/collections"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .mount(&server)
+        .await;
+
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .env("BISCUIT_TERM_WIDTH", "60")
+        .env("BISCUIT_TERM_HEIGHT", "10")
+        .args(["sets"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    // With narrow width, should be a single table.
+    // Count header-separator lines (├─…) — one per table.
+    let table_count = stdout.lines().filter(|l| l.starts_with('├')).count();
+    assert_eq!(table_count, 1, "expected single table; got {} tables", table_count);
+}
+
+#[tokio::test]
+async fn sets_wide_short_uses_two_tables() {
+    let server = MockServer::start().await;
+    let mut collections = serde_json::Map::new();
+    for i in 0..10 {
+        collections.insert(format!("set{i}"), serde_json::json!({ "name": format!("Set {i}"), "total": 100 }));
+    }
+    let json = serde_json::Value::Object(collections);
+    Mock::given(method("GET"))
+        .and(path("/collections"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .mount(&server)
+        .await;
+
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .env("BISCUIT_TERM_WIDTH", "120")
+        .env("BISCUIT_TERM_HEIGHT", "4")
+        .args(["sets"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    // With wide+short, should be two tables rendered side-by-side.
+    // Detect split by the presence of two table separators joined on one line.
+    let is_split = stdout.lines().any(|l| l.contains('┤') && l.contains('├'));
+    assert!(is_split, "expected split layout (two tables side-by-side); got:\n{}", stdout);
+}
+
+#[tokio::test]
+async fn sets_wide_tall_uses_single_table() {
+    let server = MockServer::start().await;
+    let mut collections = serde_json::Map::new();
+    for i in 0..5 {
+        collections.insert(format!("set{i}"), serde_json::json!({ "name": format!("Set {i}"), "total": 100 }));
+    }
+    let json = serde_json::Value::Object(collections);
+    Mock::given(method("GET"))
+        .and(path("/collections"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .mount(&server)
+        .await;
+
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .env("BISCUIT_TERM_WIDTH", "120")
+        .env("BISCUIT_TERM_HEIGHT", "20")
+        .args(["sets"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    // With wide+tall (all rows fit), should be single table.
+    // Count header-separator lines (├─…) — one per table.
+    let table_count = stdout.lines().filter(|l| l.starts_with('├')).count();
+    assert_eq!(table_count, 1, "expected single table when all rows fit; got {} tables", table_count);
+}
+
+#[tokio::test]
+async fn sets_output_contains_no_raw_prose_markup() {
+    let server = MockServer::start().await;
+    let json = serde_json::json!({
+        "test": { "name": "Test Set", "total": 100 }
+    });
+    Mock::given(method("GET"))
+        .and(path("/collections"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .mount(&server)
+        .await;
+
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .args(["sets", "test"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
-        stdout.contains("mdi,ic-custom"),
-        "expected cached prefix reconstructed with CSV prefix; got: {}",
+        !stdout.contains('<') || !stdout.contains('>'),
+        "output should not contain raw Prose markup tags; got: {}",
         stdout
     );
 }

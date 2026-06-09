@@ -1,5 +1,6 @@
 mod args;
 mod commands;
+mod sets_table;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
@@ -28,9 +29,16 @@ async fn main() {
     init_tracing(cli.debug);
 
     // Resolve the default `icons` command when none is given.
-    let command = cli
-        .command
-        .unwrap_or(Commands::Icons { filter: cli.filter, from: cli.from });
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None if cli.filter.is_none() && cli.from.is_none() => {
+            let mut cmd = Cli::command();
+            cmd.print_help().unwrap();
+            println!();
+            return;
+        }
+        None => Commands::Icons { filter: cli.filter, from: cli.from },
+    };
 
     if let Err(err) = commands::run(command, cli.nerd).await {
         render_error(&err, cli.verbose);

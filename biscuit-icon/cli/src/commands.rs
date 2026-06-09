@@ -9,6 +9,7 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 
 use crate::args::{CacheAction, Commands};
+use crate::sets_table::{SetRow, render_sets};
 
 /// Builds an Iconify client respecting the `ICONIFY_BASE_URL` env var.
 fn client_from_env() -> IconifyClient {
@@ -165,62 +166,20 @@ async fn sets(filter: Option<String>, client: &IconifyClient) -> Result<()> {
         Ok(sets) => {
             // Cache every fetched collection so the full catalog is available
             // for later offline filters, then filter only for presentation.
-            for (prefix, title, license) in &sets {
-                let license_str = license.as_ref().and_then(|l| {
-                    if l.spdx.is_empty() {
-                        None
-                    } else {
-                        Some(l.spdx.clone())
-                    }
-                });
-                let license_title = license.as_ref().and_then(|l| {
-                    if l.title.is_empty() {
-                        None
-                    } else {
-                        Some(l.title.clone())
-                    }
-                });
-                let license_url = license.as_ref().and_then(|l| l.url.clone());
-                let info = SetInfo {
-                    prefix: prefix.clone(),
-                    title: title.clone(),
-                    license: license_str,
-                    license_title,
-                    license_url,
-                };
-                if let Err(err) = cache.put_set(&info) {
-                    tracing::warn!("failed to cache set metadata for {prefix}: {err}");
+            for info in &sets {
+                let set_info = set_info_from_collection(info);
+                if let Err(err) = cache.put_set(&set_info) {
+                    tracing::warn!("failed to cache set metadata for {}: {err}", info.prefix);
                 }
             }
-            for (prefix, title, license) in sets {
+            for info in sets {
                 if needle.is_empty()
-                    || prefix.to_lowercase().contains(&needle)
-                    || title.to_lowercase().contains(&needle)
+                    || info.prefix.to_lowercase().contains(&needle)
+                    || info.title.to_lowercase().contains(&needle)
                 {
-                    let license_str = license.as_ref().and_then(|l| {
-                        if l.spdx.is_empty() {
-                            None
-                        } else {
-                            Some(l.spdx.clone())
-                        }
-                    });
-                    let license_title = license.as_ref().and_then(|l| {
-                        if l.title.is_empty() {
-                            None
-                        } else {
-                            Some(l.title.clone())
-                        }
-                    });
-                    let license_url = license.as_ref().and_then(|l| l.url.clone());
-                    let info = SetInfo {
-                        prefix: prefix.clone(),
-                        title: title.clone(),
-                        license: license_str,
-                        license_title,
-                        license_url,
-                    };
-                    offline.retain(|s| s.prefix != prefix);
-                    offline.push(info);
+                    let set_info = set_info_from_collection(&info);
+                    offline.retain(|s| s.prefix != info.prefix);
+                    offline.push(set_info);
                 }
             }
         }
@@ -234,10 +193,62 @@ async fn sets(filter: Option<String>, client: &IconifyClient) -> Result<()> {
     }
 
     offline.sort_by(|a, b| a.prefix.cmp(&b.prefix));
-    for set in offline {
-        println!("{}\t{}", set.prefix, set.title);
-    }
+
+    let prefixes: Vec<String> = offline.iter().map(|s| s.prefix.clone()).collect();
+    let counts = cache.cached_icon_counts(&prefixes)?;
+
+    let rows: Vec<SetRow> = offline
+        .into_iter()
+        .map(|s| SetRow {
+            prefix: s.prefix.clone(),
+            title: s.title,
+            total: s.total,
+            cached: counts.get(&s.prefix).copied().unwrap_or(0),
+        })
+        .collect();
+
+    let term = if let (Ok(w), Ok(h)) = (
+        std::env::var("BISCUIT_TERM_WIDTH"),
+        std::env::var("BISCUIT_TERM_HEIGHT"),
+    ) {
+        if let (Ok(w), Ok(h)) = (w.parse::<u32>(), h.parse::<u32>()) {
+            Terminal::builder().width(w).height(h).build()
+        } else {
+            Terminal::new()
+        }
+    } else {
+        Terminal::new()
+    };
+    let output = render_sets(&rows, &term);
+    println!("{output}");
     Ok(())
+}
+
+/// Builds a [`SetInfo`] from a [`CollectionInfo`], mapping license fields.
+fn set_info_from_collection(info: &biscuit_icon::iconify::CollectionInfo) -> SetInfo {
+    let license_str = info.license.as_ref().and_then(|l| {
+        if l.spdx.is_empty() {
+            None
+        } else {
+            Some(l.spdx.clone())
+        }
+    });
+    let license_title = info.license.as_ref().and_then(|l| {
+        if l.title.is_empty() {
+            None
+        } else {
+            Some(l.title.clone())
+        }
+    });
+    let license_url = info.license.as_ref().and_then(|l| l.url.clone());
+    SetInfo {
+        prefix: info.prefix.clone(),
+        title: info.title.clone(),
+        license: license_str,
+        license_title,
+        license_url,
+        total: info.total,
+    }
 }
 
 /// Resolves an identifier to an [`Icon`], preferring the embedded domain
