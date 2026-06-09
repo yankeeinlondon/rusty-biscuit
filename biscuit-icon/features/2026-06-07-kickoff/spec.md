@@ -285,8 +285,9 @@ into the hot path; image rendering is an opt-in enhancement for glyph-less icons
 | `icon cache clear` | Clear the local cache DB. |
 
 **Listing boundary:** `sets`/`icons` serve the built-in domain catalog plus local
-cache offline; the full Iconify catalog is reached via the API only when online
-(results cached afterward).
+cache offline; when a filter is provided, the full Iconify catalog is reached via
+the API and merged with offline results (results cached afterward). An empty filter
+intentionally lists only offline icons.
 
 **Errors:** the library uses `thiserror` (`IconError`). The CLI catches and renders
 human-readable, Prose-styled errors (`<red><b>Error:</b></red>`, deduplicated cause

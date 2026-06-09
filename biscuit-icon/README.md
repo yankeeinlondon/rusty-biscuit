@@ -201,8 +201,9 @@ The CLI binary `icon` has an API surface of:
 - `sets <filter>` provides the list of icon sets (names only) which Iconify provides; you can optionally filter down the returned sets with the `<filter>` param
 - `icons [filter] [--from <csv>]`
     - provides a list of icons (and icon names) whose name includes the `filter` parameter
+    - when `filter` is omitted, only offline icons (built-in domain catalog and local cache) are listed
     - you can isolate to an enumerated set of icon sets using the `--from <csv>` filter (e.g., `icon icons happy --from fa,mdi`)
-    - offline results come from the built-in domain catalog plus the local cache; the online Iconify catalog is always queried and merged with offline results
+    - offline results come from the built-in domain catalog plus the local cache; when a filter is provided, the online Iconify catalog is also queried and merged with offline results
 - `completions`
     - provides dynamic shell completions
     - it will always know the icon set names and the static icon sets built into the binary
