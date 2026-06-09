@@ -17,8 +17,7 @@ use darkmatter::markdown::compose::ComposeContext;
 use crate::commands::context_render::{
     configure_shared_table, context_column_widths, function_first_column_width, inline_code_text,
     prose_with_inline_code, render_context_section, render_table_resilient,
-    render_table_within_contract, report_column, report_droppable_column,
-    render_unordered_list, TableLayout,
+    render_table_within_contract, report_column, render_unordered_list, TableLayout,
 };
 use crate::log;
 
@@ -674,15 +673,10 @@ fn render_side_effects_report() {
             if layout == TableLayout::Pinned {
                 capability = capability.with_min_width(cap_width).with_max_width(cap_width);
             }
-            let safety = if layout == TableLayout::WrapAndDrop {
-                report_droppable_column("Safety")
-            } else {
-                report_column("Safety")
-            };
             let mut table = Table::new().with_columns(vec![
                 capability,
                 report_column("Description"),
-                safety,
+                report_column("Safety"),
             ]);
             configure_shared_table(&mut table);
             for effect in effects {
@@ -812,17 +806,23 @@ mod tests {
     }
 
     /// The spec keeps `Property`, `Type`, and the final column in the default
-    /// and values reports at every width, relying on wrapping rather than a
-    /// Claudine-specific narrow layout. `render_context_section` must keep all
-    /// three columns at a narrow width — even with the widest unbreakable
-    /// property name — by letting the columns wrap instead of dropping `Type`
-    /// or emitting the planner's width-error string inline.
+    /// and values reports at every supported width, relying on wrapping rather
+    /// than a Claudine-specific narrow layout. At the documented minimum
+    /// supported width (`MIN_SUPPORTED_REPORT_WIDTH`), `render_context_section`
+    /// must keep all three columns — even with the widest unbreakable property
+    /// name *and* the binding `NestedMarkdownList` type token — by letting the
+    /// columns wrap instead of dropping `Type` or emitting the planner's
+    /// width-error string inline. Representative content from every column must
+    /// survive too, not merely the headers.
     #[test]
-    fn narrow_default_report_preserves_type_column_and_wraps() {
+    fn default_report_preserves_all_columns_at_minimum_supported_width() {
+        use crate::commands::context_render::MIN_SUPPORTED_REPORT_WIDTH;
+
         // The widest real property; 41 unbreakable cells on spaces.
         let property_width = "ctx.current_package_area_has_staged_files".len();
+        // The widest real type token — the constraint that fixes the floor.
         let type_width = "NestedMarkdownList".len();
-        let term = Terminal::new_optimistic(78);
+        let term = Terminal::new_optimistic(MIN_SUPPORTED_REPORT_WIDTH);
 
         let output = render_context_section(
             &term,
@@ -836,23 +836,31 @@ mod tests {
                     "Whether the current package area has staged files.".into(),
                 ]);
                 table.add_row(vec![
-                    "ctx.docs_blast_radius".into(),
-                    "Csv".into(),
-                    "Comma-separated docs with 'blast_radius' frontmatter, scope-filtered.".into(),
+                    "ctx.docs_outline".into(),
+                    "NestedMarkdownList".into(),
+                    "Nested outline of the in-scope docs.".into(),
                 ]);
             },
         );
 
         assert!(
-            !output.contains("Table could not be rendered"),
-            "render must wrap content rather than emit the width-error string; \
-             output was:\n{output}",
+            !output.contains("could not be rendered"),
+            "render at the minimum supported width must wrap content rather than \
+             emit the width-error string; output was:\n{output}",
         );
         // All three columns survive — no alternate narrow layout drops Type.
         for header in ["Property", "Type", "Description"] {
             assert!(
                 output.contains(header),
-                "narrow report must keep the `{header}` column; output was:\n{output}",
+                "minimum-width report must keep the `{header}` column; output was:\n{output}",
+            );
+        }
+        // Representative content from each column survives the wrap (tokens may
+        // wrap across rows, so assert fragments that stay intact).
+        for fragment in ["ctx.", "Boolean", "NestedMarkdownList", "staged"] {
+            assert!(
+                output.contains(fragment),
+                "minimum-width report must retain `{fragment}` content; output was:\n{output}",
             );
         }
         // Output fits the terminal width without intentional overflow.
@@ -862,8 +870,8 @@ mod tests {
             .max()
             .unwrap_or(0);
         assert!(
-            max <= 78,
-            "narrow report must fit within the terminal width; max={max}; output:\n{output}",
+            max <= MIN_SUPPORTED_REPORT_WIDTH as usize,
+            "minimum-width report must fit within the terminal width; max={max}; output:\n{output}",
         );
     }
 

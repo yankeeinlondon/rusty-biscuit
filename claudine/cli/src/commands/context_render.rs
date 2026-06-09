@@ -12,6 +12,21 @@ use biscuit_terminal::utils::layout::{Alignment, Length, Margin, TargetValue, Wo
 #[allow(dead_code)]
 pub const MAX_REPORT_WIDTH: u32 = 140;
 
+/// Minimum terminal width, in visible cells, at which every context report
+/// renders all of its required columns by wrapping.
+///
+/// The reports never drop a column or introduce a Claudine-specific narrow
+/// layout (see the spec's "Narrow Terminals" clause). Every required column is
+/// preserved by letting the break-aware wrap policy fit content to the available
+/// width — but the widest unbreakable catalog tokens (e.g. the `Type` value
+/// `NestedMarkdownList` and the `Safety` value `MarkdownMutation`) impose a hard
+/// floor below which three columns cannot coexist without overflow. At or above
+/// this width all columns survive; below it the shared `Table` component's own
+/// constrained-width behavior applies. This is the documented minimum supported
+/// width referenced by the spec.
+#[allow(dead_code)]
+pub const MIN_SUPPORTED_REPORT_WIDTH: u32 = 53;
+
 /// Break characters for report table cells.
 ///
 /// Catalog tokens — `ctx.`-prefixed property names, function/capability
@@ -152,49 +167,45 @@ pub fn render_table_within_contract(table: &Table, term: &Terminal) -> String {
 pub enum TableLayout {
     /// Width pins applied so sections align across the report.
     Pinned,
-    /// Pins removed; break-aware columns wrap. Preferred over dropping.
+    /// Pins removed; break-aware columns wrap to fit the available width while
+    /// every column is preserved.
     Wrap,
-    /// Pins removed and secondary columns droppable — the last resort for
-    /// terminals too narrow to wrap every column.
-    WrapAndDrop,
 }
 
 /// The sentinel the table planner emits inline when no layout fits the width.
 const TABLE_WIDTH_ERROR_SENTINEL: &str = "could not be rendered";
 
-/// Renders a table under the width contract, escalating relaxation only as far
-/// as the terminal forces.
+/// Renders a table under the width contract, relaxing the shared width pins only
+/// as far as the terminal forces.
 ///
 /// `build` constructs the table for a given [`TableLayout`]. Pins
 /// (`with_min_width`/`with_fixed_width`) are hard floors — too narrow to honor
 /// them, the planner emits its width-error string inline — so this first tries
-/// the pinned layout, then the break-aware [`TableLayout::Wrap`] layout, and
-/// only if that *still* renders the planner error does it fall back to
-/// [`TableLayout::WrapAndDrop`], which marks secondary columns droppable. The
-/// outcome is checked against the actually rendered output (not a separate
-/// width probe, which the render tree does not share), so columns are dropped
-/// only when wrapping genuinely cannot fit — never in a mid-width band where
-/// dropping merely lets a wide column expand.
+/// the pinned layout and falls back to the break-aware [`TableLayout::Wrap`]
+/// layout, which keeps every column and lets the break-aware wrap policy fit the
+/// content to the available width. No column is ever dropped: the spec forbids a
+/// Claudine-specific narrow layout, so below the [minimum supported width] the
+/// `Wrap` layout's output is returned verbatim (the shared `Table` component's
+/// own constrained-width behavior applies).
+///
+/// [minimum supported width]: MIN_SUPPORTED_REPORT_WIDTH
 ///
 /// `build` is invoked once per attempt so callers do not need clonable cells.
 #[allow(dead_code)]
 pub fn render_table_resilient(term: &Terminal, build: impl Fn(TableLayout) -> Table) -> String {
-    for layout in [TableLayout::Pinned, TableLayout::Wrap] {
-        let rendered = render_table_within_contract(&build(layout), term);
-        if !rendered.contains(TABLE_WIDTH_ERROR_SENTINEL) {
-            return rendered;
-        }
+    let pinned = render_table_within_contract(&build(TableLayout::Pinned), term);
+    if !pinned.contains(TABLE_WIDTH_ERROR_SENTINEL) {
+        return pinned;
     }
-    render_table_within_contract(&build(TableLayout::WrapAndDrop), term)
+    render_table_within_contract(&build(TableLayout::Wrap), term)
 }
 
 /// Renders one context section table (`Property` / `Type` / final column).
 ///
 /// The shared `property_width`/`type_width` are pinned as minimum widths so
-/// sections align — but only when the width can afford them. Below that the
-/// pins drop and the break-aware columns wrap, keeping all three columns. Only
-/// terminals too narrow to wrap all three fall back to dropping `Type`,
-/// preserving `Property` and the descriptive final column.
+/// sections align — but only when the width can afford them. Below that the pins
+/// drop and the break-aware columns wrap, keeping all three columns at every
+/// supported width. No column is dropped (see [`MIN_SUPPORTED_REPORT_WIDTH`]).
 ///
 /// `add_rows` receives the table and pushes one row per descriptor; it is
 /// invoked once per layout attempt so callers do not need clonable cells.
@@ -208,12 +219,7 @@ pub fn render_context_section(
 ) -> String {
     render_table_resilient(term, |layout| {
         let mut property = report_column("Property");
-        let mut ty = if layout == TableLayout::WrapAndDrop {
-            report_droppable_column("Type")
-        } else {
-            report_column("Type")
-        }
-        .with_alignment(Alignment::Center);
+        let mut ty = report_column("Type").with_alignment(Alignment::Center);
         if layout == TableLayout::Pinned {
             property = property.with_min_width(property_width);
             ty = ty.with_min_width(type_width);

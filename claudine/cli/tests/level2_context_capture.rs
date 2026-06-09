@@ -538,14 +538,21 @@ fn level2_context_side_effects_caps_at_140_in_wide_tmux() {
 }
 
 // ---------------------------------------------------------------------------
-// Genuinely-constrained widths (review-3 finding 1)
+// Minimum supported width — required-column preservation (review-4 finding 1)
 // ---------------------------------------------------------------------------
 //
-// The earlier "narrow" cases (78/100/120/128) sit above each report's failure
-// range. These capture every report at 40–60 columns — the range the
-// iteration-3 review reproduced — in a real terminal and assert the production
-// table wraps to fit (box glyphs, the 1ch left margin, a wrapped continuation
-// row, rows within the pane) and never shows the planner's width-error string.
+// The minimum supported terminal width is 53 cells (see the spec's "Narrow
+// Terminals" clause). At that floor the binding default and values reports must
+// preserve every required column by wrapping — never drop a column and never
+// emit the planner width-error string. The expression and side-effect reports
+// hold narrower unbreakable tokens and preserve their columns below the floor;
+// they are exercised at 50 here. Each case captures a real terminal and asserts
+// box glyphs, the 1ch left margin, no planner diagnostic, that all required
+// headers survive, representative content renders, and rows fit the pane.
+
+/// The minimum supported terminal width, in cells, at which every report keeps
+/// all required columns. Mirrors `MIN_SUPPORTED_REPORT_WIDTH` in the renderer.
+const MIN_SUPPORTED_WIDTH: u32 = 53;
 
 /// Asserts the visible frame carries no table planner width-error diagnostic.
 fn assert_no_planner_diagnostic(frame: &CapturedFrame) {
@@ -556,16 +563,29 @@ fn assert_no_planner_diagnostic(frame: &CapturedFrame) {
     );
 }
 
-/// Default report at 48 columns: wraps to fit with box glyphs, no planner
-/// diagnostic, and still renders catalog content (`ctx.gpu`, the final row).
+/// Asserts every required column header survives in the captured frame.
+fn assert_headers_present(frame: &CapturedFrame, headers: &[&str]) {
+    for header in headers {
+        assert!(
+            frame.plain.contains(header),
+            "constrained report must keep the `{header}` column.\nplain:\n{}",
+            frame.plain,
+        );
+    }
+}
+
+/// Default report at the minimum supported width (53 columns): wraps to fit with
+/// box glyphs, keeps all three columns (`Property`/`Type`/`Description`), shows
+/// no planner diagnostic, and still renders catalog content (`ctx.gpu`).
 #[test]
 #[serial(level2_terminal)]
-fn level2_context_default_constrained_48_wraps_in_tmux() {
+fn level2_context_default_preserves_columns_at_min_width_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
-    let frame = capture_context(&[], 48, 400);
+    let frame = capture_context(&[], MIN_SUPPORTED_WIDTH, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
     assert_no_planner_diagnostic(&frame);
+    assert_headers_present(&frame, &["Property", "Type", "Description"]);
     assert!(
         frame.plain.contains("ctx.gpu"),
         "constrained default report must still render catalog rows.\nplain:\n{}",
@@ -577,19 +597,26 @@ fn level2_context_default_constrained_48_wraps_in_tmux() {
         frame.plain,
     );
     let max = max_visible_width(&frame);
-    assert!(max <= 48, "rows must fit the 48-col pane; max={max}.\nplain:\n{}", frame.plain);
+    assert!(
+        max <= MIN_SUPPORTED_WIDTH as usize,
+        "rows must fit the {MIN_SUPPORTED_WIDTH}-col pane; max={max}.\nplain:\n{}",
+        frame.plain,
+    );
 }
 
-/// `--values` at 60 columns (its live-data floor): wraps, no planner diagnostic,
-/// renders the bottom `ctx.gpu` row.
+/// `--values` at 60 columns (its live-data floor — captured values are
+/// host-dependent and can exceed the static catalog's intrinsic width): wraps,
+/// no planner diagnostic, keeps all three columns (`Property`/`Type`/`Value`),
+/// and renders the bottom `ctx.gpu` row.
 #[test]
 #[serial(level2_terminal)]
-fn level2_context_values_constrained_60_wraps_in_tmux() {
+fn level2_context_values_preserves_columns_constrained_60_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
     let frame = capture_context(&["--values"], 60, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
     assert_no_planner_diagnostic(&frame);
+    assert_headers_present(&frame, &["Property", "Type", "Value"]);
     assert!(
         frame.plain.contains("ctx.gpu"),
         "constrained values report must render the bottom `ctx.gpu` row.\nplain:\n{}",
@@ -599,8 +626,10 @@ fn level2_context_values_constrained_60_wraps_in_tmux() {
     assert!(max <= 60, "rows must fit the 60-col pane; max={max}.\nplain:\n{}", frame.plain);
 }
 
-/// `--expressions` at 50 columns: wraps, no planner diagnostic, still renders
-/// the function catalog (the bottom `validate_schema` Filesystem group).
+/// `--expressions` at 50 columns (below the shared floor — its narrower
+/// unbreakable tokens preserve all columns there): wraps, no planner diagnostic,
+/// keeps both columns (`Function`/`Description`), and still renders the function
+/// catalog (the bottom `validate_schema` Filesystem group).
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_constrained_50_wraps_in_tmux() {
@@ -609,6 +638,7 @@ fn level2_context_expressions_constrained_50_wraps_in_tmux() {
 
     assert_box_glyphs_and_left_margin(&frame);
     assert_no_planner_diagnostic(&frame);
+    assert_headers_present(&frame, &["Function", "Description"]);
     assert!(
         frame.plain.contains("validate_schema"),
         "constrained expressions report must render the function catalog.\nplain:\n{}",
@@ -618,21 +648,30 @@ fn level2_context_expressions_constrained_50_wraps_in_tmux() {
     assert!(max <= 50, "rows must fit the 50-col pane; max={max}.\nplain:\n{}", frame.plain);
 }
 
-/// `--side-effects` at 50 columns: wraps, no planner diagnostic, still renders
-/// the capability catalog (the bottom `http_post` Network group).
+/// `--side-effects` at the minimum supported width (53 columns): wraps, no
+/// planner diagnostic, keeps all three columns
+/// (`Capability`/`Description`/`Safety`), and still renders the capability
+/// catalog (the bottom `http_post` Network group). The `Frontmatter Mutations`
+/// section's `MarkdownMutation` safety token is the binding constraint here, so
+/// this report is exercised at the shared floor rather than below it.
 #[test]
 #[serial(level2_terminal)]
-fn level2_context_side_effects_constrained_50_wraps_in_tmux() {
+fn level2_context_side_effects_preserves_columns_at_min_width_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
-    let frame = capture_context(&["--side-effects"], 50, 200);
+    let frame = capture_context(&["--side-effects"], MIN_SUPPORTED_WIDTH, 200);
 
     assert_box_glyphs_and_left_margin(&frame);
     assert_no_planner_diagnostic(&frame);
+    assert_headers_present(&frame, &["Capability", "Description", "Safety"]);
     assert!(
         frame.plain.contains("http_post"),
         "constrained side-effects report must render the capability catalog.\nplain:\n{}",
         frame.plain,
     );
     let max = max_visible_width(&frame);
-    assert!(max <= 50, "rows must fit the 50-col pane; max={max}.\nplain:\n{}", frame.plain);
+    assert!(
+        max <= MIN_SUPPORTED_WIDTH as usize,
+        "rows must fit the {MIN_SUPPORTED_WIDTH}-col pane; max={max}.\nplain:\n{}",
+        frame.plain,
+    );
 }

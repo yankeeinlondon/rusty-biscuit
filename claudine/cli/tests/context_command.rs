@@ -665,22 +665,32 @@ fn context_footer_no_availability_claims() {
 // Narrow-terminal regression (review-3 finding 1)
 // =====================================================================
 
-/// At genuinely constrained widths (40–60 columns) every report must render its
-/// catalog by wrapping — never degrade into the table planner's
-/// "Table could not be rendered …" diagnostic. This guards the exact failure
-/// the iteration-3 review reproduced (`COLUMNS=40` and `COLUMNS=60`), checking
-/// the whole report (full stdout), not just a screenful.
+/// At and above the documented minimum supported width (53 cells) every report
+/// must render its catalog by wrapping with **all required columns preserved** —
+/// never dropping a column and never degrading into the table planner's
+/// "Table could not be rendered …" diagnostic. The spec forbids a
+/// Claudine-specific narrow layout, so this asserts every required header and
+/// representative content survive (not merely the absence of the diagnostic),
+/// checking the whole report (full stdout). 53 is the binding floor for the
+/// default and values reports; the expression and side-effect reports preserve
+/// all columns below it, but are exercised here at the shared floor too.
 #[test]
-fn context_reports_render_without_planner_diagnostic_at_narrow_widths() {
-    let cases: &[(&[&str], &str)] = &[
-        (&["context"], "ctx.today"),
-        (&["context", "--values"], "ctx.today"),
-        (&["context", "--expressions"], "min(a, b)"),
-        (&["context", "--side-effects"], "ensure_file"),
+fn context_reports_preserve_all_columns_at_minimum_supported_width() {
+    // (args, required headers, representative content sentinel)
+    let cases: &[(&[&str], &[&str], &str)] = &[
+        (&["context"], &["Property", "Type", "Description"], "ctx.today"),
+        (&["context", "--values"], &["Property", "Type", "Value"], "ctx.today"),
+        (&["context", "--expressions"], &["Function", "Description"], "min(a, b)"),
+        (
+            &["context", "--side-effects"],
+            &["Capability", "Description", "Safety"],
+            "ensure_file",
+        ),
     ];
 
-    for width in ["40", "50", "60"] {
-        for (args, sentinel) in cases {
+    // 53 is the minimum supported width; 60 and 80 confirm columns persist above it.
+    for width in ["53", "60", "80"] {
+        for (args, headers, sentinel) in cases {
             let assert = cargo_bin_cmd!("claudine")
                 .env("NO_COLOR", "1")
                 .env("COLUMNS", width)
@@ -695,6 +705,13 @@ fn context_reports_render_without_planner_diagnostic_at_narrow_widths() {
                 "`claudine {args:?}` at COLUMNS={width} must wrap, not emit the \
                  planner width-error; got stdout:\n{stdout}"
             );
+            for header in *headers {
+                assert!(
+                    stdout.contains(header),
+                    "`claudine {args:?}` at COLUMNS={width} must keep the `{header}` \
+                     column; got stdout:\n{stdout}"
+                );
+            }
             assert!(
                 stdout.contains(sentinel),
                 "`claudine {args:?}` at COLUMNS={width} must still render catalog \
@@ -702,6 +719,51 @@ fn context_reports_render_without_planner_diagnostic_at_narrow_widths() {
             );
         }
     }
+}
+
+/// The removed narrow layout silently dropped the `Type` column at some narrow
+/// widths (the iteration-4 regression at `COLUMNS=35`). Dropping is now gone:
+/// at any width the default report either renders a full three-column table or
+/// falls back to the shared `Table` component's diagnostic — it must never emit
+/// a two-column table that keeps `Property`/`Description` but omits `Type`.
+///
+/// This sweeps the narrow band straddling the minimum supported width and
+/// asserts that *every* table header row (a line carrying `Property` and
+/// `Description`) also carries `Type`. Widths below the floor produce no header
+/// rows (the diagnostic, not a degraded table); widths at and above it produce
+/// header rows that must keep all three columns.
+#[test]
+fn context_default_report_never_drops_type_column_at_any_width() {
+    let mut saw_header_row = false;
+
+    for width in ["35", "40", "45", "50", "53", "56", "60"] {
+        let assert = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("COLUMNS", width)
+            .current_dir(repo_root())
+            .args(["context"])
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+        for row in stdout
+            .lines()
+            .filter(|line| line.contains("Property") && line.contains("Description"))
+        {
+            saw_header_row = true;
+            assert!(
+                row.contains("Type"),
+                "default report at COLUMNS={width} dropped the `Type` column; \
+                 header row was:\n  {row}\n\nfull stdout:\n{stdout}"
+            );
+        }
+    }
+
+    assert!(
+        saw_header_row,
+        "expected at least one three-column header row across the swept widths; \
+         the sweep proved nothing if no table ever rendered"
+    );
 }
 
 /// The "Interpolation vs. Condition Mode" introduction uses corrected wording.
