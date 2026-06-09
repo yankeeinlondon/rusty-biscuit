@@ -479,6 +479,209 @@ fn level2_sets_split_table_renders() {
     );
 }
 
+/// Runs `icon sets <filter>` against an isolated, offline cache **without**
+/// dimension overrides, so the binary detects the live tmux pane size via
+/// `TIOCGWINSZ`. Clears the pane first so the capture reflects only this run.
+fn run_sets_live(
+    harness: &mut TmuxHarness,
+    home: &std::path::Path,
+    filter: &str,
+) -> CapturedFrame {
+    harness.send_text(b"clear\n").expect("clear failed");
+    harness.settle();
+    let cmd = format!(
+        "HOME='{}' ICONIFY_BASE_URL='http://127.0.0.1:1' '{}' sets {filter}\n",
+        home.display(),
+        icon_bin().display(),
+    );
+    harness.send_text(cmd.as_bytes()).expect("send_text failed");
+    let _ = wait_for_prompt(harness);
+    harness.capture().expect("capture failed")
+}
+
+/// Verifies that `icon sets` chooses its layout from the *live* terminal
+/// geometry, not from injected dimensions: the same six rows render as one
+/// table in a narrow/tall pane and as a column-major split in a wide/short
+/// pane.
+#[test]
+#[serial(level2_terminal)]
+fn level2_sets_layout_adapts_to_live_terminal_size() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    // A dedicated, owned session: this test resizes the pane, so it must not
+    // perturb the shared session other tests attach to. Drop tears it down.
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("spawn tmux");
+
+    let home = tempfile::tempdir().unwrap();
+    let seeded: Vec<(String, String, Option<usize>)> = (0..6)
+        .map(|i| (format!("zz{i}"), format!("ZZ {i}"), Some(i * 100)))
+        .collect();
+    let seeded_refs: Vec<(&str, &str, Option<usize>)> = seeded
+        .iter()
+        .map(|(p, t, total)| (p.as_str(), t.as_str(), *total))
+        .collect();
+    seed_sets(home.path(), &seeded_refs, &[]);
+
+    // Narrow and tall: width below MIN_SPLIT_WIDTH and height ample, so all six
+    // rows fit one table and zz0/zz3 land on different rows.
+    harness.resize(70, 30).expect("resize narrow/tall");
+    let narrow = run_sets_live(&mut harness, home.path(), "zz");
+    let narrow_zz0 = narrow
+        .plain
+        .lines()
+        .find(|l| l.contains("zz0") && l.contains('│'))
+        .unwrap_or_else(|| panic!("zz0 row not found in narrow output:\n{}", narrow.plain));
+    assert!(
+        !narrow_zz0.contains("zz3"),
+        "narrow/tall pane should render a single table (zz0 and zz3 on separate rows); got:\n{}",
+        narrow.plain
+    );
+
+    // Wide and short: width above MIN_SPLIT_WIDTH and height too small for six
+    // rows, forcing a column-major split where zz0 (top-left) and zz3
+    // (top-right) share the first data row.
+    harness.resize(120, 9).expect("resize wide/short");
+    let wide = run_sets_live(&mut harness, home.path(), "zz");
+    let wide_first = wide
+        .plain
+        .lines()
+        .find(|l| l.contains("zz0") && l.contains("zz3"))
+        .unwrap_or_else(|| {
+            panic!("expected zz0 and zz3 on one row in wide output:\n{}", wide.plain)
+        });
+    assert!(
+        wide_first.find("zz0").unwrap() < wide_first.find("zz3").unwrap(),
+        "wide/short pane should split column-major (zz0 left of zz3): {wide_first:?}",
+    );
+}
+
+/// Char positions of every `│` (column border) in a captured table line.
+fn vbar_positions(line: &str) -> Vec<usize> {
+    line.chars()
+        .enumerate()
+        .filter(|(_, c)| *c == '│')
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Distance in chars from the last non-space char of the cell bounded by the
+/// `left`/`right` border positions to the right border. A right-aligned cell
+/// yields the same gap regardless of how wide its content is, so comparing the
+/// gap of a narrow value against a wide one detects (mis)alignment.
+fn cell_right_gap(chars: &[char], left: usize, right: usize) -> usize {
+    match (left + 1..right).rev().find(|&i| chars[i] != ' ') {
+        Some(i) => right - i,
+        None => right - left,
+    }
+}
+
+/// Verifies, in a real terminal, that the `Total` and `Cached` columns are
+/// right-aligned across rows of differing numeric width and that an overlong
+/// title wraps within its column instead of pushing the count columns off
+/// screen.
+#[test]
+#[serial(level2_terminal)]
+fn level2_sets_right_alignment_and_wrapping() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+    harness.send_text(b"clear\n").expect("clear failed");
+    harness.settle();
+
+    let home = tempfile::tempdir().unwrap();
+    // Rows with deliberately different numeric widths (1 vs 7 digits) and one
+    // overlong title that must wrap inside the Set column (max width 30).
+    seed_sets(
+        home.path(),
+        &[
+            ("zzbig", "Big", Some(9_999_999)),
+            ("zzshort", "Short", Some(5)),
+            ("zzwrap", "Alphabetagamma Deltaepsilonzeta Etathetaiota", Some(42)),
+        ],
+        &[("zzbig", 123), ("zzshort", 1)],
+    );
+
+    // Fixed size that keeps a single table and leaves the table well within the
+    // pane so captured borders are not wrapped by the terminal.
+    let frame = run_sets(harness, home.path(), "zz", 100, 30);
+    let lines: Vec<&str> = frame.plain.lines().collect();
+
+    let row = |prefix: &str| -> &str {
+        lines
+            .iter()
+            .find(|l| l.contains(prefix) && l.contains('│'))
+            .copied()
+            .unwrap_or_else(|| panic!("{prefix} row not found in:\n{}", frame.plain))
+    };
+
+    // Right alignment: a 1-digit row and a 7-digit row share the same right
+    // edge in both numeric columns (identical gap to their right border).
+    let short = row("zzshort");
+    let big = row("zzbig");
+    let short_bars = vbar_positions(short);
+    let big_bars = vbar_positions(big);
+    assert_eq!(
+        short_bars, big_bars,
+        "fixed-width table rows must share column-border positions:\n{short:?}\n{big:?}"
+    );
+    assert!(
+        short_bars.len() >= 5,
+        "expected four columns (>= 5 borders); got {short:?}"
+    );
+    let short_chars: Vec<char> = short.chars().collect();
+    let big_chars: Vec<char> = big.chars().collect();
+    assert_eq!(
+        cell_right_gap(&short_chars, short_bars[2], short_bars[3]),
+        cell_right_gap(&big_chars, big_bars[2], big_bars[3]),
+        "Total column is not right-aligned:\n{short:?}\n{big:?}"
+    );
+    assert_eq!(
+        cell_right_gap(&short_chars, short_bars[3], short_bars[4]),
+        cell_right_gap(&big_chars, big_bars[3], big_bars[4]),
+        "Cached column is not right-aligned:\n{short:?}\n{big:?}"
+    );
+
+    // Count columns stay visible: the widest total renders in full, not clipped.
+    assert!(
+        big.contains("9,999,999"),
+        "widest Total must render in full; got: {big:?}"
+    );
+
+    // Wrapping: the overlong title spills onto a continuation row that keeps the
+    // table borders and does not repeat the prefix.
+    let wrap_idx = lines
+        .iter()
+        .position(|l| l.contains("zzwrap"))
+        .unwrap_or_else(|| panic!("zzwrap row not found in:\n{}", frame.plain));
+    let continuation = lines[wrap_idx + 1..]
+        .iter()
+        .take_while(|l| l.contains('│'))
+        .find(|l| l.contains("Etathetaiota"))
+        .unwrap_or_else(|| {
+            panic!(
+                "overlong title did not wrap onto a continuation row:\n{}",
+                frame.plain
+            )
+        });
+    assert!(
+        !continuation.contains("zzwrap"),
+        "wrapped continuation row should not repeat the prefix: {continuation:?}"
+    );
+    assert!(
+        continuation.contains('│'),
+        "wrapped continuation row should retain table borders: {continuation:?}"
+    );
+    // The wrapped-title row itself keeps all four columns and its own Total.
+    let wrap_row = row("zzwrap");
+    assert!(
+        vbar_positions(wrap_row).len() >= 5 && wrap_row.contains("42"),
+        "wrapped-title row must keep all columns and its Total: {wrap_row:?}"
+    );
+}
+
 // ------------------------------------------------------------------
 // Styled errors
 // ------------------------------------------------------------------
