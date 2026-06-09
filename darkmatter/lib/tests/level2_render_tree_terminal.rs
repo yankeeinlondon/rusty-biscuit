@@ -329,6 +329,60 @@ fn background_colors(row: &str) -> Vec<String> {
     out
 }
 
+/// Extracts every foreground-color descriptor set by the SGR sequences in
+/// `row`, normalized like [`background_colors`] so two captures can be compared
+/// regardless of WezTerm's true-color wire form. The foreground introducer is
+/// `38` (colon form `38:2::r:g:b` / `38:5:n`; semicolon form `38;2;r;g;b` /
+/// `38;5;n`).
+fn foreground_colors(row: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = row;
+    while let Some(start) = rest.find("\u{1b}[") {
+        let after = &rest[start + 2..];
+        let Some(mpos) = after.find('m') else {
+            break;
+        };
+        let params = &after[..mpos];
+        if params
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, ';' | ':'))
+        {
+            let fields: Vec<&str> = params.split(';').collect();
+            for field in &fields {
+                if field.starts_with("38:") {
+                    out.push((*field).to_string());
+                }
+            }
+            let mut i = 0;
+            while i < fields.len() {
+                if fields[i] == "38" {
+                    let span = match fields.get(i + 1).copied() {
+                        Some("2") => 5,
+                        Some("5") => 3,
+                        _ => 1,
+                    };
+                    let end = (i + span).min(fields.len());
+                    out.push(fields[i..end].join(";"));
+                    i = end;
+                    continue;
+                }
+                i += 1;
+            }
+        }
+        rest = &after[mpos + 1..];
+    }
+    out
+}
+
+/// The sorted, de-duplicated set of foreground colors across every row of a
+/// captured frame — the semantic comparison key for two real-terminal renders.
+fn foreground_color_set(frame: &CapturedFrame) -> Vec<String> {
+    let mut set: Vec<String> = frame.raw.lines().flat_map(foreground_colors).collect();
+    set.sort();
+    set.dedup();
+    set
+}
+
 /// Review-13: rich fenced code blocks are a user-observable terminal feature
 /// (info-string title, line-number gutter, highlighted lines) but were only
 /// verified at Level 1 (in-process string assertions in `entrypoints.rs` and
@@ -1319,13 +1373,35 @@ fn render_zero_config_page_to_tempfile(
     (dir, path)
 }
 
+/// Renders `body` through a baseline [`DarkmatterPage`] with no component
+/// policy, pinning TrueColor so the capture is deterministic regardless of the
+/// test process's ambient detection. Paired with
+/// [`render_unmatched_policy_page_to_tempfile`] for the review-4 parity test.
+fn render_no_policy_page_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let term = Terminal::new_optimistic(120);
+    let md: Markdown = body.into();
+    let rendered = DarkmatterPage::new(&term)
+        .with_color_depth(ColorDepth::TrueColor)
+        .render(&md)
+        .expect("no-policy DarkmatterPage::render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered).unwrap();
+    (dir, path)
+}
+
 /// Renders `body` through a [`DarkmatterPage`] carrying an *unmatched* colored
-/// `Tables` policy on a captured terminal that reports `None` (no-color) depth.
+/// `Tables` policy, pinning TrueColor to match
+/// [`render_no_policy_page_to_tempfile`].
 ///
-/// The document has no table, so the policy bakes nothing; per the review-3
-/// fix the unmatched policy must not flip the renderer-wide color depth to the
-/// captured `None`. The fenced code block must therefore still be syntax-
-/// highlighted (color-bearing) in the rendered bytes.
+/// The document has no table, so the policy bakes nothing; per the review-4 fix
+/// the unmatched policy must not change the capability profile of unrelated
+/// content. The fenced code block's TrueColor syntax highlighting must therefore
+/// be byte-identical to the no-policy render.
 fn render_unmatched_policy_page_to_tempfile(
     body: &str,
     name: &str,
@@ -1333,10 +1409,10 @@ fn render_unmatched_policy_page_to_tempfile(
     use renderable::color::{Color, Tailwind};
     use renderable::style::PaintColor;
 
-    let mut term = Terminal::new_optimistic(120);
-    term.color_depth = biscuit_terminal::discovery::detection::ColorDepth::None;
+    let term = Terminal::new_optimistic(120);
     let md: Markdown = body.into();
     let rendered = DarkmatterPage::new(&term)
+        .with_color_depth(ColorDepth::TrueColor)
         .with_component_color(
             darkmatter::layout::PageComponent::Tables,
             PaintColor::new(Color::Tailwind(Tailwind::Red500)),
@@ -1383,47 +1459,60 @@ fn level2_public_as_terminal_entry_renders_in_real_terminal() {
     );
 }
 
-/// Review-3 finding (High): an *unmatched* component policy must not flip the
-/// renderer-wide color depth — capability selection must be independent of
-/// policy presence. SGR color is terminal-observable, so this closes the
-/// review's request for Level 2 coverage of the color-depth defect (the Level 1
-/// parity test in `page.rs` exercises the byte string; this drives the bytes
-/// through a real WezTerm pane).
+/// Review-4 finding 1 (High): an *unmatched* component policy must not change
+/// the capability profile of unrelated content — the real-terminal render must
+/// be the same with and without the policy.
 ///
-/// The page is built from a captured `None`-depth terminal and carries a colored
-/// `Tables` policy, but the document has no table — so the policy is unmatched
-/// and paints nothing. The fenced code block's syntax highlighting must survive
-/// to the real terminal as foreground color SGR. Before the fix the unmatched
-/// policy forced the captured `None` depth, stripping all color; the capture
-/// would then carry no `38;…` foreground sequence.
+/// Both pages pin TrueColor and render the same fixture (prose + a syntax-
+/// highlighted code block); one also carries a colored `Tables` policy the
+/// document never matches. Driving both through a real WezTerm pane and
+/// comparing the captured foreground-color sets proves the policy changes no
+/// capability: the colored code is identical. Before the fix the unmatched
+/// policy routed the render through the optimistic terminal, so its colored
+/// output diverged from the no-policy baseline. This is the Level 2 parity
+/// companion to the Level 1 byte test in `page.rs`.
 #[test]
 #[serial(level2_terminal)]
-fn level2_unmatched_policy_keeps_code_color_in_real_terminal() {
+fn level2_unmatched_policy_matches_no_policy_color_in_real_terminal() {
     let body = "Lead prose paragraph.\n\n```rust\nfn demo() { let x = 1; }\n```\n";
-    let Some((frame, _dir)) =
-        drive_pane(body, "unmatched_policy_color", render_unmatched_policy_page_to_tempfile)
+    let Some((no_policy_frame, _d1)) =
+        drive_pane(body, "no_policy_color", render_no_policy_page_to_tempfile)
     else {
         return;
     };
+    let Some((unmatched_frame, _d2)) = drive_pane(
+        body,
+        "unmatched_policy_color",
+        render_unmatched_policy_page_to_tempfile,
+    ) else {
+        return;
+    };
 
-    // The code body must survive the round-trip.
+    // The code body must survive both round-trips.
+    for frame in [&no_policy_frame, &unmatched_frame] {
+        assert!(
+            frame.plain.contains("demo"),
+            "code body token missing from real-terminal capture. plain:\n{}",
+            frame.plain
+        );
+    }
+
+    let no_policy_fg = foreground_color_set(&no_policy_frame);
+    let unmatched_fg = foreground_color_set(&unmatched_frame);
+
+    // Premise: the baseline render is actually colored, so the comparison is
+    // meaningful rather than two empty sets.
     assert!(
-        frame.plain.contains("demo"),
-        "code body token missing from real-terminal capture. plain:\n{}",
-        frame.plain
+        !no_policy_fg.is_empty(),
+        "test premise: the no-policy code block must carry foreground color in the pane; \
+         raw:\n{}",
+        no_policy_frame.raw
     );
-
-    // Foreground syntax-highlight SGRs must survive into the real pane: an
-    // unmatched policy must NOT have forced the captured `None` depth (which
-    // would emit no color at all). WezTerm re-emits true color in the colon
-    // form; accept colon, semicolon, or 256-color.
-    assert!(
-        frame.raw.contains("\u{1b}[38;2;")
-            || frame.raw.contains("\u{1b}[38:2:")
-            || frame.raw.contains("\u{1b}[38;5;"),
-        "expected foreground syntax-highlight SGRs despite the unmatched colored policy; \
-         the policy must not flip color depth to the captured None. raw:\n{}",
-        frame.raw
+    // Parity: the unmatched policy must produce the same foreground colors.
+    assert_eq!(
+        no_policy_fg, unmatched_fg,
+        "an unmatched policy must not change the real-terminal foreground colors of \
+         unrelated content"
     );
 }
 
