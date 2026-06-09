@@ -592,14 +592,17 @@ fn level2_sets_right_alignment_and_wrapping() {
     harness.settle();
 
     let home = tempfile::tempdir().unwrap();
-    // Rows with deliberately different numeric widths (1 vs 7 digits) and one
-    // overlong title that must wrap inside the Set column (max width 30).
+    // Rows with deliberately different numeric widths (1 vs 7 digits), one
+    // overlong title that must wrap inside the Set column (max width 30), and
+    // one overlong prefix that must wrap inside the Prefix column (max width
+    // 20) at its hyphen break without displacing the count columns.
     seed_sets(
         home.path(),
         &[
             ("zzbig", "Big", Some(9_999_999)),
             ("zzshort", "Short", Some(5)),
             ("zzwrap", "Alphabetagamma Deltaepsilonzeta Etathetaiota", Some(42)),
+            ("zzwideprefix-continues", "Wide", Some(7_654_321)),
         ],
         &[("zzbig", 123), ("zzshort", 1)],
     );
@@ -679,6 +682,48 @@ fn level2_sets_right_alignment_and_wrapping() {
     assert!(
         vbar_positions(wrap_row).len() >= 5 && wrap_row.contains("42"),
         "wrapped-title row must keep all columns and its Total: {wrap_row:?}"
+    );
+
+    // Prefix wrapping: the overlong prefix breaks at its hyphen onto a
+    // continuation row that stays inside the Prefix cell, keeps the table
+    // borders, and repeats neither the leading prefix segment nor the title.
+    let pfx_idx = lines
+        .iter()
+        .position(|l| l.contains("zzwideprefix"))
+        .unwrap_or_else(|| panic!("zzwideprefix row not found in:\n{}", frame.plain));
+    let pfx_continuation = lines[pfx_idx + 1..]
+        .iter()
+        .take_while(|l| l.contains('│'))
+        .find(|l| l.contains("continues"))
+        .unwrap_or_else(|| {
+            panic!(
+                "overlong prefix did not wrap onto a continuation row:\n{}",
+                frame.plain
+            )
+        });
+    assert!(
+        !pfx_continuation.contains("zzwideprefix"),
+        "wrapped prefix continuation must not repeat the leading segment: {pfx_continuation:?}"
+    );
+    assert!(
+        !pfx_continuation.contains("Wide"),
+        "wrapped prefix continuation must not repeat the title: {pfx_continuation:?}"
+    );
+    // The continuation text sits within the Prefix column: between the second
+    // and third column borders.
+    let cont_bars = vbar_positions(pfx_continuation);
+    let cont_tail = pfx_continuation.find("continues").unwrap();
+    assert!(
+        cont_bars.len() >= 5
+            && cont_tail > cont_bars[1]
+            && cont_tail < cont_bars[2],
+        "prefix continuation must stay inside the Prefix cell: {pfx_continuation:?}"
+    );
+    // The primary prefix row keeps all four columns and its full Total.
+    let pfx_row = row("zzwideprefix");
+    assert!(
+        vbar_positions(pfx_row).len() >= 5 && pfx_row.contains("7,654,321"),
+        "wrapped-prefix row must keep all columns and its full Total: {pfx_row:?}"
     );
 }
 
