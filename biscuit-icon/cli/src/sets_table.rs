@@ -306,6 +306,58 @@ mod tests {
     }
 
     #[test]
+    fn set_title_links_to_iconify_page() {
+        // The Set name links to its Iconify catalog page, which lives at a
+        // route keyed on the set prefix.
+        let rows = vec![SetRow {
+            prefix: "mdi".into(),
+            title: "Material Design Icons".into(),
+            total: Some(7447),
+            cached: 0,
+        }];
+        let t = Terminal::builder()
+            .width(120)
+            .height(20)
+            .is_tty(true)
+            .osc_link_support(true)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::TrueColor)
+            .build();
+        let output = render_sets(&rows, &t);
+        assert!(
+            output.contains("https://icon-sets.iconify.design/mdi"),
+            "expected an OSC8 link to the set's Iconify page; got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn set_title_plain_when_links_unsupported() {
+        // Without OSC8 support the title degrades to plain text — no escape
+        // codes, no raw markup tags.
+        let rows = vec![SetRow {
+            prefix: "mdi".into(),
+            title: "Material Design Icons".into(),
+            total: Some(7447),
+            cached: 0,
+        }];
+        let t = Terminal::builder()
+            .width(120)
+            .height(20)
+            .is_tty(false)
+            .osc_link_support(false)
+            .build();
+        let output = render_sets(&rows, &t);
+        assert!(output.contains("Material Design Icons"));
+        assert!(
+            !output.contains("https://icon-sets.iconify.design"),
+            "plain output must not embed the link URL; got:\n{output}"
+        );
+        assert!(
+            !output.contains("<blue>") && !output.contains("<a href"),
+            "plain output must not contain raw Prose markup; got:\n{output}"
+        );
+    }
+
+    #[test]
     fn wide_and_tall_uses_single_table() {
         let rows = test_rows(5);
         let t = term(120, 20); // 20 height -> 16 rows per table, 5 fits
