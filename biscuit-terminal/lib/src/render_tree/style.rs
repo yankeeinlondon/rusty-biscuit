@@ -270,11 +270,32 @@ pub(crate) fn text_appearance_sgr(style: &Style, term: &Terminal) -> String {
     open
 }
 
+/// Closes an inline appearance run, restoring the ancestor `parent` appearance.
+///
+/// `open` is the run produced by [`text_appearance_sgr`] for the styled node.
+/// When it is empty — no text appearance, or a [`ColorDepth::None`] terminal
+/// that suppresses every escape — the run opened nothing, so the close is also
+/// empty: no stray [`SGR_RESET`] is emitted. Otherwise the run is reset and the
+/// `parent` appearance re-applied so text after the node keeps the inherited
+/// color/emphasis.
+pub(crate) fn appearance_close(open: &str, parent: &Style, term: &Terminal) -> String {
+    if open.is_empty() {
+        return String::new();
+    }
+    format!("{}{}", SGR_RESET, text_appearance_sgr(parent, term))
+}
+
 /// Builds the emphasis SGR run for a [`Style`].
 ///
 /// The non-underline layers come from [`TextEmphasis::sgr_ops`]; the underline
-/// variant is degraded against the terminal's reported support.
+/// variant is degraded against the terminal's reported support. A
+/// [`ColorDepth::None`] terminal emits no style SGR at all — emphasis is a
+/// style escape and is suppressed alongside color so the no-color profile
+/// yields completely escape-free output.
 fn emphasis_sgr(style: &Style, term: &Terminal) -> String {
+    if matches!(term.color_depth, ColorDepth::None) {
+        return String::new();
+    }
     let mut sgr = String::new();
     for (_, code) in style.emphasis.sgr_ops() {
         sgr.push_str(code);

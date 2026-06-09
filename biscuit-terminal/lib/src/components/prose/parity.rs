@@ -205,8 +205,9 @@ fn terminal_double_underline_suppressed_without_underline_support() {
             colored: false,
         })
         .build();
-    // Tree renderer resets fully even when no visible style was emitted.
-    assert_eq!(term_caps("<uu>x</uu>", &terminal), "x\x1b[0m");
+    // No underline support means the span opens nothing, so no stray reset is
+    // emitted — the output is the bare character with no escapes.
+    assert_eq!(term_caps("<uu>x</uu>", &terminal), "x");
 }
 
 // ── Terminal: inverse (load-bearing SGR 7) ───────────────────────────────
