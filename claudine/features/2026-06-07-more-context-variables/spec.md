@@ -253,8 +253,27 @@ the established `biscuit-terminal` table behavior for constrained layouts:
 - cell content wraps rather than causing deliberate horizontal overflow
 - configured margins remain 1ch where the component can represent them
 - descriptive content remains present
+- every required column is preserved — no column is dropped
 - no Claudine-specific truncation marker or alternate narrow layout is
   introduced by this feature
+
+#### Minimum Supported Width
+
+Reports never drop a required column and never introduce a Claudine-specific
+narrow layout. Every required column is preserved by letting the break-aware
+wrap policy fit content to the available width. The widest unbreakable catalog
+tokens — notably the `Type` value `NestedMarkdownList` (18 cells) — impose a
+hard floor below which the default and values reports cannot lay out all three
+columns without overflow.
+
+The **minimum supported terminal width is 53 visible cells**. At or above 53
+cells, every report renders all of its required columns and representative
+content by wrapping, within the width contract. Below 53 cells the terminal is
+unsupported: the shared `Table` component's own constrained-width behavior
+applies and may emit its width-error diagnostic. The expression-function and
+side-effect-capability reports, whose columns hold narrower unbreakable tokens,
+preserve all columns well below this floor; 53 is the floor for the binding
+default and values reports.
 
 The implementation must not panic for a positive terminal width supported by
 the terminal and table components.
@@ -415,6 +434,10 @@ non-normative unless needed to satisfy them:
 - Assert context `Property` and `Type` widths are not forced to be equal.
 - Assert function and capability first-column widths are at most 40ch.
 - Assert narrow output wraps without panic and retains descriptive content.
+- At the minimum supported width (53 cells), assert every report preserves all
+  of its required columns and representative content by wrapping — never drops a
+  column and never emits the planner width-error string. Cover the transition by
+  asserting the binding default report wraps with all columns at 53 cells.
 - Assert inline code emits inverse styling in styled output, restores visible
   backticks in plain output, and renders correctly in prose, list items, and
   table cells.
