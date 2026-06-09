@@ -353,7 +353,7 @@ pub fn expression_function_descriptors() -> &'static [ExpressionFunctionDescript
 mod tests {
     use super::*;
     use crate::markdown::compose::expression::functions::{
-        dispatchable_canonical_names, LAZY_OPERATOR_NAMES,
+        dispatchable_signatures, LAZY_OPERATOR_NAMES,
     };
     use crate::markdown::compose::expression::{
         evaluate, parse, EvaluationLookup, ResolutionContext,
@@ -361,14 +361,39 @@ mod tests {
     use serde_json::Value;
     use std::collections::HashSet;
 
-    /// The canonical function name (text before `(`) of each descriptor.
-    /// Overloaded signatures (e.g. `frontmatter(file)` and
-    /// `frontmatter(file, prop)`) collapse to one name.
-    fn descriptor_canonical_names() -> HashSet<&'static str> {
-        EXPRESSION_FUNCTION_DESCRIPTORS
-            .iter()
-            .map(|d| d.signature.split('(').next().unwrap())
-            .collect()
+    /// The number of arguments to pass when exercising a signature: the count
+    /// of comma-separated parameters, with a variadic `...` exercised at two
+    /// arguments and optional `[param]` placeholders counted as present.
+    fn signature_call_arity(signature: &str) -> usize {
+        let inner = signature
+            .split_once('(')
+            .and_then(|(_, rest)| rest.rsplit_once(')'))
+            .map(|(params, _)| params.trim())
+            .unwrap_or("");
+        if inner.is_empty() {
+            return 0;
+        }
+        if inner.contains("...") {
+            return 2;
+        }
+        inner.split(',').filter(|p| !p.trim().is_empty()).count()
+    }
+
+    /// Whether `message` is an arity (wrong-argument-count) error rather than a
+    /// type/domain error.
+    ///
+    /// Arity errors come from `require_args` and the variadic count guards and
+    /// read "… requires N argument(s)" / "… requires 1 or 2 arguments" / "…
+    /// requires at least 1 argument". Type errors also contain "requires …
+    /// argument" but name the rejected domain ("numeric"/"string"/"array"), so
+    /// those are excluded.
+    fn is_arity_error(message: &str) -> bool {
+        let m = message.to_lowercase();
+        m.contains("requires")
+            && m.contains("argument")
+            && !m.contains("numeric")
+            && !m.contains("string argument")
+            && !m.contains("array argument")
     }
 
     /// A lookup that supplies a [`ResolutionContext`] so the filesystem
@@ -388,40 +413,54 @@ mod tests {
         }
     }
 
-    /// Evaluate `name(0, 0)` through the real parse + evaluate pipeline and
-    /// return the error string, if any. A recognized function either succeeds
-    /// or fails with an argument/type error; only an *unrecognized* name yields
-    /// `Unknown function: …`.
-    fn dispatch_error(name: &str, lookup: &FsLookup) -> Option<String> {
-        let expr = parse(&format!("{name}(0, 0)")).expect("descriptor signature must parse");
+    /// Evaluate `name(0, 0, …)` with `arity` arguments through the real parse +
+    /// evaluate pipeline and return the error string, if any. A recognized
+    /// function either succeeds or fails with an argument/type error; only an
+    /// *unrecognized* name yields `Unknown function: …`.
+    fn dispatch_error_arity(name: &str, arity: usize, lookup: &FsLookup) -> Option<String> {
+        let args = vec!["0"; arity].join(", ");
+        let expr = parse(&format!("{name}({args})")).expect("descriptor signature must parse");
         evaluate(&expr, lookup).err()
     }
 
-    /// Exact, bidirectional parity between descriptors and the runtime.
+    /// Convenience: exercise a name with two arguments.
+    fn dispatch_error(name: &str, lookup: &FsLookup) -> Option<String> {
+        dispatch_error_arity(name, 2, lookup)
+    }
+
+    /// Exact, bidirectional parity between descriptor *signatures* and the
+    /// runtime *signature* surface — overload for overload, not merely name for
+    /// name.
     ///
-    /// The runtime side is [`dispatchable_canonical_names`], which enumerates
-    /// the two dispatch tables [`dispatch`]/[`dispatch_fs`] actually consult
-    /// plus the lazy logical operators — not a list maintained beside the
-    /// dispatcher. Set equality fails in *both* directions:
+    /// The runtime side is [`dispatchable_signatures`], which enumerates the
+    /// per-registration `signatures` of [`dispatch`]/[`dispatch_fs`] plus the
+    /// lazy logical operators. Comparing full signatures (with arity) rather
+    /// than collapsed names means set equality fails in *both* directions for
+    /// overloads too:
     ///
-    /// - adding a callable function (a `PURE_FUNCTIONS`/`FS_FUNCTIONS` entry or
-    ///   a `LAZY_OPERATOR_NAMES` operator) without a descriptor, and
-    /// - adding a descriptor without a callable function.
+    /// - adding or removing a callable overload (e.g. a second
+    ///   `frontmatter(file, prop)` registration signature) without the matching
+    ///   descriptor, and
+    /// - adding or removing a descriptor overload without the matching callable
+    ///   signature.
     #[test]
-    fn descriptor_name_set_equals_dispatchable_runtime_name_set() {
-        let descriptors = descriptor_canonical_names();
-        let runtime: HashSet<&str> = dispatchable_canonical_names().into_iter().collect();
+    fn descriptor_signature_set_equals_dispatchable_signature_set() {
+        let descriptors: HashSet<&str> = EXPRESSION_FUNCTION_DESCRIPTORS
+            .iter()
+            .map(|d| d.signature)
+            .collect();
+        let runtime: HashSet<&str> = dispatchable_signatures().into_iter().collect();
 
         let missing_descriptors: Vec<_> = runtime.difference(&descriptors).collect();
         let extra_descriptors: Vec<_> = descriptors.difference(&runtime).collect();
 
         assert!(
             missing_descriptors.is_empty(),
-            "dispatchable functions without descriptors: {missing_descriptors:?}"
+            "dispatchable signatures without descriptors: {missing_descriptors:?}"
         );
         assert!(
             extra_descriptors.is_empty(),
-            "descriptors without a dispatchable function: {extra_descriptors:?}"
+            "descriptor signatures without a dispatchable signature: {extra_descriptors:?}"
         );
     }
 
@@ -441,31 +480,36 @@ mod tests {
         }
     }
 
-    /// Every descriptor must name a function the real evaluator dispatches.
+    /// Every descriptor overload must be dispatchable at its declared arity.
     ///
-    /// Complements the set-equality test above with an end-to-end proof: it
-    /// drives the actual `evaluate` → `evaluate_function` →
-    /// `dispatch_fs`/`dispatch` pipeline, so a descriptor whose handler was
-    /// removed returns `Unknown function` and fails here.
+    /// Complements the set-equality test above with an end-to-end proof that is
+    /// arity-aware: each descriptor signature is parsed for its argument count
+    /// and exercised through the actual `evaluate` → `evaluate_function` →
+    /// `dispatch_fs`/`dispatch` pipeline at *that* arity. A descriptor whose
+    /// handler was removed yields `Unknown function`; a bogus overload arity the
+    /// handler rejects (e.g. a spurious three-argument `frontmatter`) yields an
+    /// arity error. Either fails here — so the declared signatures are bound to
+    /// what the runtime genuinely accepts, not just to a dispatchable name.
     #[test]
-    fn every_descriptor_is_dispatchable_at_runtime() {
+    fn every_descriptor_overload_is_dispatchable_at_its_declared_arity() {
         let lookup = FsLookup {
             ctx: ResolutionContext::new(std::env::temp_dir()),
         };
 
-        let mut undispatchable = Vec::new();
+        let mut failures = Vec::new();
         for desc in EXPRESSION_FUNCTION_DESCRIPTORS {
             let name = desc.signature.split('(').next().unwrap();
-            if let Some(err) = dispatch_error(name, &lookup)
-                && err.contains("Unknown function")
+            let arity = signature_call_arity(desc.signature);
+            if let Some(err) = dispatch_error_arity(name, arity, &lookup)
+                && (err.contains("Unknown function") || is_arity_error(&err))
             {
-                undispatchable.push((desc.signature, err));
+                failures.push((desc.signature, err));
             }
         }
 
         assert!(
-            undispatchable.is_empty(),
-            "descriptors whose function the evaluator does not dispatch: {undispatchable:?}"
+            failures.is_empty(),
+            "descriptor overloads the evaluator does not accept at their declared arity: {failures:?}"
         );
     }
 

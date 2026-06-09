@@ -857,6 +857,12 @@ pub struct PureFunction {
     pub canonical: &'static str,
     /// Accepted lowercased aliases (e.g. the underscore-free spelling).
     pub aliases: &'static [&'static str],
+    /// Every canonical signature this function answers to, including each
+    /// overload and optional/variadic arity (e.g. `number(x, [default])`). This
+    /// is the authoritative set of callable signatures the descriptor catalog
+    /// is checked against, so adding or removing an overload here (or in a
+    /// descriptor) is detected by `descriptor_signature_set_equals_dispatchable_signature_set`.
+    pub signatures: &'static [&'static str],
     /// Handler invoked with fully-evaluated arguments.
     pub handler: PureFn,
 }
@@ -867,6 +873,10 @@ pub struct FsFunction {
     pub canonical: &'static str,
     /// Accepted lowercased aliases (e.g. the underscore-free spelling).
     pub aliases: &'static [&'static str],
+    /// Every canonical signature this function answers to, including overloads
+    /// (e.g. `frontmatter(file)` and `frontmatter(file, prop)`). See
+    /// [`PureFunction::signatures`].
+    pub signatures: &'static [&'static str],
     /// Handler invoked with fully-evaluated arguments and the resolution context.
     pub handler: FsFn,
 }
@@ -879,77 +889,83 @@ pub struct FsFunction {
 /// (enforced by `descriptor_name_set_equals_dispatchable_runtime_name_set`).
 pub const PURE_FUNCTIONS: &[PureFunction] = &[
     // Type predicates
-    PureFunction { canonical: "is_string", aliases: &["isstring"], handler: is_string },
-    PureFunction { canonical: "is_number", aliases: &["isnumber"], handler: is_number },
-    PureFunction { canonical: "is_array", aliases: &["isarray"], handler: is_array },
-    PureFunction { canonical: "is_null", aliases: &["isnull"], handler: is_null },
-    PureFunction { canonical: "is_object", aliases: &["isobject"], handler: is_object },
-    PureFunction { canonical: "is_empty", aliases: &["isempty"], handler: is_empty_fn },
+    PureFunction { canonical: "is_string", aliases: &["isstring"], signatures: &["is_string(x)"], handler: is_string },
+    PureFunction { canonical: "is_number", aliases: &["isnumber"], signatures: &["is_number(x)"], handler: is_number },
+    PureFunction { canonical: "is_array", aliases: &["isarray"], signatures: &["is_array(x)"], handler: is_array },
+    PureFunction { canonical: "is_null", aliases: &["isnull"], signatures: &["is_null(x)"], handler: is_null },
+    PureFunction { canonical: "is_object", aliases: &["isobject"], signatures: &["is_object(x)"], handler: is_object },
+    PureFunction { canonical: "is_empty", aliases: &["isempty"], signatures: &["is_empty(x)"], handler: is_empty_fn },
     // Math helpers
-    PureFunction { canonical: "min", aliases: &[], handler: min_fn },
-    PureFunction { canonical: "max", aliases: &[], handler: max_fn },
-    PureFunction { canonical: "abs", aliases: &[], handler: abs_fn },
-    PureFunction { canonical: "round", aliases: &[], handler: round_fn },
+    PureFunction { canonical: "min", aliases: &[], signatures: &["min(a, b)"], handler: min_fn },
+    PureFunction { canonical: "max", aliases: &[], signatures: &["max(a, b)"], handler: max_fn },
+    PureFunction { canonical: "abs", aliases: &[], signatures: &["abs(x)"], handler: abs_fn },
+    PureFunction { canonical: "round", aliases: &[], signatures: &["round(x, [default])"], handler: round_fn },
     // Collection helpers
-    PureFunction { canonical: "first", aliases: &[], handler: first_fn },
-    PureFunction { canonical: "last", aliases: &[], handler: last_fn },
-    PureFunction { canonical: "has_key", aliases: &["haskey"], handler: has_key_fn },
-    PureFunction { canonical: "contains", aliases: &[], handler: contains_fn },
-    PureFunction { canonical: "length", aliases: &[], handler: length_fn },
+    PureFunction { canonical: "first", aliases: &[], signatures: &["first(x)"], handler: first_fn },
+    PureFunction { canonical: "last", aliases: &[], signatures: &["last(x)"], handler: last_fn },
+    PureFunction { canonical: "has_key", aliases: &["haskey"], signatures: &["has_key(obj, key)"], handler: has_key_fn },
+    PureFunction { canonical: "contains", aliases: &[], signatures: &["contains(haystack, needle)"], handler: contains_fn },
+    PureFunction { canonical: "length", aliases: &[], signatures: &["length(x)"], handler: length_fn },
     // Type conversion
-    PureFunction { canonical: "number", aliases: &[], handler: number_fn },
+    PureFunction { canonical: "number", aliases: &[], signatures: &["number(x, [default])"], handler: number_fn },
     // String predicates
-    PureFunction { canonical: "starts_with", aliases: &["startswith"], handler: starts_with },
-    PureFunction { canonical: "ends_with", aliases: &["endswith"], handler: ends_with },
+    PureFunction { canonical: "starts_with", aliases: &["startswith"], signatures: &["starts_with(x, find)"], handler: starts_with },
+    PureFunction { canonical: "ends_with", aliases: &["endswith"], signatures: &["ends_with(x, find)"], handler: ends_with },
     // String mutations
-    PureFunction { canonical: "lower", aliases: &[], handler: lower },
-    PureFunction { canonical: "upper", aliases: &[], handler: upper },
-    PureFunction { canonical: "capitalize", aliases: &[], handler: capitalize },
-    PureFunction { canonical: "kebab_case", aliases: &["kebabcase"], handler: kebab_case },
-    PureFunction { canonical: "snake_case", aliases: &["snakecase"], handler: snake_case },
-    PureFunction { canonical: "camel_case", aliases: &["camelcase"], handler: camel_case },
-    PureFunction { canonical: "pascal_case", aliases: &["pascalcase"], handler: pascal_case },
-    PureFunction { canonical: "title_case", aliases: &["titlecase"], handler: title_case },
+    PureFunction { canonical: "lower", aliases: &[], signatures: &["lower(x)"], handler: lower },
+    PureFunction { canonical: "upper", aliases: &[], signatures: &["upper(x)"], handler: upper },
+    PureFunction { canonical: "capitalize", aliases: &[], signatures: &["capitalize(x)"], handler: capitalize },
+    PureFunction { canonical: "kebab_case", aliases: &["kebabcase"], signatures: &["kebab_case(x)"], handler: kebab_case },
+    PureFunction { canonical: "snake_case", aliases: &["snakecase"], signatures: &["snake_case(x)"], handler: snake_case },
+    PureFunction { canonical: "camel_case", aliases: &["camelcase"], signatures: &["camel_case(x)"], handler: camel_case },
+    PureFunction { canonical: "pascal_case", aliases: &["pascalcase"], signatures: &["pascal_case(x)"], handler: pascal_case },
+    PureFunction { canonical: "title_case", aliases: &["titlecase"], signatures: &["title_case(x)"], handler: title_case },
     // Date formatting
-    PureFunction { canonical: "date", aliases: &[], handler: date_fn },
+    PureFunction { canonical: "date", aliases: &[], signatures: &["date(iso, fmt)"], handler: date_fn },
     // Strict date validators
-    PureFunction { canonical: "is_date", aliases: &["isdate"], handler: is_date },
-    PureFunction { canonical: "is_date_utc", aliases: &["isdateutc"], handler: is_date_utc },
+    PureFunction { canonical: "is_date", aliases: &["isdate"], signatures: &["is_date(x)"], handler: is_date },
+    PureFunction { canonical: "is_date_utc", aliases: &["isdateutc"], signatures: &["is_date_utc(x)"], handler: is_date_utc },
     PureFunction {
         canonical: "is_date_time",
         aliases: &["isdatetime", "is_datetime"],
+        signatures: &["is_date_time(x)"],
         handler: is_datetime,
     },
     PureFunction {
         canonical: "is_date_time_utc",
         aliases: &["isdatetimeutc", "is_datetime_utc"],
+        signatures: &["is_date_time_utc(x)"],
         handler: is_datetime_utc,
     },
     // Relative date validators
-    PureFunction { canonical: "is_today", aliases: &["istoday"], handler: is_today },
-    PureFunction { canonical: "is_today_utc", aliases: &["istodayutc"], handler: is_today_utc },
-    PureFunction { canonical: "is_yesterday", aliases: &["isyesterday"], handler: is_yesterday },
+    PureFunction { canonical: "is_today", aliases: &["istoday"], signatures: &["is_today(x)"], handler: is_today },
+    PureFunction { canonical: "is_today_utc", aliases: &["istodayutc"], signatures: &["is_today_utc(x)"], handler: is_today_utc },
+    PureFunction { canonical: "is_yesterday", aliases: &["isyesterday"], signatures: &["is_yesterday(x)"], handler: is_yesterday },
     PureFunction {
         canonical: "is_yesterday_utc",
         aliases: &["isyesterdayutc"],
+        signatures: &["is_yesterday_utc(x)"],
         handler: is_yesterday_utc,
     },
-    PureFunction { canonical: "is_tomorrow", aliases: &["istomorrow"], handler: is_tomorrow },
+    PureFunction { canonical: "is_tomorrow", aliases: &["istomorrow"], signatures: &["is_tomorrow(x)"], handler: is_tomorrow },
     PureFunction {
         canonical: "is_tomorrow_utc",
         aliases: &["istomorrowutc"],
+        signatures: &["is_tomorrow_utc(x)"],
         handler: is_tomorrow_utc,
     },
-    PureFunction { canonical: "is_this_month", aliases: &["isthismonth"], handler: is_this_month },
+    PureFunction { canonical: "is_this_month", aliases: &["isthismonth"], signatures: &["is_this_month(x)"], handler: is_this_month },
     PureFunction {
         canonical: "is_this_month_utc",
         aliases: &["isthismonthutc"],
+        signatures: &["is_this_month_utc(x)"],
         handler: is_this_month_utc,
     },
-    PureFunction { canonical: "is_this_year", aliases: &["isthisyear"], handler: is_this_year },
+    PureFunction { canonical: "is_this_year", aliases: &["isthisyear"], signatures: &["is_this_year(x)"], handler: is_this_year },
     PureFunction {
         canonical: "is_this_year_utc",
         aliases: &["isthisyearutc"],
+        signatures: &["is_this_year_utc(x)"],
         handler: is_this_year_utc,
     },
 ];
@@ -959,23 +975,31 @@ pub const PURE_FUNCTIONS: &[PureFunction] = &[
 /// [`dispatch_fs`] resolves names against this slice, making it the single
 /// source of truth for the fs surface.
 pub const FS_FUNCTIONS: &[FsFunction] = &[
-    FsFunction { canonical: "absolute", aliases: &[], handler: absolute_fn },
-    FsFunction { canonical: "relative", aliases: &[], handler: relative_fn },
-    FsFunction { canonical: "file_exists", aliases: &["fileexists"], handler: file_exists_fn },
-    FsFunction { canonical: "frontmatter", aliases: &[], handler: frontmatter_fn },
+    FsFunction { canonical: "absolute", aliases: &[], signatures: &["absolute(file)"], handler: absolute_fn },
+    FsFunction { canonical: "relative", aliases: &[], signatures: &["relative(file)"], handler: relative_fn },
+    FsFunction { canonical: "file_exists", aliases: &["fileexists"], signatures: &["file_exists(file)"], handler: file_exists_fn },
+    FsFunction {
+        canonical: "frontmatter",
+        aliases: &[],
+        signatures: &["frontmatter(file)", "frontmatter(file, prop)"],
+        handler: frontmatter_fn,
+    },
     FsFunction {
         canonical: "markdown_body_empty",
         aliases: &["markdownbodyempty"],
+        signatures: &["markdown_body_empty(file)"],
         handler: markdown_body_empty_fn,
     },
     FsFunction {
         canonical: "markdown_title",
         aliases: &["markdowntitle"],
+        signatures: &["markdown_title(file)"],
         handler: markdown_title_fn,
     },
     FsFunction {
         canonical: "validate_schema",
         aliases: &["validateschema"],
+        signatures: &["validate_schema(file)", "validate_schema(file, obj)"],
         handler: validate_schema_fn,
     },
 ];
@@ -986,18 +1010,34 @@ pub const FS_FUNCTIONS: &[FsFunction] = &[
 /// complete; `lazy_operators_are_dispatchable` proves each one resolves.
 pub const LAZY_OPERATOR_NAMES: &[&str] = &["and", "or"];
 
+/// Canonical signatures of the lazy logical operators, kept in lock-step with
+/// [`LAZY_OPERATOR_NAMES`] so they appear in [`dispatchable_signatures`].
+pub const LAZY_OPERATOR_SIGNATURES: &[&str] = &["and(...)", "or(...)"];
+
 /// Returns every canonical function name the evaluator can dispatch.
 ///
 /// This is the authoritative runtime surface: the lazy operators plus the two
-/// dispatch tables that [`dispatch`]/[`dispatch_fs`] actually consult. The
-/// expression descriptor catalog is checked for exact set equality against it,
-/// so adding a callable function without a descriptor (or vice versa) fails a
-/// test.
+/// dispatch tables that [`dispatch`]/[`dispatch_fs`] actually consult.
 pub fn dispatchable_canonical_names() -> Vec<&'static str> {
     let mut names: Vec<&'static str> = LAZY_OPERATOR_NAMES.to_vec();
     names.extend(PURE_FUNCTIONS.iter().map(|f| f.canonical));
     names.extend(FS_FUNCTIONS.iter().map(|f| f.canonical));
     names
+}
+
+/// Returns every canonical callable signature the evaluator dispatches,
+/// including each overload and optional/variadic arity.
+///
+/// This is the authoritative runtime signature surface: the lazy operators plus
+/// the per-registration [`PureFunction::signatures`]/[`FsFunction::signatures`].
+/// The expression descriptor catalog is checked for exact set equality against
+/// it, so adding or removing a callable *overload* (not merely a name) without
+/// a matching descriptor — or vice versa — fails a test.
+pub fn dispatchable_signatures() -> Vec<&'static str> {
+    let mut sigs: Vec<&'static str> = LAZY_OPERATOR_SIGNATURES.to_vec();
+    sigs.extend(PURE_FUNCTIONS.iter().flat_map(|f| f.signatures.iter().copied()));
+    sigs.extend(FS_FUNCTIONS.iter().flat_map(|f| f.signatures.iter().copied()));
+    sigs
 }
 
 /// Context-aware dispatch for filesystem/document functions.
