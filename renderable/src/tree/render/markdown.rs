@@ -662,13 +662,14 @@ impl Writer<'_> {
     /// whitespace cannot truncate or break the destination.
     fn link_target(&self, url: &str, title: &Option<String>) -> String {
         if self.table_cell_depth > 0 {
+            // A cell destination faces both concerns: CommonMark bare-destination
+            // safety (escape `(`, `)`, `\` — matching standalone Prose) and GFM
+            // row safety (`|` → `\|`, newline → `<br>`). The title keeps the
+            // GFM-only escaping it already had.
+            let dest = escape_cell_link_destination(url);
             return match title {
-                Some(title) => format!(
-                    "{} \"{}\"",
-                    escape_table_cell_text(url),
-                    escape_table_cell_text(title)
-                ),
-                None => escape_table_cell_text(url),
+                Some(title) => format!("{dest} \"{}\"", escape_table_cell_text(title)),
+                None => dest,
             };
         }
         let dest = escape_markdown_destination(url);
@@ -747,6 +748,31 @@ fn escape_table_cell_text(text: &str) -> String {
     text.replace('|', "\\|")
         .replace("\r\n", "<br>")
         .replace('\n', "<br>")
+}
+
+/// Escapes a link/image destination for placement inside a GFM table cell.
+///
+/// Combines the two concerns a cell destination faces: CommonMark bare-
+/// destination safety (a literal `(`, `)`, or `\` is backslash-escaped, matching
+/// standalone Prose via [`escape_markdown_destination`]) and GFM row safety (a
+/// literal `|` becomes `\|`, a newline becomes `<br>`). An ordinary destination
+/// is therefore byte-identical to a standalone Prose link while a pipe or
+/// newline can never split the pipe-delimited row.
+fn escape_cell_link_destination(url: &str) -> String {
+    let mut out = String::with_capacity(url.len());
+    for c in url.chars() {
+        match c {
+            '\\' | '(' | ')' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '|' => out.push_str("\\|"),
+            '\n' => out.push_str("<br>"),
+            '\r' => {}
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// HTML-escapes `<`, `>`, and `&` for text placed inside the body of a
