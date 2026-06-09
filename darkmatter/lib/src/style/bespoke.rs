@@ -1450,8 +1450,13 @@ mod tests {
         use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
         use renderable::layout::{Alignment, Length};
 
+        // A minimal frame (`margin-left`) deliberately selects the optimistic
+        // profile so OSC8 is available. Under the review-5 capability model the
+        // hyperlink *width* is a local text-layout attr that applies regardless
+        // of profile, while OSC8 availability follows the deliberate frame (or an
+        // OSC8-capable terminal) — never the hyperlink-style match itself.
         let term = Terminal::new_optimistic(80);
-        let page = DarkmatterPage::new(&term);
+        let page = DarkmatterPage::new(&term).with_margin_left(1);
         let style = StyleFrontmatter {
             hyperlinks: Some(HyperlinkStyle {
                 common: CommonStyle {
@@ -1470,10 +1475,8 @@ mod tests {
         let output = page.render(&md).unwrap();
 
         // Width 10 + Left alignment over text "hi" (2 cells) must pad with
-        // 8 trailing spaces. The page was built from an optimistic terminal and
-        // carries hyperlink styling, so it renders through that terminal's
-        // capabilities (Option A: a configured page uses its captured terminal),
-        // emitting the padded label inside an OSC8 hyperlink.
+        // 8 trailing spaces, and the framed page's optimistic profile emits the
+        // padded label inside an OSC8 hyperlink.
         assert!(
             output.contains("hi        ") && output.contains("]8;;https://example.com"),
             "padded display text inside an OSC8 hyperlink not present. output={:?}",

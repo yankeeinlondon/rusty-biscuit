@@ -1426,6 +1426,36 @@ fn render_unmatched_policy_page_to_tempfile(
     (dir, path)
 }
 
+/// Renders `body` through a [`DarkmatterPage`] carrying a *matched* layout-only
+/// `Tables` center-alignment policy, pinning TrueColor to match
+/// [`render_no_policy_page_to_tempfile`].
+///
+/// The document contains a table, so the policy matches and centers it — but
+/// centering is layout-only and bakes no color. Per review-5 finding 1 a matched
+/// layout policy must not change the renderer-wide capability profile, so the
+/// unrelated code block's colors and the link's hyperlink behavior must stay
+/// identical to the no-policy render.
+fn render_matched_layout_policy_page_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let mut policy = darkmatter::layout::ComponentPolicy::default();
+    policy.layout.alignment = renderable::layout::Alignment::Center;
+
+    let term = Terminal::new_optimistic(120);
+    let md: Markdown = body.into();
+    let rendered = DarkmatterPage::new(&term)
+        .with_color_depth(ColorDepth::TrueColor)
+        .with_component_policy(darkmatter::layout::PageComponent::Tables, policy)
+        .render(&md)
+        .expect("matched-layout-policy DarkmatterPage::render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered).unwrap();
+    (dir, path)
+}
+
 /// Finding 7: the public `Markdown::as_terminal` entry must survive a real
 /// terminal — heading, prose, fenced-code body + language header, and SGR
 /// styling all reach the pane through the post-cutover tree path.
@@ -1512,6 +1542,79 @@ fn level2_unmatched_policy_matches_no_policy_color_in_real_terminal() {
     assert_eq!(
         no_policy_fg, unmatched_fg,
         "an unmatched policy must not change the real-terminal foreground colors of \
+         unrelated content"
+    );
+}
+
+/// Review-5 finding 1 (High): a *matched* layout-only component policy must not
+/// change the renderer-wide capability profile — neither rendered color nor
+/// hyperlink behavior — of unrelated content. This is the real-terminal
+/// companion to the Level 1 capability-signature test in `page.rs`; the Level 1
+/// tests pin TrueColor and never inspect hyperlink escapes, so the OSC8 axis was
+/// previously unverified in a real pane (the review's named gap).
+///
+/// Both pages pin TrueColor and render the same fixture (a table + a syntax-
+/// highlighted code block + a hyperlink); one also centers the table via a
+/// layout-only policy the table matches. Driving both through a real WezTerm
+/// pane and comparing the captured foreground colors *and* the link's visible
+/// representation proves the matched layout changes no capability: the colored
+/// code is identical and the link renders the same way. Before the fix the
+/// matched layout routed the render through the optimistic terminal, handing the
+/// unrelated code TrueColor and the unrelated link an OSC8 escape the ambient
+/// terminal never advertised.
+#[test]
+#[serial(level2_terminal)]
+fn level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal() {
+    let body = "| A | B |\n|---|---|\n| 1 | 2 |\n\n\
+                ```rust\nfn demo() { let x = 1; }\n```\n\n\
+                [link](https://example.com)\n";
+    let Some((no_policy_frame, _d1)) =
+        drive_pane(body, "no_policy_caps", render_no_policy_page_to_tempfile)
+    else {
+        return;
+    };
+    let Some((matched_frame, _d2)) = drive_pane(
+        body,
+        "matched_layout_caps",
+        render_matched_layout_policy_page_to_tempfile,
+    ) else {
+        return;
+    };
+
+    // The code body must survive both round-trips.
+    for frame in [&no_policy_frame, &matched_frame] {
+        assert!(
+            frame.plain.contains("demo"),
+            "code body token missing from real-terminal capture. plain:\n{}",
+            frame.plain
+        );
+    }
+
+    // Color axis: the unrelated code block's foreground colors must be identical.
+    let no_policy_fg = foreground_color_set(&no_policy_frame);
+    let matched_fg = foreground_color_set(&matched_frame);
+    assert!(
+        !no_policy_fg.is_empty(),
+        "test premise: the no-policy code block must carry foreground color in the pane; \
+         raw:\n{}",
+        no_policy_frame.raw
+    );
+    assert_eq!(
+        no_policy_fg, matched_fg,
+        "a matched layout-only policy must not change the real-terminal foreground colors of \
+         unrelated content"
+    );
+
+    // Hyperlink axis: the link's visible representation must be identical. Under
+    // the ambient (non-OSC8) capability profile both render the plain markdown
+    // link, so the URL text is visible in both panes; a regression that promoted
+    // the matched-layout page to the optimistic OSC8 profile would hide the URL
+    // behind a hyperlink escape in one pane but not the other.
+    let no_policy_url = no_policy_frame.plain.contains("example.com");
+    let matched_url = matched_frame.plain.contains("example.com");
+    assert_eq!(
+        no_policy_url, matched_url,
+        "a matched layout-only policy must not change the real-terminal hyperlink behavior of \
          unrelated content"
     );
 }

@@ -1031,9 +1031,9 @@ impl DarkmatterPage {
     }
 
     /// Whether any component, hyperlink, or image policy is configured — the
-    /// sources that can bake a per-node attribute. Gates the baked-attribute walk
-    /// in [`Self::capability_signals`]; with no such source there is nothing to
-    /// find, so the walk is skipped.
+    /// sources that can bake a per-node attribute. Gates the painted-color walk
+    /// in [`Self::paints_construction_color`]; with no such source there is
+    /// nothing to find, so the walk is skipped.
     fn has_node_policy_source(&self) -> bool {
         !self.component_policies.is_empty()
             || self.hyperlink_style.is_some()
@@ -3495,10 +3495,17 @@ mod tests {
         assert!(html.contains("two"));
     }
 
+    /// A hyperlink *color* must not strip the link's OSC8 clickability when the
+    /// render context supports OSC8. Under the review-5 capability model OSC8
+    /// availability follows a *deliberate* frame (geometry) or an OSC8-capable
+    /// terminal — never the matched color policy itself — so the page carries a
+    /// minimal frame (`margin-left`) to select the optimistic profile. The color
+    /// is then layered on and must coexist with OSC8, not clobber it.
     #[test]
     fn terminal_hyperlink_color_preserves_osc8_sequences() {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term)
+            .with_margin_left(1)
             .with_hyperlink_mode(HyperlinkMode::Always)
             .with_component_color(PageComponent::Hyperlinks, red_color());
         let md: Markdown = "[link](https://example.com)\n".into();
@@ -3641,10 +3648,17 @@ mod tests {
         );
     }
 
+    /// A hyperlink color applied to a link nested in a colored table cell must
+    /// wrap the link text *and* leave its OSC8 clickability intact. As in
+    /// [`terminal_hyperlink_color_preserves_osc8_sequences`], OSC8 availability
+    /// follows a deliberate frame under the review-5 capability model, so the
+    /// page carries a minimal `margin-left` frame; the matched colors are then
+    /// local node attrs that coexist with the OSC8 the frame's profile provides.
     #[test]
     fn hyperlink_color_applies_inside_table_cells() {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term)
+            .with_margin_left(1)
             .with_hyperlink_mode(HyperlinkMode::Always)
             .with_component_color(PageComponent::Tables, blue_color())
             .with_component_color(PageComponent::Hyperlinks, red_color());
