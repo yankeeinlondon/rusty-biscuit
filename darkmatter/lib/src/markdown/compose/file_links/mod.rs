@@ -23,9 +23,11 @@
 
 mod discovery;
 mod parser;
+mod render;
 mod types;
 
 pub use types::{FileLinksDirective, FileLinksError, FileLinksMode, FileLinksRender, FileLinksResult};
 
-pub(crate) use parser::parse_file_links_directives;
 pub(crate) use discovery::discover;
+pub(crate) use parser::parse_file_links_directives;
+pub(crate) use render::build_included_tree;

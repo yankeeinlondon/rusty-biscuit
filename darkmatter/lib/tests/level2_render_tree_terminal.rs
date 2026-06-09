@@ -1408,11 +1408,23 @@ fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempfile::TempDi
     fs::create_dir(dir.path().join(".git")).unwrap();
     let topics = dir.path().join("docs").join("topics");
     fs::create_dir_all(&topics).unwrap();
+    // Representative document extensions (distinct Unicode glyphs), a dotfile
+    // (italic), and a gitignored document (dim) so the capture can verify the
+    // full presentation contract — not just plain `.md` hierarchy.
     fs::write(topics.join("alpha.md"), "# Alpha\n").unwrap();
     fs::write(topics.join("beta.md"), "# Beta\n").unwrap();
+    fs::write(topics.join("notes.txt"), "notes\n").unwrap();
+    fs::write(topics.join("report.pdf"), "pdf\n").unwrap();
+    fs::write(topics.join("sheet.xlsx"), "xls\n").unwrap();
+    fs::write(topics.join("memo.docx"), "doc\n").unwrap();
+    fs::write(topics.join(".hidden.md"), "# Hidden\n").unwrap();
+    // `.gitignore` itself is not a document extension, so it never appears in
+    // the tree; it only causes `ignored.md` to render dim.
+    fs::write(topics.join(".gitignore"), "ignored.md\n").unwrap();
+    fs::write(topics.join("ignored.md"), "# Ignored\n").unwrap();
 
     let root = dir.path().join("root.md");
-    fs::write(&root, "# Root\n\n::file-links docs/topics/*.md\n").unwrap();
+    fs::write(&root, "# Root\n\n::file-links --dir docs/topics\n").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let (composed, _report) = md
@@ -1441,11 +1453,13 @@ fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempfile::TempDi
     Some((frame, dir))
 }
 
-/// Review-1 findings 1 + 2: composing `::file-links` and rendering the result
-/// in a real terminal must reproduce the styled FileSystem tree — the target
-/// directory name and matched files are visible, the dimmed root prefix emits
-/// the dim SGR, OSC8 file links reach the pane, and the embedding marker never
-/// leaks as visible text.
+/// Review-2 finding: composing `::file-links` and rendering the result in a
+/// real terminal must reproduce the FULL styled FileSystem presentation — not
+/// just plain `.md` hierarchy. This asserts the visible hierarchy, the
+/// extension-specific document glyphs, the repository root icon (distinct from
+/// an ordinary folder), the dimmed root prefix and dimmed gitignored entry, the
+/// italic dotfile, the highlighted (bold) target directory, OSC8 file links,
+/// and that the embedding marker never leaks as visible text.
 #[test]
 #[serial(level2_terminal)]
 fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
@@ -1453,14 +1467,32 @@ fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
         return;
     };
 
-    // Visible hierarchy: the target directory and both matched files.
-    for token in &["topics", "alpha.md", "beta.md"] {
+    // Visible hierarchy: the target directory plus every discovered document,
+    // including the dotfile and the gitignored file.
+    for token in &[
+        "topics",
+        "alpha.md",
+        "beta.md",
+        "notes.txt",
+        "report.pdf",
+        "sheet.xlsx",
+        "memo.docx",
+        ".hidden.md",
+        "ignored.md",
+    ] {
         assert!(
             frame.plain.contains(token),
             "::file-links token {token:?} missing from real-terminal capture. plain:\n{}",
             frame.plain
         );
     }
+
+    // `.gitignore` is not a document extension, so it must not be in the tree.
+    assert!(
+        !frame.plain.contains(".gitignore"),
+        ".gitignore should not be a tree entry. plain:\n{}",
+        frame.plain
+    );
 
     // The embedding marker must never surface as visible text.
     assert!(
@@ -1469,15 +1501,69 @@ fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
         frame.plain
     );
 
-    // The dimmed root prefix (`/docs/`) emits the dim SGR (`ESC [ 2 m`); accept
-    // any position within a combined run, matching the other dim L2 tests.
+    // Extension-specific Unicode glyphs distinguish each document kind (the
+    // projection bakes Unicode icons; the bytes survive regardless of font).
+    for (glyph, label) in &[
+        ("📝", "txt"),
+        ("📕", "pdf"),
+        ("📗", "xls"),
+        ("📘", "doc"),
+    ] {
+        assert!(
+            frame.plain.contains(glyph),
+            "expected {label} glyph {glyph:?} in capture. plain:\n{}",
+            frame.plain
+        );
+    }
+
+    // The root is a repository (`.git` present), so it renders the repository
+    // icon (📦), NOT the ordinary folder icon (📂). No subdirectories exist in
+    // the fixture, so 📂 must be entirely absent — distinguishing the repo icon
+    // from incidental folder styling.
+    assert!(
+        frame.plain.contains("📦"),
+        "expected repository root icon 📦 in capture. plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        !frame.plain.contains("📂"),
+        "ordinary folder icon 📂 must not appear (root is a repository). plain:\n{}",
+        frame.plain
+    );
+
+    // The dimmed root prefix (`/docs/`) and the gitignored `ignored.md` both
+    // emit the dim SGR (`ESC [ 2 m`); accept any position within a combined run.
     let has_dim = frame.raw.contains("\u{1b}[2m")
         || frame.raw.contains("\u{1b}[2;")
         || frame.raw.contains(";2m")
         || frame.raw.contains(";2;");
     assert!(
         has_dim,
-        "expected dim SGR for the dimmed root prefix; raw:\n{}",
+        "expected dim SGR for the dimmed prefix / gitignored entry; raw:\n{}",
+        frame.raw
+    );
+
+    // The dotfile `.hidden.md` is italic (`ESC [ 3 m`). The `;3m`/`;3;` forms
+    // catch a combined run; none of these patterns collide with `38;`/`33`.
+    let has_italic = frame.raw.contains("\u{1b}[3m")
+        || frame.raw.contains("\u{1b}[3;")
+        || frame.raw.contains(";3m")
+        || frame.raw.contains(";3;");
+    assert!(
+        has_italic,
+        "expected italic SGR for the dotfile entry; raw:\n{}",
+        frame.raw
+    );
+
+    // The highlighted target directory is bold (the root header is the only
+    // bold entry — no subdirectories exist to add incidental bold).
+    let has_bold = frame.raw.contains("\u{1b}[1m")
+        || frame.raw.contains("\u{1b}[1;")
+        || frame.raw.contains(";1m")
+        || frame.raw.contains(";1;");
+    assert!(
+        has_bold,
+        "expected bold SGR for the highlighted target directory; raw:\n{}",
         frame.raw
     );
 
