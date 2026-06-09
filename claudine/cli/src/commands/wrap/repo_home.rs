@@ -63,6 +63,17 @@ impl RepoHomeManager {
             return Ok(());
         }
 
+        // Live SQLite databases must never be symlinked into the shadow home.
+        // Doing so points two independent provider processes (e.g. bare `codex`
+        // and `claudine codex`) at one physical WAL-mode DB through a symlink;
+        // their -wal/-shm sidecars desync and SQLite reports SQLITE_CANTOPEN
+        // ("database appears damaged"). Sweep the shadow unconditionally before
+        // linking so the provider rebuilds a self-consistent DB+WAL+SHM set on
+        // every launch — see `purge_volatile_state` for why the sweep must be
+        // shadow-driven rather than source-driven. Config files (auth.json,
+        // config.toml, …) are still shared via symlink.
+        purge_volatile_state(&self.shadow_home)?;
+
         for entry in fs::read_dir(original_home)? {
             let entry = entry?;
             let file_name = entry.file_name();
@@ -73,15 +84,8 @@ impl RepoHomeManager {
                 continue;
             }
 
-            // Live SQLite databases must never be symlinked into the shadow home.
-            // Doing so points two independent provider processes (e.g. bare `codex`
-            // and `claudine codex`) at one physical WAL-mode DB through a symlink;
-            // their -wal/-shm sidecars desync and SQLite reports SQLITE_CANTOPEN
-            // ("database appears damaged"). Purge any stale shadow copy so the
-            // provider rebuilds its own fresh, consistent DB on launch. Config
-            // files (auth.json, config.toml, …) are still shared via symlink.
+            // Never symlink a live DB into the shadow (purged above).
             if is_volatile_state_file(&file_name) {
-                remove_existing_path(&dest)?;
                 continue;
             }
 
@@ -153,6 +157,34 @@ impl RepoHomeManager {
             _ => vec!["skills", "commands", "agents", "hooks"],
         }
     }
+}
+
+/// Sweep every live-SQLite file out of the shadow home before linking.
+///
+/// WAL/SHM sidecars are transient: a bare provider run can checkpoint and delete
+/// a `-wal`/`-shm` in the real HOME while a stale twin from a previous DB
+/// generation lingers in the shadow. A source-driven purge (deleting only shadow
+/// files whose name still exists in the real HOME) never visits that orphan, so
+/// SQLite later opens a freshly-rebuilt DB against a mismatched sidecar and
+/// reports code-14 ("database appears damaged"). Because the shadow home is
+/// global across worktrees, whether a launch hits the orphan is pure timing,
+/// surfacing as "fails in some worktrees but not others." Sweeping the shadow
+/// unconditionally — keyed on what is *present in the shadow*, not the source —
+/// guarantees a self-consistent rebuild on every launch.
+///
+/// A missing shadow directory is not an error: it simply means there is nothing
+/// to sweep.
+fn purge_volatile_state(shadow_home: &Path) -> Result<()> {
+    let Ok(entries) = fs::read_dir(shadow_home) else {
+        return Ok(());
+    };
+    for entry in entries {
+        let entry = entry?;
+        if is_volatile_state_file(&entry.file_name()) {
+            remove_existing_path(&entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 /// Live SQLite state databases and their WAL/SHM/journal sidecars. These are
@@ -408,6 +440,42 @@ mod tests {
             .status()
             .map(|status| status.success())
             .unwrap_or(false)
+    }
+
+    #[test]
+    fn purge_volatile_state_removes_orphaned_sidecars() {
+        // Reproduces the code-14 corruption: a bare provider run checkpointed
+        // away the source `-shm`, but a stale twin from a previous DB generation
+        // still lingers in the shadow. A source-driven purge never visits this
+        // orphan (no matching source name), so the sweep must clear it anyway.
+        let tmp = TempDir::new().unwrap();
+        let shadow = tmp.path();
+
+        fs::write(shadow.join("goals_1.sqlite"), b"db").unwrap();
+        fs::write(shadow.join("goals_1.sqlite-wal"), b"wal").unwrap();
+        fs::write(shadow.join("goals_1.sqlite-shm"), b"stale-shm").unwrap();
+        // Shared config must survive the sweep untouched.
+        fs::write(shadow.join("config.toml"), b"cfg").unwrap();
+
+        purge_volatile_state(shadow).unwrap();
+
+        assert!(!shadow.join("goals_1.sqlite").exists());
+        assert!(!shadow.join("goals_1.sqlite-wal").exists());
+        assert!(
+            !shadow.join("goals_1.sqlite-shm").exists(),
+            "stale orphaned -shm must be swept even with no matching source file"
+        );
+        assert!(
+            shadow.join("config.toml").exists(),
+            "shared config must survive the volatile sweep"
+        );
+    }
+
+    #[test]
+    fn purge_volatile_state_tolerates_missing_shadow_dir() {
+        let tmp = TempDir::new().unwrap();
+        let missing = tmp.path().join("does-not-exist");
+        purge_volatile_state(&missing).unwrap();
     }
 
     #[test]

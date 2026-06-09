@@ -1516,6 +1516,11 @@ impl Table {
                 droppable: col.is_droppable(),
                 drop_note: col.drop_note(),
                 uniform_alignment: col.uniform_alignment,
+                // Carry the explicit per-column wrap override so the render-tree
+                // planner and cell wrapper honor the same break behavior the
+                // bespoke planner does. Without this a custom policy is dropped
+                // in the tree round-trip and narrow tables fail to lay out.
+                word_wrap: col.word_wrap.clone(),
             };
             node.attrs.set_table_column_hints(idx, &hints);
         }

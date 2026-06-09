@@ -12,7 +12,7 @@ use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, Utc};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use super::json_number;
+use super::{json_number, scalar_string, to_number, to_number_coerce};
 use super::resolve_ctx::{ResolutionContext, is_remote_url, normalize_path_arg};
 use crate::markdown::Markdown;
 use crate::markdown::schemas::DarkmatterSchemas;
@@ -765,84 +765,311 @@ pub fn validate_schema_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
     Ok(Value::Bool(report.valid))
 }
 
+/// `has_key(obj, key)` → bool. Eagerly-evaluated form of the core operator.
+pub fn has_key_fn(args: &[Value]) -> Result<Value, String> {
+    if args.len() < 2 {
+        return Err("has_key() requires 2 arguments".to_string());
+    }
+    let key = scalar_string(&args[1]);
+    let has = args[0]
+        .as_object()
+        .map(|obj| obj.contains_key(&key))
+        .unwrap_or(false);
+    Ok(Value::Bool(has))
+}
+
+/// `contains(haystack, needle)` → bool over arrays, objects, or strings.
+pub fn contains_fn(args: &[Value]) -> Result<Value, String> {
+    if args.len() < 2 {
+        return Err("contains() requires 2 arguments".to_string());
+    }
+    let needle = &args[1];
+    let found = match &args[0] {
+        Value::Array(values) => values
+            .iter()
+            .any(|value| scalar_string(value) == scalar_string(needle)),
+        Value::Object(values) => values
+            .values()
+            .any(|value| scalar_string(value) == scalar_string(needle)),
+        Value::String(value) => value.contains(&scalar_string(needle)),
+        value => scalar_string(value).contains(&scalar_string(needle)),
+    };
+    Ok(Value::Bool(found))
+}
+
+/// `length(x)` → count of chars / array items / object keys.
+pub fn length_fn(args: &[Value]) -> Result<Value, String> {
+    if args.is_empty() {
+        return Err("length() requires 1 argument".to_string());
+    }
+    let len = match &args[0] {
+        Value::String(s) => s.chars().count(),
+        Value::Array(arr) => arr.len(),
+        Value::Object(obj) => obj.len(),
+        Value::Number(n) => n.to_string().chars().count(),
+        Value::Bool(_) | Value::Null => 0,
+    };
+    Ok(Value::Number(serde_json::Number::from(len)))
+}
+
+/// `number(x, [default])` → numeric conversion with optional fallback.
+pub fn number_fn(args: &[Value]) -> Result<Value, String> {
+    if args.is_empty() {
+        return Err("number() requires at least 1 argument".to_string());
+    }
+    let default = if args.len() > 1 {
+        to_number_coerce(&args[1])
+    } else {
+        0.0
+    };
+    let number = to_number(&args[0]).unwrap_or(default);
+    let json = if number.fract() == 0.0 {
+        serde_json::Number::from(number as i64)
+    } else {
+        serde_json::Number::from_f64(number)
+            .ok_or_else(|| "Unable to represent number".to_string())?
+    };
+    Ok(Value::Number(json))
+}
+
+/// `round(x, [default])` → nearest integer with optional fallback.
+pub fn round_fn(args: &[Value]) -> Result<Value, String> {
+    if args.is_empty() {
+        return Err("round() requires at least 1 argument".to_string());
+    }
+    let default = if args.len() > 1 {
+        to_number_coerce(&args[1])
+    } else {
+        0.0
+    };
+    let number = to_number(&args[0]).unwrap_or(default).round() as i64;
+    Ok(Value::Number(serde_json::Number::from(number)))
+}
+
+/// Signature of a pure expression function (fully-evaluated `Value` args).
+pub type PureFn = fn(&[Value]) -> Result<Value, String>;
+/// Signature of a context-aware (filesystem/document) expression function.
+pub type FsFn = fn(&[Value], &ResolutionContext) -> Result<Value, String>;
+
+/// One pure (context-free) expression function registration.
+pub struct PureFunction {
+    /// Canonical snake_case name (matches the descriptor signature).
+    pub canonical: &'static str,
+    /// Accepted lowercased aliases (e.g. the underscore-free spelling).
+    pub aliases: &'static [&'static str],
+    /// Every canonical signature this function answers to, including each
+    /// overload and optional/variadic arity (e.g. `number(x, [default])`). This
+    /// is the authoritative set of callable signatures the descriptor catalog
+    /// is checked against, so adding or removing an overload here (or in a
+    /// descriptor) is detected by `descriptor_signature_set_equals_dispatchable_signature_set`.
+    pub signatures: &'static [&'static str],
+    /// Handler invoked with fully-evaluated arguments.
+    pub handler: PureFn,
+}
+
+/// One context-aware expression function registration.
+pub struct FsFunction {
+    /// Canonical snake_case name (matches the descriptor signature).
+    pub canonical: &'static str,
+    /// Accepted lowercased aliases (e.g. the underscore-free spelling).
+    pub aliases: &'static [&'static str],
+    /// Every canonical signature this function answers to, including overloads
+    /// (e.g. `frontmatter(file)` and `frontmatter(file, prop)`). See
+    /// [`PureFunction::signatures`].
+    pub signatures: &'static [&'static str],
+    /// Handler invoked with fully-evaluated arguments and the resolution context.
+    pub handler: FsFn,
+}
+
+/// The authoritative table of pure expression functions.
+///
+/// [`dispatch`] resolves names against this slice, so it is the single source
+/// of truth for which pure functions the evaluator recognizes — not a list
+/// maintained beside the dispatcher. The descriptor catalog must match it
+/// (enforced by `descriptor_name_set_equals_dispatchable_runtime_name_set`).
+pub const PURE_FUNCTIONS: &[PureFunction] = &[
+    // Type predicates
+    PureFunction { canonical: "is_string", aliases: &["isstring"], signatures: &["is_string(x)"], handler: is_string },
+    PureFunction { canonical: "is_number", aliases: &["isnumber"], signatures: &["is_number(x)"], handler: is_number },
+    PureFunction { canonical: "is_array", aliases: &["isarray"], signatures: &["is_array(x)"], handler: is_array },
+    PureFunction { canonical: "is_null", aliases: &["isnull"], signatures: &["is_null(x)"], handler: is_null },
+    PureFunction { canonical: "is_object", aliases: &["isobject"], signatures: &["is_object(x)"], handler: is_object },
+    PureFunction { canonical: "is_empty", aliases: &["isempty"], signatures: &["is_empty(x)"], handler: is_empty_fn },
+    // Math helpers
+    PureFunction { canonical: "min", aliases: &[], signatures: &["min(a, b)"], handler: min_fn },
+    PureFunction { canonical: "max", aliases: &[], signatures: &["max(a, b)"], handler: max_fn },
+    PureFunction { canonical: "abs", aliases: &[], signatures: &["abs(x)"], handler: abs_fn },
+    PureFunction { canonical: "round", aliases: &[], signatures: &["round(x, [default])"], handler: round_fn },
+    // Collection helpers
+    PureFunction { canonical: "first", aliases: &[], signatures: &["first(x)"], handler: first_fn },
+    PureFunction { canonical: "last", aliases: &[], signatures: &["last(x)"], handler: last_fn },
+    PureFunction { canonical: "has_key", aliases: &["haskey"], signatures: &["has_key(obj, key)"], handler: has_key_fn },
+    PureFunction { canonical: "contains", aliases: &[], signatures: &["contains(haystack, needle)"], handler: contains_fn },
+    PureFunction { canonical: "length", aliases: &[], signatures: &["length(x)"], handler: length_fn },
+    // Type conversion
+    PureFunction { canonical: "number", aliases: &[], signatures: &["number(x, [default])"], handler: number_fn },
+    // String predicates
+    PureFunction { canonical: "starts_with", aliases: &["startswith"], signatures: &["starts_with(x, find)"], handler: starts_with },
+    PureFunction { canonical: "ends_with", aliases: &["endswith"], signatures: &["ends_with(x, find)"], handler: ends_with },
+    // String mutations
+    PureFunction { canonical: "lower", aliases: &[], signatures: &["lower(x)"], handler: lower },
+    PureFunction { canonical: "upper", aliases: &[], signatures: &["upper(x)"], handler: upper },
+    PureFunction { canonical: "capitalize", aliases: &[], signatures: &["capitalize(x)"], handler: capitalize },
+    PureFunction { canonical: "kebab_case", aliases: &["kebabcase"], signatures: &["kebab_case(x)"], handler: kebab_case },
+    PureFunction { canonical: "snake_case", aliases: &["snakecase"], signatures: &["snake_case(x)"], handler: snake_case },
+    PureFunction { canonical: "camel_case", aliases: &["camelcase"], signatures: &["camel_case(x)"], handler: camel_case },
+    PureFunction { canonical: "pascal_case", aliases: &["pascalcase"], signatures: &["pascal_case(x)"], handler: pascal_case },
+    PureFunction { canonical: "title_case", aliases: &["titlecase"], signatures: &["title_case(x)"], handler: title_case },
+    // Date formatting
+    PureFunction { canonical: "date", aliases: &[], signatures: &["date(iso, fmt)"], handler: date_fn },
+    // Strict date validators
+    PureFunction { canonical: "is_date", aliases: &["isdate"], signatures: &["is_date(x)"], handler: is_date },
+    PureFunction { canonical: "is_date_utc", aliases: &["isdateutc"], signatures: &["is_date_utc(x)"], handler: is_date_utc },
+    PureFunction {
+        canonical: "is_date_time",
+        aliases: &["isdatetime", "is_datetime"],
+        signatures: &["is_date_time(x)"],
+        handler: is_datetime,
+    },
+    PureFunction {
+        canonical: "is_date_time_utc",
+        aliases: &["isdatetimeutc", "is_datetime_utc"],
+        signatures: &["is_date_time_utc(x)"],
+        handler: is_datetime_utc,
+    },
+    // Relative date validators
+    PureFunction { canonical: "is_today", aliases: &["istoday"], signatures: &["is_today(x)"], handler: is_today },
+    PureFunction { canonical: "is_today_utc", aliases: &["istodayutc"], signatures: &["is_today_utc(x)"], handler: is_today_utc },
+    PureFunction { canonical: "is_yesterday", aliases: &["isyesterday"], signatures: &["is_yesterday(x)"], handler: is_yesterday },
+    PureFunction {
+        canonical: "is_yesterday_utc",
+        aliases: &["isyesterdayutc"],
+        signatures: &["is_yesterday_utc(x)"],
+        handler: is_yesterday_utc,
+    },
+    PureFunction { canonical: "is_tomorrow", aliases: &["istomorrow"], signatures: &["is_tomorrow(x)"], handler: is_tomorrow },
+    PureFunction {
+        canonical: "is_tomorrow_utc",
+        aliases: &["istomorrowutc"],
+        signatures: &["is_tomorrow_utc(x)"],
+        handler: is_tomorrow_utc,
+    },
+    PureFunction { canonical: "is_this_month", aliases: &["isthismonth"], signatures: &["is_this_month(x)"], handler: is_this_month },
+    PureFunction {
+        canonical: "is_this_month_utc",
+        aliases: &["isthismonthutc"],
+        signatures: &["is_this_month_utc(x)"],
+        handler: is_this_month_utc,
+    },
+    PureFunction { canonical: "is_this_year", aliases: &["isthisyear"], signatures: &["is_this_year(x)"], handler: is_this_year },
+    PureFunction {
+        canonical: "is_this_year_utc",
+        aliases: &["isthisyearutc"],
+        signatures: &["is_this_year_utc(x)"],
+        handler: is_this_year_utc,
+    },
+];
+
+/// The authoritative table of context-aware (filesystem/document) functions.
+///
+/// [`dispatch_fs`] resolves names against this slice, making it the single
+/// source of truth for the fs surface.
+pub const FS_FUNCTIONS: &[FsFunction] = &[
+    FsFunction { canonical: "absolute", aliases: &[], signatures: &["absolute(file)"], handler: absolute_fn },
+    FsFunction { canonical: "relative", aliases: &[], signatures: &["relative(file)"], handler: relative_fn },
+    FsFunction { canonical: "file_exists", aliases: &["fileexists"], signatures: &["file_exists(file)"], handler: file_exists_fn },
+    FsFunction {
+        canonical: "frontmatter",
+        aliases: &[],
+        signatures: &["frontmatter(file)", "frontmatter(file, prop)"],
+        handler: frontmatter_fn,
+    },
+    FsFunction {
+        canonical: "markdown_body_empty",
+        aliases: &["markdownbodyempty"],
+        signatures: &["markdown_body_empty(file)"],
+        handler: markdown_body_empty_fn,
+    },
+    FsFunction {
+        canonical: "markdown_title",
+        aliases: &["markdowntitle"],
+        signatures: &["markdown_title(file)"],
+        handler: markdown_title_fn,
+    },
+    FsFunction {
+        canonical: "validate_schema",
+        aliases: &["validateschema"],
+        signatures: &["validate_schema(file)", "validate_schema(file, obj)"],
+        handler: validate_schema_fn,
+    },
+];
+
+/// Logical short-circuit operators handled directly in `evaluate_function`
+/// (they evaluate their arguments lazily and so cannot live in the pure
+/// `&[Value]` table). Listed here so the dispatchable-name enumeration stays
+/// complete; `lazy_operators_are_dispatchable` proves each one resolves.
+pub const LAZY_OPERATOR_NAMES: &[&str] = &["and", "or"];
+
+/// Canonical signatures of the lazy logical operators, kept in lock-step with
+/// [`LAZY_OPERATOR_NAMES`] so they appear in [`dispatchable_signatures`].
+pub const LAZY_OPERATOR_SIGNATURES: &[&str] = &["and(...)", "or(...)"];
+
+/// Returns every canonical function name the evaluator can dispatch.
+///
+/// This is the authoritative runtime surface: the lazy operators plus the two
+/// dispatch tables that [`dispatch`]/[`dispatch_fs`] actually consult.
+pub fn dispatchable_canonical_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = LAZY_OPERATOR_NAMES.to_vec();
+    names.extend(PURE_FUNCTIONS.iter().map(|f| f.canonical));
+    names.extend(FS_FUNCTIONS.iter().map(|f| f.canonical));
+    names
+}
+
+/// Returns every canonical callable signature the evaluator dispatches,
+/// including each overload and optional/variadic arity.
+///
+/// This is the authoritative runtime signature surface: the lazy operators plus
+/// the per-registration [`PureFunction::signatures`]/[`FsFunction::signatures`].
+/// The expression descriptor catalog is checked for exact set equality against
+/// it, so adding or removing a callable *overload* (not merely a name) without
+/// a matching descriptor — or vice versa — fails a test.
+pub fn dispatchable_signatures() -> Vec<&'static str> {
+    let mut sigs: Vec<&'static str> = LAZY_OPERATOR_SIGNATURES.to_vec();
+    sigs.extend(PURE_FUNCTIONS.iter().flat_map(|f| f.signatures.iter().copied()));
+    sigs.extend(FS_FUNCTIONS.iter().flat_map(|f| f.signatures.iter().copied()));
+    sigs
+}
+
 /// Context-aware dispatch for filesystem/document functions.
 ///
 /// ## Returns
 ///
-/// `Some(result)` for names this dispatcher owns, or `None` for any other
-/// name (the caller then falls through to [`dispatch`]).
+/// `Some(result)` for names registered in [`FS_FUNCTIONS`], or `None` for any
+/// other name (the caller then falls through to [`dispatch`]).
 pub fn dispatch_fs(
     name: &str,
     args: &[Value],
     ctx: &ResolutionContext,
 ) -> Option<Result<Value, String>> {
-    let result = match name {
-        "absolute" => absolute_fn(args, ctx),
-        "relative" => relative_fn(args, ctx),
-        "file_exists" | "fileexists" => file_exists_fn(args, ctx),
-        "frontmatter" => frontmatter_fn(args, ctx),
-        "markdown_body_empty" | "markdownbodyempty" => markdown_body_empty_fn(args, ctx),
-        "markdown_title" | "markdowntitle" => markdown_title_fn(args, ctx),
-        "validate_schema" | "validateschema" => validate_schema_fn(args, ctx),
-        _ => return None,
-    };
-    Some(result)
+    for f in FS_FUNCTIONS {
+        if f.canonical == name || f.aliases.contains(&name) {
+            return Some((f.handler)(args, ctx));
+        }
+    }
+    None
 }
 
-/// Dispatches an evaluated function call against the new helper library.
+/// Dispatches an evaluated function call against the pure helper library.
 ///
-/// Returns `Some(result)` when the name matches a helper in this module,
-/// or `None` to let the outer dispatcher fall through to its own handlers
-/// (`Unknown function: ...`).
+/// Returns `Some(result)` when the name matches an entry in [`PURE_FUNCTIONS`],
+/// or `None` to let the outer dispatcher report `Unknown function: ...`.
 pub fn dispatch(name: &str, args: &[Value]) -> Option<Result<Value, String>> {
-    let f = match name {
-        // Type predicates
-        "isstring" | "is_string" => is_string as fn(&[Value]) -> Result<Value, String>,
-        "isnumber" | "is_number" => is_number,
-        "isarray" | "is_array" => is_array,
-        "isnull" | "is_null" => is_null,
-        "isobject" | "is_object" => is_object,
-        "isempty" | "is_empty" => is_empty_fn,
-        // Math helpers
-        "min" => min_fn,
-        "max" => max_fn,
-        "abs" => abs_fn,
-        // Collection helpers
-        "first" => first_fn,
-        "last" => last_fn,
-        // String predicates
-        "startswith" | "starts_with" => starts_with,
-        "endswith" | "ends_with" => ends_with,
-        // String mutations
-        "lower" => lower,
-        "upper" => upper,
-        "capitalize" => capitalize,
-        "kebabcase" | "kebab_case" => kebab_case,
-        "snakecase" | "snake_case" => snake_case,
-        "camelcase" | "camel_case" => camel_case,
-        "pascalcase" | "pascal_case" => pascal_case,
-        "titlecase" | "title_case" => title_case,
-        // Date formatting
-        "date" => date_fn,
-        // Strict date validators
-        "isdate" | "is_date" => is_date,
-        "isdateutc" | "is_date_utc" => is_date_utc,
-        "isdatetime" | "is_datetime" | "is_date_time" => is_datetime,
-        "isdatetimeutc" | "is_datetime_utc" | "is_date_time_utc" => is_datetime_utc,
-        // Relative date validators
-        "istoday" | "is_today" => is_today,
-        "istodayutc" | "is_today_utc" => is_today_utc,
-        "isyesterday" | "is_yesterday" => is_yesterday,
-        "isyesterdayutc" | "is_yesterday_utc" => is_yesterday_utc,
-        "istomorrow" | "is_tomorrow" => is_tomorrow,
-        "istomorrowutc" | "is_tomorrow_utc" => is_tomorrow_utc,
-        "isthismonth" | "is_this_month" => is_this_month,
-        "isthismonthutc" | "is_this_month_utc" => is_this_month_utc,
-        "isthisyear" | "is_this_year" => is_this_year,
-        "isthisyearutc" | "is_this_year_utc" => is_this_year_utc,
-        _ => return None,
-    };
-    Some(f(args))
+    for f in PURE_FUNCTIONS {
+        if f.canonical == name || f.aliases.contains(&name) {
+            return Some((f.handler)(args));
+        }
+    }
+    None
 }
 
 #[cfg(test)]

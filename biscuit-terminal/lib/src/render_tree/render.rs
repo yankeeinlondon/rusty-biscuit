@@ -2387,6 +2387,11 @@ fn build_table_column(
     if let Some(w) = hints.fixed_width {
         col = col.with_fixed_width(w as usize);
     }
+    // Restore the per-column wrap override so the render-tree planner and cell
+    // wrapper break long tokens the same way the bespoke planner did.
+    if let Some(wrap) = &hints.word_wrap {
+        col = col.with_word_wrap(wrap.clone());
+    }
     col = col.with_when(conditional_from_hint(hints.conditional));
     col = col.with_uniform_alignment(hints.uniform_alignment);
     // Reconstruct droppability from the authoritative `droppable` flag. A
