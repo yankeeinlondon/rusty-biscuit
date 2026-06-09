@@ -38,12 +38,12 @@ fn path_with_icon_bin() -> String {
     format!("{existing}:{}", bin_dir.display())
 }
 
-/// Runs an `icon` command with an isolated `$HOME` and returns the captured
-/// frame once the shell prompt has returned.
+/// Runs an `icon` command with an isolated `$HOME` and a dead Iconify endpoint
+/// so tests never trigger live network searches.
 fn run_icon(harness: &mut TmuxHarness, args: &str) -> CapturedFrame {
     let home = tempfile::tempdir().unwrap();
     let cmd = format!(
-        "HOME='{}' PATH='{}' icon {}\n",
+        "HOME='{}' PATH='{}' ICONIFY_BASE_URL='http://127.0.0.1:1' icon {}\n",
         home.path().display(),
         path_with_icon_bin(),
         args
@@ -175,6 +175,11 @@ fn level2_image_protocol_fallback_renders_graphics() {
             .unwrap();
     }
 
+    let baseline_result = harness.capture_window_png().expect("png capture call failed");
+    let capture_available = baseline_result.is_some();
+    require_level!(Level::L2, capture_available, "window capture (screen recording permission)");
+    let baseline_png = baseline_result.unwrap();
+
     let cmd = format!(
         "HOME='{}' PATH='{}' icon icons test:red-witness\n",
         home.path().display(),
@@ -183,25 +188,86 @@ fn level2_image_protocol_fallback_renders_graphics() {
     harness.send_text(cmd.as_bytes()).expect("send_text failed");
     let _ = wait_for_prompt(harness);
 
-    let png_bytes = harness
+    let after_png = harness
         .capture_window_png()
         .expect("png capture call failed")
-        .expect("window capture returned None; screen recording permission may be missing");
+        .expect("capture was available at baseline but not after render");
 
-    let img = image::load_from_memory(&png_bytes).expect("decode png");
-    let mut found_red = false;
-    'outer: for y in 0..img.height() {
-        for x in 0..img.width() {
-            let pixel = img.get_pixel(x, y);
-            // Look for a bright red pixel (R high, G and B low) that could
-            // only come from the rendered SVG witness.
-            if pixel[0] > 200 && pixel[1] < 50 && pixel[2] < 50 {
-                found_red = true;
-                break 'outer;
+    let baseline = image::load_from_memory(&baseline_png).expect("decode baseline png");
+    let after = image::load_from_memory(&after_png).expect("decode after png");
+
+    // Build a mask of bright red pixels that appear in the after image but
+    // were not present in the baseline, then look for a contiguous block.
+    // A rendered icon produces a solid rectangle; command text or UI chrome
+    // does not.
+    let mut new_red = vec![vec![false; after.width() as usize]; after.height() as usize];
+    for y in 0..after.height() {
+        for x in 0..after.width() {
+            let after_pixel = after.get_pixel(x, y);
+            if after_pixel[0] > 200 && after_pixel[1] < 50 && after_pixel[2] < 50 {
+                let baseline_pixel = if x < baseline.width() && y < baseline.height() {
+                    baseline.get_pixel(x, y)
+                } else {
+                    after_pixel
+                };
+                let baseline_red = baseline_pixel[0] > 200
+                    && baseline_pixel[1] < 50
+                    && baseline_pixel[2] < 50;
+                if !baseline_red {
+                    new_red[y as usize][x as usize] = true;
+                }
             }
         }
     }
-    assert!(found_red, "expected bright red pixels in WezTerm capture; image may not have rendered");
+
+    let mut visited = vec![vec![false; after.width() as usize]; after.height() as usize];
+    let mut found_component = false;
+    for y in 0..after.height() {
+        for x in 0..after.width() {
+            if !new_red[y as usize][x as usize] || visited[y as usize][x as usize] {
+                continue;
+            }
+
+            let mut stack = vec![(x, y)];
+            let mut size = 0;
+            visited[y as usize][x as usize] = true;
+
+            while let Some((cx, cy)) = stack.pop() {
+                size += 1;
+                for (dx, dy) in [(0i32, 1i32), (0, -1), (1, 0), (-1, 0)] {
+                    let nx = cx as i32 + dx;
+                    let ny = cy as i32 + dy;
+                    if nx >= 0
+                        && nx < after.width() as i32
+                        && ny >= 0
+                        && ny < after.height() as i32
+                    {
+                        let nx = nx as u32;
+                        let ny = ny as u32;
+                        if new_red[ny as usize][nx as usize]
+                            && !visited[ny as usize][nx as usize]
+                        {
+                            visited[ny as usize][nx as usize] = true;
+                            stack.push((nx, ny));
+                        }
+                    }
+                }
+            }
+
+            if size >= 50 {
+                found_component = true;
+                break;
+            }
+        }
+        if found_component {
+            break;
+        }
+    }
+
+    assert!(
+        found_component,
+        "expected a contiguous block of at least 50 bright red pixels in WezTerm capture after rendering icon; image may not have rendered"
+    );
 }
 
 // ------------------------------------------------------------------

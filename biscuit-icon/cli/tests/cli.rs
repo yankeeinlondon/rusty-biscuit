@@ -29,12 +29,14 @@ fn cache_clear_succeeds_with_isolated_home() {
 
 #[test]
 fn completions_bash_emits_script() {
-    Command::cargo_bin("icon")
+    let output = Command::cargo_bin("icon")
         .unwrap()
         .args(["completions", "bash"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("icon"));
+        .output()
+        .expect("spawn icon completions");
+    assert!(output.status.success(), "completions exited with {:?}", output.status);
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("icon"), "expected 'icon' in completion script; got: {stdout}");
 }
 
 #[test]
@@ -147,6 +149,100 @@ fn completions_dynamic_includes_builtin_and_cached() {
 }
 
 #[tokio::test]
+async fn icons_limits_online_results_with_large_catalog() {
+    let server = MockServer::start().await;
+    let icons: Vec<String> = (0..120).map(|i| format!("mdi:icon-{i}")).collect();
+    let search_json = serde_json::json!({
+        "icons": icons,
+        "total": 120,
+    });
+
+    // Only one search request should be made because max_results caps at 100.
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .and(query_param("query", "icon"))
+        .and(query_param("limit", "100"))
+        .and(query_param("start", "0"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(search_json))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    // Mock a few body fetches; the rest will fail, but the search is bounded.
+    for i in 0..3 {
+        Mock::given(method("GET"))
+            .and(path("/mdi.json"))
+            .and(query_param("icons", format!("icon-{i}")))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                format!(r#"{{"prefix":"mdi","width":24,"height":24,"icons":{{"icon-{i}":{{"body":"<path d=\"M0 0\"/>"}}}}}}"#)
+            ))
+            .mount(&server)
+            .await;
+    }
+
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .args(["icons", "icon"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("mdi:icon-0"), "expected bounded results; got: {}", stdout);
+    assert!(stdout.contains("mdi:icon-2"), "expected bounded results; got: {}", stdout);
+    assert!(
+        stdout.contains("20 more result(s) available online"),
+        "expected truncation notice; got: {}",
+        stdout
+    );
+}
+
+#[tokio::test]
+async fn icons_reports_failure_when_some_body_fetches_fail() {
+    let server = MockServer::start().await;
+    let json = serde_json::json!({
+        "icons": ["mdi:home", "lucide:home"],
+        "total": 2,
+    });
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .and(query_param("query", "home"))
+        .and(query_param("limit", "100"))
+        .and(query_param("start", "0"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .mount(&server)
+        .await;
+
+    // Only mock mdi:home body; lucide:home will 404.
+    Mock::given(method("GET"))
+        .and(path("/mdi.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"prefix":"mdi","width":24,"height":24,"icons":{"home":{"body":"<path d=\"M0 0\"/>"}}}"#
+        ))
+        .mount(&server)
+        .await;
+
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .args(["icons", "home"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("mdi:home"), "expected successful hit in output; got: {}", stdout);
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("lucide:home"), "expected failed icon in stderr; got: {}", stderr);
+
+    assert!(!output.status.success(), "expected non-zero exit when some fetches fail");
+}
+
+#[tokio::test]
 async fn icons_merges_offline_and_online_results() {
     let server = MockServer::start().await;
     let json = serde_json::json!({
@@ -194,15 +290,17 @@ async fn icons_merges_offline_and_online_results() {
 #[tokio::test]
 async fn icons_online_honors_from_filter() {
     let server = MockServer::start().await;
+    // The API now receives the --from prefix, so it only returns lucide results.
     let json = serde_json::json!({
-        "icons": ["mdi:home", "lucide:home"],
-        "total": 2,
+        "icons": ["lucide:home"],
+        "total": 1,
     });
     Mock::given(method("GET"))
         .and(path("/search"))
         .and(query_param("query", "home"))
         .and(query_param("limit", "100"))
         .and(query_param("start", "0"))
+        .and(query_param("prefix", "lucide"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json))
         .mount(&server)
         .await;
@@ -292,6 +390,62 @@ async fn icons_online_caches_search_results() {
 }
 
 #[tokio::test]
+async fn icons_from_with_multiple_prefixes_uses_prefixes_param() {
+    let server = MockServer::start().await;
+    let json = serde_json::json!({
+        "icons": ["mdi:home", "lucide:home"],
+        "total": 2,
+    });
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .and(query_param("query", "home"))
+        .and(query_param("limit", "100"))
+        .and(query_param("start", "0"))
+        .and(query_param("prefixes", "lucide,mdi"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/mdi.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"prefix":"mdi","width":24,"height":24,"icons":{"home":{"body":"<path d=\"M0 0\"/>"}}}"#
+        ))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/lucide.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"prefix":"lucide","width":24,"height":24,"icons":{"home":{"body":"<path d=\"M0 0\"/>"}}}"#
+        ))
+        .mount(&server)
+        .await;
+
+    let home = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .args(["icons", "home", "--from", "mdi,lucide"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("mdi:home"),
+        "expected mdi:home through multi-prefix --from; got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("lucide:home"),
+        "expected lucide:home through multi-prefix --from; got: {}",
+        stdout
+    );
+}
+
+#[tokio::test]
 async fn icons_paginates_past_first_page() {
     let server = MockServer::start().await;
 
@@ -361,11 +515,73 @@ async fn icons_paginates_past_first_page() {
     assert!(stdout.contains("fa:home"), "expected fa:home from page 2; got: {}", stdout);
 }
 
-#[test]
-fn icons_no_filter_skips_online_search() {
+#[tokio::test]
+async fn icons_concurrent_fetch_caches_all_successful_bodies() {
+    let server = MockServer::start().await;
+
+    // Return enough hits to fill one concurrency window (10).
+    let icon_ids: Vec<String> = (0..10).map(|i| format!("mdi:concurrent-{i}")).collect();
+    let search_json = serde_json::json!({
+        "icons": icon_ids,
+        "total": 10,
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .and(query_param("query", "concurrent"))
+        .and(query_param("limit", "100"))
+        .and(query_param("start", "0"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(search_json))
+        .mount(&server)
+        .await;
+
+    // Mock every body fetch successfully so the concurrent window does not
+    // encounter network failures mixed with cache-lock failures.
+    for i in 0..10 {
+        Mock::given(method("GET"))
+            .and(path("/mdi.json"))
+            .and(query_param("icons", format!("concurrent-{i}")))
+            .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                r#"{{"prefix":"mdi","width":24,"height":24,"icons":{{"concurrent-{i}":{{"body":"<path d=\"M{i} 0\"/>"}}}}}}"#
+            )))
+            .mount(&server)
+            .await;
+    }
+
     let home = tempfile::tempdir().unwrap();
-    // No filter and a dead endpoint should still succeed because offline
-    // icons are listed and online search is skipped for empty queries.
+    let output = Command::cargo_bin("icon")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("ICONIFY_BASE_URL", server.uri())
+        .args(["icons", "concurrent"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "expected zero exit when all concurrent fetches succeed; stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Verify every body was cached — distinguishes cache-lock failures from
+    // intended network failures.
+    let cache_dir = home.path().join(".cache").join("biscuit-icon");
+    let cache = biscuit_icon::cache::IconCache::open_at(cache_dir.join("icons.db")).unwrap();
+    for i in 0..10 {
+        let body = cache.get("mdi", &format!("concurrent-{i}")).unwrap();
+        assert!(
+            body.is_some(),
+            "expected mdi:concurrent-{i} to be cached after successful concurrent fetch"
+        );
+    }
+}
+
+#[test]
+fn icons_no_filter_lists_offline_only() {
+    let home = tempfile::tempdir().unwrap();
+    // No filter: only offline icons are listed; online search is skipped
+    // because the Iconify search endpoint requires a query.
     Command::cargo_bin("icon")
         .unwrap()
         .env("HOME", home.path())
