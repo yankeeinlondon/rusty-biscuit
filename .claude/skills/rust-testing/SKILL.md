@@ -4,7 +4,7 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-b9004268e1a480de
+hash: 1acc7c1c76b11142-9d61f99b8c9672e3
 last_updated: 2026-06-06
 ---
 # Rust Testing — Rusty Biscuit Monorepo
@@ -86,6 +86,15 @@ Every curated package area defines these 12 recipes:
 | `all`          | `sanity → lint → doctest → test → test-l2 → test-browser`.                                                                                                                                                                                                                                                                                   |
 
 Delegate to shared recipes in `just/devops.just` (e.g. `@just _test my-crate`).
+
+At the repository root, `just test` delegates to `_test_workspace`. It uses
+Cargo metadata as the package source of truth, runs every workspace package,
+continues after ordinary failures, and reports failed packages at the end.
+Ctrl+C aborts the remaining packages and preserves exit code `130`. Optional
+selectors may be exact package names or package-area paths.
+
+Run `just check-test-interrupts` to verify that every package-area `test`
+recipe also preserves Ctrl+C as exit `130`.
 
 ## Running L2 Tests (read before you run)
 
