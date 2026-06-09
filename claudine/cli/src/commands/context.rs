@@ -105,7 +105,44 @@ fn display_property(name: &str) -> String {
 }
 
 fn format_context_value_type(ty: ContextValueType, term: &Terminal) -> String {
-    let text = match ty {
+    Prose::new(context_value_type_markup(ty)).render(term)
+}
+
+/// Builds the Prose markup for a type label, coloring each type by category.
+///
+/// `Nullable(inner)` wraps the inner type's own colored markup in grey
+/// `Nullable(…)` so the report shows `Nullable(String)`, `Nullable(Integer)`,
+/// etc. rather than a bare `Nullable`.
+fn context_value_type_markup(ty: ContextValueType) -> String {
+    match ty {
+        ContextValueType::Nullable(inner) => {
+            format!(
+                "<grey>Nullable(</grey>{}<grey>)</grey>",
+                context_value_type_markup(*inner)
+            )
+        }
+        ContextValueType::String
+        | ContextValueType::Csv
+        | ContextValueType::MarkdownList
+        | ContextValueType::NestedMarkdownList => {
+            format!("<blue>{}</blue>", context_value_type_label(ty))
+        }
+        ContextValueType::Number | ContextValueType::Integer => {
+            format!("<green>{}</green>", context_value_type_label(ty))
+        }
+        ContextValueType::Boolean => format!("<orange>{}</orange>", context_value_type_label(ty)),
+        ContextValueType::Date
+        | ContextValueType::DateTime
+        | ContextValueType::Time
+        | ContextValueType::Timezone => {
+            format!("<violet>{}</violet>", context_value_type_label(ty))
+        }
+        ContextValueType::Object => format!("<cyan>{}</cyan>", context_value_type_label(ty)),
+    }
+}
+
+fn context_value_type_label(ty: ContextValueType) -> &'static str {
+    match ty {
         ContextValueType::Date => "Date",
         ContextValueType::DateTime => "DateTime",
         ContextValueType::Time => "Time",
@@ -118,25 +155,8 @@ fn format_context_value_type(ty: ContextValueType, term: &Terminal) -> String {
         ContextValueType::MarkdownList => "MarkdownList",
         ContextValueType::NestedMarkdownList => "NestedMarkdownList",
         ContextValueType::Object => "Object",
-        ContextValueType::Nullable => "Nullable",
-    };
-
-    let colored = match ty {
-        ContextValueType::String
-        | ContextValueType::Csv
-        | ContextValueType::MarkdownList
-        | ContextValueType::NestedMarkdownList => format!("<blue>{text}</blue>"),
-        ContextValueType::Number | ContextValueType::Integer => format!("<green>{text}</green>"),
-        ContextValueType::Boolean => format!("<orange>{text}</orange>"),
-        ContextValueType::Date
-        | ContextValueType::DateTime
-        | ContextValueType::Time
-        | ContextValueType::Timezone => format!("<violet>{text}</violet>"),
-        ContextValueType::Object => format!("<cyan>{text}</cyan>"),
-        ContextValueType::Nullable => format!("<grey>{text}</grey>"),
-    };
-
-    Prose::new(colored).render(term)
+        ContextValueType::Nullable(_) => "Nullable",
+    }
 }
 
 fn format_value(value: &serde_json::Value, term: &Terminal) -> String {
