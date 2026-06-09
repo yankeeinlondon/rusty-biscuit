@@ -2,7 +2,7 @@
 status: complete
 date: 2026-06-07
 owner: ken
-spec: renderable/features/2026-06-06-tree-closeout/spec.md
+spec: renderable/features/_completed/2026-06-06-tree-closeout/spec.md
 phase: 3
 ---
 
@@ -80,9 +80,10 @@ layout/text-layout scan that fed the now-deleted `applies` capability signal.
 The `styled_production/page_styled/terminal` median below is the **re-anchored**
 value from a fresh run on the post-review-5 single-fold, color-only-probe
 topology: ~374 µs, down from the ~412 µs recorded under the review-3 double-fold
-design (a ~17% reduction; the browser path re-anchored to ~123 µs from ~197 µs).
-As elsewhere here, the structural gate — not wall-clock — remains the acceptance
-authority.
+design (the browser path re-anchored to ~123 µs from ~197 µs). These are
+deliberately short trend runs, so the movement is reported as raw medians rather
+than a percentage; as elsewhere here, the structural gate — not wall-clock —
+remains the acceptance authority.
 
 ## Criterion timings (trend only, non-gating)
 

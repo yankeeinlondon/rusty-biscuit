@@ -2,7 +2,7 @@
 status: complete
 date: 2026-06-06
 owner: ken
-spec: renderable/features/2026-06-06-tree-closeout/spec.md
+spec: renderable/features/_completed/2026-06-06-tree-closeout/spec.md
 phase: 1
 ---
 
@@ -179,9 +179,14 @@ policy and does not traverse/mutate document components
   unrelated content color or hyperlinks the ambient terminal never advertised.
   The real-terminal companion
   `level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal`
-  drives both renders through a WezTerm pane and asserts both the foreground-color
-  sets *and* the link's visible representation (the OSC8 axis the Level 1 tests
-  cannot inspect) are identical.
+  drives both the no-policy and matched-policy renders through a WezTerm pane.
+  It first shows the matched policy actually applies — the centered table shifts
+  its header row right, so only the matched capture's header carries leading
+  whitespace (otherwise the parity checks would be vacuous). It then asserts the
+  unrelated code block's foreground-color sets are identical, and that captured
+  OSC8 opener metadata is present (the URL lives in the hyperlink opener, never in
+  the visible row) and byte-identical across both renders — the OSC8 axis the
+  Level 1 tests cannot inspect.
 - `page_frame_vertical_margin_only_wraps_component_body` — adding top/bottom
   margin to an otherwise identical page only prepends/appends blank rows; the
   folded component body (heading, block quote, list, code) stays
