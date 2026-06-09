@@ -135,16 +135,30 @@ pub fn effect_descriptors() -> &'static [EffectDescriptor] {
     EFFECT_DESCRIPTORS
 }
 
-/// One invocable side-effect verb: its canonical signature and a thin adapter
-/// that exercises the real [`EffectEngine`] method behind it.
+/// Test-only reachability harness: one side-effect signature paired with a thin
+/// adapter that exercises the real [`EffectEngine`](super::EffectEngine) method
+/// behind it.
 ///
-/// Effects have no string dispatcher — they are typed methods on
-/// `EffectEngine`. This registry is the authoritative set of *dispatchable
-/// verbs*: each `exercise` closure calls the real method (so a renamed or
-/// removed verb fails to compile), and the descriptor catalog must match it
-/// signature-for-signature (enforced by
-/// `verb_signature_set_equals_descriptor_signature_set`). Adding a verb here
-/// without a descriptor — or a descriptor without a verb — fails that test.
+/// Effects have no string dispatcher — they are typed methods called directly
+/// by an external orchestrator, and Rust cannot enumerate the public method
+/// surface at compile time. The **descriptor catalog**
+/// ([`EFFECT_DESCRIPTORS`]) is therefore the authoritative capability surface;
+/// a method without a descriptor is simply not a catalogued capability.
+///
+/// This registry exists only to keep the catalog honest under test. Each
+/// `exercise` closure calls the real method, so a renamed or removed method
+/// fails to compile, and
+/// `verb_signature_set_equals_descriptor_signature_set` asserts the verb and
+/// descriptor signature sets are equal in both directions — catching a
+/// descriptor (including a new overload such as `ensure_file(file, content)`)
+/// with no backing method, or a verb with no descriptor. It does not, and
+/// cannot, detect a public `EffectEngine` method that was never given a
+/// descriptor; such a method is intentionally outside the capability surface
+/// until a descriptor adds it.
+///
+/// Lives under `cfg(test)` so it never enters the public API or production
+/// builds.
+#[cfg(test)]
 pub struct EffectVerb {
     /// Canonical signature including arity; matches an [`EffectDescriptor`].
     pub signature: &'static str,
@@ -154,7 +168,9 @@ pub struct EffectVerb {
     pub exercise: fn(&super::EffectEngine) -> Result<serde_json::Value, super::EffectError>,
 }
 
-/// The authoritative table of dispatchable side-effect verbs.
+/// The test-only table pairing every descriptor signature with a real
+/// [`EffectEngine`](super::EffectEngine) method. See [`EffectVerb`].
+#[cfg(test)]
 pub const EFFECT_VERBS: &[EffectVerb] = &[
     EffectVerb {
         signature: "set_frontmatter(file, prop, value)",
@@ -221,24 +237,21 @@ pub const EFFECT_VERBS: &[EffectVerb] = &[
     },
 ];
 
-/// Returns all dispatchable side-effect verbs.
-pub fn effect_verbs() -> &'static [EffectVerb] {
-    EFFECT_VERBS
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::effects::EffectEngine;
     use std::collections::HashSet;
 
-    /// Exact, bidirectional parity between the verb registry and the
-    /// descriptor catalog.
+    /// Exact, bidirectional parity between the verb harness and the descriptor
+    /// catalog.
     ///
-    /// [`EFFECT_VERBS`] is the authoritative set of dispatchable verbs (each
-    /// entry calls a real `EffectEngine` method), so set equality fails in
-    /// *both* directions: adding a verb without a descriptor, or a descriptor
-    /// (including a new overload) without a verb.
+    /// Each [`EFFECT_VERBS`] entry calls a real `EffectEngine` method, so set
+    /// equality fails in *both* directions: a descriptor (including a new
+    /// overload) with no backing method, or a verb with no descriptor. It does
+    /// not enforce that every public `EffectEngine` method has a descriptor —
+    /// see [`EffectVerb`] for why the descriptor catalog, not the method
+    /// surface, defines the capability set.
     #[test]
     fn verb_signature_set_equals_descriptor_signature_set() {
         let verbs: HashSet<&str> = EFFECT_VERBS.iter().map(|v| v.signature).collect();

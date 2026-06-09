@@ -17,6 +17,14 @@ path = "src/lib.rs"
 # "N ignored" block) before the Criterion `[[bench]]` targets.
 bench = false
 
+[features]
+default = []
+# Test-only instrumentation. Enables process-wide counters that let downstream
+# test suites assert a documentation-only code path constructs no `EffectEngine`
+# and attempts no network access. Off by default; production builds carry no
+# counter state and expose none of the instrumentation API.
+effects-instrumentation = []
+
 [dependencies]
 # Tracing
 tracing = "0.1"

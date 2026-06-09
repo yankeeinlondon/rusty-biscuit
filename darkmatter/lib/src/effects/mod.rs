@@ -11,46 +11,54 @@ mod fs_write;
 mod verbs;
 
 pub use catalog::{
-    effect_descriptors, effect_verbs, EffectDescriptor, EffectSafety, EffectVerb,
-    EFFECT_DESCRIPTORS, EFFECT_VERBS,
+    effect_descriptors, EffectDescriptor, EffectSafety, EFFECT_DESCRIPTORS,
 };
 pub use error::EffectError;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Counts every [`EffectEngine`] constructed in this process. Used as test
-/// instrumentation to prove that documentation-only paths (e.g. Claudine's
-/// `context --side-effects` report) never instantiate an effect engine.
-static ENGINE_BUILD_COUNT: AtomicU64 = AtomicU64::new(0);
-
-/// Counts every network attempt made by [`EffectEngine::http_post`], including
-/// attempts the allowlist refuses before any socket is opened. Used as test
-/// instrumentation to prove metadata-only paths attempt no network.
-static NETWORK_ATTEMPT_COUNT: AtomicU64 = AtomicU64::new(0);
-
-pub(crate) fn record_network_attempt() {
-    NETWORK_ATTEMPT_COUNT.fetch_add(1, Ordering::Relaxed);
-}
-
-/// Returns how many [`EffectEngine`] instances have been built this process.
+/// Process-wide effect instrumentation, compiled only under the
+/// `effects-instrumentation` feature.
 ///
-/// Test instrumentation; compare a before/after delta around a code path to
-/// assert it constructed no engine.
-#[doc(hidden)]
-pub fn engine_build_count() -> u64 {
-    ENGINE_BUILD_COUNT.load(Ordering::Relaxed)
+/// The counters let a downstream test suite assert that a documentation-only
+/// code path (e.g. Claudine's `context --side-effects` report) constructs no
+/// [`EffectEngine`] and attempts no network access. Production builds do not
+/// enable the feature, so they carry no counter state and the atomics never
+/// appear on the engine-build or `http_post` hot paths.
+#[cfg(feature = "effects-instrumentation")]
+mod instrumentation {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static ENGINE_BUILD_COUNT: AtomicU64 = AtomicU64::new(0);
+    static NETWORK_ATTEMPT_COUNT: AtomicU64 = AtomicU64::new(0);
+
+    pub(crate) fn record_engine_build() {
+        ENGINE_BUILD_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn record_network_attempt() {
+        NETWORK_ATTEMPT_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Returns how many [`super::EffectEngine`] instances have been built this
+    /// process. Compare a before/after delta around a code path to assert it
+    /// constructed no engine.
+    pub fn engine_build_count() -> u64 {
+        ENGINE_BUILD_COUNT.load(Ordering::Relaxed)
+    }
+
+    /// Returns how many network attempts [`super::EffectEngine::http_post`] has
+    /// made this process (including allowlist-refused attempts).
+    pub fn network_attempt_count() -> u64 {
+        NETWORK_ATTEMPT_COUNT.load(Ordering::Relaxed)
+    }
 }
 
-/// Returns how many network attempts [`EffectEngine::http_post`] has made this
-/// process (including allowlist-refused attempts).
-///
-/// Test instrumentation; compare a before/after delta around a code path to
-/// assert it attempted no network.
-#[doc(hidden)]
-pub fn network_attempt_count() -> u64 {
-    NETWORK_ATTEMPT_COUNT.load(Ordering::Relaxed)
-}
+#[cfg(feature = "effects-instrumentation")]
+pub use instrumentation::{engine_build_count, network_attempt_count};
+
+#[cfg(feature = "effects-instrumentation")]
+pub(crate) use instrumentation::record_network_attempt;
 
 /// The mutating side-effect engine. Construct via [`EffectEngine::builder`].
 #[derive(Clone, Debug)]
@@ -112,7 +120,8 @@ impl EffectEngineBuilder {
         self
     }
     pub fn build(self) -> EffectEngine {
-        ENGINE_BUILD_COUNT.fetch_add(1, Ordering::Relaxed);
+        #[cfg(feature = "effects-instrumentation")]
+        instrumentation::record_engine_build();
         EffectEngine {
             mutation_root: self.mutation_root,
             allowed_hosts: self.allowed_hosts,
