@@ -71,6 +71,17 @@ struct CollectionMeta {
     name: String,
     #[serde(default)]
     license: Option<License>,
+    #[serde(default)]
+    total: Option<usize>,
+}
+
+/// Metadata for an Iconify collection returned by [`IconifyClient::fetch_collections`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct CollectionInfo {
+    pub prefix: String,
+    pub title: String,
+    pub license: Option<License>,
+    pub total: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -131,12 +142,15 @@ impl IconifyClient {
         Ok(IconBody::with_origin(entry.body.clone(), width, height, left, top))
     }
 
-    /// Fetches the list of Iconify set prefixes, each with its human title
-    /// and optional license.
+    /// Fetches the list of Iconify set prefixes, each with its human title,
+    /// optional license, and optional upstream total icon count.
+    ///
+    /// The returned vector is sorted by prefix because the API response is
+    /// decoded as a `BTreeMap`.
     ///
     /// # Errors
     /// [`IconError::Fetch`] on transport/HTTP/parse failure.
-    pub async fn fetch_collections(&self) -> Result<Vec<(String, String, Option<License>)>> {
+    pub async fn fetch_collections(&self) -> Result<Vec<CollectionInfo>> {
         let url = Url::parse(&self.base)
             .map_err(|e| IconError::Fetch(e.to_string()))?
             .join("collections")
@@ -147,7 +161,15 @@ impl IconifyClient {
         }
         let map: std::collections::BTreeMap<String, CollectionMeta> =
             resp.json().await.map_err(|e| IconError::Fetch(e.to_string()))?;
-        Ok(map.into_iter().map(|(prefix, meta)| (prefix, meta.name, meta.license)).collect())
+        Ok(map
+            .into_iter()
+            .map(|(prefix, meta)| CollectionInfo {
+                prefix,
+                title: meta.name,
+                license: meta.license,
+                total: meta.total,
+            })
+            .collect())
     }
 
     /// Searches the Iconify catalog for icons matching `query`.
@@ -314,11 +336,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_collections_lists_prefixes_titles_and_licenses() {
+    async fn fetch_collections_parses_total_shapes() {
         let server = MockServer::start().await;
         let json = serde_json::json!({
-            "mdi": { "name": "Material Design Icons", "license": { "title": "Apache License 2.0", "spdx": "Apache-2.0", "url": "https://github.com/Templarian/MaterialDesign/blob/master/LICENSE" } },
-            "lucide": { "name": "Lucide" }
+            "mdi": { "name": "Material Design Icons", "total": 5000, "license": { "title": "Apache License 2.0", "spdx": "Apache-2.0", "url": "https://github.com/Templarian/MaterialDesign/blob/master/LICENSE" } },
+            "lucide": { "name": "Lucide", "total": 0 },
+            "hero": { "name": "Hero Icons" }
         });
         Mock::given(method("GET"))
             .and(path("/collections"))
@@ -327,12 +350,34 @@ mod tests {
             .await;
         let client = IconifyClient::with_base(server.uri());
         let sets = client.fetch_collections().await.unwrap();
-        assert!(sets.contains(&(
-            "mdi".into(),
-            "Material Design Icons".into(),
-            Some(License { title: "Apache License 2.0".into(), spdx: "Apache-2.0".into(), url: Some("https://github.com/Templarian/MaterialDesign/blob/master/LICENSE".into()) })
-        )));
-        assert!(sets.contains(&("lucide".into(), "Lucide".into(), None)));
+        assert_eq!(sets.len(), 3);
+        assert_eq!(
+            sets[0],
+            CollectionInfo {
+                prefix: "hero".into(),
+                title: "Hero Icons".into(),
+                license: None,
+                total: None,
+            }
+        );
+        assert_eq!(
+            sets[1],
+            CollectionInfo {
+                prefix: "lucide".into(),
+                title: "Lucide".into(),
+                license: None,
+                total: Some(0),
+            }
+        );
+        assert_eq!(
+            sets[2],
+            CollectionInfo {
+                prefix: "mdi".into(),
+                title: "Material Design Icons".into(),
+                license: Some(License { title: "Apache License 2.0".into(), spdx: "Apache-2.0".into(), url: Some("https://github.com/Templarian/MaterialDesign/blob/master/LICENSE".into()) }),
+                total: Some(5000),
+            }
+        );
     }
 
     #[tokio::test]
