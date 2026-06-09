@@ -19,6 +19,11 @@ use crate::Result;
 
 /// Working-directory root of the repository containing `path`.
 ///
+/// The returned path is absolute. gix reports a workdir relative to the
+/// discovery path, so a relative `path` (e.g. the default `"."`) would
+/// otherwise yield a relative root such as `".."`; discovering from an
+/// absolutized path keeps the result absolute without resolving symlinks.
+///
 /// ## Returns
 ///
 /// `Ok(None)` when `path` is not inside a (trusted) git repository, or the
@@ -29,7 +34,8 @@ use crate::Result;
 /// Trust/ownership, permission, I/O, and corruption failures surface as
 /// [`crate::SniffError::Git`]; genuine repository absence is `Ok(None)`.
 pub fn repo_root(path: &Path) -> Result<Option<PathBuf>> {
-    Ok(open::trusted_discover(path)?.and_then(|repo| repo.workdir().map(Path::to_path_buf)))
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    Ok(open::trusted_discover(&path)?.and_then(|repo| repo.workdir().map(Path::to_path_buf)))
 }
 
 /// Discover a trusted gix handle for the port-in-progress helpers.
