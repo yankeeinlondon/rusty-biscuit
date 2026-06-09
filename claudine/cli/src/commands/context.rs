@@ -1,7 +1,7 @@
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
-use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
+use biscuit_terminal::components::table::table::{Table, TableCellContent};
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
 use color_eyre::eyre::Result;
@@ -16,8 +16,9 @@ use darkmatter::markdown::compose::ComposeContext;
 
 use crate::commands::context_render::{
     configure_shared_table, context_column_widths, function_first_column_width, inline_code_text,
-    prose_with_inline_code, render_context_section, render_table_within_contract,
-    render_unordered_list,
+    prose_with_inline_code, render_context_section, render_table_resilient,
+    render_table_within_contract, report_column, report_droppable_column,
+    render_unordered_list, TableLayout,
 };
 use crate::log;
 
@@ -353,10 +354,7 @@ fn render_expressions_precedence(term: &Terminal) {
         ("Ternary", "`? :`"),
     ];
 
-    let columns = vec![
-        TableColumn::new("Precedence"),
-        TableColumn::new("Operators"),
-    ];
+    let columns = vec![report_column("Precedence"), report_column("Operators")];
     let mut table = Table::new().with_columns(columns);
     configure_shared_table(&mut table);
 
@@ -377,10 +375,7 @@ fn render_expressions_truthiness(term: &Terminal) {
     log::data(&heading.render(term));
     log::data("");
 
-    let columns = vec![
-        TableColumn::new("Value"),
-        TableColumn::new("Falsy"),
-    ];
+    let columns = vec![report_column("Value"), report_column("Falsy")];
     let mut table = Table::new().with_columns(columns);
     configure_shared_table(&mut table);
 
@@ -412,10 +407,7 @@ fn render_expressions_unary(term: &Terminal) {
     log::data(&heading.render(term));
     log::data("");
 
-    let columns = vec![
-        TableColumn::new("Operator"),
-        TableColumn::new("Description"),
-    ];
+    let columns = vec![report_column("Operator"), report_column("Description")];
     let mut table = Table::new().with_columns(columns);
     configure_shared_table(&mut table);
 
@@ -517,8 +509,8 @@ fn render_expressions_modes(term: &Terminal) {
     log::data("");
 
     let columns = vec![
-        TableColumn::new("Surface"),
-        TableColumn::new(inline_code_text("`||` meaning", term)),
+        report_column("Surface"),
+        report_column(inline_code_text("`||` meaning", term)),
     ];
     let mut table = Table::new().with_columns(columns);
     configure_shared_table(&mut table);
@@ -566,10 +558,7 @@ fn render_expressions_null_propagation(term: &Terminal) {
     log::data(&heading.render(term));
     log::data("");
 
-    let columns = vec![
-        TableColumn::new("Operation"),
-        TableColumn::new("Behavior"),
-    ];
+    let columns = vec![report_column("Operation"), report_column("Behavior")];
     let mut table = Table::new().with_columns(columns);
     configure_shared_table(&mut table);
 
@@ -612,24 +601,24 @@ fn render_expressions_functions(term: &Terminal) {
         let sub_heading = Prose::new(format!("<b>{category}</b>"));
         log::data(&sub_heading.render(term));
 
-        let columns = vec![
-            TableColumn::new("Function")
-                .with_min_width(func_width)
-                .with_max_width(func_width),
-            TableColumn::new("Description"),
-        ];
-        let mut table = Table::new().with_columns(columns);
-        configure_shared_table(&mut table);
-
-        for func in functions {
-            let row: Vec<TableCellContent> = vec![
-                inline_code_text(func.signature, term).into(),
-                inline_code_text(func.description, term).into(),
-            ];
-            table.add_row(row);
-        }
-
-        log::data(&render_table_within_contract(&table, term));
+        let rendered = render_table_resilient(term, |layout| {
+            let mut function = report_column("Function");
+            if layout == TableLayout::Pinned {
+                function = function.with_min_width(func_width).with_max_width(func_width);
+            }
+            let mut table =
+                Table::new().with_columns(vec![function, report_column("Description")]);
+            configure_shared_table(&mut table);
+            for func in functions {
+                let row: Vec<TableCellContent> = vec![
+                    inline_code_text(func.signature, term).into(),
+                    inline_code_text(func.description, term).into(),
+                ];
+                table.add_row(row);
+            }
+            table
+        });
+        log::data(&rendered);
         log::data("");
     }
 }
@@ -680,26 +669,33 @@ fn render_side_effects_report() {
         let cat_heading = Prose::new(format!("<blue><b>{category}</b></blue>"));
         log::data(&cat_heading.render(&term));
 
-        let columns = vec![
-            TableColumn::new("Capability")
-                .with_min_width(cap_width)
-                .with_max_width(cap_width),
-            TableColumn::new("Description"),
-            TableColumn::new("Safety"),
-        ];
-        let mut table = Table::new().with_columns(columns);
-        configure_shared_table(&mut table);
-
-        for effect in effects {
-            let row: Vec<TableCellContent> = vec![
-                inline_code_text(effect.signature, &term).into(),
-                inline_code_text(effect.description, &term).into(),
-                format_safety(effect.safety, &term).into(),
-            ];
-            table.add_row(row);
-        }
-
-        log::data(&render_table_within_contract(&table, &term));
+        let rendered = render_table_resilient(&term, |layout| {
+            let mut capability = report_column("Capability");
+            if layout == TableLayout::Pinned {
+                capability = capability.with_min_width(cap_width).with_max_width(cap_width);
+            }
+            let safety = if layout == TableLayout::WrapAndDrop {
+                report_droppable_column("Safety")
+            } else {
+                report_column("Safety")
+            };
+            let mut table = Table::new().with_columns(vec![
+                capability,
+                report_column("Description"),
+                safety,
+            ]);
+            configure_shared_table(&mut table);
+            for effect in effects {
+                let row: Vec<TableCellContent> = vec![
+                    inline_code_text(effect.signature, &term).into(),
+                    inline_code_text(effect.description, &term).into(),
+                    format_safety(effect.safety, &term).into(),
+                ];
+                table.add_row(row);
+            }
+            table
+        });
+        log::data(&rendered);
         log::data("");
     }
 }

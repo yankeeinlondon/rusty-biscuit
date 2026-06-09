@@ -536,3 +536,103 @@ fn level2_context_side_effects_caps_at_140_in_wide_tmux() {
     assert_box_glyphs_and_left_margin(&frame);
     assert_fills_to_140_cap_with_right_margin(&frame);
 }
+
+// ---------------------------------------------------------------------------
+// Genuinely-constrained widths (review-3 finding 1)
+// ---------------------------------------------------------------------------
+//
+// The earlier "narrow" cases (78/100/120/128) sit above each report's failure
+// range. These capture every report at 40–60 columns — the range the
+// iteration-3 review reproduced — in a real terminal and assert the production
+// table wraps to fit (box glyphs, the 1ch left margin, a wrapped continuation
+// row, rows within the pane) and never shows the planner's width-error string.
+
+/// Asserts the visible frame carries no table planner width-error diagnostic.
+fn assert_no_planner_diagnostic(frame: &CapturedFrame) {
+    assert!(
+        !frame.plain.contains("could not be rendered"),
+        "constrained-width report must wrap, not emit the planner width-error.\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+/// Default report at 48 columns: wraps to fit with box glyphs, no planner
+/// diagnostic, and still renders catalog content (`ctx.gpu`, the final row).
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_default_constrained_48_wraps_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&[], 48, 400);
+
+    assert_box_glyphs_and_left_margin(&frame);
+    assert_no_planner_diagnostic(&frame);
+    assert!(
+        frame.plain.contains("ctx.gpu"),
+        "constrained default report must still render catalog rows.\nplain:\n{}",
+        frame.plain,
+    );
+    assert!(
+        has_wrapped_continuation(&frame),
+        "constrained default report must wrap onto continuation rows.\nplain:\n{}",
+        frame.plain,
+    );
+    let max = max_visible_width(&frame);
+    assert!(max <= 48, "rows must fit the 48-col pane; max={max}.\nplain:\n{}", frame.plain);
+}
+
+/// `--values` at 60 columns (its live-data floor): wraps, no planner diagnostic,
+/// renders the bottom `ctx.gpu` row.
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_values_constrained_60_wraps_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&["--values"], 60, 400);
+
+    assert_box_glyphs_and_left_margin(&frame);
+    assert_no_planner_diagnostic(&frame);
+    assert!(
+        frame.plain.contains("ctx.gpu"),
+        "constrained values report must render the bottom `ctx.gpu` row.\nplain:\n{}",
+        frame.plain,
+    );
+    let max = max_visible_width(&frame);
+    assert!(max <= 60, "rows must fit the 60-col pane; max={max}.\nplain:\n{}", frame.plain);
+}
+
+/// `--expressions` at 50 columns: wraps, no planner diagnostic, still renders
+/// the function catalog (the bottom `validate_schema` Filesystem group).
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_expressions_constrained_50_wraps_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&["--expressions"], 50, 400);
+
+    assert_box_glyphs_and_left_margin(&frame);
+    assert_no_planner_diagnostic(&frame);
+    assert!(
+        frame.plain.contains("validate_schema"),
+        "constrained expressions report must render the function catalog.\nplain:\n{}",
+        frame.plain,
+    );
+    let max = max_visible_width(&frame);
+    assert!(max <= 50, "rows must fit the 50-col pane; max={max}.\nplain:\n{}", frame.plain);
+}
+
+/// `--side-effects` at 50 columns: wraps, no planner diagnostic, still renders
+/// the capability catalog (the bottom `http_post` Network group).
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_side_effects_constrained_50_wraps_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&["--side-effects"], 50, 200);
+
+    assert_box_glyphs_and_left_margin(&frame);
+    assert_no_planner_diagnostic(&frame);
+    assert!(
+        frame.plain.contains("http_post"),
+        "constrained side-effects report must render the capability catalog.\nplain:\n{}",
+        frame.plain,
+    );
+    let max = max_visible_width(&frame);
+    assert!(max <= 50, "rows must fit the 50-col pane; max={max}.\nplain:\n{}", frame.plain);
+}

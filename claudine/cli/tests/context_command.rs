@@ -661,6 +661,49 @@ fn context_footer_no_availability_claims() {
     }
 }
 
+// =====================================================================
+// Narrow-terminal regression (review-3 finding 1)
+// =====================================================================
+
+/// At genuinely constrained widths (40–60 columns) every report must render its
+/// catalog by wrapping — never degrade into the table planner's
+/// "Table could not be rendered …" diagnostic. This guards the exact failure
+/// the iteration-3 review reproduced (`COLUMNS=40` and `COLUMNS=60`), checking
+/// the whole report (full stdout), not just a screenful.
+#[test]
+fn context_reports_render_without_planner_diagnostic_at_narrow_widths() {
+    let cases: &[(&[&str], &str)] = &[
+        (&["context"], "ctx.today"),
+        (&["context", "--values"], "ctx.today"),
+        (&["context", "--expressions"], "min(a, b)"),
+        (&["context", "--side-effects"], "ensure_file"),
+    ];
+
+    for width in ["40", "50", "60"] {
+        for (args, sentinel) in cases {
+            let assert = cargo_bin_cmd!("claudine")
+                .env("NO_COLOR", "1")
+                .env("COLUMNS", width)
+                .current_dir(repo_root())
+                .args(*args)
+                .assert()
+                .success();
+
+            let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+            assert!(
+                !stdout.contains("could not be rendered"),
+                "`claudine {args:?}` at COLUMNS={width} must wrap, not emit the \
+                 planner width-error; got stdout:\n{stdout}"
+            );
+            assert!(
+                stdout.contains(sentinel),
+                "`claudine {args:?}` at COLUMNS={width} must still render catalog \
+                 content ({sentinel}); got stdout:\n{stdout}"
+            );
+        }
+    }
+}
+
 /// The "Interpolation vs. Condition Mode" introduction uses corrected wording.
 #[test]
 fn context_expressions_corrected_interpolation_wording() {
