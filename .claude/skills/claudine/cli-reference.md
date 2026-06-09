@@ -1,5 +1,6 @@
 ---
-hash: ef46db3751d8e999-198838c905a1ab63
+hash: ef46db3751d8e999-e316cdb49ab5f3e3
+last_updated: 2026-06-08
 ---
 # Claudine CLI Reference
 
@@ -515,6 +516,8 @@ Catalog-wide constraints communicated in the report:
 All reports share a consistent terminal layout:
 - Tables fill the available terminal width up to a maximum of **140 visible cells** total, including 1ch left and right margins, borders, separators, and content
 - At widths below 140ch, tables use the available width without intentional overflow
+- The **minimum supported terminal width is 53 visible cells**. At or above 53 cells every report renders all of its required columns by wrapping — no column is dropped and no Claudine-specific narrow layout is introduced. (The `--expressions` and `--side-effects` reports hold narrower unbreakable tokens and keep all columns well below 53; 53 is the binding floor for the default and `--values` reports.)
+- Below 53 cells the terminal is unsupported: the shared `Table` component's own constrained-width behavior applies and it may emit its width-error diagnostic instead of a table. Widen the terminal to 53 or more cells to restore full rendering.
 - Backtick-delimited inline code renders with inverse styling in styled output and visible backticks in plain/`--plain`/`NO_COLOR` mode
 - Unordered lists use `- ` bullets with hanging indentation for wrapped continuation lines
 
