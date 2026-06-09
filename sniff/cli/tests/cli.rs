@@ -4061,6 +4061,35 @@ fn test_repo_root_json_perf_stdout_is_valid_json() {
 }
 
 #[test]
+fn test_repo_root_is_absolute_without_base_from_subdir() {
+    // Regression: discovering with the default "." (no --base) from a
+    // subdirectory must still print an absolute root, not a relative ".."/".".
+    let (_dir, repo_path) = create_test_repo();
+    let subdir = repo_path.join("nested/deep");
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .current_dir(&subdir)
+        .args(["repo", "root"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let printed = stdout.trim();
+    let root = Path::new(printed);
+    assert!(root.is_absolute(), "root must be absolute, got: {printed:?}");
+    assert!(
+        !printed.ends_with('/'),
+        "root must not have a trailing separator, got: {printed:?}"
+    );
+    assert_eq!(
+        std::fs::canonicalize(root).unwrap(),
+        std::fs::canonicalize(&repo_path).unwrap(),
+        "root must resolve to the repository working directory"
+    );
+}
+
+#[test]
 fn test_repo_dirty_files_json_perf_stdout_is_valid_json() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
@@ -5209,7 +5238,7 @@ fn test_repo_worktrees_default_output() {
         .success();
 
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-    let lines: Vec<&str> = stdout.trim().lines().collect();
+    let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(
         lines.len(),
         2,
@@ -5218,6 +5247,31 @@ fn test_repo_worktrees_default_output() {
     assert!(
         lines.iter().any(|l| l.contains("my-worktree")),
         "should list linked worktree: {stdout}"
+    );
+    // No worktree line may begin with whitespace; non-current entries are
+    // unprefixed, current entries use a "* " marker.
+    for line in &lines {
+        assert!(
+            !line.starts_with(' '),
+            "worktree line must not start with a space: {line:?}"
+        );
+    }
+
+    // The default output must be byte-identical to `--list`.
+    let list = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--list",
+        ])
+        .assert()
+        .success();
+    let list_stdout = String::from_utf8(list.get_output().stdout.clone()).unwrap();
+    assert_eq!(
+        stdout, list_stdout,
+        "default output must match `--list` output"
     );
 }
 
