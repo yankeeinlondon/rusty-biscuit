@@ -49,6 +49,29 @@ fn cell_row(frame: &CapturedFrame, needle: &str) -> Option<String> {
     None
 }
 
+/// The plain (escape-stripped) capture line for a rendered cell: the row whose
+/// plain text carries both a box-drawing border glyph and `needle`. Used for
+/// border-geometry assertions that must see the visible grid, not escapes.
+fn plain_cell_row(frame: &CapturedFrame, needle: &str) -> Option<String> {
+    frame
+        .plain
+        .lines()
+        .find(|plain| plain.contains('│') && plain.contains(needle))
+        .map(str::to_string)
+}
+
+/// Asserts the cell line carrying `needle` sits inside the box: its visible
+/// content opens and closes with a vertical border glyph (trailing pane padding
+/// spaces are ignored).
+fn assert_bordered_line(frame: &CapturedFrame, needle: &str) {
+    let plain = plain_cell_row(frame, needle)
+        .unwrap_or_else(|| panic!("missing cell line {needle:?}.\nplain:\n{}", frame.plain));
+    assert!(
+        plain.trim_start().starts_with('│') && plain.trim_end().ends_with('│'),
+        "cell line {needle:?} must stay inside the box border: {plain:?}"
+    );
+}
+
 /// Whether `row` carries an SGR sequence (`ESC [ … m`) whose parameter list
 /// includes the bold attribute `1`. SGR forms vary by terminal (semicolon vs
 /// ITU colon, standalone vs coalesced), so the parameter list is parsed rather
@@ -114,9 +137,57 @@ fn assert_prose_cell_styled<H: TerminalHarness>(harness: &mut H) {
     );
 }
 
+/// Asserts a word-wrapped styled Prose cell keeps every wrapped visual line
+/// bordered and bold. A single bold run `<b>alpha bravo charlie</b>` wraps into
+/// three visual lines under a narrow column; each must stay inside the box
+/// (checked on `frame.plain`) and retain the bold attribute (checked on the raw
+/// row), proving wrap geometry and per-line style containment in a real
+/// terminal.
+fn assert_prose_cell_wraps_styled<H: TerminalHarness>(harness: &mut H) {
+    let frame = capture_bt(
+        harness,
+        "bt table --columns \"Notes\" --prose-row \"<b>alpha bravo charlie</b>\" --col-width 9",
+    );
+    for word in ["alpha", "bravo", "charlie"] {
+        assert_bordered_line(&frame, word);
+        let row = cell_row(&frame, word).unwrap_or_else(|| {
+            panic!(
+                "missing raw wrapped line {word:?}.\nplain:\n{}",
+                frame.plain
+            )
+        });
+        assert!(
+            sgr_carries_bold(&row),
+            "wrapped line {word:?} must keep its bold attribute: {row:?}"
+        );
+    }
+}
+
+/// Asserts an explicit hard line break inside one styled run renders as two
+/// bordered, bold visual lines. `<b>line one\nline two</b>` (CLI `\n` becomes a
+/// newline) must keep each line inside the box and carrying bold, proving a
+/// styled run that crosses a newline does not bleed into the border or the next
+/// visual line.
+fn assert_prose_cell_multiline_styled<H: TerminalHarness>(harness: &mut H) {
+    let frame = capture_bt(
+        harness,
+        "bt table --columns \"Msg\" --prose-row \"<b>line one\\nline two</b>\"",
+    );
+    for phrase in ["line one", "line two"] {
+        assert_bordered_line(&frame, phrase);
+        let row = cell_row(&frame, phrase).unwrap_or_else(|| {
+            panic!("missing raw multiline {phrase:?}.\nplain:\n{}", frame.plain)
+        });
+        assert!(
+            sgr_carries_bold(&row),
+            "multiline {phrase:?} must keep its bold attribute: {row:?}"
+        );
+    }
+}
+
 /// Asserts two styled Prose rows render independently: the bold row carries a
-/// bold attribute and the red row a red foreground, and each styled run is reset
-/// (a `0`-parameter SGR) on its own row so styling does not bleed across rows.
+/// bold attribute, the red row a red foreground, and the bold run is turned off
+/// before its row's border so styling does not bleed across rows.
 fn assert_prose_rows_independently_styled<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(
         harness,
@@ -134,10 +205,26 @@ fn assert_prose_rows_independently_styled<H: TerminalHarness>(harness: &mut H) {
         carries_red_fg(&red_row),
         "the second Prose row must carry red: {red_row:?}"
     );
-    // Each styled row resets its run (no carry into the next row's border).
+    // The bold run must turn off after its text and before the row's trailing
+    // border, and must not re-open afterward — proving it cannot bleed into the
+    // padding, the border glyph, or the next row. The WezTerm harness warns a
+    // literal `ESC[0m` may be re-emitted as an explicit bold-off (`ESC[22m`) or
+    // elided across captures, so this asserts ordering and accepts either
+    // documented bold-off form rather than depending on one capture byte.
+    let text_end = bold_row
+        .find("alphaword")
+        .expect("the bold cell text must appear in its raw row")
+        + "alphaword".len();
+    let tail = &bold_row[text_end..];
+    let reset_at = tail
+        .find("\x1b[0m")
+        .or_else(|| tail.find("\x1b[22m"))
+        .unwrap_or_else(|| {
+            panic!("the bold run must turn off (ESC[0m or ESC[22m) after its text: {bold_row:?}")
+        });
     assert!(
-        bold_row.contains("\x1b[0m"),
-        "the bold row must reset its run before the border: {bold_row:?}"
+        !sgr_carries_bold(&tail[reset_at..]),
+        "no bold may re-open after the row's reset, before the border: {bold_row:?}"
     );
 }
 
@@ -186,6 +273,8 @@ fn level2_prose_cells_in_wezterm() {
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
     assert_prose_cell_styled(harness);
+    assert_prose_cell_wraps_styled(harness);
+    assert_prose_cell_multiline_styled(harness);
     assert_prose_rows_independently_styled(harness);
     assert_prose_cursor_align(harness);
 }
@@ -204,6 +293,8 @@ fn level2_prose_cells_in_kitty() {
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
     assert_prose_cell_styled(harness);
+    assert_prose_cell_wraps_styled(harness);
+    assert_prose_cell_multiline_styled(harness);
     assert_prose_rows_independently_styled(harness);
     assert_prose_cursor_align(harness);
 }
@@ -244,6 +335,29 @@ fn level2_prose_cells_in_tmux() {
     assert!(
         frame.plain.contains("cursorword"),
         "expected the cursor-aligned Prose cell text in tmux.\nplain:\n{}",
+        frame.plain,
+    );
+
+    // tmux carries no styling, but it must still wrap a long styled cell onto
+    // multiple bordered visual lines, and honor a hard line break inside a
+    // styled run. Assert the wrap/newline geometry survives with intact borders.
+    let frame = capture_bt(
+        harness,
+        "bt table --columns \"Notes\" --prose-row \"<b>alpha bravo charlie</b>\" --col-width 9",
+    );
+    for word in ["alpha", "bravo", "charlie"] {
+        assert_bordered_line(&frame, word);
+    }
+    let frame = capture_bt(
+        harness,
+        "bt table --columns \"Msg\" --prose-row \"<b>line one\\nline two</b>\"",
+    );
+    for phrase in ["line one", "line two"] {
+        assert_bordered_line(&frame, phrase);
+    }
+    assert!(
+        !frame.plain.contains('\x1b'),
+        "expected no raw escape bytes in the tmux multiline plain capture.\nplain:\n{}",
         frame.plain,
     );
 }

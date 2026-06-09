@@ -45,8 +45,16 @@ pub struct TableArgs {
     /// A comma-separated row whose cells are parsed as [`Prose`] markup, so
     /// inline tags (`<b>`, `<red>`, `<a href=…>`, …) become capability-resolved
     /// `StyledProse` cells. Repeat for multiple rows; appended after `--row`.
+    ///
+    /// A literal `\n` in a cell becomes a hard line break inside that styled
+    /// run, so one cell can span multiple visual lines.
     #[arg(long = "prose-row")]
     pub prose_rows: Vec<String>,
+
+    /// Cap every column to this character width so long cells wrap onto
+    /// multiple visual lines. Useful for exercising wrapped styled cells.
+    #[arg(long = "col-width")]
+    pub col_width: Option<usize>,
 
     /// Render through the cursor-alignment bespoke path
     /// (`Table::prefer_cursor_alignment`) instead of the standard tree layout.
@@ -113,7 +121,16 @@ impl Run for TableArgs {
             ));
         }
 
-        let columns: Vec<TableColumn> = headers.iter().map(|h| TableColumn::new(*h)).collect();
+        let columns: Vec<TableColumn> = headers
+            .iter()
+            .map(|h| {
+                let column = TableColumn::new(*h);
+                match self.col_width {
+                    Some(width) => column.with_max_width(width),
+                    None => column,
+                }
+            })
+            .collect();
 
         let rows = if self.example && self.rows.is_empty() {
             TABLE_EXAMPLE_ROWS
@@ -138,7 +155,13 @@ impl Run for TableArgs {
         for row in &self.prose_rows {
             let cells: Vec<TableCellContent> = row
                 .split(',')
-                .map(|cell| TableCellContent::from(Prose::new(cell.trim())))
+                .map(|cell| {
+                    // A literal `\n` in the cell becomes a hard line break inside
+                    // the styled run; shells cannot pass a raw newline as one
+                    // argument word.
+                    let markup = cell.trim().replace("\\n", "\n");
+                    TableCellContent::from(Prose::new(markup))
+                })
                 .collect();
             data.push(cells);
         }
