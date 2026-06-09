@@ -44,7 +44,7 @@ pub fn offline_sets(cache: &IconCache, needle: &str) -> Result<Vec<SetInfo>> {
         if let Some((prefix, _)) = id.split_once(':') {
             let title = prefix.to_string();
             if needle.is_empty() || prefix.contains(needle) || title.contains(needle) {
-                out.entry(prefix.to_string()).or_insert(SetInfo { prefix: prefix.to_string(), title, license: None, license_title: None, license_url: None });
+                out.entry(prefix.to_string()).or_insert(SetInfo { prefix: prefix.to_string(), title, license: None, license_title: None, license_url: None, total: None });
             }
         }
     }

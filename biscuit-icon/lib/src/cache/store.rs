@@ -13,6 +13,7 @@ pub struct SetInfo {
     pub license: Option<String>,
     pub license_title: Option<String>,
     pub license_url: Option<String>,
+    pub total: Option<usize>,
 }
 
 /// A SQLite-backed cache of fetched Iconify icon bodies and set metadata.
@@ -71,6 +72,7 @@ impl IconCache {
                     license         TEXT,
                     license_title   TEXT,
                     license_url     TEXT,
+                    total           INTEGER,
                     fetched_at      TEXT NOT NULL
                 );
                 "#,
@@ -152,6 +154,27 @@ impl IconCache {
 
             conn.execute_batch("PRAGMA user_version = 1;")
                 .map_err(map_sql)?;
+        }
+
+        if version < 2 {
+            let tx = conn.transaction().map_err(map_sql)?;
+
+            let set_cols: Vec<String> = tx
+                .prepare("PRAGMA table_info(sets)")
+                .map_err(map_sql)?
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(map_sql)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(map_sql)?;
+
+            if !set_cols.contains(&"total".to_string()) {
+                tx.execute("ALTER TABLE sets ADD COLUMN total INTEGER", [])
+                    .map_err(map_sql)?;
+            }
+
+            tx.execute_batch("PRAGMA user_version = 2;")
+                .map_err(map_sql)?;
+            tx.commit().map_err(map_sql)?;
         }
 
         drop(conn);
@@ -257,14 +280,15 @@ impl IconCache {
     pub fn put_set(&self, info: &SetInfo) -> Result<()> {
         self.conn()?
             .execute(
-                "INSERT OR REPLACE INTO sets (prefix, title, license, license_title, license_url, fetched_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
+                "INSERT OR REPLACE INTO sets (prefix, title, license, license_title, license_url, total, fetched_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
                 params![
                     info.prefix,
                     info.title,
                     info.license.as_deref(),
                     info.license_title.as_deref(),
-                    info.license_url.as_deref()
+                    info.license_url.as_deref(),
+                    info.total.map(|v| v as i64)
                 ],
             )
             .map(|_| ())
@@ -279,7 +303,7 @@ impl IconCache {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT prefix, title, license, license_title, license_url FROM sets \
+                "SELECT prefix, title, license, license_title, license_url, total FROM sets \
                  WHERE prefix LIKE ?1 OR title LIKE ?1 ORDER BY prefix",
             )
             .map_err(map_sql)?;
@@ -292,6 +316,7 @@ impl IconCache {
                     license: row.get(2)?,
                     license_title: row.get(3)?,
                     license_url: row.get(4)?,
+                    total: row.get::<_, Option<i64>>(5)?.map(|v| v as usize),
                 })
             })
             .map_err(map_sql)?;
@@ -305,7 +330,7 @@ impl IconCache {
     pub fn all_sets(&self) -> Result<Vec<SetInfo>> {
         let conn = self.conn()?;
         let mut stmt = conn
-            .prepare("SELECT prefix, title, license, license_title, license_url FROM sets ORDER BY prefix")
+            .prepare("SELECT prefix, title, license, license_title, license_url, total FROM sets ORDER BY prefix")
             .map_err(map_sql)?;
         let rows = stmt
             .query_map([], |row| {
@@ -315,10 +340,46 @@ impl IconCache {
                     license: row.get(2)?,
                     license_title: row.get(3)?,
                     license_url: row.get(4)?,
+                    total: row.get::<_, Option<i64>>(5)?.map(|v| v as usize),
                 })
             })
             .map_err(map_sql)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_sql)
+    }
+
+    /// Returns a map of prefix → cached icon count for the given prefixes.
+    ///
+    /// Empty input returns an empty map without opening a query.
+    /// Prefixes with zero cached rows are omitted; presentation treats a
+    /// missing entry as zero.
+    ///
+    /// ## Errors
+    /// [`IconError::Cache`] on query failure.
+    pub fn cached_icon_counts(
+        &self,
+        prefixes: &[String],
+    ) -> Result<std::collections::BTreeMap<String, usize>> {
+        if prefixes.is_empty() {
+            return Ok(std::collections::BTreeMap::new());
+        }
+
+        let placeholders = prefixes.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "SELECT prefix, COUNT(*) FROM icons WHERE prefix IN ({}) GROUP BY prefix",
+            placeholders
+        );
+
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(&sql).map_err(map_sql)?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(prefixes.iter()), |row| {
+                let prefix: String = row.get(0)?;
+                let count: i64 = row.get(1)?;
+                Ok((prefix, count as usize))
+            })
+            .map_err(map_sql)?;
+        rows.collect::<rusqlite::Result<std::collections::BTreeMap<_, _>>>()
+            .map_err(map_sql)
     }
 
     /// Deletes all cached rows.
@@ -370,7 +431,7 @@ mod tests {
     #[test]
     fn set_metadata_round_trips() {
         let (_d, cache) = temp_cache();
-        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "Material Design".into(), license: Some("Apache-2.0".into()), license_title: Some("Apache License 2.0".into()), license_url: None }).unwrap();
+        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "Material Design".into(), license: Some("Apache-2.0".into()), license_title: Some("Apache License 2.0".into()), license_url: None, total: None }).unwrap();
         let hits = cache.search_sets("material").unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].prefix, "mdi");
@@ -381,7 +442,7 @@ mod tests {
     #[test]
     fn set_metadata_preserves_null_license() {
         let (_d, cache) = temp_cache();
-        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "Material Design".into(), license: None, license_title: None, license_url: None }).unwrap();
+        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "Material Design".into(), license: None, license_title: None, license_url: None, total: None }).unwrap();
         let hits = cache.all_sets().unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].license, None);
@@ -391,7 +452,7 @@ mod tests {
     fn clear_empties_the_cache() {
         let (_d, cache) = temp_cache();
         cache.put("mdi", "home", &IconBody::new("<a/>", 24, 24)).unwrap();
-        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "M".into(), license: None, license_title: None, license_url: None }).unwrap();
+        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "M".into(), license: None, license_title: None, license_url: None, total: None }).unwrap();
         cache.clear().unwrap();
         assert_eq!(cache.get("mdi", "home").unwrap(), None);
         assert!(cache.all_sets().unwrap().is_empty());
@@ -488,6 +549,7 @@ mod tests {
                 license: Some("ISC".into()),
                 license_title: Some("ISC License".into()),
                 license_url: Some("https://opensource.org/licenses/ISC".into()),
+                total: None,
             })
             .unwrap();
         let new_sets = cache.search_sets("lucide").unwrap();
@@ -499,7 +561,7 @@ mod tests {
     fn timestamp_is_rfc3339_utc() {
         let (_d, cache) = temp_cache();
         cache.put("mdi", "home", &IconBody::new("<path/>", 24, 24)).unwrap();
-        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "M".into(), license: None, license_title: None, license_url: None }).unwrap();
+        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "M".into(), license: None, license_title: None, license_url: None, total: None }).unwrap();
 
         let conn = Connection::open(cache.path()).unwrap();
         let icon_ts: String = conn
@@ -513,5 +575,248 @@ mod tests {
             assert!(ts.ends_with('Z'), "expected RFC 3339 UTC suffix; got: {ts}");
             assert!(ts.contains('T'), "expected RFC 3339 date/time separator; got: {ts}");
         }
+    }
+
+    #[test]
+    fn fresh_db_is_user_version_2_with_total_column() {
+        let (_d, cache) = temp_cache();
+        let conn = Connection::open(cache.path()).unwrap();
+        let version: i32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 2, "fresh DB should be at user_version 2");
+
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(sets)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(cols.contains(&"total".to_string()), "sets table should have total column");
+    }
+
+    #[test]
+    fn v0_db_migrates_to_v2_preserving_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("icons.db");
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE icons (
+                    prefix     TEXT NOT NULL,
+                    name       TEXT NOT NULL,
+                    body       TEXT NOT NULL,
+                    view_box   TEXT NOT NULL,
+                    width      INTEGER,
+                    height      INTEGER,
+                    fetched_at TEXT NOT NULL,
+                    PRIMARY KEY (prefix, name)
+                );
+                CREATE TABLE sets (
+                    prefix      TEXT PRIMARY KEY,
+                    title       TEXT,
+                    license     TEXT,
+                    fetched_at  TEXT NOT NULL
+                );
+                PRAGMA user_version = 0;
+                "#,
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO icons (prefix, name, body, view_box, width, height, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params!["mdi", "home", "<path/>", "0 0 24 24", 24, 24, "2024-01-01T00:00:00Z"],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sets (prefix, title, license, fetched_at) VALUES (?1, ?2, ?3, ?4)",
+                params!["mdi", "Material Design", "Apache-2.0", "2024-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        }
+
+        let cache = IconCache::open_at(&path).unwrap();
+
+        let conn = Connection::open(cache.path()).unwrap();
+        let version: i32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
+
+        let sets = cache.all_sets().unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].prefix, "mdi");
+        assert_eq!(sets[0].total, None, "existing v0 set total should be None after migration");
+
+        let body = cache.get("mdi", "home").unwrap().expect("icon should survive migration");
+        assert_eq!(body.body, "<path/>");
+    }
+
+    #[test]
+    fn v1_db_migrates_to_v2() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("icons.db");
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE icons (
+                    prefix     TEXT NOT NULL,
+                    name       TEXT NOT NULL,
+                    body       TEXT NOT NULL,
+                    left       INTEGER NOT NULL DEFAULT 0,
+                    top        INTEGER NOT NULL DEFAULT 0,
+                    width      INTEGER NOT NULL,
+                    height     INTEGER NOT NULL,
+                    fetched_at TEXT NOT NULL,
+                    PRIMARY KEY (prefix, name)
+                );
+                CREATE TABLE sets (
+                    prefix          TEXT PRIMARY KEY,
+                    title           TEXT NOT NULL,
+                    license         TEXT,
+                    license_title   TEXT,
+                    license_url     TEXT,
+                    fetched_at      TEXT NOT NULL
+                );
+                PRAGMA user_version = 1;
+                "#,
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sets (prefix, title, license, license_title, license_url, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params!["mdi", "Material Design", "Apache-2.0", "Apache License 2.0", "https://example.com", "2024-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        }
+
+        let cache = IconCache::open_at(&path).unwrap();
+
+        let conn = Connection::open(cache.path()).unwrap();
+        let version: i32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
+
+        let sets = cache.all_sets().unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].total, None, "existing v1 set total should be None after migration");
+        assert_eq!(sets[0].license_title, Some("Apache License 2.0".into()));
+    }
+
+    #[test]
+    fn idempotent_migration_when_total_column_already_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("icons.db");
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE icons (
+                    prefix     TEXT NOT NULL,
+                    name       TEXT NOT NULL,
+                    body       TEXT NOT NULL,
+                    left       INTEGER NOT NULL DEFAULT 0,
+                    top        INTEGER NOT NULL DEFAULT 0,
+                    width      INTEGER NOT NULL,
+                    height     INTEGER NOT NULL,
+                    fetched_at TEXT NOT NULL,
+                    PRIMARY KEY (prefix, name)
+                );
+                CREATE TABLE sets (
+                    prefix          TEXT PRIMARY KEY,
+                    title           TEXT NOT NULL,
+                    license         TEXT,
+                    license_title   TEXT,
+                    license_url     TEXT,
+                    total           INTEGER,
+                    fetched_at      TEXT NOT NULL
+                );
+                PRAGMA user_version = 1;
+                "#,
+            )
+            .unwrap();
+        }
+
+        // Opening should not fail with duplicate-column error.
+        let cache = IconCache::open_at(&path).unwrap();
+
+        let conn = Connection::open(cache.path()).unwrap();
+        let version: i32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
+    }
+
+    #[test]
+    fn set_info_total_round_trips() {
+        let (_d, cache) = temp_cache();
+        cache
+            .put_set(&SetInfo {
+                prefix: "mdi".into(),
+                title: "Material Design".into(),
+                license: None,
+                license_title: None,
+                license_url: None,
+                total: Some(7000),
+            })
+            .unwrap();
+
+        let by_search = cache.search_sets("material").unwrap();
+        assert_eq!(by_search.len(), 1);
+        assert_eq!(by_search[0].total, Some(7000));
+
+        let by_all = cache.all_sets().unwrap();
+        assert_eq!(by_all.len(), 1);
+        assert_eq!(by_all[0].total, Some(7000));
+
+        cache
+            .put_set(&SetInfo {
+                prefix: "lucide".into(),
+                title: "Lucide".into(),
+                license: None,
+                license_title: None,
+                license_url: None,
+                total: None,
+            })
+            .unwrap();
+
+        let all = cache.all_sets().unwrap();
+        let lucide = all.iter().find(|s| s.prefix == "lucide").unwrap();
+        assert_eq!(lucide.total, None);
+    }
+
+    #[test]
+    fn cached_icon_counts_groups_and_omits_zero() {
+        let (_d, cache) = temp_cache();
+        cache.put("mdi", "home", &IconBody::new("<a/>", 24, 24)).unwrap();
+        cache.put("mdi", "alert", &IconBody::new("<b/>", 24, 24)).unwrap();
+        cache.put("ic", "baseline-apple", &IconBody::new("<c/>", 24, 24)).unwrap();
+
+        let counts = cache.cached_icon_counts(&["mdi".into(), "ic".into(), "unknown".into()]).unwrap();
+        assert_eq!(counts.get("mdi"), Some(&2usize));
+        assert_eq!(counts.get("ic"), Some(&1usize));
+        assert!(!counts.contains_key("unknown"), "zero-count prefix should be omitted");
+    }
+
+    #[test]
+    fn cached_icon_counts_empty_input_returns_empty_map() {
+        let (_d, cache) = temp_cache();
+        let counts = cache.cached_icon_counts(&[]).unwrap();
+        assert!(counts.is_empty());
+    }
+
+    #[test]
+    fn cached_icon_counts_excludes_embedded_domain_icons() {
+        // Embedded domain icons are not in the SQLite cache, so they are never counted.
+        let (_d, cache) = temp_cache();
+        cache.put("mdi", "home", &IconBody::new("<a/>", 24, 24)).unwrap();
+
+        let counts = cache.cached_icon_counts(&["ic".into()]).unwrap();
+        assert!(counts.is_empty(), "embedded domain prefix should have no cached count");
     }
 }
