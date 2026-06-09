@@ -3,6 +3,7 @@ set positional-arguments
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
+import "../just/spec.just"
 import "../just/plan.just"
 import "../just/review.just"
 import "../just/notify.just"
@@ -27,19 +28,19 @@ default:
     just --list | grep -v 'default'
 
 build *args="":
-    @just _build biscuit-icon "Biscuit Icon Library" {{args}}
-    @just _build biscuit-icon-cli "Biscuit Icon CLI" {{args}}
+    @just _build biscuit-icon "Biscuit Icon Library" {{ args }}
+    @just _build biscuit-icon-cli "Biscuit Icon CLI" {{ args }}
 
 sanity:
     @just _sanity biscuit-icon
     @just _sanity biscuit-icon-cli
 
 test *args="":
-    @just _test biscuit-icon {{args}}
-    @just _test biscuit-icon-cli {{args}}
+    @just _test biscuit-icon {{ args }}
+    @just _test biscuit-icon-cli {{ args }}
 
 test-l2 *args="":
-    @just _test_l2 biscuit-icon-cli --features image {{args}}
+    @just _test_l2 biscuit-icon-cli --features image {{ args }}
 
 test-l3:
     @echo "test-l3: not applicable for biscuit-icon"
@@ -55,12 +56,12 @@ lint:
     @just _lint biscuit-icon-cli
 
 coverage *args="":
-    @just _coverage biscuit-icon {{args}}
-    @just _coverage biscuit-icon-cli {{args}}
+    @just _coverage biscuit-icon {{ args }}
+    @just _coverage biscuit-icon-cli {{ args }}
 
 doctest *args="":
-    @just _doctest biscuit-icon {{args}}
-    @just _doctest biscuit-icon-cli {{args}}
+    @just _doctest biscuit-icon {{ args }}
+    @just _doctest biscuit-icon-cli {{ args }}
 
 fuzz:
     @echo "fuzz: not applicable for biscuit-icon"
@@ -79,17 +80,17 @@ lint-fix:
 
 install *args="":
     @just build --release
-    @just _install "./cli" "Biscuit Icon" {{args}}
+    @just _install "./cli" "Biscuit Icon" {{ args }}
 
 docs:
     @cargo doc -p biscuit-icon --open
 
 cli *args="":
-    @cargo run -p biscuit-icon-cli -- {{args}}
+    @cargo run -p biscuit-icon-cli -- {{ args }}
 
 # Dev-only: fetch curated icon bodies from the Iconify API into assets + generated.rs.
 populate-assets *args="":
-    @cargo run -p biscuit-icon --bin populate_assets -- {{args}}
+    @cargo run -p biscuit-icon --bin populate_assets -- {{ args }}
 
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{RED}} {{DIM}} >/dev/null || true
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ RED }} {{ DIM }} >/dev/null || true
