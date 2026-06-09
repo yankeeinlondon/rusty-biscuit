@@ -1,3 +1,4 @@
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::components::table::types::ColumnType;
@@ -13,13 +14,38 @@ pub struct SetRow {
     pub cached: usize,
 }
 
+/// Base URL of the Iconify icon-set browser. Each set has a page keyed on its
+/// prefix, e.g. `mdi` → `https://icon-sets.iconify.design/mdi`.
+const ICONIFY_SET_BASE_URL: &str = "https://icon-sets.iconify.design";
+
 const SPLIT_GAP: u32 = 3;
 const MIN_TABLE_WIDTH: u32 = 48;
 const MIN_SPLIT_WIDTH: u32 = MIN_TABLE_WIDTH * 2 + SPLIT_GAP;
 const TABLE_OVERHEAD: u32 = 4; // top border + header + separator + bottom border
 
+/// Builds the Set-name cell, linking the title to its Iconify catalog page.
+///
+/// Only terminals that advertise OSC8 support get the hyperlink: the link's URL
+/// lives in an invisible escape, so the cell's visible width stays at the label.
+/// Without OSC8 the render tree would degrade the link to a `[label](url)`
+/// reference whose long, barely-breakable URL inflates the column's minimum
+/// width and can make the table unrenderable in narrow terminals — so those
+/// terminals get the plain title instead.
+fn title_cell(title: &str, prefix: &str, term: &Terminal) -> TableCellContent {
+    if !term.osc_link_support {
+        return title.to_string().into();
+    }
+    let url = format!("{ICONIFY_SET_BASE_URL}/{prefix}");
+    Prose::new(format!(
+        "<blue><a href={href}>{label}</a></blue>",
+        href = Prose::quoted_attr(&url),
+        label = Prose::escape_text(title),
+    ))
+    .into()
+}
+
 /// Builds a striped four-column table from rows.
-pub fn build_table(rows: &[SetRow]) -> Table {
+pub fn build_table(rows: &[SetRow], term: &Terminal) -> Table {
     let data: Vec<Vec<TableCellContent>> = rows
         .iter()
         .map(|r| {
@@ -28,7 +54,7 @@ pub fn build_table(rows: &[SetRow]) -> Table {
                 None => TableCellContent::Text("Unknown".into()),
             };
             vec![
-                r.title.clone().into(),
+                title_cell(&r.title, &r.prefix, term),
                 r.prefix.clone().into(),
                 total_cell,
                 TableCellContent::Integer(r.cached as i64),
@@ -69,13 +95,13 @@ pub fn choose_layout(rows: &[SetRow], term: &Terminal) -> Layout {
     let per_table = rows_per_table(term.height());
 
     if rows.len() <= per_table {
-        Layout::Single(build_table(rows))
+        Layout::Single(build_table(rows, term))
     } else if term.width() >= MIN_SPLIT_WIDTH {
         let midpoint = rows.len().div_ceil(2);
         let (left, right) = rows.split_at(midpoint);
-        Layout::Split(build_table(left), build_table(right))
+        Layout::Split(build_table(left, term), build_table(right, term))
     } else {
-        Layout::Single(build_table(rows))
+        Layout::Single(build_table(rows, term))
     }
 }
 
@@ -330,9 +356,9 @@ mod tests {
     }
 
     #[test]
-    fn set_title_plain_when_links_unsupported() {
-        // Without OSC8 support the title degrades to plain text — no escape
-        // codes, no raw markup tags.
+    fn set_title_never_leaks_raw_prose_markup() {
+        // Whatever the terminal capabilities, the styled title must lower to
+        // escapes or a markdown fallback — never raw `<blue>`/`<a href>` tags.
         let rows = vec![SetRow {
             prefix: "mdi".into(),
             title: "Material Design Icons".into(),
@@ -346,14 +372,9 @@ mod tests {
             .osc_link_support(false)
             .build();
         let output = render_sets(&rows, &t);
-        assert!(output.contains("Material Design Icons"));
-        assert!(
-            !output.contains("https://icon-sets.iconify.design"),
-            "plain output must not embed the link URL; got:\n{output}"
-        );
         assert!(
             !output.contains("<blue>") && !output.contains("<a href"),
-            "plain output must not contain raw Prose markup; got:\n{output}"
+            "output must not contain raw Prose markup; got:\n{output}"
         );
     }
 
