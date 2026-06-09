@@ -1422,9 +1422,18 @@ fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempfile::TempDi
     // the tree; it only causes `ignored.md` to render dim.
     fs::write(topics.join(".gitignore"), "ignored.md\n").unwrap();
     fs::write(topics.join("ignored.md"), "# Ignored\n").unwrap();
+    // A nested subtree with its OWN `.gitignore`. The nested rule must dim
+    // `sub/buried.md` (proving `.gitignore` files below the component root are
+    // evaluated with directory-scoped Git semantics) while `sub/nested.md`
+    // exercises a per-file OSC8 link at depth.
+    let sub = topics.join("sub");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(sub.join(".gitignore"), "buried.md\n").unwrap();
+    fs::write(sub.join("nested.md"), "# Nested\n").unwrap();
+    fs::write(sub.join("buried.md"), "# Buried\n").unwrap();
 
     let root = dir.path().join("root.md");
-    fs::write(&root, "# Root\n\n::file-links --dir docs/topics\n").unwrap();
+    fs::write(&root, "# Root\n\n::file-links --dir docs/topics --depth 1\n").unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let (composed, _report) = md
@@ -1453,24 +1462,126 @@ fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempfile::TempDi
     Some((frame, dir))
 }
 
+/// Removes OSC sequences (`ESC ] … ST|BEL`) — including OSC8 hyperlinks and
+/// their `file://` payloads — from `raw`, leaving SGR styling and visible text.
+/// Style assertions run against this so a token (e.g. `topics`) keys off visible
+/// output instead of the same substring inside a hyperlink URL.
+fn strip_osc(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && bytes.get(i + 1) == Some(&b']') {
+            i += 2;
+            while i < bytes.len() {
+                if bytes[i] == 0x07 {
+                    i += 1;
+                    break;
+                }
+                if bytes[i] == 0x1b && bytes.get(i + 1) == Some(&b'\\') {
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// SGR attributes active at the first occurrence of `token` in OSC-stripped
+/// `text`: bold = 1, dim = 2, italic = 3. Color introducers (`38;2;…`,
+/// `38;5;…`, `48;…`) are parsed structurally so their parameters are never
+/// mistaken for attributes (the `2` in `38;2` is not dim). Returns `None` when
+/// `token` is absent.
+fn active_sgr_params(text: &str, token: &str) -> Option<std::collections::HashSet<u16>> {
+    let idx = text.find(token)?;
+    let prefix = &text[..idx];
+    let bytes = prefix.as_bytes();
+    let mut active: std::collections::HashSet<u16> = std::collections::HashSet::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && bytes.get(i + 1) == Some(&b'[') {
+            let start = i + 2;
+            let mut j = start;
+            while j < bytes.len() && bytes[j] != b'm' && bytes[j] != 0x1b {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'm' {
+                apply_sgr_params(&prefix[start..j], &mut active);
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    Some(active)
+}
+
+/// Folds one `ESC [ … m` parameter list into the active attribute set.
+fn apply_sgr_params(params: &str, active: &mut std::collections::HashSet<u16>) {
+    if params.is_empty() {
+        active.clear(); // `ESC[m` is an alias for `ESC[0m`.
+        return;
+    }
+    let parts: Vec<&str> = params.split(';').collect();
+    let mut k = 0;
+    while k < parts.len() {
+        match parts[k].parse::<u16>() {
+            Ok(0) => active.clear(),
+            Ok(1) => {
+                active.insert(1);
+            }
+            Ok(2) => {
+                active.insert(2);
+            }
+            Ok(3) => {
+                active.insert(3);
+            }
+            Ok(22) => {
+                active.remove(&1);
+                active.remove(&2);
+            }
+            Ok(23) => {
+                active.remove(&3);
+            }
+            // Skip the operands of an extended color so they are not read as
+            // attributes: `38;5;n` consumes one, `38;2;r;g;b` consumes three.
+            Ok(38) | Ok(48) => match parts.get(k + 1) {
+                Some(&"5") => k += 2,
+                Some(&"2") => k += 4,
+                _ => {}
+            },
+            _ => {}
+        }
+        k += 1;
+    }
+}
+
 /// Review-2 finding: composing `::file-links` and rendering the result in a
 /// real terminal must reproduce the FULL styled FileSystem presentation — not
-/// just plain `.md` hierarchy. This asserts the visible hierarchy, the
-/// extension-specific document glyphs, the repository root icon (distinct from
-/// an ordinary folder), the dimmed root prefix and dimmed gitignored entry, the
-/// italic dotfile, the highlighted (bold) target directory, OSC8 file links,
-/// and that the embedding marker never leaks as visible text.
+/// just plain `.md` hierarchy. This asserts the visible hierarchy (including a
+/// nested subtree), the extension-specific document glyphs, the repository root
+/// icon paired with an ordinary folder icon for the subdirectory, the dim SGR
+/// run *surrounding each gitignored entry* (a root-level rule and a nested
+/// `.gitignore` below the component root), the italic dotfile, the bold target
+/// directory, a per-file OSC8 `file://` link to each named destination, and
+/// that the embedding marker never leaks as visible text.
 #[test]
 #[serial(level2_terminal)]
 fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
-    let Some((frame, _dir)) = run_file_links_in_pane("file_links") else {
+    let Some((frame, dir)) = run_file_links_in_pane("file_links") else {
         return;
     };
 
-    // Visible hierarchy: the target directory plus every discovered document,
-    // including the dotfile and the gitignored file.
-    for token in &[
-        "topics",
+    // Files discovered by `::file-links --dir docs/topics --depth 1`, relative
+    // to the component root. The SAME list drives the visible-name checks and
+    // the per-file OSC8 destination checks below, so every rendered file is
+    // verified — not a representative subset that could leave regressions green.
+    let expected_rel = [
         "alpha.md",
         "beta.md",
         "notes.txt",
@@ -1479,10 +1590,24 @@ fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
         "memo.docx",
         ".hidden.md",
         "ignored.md",
-    ] {
+        "sub/nested.md",
+        "sub/buried.md",
+    ];
+
+    // Visible hierarchy: the target directory, the nested subdirectory, and
+    // every discovered document by its displayed (leaf) name.
+    for token in ["topics", "sub"] {
         assert!(
             frame.plain.contains(token),
             "::file-links token {token:?} missing from real-terminal capture. plain:\n{}",
+            frame.plain
+        );
+    }
+    for rel in &expected_rel {
+        let leaf = rel.rsplit('/').next().unwrap();
+        assert!(
+            frame.plain.contains(leaf),
+            "::file-links file {leaf:?} missing from real-terminal capture. plain:\n{}",
             frame.plain
         );
     }
@@ -1517,67 +1642,92 @@ fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
     }
 
     // The root is a repository (`.git` present), so it renders the repository
-    // icon (📦), NOT the ordinary folder icon (📂). No subdirectories exist in
-    // the fixture, so 📂 must be entirely absent — distinguishing the repo icon
-    // from incidental folder styling.
+    // icon (📦); the `sub` subdirectory renders the ordinary folder icon (📂).
+    // Both appearing — each where expected — distinguishes the repo icon from
+    // ordinary folder styling.
     assert!(
         frame.plain.contains("📦"),
         "expected repository root icon 📦 in capture. plain:\n{}",
         frame.plain
     );
     assert!(
-        !frame.plain.contains("📂"),
-        "ordinary folder icon 📂 must not appear (root is a repository). plain:\n{}",
+        frame.plain.contains("📂"),
+        "expected ordinary folder icon 📂 for the `sub` subdirectory. plain:\n{}",
         frame.plain
     );
 
-    // The dimmed root prefix (`/docs/`) and the gitignored `ignored.md` both
-    // emit the dim SGR (`ESC [ 2 m`); accept any position within a combined run.
-    let has_dim = frame.raw.contains("\u{1b}[2m")
-        || frame.raw.contains("\u{1b}[2;")
-        || frame.raw.contains(";2m")
-        || frame.raw.contains(";2;");
+    // Style assertions key off the OSC-stripped capture so a token is matched
+    // as visible output, never inside a `file://` hyperlink URL.
+    let styled = strip_osc(&frame.raw);
+
+    // The gitignored entries are dim (SGR 2) on their own name — the root-level
+    // rule (`ignored.md`) and a nested `.gitignore` below the component root
+    // (`sub/buried.md`), which only dims correctly with directory-scoped Git
+    // semantics. Asserting the run surrounding each name (not merely that *some*
+    // dim exists) is what the dimmed root prefix alone could otherwise satisfy.
+    for name in &["ignored.md", "buried.md"] {
+        let attrs =
+            active_sgr_params(&styled, name).unwrap_or_else(|| panic!("{name} missing from capture"));
+        assert!(
+            attrs.contains(&2),
+            "gitignored `{name}` must carry the dim SGR on its own name; raw:\n{}",
+            frame.raw
+        );
+    }
+
+    // The dotfile `.hidden.md` is italic (SGR 3) on its own name.
+    let hidden_attrs =
+        active_sgr_params(&styled, ".hidden.md").expect(".hidden.md missing from capture");
     assert!(
-        has_dim,
-        "expected dim SGR for the dimmed prefix / gitignored entry; raw:\n{}",
+        hidden_attrs.contains(&3),
+        "dotfile `.hidden.md` must carry the italic SGR on its own name; raw:\n{}",
         frame.raw
     );
 
-    // The dotfile `.hidden.md` is italic (`ESC [ 3 m`). The `;3m`/`;3;` forms
-    // catch a combined run; none of these patterns collide with `38;`/`33`.
-    let has_italic = frame.raw.contains("\u{1b}[3m")
-        || frame.raw.contains("\u{1b}[3;")
-        || frame.raw.contains(";3m")
-        || frame.raw.contains(";3;");
+    // The highlighted target directory `topics` is bold (SGR 1) on its own
+    // name. Keying off the `topics` token rules out the document's `# Root`
+    // heading satisfying the assertion in its place.
+    let topics_attrs = active_sgr_params(&styled, "topics").expect("topics missing from capture");
     assert!(
-        has_italic,
-        "expected italic SGR for the dotfile entry; raw:\n{}",
+        topics_attrs.contains(&1) && !topics_attrs.contains(&2),
+        "highlighted target `topics` must carry the bold SGR on its own name; raw:\n{}",
         frame.raw
     );
 
-    // The highlighted target directory is bold (the root header is the only
-    // bold entry — no subdirectories exist to add incidental bold).
-    let has_bold = frame.raw.contains("\u{1b}[1m")
-        || frame.raw.contains("\u{1b}[1;")
-        || frame.raw.contains(";1m")
-        || frame.raw.contains(";1;");
+    // The boundary-relative root prefix renders dimmed (SGR 2) before the
+    // highlighted target: the full `/docs/topics` root label is visible, and the
+    // `/docs/` prefix run carries the dim SGR on its own (distinct from the bold,
+    // non-dim `topics` asserted above).
     assert!(
-        has_bold,
-        "expected bold SGR for the highlighted target directory; raw:\n{}",
+        frame.plain.contains("/docs/topics"),
+        "expected visible boundary-relative root `/docs/topics`; plain:\n{}",
+        frame.plain
+    );
+    let prefix_attrs =
+        active_sgr_params(&styled, "/docs/").expect("/docs/ root prefix missing from capture");
+    assert!(
+        prefix_attrs.contains(&2),
+        "dimmed root prefix `/docs/` must carry the dim SGR on its own run; raw:\n{}",
         frame.raw
     );
 
-    // OSC8 hyperlinks for the matched files survive into the real pane. WezTerm
-    // re-emits hyperlink escapes in its `--escapes` capture, so the introducer
-    // and the `file://` destination both reach the raw frame.
+    // Every rendered file carries its OWN OSC8 link to the correct canonical
+    // `file://` destination — flat files, the dotfile, the gitignored file, and
+    // both files inside the nested subtree. WezTerm re-emits hyperlink escapes in
+    // its `--escapes` capture, so each full destination reaches the raw frame.
     assert!(
         frame.raw.contains("\u{1b}]8;;"),
         "expected OSC8 hyperlink introducer in the capture; raw:\n{}",
         frame.raw
     );
-    assert!(
-        frame.raw.contains("file://"),
-        "expected an OSC8 `file://` link target in the capture; raw:\n{}",
-        frame.raw
-    );
+    let component_root = fs::canonicalize(dir.path().join("docs").join("topics"))
+        .expect("canonicalize component root");
+    for rel in &expected_rel {
+        let want = format!("file://{}", component_root.join(rel).display());
+        assert!(
+            frame.raw.contains(&want),
+            "expected per-file OSC8 destination {want:?} in capture; raw:\n{}",
+            frame.raw
+        );
+    }
 }
