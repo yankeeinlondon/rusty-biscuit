@@ -6,15 +6,13 @@
 //! has a stable `git_ops/*` identifier to compare a saved `git2` baseline
 //! against the `gix` port on the same host.
 //!
-//! Every benchmark exercises only the public `sniff` API (plus `git2` for the
-//! commit-file diff, which needs a `Repository` handle), so the same IDs keep
+//! Every benchmark exercises only the public `sniff` API, so the same IDs keep
 //! their meaning across the backend swap. Fixtures are materialized outside the
 //! timed iterations; the commit-graph variants skip with a clear message when
 //! no `git` executable is available.
 
 use chrono::DateTime;
 use criterion::{BenchmarkId, Criterion, Throughput, black_box};
-use git2::Repository;
 
 use sniff::filesystem::detect_git_with_request;
 use sniff::filesystem::git::get_recent_commits_in_range;
@@ -176,7 +174,6 @@ fn register_diff(c: &mut Criterion) {
     let mut group = util::configure_slow_group(c, "git_ops");
 
     let fixture = fixtures::deep_history_repo(DIFF_DEPTH, false).expect("graph-absent fixture");
-    let git2_repo = Repository::discover(fixture.path()).expect("discover diff fixture");
     let mut gix_repo = gix::open(fixture.path()).expect("open diff fixture with gix");
     // Production sizes the object cache before diffing many commits (see
     // `open::configure_cache`, applied in every `recent_commits` entry point).
@@ -186,7 +183,7 @@ fn register_diff(c: &mut Criterion) {
         let size = gix_repo.compute_object_cache_size_for_tree_diffs(&index);
         gix_repo.object_cache_size_if_unset(size);
     }
-    let shas = commit_shas(&git2_repo);
+    let shas = commit_shas(&gix_repo);
     group.throughput(Throughput::Elements(shas.len() as u64));
 
     let mut cache = gix_repo
@@ -287,11 +284,13 @@ fn register_config_and_refs(c: &mut Criterion) {
     group.finish();
 }
 
-/// Collect every commit SHA reachable from HEAD, newest-first.
-fn commit_shas(repo: &Repository) -> Vec<String> {
-    let mut revwalk = repo.revwalk().expect("revwalk");
-    revwalk.push_head().expect("push HEAD");
-    revwalk
-        .filter_map(|oid| oid.ok().map(|o| o.to_string()))
+/// Collect every commit SHA reachable from HEAD. Order is irrelevant here — the
+/// diff bench iterates the full set and diffs each commit independently.
+fn commit_shas(repo: &gix::Repository) -> Vec<String> {
+    let head = repo.head_id().expect("resolve HEAD");
+    repo.rev_walk([head])
+        .all()
+        .expect("revwalk")
+        .filter_map(|info| info.ok().map(|info| info.id().to_hex().to_string()))
         .collect()
 }
