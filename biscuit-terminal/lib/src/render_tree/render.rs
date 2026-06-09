@@ -35,12 +35,14 @@ use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
     ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HintNamespace, NodeKind,
     ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
-    TerminalMermaidMode,
 };
+#[cfg(feature = "image")]
+use renderable::tree::TerminalMermaidMode;
 use renderable::tree::{ValidationError, ValidationMode, validate};
 
 use crate::components::block_quote::BlockQuote;
 use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
+#[cfg(feature = "image")]
 use crate::components::mermaid::MermaidDiagram;
 use crate::components::prose::Prose;
 use crate::components::renderable::TerminalRenderable;
@@ -146,6 +148,30 @@ pub fn render_terminal_document(
     opts: &TerminalRenderOptions,
 ) -> Result<Rendered<String>, RenderError> {
     render_terminal_node(&doc.root, opts)
+}
+
+/// Deserialized payload for the `"icon"` extension token.
+#[derive(serde::Deserialize)]
+struct IconPayload {
+    nerd_font: Option<String>,
+    unicode: Option<String>,
+    text: String,
+    #[serde(default)]
+    svg: String,
+    #[serde(default)]
+    nerd_font_preferred: bool,
+}
+
+/// Writes SVG markup to a temporary file and renders it via the terminal image
+/// protocol.
+fn render_svg_string(svg: &str, term: &crate::terminal::Terminal) -> std::io::Result<String> {
+    use std::io::Write;
+
+    let mut file = tempfile::Builder::new().suffix(".svg").tempfile()?;
+    file.write_all(svg.as_bytes())?;
+    let img = TerminalImage::new(file.path())
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    Ok(img.render(term))
 }
 
 /// Threads render options and accumulating diagnostics through the recursion.
@@ -884,8 +910,11 @@ impl Writer<'_> {
             // legacy span-class path in `apply_classes`. An unrecognized token
             // renders its children as plain inline content.
             NodeKind::Extended {
-                token, children, ..
+                token, children, payload,
             } => {
+                if token.as_ref() == "icon" {
+                    return self.render_icon_payload(payload, term);
+                }
                 let inner = self.render_inline(children, effective)?;
                 let mut child_effective = effective.clone();
                 match token.as_ref() {
@@ -1319,13 +1348,14 @@ impl Writer<'_> {
         meta: Option<&str>,
         attrs: &renderable::tree::NodeAttrs,
     ) -> Result<String, RenderError> {
-        let is_mermaid = lang
+        let _is_mermaid = lang
             .map(|l| l.eq_ignore_ascii_case("mermaid"))
             .unwrap_or(false);
 
         // Promotion is gated by the opt-in AND the ceiling: terminal Mermaid
         // rasterizes only at `Rich`, and only when the caller opted in.
-        if is_mermaid
+        #[cfg(feature = "image")]
+        if _is_mermaid
             && self.opts.context.mermaid_mode == TerminalMermaidMode::Image
             && self.opts.context.graphics_mode == GraphicsMode::Rich
         {
@@ -1448,6 +1478,36 @@ impl Writer<'_> {
         let image = TerminalImage::new(&full_path).ok()?.with_alt_text(alt);
         let output = image.render(&term);
         (!output.is_empty()).then_some(output)
+    }
+
+    /// Renders an `"icon"` extended node by walking the degradation ladder
+    /// encoded in the JSON payload.
+    fn render_icon_payload(
+        &self,
+        payload: &Option<String>,
+        term: &crate::terminal::Terminal,
+    ) -> Result<String, RenderError> {
+        let Some(payload) = payload else {
+            return Ok(String::new());
+        };
+        let icon: IconPayload = match serde_json::from_str(payload) {
+            Ok(i) => i,
+            Err(_) => return Ok(payload.clone()),
+        };
+
+        if icon.nerd_font_preferred && let Some(ref nerd) = icon.nerd_font {
+            return Ok(nerd.clone());
+        }
+        if let Some(ref unicode) = icon.unicode {
+            return Ok(unicode.clone());
+        }
+        if !icon.svg.is_empty()
+            && !matches!(term.image_support, ImageSupport::None)
+            && let Ok(s) = render_svg_string(&icon.svg, term)
+        {
+            return Ok(s);
+        }
+        Ok(icon.text)
     }
 
     /// Renders a code block as a dim, indented panel.
@@ -3712,6 +3772,7 @@ mod render_tree_tests {
     /// GraphicsMode::Rich on a Kitty-capable TTY should use the image tier
     /// when available.
     #[test]
+    #[cfg(feature = "image")]
     fn render_tree_thematic_break_rich_mode_uses_image_tier_when_available() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
@@ -3768,6 +3829,7 @@ mod render_tree_tests {
     /// support, forcing graphics upgrades the capability snapshot so the HR
     /// image tier still fires at `Rich`.
     #[test]
+    #[cfg(feature = "image")]
     fn render_tree_thematic_break_force_graphics_rasterizes_on_unsupported_terminal() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
@@ -3804,6 +3866,7 @@ mod render_tree_tests {
     /// support guarantees the promotion fails (no protocol to target, or no
     /// rasterization deps) regardless of host capability.
     #[test]
+    #[cfg(feature = "image")]
     fn mermaid_promotion_failure_rejects_under_strict() {
         use crate::discovery::detection::ImageSupport;
         use renderable::tree::{GraphicsMode, TerminalMermaidMode};

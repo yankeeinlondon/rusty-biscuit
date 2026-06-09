@@ -312,6 +312,7 @@ fn test_terminal_image_load_image() {
 }
 
 #[test]
+#[cfg(feature = "image")]
 fn test_terminal_image_load_svg() {
     let dir = tempfile::tempdir().unwrap();
     let file_path = dir.path().join("test.svg");
