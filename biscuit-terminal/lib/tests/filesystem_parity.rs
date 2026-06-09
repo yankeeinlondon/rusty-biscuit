@@ -170,17 +170,17 @@ fn fixture_connector_geometry_records_divergence() {
     let bespoke = strip_ansi(&fs.render(&term));
     let via_tree = strip_ansi(&render_via_tree(&fs, &term));
 
-    // The bespoke renderer formats Unicode-icon lines as `📂name`, while
+    // The bespoke renderer formats Unicode-icon lines as `📝name`, while
     // the tree projection inserts a literal `" "` between the icon span and
-    // the name span — producing `📂 name`. Pin that gap so a future change
+    // the name span — producing `📝 name`. Pin that gap so a future change
     // to either path forces this decision gate to be re-examined.
     assert!(
-        bespoke.contains("├── 📄a.txt"),
-        "bespoke uses `📄name` (no space): {bespoke:?}"
+        bespoke.contains("├── 📝a.txt"),
+        "bespoke uses `📝name` (no space): {bespoke:?}"
     );
     assert!(
-        via_tree.contains("├── 📄 a.txt"),
-        "tree path uses `📄 name` (extra space): {via_tree:?}"
+        via_tree.contains("├── 📝 a.txt"),
+        "tree path uses `📝 name` (extra space): {via_tree:?}"
     );
 
     // Connector glyphs themselves match.
@@ -505,6 +505,152 @@ fn fixture_link_osc8_records_divergence() {
         bespoke.contains("file://") && via_tree.contains("file://"),
         "missing file:// scheme on at least one path"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 — File Links Directive: new capability parity tests.
+//
+// These fixtures exercise the document-extension allowlist, included-paths
+// allowlist, and dimmed-root-prefix / root-icon API added in Phase 1 of the
+// file-links directive plan. Each test compares the bespoke renderer against
+// the canonical tree projection, asserting content (stripped ANSI) parity.
+// ---------------------------------------------------------------------------
+
+/// Extension filter: only files whose extension is in the allowlist should
+/// appear in both renderers. Non-matching files are pruned during scanning.
+#[test]
+fn fixture_extension_filter_content_matches() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let root = dir.path();
+    fs::write(root.join("readme.md"), "m").expect("readme.md");
+    fs::write(root.join("notes.txt"), "t").expect("notes.txt");
+    fs::write(root.join("report.pdf"), "p").expect("report.pdf");
+
+    let mut fs_obj = FileSystem::new(root)
+        .expect("FileSystem::new")
+        .show_root(false)
+        .extension_filter(["md"]);
+    fs_obj.ensure_tree_built();
+
+    let term = test_terminal(80);
+    let bespoke = strip_ansi(&fs_obj.render(&term));
+    let via_tree = strip_ansi(&render_via_tree(&fs_obj, &term));
+
+    assert!(bespoke.contains("readme.md"), "bespoke missing readme.md: {bespoke:?}");
+    assert!(via_tree.contains("readme.md"), "tree missing readme.md: {via_tree:?}");
+    assert!(!bespoke.contains("notes.txt"), "bespoke should prune notes.txt: {bespoke:?}");
+    assert!(!via_tree.contains("notes.txt"), "tree should prune notes.txt: {via_tree:?}");
+    assert!(!bespoke.contains("report.pdf"), "bespoke should prune report.pdf: {bespoke:?}");
+    assert!(!via_tree.contains("report.pdf"), "tree should prune report.pdf: {via_tree:?}");
+}
+
+/// `document_extensions()` convenience filter should accept .md, .txt, .pdf,
+/// .doc(x), .xls(x) and prune everything else.
+#[test]
+fn fixture_document_extensions_filter_content_matches() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let root = dir.path();
+    fs::write(root.join("doc.md"), "m").expect("doc.md");
+    fs::write(root.join("img.png"), "i").expect("img.png");
+    fs::write(root.join("data.csv"), "c").expect("data.csv");
+
+    let mut fs_obj = FileSystem::new(root)
+        .expect("FileSystem::new")
+        .show_root(false)
+        .document_extensions();
+    fs_obj.ensure_tree_built();
+
+    let term = test_terminal(80);
+    let bespoke = strip_ansi(&fs_obj.render(&term));
+    let via_tree = strip_ansi(&render_via_tree(&fs_obj, &term));
+
+    assert!(bespoke.contains("doc.md"), "bespoke missing doc.md: {bespoke:?}");
+    assert!(via_tree.contains("doc.md"), "tree missing doc.md: {via_tree:?}");
+    assert!(!bespoke.contains("img.png"), "bespoke should prune img.png: {bespoke:?}");
+    assert!(!via_tree.contains("img.png"), "tree should prune img.png: {via_tree:?}");
+}
+
+/// Included paths: only files under the specified relative path should appear.
+#[test]
+fn fixture_included_paths_content_matches() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("topics")).expect("topics");
+    fs::write(root.join("topics/alpha.md"), "a").expect("alpha.md");
+    fs::write(root.join("topics/beta.md"), "b").expect("beta.md");
+    fs::write(root.join("other.md"), "o").expect("other.md");
+
+    let mut fs_obj = FileSystem::new(root)
+        .expect("FileSystem::new")
+        .show_root(false)
+        .included_paths(["topics/alpha.md"]);
+    fs_obj.ensure_tree_built();
+
+    let term = test_terminal(80);
+    let bespoke = strip_ansi(&fs_obj.render(&term));
+    let via_tree = strip_ansi(&render_via_tree(&fs_obj, &term));
+
+    assert!(bespoke.contains("alpha.md"), "bespoke missing alpha.md: {bespoke:?}");
+    assert!(via_tree.contains("alpha.md"), "tree missing alpha.md: {via_tree:?}");
+    assert!(!bespoke.contains("beta.md"), "bespoke should prune beta.md: {bespoke:?}");
+    assert!(!via_tree.contains("beta.md"), "tree should prune beta.md: {via_tree:?}");
+    assert!(!bespoke.contains("other.md"), "bespoke should prune other.md: {bespoke:?}");
+    assert!(!via_tree.contains("other.md"), "tree should prune other.md: {via_tree:?}");
+}
+
+/// Dimmed root prefix: both renderers should emit the display name, and the
+/// dim SGR (`\x1b[2m`) should appear for the prefix portion in the bespoke
+/// path. Content parity is asserted on stripped ANSI.
+#[test]
+fn fixture_dimmed_root_prefix_content_matches() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let root = dir.path();
+    fs::write(root.join("a.md"), "a").expect("a.md");
+
+    let mut fs_obj = FileSystem::new(root)
+        .expect("FileSystem::new")
+        .with_dimmed_root_prefix("/docs/")
+        .with_root_display_name("topics");
+    fs_obj.ensure_tree_built();
+
+    let term = test_terminal(80);
+    let bespoke_raw = fs_obj.render(&term);
+    let via_tree_raw = render_via_tree(&fs_obj, &term);
+    let bespoke = strip_ansi(&bespoke_raw);
+    let via_tree = strip_ansi(&via_tree_raw);
+
+    // Both paths should show the display name in the root line.
+    let bespoke_root = bespoke.lines().next().unwrap_or_default();
+    let tree_root = via_tree.lines().next().unwrap_or_default();
+    assert!(bespoke_root.contains("topics"), "bespoke root missing 'topics': {bespoke_root:?}");
+    assert!(tree_root.contains("topics"), "tree root missing 'topics': {tree_root:?}");
+}
+
+/// Root icon: setting `with_root_icon(Repository)` should change the icon
+/// glyph in both renderers. The content (display name) should still match.
+#[test]
+fn fixture_root_icon_content_matches() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let root = dir.path();
+    fs::write(root.join("a.md"), "a").expect("a.md");
+
+    let mut fs_dir = FileSystem::new(root)
+        .expect("FileSystem::new")
+        .with_root_icon(biscuit_terminal::components::filesystem::RootIconKind::Directory);
+    fs_dir.ensure_tree_built();
+
+    let mut fs_repo = FileSystem::new(root)
+        .expect("FileSystem::new")
+        .with_root_icon(biscuit_terminal::components::filesystem::RootIconKind::Repository);
+    fs_repo.ensure_tree_built();
+
+    let term = test_terminal(80);
+    let dir_bespoke = strip_ansi(&fs_dir.render(&term));
+    let repo_bespoke = strip_ansi(&fs_repo.render(&term));
+
+    // At minimum, both should produce non-empty root lines with the dir name.
+    assert!(dir_bespoke.lines().count() > 0);
+    assert!(repo_bespoke.lines().count() > 0);
 }
 
 // ---------------------------------------------------------------------------

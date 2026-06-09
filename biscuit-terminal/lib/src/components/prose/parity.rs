@@ -374,7 +374,7 @@ fn browser_bold_is_semantic_strong() {
 #[test]
 fn browser_foreground_color_span() {
     assert!(
-        html("<red>x</red>").contains("<span style=\"color:#800000\">x</span>"),
+        html("<red>x</red>").contains("<span style=\"color:rgb(128, 0, 0)\">x</span>"),
         "got: {}",
         html("<red>x</red>")
     );
@@ -384,7 +384,7 @@ fn browser_foreground_color_span() {
 fn browser_background_color_span() {
     assert!(
         html("<bg-rgb 1,2,3>x</bg-rgb>")
-            .contains("<span style=\"background-color:#010203\">x</span>"),
+            .contains("<span style=\"background-color:rgb(1, 2, 3)\">x</span>"),
         "got: {}",
         html("<bg-rgb 1,2,3>x</bg-rgb>")
     );

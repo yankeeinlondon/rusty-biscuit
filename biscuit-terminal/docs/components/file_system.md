@@ -62,6 +62,14 @@ that path errors surface early.
 | `.do_not_recurse_gitignore(bool)` | Show gitignored dirs but don't descend into them |
 | `.hide_dot_files(bool)` / `.hide_dot_dirs(bool)` | Omit dotfiles / dotdirs entirely |
 
+### Filtering Builders
+
+| Method | Description |
+|--------|-------------|
+| `.extension_filter([...])` | Restrict files to case-insensitive extensions (e.g. `["md", "pdf"]`); ancestor dirs are pruned when empty |
+| `.document_extensions()` | Convenience preset — equivalent to `.extension_filter(["md", "txt", "doc", "docx", "xls", "xlsx", "pdf"])` |
+| `.included_paths([...])` | Restrict files to an exact relative path allowlist; directories outside the set are pruned |
+
 ### Styling Builders
 
 | Method | Description |
@@ -70,6 +78,9 @@ that path errors surface early.
 | `.dim_gitignore(bool)` | Render `.gitignore`-matched entries dim |
 | `.highlight_red(pattern)` / `.highlight_green(pattern)` | Repeatable — color matching entries |
 | `.with_file_links()` | Wrap filenames in OSC8 hyperlinks (TTY only) |
+| `.with_dimmed_root_prefix(prefix)` | Render a dimmed prefix before the root directory name (e.g. `"/docs/"`) |
+| `.with_root_display_name(name)` | Override the highlighted target directory name on the root line |
+| `.with_root_icon(icon)` | Override the root icon (`RootIconKind::Directory` or `RootIconKind::Repository`) |
 | `.layout(Layout)` | Replace the entire layout config (margins/alignment) |
 | `.left_margin(Margin)` / `.right_margin(Margin)` | Per-side margins (via the `Renderable` trait) |
 | `.alignment(Alignment)` | Block alignment (via the `Renderable` trait) |
@@ -153,11 +164,22 @@ extension match (`.rs`, `.ts`, `.js`, `.toml`, `.yaml`/`.yml`, `.json`) →
 markdown → base file/dir icon. Special directory icons exist for `.git`,
 `.github`, `utils`/`util`, and `docs`/`documentation`.
 
+Document extensions added for Darkmatter file-link rendering:
+
+| Extension | Nerd Font | Unicode |
+|-----------|-----------|---------|
+| `.pdf` | `icons::nerd::ext::PDF` | 📕 |
+| `.doc`, `.docx` | `icons::nerd::ext::WORD` | 📘 |
+| `.xls`, `.xlsx` | `icons::nerd::ext::EXCEL` | 📗 |
+| `.txt` | `icons::nerd::ext::TEXT` | 📄 |
+
 ```rust
 use biscuit_terminal::components::filesystem::icons;
 
 // Nerd Font (patched fonts required)
 let _ = icons::nerd::ext::RUST;        // 
+let _ = icons::nerd::ext::PDF;         // 
+let _ = icons::nerd::ext::WORD;        // 
 let _ = icons::nerd::dir::BASE;        // 
 let _ = icons::nerd::file::SKILL;      // 
 let _ = icons::nerd::dir::DEPTH_LIMIT; // shown when a directory hits `.depth(n)`
@@ -166,6 +188,32 @@ let _ = icons::nerd::dir::DEPTH_LIMIT; // shown when a directory hits `.depth(n)
 let _ = icons::unicode::file::BASE;    // 📄
 let _ = icons::unicode::dir::BASE;     // 📂
 let _ = icons::unicode::file::SYMLINK; // @
+```
+
+### Filtering and Root Customization Examples
+
+```rust
+use biscuit_terminal::prelude::*;
+
+// Only Markdown and PDF files under docs/
+let mut fs = FileSystem::new(".")?
+    .document_extensions()
+    .with_dimmed_root_prefix("/docs/")
+    .with_root_icon(RootIconKind::Repository)
+    .with_file_links();
+fs.ensure_tree_built();
+println!("{}", fs.render(&Terminal::default()));
+
+// Exact path selection from a glob result
+let mut fs = FileSystem::new(".")?
+    .included_paths([
+        PathBuf::from("src/main.rs"),
+        PathBuf::from("src/lib.rs"),
+    ])
+    .show_root(true);
+fs.ensure_tree_built();
+println!("{}", fs.render(&Terminal::default()));
+# Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
 ```
 
 ### Error Handling

@@ -3,13 +3,8 @@
 //! These tests capture the full terminal output for the worked example described
 //! in `darkmatter/features/2026-05-08-darkmatter-layout/spec.md`.
 
-// Exercises `DarkmatterPage`'s still-active `Page*` types; migration to
-// `renderable::layout::Layout` is the deferred Spec A milestone. Mirrors the
-// library's own allow in `darkmatter/lib/src/layout/mod.rs`.
-#![allow(deprecated)]
-
 use biscuit_terminal::terminal::Terminal;
-use darkmatter::layout::{DarkmatterPage, PageAlignment, PageBackground, PageComponent};
+use darkmatter::layout::{ComponentPolicy, DarkmatterPage, PageBackground, PageComponent};
 use darkmatter::markdown::output::terminal::{ColorDepth, TerminalOptions};
 use darkmatter::markdown::Markdown;
 
@@ -64,13 +59,15 @@ impl Drop for ColorSnapshotEnv {
 fn end_to_end_example_snapshot() {
     let _env = ColorSnapshotEnv::force_color();
     let term = Terminal::new_optimistic(120);
+    let mut policy = ComponentPolicy::default();
+    policy.layout.alignment = renderable::layout::Alignment::Center;
     let page = DarkmatterPage::new(&term)
         .with_margin(2)
         .with_padding(1)
         .with_page_background(PageBackground::Subtle)
         .with_max_width(100)
         .use_line_numbers()
-        .use_alignment(PageComponent::CodeBlocks, PageAlignment::Center);
+        .with_component_policy(PageComponent::CodeBlocks, policy);
     let md: Markdown = "# Title\n\nSome prose here.\n\n```rust\nfn main() {}\n```\n".into();
 
     let out = page.render(&md).unwrap();

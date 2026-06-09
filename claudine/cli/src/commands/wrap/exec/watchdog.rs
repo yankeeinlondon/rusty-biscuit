@@ -740,7 +740,7 @@ pub(crate) fn render_watchdog_error_to_stream(
     use biscuit_terminal::components::status::StatusState;
     use biscuit_terminal::prelude::StatusBlock;
     use biscuit_terminal::utils::color::{Color, Tailwind};
-    use biscuit_terminal::utils::layout::{Length, Margin, TargetValue, WordWrap};
+    use biscuit_terminal::utils::layout::{Length, Edges, TargetValue, WordWrap};
 
     let term = crate::log::terminal();
     let border_color = Color::Tailwind(Tailwind::Red700);

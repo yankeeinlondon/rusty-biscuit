@@ -5271,11 +5271,11 @@ mod tests {
 
     #[test]
     fn table_render_tree_node_carries_layout_when_margins_set() {
-        use renderable::layout::{Length, Margin};
+        use renderable::layout::{Length, Edges};
         let mut table = Table::new()
             .with_columns(vec![TableColumn::new("Name")])
             .with_data(vec![vec!["Alice".into()]]);
-        table.layout.margin = Margin::x(Length::ch(2));
+        table.layout.margin = Edges::x(Length::ch(2));
         let node = table.render_tree_node().unwrap();
         assert!(node.attrs.layout().is_some());
     }

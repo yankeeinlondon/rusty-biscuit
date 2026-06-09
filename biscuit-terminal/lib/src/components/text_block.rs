@@ -192,7 +192,6 @@ impl TextBlock {
             background,
             emphasis,
             border: None,
-            fill: None,
         }
     }
 

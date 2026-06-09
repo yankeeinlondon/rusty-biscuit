@@ -877,9 +877,9 @@ mod tests {
 
     #[test]
     fn two_column_render_tree_node_carries_layout_when_margins_set() {
-        use crate::utils::layout::{Length, Margin};
+        use crate::utils::layout::{Length, Edges};
         let mut two = TwoColumn::new("L", "R");
-        two.layout_mut().margin = Margin::x(Length::ch(2));
+        two.layout_mut().margin = Edges::x(Length::ch(2));
         let node = two.render_tree_node().unwrap();
         assert!(node.attrs.layout().is_some());
     }

@@ -14,7 +14,7 @@
 //!
 //! The predicates operate on plain strings and a small expectation struct —
 //! they carry no darkmatter- or biscuit-terminal-specific dependency. Both
-//! crates share the same `Layout`/`Margin`/background-fill model, so both can
+//! crates share the same `Layout`/`Edges`/background-fill model, so both can
 //! sweep their renderable components against this one contract.
 //!
 //! ## Invariant catalogue

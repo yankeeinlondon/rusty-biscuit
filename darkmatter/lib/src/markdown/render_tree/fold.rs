@@ -40,11 +40,12 @@
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use renderable::tree::{
     ColumnAlign, Diagnostic, Document, DocumentMetadata, Frontmatter as TreeFrontmatter,
-    FrontmatterFormat, HeadingDepth, HintNamespace, NodeKind, Provenance, RenderNode,
-    SourceDescriptor, SourceId, SourceLocation, SourceSpan,
+    FrontmatterFormat, HeadingDepth, HrAlignment, HrKind, HrWeight, NodeKind, Provenance,
+    RenderNode, SourceDescriptor, SourceId, SourceLocation, SourceSpan, ThematicBreakAttrs,
 };
 use std::ops::Range;
 
+use super::build_context::{TreeBuildContext, apply_node_policy, apply_page_colors};
 use super::source::single_source_registry;
 use crate::markdown::inline::HorizontalRuleAttrs;
 
@@ -131,19 +132,30 @@ enum ContainerKind {
     /// `Tag::HtmlBlock` — the `Event::Html` lines inside it are concatenated
     /// into a single `NodeKind::Html { block: true }` node on close.
     HtmlBlock,
+    /// A deferred embedded render-tree region. Pushed when an opening marker
+    /// decodes; buffers the portable fallback as children until the closing
+    /// marker finalizes it (discarding the buffer in favor of `node`). If the
+    /// region is never closed, the drain restores the buffered fallback.
+    EmbedRegion {
+        node: RenderNode,
+        marker_span: SourceSpan,
+    },
 }
 
 /// The mutable state threaded through the fold.
-struct Fold {
+struct Fold<'ctx> {
     /// Container stack; the last entry is the innermost open container.
     stack: Vec<Frame>,
     /// The single source every parsed node refers to.
     source: SourceId,
     /// Diagnostics accumulated during the fold.
     diagnostics: Vec<Diagnostic>,
+    /// Construction-time policy; `None` on the plain fold, `Some` on the
+    /// context-aware fold that bakes component policy into nodes.
+    ctx: Option<&'ctx TreeBuildContext<'ctx>>,
 }
 
-impl Fold {
+impl Fold<'_> {
     /// Builds a [`SourceSpan`] for a parsed node spanning `range`.
     fn parsed_span(&self, range: Range<usize>) -> SourceSpan {
         SourceSpan {
@@ -166,11 +178,13 @@ impl Fold {
     }
 
     /// Appends a leaf node carrying a parsed span over `range`.
-    fn push_leaf(&mut self, kind_node: RenderNode, range: Range<usize>) {
+    fn push_leaf(&mut self, mut kind_node: RenderNode, range: Range<usize>) {
         let span = self.parsed_span(range);
-        let mut node = kind_node;
-        node.span = span;
-        self.push_child(node);
+        kind_node.span = span;
+        if let Some(ctx) = self.ctx {
+            apply_node_policy(&mut kind_node, ctx);
+        }
+        self.push_child(kind_node);
     }
 
     /// Feeds a single `(Event, Range)` pair through the fold's main dispatch.
@@ -268,6 +282,7 @@ pub fn fold_markdown_to_document_with_metadata(
         }],
         source: source_id,
         diagnostics: Vec::new(),
+        ctx: None,
     };
 
     for (event, range) in Parser::new_ext(input, options).into_offset_iter() {
@@ -276,12 +291,15 @@ pub fn fold_markdown_to_document_with_metadata(
 
     // Drain remaining frames. Only the root should remain; if the parser left
     // containers open (malformed), splice their children upward and diagnose.
+    // An unterminated embedded region restores its buffered fallback this way.
     while fold.stack.len() > 1 {
         let frame = fold.stack.pop().expect("len checked");
-        fold.diagnostics.push(Diagnostic::structural(
-            "unclosed container in event stream",
-            None,
-        ));
+        let message = if matches!(frame.tag, ContainerKind::EmbedRegion { .. }) {
+            "unterminated embedded render-tree region: missing closing marker"
+        } else {
+            "unclosed container in event stream"
+        };
+        fold.diagnostics.push(Diagnostic::structural(message, None));
         if let Some(parent) = fold.stack.last_mut() {
             parent.children.extend(frame.children);
         }
@@ -329,7 +347,8 @@ pub fn fold_markdown_with_frontmatter(
 /// paragraph that the block-extension processor lifted from the event stream.
 ///
 /// The returned node has [`Provenance::Generated`] (it was synthesized from a
-/// paragraph) and carries the parsed `darkmatter.hr.*` hints. `body_range`
+/// paragraph) and carries the parsed HR styling in the typed
+/// [`ThematicBreakAttrs`] field. `body_range`
 /// must point at the original paragraph body bytes — not the wider
 /// `End(Paragraph)` range — so the produced
 /// [`renderable::tree::SourceLocation`] is byte-identical to the retired
@@ -347,26 +366,21 @@ fn lower_hr_attrs_to_node(
             bytes: body_range,
         }),
     };
-    let hr_ns = HintNamespace("darkmatter.hr");
-    if let Some(kind) = attrs.kind.as_ref().or(attrs.legacy_style.as_ref()) {
-        node.attrs.set_hint(hr_ns, "kind", serde_json::json!(kind));
-    }
-    if let Some(alignment) = attrs.alignment {
-        node.attrs
-            .set_hint(hr_ns, "alignment", serde_json::json!(alignment));
-    }
-    if let Some(weight) = attrs.weight {
-        node.attrs
-            .set_hint(hr_ns, "weight", serde_json::json!(weight));
-    }
-    if let Some(width) = attrs.width {
-        node.attrs
-            .set_hint(hr_ns, "width", serde_json::json!(width));
-    }
-    if let Some(color) = attrs.color {
-        node.attrs
-            .set_hint(hr_ns, "color", serde_json::json!(color));
-    }
+    node.attrs.set_thematic_break(&ThematicBreakAttrs {
+        // The canonical `kind` key wins over the deprecated `style:` alias.
+        // Author text is parsed to the shared enums here, at the single fold
+        // boundary; an unrecognized spelling becomes `None` and the renderers
+        // fall back to their defaults.
+        kind: attrs
+            .kind
+            .or(attrs.legacy_style)
+            .as_deref()
+            .and_then(HrKind::from_authored),
+        alignment: attrs.alignment.as_deref().and_then(HrAlignment::from_authored),
+        weight: attrs.weight.as_deref().and_then(HrWeight::from_authored),
+        width: attrs.width,
+        color: attrs.color,
+    });
     node
 }
 
@@ -390,8 +404,8 @@ fn lower_hr_attrs_to_node(
 ///    range is mapped back to the original source through the rewriter's
 ///    provenance table.
 ///
-/// HR-attribute paragraphs fold to a [`NodeKind::ThematicBreak`] with
-/// `darkmatter.hr.*` hints (and [`Provenance::Generated`] because the event was
+/// HR-attribute paragraphs fold to a [`NodeKind::ThematicBreak`] with typed
+/// [`ThematicBreakAttrs`] (and [`Provenance::Generated`] because the event was
 /// synthesized from a paragraph). The body fold sees only Markdown content;
 /// darkmatter's already extracted frontmatter flows into
 /// [`DocumentMetadata::frontmatter`].
@@ -435,6 +449,7 @@ pub fn fold_markdown_spanned_with_frontmatter(
         }],
         source: source_id,
         diagnostics: Vec::new(),
+        ctx: None,
     };
 
     // 3. Plain fold. `Fold::end` dispatches `~~…~~` containers to `Extended`
@@ -444,7 +459,10 @@ pub fn fold_markdown_spanned_with_frontmatter(
         match be {
             BlockExtensionEvent::Standard(event, range) => fold.feed_event(event, range),
             BlockExtensionEvent::HorizontalRule { attrs, body_range } => {
-                let node = lower_hr_attrs_to_node(attrs, body_range, fold.source);
+                let mut node = lower_hr_attrs_to_node(attrs, body_range, fold.source);
+                if let Some(ctx) = fold.ctx {
+                    apply_node_policy(&mut node, ctx);
+                }
                 fold.push_child(node);
             }
         }
@@ -452,12 +470,15 @@ pub fn fold_markdown_spanned_with_frontmatter(
 
     // Drain remaining frames. Only the root should remain; an unclosed
     // container splices its children upward and emits a structural diagnostic.
+    // An unterminated embedded region restores its buffered fallback this way.
     while fold.stack.len() > 1 {
         let frame = fold.stack.pop().expect("len checked");
-        fold.diagnostics.push(Diagnostic::structural(
-            "unclosed container in event stream",
-            None,
-        ));
+        let message = if matches!(frame.tag, ContainerKind::EmbedRegion { .. }) {
+            "unterminated embedded render-tree region: missing closing marker"
+        } else {
+            "unclosed container in event stream"
+        };
+        fold.diagnostics.push(Diagnostic::structural(message, None));
         if let Some(parent) = fold.stack.last_mut() {
             parent.children.extend(frame.children);
         }
@@ -493,7 +514,103 @@ pub fn fold_markdown_spanned_with_frontmatter(
     (document, diagnostics)
 }
 
-impl Fold {
+/// Context-aware span fold: identical to [`fold_markdown_spanned_with_frontmatter`]
+/// but attaches construction-time policy (component layout, colors, text-layout
+/// hints, structured directives, HR defaults) from `ctx` as nodes are built.
+///
+/// The resulting [`Document`] is the complete typed render input — no
+/// post-fold decoration or attribute injection is needed.
+///
+/// ## Returns
+///
+/// The folded [`Document`] and any non-fatal [`Diagnostic`]s.
+#[must_use]
+pub(crate) fn fold_markdown_spanned_with_context(
+    source: SourceDescriptor,
+    md: &crate::markdown::Markdown,
+    ctx: &TreeBuildContext,
+) -> (Document, Vec<Diagnostic>) {
+    use super::block_extension::{BlockExtensionEvent, BlockExtensionProcessor};
+    use super::inline_extension::rewrite_inline_extensions;
+
+    let metadata = DocumentMetadata {
+        frontmatter: md.frontmatter().raw_source().map(|raw| TreeFrontmatter {
+            format: FrontmatterFormat::Yaml,
+            raw: raw.to_string(),
+        }),
+    };
+    let (registry, source_id) = single_source_registry(source);
+
+    let rewrite = rewrite_inline_extensions(md.content());
+
+    let options = render_tree_parser_options();
+    let parser = Parser::new_ext(rewrite.source.as_ref(), options).into_offset_iter();
+    let chain = BlockExtensionProcessor::new(parser);
+
+    let mut fold = Fold {
+        stack: vec![Frame {
+            tag: ContainerKind::Root,
+            children: Vec::new(),
+            start: 0,
+        }],
+        source: source_id,
+        diagnostics: Vec::new(),
+        ctx: Some(ctx),
+    };
+
+    for be in chain {
+        match be {
+            BlockExtensionEvent::Standard(event, range) => fold.feed_event(event, range),
+            BlockExtensionEvent::HorizontalRule { attrs, body_range } => {
+                let mut node = lower_hr_attrs_to_node(attrs, body_range, fold.source);
+                if let Some(ctx) = fold.ctx {
+                    apply_node_policy(&mut node, ctx);
+                }
+                fold.push_child(node);
+            }
+        }
+    }
+
+    while fold.stack.len() > 1 {
+        let frame = fold.stack.pop().expect("len checked");
+        fold.diagnostics.push(Diagnostic::structural(
+            "unclosed container in event stream",
+            None,
+        ));
+        if let Some(parent) = fold.stack.last_mut() {
+            parent.children.extend(frame.children);
+        }
+    }
+
+    let root_children = fold.stack.pop().map(|f| f.children).unwrap_or_default();
+    let mut diagnostics = fold.diagnostics;
+    let mut root = RenderNode::root(root_children);
+
+    // Apply page-level colors to the root so they inherit to all descendants.
+    apply_page_colors(&mut root, ctx);
+
+    if !rewrite.provenance.is_empty() {
+        resolve_node_spans(&mut root, &rewrite.provenance);
+        for diagnostic in &mut diagnostics {
+            if let Some(location) = diagnostic
+                .span
+                .as_mut()
+                .and_then(|span| span.location.as_mut())
+            {
+                location.bytes = rewrite.provenance.resolve_range(location.bytes.clone());
+            }
+        }
+    }
+
+    let document = Document {
+        sources: registry,
+        metadata,
+        root,
+    };
+    (document, diagnostics)
+}
+
+impl Fold<'_> {
     /// Handles an `Event::Start`, pushing a container frame.
     fn start(&mut self, tag: Tag<'_>, range: Range<usize>) {
         let kind = match tag {
@@ -600,9 +717,55 @@ impl Fold {
                         value.push_str(line);
                     }
                 }
+                // An embedded render-tree opening marker opens a deferred
+                // region: the portable fallback that follows buffers as its
+                // children until the closing marker discards it in favor of the
+                // decoded subtree. Deferring (rather than splicing now) lets an
+                // unterminated region restore its fallback instead of dropping
+                // it. A malformed marker falls through to the raw-HTML path.
+                if let Some(node) = renderable::tree::decode_embedded_open(&value) {
+                    self.stack.push(Frame {
+                        tag: ContainerKind::EmbedRegion {
+                            node,
+                            marker_span: span,
+                        },
+                        children: Vec::new(),
+                        start: range.start,
+                    });
+                    return;
+                }
+                // A closing marker whose innermost frame is an open region
+                // finalizes it: discard the buffered fallback, splice the
+                // decoded subtree. A stray close with no open region falls
+                // through and renders as ordinary HTML.
+                if renderable::tree::is_embedded_close(&value)
+                    && let Some(Frame {
+                        tag: ContainerKind::EmbedRegion { .. },
+                        ..
+                    }) = self.stack.last()
+                {
+                    let Frame { tag, .. } = self.stack.pop().expect("checked above");
+                    let ContainerKind::EmbedRegion { node, marker_span } = tag else {
+                        unreachable!("matched EmbedRegion above")
+                    };
+                    self.splice_embedded_node(node, marker_span);
+                    return;
+                }
                 let mut node = RenderNode::html(value, true);
                 node.span = span;
                 self.push_child(node);
+            }
+            ContainerKind::EmbedRegion { .. } => {
+                // An ordinary End event popped the region before its closing
+                // marker: the region is malformed. Restore the buffered
+                // fallback and diagnose rather than dropping content.
+                self.diagnostics.push(Diagnostic::structural(
+                    "unterminated embedded render-tree region",
+                    Some(span),
+                ));
+                for child in children {
+                    self.push_child(child);
+                }
             }
             ContainerKind::TableHead => {
                 // A table head folds into an ordinary leading TableRow.
@@ -622,14 +785,35 @@ impl Fold {
                 // a darkmatter inline-extension envelope produced by the source
                 // rewriter (`==mark==` / `⌄dim⌄`). Peek the leading marker and
                 // dispatch accordingly.
-                let node = self.dispatch_strikethrough(children, span);
+                let mut node = self.dispatch_strikethrough(children, span);
+                if let Some(ctx) = self.ctx {
+                    apply_node_policy(&mut node, ctx);
+                }
                 self.push_child(node);
             }
             other => {
                 let mut node = build_container(other, children);
                 node.span = span;
+                if let Some(ctx) = self.ctx {
+                    apply_node_policy(&mut node, ctx);
+                }
                 self.push_child(node);
             }
+        }
+    }
+
+    /// Splices a decoded embedded subtree into the current container. A `Root`
+    /// contributes its children (it may appear only at the document top level);
+    /// any other node splices directly, carrying `span`.
+    fn splice_embedded_node(&mut self, node: RenderNode, span: SourceSpan) {
+        if let NodeKind::Root { children } = node.kind {
+            for child in children {
+                self.push_child(child);
+            }
+        } else {
+            let mut node = node;
+            node.span = span;
+            self.push_child(node);
         }
     }
 
@@ -740,6 +924,7 @@ fn build_container(kind: ContainerKind, children: Vec<RenderNode>) -> RenderNode
         // `Fold::end`'s strikethrough dispatch before it can reach this match.
         ContainerKind::Root
         | ContainerKind::HtmlBlock
+        | ContainerKind::EmbedRegion { .. }
         | ContainerKind::TableHead
         | ContainerKind::Delete
         | ContainerKind::Unsupported { .. } => RenderNode::unsupported("internal: unhandled"),
@@ -1144,6 +1329,180 @@ mod tests {
     }
 
     #[test]
+    fn embedded_render_tree_marker_splices_decoded_subtree_and_drops_fallback() {
+        use renderable::style::{Style, TextEmphasis};
+        use renderable::tree::encode_embedded_subtree;
+
+        // A styled span whose dim weight + class have no plain-Markdown form.
+        let mut span =
+            RenderNode::span(vec!["fs-dir".to_string()], vec![RenderNode::text("topics")]);
+        span.attrs.set_style(&Style {
+            emphasis: TextEmphasis {
+                dim: true,
+                ..TextEmphasis::default()
+            },
+            ..Style::default()
+        });
+        let block = encode_embedded_subtree(&span).unwrap();
+        let input = format!("Intro\n\n{block}\n\nOutro\n");
+
+        let (doc, _diags) = fold(&input);
+
+        fn collect<'a>(node: &'a RenderNode, out: &mut Vec<&'a RenderNode>) {
+            if matches!(&node.kind, NodeKind::Span { .. })
+                && node.attrs.classes.iter().any(|c| c == "fs-dir")
+            {
+                out.push(node);
+            }
+            for child in node.children() {
+                collect(child, out);
+            }
+        }
+        let mut spans = Vec::new();
+        collect(&doc.root, &mut spans);
+        assert_eq!(spans.len(), 1, "decoded span spliced exactly once");
+        assert!(
+            spans[0].attrs.style().unwrap().emphasis.dim,
+            "dim styling survived the round-trip"
+        );
+
+        // The raw marker comment is consumed, not left as an Html node, and the
+        // portable fallback paragraph is dropped in favor of the decoded span.
+        fn has_marker_html(node: &RenderNode) -> bool {
+            if let NodeKind::Html { value, .. } = &node.kind
+                && value.contains("bt:render-tree")
+            {
+                return true;
+            }
+            node.children().iter().any(has_marker_html)
+        }
+        assert!(!has_marker_html(&doc.root), "marker comments are consumed");
+    }
+
+    /// Builds a styled `fs-dir` span wrapping `text`, whose dim weight has no
+    /// plain-Markdown form, then encodes it as an embedded-subtree block.
+    fn embed_block(text: &str) -> String {
+        use renderable::style::{Style, TextEmphasis};
+        use renderable::tree::encode_embedded_subtree;
+
+        let mut span =
+            RenderNode::span(vec!["fs-dir".to_string()], vec![RenderNode::text(text)]);
+        span.attrs.set_style(&Style {
+            emphasis: TextEmphasis {
+                dim: true,
+                ..TextEmphasis::default()
+            },
+            ..Style::default()
+        });
+        encode_embedded_subtree(&span).unwrap()
+    }
+
+    /// Collects every `fs-dir` span in the tree rooted at `node`.
+    fn collect_fs_dir_spans<'a>(node: &'a RenderNode, out: &mut Vec<&'a RenderNode>) {
+        if matches!(&node.kind, NodeKind::Span { .. })
+            && node.attrs.classes.iter().any(|c| c == "fs-dir")
+        {
+            out.push(node);
+        }
+        for child in node.children() {
+            collect_fs_dir_spans(child, out);
+        }
+    }
+
+    /// Whether any node in the tree is an `Html` node leaking the marker text.
+    fn leaks_marker_html(node: &RenderNode) -> bool {
+        if let NodeKind::Html { value, .. } = &node.kind
+            && value.contains("bt:render-tree")
+        {
+            return true;
+        }
+        node.children().iter().any(leaks_marker_html)
+    }
+
+    /// Whether any text node in the tree rooted at `node` equals `needle`.
+    fn has_text(node: &RenderNode, needle: &str) -> bool {
+        if let NodeKind::Text { value } = &node.kind
+            && value == needle
+        {
+            return true;
+        }
+        node.children().iter().any(|c| has_text(c, needle))
+    }
+
+    #[test]
+    fn embedded_render_tree_missing_close_marker_restores_fallback_and_diagnoses() {
+        // Drop the trailing closing-marker line so the region is unterminated.
+        let block = embed_block("topics");
+        let without_close = block
+            .strip_suffix(renderable::tree::EMBED_CLOSE)
+            .expect("block ends with a close marker")
+            .trim_end()
+            .to_string();
+        let input = format!("Intro\n\n{without_close}\n\nOutro\n");
+
+        let (doc, diags) = fold(&input);
+
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("unterminated embedded render-tree region")),
+            "an unterminated region must be diagnosed: {diags:?}",
+        );
+        // The decoded subtree is never spliced (the region never closed), but
+        // the buffered portable fallback — text "topics" — is restored rather
+        // than dropped, and content after the marker ("Outro") survives.
+        assert!(
+            has_text(&doc.root, "topics"),
+            "the portable fallback must be restored, not dropped",
+        );
+        assert!(
+            has_text(&doc.root, "Outro"),
+            "content after the opening marker must survive",
+        );
+    }
+
+    #[test]
+    fn embedded_render_tree_duplicate_close_marker_is_tolerated() {
+        let block = embed_block("topics");
+        let input = format!("{block}\n\n{}\n\nOutro\n", renderable::tree::EMBED_CLOSE);
+
+        let (doc, _diags) = fold(&input);
+
+        let mut spans = Vec::new();
+        collect_fs_dir_spans(&doc.root, &mut spans);
+        assert_eq!(
+            spans.len(),
+            1,
+            "the well-formed region splices exactly once; the stray close adds none",
+        );
+        assert!(
+            has_text(&doc.root, "Outro"),
+            "the stray close must not corrupt the trailing content",
+        );
+    }
+
+    #[test]
+    fn embedded_render_tree_adjacent_regions_both_splice() {
+        let block_a = embed_block("alpha");
+        let block_b = embed_block("beta");
+        let input = format!("{block_a}\n\n{block_b}\n");
+
+        let (doc, _diags) = fold(&input);
+
+        let mut spans = Vec::new();
+        collect_fs_dir_spans(&doc.root, &mut spans);
+        assert_eq!(spans.len(), 2, "both adjacent regions splice their subtrees");
+        assert!(
+            has_text(&doc.root, "alpha") && has_text(&doc.root, "beta"),
+            "each decoded subtree carries its distinguishing text",
+        );
+        assert!(
+            !leaks_marker_html(&doc.root),
+            "no marker comment leaks as visible Html",
+        );
+    }
+
+    #[test]
     fn footnote_reference_and_definition_fold_to_real_nodes() {
         let (doc, diags) = fold("A claim.[^note]\n\n[^note]: The supporting detail.\n");
         assert!(diags.is_empty(), "footnotes fold without diagnostics");
@@ -1286,6 +1645,7 @@ mod tests {
             }],
             source: SourceId(0),
             diagnostics: Vec::new(),
+            ctx: None,
         };
         fold.task_marker(true, 0..3);
         assert_eq!(fold.diagnostics.len(), 1);
@@ -1430,15 +1790,9 @@ mod tests {
             None
         }
         let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
-        let ns = renderable::tree::HintNamespace("darkmatter.hr");
-        assert_eq!(
-            hr.attrs.get_hint(ns, "kind"),
-            Some(&serde_json::json!("waves"))
-        );
-        assert_eq!(
-            hr.attrs.get_hint(ns, "width"),
-            Some(&serde_json::json!("50%"))
-        );
+        let tb = hr.attrs.thematic_break_ref().expect("HR styling attached");
+        assert_eq!(tb.kind, Some(HrKind::Waves));
+        assert_eq!(tb.width.as_deref(), Some("50%"));
         // Generated provenance: this HR was synthesized from a paragraph.
         assert_eq!(hr.span.provenance, Provenance::Generated);
         assert!(hr.span.location.is_some());
@@ -1507,10 +1861,9 @@ mod tests {
         }
         let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
         assert_eq!(hr.span.provenance, Provenance::Parsed);
-        let ns = renderable::tree::HintNamespace("darkmatter.hr");
         assert!(
-            hr.attrs.get_hint(ns, "kind").is_none(),
-            "plain rule must not carry HR hints"
+            hr.attrs.thematic_break_ref().is_none(),
+            "plain rule must not carry HR styling"
         );
     }
 

@@ -57,10 +57,31 @@ sanity:
     @just _sanity {{ LIBRARY }}
     @just _sanity {{ CLI }}
 
-# Test both library and CLI.
+# Test both library and CLI. Level-1 only: the slow tiers (real-terminal,
+# headless-browser, real-resource) are excluded here and run via their own
+# recipes (`test-l2`, `test-browser`). The `browser_render` and
+# `level2_render_tree_terminal` binary names are themselves matched by the
+# `browser_`/`level2_` filter terms, so the whole binary is skipped.
 test *args="":
-    @just _test {{ LIBRARY }} {{ args }}
-    @just _test {{ CLI }} {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/))'
+    echo
+    echo -e "Testing {{ BOLD }}{{ LIBRARY }}{{ RESET }} package"
+    echo
+    cargo nextest run -p {{ LIBRARY }} -E "$filter" {{ args }}
+    echo
+    echo -e "✅ {{ GREEN }} all tests passing in {{ BOLD }}{{ LIBRARY }}{{ RESET }}{{ GREEN }} package{{ RESET }}"
+    echo
+    echo
+    echo -e "Testing {{ BOLD }}{{ CLI }}{{ RESET }} package"
+    echo
+    cargo nextest run -p {{ CLI }} -E "$filter" {{ args }}
+    echo
+    echo -e "✅ {{ GREEN }} all tests passing in {{ BOLD }}{{ CLI }}{{ RESET }}{{ GREEN }} package{{ RESET }}"
+    echo
+    echo -e "👀 {{ BOLD }}Note:{{ RESET }} {{ BLUE }}just test{{ RESET }} runs Level-1 only; use {{ BLUE }}just test-l2{{ RESET }} / {{ BLUE }}just test-browser{{ RESET }} for the slow tiers"
+    echo
 
 # Level-2 (real-terminal) render-tree tests for both crates.
 #

@@ -519,6 +519,35 @@ fn build_node(
         }
     }
 
+    // ::file-links directives emit reference records but do not create
+    // child insertions (they are not followable transclusions).
+    if let Ok(file_links_directives) =
+        crate::markdown::compose::file_links::parse_file_links_directives(&prepared_content)
+    {
+        for directive in &file_links_directives {
+            if extract_references {
+                let raw_target = match &directive.mode {
+                    crate::markdown::compose::file_links::FileLinksMode::Glob(g) => g.clone(),
+                    crate::markdown::compose::file_links::FileLinksMode::Dir { path, depth } => {
+                        format!("{} --depth {}", path, depth)
+                    }
+                };
+                local_references.records.push(ReferenceRecord {
+                    id: make_reference_id(source, directive.line, directive.span.start),
+                    kind: ReferenceKind::Transclusion,
+                    target: classify_target(&raw_target),
+                    origin: ReferenceOrigin {
+                        source: source.clone(),
+                        line: directive.line,
+                        span: directive.span.clone(),
+                        syntax: ReferenceSyntax::DirectiveFileLinks,
+                    },
+                    attributes: serde_json::Map::new(),
+                });
+            }
+        }
+    }
+
     // Frontmatter prologue/epilogue
     if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map(), ctx.clone()) {
         for (idx, prologue) in fm_refs.prologue.iter().enumerate() {

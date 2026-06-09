@@ -178,6 +178,16 @@ File/directory tree rendering with Nerd Font icons and gitignore-aware dimming. 
 
 Supports optional file metrics: file sizes, estimated LLM token counts, modification timestamps (absolute and relative).
 
+New builder APIs for selective tree rendering:
+
+- `.extension_filter([...])` / `.document_extensions()` — case-insensitive extension allowlist
+- `.included_paths([...])` — exact relative-path allowlist
+- `.with_dimmed_root_prefix(prefix)` — dimmed prefix before the root directory name
+- `.with_root_display_name(name)` — override the highlighted target directory name
+- `.with_root_icon(icon)` — `RootIconKind::Directory` or `RootIconKind::Repository`
+
+These are used by the `::file-links` compose directive to render bounded document trees.
+
 ## InlineContent
 
 Inline concatenation of items without newlines. Useful for composing multiple elements on a single line.

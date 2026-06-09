@@ -20,8 +20,8 @@ use std::sync::Once;
 use std::time::Duration;
 
 use super::{
-    CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, SEND_TIMEOUT, SPAWN_TIMEOUT, TerminalHarness,
-    current_process_id, process_is_alive, run_with_timeout, wait_for_prompt,
+    CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, SEND_TIMEOUT, SPAWN_TIMEOUT,
+    TerminalHarness, current_process_id, process_is_alive, run_with_timeout, wait_for_prompt,
 };
 
 const SESSION_PREFIX: &str = "biscuit_test_";
@@ -89,6 +89,33 @@ impl TmuxHarness {
     /// not spawned or attached yet).
     pub fn session_name(&self) -> &str {
         self.session()
+    }
+
+    /// Returns the pane's text width in columns, queried live from tmux.
+    ///
+    /// Reading `#{pane_width}` rather than assuming the spawn geometry keeps
+    /// callers correct whether the session was spawned by this harness
+    /// (120 columns) or pre-spawned by `biscuit-harness-broker`.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when the `tmux display-message` query fails or its
+    /// output is not a column count.
+    pub fn pane_cols(&self) -> io::Result<u32> {
+        let session = self.session().to_string();
+        let mut cmd = Command::new("tmux");
+        cmd.args(["display-message", "-p", "-t", &session, "#{pane_width}"]);
+        let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "tmux display-message failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse()
+            .map_err(|e| io::Error::other(format!("tmux pane_width not a u32: {e}")))
     }
 
     fn session(&self) -> &str {

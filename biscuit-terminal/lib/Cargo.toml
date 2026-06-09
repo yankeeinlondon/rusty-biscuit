@@ -60,6 +60,11 @@ chrono = { version = "0.4.43", features = ["serde"] }
 libc = "0.2"
 
 [dev-dependencies]
+# Re-declares the renderable path dep with the test-only `hint-access-counter`
+# feature so the terminal perf-gate test (`tests/perf_gate.rs`) can observe the
+# `NodeAttrs::data` access counter while folding a corpus. The feature is unioned
+# into test/bench builds only; normal `cargo build` keeps it off.
+renderable = { path = "../../renderable", features = ["hint-access-counter"] }
 assert_cmd = "2"
 criterion = { version = "0.5", features = ["html_reports"] }
 expectrl = "0.8.0"

@@ -606,22 +606,7 @@ impl Markdown {
     /// when the render tree fails structural validation or a strict-mode
     /// rejection occurs.
     pub fn as_html(&self, options: output::HtmlOptions) -> MarkdownResult<String> {
-        let (mut doc, fold_diagnostics) = render_tree::entrypoints::to_render_document(self);
-        // Restore the legacy `output::as_html` contract: a malformed fenced
-        // code-block directive (e.g. an invalid highlight range) is a fatal
-        // error on the browser path, not a silent degrade. The render-tree
-        // code renderer only degrades (matching the legacy *terminal* path), so
-        // this preflight runs over the same folded tree before rendering.
-        render_tree::entrypoints::validate_code_directives(&doc.root)?;
-        // Direct-API fallback: with no explicit `hr_defaults`, seed bare rules
-        // from the deprecated top-level `hr:` frontmatter, matching the deleted
-        // bespoke serializer. An explicit option (e.g. a `DarkmatterPage`
-        // `style.hr.*` projection) is applied by `render_tree_html_from_document`
-        // instead, so the branches stay mutually exclusive.
-        if options.hr_defaults.is_none() {
-            render_tree::entrypoints::apply_hr_frontmatter_fallback(&mut doc.root, self);
-        }
-        Ok(render_tree::entrypoints::render_tree_html_from_document(doc, fold_diagnostics, &options)?.output)
+        Ok(render_tree::render_tree_html(self, &options)?.output)
     }
 
     /// Renders the markdown document as ANSI-styled terminal output.
@@ -652,33 +637,7 @@ impl Markdown {
     /// when the render tree fails structural validation or a strict-mode
     /// rejection occurs.
     pub fn as_terminal(&self, options: output::TerminalOptions) -> MarkdownResult<String> {
-        self.as_terminal_with_layout(options, None)
-    }
-
-    /// Internal entry point that passes an optional page layout context through
-    /// to the renderer so per-component alignment and fill are honoured.
-    ///
-    /// Both branches route through the render-tree terminal document renderer.
-    /// With no layout context (the default-layout path that
-    /// [`DarkmatterPage::render`](crate::layout::DarkmatterPage::render) and
-    /// [`as_terminal`](Self::as_terminal) take), the document folds and renders
-    /// directly. With a layout context (`Some(ctx)`), the tree-side decoration
-    /// pass
-    /// ([`render_tree_terminal_with_layout`](render_tree::entrypoints::render_tree_terminal_with_layout))
-    /// projects per-component alignment, fill, width caps, list-left margins,
-    /// colors, line numbers, hyperlink-label and image-alt width/alignment, and
-    /// the right-aligned list-item body onto the tree before rendering.
-    pub(crate) fn as_terminal_with_layout(
-        &self,
-        options: output::TerminalOptions,
-        layout_ctx: Option<&crate::layout::LayoutContext>,
-    ) -> MarkdownResult<String> {
-        match layout_ctx {
-            None => Ok(render_tree::render_tree_terminal(self, &options)?.output),
-            Some(ctx) => {
-                Ok(render_tree::entrypoints::render_tree_terminal_with_layout(self, &options, ctx)?.output)
-            }
-        }
+        Ok(render_tree::render_tree_terminal(self, &options)?.output)
     }
 
     /// Extracts a Table of Contents from the markdown document.

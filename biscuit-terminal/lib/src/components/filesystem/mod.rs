@@ -77,6 +77,7 @@
 
 // Submodules
 pub mod error;
+pub mod gitignore;
 pub mod icons;
 pub mod metrics;
 pub mod tree_chars;
@@ -84,11 +85,12 @@ pub mod tree_node;
 
 // Re-exports for backward compatibility
 pub use error::FileSystemError;
+pub use gitignore::GitignoreMatcher;
 pub use metrics::{FileMetrics, MetricKind};
 pub use tree_node::TreeNode;
 
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -102,7 +104,7 @@ use renderable::color::{BasicColor, Color};
 use renderable::html::HtmlPage;
 use renderable::layout::TargetValue as RTargetValue;
 use renderable::markdown::MarkdownRenderable;
-use renderable::style::{PerMode, Style, TextEmphasis};
+use renderable::style::{PaintColor, PerMode, Style, TextEmphasis};
 use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
     render_markdown_node,
@@ -115,6 +117,38 @@ use crate::terminal::Terminal;
 use crate::utils::block_constraint::{split_at_visible_width, visible_width};
 use crate::utils::layout::{Layout, LayoutTerminalExt};
 use crate::utils::wrap_policy::WordWrap;
+
+/// Icon kind for the root directory line.
+///
+/// Controls which icon is rendered for the root header when a custom
+/// [`FileSystem::with_root_icon`] override is configured. When no override is
+/// set the component falls back to the default directory icon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RootIconKind {
+    /// Default directory folder icon.
+    #[default]
+    Directory,
+    /// Repository icon (for when the root starts at the repo root).
+    Repository,
+}
+
+impl RootIconKind {
+    /// Returns the Nerd Font codepoint for this icon kind.
+    fn nerd_char(self) -> char {
+        match self {
+            RootIconKind::Directory => icons::nerd::dir::BASE,
+            RootIconKind::Repository => icons::nerd::dir::REPO,
+        }
+    }
+
+    /// Returns the Unicode fallback glyph for this icon kind.
+    fn unicode_str(self) -> &'static str {
+        match self {
+            RootIconKind::Directory => "📂",
+            RootIconKind::Repository => "📦",
+        }
+    }
+}
 
 /// A terminal component that renders a filesystem directory tree.
 ///
@@ -203,6 +237,21 @@ pub struct FileSystem {
     show_metrics_on_directories: bool,
     /// When true, filenames are rendered as clickable OSC8 hyperlinks to the files.
     file_links: bool,
+    /// Case-insensitive extension allowlist (without leading dot). When
+    /// non-empty, only files whose extension is in this set are scanned.
+    /// Directories are retained only when they contain an included descendant.
+    extension_allowlist: BTreeSet<String>,
+    /// Exact included-path allowlist, each relative to `root_path`. When
+    /// non-empty, only files whose relative path matches an entry are scanned.
+    /// Entries outside `root_path` are ignored. Directories are retained only
+    /// when they contain an included descendant.
+    included_paths: BTreeSet<PathBuf>,
+    /// Dimmed prefix rendered on the root line before the target name.
+    root_prefix: Option<String>,
+    /// Explicit root display name (overrides the directory's `file_name()`).
+    root_display_name: Option<String>,
+    /// Custom root icon kind (overrides the default directory icon).
+    root_icon: Option<RootIconKind>,
 }
 
 impl Default for FileSystem {
@@ -228,6 +277,11 @@ impl Default for FileSystem {
             metric_configs: HashMap::new(),
             show_metrics_on_directories: false,
             file_links: false,
+            extension_allowlist: BTreeSet::new(),
+            included_paths: BTreeSet::new(),
+            root_prefix: None,
+            root_display_name: None,
+            root_icon: None,
         }
     }
 }
@@ -293,6 +347,11 @@ impl FileSystem {
             metric_configs: HashMap::new(),
             show_metrics_on_directories: false,
             file_links: false,
+            extension_allowlist: BTreeSet::new(),
+            included_paths: BTreeSet::new(),
+            root_prefix: None,
+            root_display_name: None,
+            root_icon: None,
         })
     }
 
@@ -571,6 +630,147 @@ impl FileSystem {
         self
     }
 
+    /// Restricts scanned files to the given set of case-insensitive extensions.
+    ///
+    /// Each extension should be supplied **without** a leading dot (e.g. `"md"`,
+    /// `"pdf"`). The scan drops any file whose lowercased extension is not in
+    /// `extensions`. Directories are retained only when they contain at least
+    /// one included descendant, so ancestor directories that would otherwise be
+    /// empty are pruned.
+    ///
+    /// Calling this replaces any previously configured extension allowlist.
+    /// To add the standard Darkmatter document set (`.md`, `.txt`, `.doc`,
+    /// `.docx`, `.xls`, `.xlsx`, `.pdf`), use
+    /// [`document_extensions`](Self::document_extensions).
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// # use biscuit_terminal::prelude::FileSystem;
+    /// let fs = FileSystem::new(".")?
+    ///     .extension_filter(["md", "pdf"].into_iter());
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
+    pub fn extension_filter<I, S>(mut self, extensions: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.extension_allowlist = extensions
+            .into_iter()
+            .map(|e| {
+                let s = e.into();
+                s.trim_start_matches('.').to_lowercase()
+            })
+            .collect();
+        self
+    }
+
+    /// Restricts scanned files to the standard Darkmatter document extensions.
+    ///
+    /// Equivalent to:
+    ///
+    /// ```no_run
+    /// # use biscuit_terminal::prelude::FileSystem;
+    /// FileSystem::new(".")?
+    ///     .extension_filter(["md", "txt", "doc", "docx", "xls", "xlsx", "pdf"].into_iter());
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
+    pub fn document_extensions(self) -> Self {
+        self.extension_filter(
+            ["md", "txt", "doc", "docx", "xls", "xlsx", "pdf"],
+        )
+    }
+
+    /// Restricts scanned files to an exact set of paths relative to the root.
+    ///
+    /// Each path must be relative to [`root_path`](Self::root_path). Entries
+    /// that are absolute or escape the root (via `..`) are silently ignored.
+    /// Only files whose normalized relative path matches an entry are
+    /// included; their ancestor directories are preserved so the directory
+    /// hierarchy remains intact.
+    ///
+    /// This is intended for glob-based callers that have already determined
+    /// the matched file set and want to render only those files while keeping
+    /// the tree structure.
+    ///
+    /// Calling this replaces any previously configured included-path set.
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// # use biscuit_terminal::prelude::FileSystem;
+    /// use std::path::PathBuf;
+    /// let fs = FileSystem::new(".")?
+    ///     .included_paths([
+    ///         PathBuf::from("docs/a.md"),
+    ///         PathBuf::from("docs/b.txt"),
+    ///     ]);
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
+    pub fn included_paths<I, S>(mut self, paths: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<PathBuf>,
+    {
+        self.included_paths = paths
+            .into_iter()
+            .map(|s| s.into())
+            .filter(|p| is_safe_relative(p))
+            .collect();
+        self
+    }
+
+    /// Injects an already-built tree, bypassing the filesystem walk.
+    ///
+    /// [`ensure_tree_built`](Self::ensure_tree_built) becomes a no-op once a tree
+    /// is present, so a caller that has already discovered the entries (for
+    /// example darkmatter's `::file-links` resolver) can supply them directly and
+    /// avoid a second filesystem traversal.
+    pub fn with_prebuilt_tree(mut self, tree: Vec<TreeNode>) -> Self {
+        self.tree = Some(tree);
+        self
+    }
+
+    /// Sets a dimmed prefix rendered on the root line before the target name.
+    ///
+    /// When set, the root header renders as `{icon} {dim}{prefix}{reset}{target}`
+    /// instead of the default `{icon} {target}`. The prefix is typically the
+    /// path from the repository/CWD root to the target directory (e.g.
+    /// `"/docs/"`); the highlighted target name follows it.
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// # use biscuit_terminal::prelude::FileSystem;
+    /// let fs = FileSystem::new("docs/topics")?
+    ///     .with_dimmed_root_prefix("/docs/");
+    /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
+    /// ```
+    pub fn with_dimmed_root_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.root_prefix = Some(prefix.into());
+        self
+    }
+
+    /// Overrides the highlighted target name on the root line.
+    ///
+    /// By default the root line uses the last component of `root_path`.
+    /// Call this when the display name should differ from the on-disk
+    /// directory name.
+    pub fn with_root_display_name(mut self, name: impl Into<String>) -> Self {
+        self.root_display_name = Some(name.into());
+        self
+    }
+
+    /// Overrides the icon used on the root line.
+    ///
+    /// Use [`RootIconKind::Repository`] when the root starts at the repository
+    /// root so the git icon is rendered instead of the default folder icon.
+    pub fn with_root_icon(mut self, icon: RootIconKind) -> Self {
+        self.root_icon = Some(icon);
+        self
+    }
+
     // =========================================================================
     // Metric Builder Methods
     // =========================================================================
@@ -578,6 +778,42 @@ impl FileSystem {
     /// Returns whether any metrics are configured to be shown.
     fn has_any_metrics(&self) -> bool {
         self.metric_configs.values().any(|c| c.enabled)
+    }
+
+    /// Returns `true` when the extension or included-path allowlist is active.
+    fn has_file_filters(&self) -> bool {
+        !self.extension_allowlist.is_empty() || !self.included_paths.is_empty()
+    }
+
+    /// Returns `true` when a file should be included given all active filters.
+    ///
+    /// `matches_substring` is the pre-computed result of the legacy substring
+    /// [`filter`](Self::filter) patterns so the caller does not duplicate that
+    /// scan. The extension and included-path allowlists are checked here.
+    fn file_passes_all_filters(
+        &self,
+        file_name: &str,
+        rel_file_path: &Path,
+        matches_substring: bool,
+    ) -> bool {
+        // Substring filter (legacy): when active the file must match at least
+        // one pattern. When inactive, `matches_substring` is `false` and the
+        // check is skipped.
+        if !self.filter_patterns.is_empty() && !matches_substring {
+            return false;
+        }
+        // Extension allowlist
+        if !self.extension_allowlist.is_empty() {
+            match lowercase_extension(file_name) {
+                Some(e) if self.extension_allowlist.contains(&e) => {}
+                _ => return false,
+            }
+        }
+        // Included-paths allowlist
+        if !self.included_paths.is_empty() && !self.included_paths.contains(rel_file_path) {
+            return false;
+        }
+        true
     }
 
     /// Checks if a metric should be shown for the given filename.
@@ -1004,6 +1240,35 @@ impl FileSystem {
                     icons::unicode::file::BASE
                 }
             }
+            // Documents
+            Some("txt") => {
+                if use_nerd {
+                    icons::nerd::ext::TEXT
+                } else {
+                    icons::unicode::file::TEXT
+                }
+            }
+            Some("pdf") => {
+                if use_nerd {
+                    icons::nerd::ext::PDF
+                } else {
+                    icons::unicode::file::PDF
+                }
+            }
+            Some("doc" | "docx") => {
+                if use_nerd {
+                    icons::nerd::ext::WORD
+                } else {
+                    icons::unicode::file::WORD
+                }
+            }
+            Some("xls" | "xlsx") => {
+                if use_nerd {
+                    icons::nerd::ext::EXCEL
+                } else {
+                    icons::unicode::file::EXCEL
+                }
+            }
             // Default
             _ => {
                 if use_nerd {
@@ -1059,8 +1324,14 @@ impl FileSystem {
     pub fn ensure_tree_built(&mut self) {
         if self.tree.is_none() {
             let mut total_entries = 0;
-            self.tree =
-                Some(self.build_tree_recursive(&self.root_path.clone(), 0, &mut total_entries));
+            let matcher = GitignoreMatcher::for_root(&self.root_path);
+            self.tree = Some(self.build_tree_recursive(
+                &self.root_path.clone(),
+                Path::new(""),
+                0,
+                &mut total_entries,
+                &matcher,
+            ));
         }
     }
 
@@ -1091,13 +1362,19 @@ impl FileSystem {
 
     /// Builds the tree by walking the filesystem.
     ///
-    /// For now, uses `std::fs` directly. The `ignore` crate integration
-    /// will be added in Phase 8 for proper `.gitignore` support.
+    /// `rel_path` is the path of `path` relative to `root_path`, used to match
+    /// against the [`included_paths`](Self::included_paths) allowlist. At the
+    /// top level `rel_path` is empty.
+    ///
+    /// gitignore status for each entry is computed via `matcher`, a
+    /// [`GitignoreMatcher`] built once for the whole tree.
     fn build_tree_recursive(
         &self,
         path: &Path,
+        rel_path: &Path,
         depth: u32,
         total_entries: &mut u32,
+        matcher: &GitignoreMatcher,
     ) -> Vec<TreeNode> {
         // Respect max_depth (depth 0 = root level, so we check if we've exceeded)
         if depth >= self.max_depth {
@@ -1140,6 +1417,7 @@ impl FileSystem {
 
             let file_name = entry.file_name().to_string_lossy().to_string();
             let file_path = entry.path();
+            let rel_file_path = rel_path.join(&file_name);
 
             // Get file type (handling potential errors)
             let file_type = match entry.file_type() {
@@ -1165,6 +1443,8 @@ impl FileSystem {
                 (file_type.is_dir(), file_type.is_file())
             };
 
+            let is_ignored = matcher.is_ignored(&file_path, is_dir);
+
             // Determine if this is a dot file/dir
             let is_dot = file_name.starts_with('.');
 
@@ -1178,10 +1458,13 @@ impl FileSystem {
                 }
             }
 
-            // Apply filter patterns
-            let has_filters = !self.filter_patterns.is_empty();
-            let matches_filter =
-                has_filters && self.filter_patterns.iter().any(|p| file_name.contains(p));
+            // Determine whether any filtering is active (substring, extension,
+            // or included-path). When active, non-matching files are skipped
+            // and directories are pruned unless they have surviving children.
+            let has_substring_filter = !self.filter_patterns.is_empty();
+            let matches_substring = has_substring_filter
+                && self.filter_patterns.iter().any(|p| file_name.contains(p));
+            let has_file_filters = self.has_file_filters();
 
             if is_dir {
                 // Don't follow symlinks to avoid infinite loops
@@ -1189,12 +1472,21 @@ impl FileSystem {
                 let children = if is_symlink || at_depth_limit {
                     vec![]
                 } else {
-                    self.build_tree_recursive(&file_path, depth + 1, total_entries)
+                    self.build_tree_recursive(
+                        &file_path,
+                        &rel_file_path,
+                        depth + 1,
+                        total_entries,
+                        matcher,
+                    )
                 };
 
                 // When filters are active, only include directories that either
-                // match the filter themselves or have matching descendants.
-                if has_filters && !matches_filter && children.is_empty() {
+                // match a substring filter themselves or have surviving children.
+                if (has_substring_filter || has_file_filters)
+                    && !matches_substring
+                    && children.is_empty()
+                {
                     continue;
                 }
 
@@ -1208,15 +1500,19 @@ impl FileSystem {
                 entries.push(TreeNode::Dir {
                     name: file_name,
                     children,
-                    is_ignored: false, // Will be set properly with ignore crate in Phase 8
+                    is_ignored,
                     is_symlink,
                     has_error: false,
                     at_depth_limit,
                     metrics: dir_metrics,
                 });
             } else {
-                // Skip non-matching files when filters are active
-                if has_filters && !matches_filter {
+                // Skip non-matching files when any filter is active
+                if !self.file_passes_all_filters(
+                    &file_name,
+                    &rel_file_path,
+                    matches_substring,
+                ) {
                     continue;
                 }
 
@@ -1229,7 +1525,7 @@ impl FileSystem {
                 };
                 entries.push(TreeNode::File {
                     name: file_name,
-                    is_ignored: false, // Will be set properly with ignore crate in Phase 8
+                    is_ignored,
                     is_symlink,
                     metrics: file_metrics,
                 });
@@ -1693,45 +1989,88 @@ impl FileSystem {
     /// Renders the root directory name as a header line.
     ///
     /// Shows the directory icon and name (e.g., ` docs`), styled bold blue
-    /// when connected to a TTY.
+    /// when connected to a TTY. When a [`with_dimmed_root_prefix`](Self::with_dimmed_root_prefix)
+    /// is configured, the prefix is rendered dimmed and the target name is
+    /// rendered bold blue separately.
     fn render_root_line(&self, output: &mut String, is_nerd_font: Option<bool>, is_tty: bool) {
         let use_nerd = is_nerd_font.unwrap_or(false);
 
         // Resolve the display name: canonicalize relative paths like "." and ".."
-        // so we show the actual directory name instead of a dot.
-        let name = self
-            .root_path
-            .canonicalize()
-            .ok()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-            .or_else(|| {
-                self.root_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-            })
-            .unwrap_or_else(|| self.root_path.display().to_string());
+        // so we show the actual directory name instead of a dot. An explicit
+        // `root_display_name` override takes priority.
+        let name = self.root_display_name.clone().unwrap_or_else(|| {
+            self.root_path
+                .canonicalize()
+                .ok()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .or_else(|| {
+                    self.root_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                })
+                .unwrap_or_else(|| self.root_path.display().to_string())
+        });
 
-        let icon = self.get_dir_icon(&name, use_nerd);
-        let icon_str = if use_nerd {
-            format!("{} ", icon)
+        // Resolve the icon: custom root icon override or the default dir icon.
+        let icon_str = match self.root_icon {
+            Some(kind) => {
+                let icon = kind.nerd_char();
+                if use_nerd {
+                    format!("{} ", icon)
+                } else {
+                    kind.unicode_str().to_string()
+                }
+            }
+            None => {
+                let icon = self.get_dir_icon(&name, use_nerd);
+                if use_nerd {
+                    format!("{} ", icon)
+                } else {
+                    icon.to_string()
+                }
+            }
+        };
+
+        // When no dimmed prefix is configured, preserve the original rendering.
+        let Some(prefix) = &self.root_prefix else {
+            if is_tty {
+                let display_name = if self.file_links {
+                    let abs_path = self
+                        .root_path
+                        .canonicalize()
+                        .unwrap_or_else(|_| self.root_path.clone());
+                    Prose::new(format!("<a href=\"{}\">{}</a>", abs_path.display(), name))
+                        .render_optimistic(None)
+                } else {
+                    name
+                };
+                output.push_str(&format!("\x1b[1;34m{}{}\x1b[0m\n", icon_str, display_name));
+            } else {
+                output.push_str(&format!("{}{}\n", icon_str, name));
+            }
+            return;
+        };
+
+        // Dimmed-prefix root line:
+        // `{icon} {dim}{prefix}{reset}{bold-blue}{target}{reset}`
+        let target = if self.file_links && is_tty {
+            let abs_path = self
+                .root_path
+                .canonicalize()
+                .unwrap_or_else(|_| self.root_path.clone());
+            Prose::new(format!("<a href=\"{}\">{}</a>", abs_path.display(), name))
+                .render_optimistic(None)
         } else {
-            icon.to_string()
+            name
         };
 
         if is_tty {
-            let display_name = if self.file_links {
-                let abs_path = self
-                    .root_path
-                    .canonicalize()
-                    .unwrap_or_else(|_| self.root_path.clone());
-                Prose::new(format!("<a href=\"{}\">{}</a>", abs_path.display(), name))
-                    .render_optimistic(None)
-            } else {
-                name
-            };
-            output.push_str(&format!("\x1b[1;34m{}{}\x1b[0m\n", icon_str, display_name));
+            output.push_str(&format!(
+                "{}\x1b[2m{}\x1b[0m\x1b[1;34m{}\x1b[0m\n",
+                icon_str, prefix, target
+            ));
         } else {
-            output.push_str(&format!("{}{}\n", icon_str, name));
+            output.push_str(&format!("{}{}{}\n", icon_str, prefix, target));
         }
     }
 
@@ -1983,6 +2322,29 @@ fn glob_match(pattern: &str, filename: &str) -> bool {
         .ok()
         .map(|g| g.compile_matcher().is_match(filename))
         .unwrap_or(false)
+}
+
+/// Returns `true` when `path` is a clean relative path that stays within the
+/// root (no absolute prefix, no `..` components). Used to filter
+/// [`FileSystem::included_paths`] entries.
+fn is_safe_relative(path: &Path) -> bool {
+    if path.is_absolute() || path.as_os_str().is_empty() {
+        return false;
+    }
+    !path.components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::ParentDir | std::path::Component::Prefix(_)
+        )
+    })
+}
+
+/// Returns the lowercased extension (without dot) of a filename, or `None`
+/// when the name has no extension.
+fn lowercase_extension(name: &str) -> Option<String> {
+    std::path::Path::new(name)
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
 }
 
 /// Formats a byte count as a human-readable string.
@@ -2277,6 +2639,7 @@ const CLASS_HIGHLIGHT_GREEN: &str = "fs-highlight-green";
 const CLASS_ICON: &str = "fs-icon";
 const CLASS_METRICS: &str = "fs-metrics";
 const CLASS_METRIC_HIGHLIGHT: &str = "fs-metric-highlight";
+const CLASS_ROOT_PREFIX: &str = "fs-root-prefix";
 
 /// Precedence-ordered foreground kind used by the canonical projection.
 ///
@@ -2312,7 +2675,7 @@ impl FsFgKind {
 }
 
 /// Universal [`Style`] color slot for a concrete [`Color`].
-fn fs_universal_color(color: Color) -> RTargetValue<PerMode<Color>> {
+fn fs_universal_color(color: Color) -> RTargetValue<PerMode<PaintColor>> {
     RTargetValue::universal(PerMode::universal(color))
 }
 
@@ -2333,7 +2696,23 @@ fn fs_unicode_icon(node: &TreeNode) -> &'static str {
             ..
         } => "📁",
         TreeNode::Dir { .. } => "📂",
-        TreeNode::File { .. } => "📄",
+        TreeNode::File { name, .. } => fs_unicode_file_icon(name),
+    }
+}
+
+/// Returns the Unicode fallback glyph for a file based on its extension.
+///
+/// Document extensions (`.txt`, `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`)
+/// receive distinct glyphs so they remain distinguishable even without Nerd
+/// Font support. All other files fall back to the generic page emoji.
+fn fs_unicode_file_icon(name: &str) -> &'static str {
+    let ext = name.rsplit('.').next().map(|e| e.to_lowercase());
+    match ext.as_deref() {
+        Some("txt") => "📝",
+        Some("pdf") => "📕",
+        Some("doc" | "docx") => "📘",
+        Some("xls" | "xlsx") => "📗",
+        _ => "📄",
     }
 }
 
@@ -2680,23 +3059,33 @@ impl FileSystem {
 
     /// Builds the root header `Paragraph` projected onto the canonical tree
     /// when [`show_root`](FileSystem::show_root) is true.
+    ///
+    /// When a [`with_dimmed_root_prefix`](FileSystem::with_dimmed_root_prefix)
+    /// is configured, the prefix is projected as a separate dimmed span and the
+    /// target name as a bold-blue span. Without a prefix the original
+    /// paragraph-level bold-blue style is preserved.
     fn fs_project_root_header(&self) -> RenderNode {
-        let name = self
-            .root_path
-            .canonicalize()
-            .ok()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-            .or_else(|| {
-                self.root_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-            })
-            .unwrap_or_else(|| self.root_path.display().to_string());
+        let name = self.root_display_name.clone().unwrap_or_else(|| {
+            self.root_path
+                .canonicalize()
+                .ok()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .or_else(|| {
+                    self.root_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                })
+                .unwrap_or_else(|| self.root_path.display().to_string())
+        });
 
+        // Choose the root icon glyph: custom override or default folder emoji.
+        let icon_glyph = match self.root_icon {
+            Some(kind) => kind.unicode_str(),
+            None => "📂",
+        };
         let icon_span = RenderNode::span(
             vec![CLASS_ICON.to_string()],
-            // Root is always a directory; choose a stable Unicode glyph.
-            vec![RenderNode::text("📂")],
+            vec![RenderNode::text(icon_glyph)],
         );
 
         let name_node = if self.file_links {
@@ -2713,18 +3102,47 @@ impl FileSystem {
             RenderNode::text(&name)
         };
 
-        let mut paragraph =
-            RenderNode::paragraph(vec![icon_span, RenderNode::text(" "), name_node]);
-        // Root header carries bold blue Style; classes mark it as both
-        // `fs-root` and `fs-dir` for CSS hooks.
-        paragraph.attrs.set_style(&Style {
+        let bold_blue_style = Style {
             color: Some(fs_universal_color(Color::BasicColor(BasicColor::Blue))),
             emphasis: TextEmphasis {
                 bold: true,
                 ..TextEmphasis::default()
             },
             ..Style::default()
-        });
+        };
+
+        let mut paragraph = if let Some(prefix) = &self.root_prefix {
+            // Dimmed-prefix root header: icon + dim prefix + bold-blue target.
+            let mut prefix_span = RenderNode::span(
+                vec![CLASS_ROOT_PREFIX.to_string()],
+                vec![RenderNode::text(prefix.clone())],
+            );
+            prefix_span.attrs.set_style(&Style {
+                emphasis: TextEmphasis {
+                    dim: true,
+                    ..TextEmphasis::default()
+                },
+                ..Style::default()
+            });
+
+            let mut target_span = RenderNode::span(Vec::new(), vec![name_node]);
+            target_span.attrs.set_style(&bold_blue_style);
+
+            RenderNode::paragraph(vec![
+                icon_span,
+                RenderNode::text(" "),
+                prefix_span,
+                target_span,
+            ])
+        } else {
+            // Default root header: icon + name with paragraph-level bold blue.
+            let mut para =
+                RenderNode::paragraph(vec![icon_span, RenderNode::text(" "), name_node]);
+            para.attrs.set_style(&bold_blue_style);
+            para
+        };
+
+        // Root header classes mark it as both `fs-root` and `fs-dir` for CSS hooks.
         paragraph.attrs.classes = vec![CLASS_ROOT.to_string(), CLASS_DIR.to_string()];
         paragraph
     }
@@ -4190,12 +4608,12 @@ mod tests {
 
     #[test]
     fn test_filesystem_builder_layout() {
-        use crate::utils::layout::{Layout, Length, Margin, TargetValue};
+        use crate::utils::layout::{Layout, Length, Edges, TargetValue};
 
         let custom_layout = Layout {
-            margin: Margin {
+            margin: Edges {
                 left: TargetValue::universal(Length::ch(4)),
-                ..Margin::default()
+                ..Edges::default()
             },
             ..Layout::default()
         };
@@ -7330,15 +7748,89 @@ mod tests {
 
         let node = fs.render_tree();
         let classes = collect_classes(&node);
-        // Gitignore handling is heuristic; only assert the dim/class pair
-        // when ignored.txt was actually flagged as ignored.
-        if classes.iter().any(|c| c == CLASS_IGNORED) {
-            let style = first_entry_style(&node, "ignored.txt").expect("style");
-            assert!(
-                style.emphasis.dim,
-                "gitignored entry should be dim — got: {style:?}",
-            );
+        assert!(
+            classes.iter().any(|c| c == CLASS_IGNORED),
+            "expected fs-ignored class in: {classes:?}",
+        );
+        let style = first_entry_style(&node, "ignored.txt").expect("style");
+        assert!(
+            style.emphasis.dim,
+            "gitignored entry should be dim — got: {style:?}",
+        );
+    }
+
+    /// Walks `nodes` (and children) for the first entry named `name`.
+    fn find_node<'a>(nodes: &'a [TreeNode], name: &str) -> Option<&'a TreeNode> {
+        for node in nodes {
+            if node.name() == name {
+                return Some(node);
+            }
+            if let TreeNode::Dir { children, .. } = node {
+                if let Some(found) = find_node(children, name) {
+                    return Some(found);
+                }
+            }
         }
+        None
+    }
+
+    #[test]
+    fn gitignore_matcher_flags_ignored_entries() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(temp.path().join(".gitignore"), "target/\n*.log\n").unwrap();
+        std::fs::write(temp.path().join("keep.md"), "x").unwrap();
+        std::fs::write(temp.path().join("debug.log"), "x").unwrap();
+        std::fs::create_dir_all(temp.path().join("target")).unwrap();
+        std::fs::write(temp.path().join("target/out.bin"), "x").unwrap();
+
+        let mut fs = FileSystem::new(temp.path())
+            .expect("fs")
+            .dim_gitignore(true);
+        fs.ensure_tree_built();
+        let tree = fs.tree().expect("tree");
+
+        assert!(
+            !find_node(tree, "keep.md").expect("keep.md").is_ignored(),
+            "keep.md should not be ignored",
+        );
+        assert!(
+            find_node(tree, "debug.log").expect("debug.log").is_ignored(),
+            "debug.log should be ignored by *.log",
+        );
+        assert!(
+            find_node(tree, "target").expect("target").is_ignored(),
+            "target dir should be ignored by target/",
+        );
+    }
+
+    #[test]
+    fn with_prebuilt_tree_is_used_verbatim() {
+        let child = TreeNode::File {
+            name: "child.rs".to_string(),
+            is_ignored: false,
+            is_symlink: false,
+            metrics: None,
+        };
+        let injected = vec![TreeNode::Dir {
+            name: "src".to_string(),
+            children: vec![child],
+            is_ignored: false,
+            is_symlink: false,
+            has_error: false,
+            at_depth_limit: false,
+            metrics: None,
+        }];
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+        // A real on-disk entry that must NOT appear, proving the walk is skipped.
+        std::fs::write(temp.path().join("on_disk.txt"), "x").unwrap();
+
+        let mut fs = FileSystem::new(temp.path())
+            .expect("fs")
+            .with_prebuilt_tree(injected.clone());
+        fs.ensure_tree_built();
+
+        assert_eq!(fs.tree(), Some(&injected));
     }
 
     /// Suggested #9 — highlight-green wins over directory bold-blue (the
@@ -7420,5 +7912,442 @@ mod tests {
             classes.iter().any(|c| c == CLASS_DEPTH_LIMIT),
             "expected fs-depth-limit class in: {classes:?}",
         );
+    }
+
+    // ============================================================
+    // Phase 1 — File-Links Directive Component Enhancements
+    // ============================================================
+
+    // --- Document extension icon constants ---
+
+    #[test]
+    fn test_nerd_document_ext_icons_are_valid_unicode() {
+        assert!(icons::nerd::ext::PDF.is_alphanumeric() || !icons::nerd::ext::PDF.is_ascii());
+        assert!(icons::nerd::ext::WORD.is_alphanumeric() || !icons::nerd::ext::WORD.is_ascii());
+        assert!(icons::nerd::ext::EXCEL.is_alphanumeric() || !icons::nerd::ext::EXCEL.is_ascii());
+        assert!(icons::nerd::ext::TEXT.is_alphanumeric() || !icons::nerd::ext::TEXT.is_ascii());
+    }
+
+    #[test]
+    fn test_unicode_document_fallback_icons() {
+        assert_eq!(icons::unicode::file::PDF, '\u{1F4D5}'); // 📕
+        assert_eq!(icons::unicode::file::WORD, '\u{1F4D8}'); // 📘
+        assert_eq!(icons::unicode::file::EXCEL, '\u{1F4D7}'); // 📗
+        assert_eq!(icons::unicode::file::TEXT, '\u{1F4DD}'); // 📝
+    }
+
+    #[test]
+    fn test_unicode_dir_repo_icon() {
+        assert!(icons::nerd::dir::REPO.is_alphanumeric() || !icons::nerd::dir::REPO.is_ascii());
+    }
+
+    // --- Document extension icon selection (get_extension_icon) ---
+
+    #[test]
+    fn test_get_icon_pdf_extension() {
+        let fs = FileSystem::default();
+        for name in ["doc.pdf", "doc.PDF", "Doc.PdF"] {
+            let node = TreeNode::File {
+                name: name.into(),
+                is_ignored: false,
+                is_symlink: false,
+                metrics: None,
+            };
+            assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::ext::PDF, "{name}");
+            assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::PDF, "{name}");
+        }
+    }
+
+    #[test]
+    fn test_get_icon_word_extensions() {
+        let fs = FileSystem::default();
+        for ext in ["doc", "docx", "DOC", "DocX"] {
+            let node = TreeNode::File {
+                name: format!("file.{ext}"),
+                is_ignored: false,
+                is_symlink: false,
+                metrics: None,
+            };
+            assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::ext::WORD, ".{ext}");
+            assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::WORD, ".{ext}");
+        }
+    }
+
+    #[test]
+    fn test_get_icon_excel_extensions() {
+        let fs = FileSystem::default();
+        for ext in ["xls", "xlsx", "XLS", "XlsX"] {
+            let node = TreeNode::File {
+                name: format!("sheet.{ext}"),
+                is_ignored: false,
+                is_symlink: false,
+                metrics: None,
+            };
+            assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::ext::EXCEL, ".{ext}");
+            assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::EXCEL, ".{ext}");
+        }
+    }
+
+    #[test]
+    fn test_get_icon_txt_extension() {
+        let fs = FileSystem::default();
+        for ext in ["txt", "TXT", "Txt"] {
+            let node = TreeNode::File {
+                name: format!("readme.{ext}"),
+                is_ignored: false,
+                is_symlink: false,
+                metrics: None,
+            };
+            assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::ext::TEXT, ".{ext}");
+            assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::TEXT, ".{ext}");
+        }
+    }
+
+    // --- fs_unicode_file_icon (canonical render tree projection) ---
+
+    #[test]
+    fn test_fs_unicode_file_icon_documents() {
+        assert_eq!(fs_unicode_file_icon("notes.txt"), "📝");
+        assert_eq!(fs_unicode_file_icon("report.pdf"), "📕");
+        assert_eq!(fs_unicode_file_icon("letter.doc"), "📘");
+        assert_eq!(fs_unicode_file_icon("letter.docx"), "📘");
+        assert_eq!(fs_unicode_file_icon("budget.xls"), "📗");
+        assert_eq!(fs_unicode_file_icon("budget.xlsx"), "📗");
+        // Mixed case
+        assert_eq!(fs_unicode_file_icon("NOTES.TXT"), "📝");
+        // Unknown extension
+        assert_eq!(fs_unicode_file_icon("data.bin"), "📄");
+        assert_eq!(fs_unicode_file_icon("noext"), "📄");
+    }
+
+    // --- Extension allowlist builder ---
+
+    #[test]
+    fn test_extension_filter_builder() {
+        let fs = FileSystem::default().extension_filter(["md", "pdf"]);
+        assert!(fs.extension_allowlist.contains("md"));
+        assert!(fs.extension_allowlist.contains("pdf"));
+        assert_eq!(fs.extension_allowlist.len(), 2);
+    }
+
+    #[test]
+    fn test_extension_filter_strips_leading_dot_and_lowercases() {
+        let fs = FileSystem::default().extension_filter([".MD", ".Pdf"]);
+        assert!(fs.extension_allowlist.contains("md"));
+        assert!(fs.extension_allowlist.contains("pdf"));
+        assert!(!fs.extension_allowlist.contains(".md"));
+    }
+
+    #[test]
+    fn test_document_extensions_builder() {
+        let fs = FileSystem::default().document_extensions();
+        for ext in ["md", "txt", "doc", "docx", "xls", "xlsx", "pdf"] {
+            assert!(fs.extension_allowlist.contains(ext), "expected '{ext}' in allowlist");
+        }
+        assert_eq!(fs.extension_allowlist.len(), 7);
+    }
+
+    #[test]
+    fn test_extension_filter_scanning() {
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path();
+        std::fs::write(root.join("a.md"), "x").unwrap();
+        std::fs::write(root.join("b.txt"), "x").unwrap();
+        std::fs::write(root.join("c.png"), "x").unwrap();
+        std::fs::write(root.join("d.rs"), "x").unwrap();
+
+        let mut fs = FileSystem::new(root).unwrap().document_extensions().show_root(false);
+        fs.ensure_tree_built();
+        let tree = fs.tree().unwrap();
+        let names: Vec<&str> = tree.iter().map(|n| n.name()).collect();
+        assert!(names.contains(&"a.md"), "md should pass");
+        assert!(names.contains(&"b.txt"), "txt should pass");
+        assert!(!names.contains(&"c.png"), "png should be filtered out");
+        assert!(!names.contains(&"d.rs"), "rs should be filtered out");
+    }
+
+    #[test]
+    fn test_extension_filter_mixed_case_extensions() {
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path();
+        std::fs::write(root.join("upper.PDF"), "x").unwrap();
+        std::fs::write(root.join("mixed.TxT"), "x").unwrap();
+        std::fs::write(root.join("lower.docx"), "x").unwrap();
+
+        let mut fs = FileSystem::new(root).unwrap().document_extensions().show_root(false);
+        fs.ensure_tree_built();
+        let tree = fs.tree().unwrap();
+        let names: Vec<&str> = tree.iter().map(|n| n.name()).collect();
+        assert!(names.contains(&"upper.PDF"));
+        assert!(names.contains(&"mixed.TxT"));
+        assert!(names.contains(&"lower.docx"));
+    }
+
+    #[test]
+    fn test_extension_filter_prunes_empty_ancestors() {
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path();
+        // src/ contains only .rs files (not in document extension set)
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.rs"), "x").unwrap();
+        std::fs::write(root.join("src/lib.rs"), "x").unwrap();
+        // docs/ contains .md files
+        std::fs::create_dir(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/readme.md"), "x").unwrap();
+
+        let mut fs = FileSystem::new(root).unwrap().document_extensions().show_root(false);
+        fs.ensure_tree_built();
+        let tree = fs.tree().unwrap();
+        let names: Vec<&str> = tree.iter().map(|n| n.name()).collect();
+        // 'src' must be pruned (no matching descendants), 'docs' must survive
+        assert!(!names.contains(&"src"), "empty ancestor 'src' should be pruned");
+        assert!(names.contains(&"docs"), "'docs' has matching descendants and must survive");
+    }
+
+    #[test]
+    fn test_extension_filter_empty_allowlist_shows_all() {
+        // When no filter is set, all files appear (existing behavior unchanged)
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path();
+        std::fs::write(root.join("a.md"), "x").unwrap();
+        std::fs::write(root.join("b.png"), "x").unwrap();
+
+        let mut fs = FileSystem::new(root).unwrap().show_root(false);
+        fs.ensure_tree_built();
+        let tree = fs.tree().unwrap();
+        let names: Vec<&str> = tree.iter().map(|n| n.name()).collect();
+        assert!(names.contains(&"a.md"));
+        assert!(names.contains(&"b.png"));
+    }
+
+    // --- Included-paths allowlist builder ---
+
+    #[test]
+    fn test_included_paths_builder() {
+        use std::path::PathBuf;
+        let fs = FileSystem::default().included_paths([
+            PathBuf::from("docs/a.md"),
+            PathBuf::from("docs/b.txt"),
+        ]);
+        assert!(fs.included_paths.contains(&PathBuf::from("docs/a.md")));
+        assert!(fs.included_paths.contains(&PathBuf::from("docs/b.txt")));
+    }
+
+    #[test]
+    fn test_included_paths_rejects_unsafe() {
+        use std::path::PathBuf;
+        let fs = FileSystem::default().included_paths([
+            PathBuf::from("safe.md"),            // ok
+            PathBuf::from("../escape.md"),        // rejected (ParentDir)
+            PathBuf::from("/absolute.md"),        // rejected (absolute)
+        ]);
+        assert!(fs.included_paths.contains(&PathBuf::from("safe.md")));
+        assert_eq!(fs.included_paths.len(), 1, "only the safe path should survive");
+    }
+
+    #[test]
+    fn test_included_paths_scanning_preserves_hierarchy() {
+        use std::path::PathBuf;
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path();
+        std::fs::create_dir(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/a.md"), "x").unwrap();
+        std::fs::write(root.join("docs/b.md"), "x").unwrap();
+        std::fs::write(root.join("docs/c.md"), "x").unwrap();
+
+        // Only select docs/a.md and docs/c.md — docs/b.md should be hidden
+        let mut fs = FileSystem::new(root)
+            .unwrap()
+            .included_paths([PathBuf::from("docs/a.md"), PathBuf::from("docs/c.md")])
+            .show_root(false);
+        fs.ensure_tree_built();
+        let tree = fs.tree().unwrap();
+        // docs/ should survive as ancestor, but only a.md and c.md
+        assert_eq!(tree.len(), 1);
+        let dir = &tree[0];
+        assert!(dir.is_dir());
+        assert_eq!(dir.name(), "docs");
+        if let TreeNode::Dir { children, .. } = dir {
+            let names: Vec<&str> = children.iter().map(|n| n.name()).collect();
+            assert!(names.contains(&"a.md"));
+            assert!(names.contains(&"c.md"));
+            assert!(!names.contains(&"b.md"), "b.md was not in included_paths");
+        }
+    }
+
+    #[test]
+    fn test_included_paths_empty_set_shows_all() {
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path();
+        std::fs::write(root.join("a.md"), "x").unwrap();
+        std::fs::write(root.join("b.md"), "x").unwrap();
+
+        let mut fs = FileSystem::new(root).unwrap().show_root(false);
+        fs.ensure_tree_built();
+        let tree = fs.tree().unwrap();
+        assert_eq!(tree.len(), 2, "no included_paths filter → all files shown");
+    }
+
+    #[test]
+    fn test_included_paths_combined_with_extension_filter() {
+        use std::path::PathBuf;
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path();
+        std::fs::create_dir(root.join("d")).unwrap();
+        std::fs::write(root.join("d/a.md"), "x").unwrap();
+        std::fs::write(root.join("d/b.txt"), "x").unwrap();
+        std::fs::write(root.join("d/c.png"), "x").unwrap();
+
+        // included_paths selects a.md and c.png, but extension_filter only
+        // allows md/txt — so only a.md survives (both filters must pass).
+        let mut fs = FileSystem::new(root)
+            .unwrap()
+            .included_paths([
+                PathBuf::from("d/a.md"),
+                PathBuf::from("d/c.png"),
+            ])
+            .extension_filter(["md", "txt"])
+            .show_root(false);
+        fs.ensure_tree_built();
+        let tree = fs.tree().unwrap();
+        let dir = &tree[0];
+        if let TreeNode::Dir { children, .. } = dir {
+            let names: Vec<&str> = children.iter().map(|n| n.name()).collect();
+            assert!(names.contains(&"a.md"));
+            // c.png is in included_paths but fails extension_filter
+            assert!(!names.contains(&"c.png"));
+            // b.txt passes extension_filter but is not in included_paths
+            assert!(!names.contains(&"b.txt"));
+        } else {
+            panic!("expected directory");
+        }
+    }
+
+    // --- Dimmed root prefix ---
+
+    #[test]
+    fn test_with_dimmed_root_prefix_sets_field() {
+        let fs = FileSystem::default().with_dimmed_root_prefix("/docs/");
+        assert_eq!(fs.root_prefix.as_deref(), Some("/docs/"));
+    }
+
+    #[test]
+    fn test_with_root_display_name_sets_field() {
+        let fs = FileSystem::default().with_root_display_name("topics");
+        assert_eq!(fs.root_display_name.as_deref(), Some("topics"));
+    }
+
+    #[test]
+    fn test_with_root_icon_sets_field() {
+        let fs = FileSystem::default().with_root_icon(RootIconKind::Repository);
+        assert_eq!(fs.root_icon, Some(RootIconKind::Repository));
+    }
+
+    #[test]
+    fn test_dimmed_root_prefix_render_optimistic() {
+        // render_optimistic uses no TTY, so no ANSI codes. The prefix and
+        // target should appear concatenated in the root line.
+        let temp = tempfile::tempdir().expect("temp");
+        std::fs::write(temp.path().join("a.txt"), "x").unwrap();
+        let mut fs = FileSystem::new(temp.path())
+            .unwrap()
+            .with_dimmed_root_prefix("/docs/")
+            .with_root_display_name("topics");
+        fs.ensure_tree_built();
+        let output = fs.render_optimistic(Some(120));
+        // First line is the root; should contain both prefix and target
+        let first_line = output.lines().next().expect("root line");
+        assert!(first_line.contains("/docs/"), "prefix in: {first_line:?}");
+        assert!(first_line.contains("topics"), "target in: {first_line:?}");
+    }
+
+    #[test]
+    fn test_dimmed_root_prefix_render_tree_has_dimmed_prefix_span() {
+        let temp = tempfile::tempdir().expect("temp");
+        let mut fs = FileSystem::new(temp.path())
+            .unwrap()
+            .with_dimmed_root_prefix("/docs/")
+            .with_root_display_name("topics");
+        fs.ensure_tree_built();
+        let node = fs.render_tree();
+        let classes = collect_classes(&node);
+        assert!(
+            classes.iter().any(|c| c == CLASS_ROOT_PREFIX),
+            "expected fs-root-prefix class: {classes:?}",
+        );
+    }
+
+    #[test]
+    fn test_no_root_prefix_preserves_original_behavior() {
+        let temp = tempfile::tempdir().expect("temp");
+        std::fs::write(temp.path().join("a.txt"), "x").unwrap();
+
+        // Without prefix — original behavior
+        let mut fs1 = FileSystem::new(temp.path()).unwrap().show_root(true);
+        fs1.ensure_tree_built();
+        let out1 = fs1.render_optimistic(Some(80));
+
+        // The root line should be just icon+name (no prefix text)
+        let first_line = out1.lines().next().expect("root line");
+        assert!(!first_line.contains("/docs/"));
+    }
+
+    #[test]
+    fn test_dimmed_root_prefix_with_file_links() {
+        // When both file_links and root_prefix are set, the target should
+        // still be wrapped in an OSC8 hyperlink in the bespoke TTY renderer.
+        let temp = tempfile::tempdir().expect("temp");
+        std::fs::write(temp.path().join("a.txt"), "x").unwrap();
+        let mut fs = FileSystem::new(temp.path())
+            .unwrap()
+            .with_dimmed_root_prefix("/docs/")
+            .with_root_display_name("topics")
+            .with_file_links();
+        fs.ensure_tree_built();
+
+        // render_optimistic does not use TTY so no OSC8 wrapping occurs,
+        // but the content should survive.
+        let output = fs.render_optimistic(Some(120));
+        let first_line = output.lines().next().expect("root line");
+        assert!(first_line.contains("topics"), "target in: {first_line:?}");
+    }
+
+    // --- Helper function tests ---
+
+    #[test]
+    fn test_is_safe_relative() {
+        assert!(is_safe_relative(Path::new("a.md")));
+        assert!(is_safe_relative(Path::new("docs/a.md")));
+        assert!(is_safe_relative(Path::new("docs/sub/a.md")));
+        assert!(!is_safe_relative(Path::new("../escape.md")));
+        assert!(!is_safe_relative(Path::new("a/../b.md"))); // contains ParentDir
+        assert!(!is_safe_relative(Path::new("/absolute.md")));
+        assert!(!is_safe_relative(Path::new("")));
+    }
+
+    #[test]
+    fn test_lowercase_extension_helper() {
+        assert_eq!(lowercase_extension("file.md").as_deref(), Some("md"));
+        assert_eq!(lowercase_extension("file.PDF").as_deref(), Some("pdf"));
+        assert_eq!(lowercase_extension("file.DocX").as_deref(), Some("docx"));
+        assert_eq!(lowercase_extension("noext"), None);
+        assert_eq!(lowercase_extension(".env"), None); // dotfile, no real extension
+    }
+
+    #[test]
+    fn test_root_icon_kind_nerd_char() {
+        assert_eq!(RootIconKind::Directory.nerd_char(), icons::nerd::dir::BASE);
+        assert_eq!(RootIconKind::Repository.nerd_char(), icons::nerd::dir::REPO);
+    }
+
+    #[test]
+    fn test_root_icon_kind_unicode_str() {
+        assert_eq!(RootIconKind::Directory.unicode_str(), "📂");
+        assert_eq!(RootIconKind::Repository.unicode_str(), "📦");
+    }
+
+    #[test]
+    fn test_root_icon_default_is_directory() {
+        assert_eq!(RootIconKind::default(), RootIconKind::Directory);
     }
 }

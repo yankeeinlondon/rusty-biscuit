@@ -175,27 +175,33 @@ Options:
 ## Block Command
 
 Render a text block through the render tree carrying a declared `Style`
-(foreground/background, emphasis, fill band, border). `bt block` renders via
-`render_terminal_node`, so it exercises the render-tree `Style` primitive
-directly:
+(foreground/background, emphasis, background, border) and an optional `Layout`
+box (padding/margin/width/alignment). `bt block` renders via
+`render_terminal_node`, so it exercises the render-tree `Style` and `Layout`
+primitives directly:
 
 ```bash
 bt block "Plain styled text" --fg red
 bt block "Inverted notice" --fg white --bg blue --bold
 bt block "Bordered notice" --border all
 bt block "Rounded notice" --border all --border-radius 1
-bt block "Indented band" --fill pronounced --fill-band indented --inset 4
+bt block "Painted padding" --bg blue --padding 1
+bt block "Centered box" --width 20 --align center
 ```
 
 Options:
 - `--fg` / `--bg`: Foreground / background color (named or `#rrggbb`)
 - `--bold` / `--italic` / `--underline` / `--strike`: Text emphasis
-- `--fill`: Paint a background fill band — `subtle` or `pronounced`
-- `--fill-band`: Band painted by `--fill` — `full` (default), `padded`, `indented`
-- `--inset`: Inset, in columns, applied to the fill band
+- `--fill`: Paint a background tint behind the text — `subtle` or `pronounced`
 - `--border`: Draw a border — `all`, `left`, `right`, `top`, `bottom`
 - `--border-color`: Border color (named or `#rrggbb`)
 - `--border-radius`: Corner radius in columns; any non-zero value rounds corners
+- `--padding`: Padding reserved inside the box, in columns, on all four sides
+  (painted by `--bg`/`--fill`)
+- `--margin`: Transparent horizontal margin, in columns
+- `--width`: Content-box width — `auto`, `fit` (fit-content), or a column count
+- `--max-width`: Cap the resolved content-box width, in columns
+- `--align`: Place a sub-available box — `left`, `center`, `right`
 
 ## Progress Command
 

@@ -3,7 +3,7 @@ use color_eyre::eyre::Result;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::utils::layout::{Length, Margin};
+use biscuit_terminal::utils::layout::{Length, Edges};
 use claudine::events::AgenticEvent;
 
 use crate::log;
@@ -21,7 +21,7 @@ pub(super) fn run_describe() -> Result<()> {
 
     let term = crate::log::terminal();
     let mut table = Table::new().with_columns(columns).alternate_text_color();
-    table.layout_mut().margin = Margin::x(Length::ch(1));
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 
     for event in AgenticEvent::ALL {
         let row: Vec<TableCellContent> = vec![
