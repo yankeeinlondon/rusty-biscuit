@@ -5386,6 +5386,121 @@ fn test_repo_worktrees_verbose_output() {
 }
 
 #[test]
+fn test_repo_worktrees_list_verbose_composes_and_has_no_leading_space() {
+    // `-v` must compose with `--list`: metadata is appended, structure stays
+    // one-per-line, and no line begins with whitespace. Bare `-v` must be
+    // byte-identical to `--list -v`.
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let list_v = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--list",
+            "-v",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let list_v_out = String::from_utf8(list_v.get_output().stdout.clone()).unwrap();
+
+    for line in list_v_out.lines() {
+        assert!(
+            !line.starts_with(' '),
+            "verbose list line must not start with a space: {line:?}"
+        );
+        assert!(
+            line.contains("located at"),
+            "verbose list line must include metadata: {line:?}"
+        );
+    }
+
+    let bare_v = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "-v",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let bare_v_out = String::from_utf8(bare_v.get_output().stdout.clone()).unwrap();
+    assert_eq!(
+        bare_v_out, list_v_out,
+        "bare `-v` must match `--list -v`"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_md_verbose_keeps_bullet_and_metadata() {
+    // `--md -v` must keep the markdown bullet AND append metadata.
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--md",
+            "-v",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    for line in stdout.lines() {
+        assert!(
+            line.starts_with("- "),
+            "md verbose line must start with '- ': {line:?}"
+        );
+        assert!(
+            line.contains("located at"),
+            "md verbose line must include metadata: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_repo_worktrees_csv_verbose_single_line_with_metadata() {
+    // `--csv -v` must stay a single comma-separated line and gain metadata.
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--csv",
+            "-v",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(
+        stdout.trim().lines().count(),
+        1,
+        "csv verbose must be a single line: {stdout}"
+    );
+    assert!(
+        stdout.contains("located at"),
+        "csv verbose must include metadata: {stdout}"
+    );
+    assert!(
+        stdout.contains("my-worktree"),
+        "csv verbose must list worktree name: {stdout}"
+    );
+}
+
+#[test]
 fn test_repo_worktrees_json_output() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
