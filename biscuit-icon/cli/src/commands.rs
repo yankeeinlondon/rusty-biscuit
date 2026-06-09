@@ -40,6 +40,9 @@ pub async fn run_with_client(command: Commands, nerd: bool, client: &IconifyClie
 }
 
 async fn icons(filter: Option<String>, from: Option<String>, nerd: bool, client: &IconifyClient) -> Result<()> {
+    const MAX_RESULTS: usize = 100;
+    const CONCURRENCY: usize = 10;
+
     let term = Terminal::new();
     let needle = filter.unwrap_or_default();
 
@@ -63,11 +66,15 @@ async fn icons(filter: Option<String>, from: Option<String>, nerd: bool, client:
     }
 
     let offline = catalog::offline_icons(&cache, &needle, &allowed)?;
+    let mut errors = Vec::new();
 
     for id in &offline {
         match lookup_icon(id, &cache, client).await {
             Ok(icon) => println!("{}  {id}", render_icon(&icon, &term, nerd)),
-            Err(err) => eprintln!("{id}: {err}"),
+            Err(err) => {
+                eprintln!("{id}: {err}");
+                errors.push(id.clone());
+            }
         }
     }
 
@@ -77,27 +84,56 @@ async fn icons(filter: Option<String>, from: Option<String>, nerd: bool, client:
         if offline.is_empty() {
             return Err(eyre!("no icons available offline"));
         }
+        if !errors.is_empty() {
+            return Err(eyre!("{} offline icon(s) could not be rendered", errors.len()));
+        }
         return Ok(());
     }
 
+    let allowed_vec: Vec<String> = allowed.iter().cloned().collect();
+    let prefixes = if allowed_vec.is_empty() { None } else { Some(allowed_vec.as_slice()) };
+
     // Paginate through online search results and merge with offline results.
-    match client.search_icons(&needle).await {
-        Ok(hits) => {
+    match client.search_icons(&needle, Some(MAX_RESULTS), prefixes).await {
+        Ok((hits, total)) => {
             let seen: std::collections::HashSet<_> = offline.iter().cloned().collect();
             let new_hits: Vec<_> = hits
                 .into_iter()
-                .filter(|id| catalog_allowed_prefix(id, &allowed) && !seen.contains(id))
+                .filter(|id| !seen.contains(id))
                 .collect();
             if offline.is_empty() && new_hits.is_empty() {
                 return Err(eyre!(
                     "no icons match {needle:?}; try `icon <prefix:name>` to fetch directly"
                 ));
             }
-            for id in new_hits {
-                match Icon::iconify_with(&id, &cache, client).await {
-                    Ok(icon) => println!("{}  {id}", render_icon(&icon, &term, nerd)),
-                    Err(err) => eprintln!("{id}: {err}"),
+
+            for chunk in new_hits.chunks(CONCURRENCY) {
+                let mut handles = Vec::with_capacity(chunk.len());
+                for id in chunk {
+                    let id = id.clone();
+                    let cache = cache.clone();
+                    let client = client.clone();
+                    handles.push(tokio::spawn(async move {
+                        (id.clone(), Icon::iconify_with(&id, &cache, &client).await)
+                    }));
                 }
+                for handle in handles {
+                    let (id, result) = handle.await.map_err(|e| eyre!("task join failed: {e}"))?;
+                    match result {
+                        Ok(icon) => println!("{}  {id}", render_icon(&icon, &term, nerd)),
+                        Err(err) => {
+                            eprintln!("{id}: iconify fetch failed: {err}");
+                            errors.push(id);
+                        }
+                    }
+                }
+            }
+
+            if total > MAX_RESULTS {
+                println!(
+                    "… {} more result(s) available online; use a more specific filter",
+                    total - MAX_RESULTS
+                );
             }
         }
         Err(err) => {
@@ -107,6 +143,10 @@ async fn icons(filter: Option<String>, from: Option<String>, nerd: bool, client:
                 ));
             }
         }
+    }
+
+    if !errors.is_empty() {
+        return Err(eyre!("{} icon(s) could not be fetched", errors.len()));
     }
 
     Ok(())
