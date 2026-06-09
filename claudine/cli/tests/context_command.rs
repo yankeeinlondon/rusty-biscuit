@@ -598,6 +598,11 @@ fn context_side_effects_makes_no_filesystem_changes() {
         before, after,
         "`context --side-effects` must not create, delete, or modify any file in the work dir"
     );
+    // Engine construction and network attempts are not observable from a
+    // filesystem snapshot; that gap is closed in-process by the unit test
+    // `metadata_reports_construct_no_engine_and_attempt_no_network`, which
+    // asserts Darkmatter's engine-build and network-attempt counters stay flat
+    // across the render.
 }
 
 /// Side-effects report must use "capabilities" language and avoid availability claims.

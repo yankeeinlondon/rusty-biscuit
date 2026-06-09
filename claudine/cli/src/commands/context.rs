@@ -766,6 +766,36 @@ mod tests {
     use biscuit_terminal::components::table::table::{Table, TableColumn};
     use biscuit_terminal::terminal::Terminal;
 
+    /// The default, expression, and side-effect reports are documentation
+    /// only: the spec forbids them from instantiating or probing an effect
+    /// engine or touching the network. Rather than asserting that by code
+    /// inspection, this drives the real render functions and checks Darkmatter's
+    /// process-wide instrumentation counters did not move — catching a
+    /// regression that constructs an `EffectEngine` (the gateway to
+    /// allowlist/config reads and host discovery) or attempts an HTTP request.
+    #[test]
+    fn metadata_reports_construct_no_engine_and_attempt_no_network() {
+        use darkmatter::effects::{engine_build_count, network_attempt_count};
+
+        let builds_before = engine_build_count();
+        let network_before = network_attempt_count();
+
+        render_default_report();
+        render_expressions_report();
+        render_side_effects_report();
+
+        assert_eq!(
+            engine_build_count(),
+            builds_before,
+            "documentation-only reports must not construct an EffectEngine",
+        );
+        assert_eq!(
+            network_attempt_count(),
+            network_before,
+            "documentation-only reports must attempt no network access",
+        );
+    }
+
     /// The values report must capture the runtime context exactly once per
     /// invocation — never per section or per row. The capture seam lets us
     /// assert that automatically rather than by code inspection.

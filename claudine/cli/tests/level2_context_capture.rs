@@ -5,26 +5,51 @@
 //! (`CapturedFrame`), closing the gap the review flagged: the prior `*_pty.rs`
 //! tests only inspect a manufactured PTY's byte stream (Level 1).
 //!
-//! Coverage (per the context spec's shared-rendering requirements):
+//! Coverage spans all four reports (default, `--values`, `--expressions`,
+//! `--side-effects`) across the three width regimes the spec calls out — a
+//! **narrow** pane (wrapping active), **exactly 140**, and **wider than 140**:
 //!
 //! - **margins + box glyphs** — every table border carries the 1ch left margin
 //!   and the production `Table` border glyphs.
-//! - **`Type` column preserved** — the narrow report keeps `Property` / `Type` /
-//!   the final column and wraps content instead of dropping `Type`.
-//! - **visible-width contract** — no rendered row exceeds the terminal width,
-//!   and a wider-than-140 terminal caps rows at 140 visible cells.
-//! - **inverse inline code** — the `` `||` `` mode header and the alias-row
+//! - **140 cap + right margin** — in a 160-cell pane the width-filling reports
+//!   render to 139 visible cells: the 140ch maximum with its 1ch right margin
+//!   reserved (the trailing margin cell is trimmed with the pane padding). That
+//!   they stop at 139 in a 160-wide terminal proves the cap and the margin
+//!   together; the in-process width math is not trusted for this.
+//! - **`Type` column preserved** — the narrow default report keeps `Property` /
+//!   `Type` / the final column and wraps instead of dropping `Type`.
+//! - **descriptive-content retention** — known descriptive text survives at
+//!   every width.
+//! - **inverse inline code** — the `` `||` `` mode header and alias-row
 //!   descriptions render with the inverse SGR (`\x1b[7m`), never literal
 //!   backticks/markup.
 //! - **unordered list** — operator lists render with the `- ` marker and a
 //!   hanging indent on wrapped continuation lines.
 //!
-//! Each test spawns a **dedicated, tall** tmux session sized to hold the whole
-//! report — the harness captures only the visible pane (no scrollback), and the
-//! reports are far taller than a default pane, so the section under test would
-//! otherwise scroll away. tmux is the portable, headless real-terminal backend
-//! and faithfully re-emits SGR; the context reports use no OSC8 hyperlinks, so a
-//! second emulator adds nothing here.
+//! ## Per-report narrow widths
+//!
+//! Each report has a different intrinsic minimum width, so "narrow" is chosen
+//! per report to exercise wrapping without forcing data-driven overflow of an
+//! unbreakable token (a 140-char path or CSV value cannot wrap):
+//!
+//! - default — 78 (its descriptions wrap on spaces; properties are ≤41 cells)
+//! - `--values` — 120 (the narrowest width at which long CSV/path *values*
+//!   still fit; below it a single unbreakable value overflows)
+//! - `--expressions` — 100 (its natural width is 114, so 100 forces wrapping)
+//! - `--side-effects` — 128 (its 40-cell capability column plus the safety
+//!   column give it a ~123-cell floor; 128 fits while still wrapping)
+//!
+//! ## Pane height
+//!
+//! `capture-pane` returns only the visible pane (no scrollback), so each test
+//! sizes `rows` to its report. The `--values` report is far taller than any
+//! practical pane (long CSV values wrap to hundreds of lines), so its
+//! assertions target content guaranteed to be in the *bottom* screenful — the
+//! Hardware section, whose last row is `ctx.gpu`.
+//!
+//! tmux is the portable, headless real-terminal backend and faithfully
+//! re-emits SGR; the context reports use no OSC8 hyperlinks, so a second
+//! emulator adds nothing here.
 //!
 //! Skip-clean: `TmuxHarness::available()` is checked first and the tests return
 //! early when tmux is absent. `BISCUIT_TEST_LEVEL_REQUIRED=2` flips a missing
@@ -45,11 +70,11 @@ use test_toolkit::{require_level, Level};
 /// Captures a `claudine context <args>` run inside a freshly spawned tmux
 /// session of `cols` × `rows` cells, then tears the session down.
 ///
-/// `rows` must exceed the report's line count so the full report is on the
-/// (detached) pane when captured — `capture-pane` returns only the visible
-/// pane. `FORCE_COLOR=1` routes claudine through an optimistic terminal so the
-/// styling is the emulator's capture, not claudine's raw stream; `COLUMNS`
-/// fixes the logical width.
+/// `rows` must exceed (or, for over-tall reports, usefully sample) the report's
+/// line count — `capture-pane` returns only the visible pane. `FORCE_COLOR=1`
+/// routes claudine through an optimistic terminal so the styling is the
+/// emulator's capture, not claudine's raw stream; `COLUMNS` fixes the logical
+/// width.
 fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let session = format!(
@@ -134,6 +159,35 @@ fn assert_box_glyphs_and_left_margin(frame: &CapturedFrame) {
     }
 }
 
+/// A width-filling report (default / `--values` / `--side-effects`) at a pane of
+/// at least 140 must render to 139 visible cells: the 140ch cap with the 1ch
+/// right margin reserved (the margin cell trims off with the pane padding).
+/// `138..=139` tolerates a one-cell rounding difference while still proving both
+/// the cap (never 140+) and that the table genuinely uses the full width.
+fn assert_fills_to_140_cap_with_right_margin(frame: &CapturedFrame) {
+    let max = max_visible_width(frame);
+    assert!(
+        (138..=139).contains(&max),
+        "filling report must reach the 140 cap minus its 1ch right margin \
+         (expected 138..=139 visible cells); got {max}.\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+/// True when the frame contains a wrapped continuation row: a table data line
+/// whose first cell is blank (the content spilled onto a new line) but which
+/// still carries a second column separator.
+fn has_wrapped_continuation(frame: &CapturedFrame) -> bool {
+    frame.plain.lines().any(|l| {
+        let t = l.trim_start();
+        if let Some(rest) = t.strip_prefix('│') {
+            rest.starts_with("  ") && rest.contains('│')
+        } else {
+            false
+        }
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Default report
 // ---------------------------------------------------------------------------
@@ -179,11 +233,11 @@ fn level2_context_default_styled_in_tmux() {
     );
 }
 
-/// Narrow report (`COLUMNS=78`): all three columns survive and the final column
-/// wraps rather than the table dropping `Type` or overflowing.
+/// Narrow default report (`COLUMNS=78`): all three columns survive and the final
+/// column wraps rather than the table dropping `Type` or overflowing.
 #[test]
 #[serial(level2_terminal)]
-fn level2_context_narrow_preserves_type_and_wraps_in_tmux() {
+fn level2_context_default_narrow_preserves_type_and_wraps_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
     let frame = capture_context(&[], 78, 400);
 
@@ -205,20 +259,122 @@ fn level2_context_narrow_preserves_type_and_wraps_in_tmux() {
         "narrow report rows must fit within 78 cells; max={max}.\nplain:\n{}",
         frame.plain,
     );
-    // Wrapping produces continuation rows: a data line whose first cell is blank
-    // (the description spilled onto a new line) but which still has a second
-    // column separator.
-    let wrapped = frame.plain.lines().any(|l| {
-        let t = l.trim_start();
-        if let Some(rest) = t.strip_prefix('│') {
-            rest.starts_with("  ") && rest.contains('│')
-        } else {
-            false
-        }
-    });
     assert!(
-        wrapped,
+        has_wrapped_continuation(&frame),
         "narrow report must wrap descriptive content onto continuation rows.\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+/// Default report at exactly 140: fills the 140 cap with its 1ch right margin.
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_default_at_140_fills_cap_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&[], 140, 320);
+
+    assert_box_glyphs_and_left_margin(&frame);
+    assert_fills_to_140_cap_with_right_margin(&frame);
+    assert!(
+        frame.plain.contains("ctx.today"),
+        "140-wide default report must render the catalog.\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+/// In a terminal wider than 140 cells, the default report caps at the 140
+/// envelope (139 visible cells with the right margin reserved) rather than
+/// expanding to fill 160 — proven in a real terminal, not by width math.
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_default_caps_at_140_in_wide_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&[], 160, 320);
+
+    assert_box_glyphs_and_left_margin(&frame);
+    assert_fills_to_140_cap_with_right_margin(&frame);
+    assert!(
+        frame.plain.contains("ctx.today"),
+        "wide report must still render the catalog.\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Values report
+// ---------------------------------------------------------------------------
+
+/// `--values` narrow (`COLUMNS=120`, its narrowest fitting width): the three
+/// `Property` / `Type` / `Value` columns survive, content wraps, and rows fit.
+/// The report is far taller than the pane, so assertions target the bottom
+/// screenful (the Hardware section, ending in `ctx.gpu`).
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_values_narrow_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&["--values"], 120, 400);
+
+    assert_box_glyphs_and_left_margin(&frame);
+    for header in ["Property", "Type", "Value"] {
+        assert!(
+            frame.plain.contains(header),
+            "values report must keep the `{header}` column.\nplain:\n{}",
+            frame.plain,
+        );
+    }
+    assert!(
+        frame.plain.contains("ctx.gpu"),
+        "values report bottom screenful must include the final `ctx.gpu` row.\nplain:\n{}",
+        frame.plain,
+    );
+    let max = max_visible_width(&frame);
+    assert!(
+        max <= 120,
+        "narrow values rows must fit within 120 cells; max={max}.\nplain:\n{}",
+        frame.plain,
+    );
+    assert!(
+        has_wrapped_continuation(&frame),
+        "narrow values report must wrap long values onto continuation rows.\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+/// `--values` at exactly 140: fills the 140 cap with its 1ch right margin.
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_values_at_140_fills_cap_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&["--values"], 140, 400);
+
+    assert_box_glyphs_and_left_margin(&frame);
+    assert_fills_to_140_cap_with_right_margin(&frame);
+    for header in ["Property", "Type", "Value"] {
+        assert!(
+            frame.plain.contains(header),
+            "140-wide values report must keep the `{header}` column.\nplain:\n{}",
+            frame.plain,
+        );
+    }
+    assert!(
+        frame.plain.contains("ctx.gpu"),
+        "values report must render the catalog through its final row.\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+/// `--values` wider than 140: caps at the 140 envelope rather than filling 160.
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_values_caps_at_140_in_wide_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&["--values"], 160, 400);
+
+    assert_box_glyphs_and_left_margin(&frame);
+    assert_fills_to_140_cap_with_right_margin(&frame);
+    assert!(
+        frame.plain.contains("Value"),
+        "wide values report must keep the `Value` column.\nplain:\n{}",
         frame.plain,
     );
 }
@@ -227,13 +383,14 @@ fn level2_context_narrow_preserves_type_and_wraps_in_tmux() {
 // Expressions report
 // ---------------------------------------------------------------------------
 
-/// `--expressions`: the `` `||` `` mode header renders inverse, and operator
-/// lists use the `- ` marker with a hanging indent on wrapped lines.
+/// `--expressions` narrow (`COLUMNS=100`, below its ~114 natural width so
+/// wrapping is active): the `` `||` `` mode header renders inverse, operator
+/// lists use the `- ` marker with a hanging indent, and rows fit the pane.
 #[test]
 #[serial(level2_terminal)]
-fn level2_context_expressions_inline_code_and_list_in_tmux() {
+fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
-    let frame = capture_context(&["--expressions"], 120, 320);
+    let frame = capture_context(&["--expressions"], 100, 320);
 
     assert!(
         !frame.plain.contains("`||`"),
@@ -257,7 +414,10 @@ fn level2_context_expressions_inline_code_and_list_in_tmux() {
     let has_hanging_indent = frame.plain.lines().any(|l| {
         let trimmed = l.trim();
         let indent = l.len() - l.trim_start().len();
-        !trimmed.is_empty() && !trimmed.starts_with("- ") && !trimmed.starts_with('│') && indent > bullet_indent
+        !trimmed.is_empty()
+            && !trimmed.starts_with("- ")
+            && !trimmed.starts_with('│')
+            && indent > bullet_indent
     });
     assert!(
         has_hanging_indent,
@@ -266,9 +426,50 @@ fn level2_context_expressions_inline_code_and_list_in_tmux() {
     );
 
     assert!(
-        max_visible_width(&frame) <= 120,
-        "no row may exceed the 120-col pane; max={}",
+        max_visible_width(&frame) <= 100,
+        "no row may exceed the 100-col pane; max={}",
         max_visible_width(&frame),
+    );
+}
+
+/// `--expressions` at exactly 140: renders the function catalog within the cap.
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_expressions_at_140_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&["--expressions"], 140, 320);
+
+    assert_box_glyphs_and_left_margin(&frame);
+    assert!(
+        max_visible_width(&frame) <= 140,
+        "expressions report must stay within the 140 cap; max={}",
+        max_visible_width(&frame),
+    );
+    assert!(
+        frame.plain.contains("min(a, b)"),
+        "expressions report must list the function catalog.\nplain:\n{}",
+        frame.plain,
+    );
+}
+
+/// `--expressions` wider than 140: content-hugging tables still never bleed past
+/// the 140 cap in a 160-cell pane.
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_expressions_caps_at_140_in_wide_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&["--expressions"], 160, 320);
+
+    assert!(
+        max_visible_width(&frame) <= 140,
+        "in a 160-col terminal, expressions rows must stay within 140; max={}.\nplain:\n{}",
+        max_visible_width(&frame),
+        frame.plain,
+    );
+    assert!(
+        frame.plain.contains("Functions"),
+        "wide expressions report must render the function section.\nplain:\n{}",
+        frame.plain,
     );
 }
 
@@ -276,13 +477,14 @@ fn level2_context_expressions_inline_code_and_list_in_tmux() {
 // Side-effects report
 // ---------------------------------------------------------------------------
 
-/// `--side-effects`: capability tables render with glyphs, the 1ch margin, the
-/// three documented columns, and rows that fit the pane.
+/// `--side-effects` narrow (`COLUMNS=128`, just above its ~123-cell floor):
+/// capability tables render with glyphs, the three documented columns, wrapped
+/// descriptions, and rows that fit the pane.
 #[test]
 #[serial(level2_terminal)]
-fn level2_context_side_effects_styled_in_tmux() {
+fn level2_context_side_effects_narrow_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
-    let frame = capture_context(&["--side-effects"], 120, 120);
+    let frame = capture_context(&["--side-effects"], 128, 200);
 
     assert_box_glyphs_and_left_margin(&frame);
     for header in ["Capability", "Description", "Safety"] {
@@ -293,35 +495,44 @@ fn level2_context_side_effects_styled_in_tmux() {
         );
     }
     assert!(
-        max_visible_width(&frame) <= 120,
-        "no row may exceed the 120-col pane; max={}",
+        max_visible_width(&frame) <= 128,
+        "narrow side-effects rows must fit within 128 cells; max={}.\nplain:\n{}",
         max_visible_width(&frame),
+        frame.plain,
+    );
+    assert!(
+        has_wrapped_continuation(&frame),
+        "narrow side-effects report must wrap descriptions onto continuation rows.\nplain:\n{}",
+        frame.plain,
     );
 }
 
-// ---------------------------------------------------------------------------
-// 140-cap in a wider-than-140 terminal
-// ---------------------------------------------------------------------------
-
-/// In a terminal wider than 140 cells, every rendered row caps at 140 visible
-/// cells (the report's maximum-width contract), proven in a real terminal
-/// rather than by the in-process width math.
+/// `--side-effects` at exactly 140: fills the 140 cap with its 1ch right margin.
 #[test]
 #[serial(level2_terminal)]
-fn level2_context_caps_rows_at_140_in_wide_tmux() {
+fn level2_context_side_effects_at_140_fills_cap_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
-    let frame = capture_context(&[], 160, 320);
+    let frame = capture_context(&["--side-effects"], 140, 200);
 
-    let max = max_visible_width(&frame);
-    assert!(
-        max <= 140,
-        "in a 160-col terminal, rows must cap at 140 visible cells; max={max}.\nplain:\n{}",
-        frame.plain,
-    );
-    // The report still rendered fully (not blank / not scrolled away).
-    assert!(
-        frame.plain.contains("ctx.today"),
-        "wide report must still render the catalog.\nplain:\n{}",
-        frame.plain,
-    );
+    assert_box_glyphs_and_left_margin(&frame);
+    assert_fills_to_140_cap_with_right_margin(&frame);
+    for header in ["Capability", "Description", "Safety"] {
+        assert!(
+            frame.plain.contains(header),
+            "140-wide side-effects report must show the `{header}` column.\nplain:\n{}",
+            frame.plain,
+        );
+    }
+}
+
+/// `--side-effects` wider than 140: caps at the 140 envelope rather than filling
+/// 160.
+#[test]
+#[serial(level2_terminal)]
+fn level2_context_side_effects_caps_at_140_in_wide_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    let frame = capture_context(&["--side-effects"], 160, 200);
+
+    assert_box_glyphs_and_left_margin(&frame);
+    assert_fills_to_140_cap_with_right_margin(&frame);
 }
