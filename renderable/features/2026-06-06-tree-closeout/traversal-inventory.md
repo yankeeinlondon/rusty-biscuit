@@ -51,7 +51,7 @@ and consumed by one of the four target entry points: Terminal
 | T3 | The shared validation gate: `renderable::tree::validate::validate` (`validate.rs:196`) → recursive `walk`. Runs once per target fold entry point. | Browser: `browser.rs:286` (`validate_and_collect_diagnostics`); Terminal: `render.rs:99`; Markdown: `markdown.rs:92`. Each target entry calls it once on the root before folding. | **(2) Validation / diagnostics explicitly requested at the renderer API boundary.** | Produces warning-severity `Diagnostic`s (or a fatal `ValidationError` on error-severity findings). Does not mutate the tree. | **Retain.** This is the structural-integrity gate every target renderer runs. It is not disguised policy decoration — it enforces the typed-attr placement rules (e.g. `text_layout` only on link/image/list-item, browser attrs only on links/images, no `renderable.*` keys in `data`). One-line rationale: *renderer API boundary integrity gate, not output preparation.* |
 | T4 | The target renderer fold — the single recursive output-producing walk. Browser: `StreamWriter::write` (`browser.rs`); Terminal: `Writer::render` (`render.rs`); Markdown: `render_markdown_document` (`markdown.rs`). | Browser `render_browser_document_html` (`browser.rs:215`); Terminal `render_terminal_document` (`render.rs:152`); Markdown `render_markdown_document` (`markdown.rs:150`). | **(1) The target renderer fold.** | Produces the final output string for the target. | **Retain** — this is the architecture's "one target fold". |
 | T5 | `DarkmatterPage` page-frame lowering — the terminal row/column decoration and browser page-wrapper assembly performed by the page frame around the folded target output. | `darkmatter/lib/src/layout/page.rs` (`render` at `790`, `render_to_browser` at `909`) and `darkmatter/lib/src/layout/context.rs`. Operates on the folded output string / wrapper, not on the `RenderNode` tree. | **Page-frame assembler** (outside the document component tree — see the page-frame decision in Phase 2). | Outer page margin/padding, full-page background rows/wrapper, max-width centering, `PageBackground::Pronounced` code-theme contrast, browser page-wrapper metadata and stylesheet assembly. | **Retain, constrained** (Phase 2 decision target). It owns no component policy, inspects no component node kinds, and mutates no component content. |
-| T6 | `DarkmatterPage::capability_signals` (`page.rs`) → `scan_baked_attrs` — a **read-only** recursive walk of the **single** already-built `Document` (the one fold T4 also consumes; no second construction fold). Reports `(paints, applies)`: whether any node carries a construction-baked color, and whether any node carries any construction-baked attr (color / layout / text-layout). | `darkmatter/lib/src/layout/page.rs` — `DarkmatterPage::render` terminal page path only. Gated on `has_node_policy_source` (a component / link / image policy is configured), so geometry-only, page-color-only, and zero-config pages never run it. | **Page-frame capability selection** (the documented page frame, excluded by acceptance criterion 3 alongside validation). Read-only — mutates nothing. | No output effect on its own. `paints` selects the captured color-depth override; `applies` selects the captured/optimistic capability profile. Keying capability selection on whether a configured policy **matched** content (not policy *presence*) is what makes an unmatched policy render unrelated content identically to a no-policy page (review-4 finding 1). | **Retain.** The single read-only probe replaced the review-3 design that built a *second* `Document` to inspect (review-4 finding 2); it now reads the same owned tree the target fold consumes. |
+| T6 | `DarkmatterPage::paints_construction_color` (`page.rs`) → `scan_painted_color` — a **read-only** recursive walk of the **single** already-built `Document` (the one fold T4 also consumes; no second construction fold). Returns a single `bool`: whether any node carries a construction-baked **color** (page color, or a matched component / link / image color). Short-circuits on the first paint. | `darkmatter/lib/src/layout/page.rs` — `DarkmatterPage::render` terminal page path only. Gated on `has_node_policy_source` (a component / link / image policy is configured), so geometry-only, page-color-only, and zero-config pages never run it. | **Page-frame color-depth selection** (the documented page frame, excluded by acceptance criterion 3 alongside validation). Read-only — mutates nothing. | No output effect on its own. `paints` selects the captured color-depth override only. The optimistic (TrueColor + OSC8) capability **profile** is **not** keyed off this probe — it is selected by page-frame geometry alone (`has_frame_geometry`), so a matched component policy stays local to its node and cannot promote unrelated content to optimistic capabilities (review-5 finding 1). | **Retain.** The single read-only probe replaced the review-3 design that built a *second* `Document` to inspect (review-4 finding 2); it now reads the same owned tree the target fold consumes. Review-5 narrowed it from the prior `(paints, applies)` pair to color only, deleting the `applies` layout/text-layout scan that fed the now-removed matched-policy capability-profile selection. |
 
 ## Obsolete mechanism checks
 
@@ -61,7 +61,7 @@ Explicit `rg` checks for every deleted traversal named by the spec
 | Mechanism | Result |
 |---|---|
 | `decorate_document` (or an equivalent post-fold component-lookup walk) | **Absent.** The only match is `build_context.rs:183`, a doc-comment on `apply_node_policy` noting it *replaces* the deleted `decorate_document` walk. `apply_node_policy` is a construction-time helper called inside the fold, not a post-fold traversal. |
-| Component-policy `LayoutContext` traversal | **Absent.** `LayoutContext` (`context.rs:24-48`) holds only viewport/page concerns; it carries no component-policy map and performs no recursive walk. The `max_width` cap is gated purely on page-frame geometry (`DarkmatterPage::has_frame_geometry`, review-2 finding 2). Capability selection (captured color depth and the optimistic/ambient profile) is gated on whether a configured policy *actually matched* content, detected by the single read-only `capability_signals` probe over the already-built tree (T6) — not on component-policy *presence*, and not via a second construction fold (review-4 findings 1–2). An unmatched policy threads the build context but bakes nothing, so it changes neither the content-box width nor the renderer-wide capabilities. The probe is the one read-only page-path walk; no decoration/policy traversal exists. |
+| Component-policy `LayoutContext` traversal | **Absent.** `LayoutContext` (`context.rs:24-48`) holds only viewport/page concerns; it carries no component-policy map and performs no recursive walk. The `max_width` cap is gated purely on page-frame geometry (`DarkmatterPage::has_frame_geometry`, review-2 finding 2), as is the optimistic/ambient capability profile (review-5 finding 1). The captured color-depth override is gated on whether a configured color policy *actually matched* content, detected by the single read-only `paints_construction_color` probe over the already-built tree (T6) — not on component-policy *presence*, and not via a second construction fold (review-4 findings 1–2). An unmatched policy threads the build context but bakes nothing, so it changes neither the content-box width, the color depth, nor the renderer-wide capability profile; a *matched* policy stays local to its node and likewise cannot change the profile of unrelated content. The probe is the one read-only page-path walk; no decoration/policy traversal exists. |
 | Opacity or attribute sentinel injection | **Absent.** See the [extension-hint inventory](extension-hint-inventory.md#negative-searches). Alpha rides the typed `PaintColor` channel; no sentinel collection pass exists. |
 | Post-render HTML opening-tag mutation | **Absent.** `rg 'rewrite_html\|mutate_html\|post_render\|post_fold\|opening_tag_mutation'` returns nothing. The browser fold emits each opening tag once, with typed attrs + validated `inline_style` in place; there is no second pass. |
 | Pre-render link/image text replacement | **Absent.** Link children and image alt are attached as typed attrs / structural children during construction. The terminal renderer shapes its projection (label width/alignment, `▉ IMAGE[alt]` placeholder) without mutating the tree; pinned by `render_tree_text_layout_does_not_mutate_tree_across_widths`. |
@@ -83,10 +83,11 @@ The complete post-construction traversal set on the production path is:
 - **T4** the target renderer fold — the single output-producing walk.
 - **T5** the page-frame assembler — operates on the folded output,
   outside the component tree.
-- **T6** the page-frame capability probe (`capability_signals`) —
+- **T6** the page-frame color probe (`paints_construction_color`) —
   terminal page path only, gated on a configured node policy source; a
   single read-only walk of the same built tree T4 consumes (no second
-  construction fold). Selects color depth / capability profile; mutates
+  construction fold). Selects the captured color-depth override only (the
+  capability profile is geometry-keyed, review-5 finding 1); mutates
   nothing.
 
 There is **no** post-construction traversal that mutates component
@@ -157,18 +158,30 @@ policy and does not traverse/mutate document components
   depth, an unmatched colored component policy on an otherwise zero-geometry page
   produces byte-identical output to a no-policy page (a fenced code block keeps
   its highlight unchanged). The explicit depths make the parity independent of
-  the harness's ambient detection. This pins that capability selection (color
-  depth *and* the optimistic/ambient capability profile) is gated on whether a
-  configured policy *actually matched* content (`capability_signals`), never on
-  component-policy presence — closing the capability analog of the review-2 width
-  leak, and keeping width and capability selection independent in the page
-  renderer (review-4 finding 1). `terminal_painted_color_engages_captured_color_depth`
-  is the companion guard: when the page *does* paint color, the captured depth
-  engages. The real-terminal Level 2 parity test
+  the harness's ambient detection. This pins that the captured color-depth
+  override is gated on whether a configured *color* policy *actually matched*
+  content (`paints_construction_color`), never on component-policy presence —
+  closing the capability analog of the review-2 width leak, and keeping width and
+  color-depth selection independent in the page renderer (review-4 finding 1).
+  `terminal_painted_color_engages_captured_color_depth` is the companion guard:
+  when the page *does* paint color, the captured depth engages. The real-terminal
+  Level 2 parity test
   `level2_unmatched_policy_matches_no_policy_color_in_real_terminal`
   (`darkmatter/lib/tests/level2_render_tree_terminal.rs`) drives both the
   no-policy and unmatched-policy renders through a WezTerm pane and asserts the
   captured foreground-color sets are identical.
+- `terminal_matched_layout_policy_does_not_change_unrelated_capabilities`
+  (review-5 finding 1) — the optimistic (TrueColor + OSC8) capability *profile*
+  is selected by page-frame geometry alone, never by a matched component policy.
+  A *matched* layout-only policy (a centered table) leaves the capability
+  signature (truecolor / 256 / OSC8 / basic SGR counts) of unrelated code and
+  link content identical to a no-policy render, so a matched policy cannot hand
+  unrelated content color or hyperlinks the ambient terminal never advertised.
+  The real-terminal companion
+  `level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal`
+  drives both renders through a WezTerm pane and asserts both the foreground-color
+  sets *and* the link's visible representation (the OSC8 axis the Level 1 tests
+  cannot inspect) are identical.
 - `page_frame_vertical_margin_only_wraps_component_body` — adding top/bottom
   margin to an otherwise identical page only prepends/appends blank rows; the
   folded component body (heading, block quote, list, code) stays

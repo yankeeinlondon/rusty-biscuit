@@ -50,16 +50,15 @@ Both structural corpora were expanded to the spec section 6 feature list:
   fixed/max width (`table.width`, `block-quote.max-width`), page padding/
   max-width, and an ordered list with `ol.max-width`.
 
-## Construction-fold topology (review-4)
+## Construction-fold topology (review-4, re-anchored review-5)
 
-The review-3 capability probe (`paints_construction_color`) built a **second**
-throwaway `Document` to inspect for baked color, so any styled page that
-configured a component / link / image color source paid two complete
-construction folds plus a tree walk before the target fold. Review-4 collapses
-this: `DarkmatterPage::render` builds the `Document` **once** and the probe
-(`capability_signals`) reads that same owned tree (a single read-only walk,
-gated on a configured node-policy source). Net effect on the styled terminal
-page path:
+The review-3 capability probe built a **second** throwaway `Document` to inspect
+for baked color, so any styled page that configured a component / link / image
+color source paid two complete construction folds plus a tree walk before the
+target fold. Review-4 collapses this: `DarkmatterPage::render` builds the
+`Document` **once** and the probe reads that same owned tree (a single read-only
+walk, gated on a configured node-policy source). Net effect on the styled
+terminal page path:
 
 - **One fewer construction fold** for pages that configure a component / link /
   image color or style source (the common styled case). Page-color-only,
@@ -70,10 +69,20 @@ page path:
   acceptance criterion 3). See the [traversal inventory](traversal-inventory.md)
   T6 row.
 
-The `styled_production/page_styled/terminal` median below was anchored under the
-review-3 double-fold design; it should be **re-anchored** on a fresh run and is
-expected to be unchanged-to-faster for color-source pages. As elsewhere here,
-the structural gate — not wall-clock — remains the acceptance authority.
+Review-5 further narrows the probe. The optimistic (TrueColor + OSC8) capability
+profile is now selected by page-frame geometry alone — a matched component policy
+no longer promotes the whole document to optimistic capabilities (review-5
+finding 1). The probe is renamed `paints_construction_color` and returns a single
+`bool`: it scans only for baked **color** (driving the captured color-depth
+override) and short-circuits as soon as a paint is found, dropping the former
+layout/text-layout scan that fed the now-deleted `applies` capability signal.
+
+The `styled_production/page_styled/terminal` median below is the **re-anchored**
+value from a fresh run on the post-review-5 single-fold, color-only-probe
+topology: ~374 µs, down from the ~412 µs recorded under the review-3 double-fold
+design (a ~17% reduction; the browser path re-anchored to ~123 µs from ~197 µs).
+As elsewhere here, the structural gate — not wall-clock — remains the acceptance
+authority.
 
 ## Criterion timings (trend only, non-gating)
 
@@ -91,8 +100,8 @@ cargo bench -p darkmatter --bench render_pipeline_steps -- styled_production
 
 | Benchmark | Median |
 |---|---|
-| `styled_production/page_styled/terminal` (full `style:` pipeline + fold) | ~412 µs |
-| `styled_production/page_styled/browser` (full `style:` pipeline + fold) | ~197 µs |
+| `styled_production/page_styled/terminal` (full `style:` pipeline + fold) | ~374 µs |
+| `styled_production/page_styled/browser` (full `style:` pipeline + fold) | ~123 µs |
 | `render_pipeline_terminal/render` (fold-only → terminal, unstyled corpus) | ~357 µs |
 | `render_pipeline_terminal/full` (parse+fold+render, unstyled corpus) | ~410 µs |
 | `render_pipeline_browser/render` (fold-only → browser, unstyled corpus) | ~283 µs |
@@ -109,11 +118,11 @@ cargo bench -p darkmatter --bench render_pipeline_steps -- styled_production
   production CLI actually pays. The `render_pipeline_*` groups isolate the
   fold/render stages on a larger unstyled corpus and stay for stage-localization
   of regressions.
-- Styled terminal (~412 µs) and the unstyled `full` terminal path (~410 µs) are
+- Styled terminal (~374 µs) and the unstyled `full` terminal path (~410 µs) are
   similar in magnitude, but these are **different workloads** (styled corpus +
   `style:` pipeline vs. a larger unstyled corpus), so this is an order-of-
   magnitude sanity check, not a like-for-like comparison. The styled browser path
-  (~197 µs) carries more measurement variance (small absolute time, allocation-
+  (~123 µs) carries more measurement variance (small absolute time, allocation-
   sensitive); treat its band as indicative, not a threshold.
 - **No same-corpus before/after baseline exists for the styled-production group**:
   it was introduced in this phase, so these numbers are the *first* trend anchor
