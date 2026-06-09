@@ -220,11 +220,31 @@ fn styled_prose_cell_hints() {
 
 #[test]
 fn fenced_code_in_prose_degrades_to_text() {
+    // Standalone fence lines: a fence is recognized only when the trimmed line
+    // starts with three backticks, so the fence must own its own line for Prose
+    // to lift it into a `Code` node (and thus exercise `degrade_code_nodes`).
+    let prose = Prose::new("before\n```rust\nfn main() {}\n```\nafter");
+
+    // Precondition: the raw Prose projection really does carry a fenced `Code`
+    // node — otherwise the degradation below would be a no-op false positive.
+    let raw_nodes = prose.to_render_nodes();
+    let code = raw_nodes
+        .iter()
+        .find_map(|c| match &c.kind {
+            NodeKind::Code { lang, value, .. } => Some((lang.clone(), value.clone())),
+            _ => None,
+        })
+        .expect("Prose::to_render_nodes must contain a fenced Code node");
+    assert_eq!(code.0.as_deref(), Some("rust"), "fence language is captured");
+    assert!(
+        code.1.contains("fn main()"),
+        "code body present before degradation: {:?}",
+        code.1
+    );
+
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
-            "before ```rust\nfn main() {}\n``` after",
-        ))]]);
+        .with_data(vec![vec![TableCellContent::from(prose)]]);
     let node = table.render_tree_node().expect("tree node");
     let report = validate(&node, ValidationMode::Full);
     assert!(
@@ -254,6 +274,34 @@ fn fenced_code_in_prose_degrades_to_text() {
         text_content.contains("fn main()"),
         "degraded code body must appear as text: {text_content}"
     );
+    assert!(
+        !text_content.contains("```") && !text_content.contains("rust"),
+        "degraded text must drop fence and language metadata: {text_content}"
+    );
+
+    // Acceptance criterion 6: deterministic cross-target degradation. Every
+    // target must surface the literal code body and never re-emit the fence or
+    // language tag.
+    let term = test_terminal(80);
+    let terminal = strip_ansi(&table.render(&term));
+    let markdown = table.render_markdown();
+    let markdown_plus = table.render_markdown_plus();
+    let browser = table.render_html_fragment().render();
+    for (target, out) in [
+        ("terminal", terminal),
+        ("markdown", markdown),
+        ("markdown_plus", markdown_plus),
+        ("browser", browser),
+    ] {
+        assert!(
+            out.contains("fn main()"),
+            "{target} must surface the degraded code body: {out}"
+        );
+        assert!(
+            !out.contains("```") && !out.contains("rust"),
+            "{target} must not re-emit fence or language metadata: {out}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
