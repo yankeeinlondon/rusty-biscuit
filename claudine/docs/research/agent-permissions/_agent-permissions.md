@@ -8,7 +8,7 @@ target_schema:
     agent: string(required)
     model: string(required)
     # the CLI parameters involved in overriding permissions
-    cli_params: "{ param: string, description: string, example: string, example_desc: string }[]"
+    cli_params: "{ param: string(required), description: string(required), example: string, example_desc: string }[]"
     # the config files involved in setting permissions
     config_files: 
         user: string(required)
@@ -22,6 +22,8 @@ target_schema:
         ergonomic: boolean(required)
         provides_coverage: boolean(required)
     changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string
 update: "{{file_exists(file) && markdown_file_empty(file)}}"
 ---
 
@@ -29,7 +31,7 @@ update: "{{file_exists(file) && markdown_file_empty(file)}}"
 
 Use the 'claudine' skill.
 
-## Work Structure
+## Document Structure
 
 Your job is to detailed research into the **permissions** features of the **{{state.desc}}**. You are expected to answer the following questions (and use the provided doc structure):
 
@@ -71,6 +73,12 @@ Your job is to detailed research into the **permissions** features of the **{{st
             - give examples that illustrate the grammar which can be used to express permissions for {{state.name}}
     - **Extending the Base**
         - give a few practical examples of how default permissions might be set but then part of that policy is overwritten by 
+- `## Tools and Permissions`
+    - List out the tools that {{state.name}} provides by default
+    - Describe out permissions map to tool calls
+- `## MCP and Permissions`
+    - Describe how permissions and MCP interact
+    - How can you use permissions to make MCP safer?
 
 ## Task
 
@@ -116,12 +124,19 @@ Follow these steps exactly:
         - `description` - a prose description of what this CLI parameter does
         - `example` - an example of using this parameter
         - `example_description` - describe the example you've provided
+    - `config_files` - is a dictionary and you must set both properties:
+        - `user` - the relative (typically relative to user's home dir) filepath to the configuration file used for user scoped permissions
+        - `repo` - the relative (from repo root) filepath to the configuration file used for repo scoped permissions
+    - `agent_permissions`
+        - `allowed` - set to true/flase based on whether {{state.name}} allows permissions to be set on a agent/subagent scoped basis
+        - `fm_properties` - a string array of any properties involved in 
     - `changes` - add a list of string descriptions which summarize the changes discovered since the last research was done
     ::end-block
     ::block when="!update"
     - `changes` - set to `[]`
     ::end-block
-
+    - `requires_claudine_update` - set to true/false based on whether you believe there will be required code changes to **Claudine** based on the changes discovered in your research. 
+        - If you respond with `true` then you must also set the `reason` frontmatter property to describe why you think that
 ## Output
 
 ::file @prompts/make-it-markdown.md
