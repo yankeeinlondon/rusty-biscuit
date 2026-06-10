@@ -1085,6 +1085,7 @@ fn escape_prose(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_terminal::discovery::detection::ColorDepth;
     use serde_json::json;
     use std::sync::Mutex as StdMutex;
 
@@ -1121,7 +1122,7 @@ mod tests {
                 lines.lock().unwrap().push(line.to_string());
             })
         };
-        LiveSemanticSink::new(
+        let mut sink = LiveSemanticSink::new(
             provider,
             EnvironmentContext::default(),
             Path::new("/tmp"),
@@ -1129,7 +1130,13 @@ mod tests {
             Arc::new(Mutex::new(StructuredSummaryDetails::default())),
             dispatch,
             emit,
-        )
+        );
+        sink.terminal = Terminal::builder()
+            .is_tty(true)
+            .color_depth(ColorDepth::TrueColor)
+            .osc_link_support(true)
+            .build();
+        sink
     }
 
     #[test]
@@ -2894,7 +2901,7 @@ mod tests {
                 lines.lock().unwrap().push(line.to_string());
             })
         };
-        LiveSemanticSink::new(
+        let mut sink = LiveSemanticSink::new(
             Provider::Claude,
             EnvironmentContext::default(),
             cwd,
@@ -2902,7 +2909,13 @@ mod tests {
             Arc::new(Mutex::new(StructuredSummaryDetails::default())),
             dispatch,
             emit,
-        )
+        );
+        sink.terminal = Terminal::builder()
+            .is_tty(true)
+            .color_depth(ColorDepth::TrueColor)
+            .osc_link_support(true)
+            .build();
+        sink
     }
 
     #[test]
