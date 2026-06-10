@@ -152,6 +152,44 @@ impl TmuxHarness {
         }
         Ok(())
     }
+
+    /// Resizes the session's window (and therefore its pane) to
+    /// `cols`×`rows` characters.
+    ///
+    /// Detached harness sessions are fixed at their creation size, so a
+    /// program that reads its winsize via `TIOCGWINSZ` always sees
+    /// 120×40 until this is called. Switching the session to manual
+    /// sizing first makes `resize-window` stick with no client attached;
+    /// a program spawned afterwards then observes the new dimensions.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if either `tmux` invocation fails to run or
+    /// `resize-window` reports a non-zero status.
+    pub fn resize(&mut self, cols: u32, rows: u32) -> io::Result<()> {
+        let session = self.session().to_string();
+        let mut set = Command::new("tmux");
+        set.args(["set-option", "-t", &session, "window-size", "manual"]);
+        run_with_timeout(&mut set, SEND_TIMEOUT)?;
+        let mut cmd = Command::new("tmux");
+        cmd.args([
+            "resize-window",
+            "-t",
+            &session,
+            "-x",
+            &cols.to_string(),
+            "-y",
+            &rows.to_string(),
+        ]);
+        let out = run_with_timeout(&mut cmd, SEND_TIMEOUT)?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "tmux resize-window failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// Removes stale tmux sessions created by earlier
