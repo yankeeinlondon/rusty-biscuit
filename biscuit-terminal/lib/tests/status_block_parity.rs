@@ -709,6 +709,99 @@ fn multiple_body_items_keep_blank_line_separation_in_block_quote() {
     );
 }
 
+/// The render-tree contract requires the body-plus-hint body block quote to
+/// contain exactly `blank, body, blank, hint` — the hint separator must be a
+/// structural `Paragraph` node, not a renderer-side spacing rule, so Browser
+/// output preserves the blank line even when the Browser renderer does not
+/// insert spacing between adjacent paragraphs.
+#[test]
+fn body_plus_hint_block_quote_has_structural_blank_separator_before_hint() {
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Hint text");
+    let bq = body_block_quote_children(&block);
+    assert_eq!(
+        bq.len(),
+        4,
+        "body-plus-hint block quote must have exactly four children (blank, body, blank, hint)"
+    );
+
+    let is_blank_paragraph = |node: &RenderNode| matches!(&node.kind,
+        NodeKind::Paragraph { children }
+            if children.is_empty() || children.iter()
+                .all(|c| matches!(&c.kind, NodeKind::Text { value } if value.is_empty()))
+    );
+    assert!(
+        is_blank_paragraph(&bq[0]),
+        "first child must be the leading blank paragraph"
+    );
+    match &bq[1].kind {
+        NodeKind::Paragraph { children } => assert!(
+            !children.is_empty(),
+            "second child must be the non-empty body paragraph"
+        ),
+        other => panic!("second child must be a Paragraph, got {other:?}"),
+    }
+    assert!(
+        is_blank_paragraph(&bq[2]),
+        "third child must be the structural blank separator paragraph"
+    );
+    let hint_node = &bq[3];
+    assert!(
+        hint_node.attrs.classes.iter().any(|c| c == "status-block__hint"),
+        "fourth child must carry the status-block__hint class"
+    );
+    if let NodeKind::Paragraph { children } = &hint_node.kind {
+        assert!(
+            children.iter().any(|c| matches!(c.kind, NodeKind::Emphasis { .. })),
+            "hint paragraph must contain an Emphasis child"
+        );
+    } else {
+        panic!("hint node must be a Paragraph");
+    }
+
+    let html = BrowserRenderable::render_html_fragment(&block).render();
+    let p_tags: Vec<_> = html.match_indices("<p").collect();
+    let p_closes: Vec<_> = html.match_indices("</p>").collect();
+    let em_tags: Vec<_> = html.match_indices("<em>").collect();
+    let em_closes: Vec<_> = html.match_indices("</em>").collect();
+    let bq_open = html.find("<blockquote").expect("blockquote opening");
+    let bq_close = html.find("</blockquote>").expect("blockquote closing");
+    let hint_pos = html
+        .find("status-block__hint")
+        .expect("hint class in HTML");
+    assert!(
+        bq_open < hint_pos && hint_pos < bq_close,
+        "hint class must live inside the blockquote: {html:?}"
+    );
+    let p_in_bq: Vec<_> = p_tags
+        .iter()
+        .copied()
+        .filter(|(idx, _)| *idx > bq_open && *idx < bq_close)
+        .collect();
+    let p_closes_in_bq: Vec<_> = p_closes
+        .iter()
+        .copied()
+        .filter(|(idx, _)| *idx > bq_open && *idx < bq_close)
+        .collect();
+    assert_eq!(
+        p_in_bq.len(),
+        4,
+        "block quote must contain four <p> elements (blank, body, blank, hint): {html:?}"
+    );
+    assert_eq!(
+        p_closes_in_bq.len(),
+        4,
+        "block quote must close four <p> elements: {html:?}"
+    );
+    assert_eq!(
+        em_tags.len(),
+        1,
+        "block quote must contain exactly one <em> element (the hint): {html:?}"
+    );
+    assert_eq!(em_closes.len(), 1, "exactly one </em> expected: {html:?}");
+}
+
 #[test]
 fn default_border_terminal_uses_tree_projection() {
     let term = test_terminal(80);
