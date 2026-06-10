@@ -4,7 +4,7 @@ use renderable::browser::PageOptions;
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::html::HtmlPage;
 use renderable::markdown::MarkdownRenderable;
-use renderable::style::{Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style};
+use renderable::style::{Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style, TextEmphasis};
 use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
     render_markdown_node,
@@ -253,10 +253,35 @@ impl StatusBlock {
 
         if !self.body.is_empty() {
             let body_text = self.body_plain_text();
-            let mut node =
-                RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
-                    body_text,
-                )])]);
+            let mut block_children: Vec<RenderNode> = Vec::new();
+
+            // Leading blank paragraph inside the block quote.
+            block_children.push(RenderNode::paragraph(vec![]));
+
+            // Main body paragraph.
+            block_children.push(RenderNode::paragraph(vec![RenderNode::text(body_text)]));
+
+            // Optional hint, moved inside the block quote.
+            if let Some(hint_text) = &self.hint {
+                let hint = Self::prose_plain_text(hint_text);
+
+                // Separator blank paragraph.
+                block_children.push(RenderNode::paragraph(vec![]));
+
+                // Italicized hint paragraph.
+                let mut hint_node = RenderNode::paragraph(vec![RenderNode::text(hint)]);
+                hint_node.attrs.classes = vec!["status-block__hint".into()];
+                hint_node.attrs.set_style(&Style {
+                    emphasis: TextEmphasis {
+                        italic: true,
+                        ..Default::default()
+                    },
+                    ..Style::default()
+                });
+                block_children.push(hint_node);
+            }
+
+            let mut node = RenderNode::block_quote(block_children);
             node.attrs.classes = vec!["status-block__body".into()];
             node.attrs.set_style(&Style {
                 border: Some(Border {
@@ -274,9 +299,8 @@ impl StatusBlock {
                 ..Style::default()
             });
             children.push(node);
-        }
-
-        if let Some(hint_text) = &self.hint {
+        } else if let Some(hint_text) = &self.hint {
+            // No body but there is a hint — keep as a separate paragraph.
             let hint = Self::prose_plain_text(hint_text);
             let mut node = RenderNode::paragraph(vec![RenderNode::text(hint)]);
             node.attrs.classes = vec!["status-block__hint".into()];
@@ -367,12 +391,30 @@ impl StatusBlock {
         }
 
         if !self.body.is_empty() {
-            let composed = self
+            let mut composed_parts: Vec<String> = Vec::new();
+
+            // Leading blank line inside the block quote.
+            composed_parts.push(String::new());
+
+            // Body content.
+            let body_composed = self
                 .body
                 .iter()
                 .map(|p| p.render(term))
                 .collect::<Vec<_>>()
                 .join("\n\n");
+            composed_parts.push(body_composed);
+
+            // Optional hint, moved inside the block quote.
+            if let Some(ref hint_text) = self.hint {
+                // Separator blank line.
+                composed_parts.push(String::new());
+
+                // Italicized hint.
+                composed_parts.push(Prose::new(format!("<i>{}</i>", hint_text)).render(term));
+            }
+
+            let composed = composed_parts.join("\n");
             let mut block =
                 BlockQuote::new(RenderableTerminalContent::String(composed), None::<&str>)
                     .with_left_block_color(self.resolved_border_color())
@@ -381,9 +423,8 @@ impl StatusBlock {
             block.layout_mut().margin.right = self.layout.margin.right.clone();
             block.layout_mut().word_wrap = self.layout.word_wrap.clone();
             parts.push(block.render(term));
-        }
-
-        if let Some(ref hint_text) = self.hint {
+        } else if let Some(ref hint_text) = self.hint {
+            // No body but there is a hint — keep as a separate paragraph.
             parts.push(Prose::new(hint_text).render(term));
         }
 
