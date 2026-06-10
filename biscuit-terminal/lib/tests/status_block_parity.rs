@@ -470,7 +470,7 @@ fn body_block_quote_children(block: &StatusBlock) -> Vec<RenderNode> {
 }
 
 #[test]
-fn every_status_state_renders_body_with_leading_blank_line_in_block_quote() {
+fn every_status_state_renders_body_with_leading_blank_and_body_paragraph() {
     let states = [
         StatusState::NotStarted,
         StatusState::Active,
@@ -484,11 +484,28 @@ fn every_status_state_renders_body_with_leading_blank_line_in_block_quote() {
     for state in &states {
         let block = StatusBlock::new(state.clone()).body("Body text");
         let bq = body_block_quote_children(&block);
-        assert!(
-            matches!(&bq[0].kind, NodeKind::Paragraph { children } if children.is_empty()),
-            "state {:?}: first child of body block quote must be a blank paragraph",
+        assert_eq!(
+            bq.len(),
+            2,
+            "state {:?}: body-only block quote should have exactly two children (leading blank + body paragraph)",
             state
         );
+        assert!(
+            matches!(&bq[0].kind, NodeKind::Paragraph { children } if children.is_empty()
+                || children.iter().all(|c| matches!(&c.kind, NodeKind::Text { value } if value.is_empty()))),
+            "state {:?}: first child must be a structural blank paragraph",
+            state
+        );
+        match &bq[1].kind {
+            NodeKind::Paragraph { children } => {
+                assert!(
+                    !children.is_empty(),
+                    "state {:?}: body paragraph must not be empty",
+                    state
+                );
+            }
+            other => panic!("state {:?}: expected Paragraph, got {other:?}", state),
+        }
     }
 }
 
@@ -637,7 +654,7 @@ fn blank_hint_omits_separator_and_hint() {
     assert_eq!(
         bq.len(),
         2,
-        "blank hint should produce exactly 2 children (leading blank + body), got {}",
+        "blank hint should produce exactly 2 children (leading blank + body paragraph), got {}",
         bq.len()
     );
     assert!(
@@ -678,7 +695,7 @@ fn multiple_body_items_keep_blank_line_separation_in_block_quote() {
     let block = StatusBlock::new(StatusState::Info)
         .body(vec![Prose::new("first item"), Prose::new("second item")]);
     let bq = body_block_quote_children(&block);
-    assert_eq!(bq.len(), 2, "expected leading blank + body paragraph");
+    assert_eq!(bq.len(), 2, "expected leading blank + single body paragraph");
     let body_text = match &bq[1].kind {
         NodeKind::Paragraph { children } => match &children.first().unwrap().kind {
             NodeKind::Text { value } => value.clone(),
@@ -737,6 +754,36 @@ fn custom_border_mirrors_body_hint_layout() {
 }
 
 #[test]
+fn custom_border_hint_carries_italic_sgr_on_terminal() {
+    let term = test_terminal(80);
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Fix this hint")
+        .border("!! ");
+    let rendered = block.render(&term);
+    let italic_sgr = "\x1b[3m";
+    assert!(
+        rendered.contains(italic_sgr),
+        "bespoke-path hint must carry italic SGR (ESC[3m) in raw terminal output: {rendered:?}"
+    );
+    let hint_lines_raw: Vec<&str> = rendered
+        .lines()
+        .filter(|l| l.contains("Fix this hint"))
+        .collect();
+    assert!(
+        !hint_lines_raw.is_empty(),
+        "hint text must appear in raw bespoke output: {rendered:?}"
+    );
+    for line in &hint_lines_raw {
+        assert!(
+            line.contains(italic_sgr),
+            "bespoke hint line must contain italic SGR: {:?}",
+            line
+        );
+    }
+}
+
+#[test]
 fn markdown_does_not_leak_custom_border_prefix_with_body_and_hint() {
     let block = StatusBlock::new(StatusState::Error)
         .body("Body text")
@@ -789,4 +836,112 @@ fn browser_preserves_hint_class_and_italic_inside_body_block_quote() {
     } else {
         panic!("hint node must be a Paragraph: {hint_node:#?}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3b: Rendered-output row-count assertions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn terminal_body_plus_hint_has_leading_blank_and_one_separator_row() {
+    let term = test_terminal(80);
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Hint text");
+    let rendered = strip_ansi(&block.render(&term));
+    let quoted_lines: Vec<&str> = rendered.lines().filter(|l| l.contains('┃')).collect();
+    let blank_idx = quoted_lines
+        .iter()
+        .position(|l| !l.contains("Body text") && !l.contains("Hint text"))
+        .expect("leading blank row");
+    let body_idx = quoted_lines
+        .iter()
+        .position(|l| l.contains("Body text"))
+        .expect("body line");
+    let hint_idx = quoted_lines
+        .iter()
+        .position(|l| l.contains("Hint text"))
+        .expect("hint line");
+    assert_eq!(
+        body_idx - blank_idx,
+        1,
+        "body must immediately follow leading blank:\n{rendered}"
+    );
+    assert_eq!(
+        hint_idx - body_idx,
+        2,
+        "exactly one blank quoted row between body and hint:\n{rendered}"
+    );
+}
+
+#[test]
+fn terminal_body_only_has_one_leading_blank_row_before_body() {
+    let term = test_terminal(80);
+    let block = StatusBlock::new(StatusState::Error).body("Body text");
+    let rendered = strip_ansi(&block.render(&term));
+    let quoted_lines: Vec<&str> = rendered.lines().filter(|l| l.contains('┃')).collect();
+    assert_eq!(
+        quoted_lines.len(),
+        2,
+        "body-only block quote must have exactly two quoted rows (blank + body):\n{rendered}"
+    );
+    assert!(
+        !quoted_lines[0].contains("Body text"),
+        "first quoted row must be the leading blank: {rendered}"
+    );
+    assert!(
+        quoted_lines[1].contains("Body text"),
+        "second quoted row must be the body: {rendered}"
+    );
+}
+
+#[test]
+fn markdown_body_plus_hint_has_leading_blank_and_one_separator_row() {
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Hint text");
+    let md = block.render_markdown();
+    let quoted_lines: Vec<&str> = md.lines().filter(|l| l.starts_with('>')).collect();
+    let blank_idx = quoted_lines
+        .iter()
+        .position(|l| !l.contains("Body text") && !l.contains("Hint text"))
+        .expect("leading blank row");
+    let body_idx = quoted_lines
+        .iter()
+        .position(|l| l.contains("Body text"))
+        .expect("body line");
+    let hint_idx = quoted_lines
+        .iter()
+        .position(|l| l.contains("Hint text"))
+        .expect("hint line");
+    assert_eq!(
+        body_idx - blank_idx,
+        1,
+        "body must immediately follow leading blank in Markdown:\n{md}"
+    );
+    assert_eq!(
+        hint_idx - body_idx,
+        2,
+        "exactly one blank quoted row between body and hint in Markdown:\n{md}"
+    );
+}
+
+#[test]
+fn markdown_body_only_has_leading_blank_and_body_rows() {
+    let block = StatusBlock::new(StatusState::Error).body("Body text");
+    let md = block.render_markdown();
+    let quoted_lines: Vec<&str> = md.lines().filter(|l| l.starts_with('>')).collect();
+    assert_eq!(
+        quoted_lines.len(),
+        2,
+        "body-only block quote must have exactly two quoted rows (blank + body) in Markdown:\n{md}"
+    );
+    assert!(
+        quoted_lines[0].trim().is_empty() || quoted_lines[0] == ">",
+        "first quoted row must be the leading blank: {md}"
+    );
+    assert!(
+        quoted_lines[1].contains("Body text"),
+        "second quoted row must be the body: {md}"
+    );
 }

@@ -1,16 +1,12 @@
 ---
 source: biscuit-terminal/lib/tests/layout_matrix.rs
-assertion_line: 99
 expression: block
 ---
 VIA_RENDER
 ⤫ Shell Expansion Failed
 
 ┃ 
-┃ 
 ┃ Missing closing brace in template directive.
-┃ 
-┃ 
 ┃ 
 ┃ Check the template syntax and retry.
 ---
@@ -18,9 +14,6 @@ VIA_TREE_DIRECT
 ⤫ Shell Expansion Failed
 
 ┃ 
-┃ 
 ┃ Missing closing brace in template directive.
-┃ 
-┃ 
 ┃ 
 ┃ Check the template syntax and retry.
