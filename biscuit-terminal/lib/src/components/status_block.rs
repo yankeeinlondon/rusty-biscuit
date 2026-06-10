@@ -259,24 +259,14 @@ impl StatusBlock {
             let body_text = self.body_plain_text();
             let mut block_children: Vec<RenderNode> = Vec::new();
 
-            // Leading blank paragraph inside the block quote.
-            block_children.push(RenderNode::paragraph(vec![]));
-
-            // Main body paragraph.
+            block_children.push(RenderNode::paragraph(vec![RenderNode::text(
+                String::new(),
+            )]));
             block_children.push(RenderNode::paragraph(vec![RenderNode::text(body_text)]));
 
-            // Optional non-blank hint, moved inside the block quote.
             if let Some(hint_text) = self.non_blank_hint() {
                 let hint = Self::prose_plain_text(hint_text);
 
-                // Separator blank paragraph.
-                block_children.push(RenderNode::paragraph(vec![]));
-
-                // Italicized hint paragraph. The hint text is wrapped in a
-                // semantic `Emphasis` node so that every render target —
-                // Terminal (SGR italic), Markdown (`_text_`), and Browser
-                // (`<em>`) — produces portable italic output. Paragraph-level
-                // `Style.emphasis` is not consumed by the Markdown renderer.
                 let mut hint_node = RenderNode::paragraph(vec![RenderNode::emphasis(vec![
                     RenderNode::text(hint),
                 ])]);
@@ -395,10 +385,6 @@ impl StatusBlock {
         if !self.body.is_empty() {
             let mut composed_parts: Vec<String> = Vec::new();
 
-            // Leading blank line inside the block quote.
-            composed_parts.push(String::new());
-
-            // Body content.
             let body_composed = self
                 .body
                 .iter()
@@ -407,16 +393,12 @@ impl StatusBlock {
                 .join("\n\n");
             composed_parts.push(body_composed);
 
-            // Optional non-blank hint, moved inside the block quote.
             if let Some(hint_text) = self.non_blank_hint() {
-                // Separator blank line.
-                composed_parts.push(String::new());
-
-                // Italicized hint.
                 composed_parts.push(Prose::new(format!("<i>{}</i>", hint_text)).render(term));
             }
 
-            let composed = composed_parts.join("\n");
+            let composed = composed_parts.join("\n\n");
+            let composed = format!("\n{composed}");
             let mut block =
                 BlockQuote::new(RenderableTerminalContent::String(composed), None::<&str>)
                     .with_left_block_color(self.resolved_border_color())
@@ -761,6 +743,7 @@ mod tests {
             NodeKind::BlockQuote { children } => children,
             _ => panic!("expected BlockQuote"),
         };
+        assert_eq!(bq_children.len(), 3, "leading blank + body + hint");
         let hint_node = bq_children
             .iter()
             .find(|c| c.attrs.classes.iter().any(|cl| cl == "status-block__hint"))
