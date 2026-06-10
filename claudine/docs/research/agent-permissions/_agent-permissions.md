@@ -1,11 +1,6 @@
 ---
 sequence: "@claudine/docs/providers.yaml"
-file: "{{ctx.repo_root}}/claudine/docs/research/agent-logging/{{state.file}}"
-grant:
-    read:
-        - "{{state.user_dir}}"
-agent: opencode
-model: zai-coding-plan/glm-5.1
+file: "{{ctx.repo_root}}/claudine/docs/research/agent-permissions/{{state.file}}"
 # all target documents we write to should provide this frontmatter
 target_schema: 
     created: date
