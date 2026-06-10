@@ -120,7 +120,13 @@ impl StatusBlock {
         self.body(vec![line.into()])
     }
 
-    /// Sets a prose-formatted hint rendered below the block quote.
+    /// Sets a prose-formatted hint.
+    ///
+    /// When body content is present, the hint is rendered inside the same
+    /// block quote as the body, separated from it by a blank paragraph and
+    /// styled with italic emphasis. When the body is empty, the hint renders
+    /// as a standalone paragraph outside any block quote. Blank hints are
+    /// omitted.
     pub fn hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = Some(hint.into());
         self
@@ -229,8 +235,16 @@ impl StatusBlock {
     /// This is the **single private projection helper**. The
     /// [`TreeRenderable::render_tree`] entry point delegates to it; the
     /// Browser and Markdown adapters render the returned node directly. The
-    /// projection emits a `Root` with one optional header `Paragraph`, one
-    /// optional `BlockQuote` body, and one optional hint `Paragraph`.
+    /// projection emits a `Root` with one optional header `Paragraph` plus a
+    /// body surface that is one of:
+    ///
+    /// - a `BlockQuote` carrying `leading blank, body, [blank, hint]` when
+    ///   body content is present — the trailing `blank, hint` pair is only
+    ///   emitted for a non-blank hint;
+    /// - a standalone `Paragraph` hint when the body is empty and a
+    ///   non-blank hint is configured;
+    /// - nothing beyond the optional header when both body and hint are
+    ///   empty.
     ///
     /// The default border maps to a typed thick left [`Border`] on the body
     /// node so the terminal tree renderer reproduces the `┃ ` glyph. Arbitrary
@@ -265,6 +279,10 @@ impl StatusBlock {
             block_children.push(RenderNode::paragraph(vec![RenderNode::text(body_text)]));
 
             if let Some(hint_text) = self.non_blank_hint() {
+                block_children.push(RenderNode::paragraph(vec![RenderNode::text(
+                    String::new(),
+                )]));
+
                 let hint = Self::prose_plain_text(hint_text);
 
                 let mut hint_node = RenderNode::paragraph(vec![RenderNode::emphasis(vec![
@@ -743,7 +761,11 @@ mod tests {
             NodeKind::BlockQuote { children } => children,
             _ => panic!("expected BlockQuote"),
         };
-        assert_eq!(bq_children.len(), 3, "leading blank + body + hint");
+        assert_eq!(
+            bq_children.len(),
+            4,
+            "leading blank + body + hint separator blank + hint"
+        );
         let hint_node = bq_children
             .iter()
             .find(|c| c.attrs.classes.iter().any(|cl| cl == "status-block__hint"))
