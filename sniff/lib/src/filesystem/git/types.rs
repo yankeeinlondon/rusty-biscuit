@@ -657,11 +657,12 @@ impl GitRepo {
     /// Base repository root when inside a worktree.
     pub fn base_repo_root(&self) -> Option<PathBuf> {
         if self.in_worktree() {
-            self.gix
-                .borrow()
-                .common_dir()
-                .parent()
-                .map(Path::to_path_buf)
+            // Canonicalize first: gix may report a relative common_dir (e.g.
+            // `.git/worktrees/wt/../..`) whose `.parent()` does not resolve to
+            // the repository root without filesystem resolution.
+            std::fs::canonicalize(self.gix.borrow().common_dir())
+                .ok()
+                .and_then(|p| p.parent().map(Path::to_path_buf))
         } else {
             None
         }
@@ -715,7 +716,11 @@ impl GitRepo {
     /// silently omitted.
     pub fn worktrees(&self) -> Result<HashMap<String, WorktreeInfo>> {
         self.ensure_cache();
-        super::remote_refresh::get_worktrees(&self.gix.borrow())
+        super::remote_refresh::get_worktrees(
+            &self.gix.borrow(),
+            true,
+            Some(self.repo_root.as_path()),
+        )
     }
 
     /// Git user configuration.
@@ -868,7 +873,11 @@ impl GitRepo {
 
         let worktrees = if request.include_worktrees {
             self.ensure_cache();
-            super::remote_refresh::get_worktrees(&self.gix.borrow())?
+            super::remote_refresh::get_worktrees(
+                &self.gix.borrow(),
+                request.full_worktree_details,
+                Some(self.repo_root.as_path()),
+            )?
         } else {
             HashMap::new()
         };
@@ -1194,6 +1203,8 @@ pub struct WorktreeInfo {
     pub merged: bool,
     /// Number of uncommitted files (staged + unstaged + untracked).
     pub changed_files: usize,
+    /// Whether this worktree is the one the current process is running from.
+    pub is_current: bool,
 }
 
 /// A file with uncommitted changes (staged or unstaged).

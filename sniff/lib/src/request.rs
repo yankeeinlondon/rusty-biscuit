@@ -296,6 +296,11 @@ pub struct GitRequest {
     /// containment. Lower values reduce deep-git latency for repos with many
     /// remote branches. `None` means no limit.
     pub max_remote_branches: Option<usize>,
+    /// Compute ahead/behind, merge status, and conflict detection for every
+    /// linked worktree. When `false` (default), only the current worktree
+    /// receives full detail; all other linked worktrees skip the expensive
+    /// commit graph walks.
+    pub full_worktree_details: bool,
 }
 
 impl GitRequest {
@@ -311,6 +316,7 @@ impl GitRequest {
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
             max_remote_branches: None,
+            full_worktree_details: false,
         }
     }
 
@@ -332,11 +338,17 @@ impl GitRequest {
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
             max_remote_branches: None,
+            full_worktree_details: false,
         }
     }
 
     /// Standard detection with 10 commits, file change stats (paths and line counts),
     /// worktrees, but no unified diff payloads and no remote refresh.
+    ///
+    /// Worktrees are enumerated, but expensive ahead/behind and merge-conflict
+    /// probes are skipped for non-current linked worktrees. Use
+    /// [`Self::deep()`] or call `.full_worktree_details(true)` to force full
+    /// detail for every worktree.
     pub fn full() -> Self {
         Self {
             commit_count: 10,
@@ -347,6 +359,7 @@ impl GitRequest {
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
             max_remote_branches: None,
+            full_worktree_details: false,
         }
     }
 
@@ -362,6 +375,7 @@ impl GitRequest {
             include_remote_branch_details: true,
             include_commit_remote_containment: true,
             max_remote_branches: Some(50),
+            full_worktree_details: true,
         }
     }
 
@@ -416,6 +430,11 @@ impl GitRequest {
 
     pub fn max_remote_branches(mut self, limit: Option<usize>) -> Self {
         self.max_remote_branches = limit;
+        self
+    }
+
+    pub fn full_worktree_details(mut self, full: bool) -> Self {
+        self.full_worktree_details = full;
         self
     }
 }
