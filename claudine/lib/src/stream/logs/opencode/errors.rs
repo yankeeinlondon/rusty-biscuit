@@ -451,9 +451,14 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
 
 fn classify_lifecycle(record: &OpenCodeLogRecord) -> Option<LogClassification> {
     let service = record.tags.get("service").map(|s| s.as_str()).unwrap_or("");
+    let inferred_service = if service.is_empty() {
+        infer_service_from_message(record)
+    } else {
+        service
+    };
     let message = record.message.as_str();
 
-    match service {
+    match inferred_service {
         "default" => classify_default_service(record, message),
         "session" => classify_session(record, message),
         "llm" => classify_llm_call(record, message),
@@ -464,6 +469,45 @@ fn classify_lifecycle(record: &OpenCodeLogRecord) -> Option<LogClassification> {
             level: record.level,
         }),
         _ => None,
+    }
+}
+
+/// Infer the `service` tag value from the `message` tag and required sibling
+/// tags when `service` is absent.
+///
+/// OpenCode's new stderr format omits `service=` for many lifecycle records.
+/// The `message` tag still carries the trailing keyword that identifies the
+/// lifecycle class (`loop`, `stream`, `evaluated`, `created`, `opencode`,
+/// `Sent HTTP response`, `exiting loop`), and the required context tags
+/// (`session.id`, `step`, `providerID`, `modelID`, `permission`, `id`,
+/// `version`) are present.  This helper maps those observed shapes back to
+/// the service values the dedicated classifiers expect.
+fn infer_service_from_message(record: &OpenCodeLogRecord) -> &'static str {
+    let msg = record
+        .tags
+        .get("message")
+        .map(|s| s.trim_matches('"'))
+        .unwrap_or("");
+
+    match msg {
+        "loop" | "exiting loop"
+            if record.tags.contains_key("session.id")
+                && record.tags.contains_key("step") =>
+        {
+            "session.prompt"
+        }
+        "exiting loop" if record.tags.contains_key("session.id") => "session.prompt",
+        "stream"
+            if record.tags.contains_key("providerID")
+                && record.tags.contains_key("modelID") =>
+        {
+            "llm"
+        }
+        "evaluated" if record.tags.contains_key("permission") => "permission",
+        "created" if record.tags.contains_key("id") => "session",
+        "opencode" if record.tags.contains_key("version") => "default",
+        "Sent HTTP response" if record.tags.contains_key("http.method") => "default",
+        _ => "",
     }
 }
 
@@ -1029,6 +1073,106 @@ mod tests {
                 );
             }
             other => panic!("expected PermissionEvaluated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_step_loop() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:27.460Z level=INFO run=df5a9474 message=loop session.id=ses_14db step=1",
+        );
+
+        match classify(&record) {
+            LogClassification::StepLoop { session_id, step } => {
+                assert_eq!(session_id, "ses_14db");
+                assert_eq!(step, 1);
+            }
+            other => panic!("expected StepLoop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_llm_call() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:27.574Z level=INFO run=df5a9474 message=stream providerID=zai-coding-plan modelID=glm-5.1",
+        );
+
+        match classify(&record) {
+            LogClassification::LlmCall {
+                provider_id,
+                model_id,
+                mode,
+                is_stream,
+            } => {
+                assert_eq!(provider_id, "zai-coding-plan");
+                assert_eq!(model_id, "glm-5.1");
+                assert_eq!(mode, "");
+                assert!(is_stream);
+            }
+            other => panic!("expected LlmCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_permission_evaluated() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:31.461Z level=INFO run=df5a9474 message=evaluated permission=glob pattern=general action=allow",
+        );
+
+        match classify(&record) {
+            LogClassification::PermissionEvaluated {
+                permission,
+                pattern,
+                action,
+            } => {
+                assert_eq!(permission, "glob");
+                assert_eq!(pattern, "general");
+                assert_eq!(action, "allow");
+            }
+            other => panic!("expected PermissionEvaluated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_session_created() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:28.000Z level=INFO run=df5a9474 message=created id=ses_primary title=Primary session",
+        );
+
+        match classify(&record) {
+            LogClassification::SessionCreated { id, parent_id } => {
+                assert_eq!(id, "ses_primary");
+                assert_eq!(parent_id, None);
+            }
+            other => panic!("expected SessionCreated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_boot_banner() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:27.352Z level=INFO run=df5a9474 version=1.14.48 message=opencode",
+        );
+
+        match classify(&record) {
+            LogClassification::BootBanner { version } => {
+                assert_eq!(version, "1.14.48");
+            }
+            other => panic!("expected BootBanner, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_step_exit() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:31.462Z level=INFO run=df5a9474 message=\"exiting loop\" session.id=ses_primary",
+        );
+
+        match classify(&record) {
+            LogClassification::StepExit { session_id } => {
+                assert_eq!(session_id, "ses_primary");
+            }
+            other => panic!("expected StepExit, got {other:?}"),
         }
     }
 

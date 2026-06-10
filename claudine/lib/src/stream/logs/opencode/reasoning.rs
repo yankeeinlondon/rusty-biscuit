@@ -1537,6 +1537,68 @@ mod tests {
         );
     }
 
+    #[test]
+    fn new_format_bridge_consumes_serviceless_lifecycle_lines() {
+        let fixture =
+            include_str!("../../../../tests/fixtures/logs/opencode-new-format-serviceless.txt");
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), None);
+
+        for line in fixture.lines() {
+            assert_eq!(
+                bridge.ingest(line),
+                StderrIngestOutcome::Consumed,
+                "new-format serviceless lifecycle line must be consumed: {line}",
+            );
+        }
+
+        let actual: Vec<&str> = bridge
+            .sink
+            .events
+            .iter()
+            .map(|event| match event {
+                SemanticEvent::SessionStart { .. } => "session_start",
+                SemanticEvent::SubagentStart { .. } => "subagent_start",
+                SemanticEvent::SubagentStop { .. } => "subagent_stop",
+                SemanticEvent::Info { extra, .. } => extra
+                    .get("classification")
+                    .and_then(Value::as_str)
+                    .unwrap_or("info"),
+                SemanticEvent::Warning { extra, .. } => extra
+                    .get("classification")
+                    .and_then(Value::as_str)
+                    .unwrap_or("warning"),
+                SemanticEvent::Error { extra, .. } => extra
+                    .get("classification")
+                    .and_then(Value::as_str)
+                    .unwrap_or("error"),
+                _ => "other",
+            })
+            .collect();
+
+        assert_eq!(
+            actual,
+            vec![
+                "session_start",
+                "llm_call",
+                "step_loop",
+                "permission_evaluated",
+                "subagent_start",
+                "llm_call",
+                "step_loop",
+                "step_exit",
+                "subagent_stop",
+                "step_exit",
+                "http_response",
+            ],
+        );
+
+        let state = bridge.state.lock().unwrap();
+        assert_eq!(
+            state.diagnostics.log_records_parsed,
+            fixture.lines().count() as u32,
+        );
+    }
+
     // ------------------------------------------------------------------
     // Phase-3 semantic event promotion
     // ------------------------------------------------------------------
