@@ -159,6 +159,10 @@ impl StatusBlock {
             .unwrap_or_else(|| self.severity.default_color())
     }
 
+    fn non_blank_hint(&self) -> Option<&str> {
+        self.hint.as_deref().filter(|h| !h.trim().is_empty())
+    }
+
     /// Returns the portable Unicode fallback icon for a [`StatusState`].
     ///
     /// The tree projection uses these stable glyphs so Markdown and Browser
@@ -261,8 +265,8 @@ impl StatusBlock {
             // Main body paragraph.
             block_children.push(RenderNode::paragraph(vec![RenderNode::text(body_text)]));
 
-            // Optional hint, moved inside the block quote.
-            if let Some(hint_text) = &self.hint {
+            // Optional non-blank hint, moved inside the block quote.
+            if let Some(hint_text) = self.non_blank_hint() {
                 let hint = Self::prose_plain_text(hint_text);
 
                 // Separator blank paragraph.
@@ -299,8 +303,7 @@ impl StatusBlock {
                 ..Style::default()
             });
             children.push(node);
-        } else if let Some(hint_text) = &self.hint {
-            // No body but there is a hint — keep as a separate paragraph.
+        } else if let Some(hint_text) = self.non_blank_hint() {
             let hint = Self::prose_plain_text(hint_text);
             let mut node = RenderNode::paragraph(vec![RenderNode::text(hint)]);
             node.attrs.classes = vec!["status-block__hint".into()];
@@ -405,8 +408,8 @@ impl StatusBlock {
                 .join("\n\n");
             composed_parts.push(body_composed);
 
-            // Optional hint, moved inside the block quote.
-            if let Some(ref hint_text) = self.hint {
+            // Optional non-blank hint, moved inside the block quote.
+            if let Some(hint_text) = self.non_blank_hint() {
                 // Separator blank line.
                 composed_parts.push(String::new());
 
@@ -423,7 +426,7 @@ impl StatusBlock {
             block.layout_mut().margin.right = self.layout.margin.right.clone();
             block.layout_mut().word_wrap = self.layout.word_wrap.clone();
             parts.push(block.render(term));
-        } else if let Some(ref hint_text) = self.hint {
+        } else if let Some(hint_text) = self.non_blank_hint() {
             // No body but there is a hint — keep as a separate paragraph.
             parts.push(Prose::new(hint_text).render(term));
         }
@@ -1166,8 +1169,6 @@ mod tests {
 
     #[test]
     fn deprecated_failure_serializes_as_error() {
-        // The deprecated `Failure` variant maps to the same fallback icon as
-        // `Error` so old JSON round-trips with no observable visual change.
         #[allow(deprecated)]
         let icon = StatusBlock::severity_icon(&StatusState::Failure);
         assert_eq!(icon, "⤫");
