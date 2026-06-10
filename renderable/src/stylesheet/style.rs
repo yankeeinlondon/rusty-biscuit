@@ -38,6 +38,8 @@
 
 use std::fmt::{self, Display};
 
+use serde::de::{self, Deserialize, Deserializer};
+use serde::ser::{Serialize, Serializer};
 use serde_json::{Map, Value};
 
 use crate::stylesheet::error::StylesheetError;
@@ -276,6 +278,32 @@ impl Display for CssStyle {
     }
 }
 
+/// Serializes the style as its canonical declaration string (the
+/// [`to_css`](CssStyle::to_css) form), never as the internal declaration
+/// storage. The string round-trips through [`Deserialize`] via
+/// [`CssStyle::try_from`].
+impl Serialize for CssStyle {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_css())
+    }
+}
+
+/// Deserializes a style from its canonical declaration string, validating it
+/// through [`CssStyle::try_from`]. An invalid declaration block is a
+/// deserialization error rather than a silently-empty style.
+impl<'de> Deserialize<'de> for CssStyle {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let declarations = String::deserialize(deserializer)?;
+        CssStyle::try_from(declarations.as_str()).map_err(de::Error::custom)
+    }
+}
+
 /// Parses a style from a CSS-like declaration block.
 ///
 /// Accepted shapes:
@@ -511,4 +539,59 @@ fn split_declarations(input: &str) -> Vec<String> {
     }
 
     declarations
+}
+
+#[cfg(test)]
+mod serde_tests {
+    use super::*;
+    use crate::stylesheet::{CssColor, CssColorProp, CssSizing, CssSizingProp};
+
+    fn sample() -> CssStyle {
+        CssStyle::new()
+            .add(CssSizingProp::Width, CssSizing::px(320.0))
+            .add(CssColorProp::Color, CssColor::rgb(0x33, 0x66, 0x99))
+    }
+
+    #[test]
+    fn serializes_as_canonical_declaration_string() {
+        let json = serde_json::to_string(&sample()).unwrap();
+        assert_eq!(json, r#""width: 320px;\ncolor: rgb(51, 102, 153);""#);
+    }
+
+    #[test]
+    fn deserializes_through_try_from() {
+        let style: CssStyle =
+            serde_json::from_str(r#""color: #336699; margin: 8px 16px;""#).unwrap();
+        assert_eq!(style.len(), 2);
+    }
+
+    #[test]
+    fn roundtrip_is_deterministic() {
+        let original = sample();
+        let json = serde_json::to_string(&original).unwrap();
+        let back: CssStyle = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, back);
+        // Re-serializing produces byte-identical output.
+        assert_eq!(serde_json::to_string(&back).unwrap(), json);
+    }
+
+    #[test]
+    fn invalid_css_is_rejected() {
+        // No `:` separator → InvalidDeclaration surfaces as a serde error.
+        assert!(serde_json::from_str::<CssStyle>(r#""invalid-syntax""#).is_err());
+        // A known property paired with an unparsable value is also rejected.
+        assert!(serde_json::from_str::<CssStyle>(r#""width: notasize""#).is_err());
+    }
+
+    #[test]
+    fn ordering_and_replacement_are_preserved() {
+        let style = CssStyle::new()
+            .add(CssSizingProp::Width, CssSizing::px(10.0))
+            .add(CssColorProp::Color, CssColor::rgb(1, 2, 3))
+            .add(CssSizingProp::Width, CssSizing::px(20.0)); // replaces in place
+        let json = serde_json::to_string(&style).unwrap();
+        let back: CssStyle = serde_json::from_str(&json).unwrap();
+        // Width keeps its first position with the replaced value; color follows.
+        assert_eq!(back.to_css(), "width: 20px;\ncolor: rgb(1, 2, 3);");
+    }
 }

@@ -97,7 +97,7 @@ fn map_reference_parse_error(err: crate::markdown::compose::TransclusionError) -
 
 impl Markdown {
     /// Returns `true` if this document contains any transclusion directives
-    /// (`::file`, `::code`, `::url`, `::toc-linking`, `prologue`, or `epilogue`).
+    /// (`::file`, `::code`, `::url`, `::toc-linking`, `::file-links`, `prologue`, or `epilogue`).
     pub fn has_transclusions(&self) -> bool {
         // Check block directives
         if let Ok(directives) = parse_directives(self.content(), self.source_context_for_errors())
@@ -110,6 +110,14 @@ impl Markdown {
         if let Ok(toc_directives) =
             crate::markdown::compose::toc_linking::parse_directives(self.content())
             && !toc_directives.is_empty()
+        {
+            return true;
+        }
+
+        // Check file-links directives
+        if let Ok(file_links_directives) =
+            crate::markdown::compose::file_links::parse_file_links_directives(self.content())
+            && !file_links_directives.is_empty()
         {
             return true;
         }
@@ -190,6 +198,32 @@ impl Markdown {
                         line: td.line,
                         span: td.span.clone(),
                         syntax: ReferenceSyntax::DirectiveTocLinking,
+                    },
+                });
+            }
+        }
+
+        // ::file-links directives
+        if let Ok(file_links_directives) =
+            crate::markdown::compose::file_links::parse_file_links_directives(self.content())
+        {
+            for fd in &file_links_directives {
+                let raw_target = match &fd.mode {
+                    crate::markdown::compose::file_links::FileLinksMode::Glob(g) => g.clone(),
+                    crate::markdown::compose::file_links::FileLinksMode::Dir { path, depth } => {
+                        format!("{} --depth {}", path, depth)
+                    }
+                };
+                refs.push(TransclusionRef {
+                    kind: TransclusionRefKind::FileLinks,
+                    raw_target,
+                    resolved_target: None,
+                    options: TransclusionRefOptions::default(),
+                    origin: ReferenceOrigin {
+                        source: source.clone(),
+                        line: fd.line,
+                        span: fd.span.clone(),
+                        syntax: ReferenceSyntax::DirectiveFileLinks,
                     },
                 });
             }

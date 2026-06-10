@@ -162,26 +162,34 @@ _test pkg *args="":
     exit_code=0
     if cargo nextest --version >/dev/null 2>&1; then
         echo -e "ℹ️ using {{ green }}cargo nextest run{{ reset }}"
-        cargo nextest run -p {{ pkg }} {{ args }} || exit_code=$?
+        cargo nextest run -p {{ pkg }} -E '!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/))' --no-tests=pass {{ args }} || exit_code=$?
     else
         echo -e "ℹ️ using {{ green }}cargo test{{ reset }}"
-        cargo test -p {{ pkg }} {{ args }} || exit_code=$?
+        cargo test -p {{ pkg }} {{ args }} -- --skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_ || exit_code=$?
     fi
 
     duration=$SECONDS
     commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 
-    if [[ $exit_code -eq 0 ]]; then
-        result="pass"
-    else
-        result="fail"
+    case $exit_code in
+        0) result="pass" ;;
+        130) result="interrupted" ;;
+        *) result="fail" ;;
+    esac
+
+    if [[ "${BISCUIT_TEST_RECORD_TIMING:-1}" != "0" ]]; then
+        if [[ -n "{{ args }}" ]]; then
+            params_json=$(to_json_array {{ args }})
+            echo "{\"duration\": $duration, \"result\": \"$result\", \"last_commit\": \"$commit_hash\", \"params\": $params_json}" >> "test-{{ pkg }}-timing.jsonl"
+        else
+            echo "{\"duration\": $duration, \"result\": \"$result\", \"last_commit\": \"$commit_hash\"}" >> "test-{{ pkg }}-timing.jsonl"
+        fi
     fi
 
-    if [[ -n "{{ args }}" ]]; then
-        params_json=$(to_json_array {{ args }})
-        echo "{\"duration\": $duration, \"result\": \"$result\", \"last_commit\": \"$commit_hash\", \"params\": $params_json}" >> "test-{{ pkg }}-timing.jsonl"
-    else
-        echo "{\"duration\": $duration, \"result\": \"$result\", \"last_commit\": \"$commit_hash\"}" >> "test-{{ pkg }}-timing.jsonl"
+    if [[ $exit_code -eq 130 ]]; then
+        echo
+        echo -e "{{ yellow }}Testing {{ bold }}{{ pkg }}{{ reset }}{{ yellow }} interrupted (Ctrl+C){{ reset }}"
+        exit 130
     fi
 
     if [[ $exit_code -ne 0 ]]; then
@@ -192,6 +200,183 @@ _test pkg *args="":
     echo
     echo -e "✅ {{ green }} all tests passing in {{ bold }}{{ pkg }}{{ reset }}{{ green }} package{{ reset }}"
     echo
+
+# Run Level-1 tests for every workspace package, continuing after failures.
+#
+# Package discovery comes from Cargo metadata rather than the curated package-area
+# list. Optional selectors may be package names or package-area paths.
+_test_workspace *selectors="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    passed_packages=()
+    failed_packages=()
+    failed_codes=()
+    current_package=""
+
+    print_summary() {
+        echo
+        echo "================================================"
+        echo "Workspace Test Summary"
+        echo "================================================"
+        echo -e "{{ green }}Passed{{ reset }} (${#passed_packages[@]}): ${passed_packages[*]:-(none)}"
+        echo -e "{{ red }}Failed{{ reset }} (${#failed_packages[@]}):"
+        if (( ${#failed_packages[@]} == 0 )); then
+            echo "  (none)"
+        else
+            local i
+            for ((i = 0; i < ${#failed_packages[@]}; i++)); do
+                echo "  - ${failed_packages[$i]} (exit ${failed_codes[$i]})"
+            done
+        fi
+        echo "================================================"
+        echo
+    }
+
+    on_interrupt() {
+        trap - INT
+        echo
+        echo "Interrupted (Ctrl+C)${current_package:+ while testing ${current_package}}; remaining packages were not run."
+        print_summary
+        exit 130
+    }
+    trap on_interrupt INT
+
+    metadata_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-workspace-tests.XXXXXX")"
+    selected_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-workspace-selected.XXXXXX")"
+    trap 'rm -f "${metadata_file}" "${selected_file}"' EXIT
+
+    if ! cargo metadata --no-deps --format-version 1 > "${metadata_file}"; then
+        echo "Unable to discover workspace packages with cargo metadata." >&2
+        exit 1
+    fi
+
+    workspace_root="$(jq -r '.workspace_root // empty' "${metadata_file}")"
+    workspace_root="${workspace_root:-${PWD}}"
+    workspace_root="${workspace_root%/}"
+
+    requested=({{ selectors }})
+    while IFS=$'\t' read -r package manifest_path; do
+        include=0
+        if (( ${#requested[@]} == 0 )); then
+            include=1
+        else
+            relative_manifest="${manifest_path#"${workspace_root}/"}"
+            package_area="${relative_manifest%/Cargo.toml}"
+            for selector in "${requested[@]}"; do
+                selector="${selector%,}"
+                if [[ "${package}" == "${selector}" || "${package_area}" == "${selector}" || "${package_area}" == "${selector}/"* ]]; then
+                    include=1
+                    break
+                fi
+            done
+        fi
+
+        if (( include == 1 )) && ! grep -Fxq "${package}" "${selected_file}"; then
+            printf '%s\n' "${package}" >> "${selected_file}"
+        fi
+    done < <(
+        jq -r '
+            .workspace_members as $members
+            | .packages[]
+            | select(.id as $id | $members | index($id))
+            | [.name, .manifest_path]
+            | @tsv
+        ' "${metadata_file}" | sort
+    )
+
+    if [[ ! -s "${selected_file}" ]]; then
+        echo "No workspace packages matched: ${requested[*]:-(no selectors)}" >&2
+        exit 1
+    fi
+
+    package_count="$(wc -l < "${selected_file}" | tr -d ' ')"
+    echo
+    echo "Running Level-1 tests for ${package_count} workspace packages..."
+    echo "------------------------------------------------"
+
+    while IFS= read -r package; do
+        current_package="${package}"
+        package_args=()
+
+        # Messenger's default feature set omits the desktop implementation its
+        # package-area test contract covers.
+        if [[ "${package}" == "messenger" ]]; then
+            package_args+=(--features desktop)
+        fi
+
+        echo
+        echo "Testing ${package}..."
+        set +e
+        just _test "${package}" "${package_args[@]}"
+        exit_code=$?
+        set -e
+
+        if [[ ${exit_code} -eq 130 ]]; then
+            on_interrupt
+        elif [[ ${exit_code} -eq 0 ]]; then
+            passed_packages+=("${package}")
+        else
+            failed_packages+=("${package}")
+            failed_codes+=("${exit_code}")
+        fi
+        current_package=""
+    done < "${selected_file}"
+
+    print_summary
+
+    if (( ${#failed_packages[@]} > 0 )); then
+        exit 1
+    fi
+
+# Verify that every package-area `test` recipe preserves Ctrl+C as exit 130.
+_check_test_interrupts:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    cargo() {
+        if [[ "${1:-} ${2:-}" == "nextest --version" ]]; then
+            return 0
+        fi
+        return 130
+    }
+    export -f cargo
+    export BISCUIT_TEST_RECORD_TIMING=0
+
+    passed_areas=()
+    failed_areas=()
+
+    while IFS= read -r justfile; do
+        area="${justfile%/justfile}"
+        [[ "${area}" == "${justfile}" ]] && continue
+
+        if ! (CDPATH= cd "./${area}" && just --summary 2>/dev/null) | tr ' ' '\n' | grep -qx test; then
+            continue
+        fi
+
+        set +e
+        (CDPATH= cd "./${area}" && just test >/dev/null 2>&1)
+        exit_code=$?
+        set -e
+
+        if [[ ${exit_code} -eq 130 ]]; then
+            passed_areas+=("${area}")
+        else
+            failed_areas+=("${area} (exit ${exit_code})")
+        fi
+    done < <(rg --files -g justfile | sort)
+
+    echo
+    echo "Ctrl+C test contract"
+    echo "================================================"
+    echo -e "{{ green }}Passed{{ reset }} (${#passed_areas[@]}): ${passed_areas[*]:-(none)}"
+    echo -e "{{ red }}Failed{{ reset }} (${#failed_areas[@]}): ${failed_areas[*]:-(none)}"
+    echo "================================================"
+    echo
+
+    if (( ${#failed_areas[@]} > 0 )); then
+        exit 1
+    fi
 
 # ---------------------------------------------------------------------------
 # Canonical lifecycle recipes (testing-best-practices spec, Phase 2).
@@ -360,7 +545,11 @@ _test_browser pkg *args="":
     echo
     echo -e "🌐 Browser tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
-    cargo nextest run -p {{ pkg }} -E 'test(/browser_/)' --no-tests=pass {{ args }}
+    # Run one test at a time (`-j 1`). Each browser test spawns its own headless
+    # Chrome; `#[serial(browser)]` cannot serialize them because nextest runs
+    # each test in a separate process. Concurrent Chromes overwhelm teardown and
+    # trip nextest's leak detector — mirror the L2 tier and serialize the tier.
+    cargo nextest run -p {{ pkg }} -j 1 -E 'test(/browser_/)' --no-tests=pass {{ args }}
 
 # Real-resource tier: external services/devices. Selecting the set is harmless;
 # tests themselves are responsible for skipping when the resource is absent.

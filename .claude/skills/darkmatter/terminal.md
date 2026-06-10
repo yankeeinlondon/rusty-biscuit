@@ -22,15 +22,25 @@ pub struct TerminalOptions {
 
 ## Output Functions
 
-```rust
-use darkmatter::markdown::output::{TerminalOptions, write_terminal, for_terminal};
+Terminal rendering is the `Markdown::as_terminal` method; it builds a complete
+`renderable` render tree and runs one terminal fold over it. (The legacy
+free-standing `for_terminal` / `write_terminal` event-stream serializers were
+deleted in the tree cutover.)
 
-// Write directly to a writer
-write_terminal(&mut std::io::stdout(), &md, TerminalOptions::default())?;
+```rust
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::output::TerminalOptions;
+
+let md: Markdown = "# Hello\n\nWorld".into();
 
 // Get as string
-let output = for_terminal(&md, TerminalOptions::default())?;
+let output = md.as_terminal(TerminalOptions::default())?;
+print!("{output}");
 ```
+
+For page-framed terminal output (margins, padding, page background, `style:`
+frontmatter), use `DarkmatterPage::render(&md)` instead — see the darkmatter
+skill's *Common Entry Points*.
 
 ## Theme Pairs
 
@@ -119,10 +129,12 @@ The soft reset sequence `\x1b[22;23;24;25;27;28;29;39m` clears:
 - `25` blink off, `27` inverse off, `28` conceal off, `29` strikethrough off
 - `39` default foreground
 
-But **preserves** `48` (background color). This is implemented in:
-- `push_prose_text()` for blockquote prose words
-- `push_inline_code_with_bg()` for inline code inside blockquotes
-- `LineWrapper::clear_blockquote()` emits a final hard reset after padding
+But **preserves** `48` (background color). Since the tree cutover, terminal SGR
+emission lives in `biscuit-terminal`'s render-tree fold (`render_tree::render` /
+`render_tree::style`), not in darkmatter — the bespoke darkmatter terminal
+serializer (and its `push_prose_text` / `push_inline_code_with_bg` /
+`LineWrapper` helpers) has been deleted. The soft-reset principle still applies
+to any code that paints adjacent background segments by hand.
 
 **Reference issue**: Background gaps were visible as missing background on blank characters and commas inside inline code and blockquotes (2026-05-06).
 

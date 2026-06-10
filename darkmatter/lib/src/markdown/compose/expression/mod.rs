@@ -64,6 +64,7 @@
 //! topic.
 
 pub mod ast;
+pub mod catalog;
 pub mod ctx;
 pub mod functions;
 pub mod lexer;
@@ -71,6 +72,10 @@ pub mod parser;
 pub mod resolve_ctx;
 
 pub use ast::{BinaryOp, Expr};
+pub use catalog::{
+    expression_function_descriptors, ExpressionFunctionDescriptor,
+    EXPRESSION_FUNCTION_DESCRIPTORS,
+};
 pub use ctx::CtxLookup;
 pub use resolve_ctx::ResolutionContext;
 pub use lexer::{
@@ -480,6 +485,8 @@ fn evaluate_function<L: EvaluationLookup>(
 ) -> Result<Value, String> {
     let name = name.to_ascii_lowercase();
     match name.as_str() {
+        // `and`/`or` short-circuit, so they must evaluate their arguments
+        // lazily and stay here rather than in the eagerly-evaluated registries.
         "and" => {
             for arg in args {
                 let value = evaluate(arg, lookup)?;
@@ -498,83 +505,8 @@ fn evaluate_function<L: EvaluationLookup>(
             }
             Ok(Value::Bool(false))
         }
-        "haskey" | "has_key" => {
-            if args.len() < 2 {
-                return Err("has_key() requires 2 arguments".to_string());
-            }
-            let object = evaluate(&args[0], lookup)?;
-            let key = scalar_string(&evaluate(&args[1], lookup)?);
-            let has = object
-                .as_object()
-                .map(|obj| obj.contains_key(&key))
-                .unwrap_or(false);
-            Ok(Value::Bool(has))
-        }
-        "contains" => {
-            if args.len() < 2 {
-                return Err("contains() requires 2 arguments".to_string());
-            }
-            let haystack = evaluate(&args[0], lookup)?;
-            let needle = evaluate(&args[1], lookup)?;
-            let found = match haystack {
-                Value::Array(values) => values
-                    .iter()
-                    .any(|value| scalar_string(value) == scalar_string(&needle)),
-                Value::Object(values) => values
-                    .values()
-                    .any(|value| scalar_string(value) == scalar_string(&needle)),
-                Value::String(value) => value.contains(&scalar_string(&needle)),
-                value => scalar_string(&value).contains(&scalar_string(&needle)),
-            };
-            Ok(Value::Bool(found))
-        }
-        "length" => {
-            if args.is_empty() {
-                return Err("length() requires 1 argument".to_string());
-            }
-            let value = evaluate(&args[0], lookup)?;
-            let len = match value {
-                Value::String(s) => s.chars().count(),
-                Value::Array(arr) => arr.len(),
-                Value::Object(obj) => obj.len(),
-                Value::Number(n) => n.to_string().chars().count(),
-                Value::Bool(_) => 0,
-                Value::Null => 0,
-            };
-            Ok(Value::Number(serde_json::Number::from(len)))
-        }
-        "number" => {
-            if args.is_empty() {
-                return Err("number() requires at least 1 argument".to_string());
-            }
-            let value = evaluate(&args[0], lookup)?;
-            let default = if args.len() > 1 {
-                to_number_coerce(&evaluate(&args[1], lookup)?)
-            } else {
-                0.0
-            };
-            let number = to_number(&value).unwrap_or(default);
-            let json_number = if number.fract() == 0.0 {
-                serde_json::Number::from(number as i64)
-            } else {
-                serde_json::Number::from_f64(number)
-                    .ok_or_else(|| "Unable to represent number".to_string())?
-            };
-            Ok(Value::Number(json_number))
-        }
-        "round" => {
-            if args.is_empty() {
-                return Err("round() requires at least 1 argument".to_string());
-            }
-            let value = evaluate(&args[0], lookup)?;
-            let default = if args.len() > 1 {
-                to_number_coerce(&evaluate(&args[1], lookup)?)
-            } else {
-                0.0
-            };
-            let number = to_number(&value).unwrap_or(default).round() as i64;
-            Ok(Value::Number(serde_json::Number::from(number)))
-        }
+        // Every other function evaluates its arguments eagerly and resolves
+        // through the authoritative dispatch tables in `functions`.
         other => {
             let evaluated: Vec<Value> = args
                 .iter()

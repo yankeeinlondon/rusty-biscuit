@@ -1,6 +1,6 @@
 //! Terminal layout application.
 //!
-//! The layout *data* types ([`Layout`], [`Alignment`], [`Margin`],
+//! The layout *data* types ([`Layout`], [`Alignment`], [`Edges`],
 //! [`Length`], [`TargetValue`]) live in [`renderable::layout`] and
 //! [`WordWrap`] in [`renderable::wrap_policy`]; they are re-exported here for
 //! backwards compatibility. Terminal-specific ANSI-width application lives in
@@ -12,7 +12,7 @@ use crate::{
     utils::block_constraint::{split_lines, visible_width, wrap_lines},
 };
 
-pub use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue};
+pub use renderable::layout::{Alignment, Edges, Layout, Length, TargetValue};
 pub use renderable::wrap_policy::WordWrap;
 
 /// Adds `cells` whole terminal cells to a `TargetValue<Length>` margin value.
@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn test_layout_left_margin() {
         let layout = Layout {
-            margin: Margin::x(Length::ch(4)),
+            margin: Edges::x(Length::ch(4)),
             ..Layout::default()
         };
         let result = layout.apply_layout("Hello", 80);
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn apply_layout_indents_by_left_margin_cells() {
         let layout = Layout {
-            margin: Margin::x(Length::ch(3)),
+            margin: Edges::x(Length::ch(3)),
             ..Layout::default()
         };
         let out = layout.apply_layout("hi", 40);
@@ -268,7 +268,7 @@ mod tests {
         // compensation) should preserve the trailing newline without adding
         // left-margin padding to the empty trailing line.
         let layout = Layout {
-            margin: Margin::x(Length::ch(4)),
+            margin: Edges::x(Length::ch(4)),
             ..Layout::default()
         };
         let result = layout.apply_layout("hello\n", 80);
@@ -288,7 +288,7 @@ mod tests {
     fn test_layout_no_trailing_newline_unchanged() {
         // Content without trailing newline should not gain one
         let layout = Layout {
-            margin: Margin::x(Length::ch(4)),
+            margin: Edges::x(Length::ch(4)),
             ..Layout::default()
         };
         let result = layout.apply_layout("hello", 80);
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn test_apply_block_layout_respects_margins() {
         let layout = Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             alignment: Alignment::Center,
             ..Layout::default()
         };
@@ -396,7 +396,7 @@ mod tests {
             indentation in 0..=100u32
         ) {
             let layout = Layout {
-                margin: Margin::x(Length::ch(margin)),
+                margin: Edges::x(Length::ch(margin)),
                 word_wrap: WordWrap::WrapProse(Some(indentation), None),
                 ..Default::default()
             };

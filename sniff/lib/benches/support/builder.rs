@@ -14,6 +14,7 @@
 use git2::{IndexAddOption, Repository, Signature};
 use std::fs;
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 /// Number of Rust packages in the synthetic `large_monorepo` fixture.
 pub const LARGE_MONOREPO_RUST_PKGS: usize = 60;
@@ -53,12 +54,62 @@ pub const SMALL_GIT_REPO_COMMITS: u32 = 5;
 /// Dirty files in the `small_git_repo` fixture.
 pub const SMALL_GIT_REPO_DIRTY_FILES: usize = 2;
 
+/// Number of commits in the default `git_repo_with_worktrees` fixture base
+/// history before any worktrees are added.
+pub const WORKTREES_BASE_COMMITS: u32 = 3;
+
+/// Initialize a git repository with cross-platform-stable settings.
+///
+/// All fixture repos disable `core.autocrlf` and pin `core.eol = lf` so the
+/// same file contents produce identical blobs (and therefore identical dirty
+/// counts and diff text) on Windows, Linux, and macOS. Without this, a
+/// developer machine with `autocrlf = true` would rewrite line endings on
+/// checkout and skew status/diff fixtures.
+pub fn init_repo(root: &Path) -> Repository {
+    let repo = Repository::init(root).expect("init git repo");
+    if let Ok(mut config) = repo.config() {
+        let _ = config.set_bool("core.autocrlf", false);
+        let _ = config.set_str("core.eol", "lf");
+    }
+    repo
+}
+
 /// Write a file, creating parent directories as needed.
 pub fn write_file(path: &Path, contents: &str) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create parent directory");
     }
     fs::write(path, contents).expect("write fixture file");
+}
+
+/// Stage everything and create a commit using a deterministic signature whose
+/// author/committer time is `seconds` past the Unix epoch.
+///
+/// Monotonically increasing `seconds` across a history gives the revwalk a real
+/// commit-time ordering to sort and gate on, which the recent-commit time
+/// cutoff benchmarks depend on.
+pub fn commit_all_at(repo: &Repository, message: &str, seconds: i64) {
+    let mut index = repo.index().expect("load repo index");
+    index
+        .add_all(["."].iter(), IndexAddOption::DEFAULT, None)
+        .expect("stage files");
+    index.write().expect("write index");
+    let tree_id = index.write_tree().expect("write tree");
+    let tree = repo.find_tree(tree_id).expect("resolve tree");
+    let sig = Signature::new(
+        "Bench Runner",
+        "bench@sniff.test",
+        &git2::Time::new(seconds, 0),
+    )
+    .expect("build signature");
+    let parent_commit = repo
+        .head()
+        .ok()
+        .and_then(|h| h.target())
+        .and_then(|oid| repo.find_commit(oid).ok());
+    let parents: Vec<&git2::Commit> = parent_commit.as_ref().into_iter().collect();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
+        .expect("create commit");
 }
 
 /// Stage everything and create a commit using a deterministic signature.
@@ -87,7 +138,7 @@ pub fn commit_all(repo: &Repository, message: &str) {
 ///
 /// Returns the opened `Repository` handle.
 pub fn build_small_git_repo(root: &Path) -> Repository {
-    let repo = Repository::init(root).expect("init small git repo");
+    let repo = init_repo(root);
 
     write_file(&root.join("README.md"), "# small repo\n");
     write_file(&root.join(".gitignore"), "target/\n");
@@ -132,7 +183,7 @@ pub fn build_small_git_repo(root: &Path) -> Repository {
 ///
 /// Returns the opened `Repository` handle.
 pub fn build_large_monorepo(root: &Path) -> Repository {
-    let repo = Repository::init(root).expect("init large monorepo");
+    let repo = init_repo(root);
 
     let rust_pkgs = LARGE_MONOREPO_RUST_PKGS;
     let js_pkgs = LARGE_MONOREPO_JS_PKGS;
@@ -223,7 +274,7 @@ pub fn build_large_monorepo(root: &Path) -> Repository {
 ///
 /// Returns the opened `Repository` handle.
 pub fn build_huge_monorepo(root: &Path) -> Repository {
-    let repo = Repository::init(root).expect("init huge monorepo");
+    let repo = init_repo(root);
 
     let rust_pkgs = HUGE_MONOREPO_RUST_PKGS;
     let js_pkgs = HUGE_MONOREPO_JS_PKGS;
@@ -363,7 +414,7 @@ pub fn build_huge_monorepo(root: &Path) -> Repository {
 ///
 /// Returns the opened `Repository` handle.
 pub fn build_git_repo_with_dirty_files(root: &Path, dirty_count: usize) -> Repository {
-    let repo = Repository::init(root).expect("init dirty-files repo");
+    let repo = init_repo(root);
 
     write_file(&root.join(".gitignore"), "target/\n");
     write_file(
@@ -403,7 +454,7 @@ pub fn build_git_repo_with_dirty_files(root: &Path, dirty_count: usize) -> Repos
 /// difference comes from frontmatter handling rather than content size.
 pub fn build_docs_repo(root: &Path, total_docs: usize, with_blast_radius: usize) {
     let with_br = with_blast_radius.min(total_docs);
-    let repo = Repository::init(root).expect("init docs repo");
+    let repo = init_repo(root);
 
     write_file(&root.join("README.md"), "# docs fixture\n");
     write_file(&root.join(".gitignore"), "target/\n");
@@ -461,7 +512,7 @@ pub fn build_git_repo_with_fake_remotes(
     commit_count: usize,
     remote_count: usize,
 ) -> Repository {
-    let repo = Repository::init(root).expect("init fake-remotes repo");
+    let repo = init_repo(root);
 
     write_file(&root.join(".gitignore"), "target/\n");
 
@@ -513,7 +564,7 @@ pub fn build_git_repo_with_fake_remotes(
 ///
 /// Returns the opened `Repository` handle.
 pub fn build_cargo_monorepo(root: &Path, package_count: usize) -> Repository {
-    let repo = Repository::init(root).expect("init cargo monorepo");
+    let repo = init_repo(root);
 
     let cargo_members: Vec<String> = (0..package_count)
         .map(|i| format!("\"crates/pkg{i:03}\""))
@@ -584,4 +635,118 @@ pub fn build_language_mix_tree(root: &Path) {
         write_file(&deep.join("index.ts"), "export {};\n");
         write_file(&deep.join("README.md"), "# deep\n");
     }
+}
+
+/// Build a git repo with `count` linked worktrees for worktree fan-out
+/// benchmarks.
+///
+/// The base repository carries [`WORKTREES_BASE_COMMITS`] commits. Each linked
+/// worktree lives under `_wt/` (gitignored so the base working tree stays
+/// clean) on its own branch with one divergent commit, so every worktree is
+/// exactly one commit ahead of its base branch — giving the ahead/behind and
+/// merge calculations in `get_worktrees` real work to do.
+///
+/// Returns the opened base `Repository` handle.
+pub fn build_git_repo_with_worktrees(root: &Path, count: usize) -> Repository {
+    let repo = init_repo(root);
+
+    write_file(&root.join(".gitignore"), "target/\n_wt/\n");
+    write_file(&root.join("README.md"), "# worktrees fixture\n");
+    write_file(&root.join("src/lib.rs"), "pub fn base() -> u32 { 0 }\n");
+
+    let mut seconds = 1_000i64;
+    commit_all_at(&repo, "c1: initial worktrees layout", seconds);
+    for i in 1..WORKTREES_BASE_COMMITS {
+        seconds += 60;
+        write_file(
+            &root.join("src/lib.rs"),
+            &format!("pub fn base() -> u32 {{ {i} }}\n"),
+        );
+        commit_all_at(&repo, &format!("c{}: base churn {i}", i + 1), seconds);
+    }
+
+    let wt_root = root.join("_wt");
+    fs::create_dir_all(&wt_root).expect("create worktree root");
+
+    for i in 0..count {
+        let name = format!("wt{i:03}");
+        let wt_path = wt_root.join(&name);
+        repo.worktree(&name, &wt_path, None)
+            .expect("create linked worktree");
+
+        // One divergent commit per worktree so ahead/behind has work.
+        let wt_repo = Repository::open(&wt_path).expect("open linked worktree");
+        write_file(
+            &wt_path.join(format!("feature_{i:03}.rs")),
+            &format!("pub fn feature_{i:03}() -> u32 {{ {i} }}\n"),
+        );
+        commit_all_at(
+            &wt_repo,
+            &format!("wt{i:03}: divergent commit"),
+            seconds + 1_000 + i as i64,
+        );
+    }
+
+    repo
+}
+
+/// Build a git repo with `commits` commits on a single linear history for
+/// deep-history revwalk and commit-graph benchmarks.
+///
+/// Each commit rewrites a rolling source file and appends to `history.txt`, so
+/// every commit carries a small non-empty diff. Commit times increase
+/// monotonically (60s apart) so the revwalk has a meaningful commit-time order
+/// to sort and gate on.
+///
+/// Returns the opened `Repository` handle.
+pub fn build_deep_history_repo(root: &Path, commits: usize) -> Repository {
+    let repo = init_repo(root);
+
+    write_file(&root.join(".gitignore"), "target/\n");
+
+    let mut seconds = 1_000i64;
+    for i in 0..commits {
+        write_file(&root.join("history.txt"), &format!("line {i}\n"));
+        write_file(
+            &root.join(format!("src/f{:03}.rs", i % 16)),
+            &format!("pub const N: u32 = {i};\n"),
+        );
+        commit_all_at(&repo, &format!("c{i}: commit {i}"), seconds);
+        seconds += 60;
+    }
+
+    repo
+}
+
+/// Whether a usable `git` executable is on `PATH`.
+///
+/// Commit-graph generation shells out to `git` (libgit2 exposes no
+/// commit-graph writer), so graph-dependent benchmarks must skip cleanly when
+/// no `git` binary is available.
+pub fn git_available() -> bool {
+    Command::new("git")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Write a commit-graph file for `root` using the external `git` executable.
+///
+/// ## Returns
+///
+/// `true` when the commit-graph was written; `false` when `git` is unavailable
+/// or the command failed, so callers can skip graph-dependent benchmarks with a
+/// clear message rather than failing outright.
+pub fn write_commit_graph(root: &Path) -> bool {
+    Command::new("git")
+        .args(["commit-graph", "write", "--reachable"])
+        .current_dir(root)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }

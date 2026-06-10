@@ -18,6 +18,10 @@ Darkmatter provides a large variety of ways of performing transclusion but the m
 
 > this simple directive will bring the content from the two referenced files _into_ the base document.
 
+The `::file-links` directive discovers document files and renders them as a
+linked file tree. See [File Links](../inline/file-links.md) for syntax and
+options.
+
 `::file` and `::code` also accept HTTP(S) URLs when the target host is allowed
 by compose remote policy:
 

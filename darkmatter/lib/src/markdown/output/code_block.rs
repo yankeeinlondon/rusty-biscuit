@@ -34,8 +34,8 @@ use syntect::util::LinesWithEndings;
 /// * `target_width` - Optional component render width. When `Some`, each line
 ///   pads to exactly `target_width` visible columns using the line background
 ///   color instead of clearing to the terminal edge with `\x1b[K`. This is
-///   what `PageFill::Max`, `Explicit`, `Pad`, and `Indent` need so the code
-///   block body honours its resolved width.
+///   what component `Layout.max_width`, `width`, and `padding` need so the
+///   code block body honours its resolved width.
 ///
 /// ## Returns
 ///

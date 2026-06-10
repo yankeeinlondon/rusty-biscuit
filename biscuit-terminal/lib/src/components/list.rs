@@ -1157,18 +1157,18 @@ mod tests {
 
     #[test]
     fn ordered_list_render_tree_node_carries_layout_when_margins_set() {
-        use crate::utils::layout::{Length, Margin};
+        use crate::utils::layout::{Length, Edges};
         let mut list = OrderedList::new(vec!["First", "Second"]);
-        list.layout_mut().margin = Margin::x(Length::ch(2));
+        list.layout_mut().margin = Edges::x(Length::ch(2));
         let node = list.render_tree_node().unwrap();
         assert!(node.attrs.layout().is_some());
     }
 
     #[test]
     fn unordered_list_render_tree_node_carries_layout_when_margins_set() {
-        use crate::utils::layout::{Length, Margin};
+        use crate::utils::layout::{Length, Edges};
         let mut list = UnorderedList::new(vec!["Apple", "Banana"]);
-        list.layout_mut().margin = Margin::x(Length::ch(2));
+        list.layout_mut().margin = Edges::x(Length::ch(2));
         let node = list.render_tree_node().unwrap();
         assert!(node.attrs.layout().is_some());
     }

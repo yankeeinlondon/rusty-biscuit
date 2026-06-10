@@ -12,13 +12,13 @@ use biscuit_terminal::prelude::strip_escape_codes;
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::{TerminalCodeRenderer, YamlBlock};
-use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue, WordWrap};
+use renderable::layout::{Alignment, Layout, Length, Edges, TargetValue, WordWrap};
 use renderable::tree::{RenderNode, RenderStrictness};
 
-/// A `Margin` with a single side set to `length`, all other sides zero.
-fn one_side(side: Side, length: Length) -> Margin {
+/// A `Edges` with a single side set to `length`, all other sides zero.
+fn one_side(side: Side, length: Length) -> Edges {
     let value = TargetValue::universal(length);
-    let mut margin = Margin::default();
+    let mut margin = Edges::default();
     match side {
         Side::Top => margin.top = value,
         Side::Right => margin.right = value,
@@ -28,7 +28,7 @@ fn one_side(side: Side, length: Length) -> Margin {
     margin
 }
 
-/// Which side of a [`Margin`] a scenario sets.
+/// Which side of a [`Edges`] a scenario sets.
 enum Side {
     Top,
     Right,

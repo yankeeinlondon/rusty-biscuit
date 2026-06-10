@@ -26,13 +26,14 @@
 //! 10. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
 //! 11. **Code Transclusion** - Include `::code` file content as fenced blocks
 //! 12. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
+//! 13. **File Links** - Expand `::file-links` directives into a linked file tree
 //!
 //! **Inline Post** (serial):
-//! 13. **Cleanup** - Normalize markdown formatting
-//! 14. **Normalization** - Adjust heading levels
+//! 14. **Cleanup** - Normalize markdown formatting
+//! 15. **Normalization** - Adjust heading levels
 //!
 //! **Finalization** (root-only serial):
-//! 15. **Link Normalization** - Convert absolute paths back to portable forms
+//! 16. **Link Normalization** - Convert absolute paths back to portable forms
 //!
 //! ## Examples
 //!
@@ -67,6 +68,7 @@ mod types;
 
 pub mod block_pairs;
 pub mod expression;
+pub mod file_links;
 pub mod interpolation;
 pub(crate) mod link_normalization;
 pub(crate) mod link_resolve;
@@ -82,6 +84,7 @@ pub mod transclusion;
 pub use biscuit_file::PathPosition;
 pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 pub use context::ContextMergeDiagnostic;
+pub use file_links::FileLinksError;
 pub use remote::{
     DEFAULT_REMOTE_CONCURRENCY, DiscoveredRemoteUrl, REMOTE_CONCURRENCY_ENV, RemoteFreshnessMode,
     RemoteReadConfig, RemoteReadError, RemoteUrlCatalog, RemoteUrlConsumer,
@@ -367,6 +370,15 @@ enum PreparedTransclusion {
         span: std::ops::Range<usize>,
         directive: toc_linking::TocLinkingDirective,
     },
+    FileLinks {
+        order: usize,
+        span: std::ops::Range<usize>,
+        /// The parsed directive. Discovery is deferred to the concurrent
+        /// resolve stage so multiple directives' filesystem walks run in
+        /// parallel, and each directive's tree is built from its discovered
+        /// entries rather than walked a second time for rendering.
+        directive: file_links::FileLinksDirective,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -535,7 +547,7 @@ impl Markdown {
     /// Executes operations in three phases:
     /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion, ShellBlocks
     /// 2. **Transclusion** (prepared serially, resolved concurrently): BlockTransclusion,
-    ///    FrontmatterTransclusion, CodeTransclusion, TocLinking
+    ///    FrontmatterTransclusion, CodeTransclusion, TocLinking, FileLinks
     /// 3. **Inline Post** (serial): Cleanup, Normalization
     #[instrument(skip_all, fields(source = ?options.source))]
     pub(crate) fn run_compose_pipeline_internal(
@@ -1015,6 +1027,12 @@ impl Markdown {
             None
         };
 
+        let file_links_directives = if operations.contains(&ComposeOperation::FileLinks) {
+            Some(file_links::parse_file_links_directives(&self.content)?)
+        } else {
+            None
+        };
+
         if let Some(start) = parse_start {
             perf_collector.record(perf::PerfMetricKind::TransclusionParse, start.elapsed());
         }
@@ -1072,6 +1090,15 @@ impl Markdown {
                         self.prepare_toc_transclusions(
                             directives,
                             report,
+                            &mut prepared,
+                            &mut next_order,
+                        );
+                    }
+                }
+                ComposeOperation::FileLinks => {
+                    if let Some(directives) = file_links_directives.as_ref() {
+                        self.prepare_file_links_transclusions(
+                            directives,
                             &mut prepared,
                             &mut next_order,
                         );
@@ -1804,6 +1831,26 @@ impl Markdown {
         }
     }
 
+    fn prepare_file_links_transclusions(
+        &self,
+        directives: &[file_links::FileLinksDirective],
+        prepared: &mut Vec<PreparedTransclusion>,
+        next_order: &mut usize,
+    ) {
+        // Discovery is intentionally NOT performed here: it runs in the
+        // concurrent resolve stage (see `resolve_file_links_transclusion`) so
+        // multiple directives' expensive filesystem walks parallelize. This
+        // loop only enqueues the parsed directive.
+        for directive in directives {
+            prepared.push(PreparedTransclusion::FileLinks {
+                order: *next_order,
+                span: directive.span.clone(),
+                directive: directive.clone(),
+            });
+            *next_order += 1;
+        }
+    }
+
     /// Records a fetched remote URL body as a closure-hash dependency.
     ///
     /// The dependency's `closure_hash` is the xxHash of the response body, so a
@@ -2174,7 +2221,133 @@ impl Markdown {
                     source_file: None,
                 })
             }
+            PreparedTransclusion::FileLinks {
+                order,
+                span,
+                directive,
+            } => self.resolve_file_links_transclusion(order, span, directive, options),
         }
+    }
+
+    /// Resolves a single `::file-links` directive in the concurrent stage.
+    ///
+    /// Discovery runs here (not during preparation) so directives parallelize.
+    /// On a match the [`FileSystem`](biscuit_terminal::components::filesystem::FileSystem)
+    /// tree is built directly from the discovered entries — no second
+    /// filesystem walk — and its fully-styled render subtree is embedded
+    /// losslessly via [`renderable::tree::embed`]. Empty and invalid results
+    /// reproduce the strict/permissive behavior the preparation stage used to
+    /// apply.
+    fn resolve_file_links_transclusion(
+        &self,
+        order: usize,
+        span: std::ops::Range<usize>,
+        directive: file_links::FileLinksDirective,
+        options: &ComposeOptions,
+    ) -> MarkdownResult<ResolvedTransclusion> {
+        let skipped_replace = |replacement: String, report: ComposeReport| {
+            Ok(ResolvedTransclusion {
+                order,
+                target: ApplyTarget::Replace(span.clone()),
+                content: Some(replacement),
+                report,
+                source_file: None,
+            })
+        };
+
+        let render = match file_links::discover(&directive, &options.source) {
+            Ok(result) => match result.render {
+                Some(render) => render,
+                None => {
+                    // Empty result: strict mode inserts a subtle notice,
+                    // permissive mode removes the directive with a warning.
+                    let mut report = ComposeReport::new();
+                    report.transclusions_skipped = 1;
+                    if options.fail_fast {
+                        return skipped_replace("_No matching files_".to_string(), report);
+                    }
+                    report.add_warning(
+                        ComposeWarning::new(
+                            "file_links",
+                            format!(
+                                "No matching files for ::file-links directive at line {}",
+                                directive.line
+                            ),
+                        )
+                        .at_line(directive.line),
+                    );
+                    return skipped_replace(String::new(), report);
+                }
+            },
+            Err(err) => {
+                if self.resolve_ignore_invalid(options) {
+                    let mut report = ComposeReport::new();
+                    report.transclusions_skipped = 1;
+                    report.add_warning(
+                        ComposeWarning::new("file_links", err.to_string()).at_line(directive.line),
+                    );
+                    return skipped_replace(String::new(), report);
+                }
+                return Err(err.into());
+            }
+        };
+
+        // Build the FileSystem tree directly from the discovered entries and
+        // inject it, so the component renders without re-walking the directory.
+        let tree = file_links::build_included_tree(&render);
+        let mut fs =
+            biscuit_terminal::components::filesystem::FileSystem::new(&render.component_root)
+                .map_err(|e| {
+                    crate::markdown::types::MarkdownError::Transform(format!(
+                        "failed to create FileSystem for ::file-links at line {}: {e}",
+                        directive.line
+                    ))
+                })?;
+        fs = fs
+            .with_prebuilt_tree(tree)
+            .with_file_links()
+            .italicize_dot_files(true)
+            .dim_gitignore(true)
+            .show_root(true);
+        if !render.dimmed_prefix.is_empty() {
+            fs = fs.with_dimmed_root_prefix(&render.dimmed_prefix);
+        }
+        if !render.target_name.is_empty() {
+            fs = fs.with_root_display_name(&render.target_name);
+        }
+        if render.uses_repo_icon {
+            fs = fs.with_root_icon(
+                biscuit_terminal::components::filesystem::RootIconKind::Repository,
+            );
+        }
+
+        // Carry the fully-styled render subtree through the composed document
+        // losslessly: the fold splices it back so terminal and browser
+        // rendering reproduce the live component (color, dim, icons), while
+        // plain-Markdown consumers see the embedded portable fallback.
+        use renderable::tree::{TreeRenderable, encode_embedded_subtree};
+        let node = fs.render_tree();
+        let embedded = encode_embedded_subtree(&node).map_err(|e| {
+            crate::markdown::types::MarkdownError::Transform(format!(
+                "failed to embed ::file-links render tree at line {}: {e}",
+                directive.line
+            ))
+        })?;
+        let replacement = indent::indent_text(
+            &embedded,
+            &directive.indent,
+            directive.inferred_indent.as_deref(),
+        );
+
+        let mut report = ComposeReport::new();
+        report.transclusions_applied = 1;
+        Ok(ResolvedTransclusion {
+            order,
+            target: ApplyTarget::Replace(span),
+            content: Some(replacement),
+            report,
+            source_file: None,
+        })
     }
 
     // NOTE: `::file` and `::code` directives share the same indentation
@@ -5970,6 +6143,509 @@ Rounded: {{ round(pi) }}"#;
                 result.is_err(),
                 "Expected error because no allowed hosts configured"
             );
+        }
+    }
+
+    mod file_links_compose {
+        use super::*;
+
+        #[test]
+        fn glob_mode_replaces_directive_with_linked_tree() {
+            let dir = tempfile::tempdir().unwrap();
+            // Fake repo so boundary resolves to temp dir, not CWD.
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("a.md"), "# A\n").unwrap();
+            std::fs::write(docs.join("b.txt"), "B\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links docs/*\n\nFooter.\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("a.md"), "content: {text}");
+            assert!(text.contains("b.txt"), "content: {text}");
+            assert!(!text.contains("::file-links"), "directive should be replaced: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        /// End-to-end: composing a `::file-links` directive through the full
+        /// default pipeline embeds the FileSystem render subtree, and rendering
+        /// the composed document to a terminal reproduces the styled tree —
+        /// OSC8 hyperlinks and dim styling survive the round-trip, and the
+        /// embedding marker never leaks into rendered output.
+        #[test]
+        fn embedded_subtree_round_trips_through_compose_then_terminal_render() {
+            use crate::markdown::highlighting::{ColorMode, ThemePair};
+            use crate::markdown::output::terminal::{
+                ColorDepth, DimMode, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode,
+                TerminalOptions,
+            };
+
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs").join("topics");
+            std::fs::create_dir_all(&docs).unwrap();
+            std::fs::write(docs.join("alpha.md"), "# Alpha\n").unwrap();
+            std::fs::write(docs.join("beta.md"), "# Beta\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links docs/topics/*.md\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            // Full default pipeline (cleanup + normalization enabled) proves the
+            // embedded block survives end to end.
+            let (composed, _report) = md
+                .compose_with(ComposeOptions::new().with_source_file(&root))
+                .unwrap();
+            assert!(
+                composed.content().contains("bt:render-tree"),
+                "composed doc should carry the embedded subtree: {}",
+                composed.content()
+            );
+
+            let options = TerminalOptions {
+                code_theme: ThemePair::OneHalf,
+                prose_theme: ThemePair::OneHalf,
+                color_mode: ColorMode::Dark,
+                include_line_numbers: false,
+                color_depth: Some(ColorDepth::TrueColor),
+                image_mode: TerminalImageMode::Never,
+                base_path: None,
+                italic_mode: ItalicMode::Always,
+                dim_mode: DimMode::Always,
+                max_width: Some(100),
+                mermaid_mode: MermaidMode::Off,
+                hyperlink_mode: HyperlinkMode::Always,
+                hr_defaults: None,
+            };
+            let output = composed.as_terminal(options).unwrap();
+
+            assert!(
+                !output.contains("bt:render-tree"),
+                "embedding marker leaked into rendered output: {output:?}"
+            );
+            assert!(output.contains("alpha.md"), "missing file: {output:?}");
+            assert!(output.contains("beta.md"), "missing file: {output:?}");
+            assert!(
+                output.contains("\x1b]8;;"),
+                "OSC8 hyperlink did not survive: {output:?}"
+            );
+            assert!(
+                output.contains("file://"),
+                "file:// link target did not survive: {output:?}"
+            );
+            assert!(
+                output.contains("\x1b[2m"),
+                "dim styling (dimmed root prefix) did not survive: {output:?}"
+            );
+        }
+
+        /// In-process companion to the Level 2 presentation test: the full
+        /// `::file-links` contract (extension glyphs, repository icon, italic
+        /// dotfile, dimmed gitignored entry, bold target) is produced by
+        /// composing then rendering to a terminal string. This runs in the L1
+        /// suite, so the bytes the real-terminal test asserts on are verified
+        /// without a WezTerm pane.
+        #[test]
+        fn rich_fixture_renders_full_presentation_contract() {
+            use crate::markdown::output::terminal::{
+                ColorDepth, DimMode, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode,
+                TerminalOptions,
+            };
+
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let topics = dir.path().join("docs").join("topics");
+            std::fs::create_dir_all(&topics).unwrap();
+            std::fs::write(topics.join("alpha.md"), "# Alpha\n").unwrap();
+            std::fs::write(topics.join("notes.txt"), "notes\n").unwrap();
+            std::fs::write(topics.join("report.pdf"), "pdf\n").unwrap();
+            std::fs::write(topics.join("sheet.xlsx"), "xls\n").unwrap();
+            std::fs::write(topics.join("memo.docx"), "doc\n").unwrap();
+            std::fs::write(topics.join(".hidden.md"), "# Hidden\n").unwrap();
+            std::fs::write(topics.join(".gitignore"), "ignored.md\n").unwrap();
+            std::fs::write(topics.join("ignored.md"), "# Ignored\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links --dir docs/topics\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let (composed, _report) = md
+                .compose_with(ComposeOptions::new().with_source_file(&root))
+                .unwrap();
+
+            let options = TerminalOptions {
+                color_mode: crate::markdown::highlighting::ColorMode::Dark,
+                color_depth: Some(ColorDepth::TrueColor),
+                image_mode: TerminalImageMode::Never,
+                italic_mode: ItalicMode::Always,
+                dim_mode: DimMode::Always,
+                hyperlink_mode: HyperlinkMode::Always,
+                mermaid_mode: MermaidMode::Off,
+                max_width: Some(100),
+                ..TerminalOptions::default()
+            };
+            let output = composed.as_terminal(options).unwrap();
+
+            // Extension-specific Unicode glyphs.
+            for glyph in ["📝", "📕", "📗", "📘"] {
+                assert!(output.contains(glyph), "missing glyph {glyph:?}: {output:?}");
+            }
+            // Repository icon, never the ordinary folder icon (no subdirs).
+            assert!(output.contains("📦"), "missing repository icon: {output:?}");
+            assert!(!output.contains("📂"), "unexpected folder icon: {output:?}");
+            // Dotfile italic, gitignored dim, target bold.
+            assert!(output.contains("\x1b[3m"), "missing italic dotfile: {output:?}");
+            assert!(output.contains("\x1b[2m"), "missing dim entry: {output:?}");
+            assert!(output.contains("\x1b[1m"), "missing bold target: {output:?}");
+            // The gitignored document is present but dim, the dotfile present.
+            assert!(output.contains("ignored.md"), "missing ignored.md: {output:?}");
+            assert!(output.contains(".hidden.md"), "missing .hidden.md: {output:?}");
+            assert!(
+                !output.contains(".gitignore"),
+                ".gitignore should not be a tree entry: {output:?}"
+            );
+        }
+
+        #[test]
+        fn dir_mode_with_depth_zero_lists_top_level_only() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("top.md"), "# Top\n").unwrap();
+            let sub = docs.join("sub");
+            std::fs::create_dir(&sub).unwrap();
+            std::fs::write(sub.join("nested.md"), "# Nested\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links --dir docs\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("top.md"), "content: {text}");
+            assert!(
+                !text.contains("nested.md"),
+                "depth 0 should not recurse: {text}"
+            );
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        #[test]
+        fn dir_mode_with_depth_recovers_nested_files() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            let sub = docs.join("sub");
+            std::fs::create_dir(&sub).unwrap();
+            std::fs::write(sub.join("nested.md"), "# Nested\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links --dir docs --depth 2\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("nested.md"), "content: {text}");
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        #[test]
+        fn self_exclusion_skips_source_document() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links *.md\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, _report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(
+                !text.contains("root.md"),
+                "source doc should be excluded: {text}"
+            );
+        }
+
+        #[test]
+        fn strict_empty_result_inserts_notice() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links *.nonexistent\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_fail_fast(true)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("No matching files"), "content: {text}");
+            assert_eq!(report.transclusions_skipped, 1);
+        }
+
+        #[test]
+        fn permissive_empty_result_removes_directive_with_warning() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links *.nonexistent\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_fail_fast(false)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(
+                !text.contains("::file-links"),
+                "directive should be removed: {text}"
+            );
+            assert!(!text.contains("No matching files"), "content: {text}");
+            assert_eq!(report.transclusions_skipped, 1);
+            assert!(
+                report.warnings.iter().any(|w| w.message.contains("No matching files")),
+                "expected warning: {:?}",
+                report.warnings
+            );
+        }
+
+        #[test]
+        fn dir_target_regular_file_errors_strict() {
+            // `--dir` pointed at a regular file is a syntax error, not an empty
+            // directory: strict mode fails the compose with a clear diagnostic.
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            std::fs::write(dir.path().join("report.pdf"), "pdf\n").unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links --dir report.pdf\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_fail_fast(true)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let err = md.compose_with(options).unwrap_err();
+            assert!(
+                err.to_string().contains("not a directory"),
+                "expected a not-a-directory error, got: {err}"
+            );
+        }
+
+        #[test]
+        fn dir_target_regular_file_warns_permissive() {
+            // Permissive mode removes the directive and records the real
+            // not-a-directory diagnostic instead of an empty/misleading warning.
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            std::fs::write(dir.path().join("report.pdf"), "pdf\n").unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links --dir report.pdf\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_ignore_invalid_references(Some(true))
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(
+                !text.contains("::file-links"),
+                "directive should be removed: {text}"
+            );
+            assert_eq!(report.transclusions_skipped, 1);
+            assert!(
+                report
+                    .warnings
+                    .iter()
+                    .any(|w| w.message.contains("not a directory")),
+                "expected not-a-directory warning: {:?}",
+                report.warnings
+            );
+        }
+
+        #[test]
+        fn operation_disabling_leaves_directive_intact() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links *.md\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::FileLinks)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, _report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("::file-links"), "directive should remain: {text}");
+        }
+
+        #[test]
+        fn indented_directive_preserves_container_nesting() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("a.md"), "# A\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n- Item\n  ::file-links docs/*\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, _report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            // Each output line should be indented to match the list item
+            for line in text.lines().skip(3) {
+                if line.contains("a.md") {
+                    assert!(
+                        line.starts_with("  "),
+                        "expected indent, got: {line}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn malformed_directive_in_strict_mode_fails() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .with_fail_fast(true)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let result = md.compose_with(options);
+            assert!(result.is_err(), "expected parse error in strict mode");
+        }
+
+        #[test]
+        fn out_of_bound_path_is_ignored() {
+            let dir = tempfile::tempdir().unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("a.md"), "# A\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links ../*\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(
+                !text.contains(".."),
+                "out-of-bound paths should be excluded: {text}"
+            );
+            assert_eq!(report.transclusions_skipped, 1);
+        }
+
+        #[test]
+        fn mixed_case_extensions_are_included() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("lower.md"), "# L\n").unwrap();
+            std::fs::write(docs.join("UPPER.MD"), "# U\n").unwrap();
+            std::fs::write(docs.join("MiXeD.Txt"), "# M\n").unwrap();
+            std::fs::write(docs.join("binary.exe"), "binary\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(&root, "# Root\n\n::file-links docs/*\n\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, _report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            assert!(text.contains("lower.md"), "content: {text}");
+            assert!(text.contains("UPPER.MD"), "content: {text}");
+            assert!(text.contains("MiXeD.Txt"), "content: {text}");
+            assert!(
+                !text.contains("binary.exe"),
+                "unsupported extension should be excluded: {text}"
+            );
+        }
+
+        #[test]
+        fn multiple_directives_produce_deterministic_ordering() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            let docs = dir.path().join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("a.md"), "# A\n").unwrap();
+            let other = dir.path().join("other");
+            std::fs::create_dir(&other).unwrap();
+            std::fs::write(other.join("b.txt"), "B\n").unwrap();
+
+            let root = dir.path().join("root.md");
+            std::fs::write(
+                &root,
+                "# Root\n\n::file-links docs/*\n\n::file-links other/*\n\n",
+            )
+            .unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            let text = composed.content();
+            // First directive's content should appear before second
+            let pos_a = text.find("a.md").expect("a.md present");
+            let pos_b = text.find("b.txt").expect("b.txt present");
+            assert!(pos_a < pos_b, "deterministic order violated: {text}");
+            assert_eq!(report.transclusions_applied, 2);
         }
     }
 }

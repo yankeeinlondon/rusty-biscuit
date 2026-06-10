@@ -15,6 +15,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::collections::BTreeSet;
+use std::io::IsTerminal;
 
 use clap::Args;
 use claudine::composition::{
@@ -796,6 +797,26 @@ fn run_inline_compose_inner(
         "frontmatter load",
         frontmatter_load_t,
     );
+
+    // -- Fail-fast: inline-compose / sequence mismatch ----------------------
+    //
+    // A document authoring both a non-null `prompt` and a non-null `sequence`
+    // defines an inline sequence and must run under `claudine sequence`. Reject
+    // it here — after load/parse (so `FrontmatterParse` keeps precedence) but
+    // before the prompt-property pre-validation, schema scrubbing, overrides,
+    // composition, provider selection, and execution. Detection reads authored
+    // frontmatter only; `set_overrides` never participate.
+    if composition::is_inline_sequence_mismatch(&source) {
+        let raw_yaml =
+            composition::capture_frontmatter_yaml(&source.original_text).unwrap_or_default();
+        let stderr_is_tty = std::io::stderr().is_terminal();
+        return Err(CompositionError::InlineComposeSequenceMismatch {
+            source_path: source.resolved_path.clone(),
+            raw_yaml,
+            stderr_is_tty,
+        }
+        .into());
+    }
 
     // -- Pre-validation: prompt frontmatter property ------------------------
     //

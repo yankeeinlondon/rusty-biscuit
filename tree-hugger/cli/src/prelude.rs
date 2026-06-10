@@ -4,10 +4,9 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use tree_hugger::{
-    CodeRange, ImportSymbol, ProgrammingLanguage, SymbolInfo, SymbolKind, TreeFile, TreeHuggerError,
-    has_package_manifest,
+    CodeRange, ImportSymbol, ProgrammingLanguage, SymbolInfo, SymbolKind, TreeFile,
+    TreeHuggerError, has_package_manifest,
 };
-
 
 /// Resolved prelude export filter data.
 #[derive(Debug, Clone)]

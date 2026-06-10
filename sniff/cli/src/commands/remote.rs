@@ -1,5 +1,4 @@
 use sniff::SniffError;
-use sniff::filesystem::git::GitHostingProvider;
 use sniff::remote::PullRequestState;
 use sniff::remote::{DocumentCategory, GitRemote, RemoteRepoProvider, RemoteReport};
 
@@ -68,13 +67,10 @@ pub(super) async fn handle_pr_command(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let dir = base_dir.unwrap_or_else(|| std::path::Path::new("."));
 
-    // 1. Discover the git repository
-    let repo = git2::Repository::discover(dir)
-        .map_err(|_| format!("No git repository found from {}", dir.display()))?;
-
-    // 2. Resolve preferred remote URL (origin first, then first configured remote)
-    let remote_url =
-        resolve_origin_or_first_remote(&repo).ok_or("No git remotes found for this repository")?;
+    // 1. Resolve the preferred remote URL (origin first, then first configured
+    //    remote) via the backend-neutral library API.
+    let remote_url = sniff::filesystem::preferred_remote_url(dir)?
+        .ok_or("No git remotes found for this repository")?;
 
     // 3. Parse the remote URL and construct the provider
     let parsed = GitRemote::parse_url(&remote_url).map_err(|e| {
@@ -163,25 +159,6 @@ pub(super) async fn handle_pr_command(
     Ok(())
 }
 
-/// Resolve the origin remote URL, or fall back to the first configured remote.
-pub(super) fn resolve_origin_or_first_remote(repo: &git2::Repository) -> Option<String> {
-    if let Ok(remote) = repo.find_remote("origin")
-        && let Some(url) = remote.url()
-    {
-        return Some(url.to_string());
-    }
-
-    for remote_name in repo.remotes().ok()?.iter().flatten() {
-        if let Ok(remote) = repo.find_remote(remote_name)
-            && let Some(url) = remote.url()
-        {
-            return Some(url.to_string());
-        }
-    }
-
-    None
-}
-
 /// Fetch the README content when verbose mode is enabled.
 ///
 /// Looks for the first `DocumentCategory::Readme` entry in the report's
@@ -202,42 +179,4 @@ pub(super) async fn fetch_readme(
         .find(|d| d.category == DocumentCategory::Readme)
         .map(|d| d.path.as_str())?;
     remote.get_file_content(owner, repo, readme_path).await.ok()
-}
-
-/// Resolve a remote name to a URL by looking it up in the local git repository.
-///
-/// Returns `None` if not in a git repo or if the remote doesn't exist.
-pub(super) fn resolve_remote_name(
-    name: &str,
-    base_dir: Option<&std::path::Path>,
-) -> Option<String> {
-    let dir = base_dir.unwrap_or_else(|| std::path::Path::new("."));
-    let repo = git2::Repository::discover(dir).ok()?;
-    let remote = repo.find_remote(name).ok()?;
-    remote.url().map(String::from)
-}
-
-/// Build a commit URL from a `git2::Repository` by reading the origin remote.
-pub(super) fn commit_url_from_repo(repo: &git2::Repository, sha: &str) -> Option<String> {
-    let remote = repo.find_remote("origin").ok()?;
-    let url = remote.url()?;
-    let provider = GitHostingProvider::from_url(url);
-    let base = provider.browser_base_url()?;
-
-    // Extract owner/repo from URL
-    let owner_repo = if url.contains('@') && url.contains(':') {
-        url.split(':')
-            .next_back()
-            .map(|s| s.trim_end_matches(".git").to_string())
-    } else if url.contains("://") {
-        let path = url.split('/').skip(3).collect::<Vec<_>>().join("/");
-        Some(path.trim_end_matches(".git").to_string())
-    } else {
-        None
-    }?;
-
-    Some(format!(
-        "{base}/{owner_repo}/{}/{sha}",
-        provider.commit_path_segment()
-    ))
 }

@@ -1,0 +1,5 @@
+---
+source: darkmatter/lib/tests/tree_features_characterization.rs
+expression: body
+---
+<p><a class="btn" style="color:blue" target="_blank" data-id="42" data-prompt="Run it" href="https://example.com" title="Go">Click</a></p>

@@ -2,7 +2,6 @@
 
 use super::*;
 
-
 /// Finds an ancestor node with the given kind by walking up the parent chain.
 pub(crate) fn find_ancestor_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
     let mut current = node.parent();
