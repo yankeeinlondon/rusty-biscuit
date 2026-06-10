@@ -19,6 +19,8 @@ target_schema:
     has_desktop_app: boolean(required)
     desktop_logs: { same_log_format: boolean, same_directory: boolean }
     changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string
 update: "{{file_exists(file) && markdown_file_empty(file)}}"
 ---
 
@@ -103,6 +105,8 @@ Follow these steps exactly:
     ::block when="!update"
     - `changes` - set to `[]`
     ::end-block
+    - `requires_claudine_update` - set to true/false based on whether you believe there will be required code changes to **Claudine** based on the changes discovered in your research. 
+        - If you respond with `true` then you must also set the `reason` frontmatter property to describe why you think that
 
 ## Output
 
