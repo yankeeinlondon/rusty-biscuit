@@ -6,6 +6,15 @@ grant:
         - "{{state.user_dir}}"
 agent: opencode
 model: zai-coding-plan/glm-5.1
+# all target documents we write to should provide this frontmatter
+target_schema: 
+    last_updated: date(required)
+    has_official_schema: boolean(required)
+    schema_url: string
+    logs_directory: { macos: string, windows: string, linux: string }
+    log_format: enum(jsonl)
+    has_desktop_app: boolean(required)
+    desktop_logs: { same_log_format: boolean, same_directory: boolean }
 ---
 
 ## Skills
@@ -19,7 +28,10 @@ Your job is to detailed research into the **logging** features of the **{{state.
 - `## Introduction to {{state.name}} Logging` Section
     - An overview of log _locations_ for {{state.name}}
         - Go into details around how logs are organized, split, and archived
-    - The format of the log files
+    - Where the logs are kept in storage:
+        - JSONL
+        - SQLite DB
+        - etc.
     - Whether or not a SQLite (or other) database is used for storing logs
     - The major **types** of log messages that this provider distinguishes 
 
@@ -47,10 +59,29 @@ Your job is to detailed research into the **logging** features of the **{{state.
 ## Task
 
 - Your research should be saved as `{{file}}`
-- Once the document's body been saved to the filesystem, you'll set the following Frontmatter properties to the same document
+- You should then write a schema definition to `{{file}}` in metadata:
+
+    ```yaml
+    $schema:
+        last_updated: date(required)
+        has_official_schema: boolean(required)
+        schema_url: string
+        logs_directory: { macos: string, windows: string, linux: string }
+        log_format: enum(jsonl)
+        has_desktop_app: boolean(required)
+        desktop_logs: { same_log_format: boolean, same_directory: boolean }
+    ```
+
+- Once the document's body been saved to the filesystem, you'll set the following Frontmatter properties to the same document:
     - `last_updated` - today's date in YYYY-MM-DD format
     - `has_official_schema` - a boolean value indicating whether the schema was an "official" schema definition from the vendor.
         - if {{state.name}} has an official schema for logging then set `schema_url` to a URL reference to it
+    - `logs_directory` - specify where the logs directory is typically located on a host (by operating system): { macos: string, windows: string, linux: string }
+    - `has_desktop_app` - set as true/false based on whether the given provider not only has a CLI tool but also a desktop based application.
+    - `desktop_logs` - as a dictionary:
+        - `same_log_format` - set as a boolean value indicating whether the CLI and desktop apps write the same log format/schema or not
+        - `same_directory` - set as a boolean value indicating whether the CLI
+        and desktop apps share the same log file location or not
 
 ## Testing Done
 
@@ -58,4 +89,3 @@ You are done with the Markdown "{{file}}" has been saved with all research in th
 
 - you do not need to run any tests or lints
 - this task had no code modifications in it
-
