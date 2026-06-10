@@ -742,7 +742,7 @@ mod tests {
     }
 
     #[test]
-    fn all_parts_emit_three_children_in_order() {
+    fn all_parts_emit_header_and_block_quote_with_hint_inside() {
         let block = StatusBlock::new(StatusState::Error)
             .header("Header")
             .body("Body")
@@ -752,17 +752,19 @@ mod tests {
             NodeKind::Root { children } => children,
             _ => panic!("expected Root"),
         };
-        assert_eq!(children.len(), 3);
+        assert_eq!(children.len(), 2);
         assert!(matches!(children[0].kind, NodeKind::Paragraph { .. }));
         assert!(matches!(children[1].kind, NodeKind::BlockQuote { .. }));
-        assert!(matches!(children[2].kind, NodeKind::Paragraph { .. }));
-        assert!(
-            children[2]
-                .attrs
-                .classes
-                .iter()
-                .any(|c| c == "status-block__hint")
-        );
+        let bq_children = match &children[1].kind {
+            NodeKind::BlockQuote { children } => children,
+            _ => panic!("expected BlockQuote"),
+        };
+        let hint_node = bq_children
+            .iter()
+            .find(|c| c.attrs.classes.iter().any(|cl| cl == "status-block__hint"))
+            .expect("hint paragraph inside block quote");
+        let style = hint_node.attrs.style().expect("hint has style");
+        assert!(style.emphasis.italic, "hint must be italicized");
     }
 
     #[test]
