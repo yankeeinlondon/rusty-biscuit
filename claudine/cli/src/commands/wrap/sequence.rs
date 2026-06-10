@@ -1051,7 +1051,11 @@ fn run_phase_1c_attempt(
         // --dry-run path (`{{env.AGENT}}` resolves to empty for those states).
         if let Some(target) = target {
             env_overrides.insert("AGENT".to_string(), target.provider.as_slug().to_string());
+            if let Some(ref model) = target.model {
+                env_overrides.insert("MODEL".to_string(), model.clone());
+            }
         }
+        env_overrides.insert("YOLO".to_string(), shared.yolo.to_string());
 
         // Per-step schema pre-validation BEFORE preflight. If a step's
         // effective frontmatter (source + overlay overrides) is missing
