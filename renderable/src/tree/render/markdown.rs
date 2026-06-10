@@ -364,7 +364,18 @@ impl Writer<'_> {
         for child in children {
             parts.push(self.render(child)?);
         }
-        Ok(parts.join("\n\n"))
+        let mut result = String::new();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                if part.is_empty() || parts[i - 1].is_empty() {
+                    result.push('\n');
+                } else {
+                    result.push_str("\n\n");
+                }
+            }
+            result.push_str(part);
+        }
+        Ok(result)
     }
 
     /// Renders a sequence of children in order with no inserted separator.
