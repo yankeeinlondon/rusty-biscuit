@@ -9,7 +9,7 @@ plan: "plan.md"
 start:
     message: "🖊️ creating a plan for the `{{spec}}` specification"
 success:
-    stderr: "The **{{area}}/{{dir}}/{{plan}}** _plan_ has been created"
+    stderr: "The `{{area}}/{{dir}}/{{plan}}` _plan_ has been created"
     message: "✅  the _plan_ for the spec `{{spec}}` was created _at_ {{ctx.time}}"
 failure:
     message: "❌️  the _plan_ for the spec `{{spec}}` failed to complete!"
@@ -43,3 +43,5 @@ You are a planning agent. Convert the following documents into a high confidence
     - `phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format
     - `start_phase` set this to the starting phase number; usually 1 but may be 0 sometimes
+    - `agent` set this to "{{ env.AGENT }}/{{ env.MODEL || default }}"
+    - `yolo` set this to "{{ env.YOLO }}"
