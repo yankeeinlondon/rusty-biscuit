@@ -292,9 +292,14 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
     let status_code = extract_status_code(haystack);
     let is_retry_exhausted =
         haystack.contains("AI_RetryError") || haystack.contains("maxRetriesExceeded");
+    // Kimi reports its billing-cycle cap as HTTP 403 / `permission_error`
+    // with "reached your usage limit for this billing cycle" — a dialect the
+    // ZAI-style needles above do not cover.
     let has_cap = haystack.contains("\"code\":\"1308\"")
         || haystack.contains("exceeded_current_quota_error")
-        || haystack.contains("Usage limit reached");
+        || haystack.contains("Usage limit reached")
+        || haystack.contains("reached your usage limit")
+        || haystack.contains("billing cycle");
     let is_overload = contains_any_ci(haystack, &["overload", "engine_overloaded_error"]);
     let has_error_context = record.tags.contains_key("error");
 
@@ -1065,6 +1070,31 @@ mod tests {
             } => {
                 assert_eq!(status_code, 429);
                 assert_eq!(kind, ProviderLimitKind::RetriesExhausted);
+            }
+            other => panic!("expected ProviderLimit, got {other:?}"),
+        }
+    }
+
+    /// Kimi reports its billing-cycle usage cap as HTTP 403 with
+    /// `type: permission_error` and the phrase "reached your usage limit
+    /// for this billing cycle" — a dialect none of the ZAI-style cap needles
+    /// (`code 1308`, `exceeded_current_quota_error`, `Usage limit reached`)
+    /// match. It must still classify as a terminal usage cap, not a raw
+    /// `AI_APICallError` dump.
+    #[test]
+    fn classifies_kimi_403_billing_cycle_cap_as_usage_cap() {
+        let line = r#"ERROR 2026-06-09T18:21:00 +4200ms service=llm providerID=kimi-for-coding modelID=k2p6 error={"error":{"name":"AI_APICallError","statusCode":403,"responseBody":"{\"error\":{\"type\":\"permission_error\",\"message\":\"You've reached your usage limit for this billing cycle. Your quota will be refreshed in the next cycle. Upgrade to get more: https://www.kimi.com/code/console?from=quota-upgrade\"}}","isRetryable":false}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ProviderLimit {
+                status_code,
+                kind,
+                ..
+            } => {
+                assert_eq!(status_code, 403);
+                assert_eq!(kind, ProviderLimitKind::UsageCap);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
         }
