@@ -10,8 +10,8 @@ model: zai-coding-plan/glm-5.1
 target_schema: 
     created: date
     last_updated: date(required)
-    agent: string
-    model: string
+    agent: string(required)
+    model: string(required)
     has_schema: enum(formal,informal,none; required)
     schema_url: string
     logs_directory: { macos: string, windows: string, linux: string }
