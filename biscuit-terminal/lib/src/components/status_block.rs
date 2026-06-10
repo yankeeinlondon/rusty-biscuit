@@ -4,7 +4,7 @@ use renderable::browser::PageOptions;
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::html::HtmlPage;
 use renderable::markdown::MarkdownRenderable;
-use renderable::style::{Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style, TextEmphasis};
+use renderable::style::{Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style};
 use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
     render_markdown_node,
@@ -272,16 +272,15 @@ impl StatusBlock {
                 // Separator blank paragraph.
                 block_children.push(RenderNode::paragraph(vec![]));
 
-                // Italicized hint paragraph.
-                let mut hint_node = RenderNode::paragraph(vec![RenderNode::text(hint)]);
+                // Italicized hint paragraph. The hint text is wrapped in a
+                // semantic `Emphasis` node so that every render target —
+                // Terminal (SGR italic), Markdown (`_text_`), and Browser
+                // (`<em>`) — produces portable italic output. Paragraph-level
+                // `Style.emphasis` is not consumed by the Markdown renderer.
+                let mut hint_node = RenderNode::paragraph(vec![RenderNode::emphasis(vec![
+                    RenderNode::text(hint),
+                ])]);
                 hint_node.attrs.classes = vec!["status-block__hint".into()];
-                hint_node.attrs.set_style(&Style {
-                    emphasis: TextEmphasis {
-                        italic: true,
-                        ..Default::default()
-                    },
-                    ..Style::default()
-                });
                 block_children.push(hint_node);
             }
 
@@ -766,8 +765,16 @@ mod tests {
             .iter()
             .find(|c| c.attrs.classes.iter().any(|cl| cl == "status-block__hint"))
             .expect("hint paragraph inside block quote");
-        let style = hint_node.attrs.style().expect("hint has style");
-        assert!(style.emphasis.italic, "hint must be italicized");
+        let hint_children = match &hint_node.kind {
+            NodeKind::Paragraph { children } => children,
+            _ => panic!("hint must be a Paragraph"),
+        };
+        assert!(
+            hint_children
+                .iter()
+                .any(|c| matches!(c.kind, NodeKind::Emphasis { .. })),
+            "hint paragraph must contain an Emphasis child for portable italic"
+        );
     }
 
     #[test]

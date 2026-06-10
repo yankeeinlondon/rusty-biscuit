@@ -549,6 +549,35 @@ fn body_plus_hint_renders_hint_inside_block_quote_for_terminal() {
 }
 
 #[test]
+fn body_plus_hint_carries_italic_sgr_on_terminal() {
+    let term = test_terminal(80);
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body text")
+        .hint("Fix this hint");
+    let rendered = block.render(&term);
+    let italic_sgr = "\x1b[3m";
+    assert!(
+        rendered.contains(italic_sgr),
+        "hint must carry italic SGR (ESC[3m) in raw terminal output: {rendered:?}"
+    );
+    let hint_lines_raw: Vec<&str> = rendered
+        .lines()
+        .filter(|l| l.contains("Fix this hint"))
+        .collect();
+    assert!(
+        !hint_lines_raw.is_empty(),
+        "hint text must appear in raw output: {rendered:?}"
+    );
+    for line in &hint_lines_raw {
+        assert!(
+            line.contains(italic_sgr),
+            "hint line must contain italic SGR: {:?}",
+            line
+        );
+    }
+}
+
+#[test]
 fn body_plus_hint_renders_hint_inside_block_quote_for_markdown() {
     let block = StatusBlock::new(StatusState::Error)
         .body("Body text")
@@ -570,6 +599,11 @@ fn body_plus_hint_renders_hint_inside_block_quote_for_markdown() {
         assert!(
             hint_line.starts_with('>'),
             "hint line must be inside block quote: {:?}",
+            hint_line
+        );
+        assert!(
+            hint_line.contains("_Fix this hint_"),
+            "hint must be italicized with Markdown emphasis: {:?}",
             hint_line
         );
     }
@@ -739,17 +773,20 @@ fn browser_preserves_hint_class_and_italic_inside_body_block_quote() {
         "hint class must be inside blockquote: {html:?}"
     );
     assert!(
-        html.contains("font-style:italic"),
-        "hint must have italic styling in HTML: {html:?}"
+        html.contains("<em>Fix this hint</em>"),
+        "hint must be italicized via <em> in HTML: {html:?}"
     );
     let bq = body_block_quote_children(&block);
     let hint_node = bq
         .iter()
         .find(|c| c.attrs.classes.iter().any(|cl| cl == "status-block__hint"))
         .expect("hint node in block quote");
-    let style = hint_node.attrs.style().expect("hint has style");
-    assert!(
-        style.emphasis.italic,
-        "hint must have italic emphasis in render tree"
-    );
+    if let NodeKind::Paragraph { children } = &hint_node.kind {
+        assert!(
+            children.iter().any(|c| matches!(c.kind, NodeKind::Emphasis { .. })),
+            "hint paragraph must contain an Emphasis child: {hint_node:#?}"
+        );
+    } else {
+        panic!("hint node must be a Paragraph: {hint_node:#?}");
+    }
 }
