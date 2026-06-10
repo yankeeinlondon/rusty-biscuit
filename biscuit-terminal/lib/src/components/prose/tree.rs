@@ -30,7 +30,7 @@
 
 use renderable::color::Color;
 use renderable::layout::{Layout, TargetValue};
-use renderable::style::{PerMode, Style, TextEmphasis};
+use renderable::style::{PaintColor, PerMode, Style, TextEmphasis};
 use renderable::tree::{NodeKind, RenderNode, TreeRenderable};
 
 use super::prose::Prose;
@@ -86,7 +86,7 @@ impl TreeRenderable for Prose {
 
 /// Wraps `color` as the `Style` color slot shape — terminal target,
 /// universal across light/dark.
-fn universal_color(color: Color) -> TargetValue<PerMode<Color>> {
+fn universal_color(color: Color) -> TargetValue<PerMode<PaintColor>> {
     TargetValue::universal(PerMode::universal(color))
 }
 
@@ -276,9 +276,10 @@ mod tests {
         let style = first(&nodes).attrs.style().expect("style attached");
         assert!(matches!(
             style.color,
-            Some(TargetValue::Universal(PerMode::Universal(Color::Tailwind(
-                Tailwind::Red500
-            ))))
+            Some(TargetValue::Universal(PerMode::Universal(PaintColor {
+                color: Color::Tailwind(Tailwind::Red500),
+                ..
+            })))
         ));
     }
 

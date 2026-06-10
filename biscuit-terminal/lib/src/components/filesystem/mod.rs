@@ -104,7 +104,7 @@ use renderable::color::{BasicColor, Color};
 use renderable::html::HtmlPage;
 use renderable::layout::TargetValue as RTargetValue;
 use renderable::markdown::MarkdownRenderable;
-use renderable::style::{PerMode, Style, TextEmphasis};
+use renderable::style::{PaintColor, PerMode, Style, TextEmphasis};
 use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
     render_markdown_node,
@@ -2675,7 +2675,7 @@ impl FsFgKind {
 }
 
 /// Universal [`Style`] color slot for a concrete [`Color`].
-fn fs_universal_color(color: Color) -> RTargetValue<PerMode<Color>> {
+fn fs_universal_color(color: Color) -> RTargetValue<PerMode<PaintColor>> {
     RTargetValue::universal(PerMode::universal(color))
 }
 
@@ -4608,12 +4608,12 @@ mod tests {
 
     #[test]
     fn test_filesystem_builder_layout() {
-        use crate::utils::layout::{Layout, Length, Margin, TargetValue};
+        use crate::utils::layout::{Layout, Length, Edges, TargetValue};
 
         let custom_layout = Layout {
-            margin: Margin {
+            margin: Edges {
                 left: TargetValue::universal(Length::ch(4)),
-                ..Margin::default()
+                ..Edges::default()
             },
             ..Layout::default()
         };
@@ -7765,10 +7765,10 @@ mod tests {
             if node.name() == name {
                 return Some(node);
             }
-            if let TreeNode::Dir { children, .. } = node {
-                if let Some(found) = find_node(children, name) {
-                    return Some(found);
-                }
+            if let TreeNode::Dir { children, .. } = node
+                && let Some(found) = find_node(children, name)
+            {
+                return Some(found);
             }
         }
         None

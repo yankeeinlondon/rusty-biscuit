@@ -21,6 +21,24 @@ pub struct StyleColor {
     pub opacity: Option<u8>,
 }
 
+impl StyleColor {
+    /// Lowers this frontmatter color to an alpha-bearing [`PaintColor`].
+    ///
+    /// This is the parser/apply boundary conversion: `StyleColor` persists
+    /// upstream as a `style:` v1 parser/input representation, but
+    /// post-construction types (component policy, page state) store
+    /// [`PaintColor`] so opacity survives the tree without a side channel.
+    #[must_use]
+    pub fn to_paint_color(&self) -> renderable::style::PaintColor {
+        use renderable::style::Opacity;
+        let opacity = match self.opacity {
+            None => Opacity::OPAQUE,
+            Some(pct) => Opacity::from_percent(pct).unwrap_or(Opacity::OPAQUE),
+        };
+        renderable::style::PaintColor::new(self.color).with_opacity(opacity)
+    }
+}
+
 /// Parse a color string.
 pub fn parse(raw: &str) -> Result<StyleColor, &'static str> {
     let trimmed = raw.trim();
@@ -519,6 +537,29 @@ pub fn lower_to_css(style_color: &StyleColor) -> Option<String> {
                     let alpha = f32::from(op) / 100.0;
                     Some(format!("rgba({r}, {g}, {b}, {alpha})"))
                 }
+            }
+        }
+    }
+}
+
+/// Lower an alpha-bearing [`PaintColor`] to a CSS color value string.
+///
+/// The [`PaintColor`] equivalent of [`lower_to_css`]: RGB colors produce
+/// `rgb(...)` or `rgba(...)`, Tailwind specials map to CSS keywords, and
+/// terminal default/reset colors return `None` (not representable in CSS).
+#[must_use]
+pub fn paint_to_css_string(paint: &renderable::style::PaintColor) -> Option<String> {
+    match &paint.color {
+        Color::Tailwind(Tailwind::Transparent) => Some("transparent".to_string()),
+        Color::Tailwind(Tailwind::Current) => Some("currentColor".to_string()),
+        Color::Tailwind(Tailwind::Inherit) => Some("inherit".to_string()),
+        Color::DefaultForeground | Color::DefaultBackground | Color::Reset => None,
+        _ => {
+            let (r, g, b) = paint.color.to_rgb()?;
+            if paint.opacity.is_opaque() {
+                Some(format!("rgb({r}, {g}, {b})"))
+            } else {
+                Some(format!("rgba({r}, {g}, {b}, {:.3})", paint.opacity.as_css_alpha()))
             }
         }
     }

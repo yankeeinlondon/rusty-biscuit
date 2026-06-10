@@ -4,7 +4,7 @@
 //! `layout_matrix` snapshot test so they render through identical code.
 #![allow(dead_code)]
 
-use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue, WordWrap};
+use renderable::layout::{Alignment, Layout, Length, Edges, TargetValue, WordWrap};
 
 /// One cell of the matrix: a layout configuration applied at a width.
 #[derive(Clone)]
@@ -28,9 +28,9 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "left_margin_4",
             layout: Layout {
-                margin: Margin {
+                margin: Edges {
                     left: TargetValue::universal(Length::ch(4)),
-                    ..Margin::default()
+                    ..Edges::default()
                 },
                 ..Layout::default()
             },
@@ -39,9 +39,9 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "right_margin_4",
             layout: Layout {
-                margin: Margin {
+                margin: Edges {
                     right: TargetValue::universal(Length::ch(4)),
-                    ..Margin::default()
+                    ..Edges::default()
                 },
                 ..Layout::default()
             },
@@ -50,9 +50,9 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "top_margin_2",
             layout: Layout {
-                margin: Margin {
+                margin: Edges {
                     top: TargetValue::universal(Length::ch(2)),
-                    ..Margin::default()
+                    ..Edges::default()
                 },
                 ..Layout::default()
             },
@@ -61,9 +61,9 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "bottom_margin_2",
             layout: Layout {
-                margin: Margin {
+                margin: Edges {
                     bottom: TargetValue::universal(Length::ch(2)),
-                    ..Margin::default()
+                    ..Edges::default()
                 },
                 ..Layout::default()
             },
@@ -72,9 +72,9 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "left_margin_pct_10",
             layout: Layout {
-                margin: Margin {
+                margin: Edges {
                     left: TargetValue::universal(Length::Percent(10.0)),
-                    ..Margin::default()
+                    ..Edges::default()
                 },
                 ..Layout::default()
             },

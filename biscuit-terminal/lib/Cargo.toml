@@ -60,6 +60,11 @@ chrono = { version = "0.4.43", features = ["serde"] }
 libc = "0.2"
 
 [dev-dependencies]
+# Re-declares the renderable path dep with the test-only `hint-access-counter`
+# feature so the terminal perf-gate test (`tests/perf_gate.rs`) can observe the
+# `NodeAttrs::data` access counter while folding a corpus. The feature is unioned
+# into test/bench builds only; normal `cargo build` keeps it off.
+renderable = { path = "../../renderable", features = ["hint-access-counter"] }
 assert_cmd = "2"
 criterion = { version = "0.5", features = ["html_reports"] }
 expectrl = "0.8.0"
@@ -69,6 +74,11 @@ proptest = "1.5"
 serial_test = "3"
 tempfile = "3"
 tracing-test = "0.2"
+# Browser-tier (real headless Chrome) computed-style tests for Prose table
+# cells (`tests/prose_cells_parity.rs`). They skip cleanly when no
+# Chrome/Chromium is found.
+biscuit-browser-harness = { path = "../../biscuit-browser-harness" }
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
 
 [[bench]]
 name = "rendering"

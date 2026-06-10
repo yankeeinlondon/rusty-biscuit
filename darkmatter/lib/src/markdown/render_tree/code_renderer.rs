@@ -135,6 +135,7 @@ impl CodeRenderer for TerminalCodeRenderer {
         // block within its margins and the right-aligned language pill flush
         // with the block's right edge. `code_meta` carries any `line-numbering`
         // / `highlight` directive so the body honors them.
+        eprintln!("CODE_RENDERER width={}", context.width());
         let body = render_terminal_code_block(
             value,
             language,

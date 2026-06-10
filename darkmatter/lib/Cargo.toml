@@ -17,6 +17,14 @@ path = "src/lib.rs"
 # "N ignored" block) before the Criterion `[[bench]]` targets.
 bench = false
 
+[features]
+default = []
+# Test-only instrumentation. Enables process-wide counters that let downstream
+# test suites assert a documentation-only code path constructs no `EffectEngine`
+# and attempts no network access. Off by default; production builds carry no
+# counter state and expose none of the instrumentation API.
+effects-instrumentation = []
+
 [dependencies]
 # Tracing
 tracing = "0.1"
@@ -87,6 +95,12 @@ jsonschema = { version = "0.42", default-features = false }
 sha2 = "0.10"
 
 [dev-dependencies]
+# Re-declares the renderable path dep with the test-only `hint-access-counter`
+# feature so the structural performance gate (`render_tree::structural_gate`)
+# can observe the `NodeAttrs::data` hint-access counter while folding a styled
+# corpus through the real Darkmatter entry points. Cargo unifies this with the
+# `[dependencies]` declaration for the test build.
+renderable = { path = "../../renderable", features = ["hint-access-counter"] }
 tokio = { version = "1.48", features = ["full", "test-util"] }
 tracing-test = "0.2"
 insta = "1.41"

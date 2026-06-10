@@ -1,4 +1,4 @@
-use crate::args::Cli;
+use crate::args::{Cli, CliFill};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::layout::{DarkmatterPage, PageComponent};
@@ -80,7 +80,6 @@ pub fn render_terminal_output(
 /// Precedence: margin shorthand → axis → side-specific.
 /// Same for padding. Alignment: global → component-specific.
 /// Fill: global → component-specific.
-#[allow(deprecated)]
 pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage {
     let mut page = page;
 
@@ -142,67 +141,123 @@ pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage
 
     // Alignment precedence: global > component-specific
     if let Some(align) = cli.alignment {
-        page = page.use_alignment_for_all(align.into());
+        for component in PageComponent::ALL {
+            page = apply_component_alignment(page, component, align.into());
+        }
     }
     if let Some(align) = cli.align_images {
-        page = page.use_alignment(PageComponent::Images, align.into());
+        page = apply_component_alignment(page, PageComponent::Images, align.into());
     }
     if let Some(align) = cli.align_lists {
-        for component in PageComponent::LISTS {
-            page = page.use_alignment(component, align.into());
+        for component in [PageComponent::Ul, PageComponent::Ol, PageComponent::Li] {
+            page = apply_component_alignment(page, component, align.into());
         }
     }
     if let Some(align) = cli.align_ul {
-        page = page.use_alignment(PageComponent::Ul, align.into());
+        page = apply_component_alignment(page, PageComponent::Ul, align.into());
     }
     if let Some(align) = cli.align_ol {
-        page = page.use_alignment(PageComponent::Ol, align.into());
+        page = apply_component_alignment(page, PageComponent::Ol, align.into());
     }
     if let Some(align) = cli.align_li {
-        page = page.use_alignment(PageComponent::Li, align.into());
+        page = apply_component_alignment(page, PageComponent::Li, align.into());
     }
     if let Some(align) = cli.align_block_quotes {
-        page = page.use_alignment(PageComponent::BlockQuotes, align.into());
+        page = apply_component_alignment(page, PageComponent::BlockQuotes, align.into());
     }
     if let Some(align) = cli.align_tables {
-        page = page.use_alignment(PageComponent::Tables, align.into());
+        page = apply_component_alignment(page, PageComponent::Tables, align.into());
     }
     if let Some(align) = cli.align_code_blocks {
-        page = page.use_alignment(PageComponent::CodeBlocks, align.into());
+        page = apply_component_alignment(page, PageComponent::CodeBlocks, align.into());
     }
 
     // Fill precedence: global > component-specific
-    if let Some(fill) = cli.fill {
-        page = page.with_fill_for_all(fill);
-    }
-    if let Some(fill) = cli.fill_images {
-        page = page.with_fill(PageComponent::Images, fill);
-    }
-    if let Some(fill) = cli.fill_lists {
-        for component in PageComponent::LISTS {
-            page = page.with_fill(component, fill);
+    if let Some(ref fill) = cli.fill {
+        for component in PageComponent::ALL {
+            page = apply_component_fill(page, component, fill);
         }
     }
-    if let Some(fill) = cli.fill_ul {
-        page = page.with_fill(PageComponent::Ul, fill);
+    if let Some(ref fill) = cli.fill_images {
+        page = apply_component_fill(page, PageComponent::Images, fill);
     }
-    if let Some(fill) = cli.fill_ol {
-        page = page.with_fill(PageComponent::Ol, fill);
+    if let Some(ref fill) = cli.fill_lists {
+        for component in [PageComponent::Ul, PageComponent::Ol, PageComponent::Li] {
+            page = apply_component_fill(page, component, fill);
+        }
     }
-    if let Some(fill) = cli.fill_li {
-        page = page.with_fill(PageComponent::Li, fill);
+    if let Some(ref fill) = cli.fill_ul {
+        page = apply_component_fill(page, PageComponent::Ul, fill);
     }
-    if let Some(fill) = cli.fill_block_quotes {
-        page = page.with_fill(PageComponent::BlockQuotes, fill);
+    if let Some(ref fill) = cli.fill_ol {
+        page = apply_component_fill(page, PageComponent::Ol, fill);
     }
-    if let Some(fill) = cli.fill_tables {
-        page = page.with_fill(PageComponent::Tables, fill);
+    if let Some(ref fill) = cli.fill_li {
+        page = apply_component_fill(page, PageComponent::Li, fill);
     }
-    if let Some(fill) = cli.fill_code_blocks {
-        page = page.with_fill(PageComponent::CodeBlocks, fill);
+    if let Some(ref fill) = cli.fill_block_quotes {
+        page = apply_component_fill(page, PageComponent::BlockQuotes, fill);
+    }
+    if let Some(ref fill) = cli.fill_tables {
+        page = apply_component_fill(page, PageComponent::Tables, fill);
+    }
+    if let Some(ref fill) = cli.fill_code_blocks {
+        page = apply_component_fill(page, PageComponent::CodeBlocks, fill);
     }
 
     page
+}
+
+/// Set `alignment` on `component`, merging with any existing [`ComponentPolicy`].
+fn apply_component_alignment(
+    page: DarkmatterPage,
+    component: PageComponent,
+    alignment: renderable::layout::Alignment,
+) -> DarkmatterPage {
+    let mut policy = page.component_policy(component).cloned().unwrap_or_default();
+    policy.layout.alignment = alignment;
+    page.with_component_policy(component, policy)
+}
+
+/// Apply a [`CliFill`] to `component`, merging with any existing [`ComponentPolicy`].
+fn apply_component_fill(
+    page: DarkmatterPage,
+    component: PageComponent,
+    fill: &CliFill,
+) -> DarkmatterPage {
+    use renderable::layout::{Edges, TargetValue, Width};
+
+    let mut policy = page.component_policy(component).cloned().unwrap_or_default();
+    match fill {
+        CliFill::Full => {
+            policy.layout.width = Width::Auto;
+            policy.layout.max_width = None;
+            policy.layout.padding = Edges::default();
+        }
+        CliFill::Pad(length) => {
+            policy.layout.padding = Edges::x(length.clone());
+        }
+        CliFill::Indent(length) => {
+            policy.layout.padding = match policy.layout.alignment {
+                renderable::layout::Alignment::Left => Edges {
+                    left: TargetValue::universal(length.clone()),
+                    ..Edges::default()
+                },
+                renderable::layout::Alignment::Right => Edges {
+                    right: TargetValue::universal(length.clone()),
+                    ..Edges::default()
+                },
+                renderable::layout::Alignment::Center => Edges::x(length.clone()),
+            };
+        }
+        CliFill::Max(length) => {
+            policy.layout.max_width = Some(TargetValue::universal(length.clone()));
+        }
+        CliFill::Explicit(length) => {
+            policy.layout.width = Width::Fixed(TargetValue::universal(length.clone()));
+        }
+    }
+    page.with_component_policy(component, policy)
 }
 
 /// Build a [`PageStyleOverrides`] reflecting which `style.page.*` fields the

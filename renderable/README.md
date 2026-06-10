@@ -128,12 +128,19 @@ Cross-target color types.
 
 ### Layout (`layout/`)
 
-Target-agnostic layout configuration for block-level components.
+Target-agnostic layout configuration for block-level components — the CSS box
+model: margins, padding, content-box width, max-width, alignment, wrapping.
 
-- **`Layout`** — margins, alignment, max-width, and word-wrapping
+- **`Layout`** — `margin`, `padding`, `width`, `max_width`, `alignment`, and
+  `word_wrap`. `margin` is transparent outer space; `padding` is reserved inner
+  space painted by `Style.background`
 - **`TargetValue<T>`** — a value that is universal or specified per render target
 - **`Length`** — a layout length: `Zero`, `Ch`, `Percent`, or target-native `Css`
-- **`Margin`** — a four-sided box, each side a `TargetValue<Length>`
+- **`Edges`** — a four-sided box (each side a `TargetValue<Length>`), used by
+  both `margin` and `padding`; constructors `all` / `x` / `y` (renamed from the
+  former `Margin`)
+- **`Width`** — the content-box sizing mode: `Auto` (default), `FitContent`
+  (CSS `fit-content`), or `Fixed(TargetValue<Length>)`; orthogonal to `max_width`
 - **`Alignment`** — horizontal alignment (`Left`, `Center`, `Right`)
 - **`LayoutError`** — invalid percentage, non-universal unit, or empty per-target map
 
@@ -144,26 +151,30 @@ The target-agnostic **appearance** primitive — the sibling of `Layout`.
 like*. Components declare a `Style`; the tree renderers apply it (the
 Terminal renderer first). A component never hand-writes ANSI or CSS.
 
-- **`Style`** — foreground `color`, `background`, `emphasis`, `border`, and
-  `fill`. Only `color` and `emphasis` inherit through the render tree;
-  `background`, `border`, and `fill` are box-painting properties that stay
-  explicit on the painting node
+- **`Style`** — foreground `color`, `background`, `emphasis`, and `border`.
+  Only `color` and `emphasis` inherit through the render tree; `background` and
+  `border` are box-painting properties that stay explicit on the painting node.
+  Per CSS, `background` paints the content box *and* the `Layout.padding` box
 - **`TextEmphasis`** / **`UnderlineStyle`** / **`EmphasisLayer`** — shared
   text weight and decoration leaves (bold, dim, italic, underline,
-  strikethrough, blink); reused by `biscuit-terminal`'s `Prose`
+  strikethrough, blink, inverse); reused by `biscuit-terminal`'s `Prose`
 - **`PerMode<T>`** — a value that is `Universal` or `Adaptive { light, dark }`,
   resolved against the terminal/page `ColorMode`; composes with `TargetValue`
   as `TargetValue<PerMode<Color>>`
 - **`Border`** — `color`, `weight` (`BorderWeight`), `line_style`
   (`BorderLineStyle`), `sides` (`BorderSides`), and `radius`
-- **`Fill`** — painted-band behavior: `color`, `intensity` (`FillIntensity`),
-  `band` (`FillBand`), and `inset`
+- **`Background`** — a zero-sized constructor namespace returning the
+  `TargetValue<PerMode<Color>>` that `Style.background` holds; `Background::subtle()`
+  / `pronounced()` reproduce the adaptive tints the deleted fill abstraction
+  supplied. That fill abstraction (and its intensity/band knobs) is gone — a
+  painted gutter is `padding` + `background`, a band hugging text is
+  `Width::FitContent` + `background`
 
 `Style` rides on render-tree nodes via `NodeAttrs::set_style` / `style` (the
 `renderable.style` hint namespace) and may attach to block nodes *and* inline
-`Span` nodes. `Style`, `PerMode`, `Border`, `Fill`, and the emphasis leaves
-all derive `serde` with `snake_case` casing. The Markdown renderer ignores
-`Style` entirely, so Markdown output is unaffected by appearance.
+`Span` nodes. `Style`, `PerMode`, `Border`, and the emphasis leaves all derive
+`serde` with `snake_case` casing. The Markdown renderer ignores `Style`
+entirely, so Markdown output is unaffected by appearance.
 
 ### Darkmatter `style:` frontmatter
 
@@ -261,10 +272,12 @@ Word-wrapping strategies for text rendering.
 
 ## Migrating a Component to the Render Tree IR
 
-See [`docs/migrate-component-to-ir.md`](./docs/migrate-component-to-ir.md) for
-the canonical recipe — both the flip-from-bespoke (Variant A) and
-born-on-the-tree (Variant B) paths, escape-hatch rules, and the
-documentation-update obligations a migration carries with it.
+The document render pipeline is tree-native and the CSS Box Architecture
+migration is complete, so the prescriptive flip-guide that once lived here is
+retired. For the conceptual model — producers, the fold, and the
+one-fold-per-target contract — see [`docs/tree-rendering.md`](./docs/tree-rendering.md);
+for each component's current IR state and any remaining per-component `render()`
+work, see the IR State column in [`docs/components.md`](./docs/components.md).
 
 ## Usage
 

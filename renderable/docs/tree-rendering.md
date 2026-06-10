@@ -46,6 +46,13 @@ without a dependency cycle. The whole surface is `serde`-serializable to its own
 documented JSON format (it is *our* IR, not the parser's AST — it is not
 MDAST-compatible), which makes snapshotting, inspection, and tooling easy.
 
+> **Serde contract: same-version only.** The render-tree JSON is debug,
+> inspection, and same-process persistence output — not a promised cross-version
+> durable format. Typed sparse attrs (`layout`, `style`, `text_layout`,
+> `browser`, …) may add, rename, or re-shape fields between versions; default
+> values are elided, so an alpha-less tree still serializes as it did before
+> alpha paint existed. Round-trip a tree only with the version that wrote it.
+
 Three types form the model:
 
 - **`RenderNode { kind, span, attrs }`** — the node envelope.
@@ -53,9 +60,16 @@ Three types form the model:
   - `span` carries provenance — which source the node came from, and an optional
     byte range, so diagnostics and future transforms can point back at the
     original text.
-  - `attrs` (`NodeAttrs`) carries identity (`id`), semantic `classes`,
-    namespaced extension `data`, and an optional block-level `Layout` and
-    `Style` (see [Layout and style](#layout-and-style-on-the-tree)).
+  - `attrs` (`NodeAttrs`) carries identity (`id`) and semantic `classes`
+    alongside **typed sparse fields** — `layout`, `style` (whose color slots are
+    alpha-bearing `PaintColor`), `sequence_join`, `list_marker_policy`, the
+    per-kind `component` hint group, `text_layout` (unresolved width-dependent
+    text intent on link/image/list-item nodes), and `browser` (typed, validated
+    browser-target attributes) — see
+    [Layout and style](#layout-and-style-on-the-tree). Reads cost no serde
+    round-trip. The `data` map is reserved for package-local extension
+    namespaces (`darkmatter.*`); a stale `renderable.*` key in `data` is a
+    validation error.
 - **`NodeKind`** — the payload enum (~27 variants) covering document structure.
   Grouped by role:
   - *Block structure:* `Root`, `Section` (a heading grouped with its body),
@@ -222,11 +236,25 @@ equivalent yet. (`components.md` tracks each component's exact state.)
 
 Darkmatter's public Markdown rendering runs on the tree. `Markdown::as_html`,
 `Markdown::as_terminal`, and `DarkmatterPage::render` / `render_to_browser` all
-fold to a `Document` and render through the tree renderers; the hand-written
-event-stream serializers they once used have been removed.
+build a **complete** `Document` — component policy, alpha-bearing `PaintColor`,
+text layout, browser attributes, and HR defaults are baked onto the nodes during
+construction by darkmatter's context-aware fold (`TreeBuildContext`) — and then
+run **one target fold** over it. There is no post-fold decoration pass and no
+output rewriting; the hand-written event-stream serializers darkmatter once used
+have been removed.
 
 A few responsibilities sit deliberately **outside** the fold:
 
+- **The `DarkmatterPage` page frame** is the one documented exception to
+  "everything is the tree." It is a slim **viewport-level assembler** that wraps
+  the folded target output: terminal/page width, outer page margin/padding,
+  full-page background, max-width centering, `PageBackground::Pronounced`
+  code-theme contrast, and (for the browser) page-wrapper metadata and
+  stylesheet assembly. The closeout audit signed this off as **Option A** — the
+  frame carries **no** component policy, inspects **no** component node kinds,
+  and mutates **no** component content; it operates on the already-folded output
+  string / wrapper, never on the `RenderNode` tree. (See
+  `renderable/features/_completed/2026-06-06-tree-closeout/traversal-inventory.md`.)
 - **Frontmatter** is extracted by darkmatter and attached to the `Document`'s
   metadata above the fold — the fold does not re-parse YAML.
 - **`style:` frontmatter** is a darkmatter policy layer that applies page and

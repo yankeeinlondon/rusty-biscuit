@@ -12,14 +12,30 @@
 //!
 //! ## Mechanism
 //!
-//! Each test:
-//! 1. Folds a small fixture through the render-tree pipeline directly (so we
+//! Most tests pre-render in-process and replay the bytes into the pane:
+//! 1. Fold a small fixture through the render-tree pipeline directly (so we
 //!    test the canonical tree → terminal path, not the legacy
 //!    `for_terminal` event-stream serializer).
-//! 2. Writes the rendered output to a temp file.
-//! 3. Spawns a WezTerm pane and runs `cat <tempfile>` so the bytes are
+//! 2. Write the rendered output to a temp file.
+//! 3. Spawn a WezTerm pane and run `cat <tempfile>` so the bytes are
 //!    actually emitted into a real terminal.
-//! 4. Captures the rendered frame and asserts on visible structure.
+//! 4. Capture the rendered frame and assert on visible structure.
+//!
+//! ### Capability-detection tests render *inside* the pane
+//!
+//! Pre-rendering in the cargo-test process is wrong for any capability the
+//! renderer resolves from the ambient terminal at render time — most notably
+//! OSC8 hyperlink support, which `DarkmatterPage`'s no-geometry path decides
+//! via `Terminal::default()` detection that short-circuits to "no OSC8"
+//! whenever `is_tty()` is false. A cargo-test process has no controlling tty,
+//! so an in-process render has already decided OSC8 is off before its bytes
+//! ever reach the pane. These tests therefore execute the *renderer itself*
+//! inside the terminal: [`drive_render_probe`] re-execs this test binary as a
+//! foreground command in the pane (with `DM_L2_RENDER_PROBE` set so the
+//! [`level2_render_probe_entrypoint`] test renders the page straight to the
+//! real-tty stdout), giving terminal detection a real TTY to observe. Keeping
+//! the probe inside the integration-test executable avoids adding a production
+//! `bin` target to the Darkmatter library package.
 //!
 //! Tests skip cleanly when `WEZTERM_UNIX_SOCKET` is not set or the
 //! `wezterm` binary is missing. Set `BISCUIT_TEST_LEVEL_REQUIRED=2` in the
@@ -44,13 +60,14 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
-use darkmatter::layout::DarkmatterPage;
+use darkmatter::layout::{ComponentPolicy, DarkmatterPage, PageComponent};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
 use darkmatter::markdown::output::{ColorDepth, TerminalOptions};
 use darkmatter::markdown::render_tree::{
     TerminalCodeRenderer, fold_markdown_spanned_with_frontmatter, fold_markdown_to_document,
 };
+use renderable::layout::Alignment;
 use renderable::tree::{RenderStrictness, SourceDescriptor};
 use serial_test::serial;
 use std::fs;
@@ -329,6 +346,179 @@ fn background_colors(row: &str) -> Vec<String> {
     out
 }
 
+/// Extracts every foreground-color descriptor set by the SGR sequences in
+/// `row`, normalized like [`background_colors`] so two captures can be compared
+/// regardless of WezTerm's true-color wire form. The foreground introducer is
+/// `38` (colon form `38:2::r:g:b` / `38:5:n`; semicolon form `38;2;r;g;b` /
+/// `38;5;n`).
+fn foreground_colors(row: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = row;
+    while let Some(start) = rest.find("\u{1b}[") {
+        let after = &rest[start + 2..];
+        let Some(mpos) = after.find('m') else {
+            break;
+        };
+        let params = &after[..mpos];
+        if params
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, ';' | ':'))
+        {
+            let fields: Vec<&str> = params.split(';').collect();
+            for field in &fields {
+                if field.starts_with("38:") {
+                    out.push((*field).to_string());
+                }
+            }
+            let mut i = 0;
+            while i < fields.len() {
+                if fields[i] == "38" {
+                    let span = match fields.get(i + 1).copied() {
+                        Some("2") => 5,
+                        Some("5") => 3,
+                        _ => 1,
+                    };
+                    let end = (i + span).min(fields.len());
+                    out.push(fields[i..end].join(";"));
+                    i = end;
+                    continue;
+                }
+                i += 1;
+            }
+        }
+        rest = &after[mpos + 1..];
+    }
+    out
+}
+
+/// The sorted, de-duplicated set of foreground colors across every row of a
+/// captured frame — the semantic comparison key for two real-terminal renders.
+fn foreground_color_set(frame: &CapturedFrame) -> Vec<String> {
+    let mut set: Vec<String> = frame.raw.lines().flat_map(foreground_colors).collect();
+    set.sort();
+    set.dedup();
+    set
+}
+
+/// Environment variable that switches this test binary into render-probe mode.
+/// `drive_render_probe` sets it (to the variant) when it re-execs the binary
+/// inside the pane; [`level2_render_probe_entrypoint`] reads it.
+const RENDER_PROBE_ENV: &str = "DM_L2_RENDER_PROBE";
+
+/// A table (the layout-only policy target) plus unrelated capability-bearing
+/// content: a syntax-highlighted code block and an OSC8 hyperlink. The probe
+/// renders this through `DarkmatterPage::render` so the capture can compare the
+/// `no-policy` and `matched` variants' real-terminal capability output.
+const RENDER_PROBE_FIXTURE: &str = "| A | B |\n|---|---|\n| 1 | 2 |\n\n\
+                                    ```rust\nfn demo() { let x = 1; }\n```\n\n\
+                                    [link](https://example.com)\n";
+
+/// Renders [`RENDER_PROBE_FIXTURE`] to stdout for `variant` (`no-policy` /
+/// `matched`).
+///
+/// `Terminal::default()` detects the ambient terminal (width, color depth,
+/// OSC8). Pinning TrueColor keeps the color axis deterministic; the OSC8 axis is
+/// left to ambient detection on purpose — that is the capability this probe
+/// exists to exercise against a real pane. The `matched` variant adds a
+/// *matched* layout-only `Tables` center-alignment policy (the document's table
+/// matches it). Centering is layout-only and bakes no color, so a correct
+/// renderer leaves the unrelated code block's color and the link's OSC8 behavior
+/// identical to `no-policy`.
+fn render_probe_to_stdout(variant: &str) {
+    let term = Terminal::default();
+    let md: Markdown = RENDER_PROBE_FIXTURE.into();
+
+    let mut page = DarkmatterPage::new(&term).with_color_depth(ColorDepth::TrueColor);
+    if variant == "matched" {
+        let mut policy = ComponentPolicy::default();
+        policy.layout.alignment = Alignment::Center;
+        page = page.with_component_policy(PageComponent::Tables, policy);
+    }
+
+    let rendered = page.render(&md).expect("DarkmatterPage::render");
+    print!("{rendered}");
+}
+
+/// Render-probe entry point. When this test binary is spawned with
+/// [`RENDER_PROBE_ENV`] set (as `drive_render_probe` does inside the pane), it
+/// renders the named variant straight to the real-tty stdout and exits, so
+/// `DarkmatterPage::render` resolves OSC8 against the actual terminal. With the
+/// variable unset (an ordinary suite run) it is an inert pass.
+///
+/// Living inside the integration-test executable keeps the probe test-only — it
+/// adds no production `bin` target to the Darkmatter library package.
+#[test]
+fn level2_render_probe_entrypoint() {
+    let Ok(variant) = std::env::var(RENDER_PROBE_ENV) else {
+        return;
+    };
+    render_probe_to_stdout(&variant);
+    // Flush before exiting so libtest's trailing summary never races the
+    // rendered bytes the pane capture asserts on.
+    use std::io::Write;
+    std::io::stdout().flush().ok();
+    std::process::exit(0);
+}
+
+/// Runs the render probe for `variant` (`no-policy` / `matched`) by re-executing
+/// **this test binary** as a foreground command inside the shared WezTerm pane,
+/// with [`RENDER_PROBE_ENV`] set so [`level2_render_probe_entrypoint`] renders
+/// the page to the pane's real tty instead of running the suite. Returns `None`
+/// when WezTerm is unavailable (the test should skip).
+fn drive_render_probe(variant: &str) -> Option<CapturedFrame> {
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return None;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
+    }
+
+    let exe = std::env::current_exe().expect("resolve current test executable");
+
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().unwrap();
+
+    run_with_sentinel(harness, "clear");
+    // `--nocapture` lets the probe's `print!` reach the pane stdout; `--exact`
+    // selects only the probe entry point so the rest of the suite never runs in
+    // the spawned process.
+    let cmd = format!(
+        "{RENDER_PROBE_ENV}={variant} {} --exact level2_render_probe_entrypoint --nocapture --test-threads=1",
+        exe.display()
+    );
+    Some(run_with_sentinel(harness, &cmd))
+}
+
+/// Every OSC8 hyperlink **opener** carrying a URI — `ESC ] 8 ; ; <uri>` up to
+/// its `ESC`/ST terminator — found in `raw`. `wezterm cli get-text --escapes`
+/// re-emits the full opener including the URI, so this exposes the hyperlink
+/// *metadata* the ANSI-stripped `plain` view hides. The empty closer
+/// (`ESC ] 8 ; ;` with no URI) is dropped so only real links are compared.
+fn osc8_openers(raw: &str) -> Vec<String> {
+    const INTRO: &str = "\u{1b}]8;;";
+    let mut out = Vec::new();
+    let mut rest = raw;
+    while let Some(start) = rest.find(INTRO) {
+        let after = &rest[start..];
+        // The opener ends at the next ESC (ST is `ESC \`).
+        let end = after[1..]
+            .find('\u{1b}')
+            .map(|i| i + 1)
+            .unwrap_or(after.len());
+        let opener = &after[..end];
+        if opener.len() > INTRO.len() {
+            out.push(opener.to_string());
+        }
+        rest = &after[end..];
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Review-13: rich fenced code blocks are a user-observable terminal feature
 /// (info-string title, line-number gutter, highlighted lines) but were only
 /// verified at Level 1 (in-process string assertions in `entrypoints.rs` and
@@ -580,9 +770,9 @@ fn level2_tree_dim_renders_dim_sgr_in_real_terminal() {
 
 /// `--- { style: waves }` must render the **styled** horizontal rule —
 /// distinguishable from a plain rule — and must not leak the raw markdown
-/// source as visible text. Without the terminal renderer consuming the
-/// `darkmatter.hr.*` hints, the rule degrades to the default dashed style;
-/// this test enforces that the renderer honors the `style: waves` hint
+/// source as visible text. Without the terminal renderer consuming the typed
+/// `thematic_break` styling, the rule degrades to the default dashed style;
+/// this test enforces that the renderer honors the `style: waves` attribute
 /// (review-4 finding 2).
 #[test]
 #[serial(level2_terminal)]
@@ -1273,7 +1463,7 @@ fn level2_tree_rich_image_node_paints_distinctive_pixels() {
 // Public post-cutover entry-point Level 2 coverage (review-1 finding 7)
 //
 // Every other test in this file drives the lower-level `render_terminal_document`
-// directly, or the decorated `DarkmatterPage::render` (legacy) path. None drove
+// directly, or the decorated `DarkmatterPage::render` path. None drove
 // the PUBLIC, post-flip terminal entry points users actually call —
 // `Markdown::as_terminal` and zero-config `DarkmatterPage::render` — through a
 // real terminal. Those entry points map options and wire the code renderer at an
@@ -1319,6 +1509,59 @@ fn render_zero_config_page_to_tempfile(
     (dir, path)
 }
 
+/// Renders `body` through a baseline [`DarkmatterPage`] with no component
+/// policy, pinning TrueColor so the capture is deterministic regardless of the
+/// test process's ambient detection. Paired with
+/// [`render_unmatched_policy_page_to_tempfile`] for the review-4 parity test.
+fn render_no_policy_page_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let term = Terminal::new_optimistic(120);
+    let md: Markdown = body.into();
+    let rendered = DarkmatterPage::new(&term)
+        .with_color_depth(ColorDepth::TrueColor)
+        .render(&md)
+        .expect("no-policy DarkmatterPage::render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered).unwrap();
+    (dir, path)
+}
+
+/// Renders `body` through a [`DarkmatterPage`] carrying an *unmatched* colored
+/// `Tables` policy, pinning TrueColor to match
+/// [`render_no_policy_page_to_tempfile`].
+///
+/// The document has no table, so the policy bakes nothing; per the review-4 fix
+/// the unmatched policy must not change the capability profile of unrelated
+/// content. The fenced code block's TrueColor syntax highlighting must therefore
+/// be byte-identical to the no-policy render.
+fn render_unmatched_policy_page_to_tempfile(
+    body: &str,
+    name: &str,
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    use renderable::color::{Color, Tailwind};
+    use renderable::style::PaintColor;
+
+    let term = Terminal::new_optimistic(120);
+    let md: Markdown = body.into();
+    let rendered = DarkmatterPage::new(&term)
+        .with_color_depth(ColorDepth::TrueColor)
+        .with_component_color(
+            darkmatter::layout::PageComponent::Tables,
+            PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+        )
+        .render(&md)
+        .expect("unmatched-policy DarkmatterPage::render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered).unwrap();
+    (dir, path)
+}
+
 /// Finding 7: the public `Markdown::as_terminal` entry must survive a real
 /// terminal — heading, prose, fenced-code body + language header, and SGR
 /// styling all reach the pane through the post-cutover tree path.
@@ -1352,6 +1595,190 @@ fn level2_public_as_terminal_entry_renders_in_real_terminal() {
     );
 }
 
+/// Review-4 finding 1 (High): an *unmatched* component policy must not change
+/// the capability profile of unrelated content — the real-terminal render must
+/// be the same with and without the policy.
+///
+/// Both pages pin TrueColor and render the same fixture (prose + a syntax-
+/// highlighted code block); one also carries a colored `Tables` policy the
+/// document never matches. Driving both through a real WezTerm pane and
+/// comparing the captured foreground-color sets proves the policy changes no
+/// capability: the colored code is identical. Before the fix the unmatched
+/// policy routed the render through the optimistic terminal, so its colored
+/// output diverged from the no-policy baseline. This is the Level 2 parity
+/// companion to the Level 1 byte test in `page.rs`.
+#[test]
+#[serial(level2_terminal)]
+fn level2_unmatched_policy_matches_no_policy_color_in_real_terminal() {
+    let body = "Lead prose paragraph.\n\n```rust\nfn demo() { let x = 1; }\n```\n";
+    let Some((no_policy_frame, _d1)) =
+        drive_pane(body, "no_policy_color", render_no_policy_page_to_tempfile)
+    else {
+        return;
+    };
+    let Some((unmatched_frame, _d2)) = drive_pane(
+        body,
+        "unmatched_policy_color",
+        render_unmatched_policy_page_to_tempfile,
+    ) else {
+        return;
+    };
+
+    // The code body must survive both round-trips.
+    for frame in [&no_policy_frame, &unmatched_frame] {
+        assert!(
+            frame.plain.contains("demo"),
+            "code body token missing from real-terminal capture. plain:\n{}",
+            frame.plain
+        );
+    }
+
+    let no_policy_fg = foreground_color_set(&no_policy_frame);
+    let unmatched_fg = foreground_color_set(&unmatched_frame);
+
+    // Premise: the baseline render is actually colored, so the comparison is
+    // meaningful rather than two empty sets.
+    assert!(
+        !no_policy_fg.is_empty(),
+        "test premise: the no-policy code block must carry foreground color in the pane; \
+         raw:\n{}",
+        no_policy_frame.raw
+    );
+    // Parity: the unmatched policy must produce the same foreground colors.
+    assert_eq!(
+        no_policy_fg, unmatched_fg,
+        "an unmatched policy must not change the real-terminal foreground colors of \
+         unrelated content"
+    );
+}
+
+/// Review-5 finding 1 (High): a *matched* layout-only component policy must not
+/// change the renderer-wide capability profile — neither rendered color nor
+/// hyperlink behavior — of unrelated content. This is the real-terminal
+/// companion to the Level 1 capability-signature test in `page.rs`.
+///
+/// ## Why the render runs *inside* the pane
+///
+/// The no-geometry page path resolves hyperlink (OSC8) capability through
+/// `Terminal::default()` detection at render time, which returns "no OSC8"
+/// whenever `is_tty()` is false (`biscuit-terminal`'s `osc8_link_support`). A
+/// cargo-test process has no controlling tty, so an *in-process* render — even
+/// when its bytes are later `cat` into a pane — has already decided OSC8 is off:
+/// the real terminal never participates in the hyperlink decision (review-6
+/// finding 1). The earlier version compared only the ANSI-stripped `plain` view
+/// for the substring `example.com`, which a capture that discards hyperlink
+/// metadata, or a regression that degrades both renders identically, would still
+/// pass.
+///
+/// So both variants are rendered by [`drive_render_probe`] — which re-execs this
+/// test binary's [`level2_render_probe_entrypoint`] as a foreground command
+/// *inside* the WezTerm pane (a real tty). Each renders the identical fixture (a
+/// table + a syntax-highlighted code block + a hyperlink); `matched` also
+/// centers the table via a layout-only policy the table matches. The assertions
+/// then compare the captured foreground colors **and** the actual OSC8 hyperlink
+/// openers (`wezterm cli get-text --escapes` re-emits the full opener including
+/// the URI, verified), proving the matched layout changes no capability: the
+/// colored code is byte-identical and the link emits the same real OSC8 escape.
+///
+/// ## What this does and does not catch
+///
+/// In a fully OSC8-capable terminal both variants emit OSC8, so this test does
+/// not by itself catch the *promotion* regression (a matched policy forcing the
+/// optimistic profile) — that regression is only observable where the ambient
+/// terminal lacks a capability the optimistic profile would force, which is the
+/// Level 1 `capability_signature` test's job (it renders with `is_tty()` false
+/// so ambient and optimistic diverge). This test supplies the complementary
+/// real-terminal evidence the Level 1 test cannot: that `DarkmatterPage::render`
+/// emits a well-formed OSC8 hyperlink a real terminal honors, and that the
+/// matched layout policy leaves it — and the unrelated code color — untouched.
+#[test]
+#[serial(level2_terminal)]
+fn level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal() {
+    let Some(no_policy_frame) = drive_render_probe("no-policy") else {
+        return;
+    };
+    let Some(matched_frame) = drive_render_probe("matched") else {
+        return;
+    };
+
+    // Premise: the policy actually matched the table — centering shifts the
+    // header row right, so the matched capture has leading whitespace the
+    // no-policy capture lacks. (A no-op policy would make the parity checks
+    // below vacuous.)
+    let table_header = |frame: &CapturedFrame| {
+        frame
+            .plain
+            .lines()
+            .find(|l| l.contains("A") && l.contains("B") && l.contains('\u{2502}'))
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                panic!(
+                    "table header row missing from real-terminal capture. plain:\n{}",
+                    frame.plain
+                )
+            })
+    };
+    let no_policy_header = table_header(&no_policy_frame);
+    let matched_header = table_header(&matched_frame);
+    assert!(
+        !no_policy_header.starts_with(' ') && matched_header.starts_with(' '),
+        "test premise: the matched layout policy must center the table (leading whitespace) \
+         while the no-policy render does not.\nno-policy header:{no_policy_header:?}\n\
+         matched header:{matched_header:?}",
+    );
+
+    // The code body must survive both round-trips.
+    for frame in [&no_policy_frame, &matched_frame] {
+        assert!(
+            frame.plain.contains("demo"),
+            "code body token missing from real-terminal capture. plain:\n{}",
+            frame.plain
+        );
+    }
+
+    // Color axis: the unrelated code block's foreground colors must be identical.
+    let no_policy_fg = foreground_color_set(&no_policy_frame);
+    let matched_fg = foreground_color_set(&matched_frame);
+    assert!(
+        !no_policy_fg.is_empty(),
+        "test premise: the no-policy code block must carry foreground color in the pane; \
+         raw:\n{}",
+        no_policy_frame.raw
+    );
+    assert_eq!(
+        no_policy_fg, matched_fg,
+        "a matched layout-only policy must not change the real-terminal foreground colors of \
+         unrelated content"
+    );
+
+    // Hyperlink axis (discriminating, real-terminal): the page emitted a real
+    // OSC8 hyperlink the pane honored, and the capture re-emits its URI. This is
+    // non-vacuous evidence — it fails if the hyperlink metadata is absent from
+    // the capture or the link degraded to plain text.
+    let no_policy_links = osc8_openers(&no_policy_frame.raw);
+    let matched_links = osc8_openers(&matched_frame.raw);
+    assert!(
+        no_policy_links.iter().any(|l| l.contains("https://example.com")),
+        "test premise: the no-policy page must emit a real OSC8 hyperlink in the pane; \
+         openers: {no_policy_links:?}\nraw:\n{}",
+        no_policy_frame.raw
+    );
+    // The URL lives in OSC8 metadata, so the visible (plain) row carries the
+    // label, not the URL — confirming the hyperlink is genuinely active.
+    assert!(
+        !no_policy_frame.plain.contains("example.com"),
+        "the OSC8 URL must live in hyperlink metadata, not visible text. plain:\n{}",
+        no_policy_frame.plain
+    );
+    // Parity: the matched layout-only policy must emit the byte-identical OSC8
+    // opener set — it changes no hyperlink capability.
+    assert_eq!(
+        no_policy_links, matched_links,
+        "a matched layout-only policy must not change the real-terminal OSC8 hyperlink behavior \
+         of unrelated content",
+    );
+}
+
 /// Finding 7: zero-config `DarkmatterPage::render` (the other public post-flip
 /// entry) must likewise survive a real terminal through the default-layout tree
 /// path.
@@ -1369,6 +1796,103 @@ fn level2_zero_config_page_render_renders_in_real_terminal() {
             frame.plain.contains(token),
             "zero-config page token {token:?} missing from real-terminal capture. plain:\n{}",
             frame.plain
+        );
+    }
+}
+
+/// Review-2 finding (High): percentage **page-frame** margin and max-width must
+/// resolve to the correct *visible* offset and content width in a real
+/// terminal, not just in-process. Level 1 covers the cell arithmetic
+/// (`page.rs::percent_frame_browser_emits_percent_terminal_resolves_cells`);
+/// this drives the resolved bytes through a real WezTerm pane so a regression in
+/// the decorated-frame offset/width is observable on the cell grid.
+///
+/// Built at the pane's true column width with `style.page.left-margin: 25%` and
+/// `style.page.max-width: 50%`, the captured paragraph rows must (a) begin at
+/// the 25%-of-width left offset and (b) cap their content at 50% of the
+/// post-margin width — mirroring [`length_to_cells`]'s `f32::round`.
+#[test]
+#[serial(level2_terminal)]
+fn level2_percent_page_frame_offset_and_width_in_real_terminal() {
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
+    }
+
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().unwrap();
+    let cols = harness
+        .pane_size()
+        .map(|s| s.cols as usize)
+        .unwrap_or(80)
+        .max(40);
+
+    // 25% left margin resolves against the full terminal width; 50% max-width
+    // resolves against the post-margin content width.
+    let expected_left = ((cols as f32) * 0.25).round() as usize;
+    let content_base = cols - expected_left;
+    let expected_max = ((content_base as f32) * 0.50).round() as usize;
+
+    let sentinel = "Sentinel_pct_frame";
+    let body = format!(
+        "---\nstyle:\n    page:\n        left-margin: 25%\n        max-width: 50%\n---\n\n\
+         {sentinel} lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod \
+         tempor incididunt ut labore et dolore magna aliqua ut enim ad minim veniam.\n"
+    );
+
+    let md = Markdown::try_from_content(&body).expect("parse markdown with style frontmatter");
+    let (style, _warnings) =
+        darkmatter::style::from_frontmatter(md.frontmatter()).expect("parse style frontmatter");
+    let term = Terminal::new_optimistic(cols as u32);
+    let page = darkmatter::style::apply_page_style(
+        DarkmatterPage::new(&term),
+        &style,
+        darkmatter::style::PageStyleOverrides::default(),
+    )
+    .expect("apply percentage page style");
+    let rendered = page.render(&md).expect("decorated percent frame must render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("percent_frame.ansi");
+    fs::write(&path, rendered).unwrap();
+
+    run_with_sentinel(harness, "clear");
+    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+
+    // The rendered paragraph is the sentinel row plus its wrapped continuations;
+    // every content row carries the resolved left margin as leading spaces.
+    let content_rows: Vec<&str> = frame
+        .plain
+        .lines()
+        .skip_while(|l| !l.contains(sentinel))
+        .take_while(|l| !l.trim().is_empty())
+        .collect();
+
+    assert!(
+        content_rows.len() >= 2,
+        "50% max-width ({expected_max} cols of {content_base}) must wrap the paragraph onto \
+         multiple rows; got {} row(s). plain:\n{}",
+        content_rows.len(),
+        frame.plain
+    );
+
+    for (i, row) in content_rows.iter().enumerate() {
+        let leading = row.chars().take_while(|c| *c == ' ').count();
+        assert_eq!(
+            leading, expected_left,
+            "row +{i} must begin at the 25% left offset ({expected_left} cols of {cols}); \
+             got {leading}. row: {row:?}"
+        );
+        let content_width = row.trim_end().chars().count() - leading;
+        assert!(
+            content_width <= expected_max,
+            "row +{i} content width {content_width} exceeds the 50% cap ({expected_max} cols of \
+             {content_base}). row: {row:?}"
         );
     }
 }

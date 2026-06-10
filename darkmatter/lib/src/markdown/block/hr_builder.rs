@@ -2,7 +2,7 @@
 //!
 //! These map the typed `style.hr` schema enums
 //! ([`HrKind`]/[`HrWeight`]/[`HrAlignment`]) back to the kebab-/lower-case
-//! strings the render-tree `darkmatter.hr.*` hints carry, so page-level HR
+//! strings the render-tree `ThematicBreakAttrs` carry, so page-level HR
 //! defaults projected onto the tree agree with the attribute-block path.
 
 use crate::style::schema::hr::{HrAlignment, HrKind, HrWeight};

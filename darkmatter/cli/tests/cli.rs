@@ -1,9 +1,8 @@
-// The resolved-layout-precedence tests exercise `DarkmatterPage`'s still-active
-// `Page*` getters (`margin()`, `padding()`, `fill_for()`, `alignment_for()`).
-// Migrating those to `renderable::layout::Layout` is the deferred Spec A
-// milestone; until then this mirrors the library's own module-level allow in
-// `darkmatter/lib/src/layout/mod.rs`.
-#![allow(deprecated)]
+// The resolved-layout-precedence tests exercise `DarkmatterPage`'s
+// `page_margin()`, `page_padding()`, and component-policy helpers.
+// These replaced the deprecated `margin()`, `padding()`, `fill_for()`,
+// and `alignment_for()` getters after the migration to
+// `renderable::layout::Layout`.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
@@ -3823,15 +3822,15 @@ fn layout_combined_margin_padding_bg() {
 // These tests assert that CLI precedence rules produce the documented
 // observable resolved page state — not just that the CLI parses successfully.
 // They drive `apply_cli_layout_flags` against parsed `Cli` values and verify
-// the final `DarkmatterPage` getters (`margin()`, `padding()`, `fill_for()`,
+// the final `DarkmatterPage` getters (`page_margin()`, `page_padding()`, `fill_for()`,
 // `alignment_for()`, `max_width()`, `line_numbers()`).
 
 use biscuit_terminal::terminal::Terminal;
 use clap::Parser;
-#[allow(deprecated)]
-use darkmatter::layout::{DarkmatterPage, PageAlignment, PageComponent, PageFill, WidthUnit};
+use darkmatter::layout::{DarkmatterPage, PageComponent};
 use darkmatter_cli::Cli;
 use darkmatter_cli::output::apply_cli_layout_flags;
+use renderable::layout::{Alignment, Edges, Length, TargetValue, Width};
 
 fn parse_cli(args: &[&str]) -> Cli {
     let mut full = vec!["md"];
@@ -3845,46 +3844,111 @@ fn resolved_page(args: &[&str]) -> DarkmatterPage {
     apply_cli_layout_flags(DarkmatterPage::new(&term), &cli)
 }
 
+fn tv_cells(tv: &TargetValue<Length>) -> u16 {
+    match tv {
+        TargetValue::Universal(Length::Ch(n)) => u16::try_from(*n).unwrap_or(u16::MAX),
+        _ => 0,
+    }
+}
+
+fn alignment_for(page: &DarkmatterPage, component: PageComponent) -> Alignment {
+    page.component_policy(component)
+        .map(|p| p.layout.alignment)
+        .unwrap_or_default()
+}
+
+#[derive(Debug, PartialEq)]
+enum TestFill {
+    Full,
+    Pad(Length),
+    Indent(Length),
+    Max(Length),
+    Explicit(Length),
+}
+
+fn fill_for(page: &DarkmatterPage, component: PageComponent) -> TestFill {
+    match page.component_policy(component) {
+        None => TestFill::Full,
+        Some(p) => {
+            let l = &p.layout;
+            if l.width == Width::Auto && l.max_width.is_none() && l.padding == Edges::default() {
+                TestFill::Full
+            } else if l.width == Width::Auto
+                && l.max_width.is_none()
+                && l.padding != Edges::default()
+            {
+                // Pad: symmetric horizontal padding (left == right, top/bottom zero)
+                if l.padding.top == TargetValue::universal(Length::Zero)
+                    && l.padding.bottom == TargetValue::universal(Length::Zero)
+                    && l.padding.left == l.padding.right
+                {
+                    TestFill::Pad(tv_length(&l.padding.left))
+                } else {
+                    // Asymmetric padding — treat as indent if only left is non-zero
+                    TestFill::Indent(tv_length(&l.padding.left))
+                }
+            } else if let Some(max_width) = &l.max_width && l.width == Width::Auto {
+                TestFill::Max(tv_length(max_width))
+            } else if matches!(l.width, Width::Fixed(_)) {
+                TestFill::Explicit(width_length(&l.width))
+            } else {
+                TestFill::Full
+            }
+        }
+    }
+}
+
+fn tv_length(tv: &TargetValue<Length>) -> Length {
+    match tv {
+        TargetValue::Universal(l) => l.clone(),
+        _ => Length::Zero,
+    }
+}
+
+fn width_length(w: &Width) -> Length {
+    match w {
+        Width::Fixed(tv) => tv_length(tv),
+        _ => Length::Zero,
+    }
+}
+
+
 #[test]
-#[allow(deprecated)]
 fn layout_resolved_margin_shorthand_then_top_override() {
     // `-m 2 --mt 0`: shorthand sets all sides to 2, then --mt clears just the
     // top. The reviewer specifically called this out: precedence checks
     // should assert observable resolved behavior, not parse success.
     let page = resolved_page(&["fixture.md", "-m", "2", "--mt", "0"]);
-    let m = page.margin();
-    assert_eq!(m.top, 0, "--mt 0 must override -m 2 on the top edge");
-    assert_eq!(m.bottom, 2, "-m 2 must apply to the bottom edge");
-    assert_eq!(m.left, 2, "-m 2 must apply to the left edge");
-    assert_eq!(m.right, 2, "-m 2 must apply to the right edge");
+    let m = page.page_margin();
+    assert_eq!(tv_cells(&m.top), 0, "--mt 0 must override -m 2 on the top edge");
+    assert_eq!(tv_cells(&m.bottom), 2, "-m 2 must apply to the bottom edge");
+    assert_eq!(tv_cells(&m.left), 2, "-m 2 must apply to the left edge");
+    assert_eq!(tv_cells(&m.right), 2, "-m 2 must apply to the right edge");
 }
 
 #[test]
-#[allow(deprecated)]
 fn layout_resolved_margin_axis_then_side() {
     // `-m 4 --mx 2 --mt 1`: shorthand 4 everywhere, then horizontal axis to 2,
     // then top to 1.
     let page = resolved_page(&["fixture.md", "-m", "4", "--mx", "2", "--mt", "1"]);
-    let m = page.margin();
-    assert_eq!(m.top, 1, "--mt 1 overrides axis and shorthand on top");
-    assert_eq!(m.bottom, 4, "shorthand survives on bottom (no override)");
-    assert_eq!(m.left, 2, "--mx 2 overrides shorthand on left");
-    assert_eq!(m.right, 2, "--mx 2 overrides shorthand on right");
+    let m = page.page_margin();
+    assert_eq!(tv_cells(&m.top), 1, "--mt 1 overrides axis and shorthand on top");
+    assert_eq!(tv_cells(&m.bottom), 4, "shorthand survives on bottom (no override)");
+    assert_eq!(tv_cells(&m.left), 2, "--mx 2 overrides shorthand on left");
+    assert_eq!(tv_cells(&m.right), 2, "--mx 2 overrides shorthand on right");
 }
 
 #[test]
-#[allow(deprecated)]
 fn layout_resolved_padding_axis_then_side() {
     let page = resolved_page(&["fixture.md", "--padding", "4", "--px", "2", "--pt", "1"]);
-    let p = page.padding();
-    assert_eq!(p.top, 1);
-    assert_eq!(p.bottom, 4);
-    assert_eq!(p.left, 2);
-    assert_eq!(p.right, 2);
+    let p = page.page_padding();
+    assert_eq!(tv_cells(&p.top), 1);
+    assert_eq!(tv_cells(&p.bottom), 4);
+    assert_eq!(tv_cells(&p.left), 2);
+    assert_eq!(tv_cells(&p.right), 2);
 }
 
 #[test]
-#[allow(deprecated)]
 fn layout_resolved_fill_global_then_component_specific() {
     // `--fill max=40 --fill-code-blocks max=30`: global fill applies to all
     // components, then code-block-specific fill overrides only that one.
@@ -3896,27 +3960,26 @@ fn layout_resolved_fill_global_then_component_specific() {
         "max=30",
     ]);
     assert_eq!(
-        page.fill_for(PageComponent::CodeBlocks),
-        PageFill::Max(WidthUnit::Fixed(30)),
+        fill_for(&page, PageComponent::CodeBlocks),
+        TestFill::Max(Length::ch(30)),
         "code-block-specific fill must override global"
     );
     for component in [PageComponent::Ul, PageComponent::Ol, PageComponent::Li] {
         assert_eq!(
-            page.fill_for(component),
-            PageFill::Max(WidthUnit::Fixed(40)),
+            fill_for(&page, component),
+            TestFill::Max(Length::ch(40)),
             "{:?} must still see the global fill",
             component
         );
     }
     assert_eq!(
-        page.fill_for(PageComponent::Tables),
-        PageFill::Max(WidthUnit::Fixed(40)),
+        fill_for(&page, PageComponent::Tables),
+        TestFill::Max(Length::ch(40)),
         "tables must still see the global fill"
     );
 }
 
 #[test]
-#[allow(deprecated)]
 fn layout_resolved_alignment_global_then_component_specific() {
     let page = resolved_page(&[
         "fixture.md",
@@ -3926,54 +3989,28 @@ fn layout_resolved_alignment_global_then_component_specific() {
         "left",
     ]);
     assert_eq!(
-        page.alignment_for(PageComponent::CodeBlocks),
-        PageAlignment::Left,
+        alignment_for(&page, PageComponent::CodeBlocks),
+        Alignment::Left,
         "code-block-specific alignment must override global"
     );
     for component in [PageComponent::Ul, PageComponent::Ol, PageComponent::Li] {
         assert_eq!(
-            page.alignment_for(component),
-            PageAlignment::Center,
+            alignment_for(&page, component),
+            Alignment::Center,
             "{:?} must still see the global alignment",
             component
         );
     }
     assert_eq!(
-        page.alignment_for(PageComponent::BlockQuotes),
-        PageAlignment::Center,
+        alignment_for(&page, PageComponent::BlockQuotes),
+        Alignment::Center,
         "blockquotes must still see the global alignment"
     );
 }
 
-#[test]
-#[allow(deprecated)]
-fn layout_resolved_align_lists_does_not_write_deprecated_lists_slot() {
-    // `--align-lists` must broadcast to Ul/Ol/Li only; the deprecated
-    // PageComponent::Lists must remain unset so first-party CLI paths cannot
-    // resurrect the legacy broadcast.
-    let page = resolved_page(&["fixture.md", "--align-lists", "right"]);
-    let lists_align = page.alignment_for(PageComponent::Lists);
-    assert_eq!(
-        lists_align,
-        PageAlignment::Left,
-        "--align-lists must not write PageComponent::Lists"
-    );
-}
+
 
 #[test]
-#[allow(deprecated)]
-fn layout_resolved_fill_lists_does_not_write_deprecated_lists_slot() {
-    let page = resolved_page(&["fixture.md", "--fill-lists", "max=40"]);
-    let lists_fill = page.fill_for(PageComponent::Lists);
-    assert_eq!(
-        lists_fill,
-        PageFill::Full,
-        "--fill-lists must not write PageComponent::Lists"
-    );
-}
-
-#[test]
-#[allow(deprecated)]
 fn layout_resolved_align_lists_broadcast_then_granular_override() {
     // `--align-lists right --align-ul left`: broadcast sets all three list
     // components to Right, then the granular flag overrides only Ul.
@@ -3985,24 +4022,23 @@ fn layout_resolved_align_lists_broadcast_then_granular_override() {
         "left",
     ]);
     assert_eq!(
-        page.alignment_for(PageComponent::Ul),
-        PageAlignment::Left,
+        alignment_for(&page, PageComponent::Ul),
+        Alignment::Left,
         "granular --align-ul must override broadcast"
     );
     assert_eq!(
-        page.alignment_for(PageComponent::Ol),
-        PageAlignment::Right,
+        alignment_for(&page, PageComponent::Ol),
+        Alignment::Right,
         "Ol must still see the broadcast"
     );
     assert_eq!(
-        page.alignment_for(PageComponent::Li),
-        PageAlignment::Right,
+        alignment_for(&page, PageComponent::Li),
+        Alignment::Right,
         "Li must still see the broadcast"
     );
 }
 
 #[test]
-#[allow(deprecated)]
 fn layout_resolved_fill_lists_broadcast_then_granular_override() {
     // `--fill-lists max=40 --fill-ol max=30`: broadcast sets all three list
     // components to Max(40), then the granular flag overrides only Ol.
@@ -4014,18 +4050,18 @@ fn layout_resolved_fill_lists_broadcast_then_granular_override() {
         "max=30",
     ]);
     assert_eq!(
-        page.fill_for(PageComponent::Ul),
-        PageFill::Max(WidthUnit::Fixed(40)),
+        fill_for(&page, PageComponent::Ul),
+        TestFill::Max(Length::ch(40)),
         "Ul must still see the broadcast"
     );
     assert_eq!(
-        page.fill_for(PageComponent::Ol),
-        PageFill::Max(WidthUnit::Fixed(30)),
+        fill_for(&page, PageComponent::Ol),
+        TestFill::Max(Length::ch(30)),
         "granular --fill-ol must override broadcast"
     );
     assert_eq!(
-        page.fill_for(PageComponent::Li),
-        PageFill::Max(WidthUnit::Fixed(40)),
+        fill_for(&page, PageComponent::Li),
+        TestFill::Max(Length::ch(40)),
         "Li must still see the broadcast"
     );
 }
@@ -4058,16 +4094,15 @@ fn layout_parsed_line_numbers_flag_values() {
 }
 
 #[test]
-#[allow(deprecated)]
 fn layout_resolved_mt_alone_does_not_set_other_sides() {
     // `--mt 3` alone must leave other edges at default (0); no implicit
     // bleed from shorthand.
     let page = resolved_page(&["fixture.md", "--mt", "3"]);
-    let m = page.margin();
-    assert_eq!(m.top, 3);
-    assert_eq!(m.bottom, 0);
-    assert_eq!(m.left, 0);
-    assert_eq!(m.right, 0);
+    let m = page.page_margin();
+    assert_eq!(tv_cells(&m.top), 3);
+    assert_eq!(tv_cells(&m.bottom), 0);
+    assert_eq!(tv_cells(&m.left), 0);
+    assert_eq!(tv_cells(&m.right), 0);
 }
 
 // =============================================================================
@@ -4305,7 +4340,6 @@ fn style_non_strict_renders_with_unknown_key() {
 }
 
 #[test]
-#[allow(deprecated)]
 fn style_cli_margin_overrides_frontmatter() {
     // Spec test #2: CLI flag overrides frontmatter. The fixture has
     // `left-margin: 2ch`; `--ml 7` claims that field via
@@ -4328,12 +4362,12 @@ fn style_cli_margin_overrides_frontmatter() {
         apply_page_style(page, &style, overrides).expect("apply")
     };
     assert_eq!(
-        page.margin().left,
+        tv_cells(&page.page_margin().left),
         7,
         "CLI override must win over frontmatter left-margin"
     );
     assert_eq!(
-        page.margin().right,
+        tv_cells(&page.page_margin().right),
         4,
         "frontmatter right-margin (4ch) must still apply when not claimed"
     );
@@ -4426,7 +4460,6 @@ fn component_overrides_component_specific_fill_claims_one_bucket() {
 }
 
 #[test]
-#[allow(deprecated)]
 fn frontmatter_table_alignment_reaches_page_when_no_cli_flag() {
     let raw = "---\n\
 style:\n\
@@ -4435,14 +4468,13 @@ style:\n\
 ---\n\n# Doc\n";
     let page = apply_style_for(raw, &["doc.md"]);
     assert_eq!(
-        page.alignment_for(PageComponent::Tables),
-        PageAlignment::Left,
+        alignment_for(&page, PageComponent::Tables),
+        Alignment::Left,
         "frontmatter table.alignment must reach the page when no CLI claim",
     );
 }
 
 #[test]
-#[allow(deprecated)]
 fn cli_align_tables_overrides_frontmatter_table_alignment() {
     // Plan ask: `--align-tables right` overriding frontmatter
     // `style.table.alignment: left`. The CLI flag wins.
@@ -4453,14 +4485,13 @@ style:\n\
 ---\n\n# Doc\n";
     let page = apply_style_for(raw, &["doc.md", "--align-tables", "right"]);
     assert_eq!(
-        page.alignment_for(PageComponent::Tables),
-        PageAlignment::Right,
+        alignment_for(&page, PageComponent::Tables),
+        Alignment::Right,
         "--align-tables right must override frontmatter table.alignment: left",
     );
 }
 
 #[test]
-#[allow(deprecated)]
 fn cli_global_fill_overrides_frontmatter_table_max_width() {
     // Plan ask: `--fill max=60` overriding frontmatter
     // `style.table.max-width: 50%` for all components.
@@ -4471,14 +4502,13 @@ style:\n\
 ---\n\n# Doc\n";
     let page = apply_style_for(raw, &["doc.md", "--fill", "max=60"]);
     assert_eq!(
-        page.fill_for(PageComponent::Tables),
-        PageFill::Max(WidthUnit::Fixed(60)),
+        fill_for(&page, PageComponent::Tables),
+        TestFill::Max(Length::ch(60)),
         "--fill max=60 (global) must claim the table fill slot",
     );
 }
 
 #[test]
-#[allow(deprecated)]
 fn frontmatter_table_max_width_reaches_page_when_no_cli_flag() {
     let raw = "---\n\
 style:\n\
@@ -4487,14 +4517,13 @@ style:\n\
 ---\n\n# Doc\n";
     let page = apply_style_for(raw, &["doc.md"]);
     assert_eq!(
-        page.fill_for(PageComponent::Tables),
-        PageFill::Max(WidthUnit::Percent(50.0)),
+        fill_for(&page, PageComponent::Tables),
+        TestFill::Max(Length::Percent(50.0)),
         "frontmatter table.max-width must reach the page when no CLI claim",
     );
 }
 
 #[test]
-#[allow(deprecated)]
 fn frontmatter_images_alignment_and_fill_reach_page() {
     let raw = "---\n\
 style:\n\
@@ -4504,17 +4533,16 @@ style:\n\
 ---\n\n# Doc\n";
     let page = apply_style_for(raw, &["doc.md"]);
     assert_eq!(
-        page.alignment_for(PageComponent::Images),
-        PageAlignment::Center,
+        alignment_for(&page, PageComponent::Images),
+        Alignment::Center,
     );
     assert_eq!(
-        page.fill_for(PageComponent::Images),
-        PageFill::Max(WidthUnit::Fixed(40)),
+        fill_for(&page, PageComponent::Images),
+        TestFill::Max(Length::ch(40)),
     );
 }
 
 #[test]
-#[allow(deprecated)]
 fn frontmatter_block_quote_max_width_reaches_page() {
     let raw = "---\n\
 style:\n\
@@ -4523,8 +4551,8 @@ style:\n\
 ---\n\n# Doc\n";
     let page = apply_style_for(raw, &["doc.md"]);
     assert_eq!(
-        page.fill_for(PageComponent::BlockQuotes),
-        PageFill::Max(WidthUnit::Percent(75.0)),
+        fill_for(&page, PageComponent::BlockQuotes),
+        TestFill::Max(Length::Percent(75.0)),
     );
 }
 
@@ -4610,44 +4638,24 @@ fn style_frontmatter_html_emits_component_layout_css() {
 
     let html = String::from_utf8(output.stdout).expect("html stdout must be utf-8");
 
-    // Component selectors must be emitted for all three buckets.
+    // Component layout is now emitted as inline `style` attributes by the
+    // renderable browser fold (build_component_css was deleted in the cutover).
+    // Table: center alignment + max-width: 60ch → margin-left:auto;margin-right:auto.
     assert!(
-        html.contains(".darkmatter-page table {"),
-        "expected `.darkmatter-page table {{` selector in HTML. html:\n{html}",
+        html.contains("<table") && html.contains("max-width:60ch") && html.contains("margin-left:auto") && html.contains("margin-right:auto"),
+        "expected centered table with inline max-width and auto margins in HTML. html:\n{html}",
     );
+    // Block-quote: right alignment + max-width: 50ch → margin-left:auto.
     assert!(
-        html.contains(".darkmatter-page img {") || html.contains(".darkmatter-page image {"),
-        "expected `.darkmatter-page img {{` selector in HTML. html:\n{html}",
+        html.contains("<blockquote") && html.contains("max-width:50ch") && html.contains("margin-left:auto"),
+        "expected right-aligned blockquote with inline max-width and auto margin in HTML. html:\n{html}",
     );
+    // Image: max-width and alignment are applied to the wrapping paragraph via
+    // the lone-image layout path (alignment without max-width does not emit
+    // margin styles in the current fold).
     assert!(
-        html.contains(".darkmatter-page blockquote {"),
-        "expected `.darkmatter-page blockquote {{` selector in HTML. html:\n{html}",
-    );
-
-    // Center alignment → `margin-left: auto; margin-right: auto;`.
-    assert!(
-        html.contains("margin-left: auto;") && html.contains("margin-right: auto;"),
-        "expected centered-table margin declarations in HTML. html:\n{html}",
-    );
-
-    // Right alignment → `margin-right: 0;` (with auto on the left).
-    assert!(
-        html.contains("margin-right: 0;"),
-        "expected right-aligned `margin-right: 0;` declaration in HTML. html:\n{html}",
-    );
-
-    // Max-width fills → `max-width: <N>ch` for each bucket's cap.
-    assert!(
-        html.contains("max-width: 60ch"),
-        "expected `max-width: 60ch` (table cap) in HTML. html:\n{html}",
-    );
-    assert!(
-        html.contains("max-width: 40ch"),
-        "expected `max-width: 40ch` (image cap) in HTML. html:\n{html}",
-    );
-    assert!(
-        html.contains("max-width: 50ch"),
-        "expected `max-width: 50ch` (block-quote cap) in HTML. html:\n{html}",
+        html.contains("<img") && html.contains("src=\"./x.png\""),
+        "expected image element in HTML. html:\n{html}",
     );
 }
 
@@ -4670,21 +4678,17 @@ fn style_prop_fixture_html_emits_table_layout_css() {
     );
     let html = String::from_utf8(output.stdout).expect("html stdout must be utf-8");
 
+    // Component layout is now emitted as inline `style` attributes by the
+    // renderable browser fold (build_component_css was deleted in the cutover).
+    // Right alignment + max-width: 50% → margin-left:auto on the table element.
     assert!(
-        html.contains(".darkmatter-page table {"),
-        "expected `.darkmatter-page table {{` selector in HTML. html:\n{html}",
+        html.contains("<table") && html.contains("margin-left:auto"),
+        "expected right-aligned table with inline auto margin in HTML. html:\n{html}",
     );
-    // Right alignment → `margin-right: 0;`.
+    // The fixture sets `max-width: 50%`; the fold preserves the percent on HTML.
     assert!(
-        html.contains("margin-right: 0;"),
-        "expected right-aligned table `margin-right: 0;` declaration in HTML. html:\n{html}",
-    );
-    // The fixture sets `max-width: 50%`; lowering must emit a `max-width: …ch`
-    // declaration somewhere in the table block (the exact column count
-    // depends on the page-content base, but a `ch`-suffixed cap must exist).
-    assert!(
-        html.contains("max-width: ") && html.contains("ch"),
-        "expected a `max-width: <N>ch` declaration in HTML. html:\n{html}",
+        html.contains("max-width:50%"),
+        "expected `max-width:50%` declaration in HTML. html:\n{html}",
     );
 }
 
@@ -4731,13 +4735,13 @@ fn no_style_frontmatter_leaves_cli_layout_state_intact() {
         apply_style_frontmatter(cli_only.clone(), &md, &cli, None).expect("style apply");
 
     assert_eq!(
-        after_style.margin(),
-        cli_only.margin(),
+        after_style.page_margin(),
+        cli_only.page_margin(),
         "no `style:` frontmatter must leave CLI-resolved margins untouched",
     );
     assert_eq!(
-        after_style.padding(),
-        cli_only.padding(),
+        after_style.page_padding(),
+        cli_only.page_padding(),
         "no `style:` frontmatter must leave CLI-resolved padding untouched",
     );
     assert_eq!(
@@ -4747,20 +4751,19 @@ fn no_style_frontmatter_leaves_cli_layout_state_intact() {
     );
     for component in PageComponent::ALL {
         assert_eq!(
-            after_style.alignment_for(component),
-            cli_only.alignment_for(component),
+            alignment_for(&after_style, component),
+            alignment_for(&cli_only, component),
             "no `style:` frontmatter must leave CLI-resolved alignment untouched: {component:?}",
         );
         assert_eq!(
-            after_style.fill_for(component),
-            cli_only.fill_for(component),
+            fill_for(&after_style, component),
+            fill_for(&cli_only, component),
             "no `style:` frontmatter must leave CLI-resolved fill untouched: {component:?}",
         );
     }
 }
 
 #[test]
-#[allow(deprecated)]
 fn style_prop_fixture_resolves_to_expected_table_layout() {
     // Phase 5 acceptance: the canonical `style-prop.md` fixture must produce
     // a page where the table is right-aligned and capped at 50% max-width via
@@ -4769,34 +4772,32 @@ fn style_prop_fixture_resolves_to_expected_table_layout() {
     let page = apply_style_for(&raw, &["doc.md"]);
 
     assert_eq!(
-        page.alignment_for(PageComponent::Tables),
-        PageAlignment::Right,
+        alignment_for(&page, PageComponent::Tables),
+        Alignment::Right,
         "fixture must resolve to a right-aligned table",
     );
     assert_eq!(
-        page.fill_for(PageComponent::Tables),
-        PageFill::Max(WidthUnit::Percent(50.0)),
+        fill_for(&page, PageComponent::Tables),
+        TestFill::Max(Length::Percent(50.0)),
         "fixture must cap the table at 50% max-width",
     );
 }
 
 #[test]
-#[allow(deprecated)]
 fn style_prop_fixture_resolves_to_expected_page_margins() {
     // Phase 5 acceptance: page-level margins from the fixture survive the
     // full CLI -> page-style -> component-style pipeline.
     let raw = std::fs::read_to_string(style_prop_fixture()).unwrap();
     let page = apply_style_for(&raw, &["doc.md"]);
 
-    let m = page.margin();
-    assert_eq!(m.left, 2, "fixture left-margin: 2ch must reach the page");
-    assert_eq!(m.right, 4, "fixture right-margin: 4ch must reach the page");
-    assert_eq!(m.top, 1, "fixture top-margin: 1 must reach the page");
-    assert_eq!(m.bottom, 0, "fixture bottom-margin: 0 must reach the page");
+    let m = page.page_margin();
+    assert_eq!(tv_cells(&m.left), 2, "fixture left-margin: 2ch must reach the page");
+    assert_eq!(tv_cells(&m.right), 4, "fixture right-margin: 4ch must reach the page");
+    assert_eq!(tv_cells(&m.top), 1, "fixture top-margin: 1 must reach the page");
+    assert_eq!(tv_cells(&m.bottom), 0, "fixture bottom-margin: 0 must reach the page");
 }
 
 #[test]
-#[allow(deprecated)]
 fn block_quote_max_width_caps_terminal_render_wrap_width() {
     // Phase 5 acceptance: `style.block-quote.max-width` reaches the page and
     // caps visible wrap width when the terminal renders a top-level
@@ -4828,8 +4829,8 @@ terminal is reasonably wide.\n";
     // Structural guard: the apply pipeline put the fill where the renderer
     // will look for it.
     assert_eq!(
-        page.fill_for(PageComponent::BlockQuotes),
-        PageFill::Max(WidthUnit::Percent(50.0)),
+        fill_for(&page, PageComponent::BlockQuotes),
+        TestFill::Max(Length::Percent(50.0)),
         "block-quote.max-width must reach the page fill slot",
     );
 

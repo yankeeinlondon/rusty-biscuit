@@ -3,7 +3,7 @@ use color_eyre::eyre::Result;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableColumn};
-use biscuit_terminal::utils::layout::{Length, Margin};
+use biscuit_terminal::utils::layout::{Length, Edges};
 use claudine::dispatch::template::{TemplateVariable, VariableCategory};
 use claudine::events::{EventMeta, detect_environment};
 
@@ -33,7 +33,7 @@ pub(super) fn run_variables() -> Result<()> {
         TableColumn::new(bold("Available For")),
     ];
     let mut table = Table::new().with_columns(columns);
-    table.layout_mut().margin = Margin::x(Length::ch(1));
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 
     for var in TemplateVariable::event_variables() {
         table.add_row(vec![
@@ -65,7 +65,7 @@ pub(super) fn run_variables() -> Result<()> {
         TableColumn::new(bold("Current Value")),
     ];
     let mut ctx_table = Table::new().with_columns(ctx_columns);
-    ctx_table.layout_mut().margin = Margin::x(Length::ch(1));
+    ctx_table.layout_mut().margin = Edges::x(Length::ch(1));
 
     let mut current_category: Option<VariableCategory> = None;
 

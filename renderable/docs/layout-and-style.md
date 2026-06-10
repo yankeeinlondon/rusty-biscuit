@@ -60,36 +60,65 @@ returns the named entry, and a `MarkdownPlus` lookup **falls back to the
 `Markdown` entry** — the one place the four `RenderTarget` variants
 (`Markdown`, `MarkdownPlus`, `Browser`, `Terminal`) are not independent.
 
-### `Margin`, `Alignment`, `Layout`
+### `Edges`, `Width`, `Alignment`, `Layout`
 
-`Margin` is a four-sided box (`top`/`right`/`bottom`/`left`), each side a
-`TargetValue<Length>`; constructors `all` / `x` / `y`. `Alignment` is
-`Left` (default) / `Center` / `Right`. `Layout` ties them together:
+`Edges` is a four-sided box (`top`/`right`/`bottom`/`left`), each side a
+`TargetValue<Length>`; constructors `all` / `x` / `y`. It is used for **both**
+`margin` and `padding` (renamed from the former `Margin` struct, which had no
+`type Margin = Edges` alias left behind). `Width` is the content-box sizing
+mode — `Auto` (default) / `FitContent` / `Fixed(TargetValue<Length>)`.
+`Alignment` is `Left` (default) / `Center` / `Right`. `Layout` ties them into
+the full CSS box model:
 
 ```rust
 pub struct Layout {
-    pub margin: Margin,
+    pub margin: Edges,                       // transparent outer space
+    pub padding: Edges,                      // reserved inner space; PAINTED by Style.background
+    pub width: Width,                        // content-box width mode
+    pub max_width: Option<TargetValue<Length>>,  // orthogonal upper cap
     pub alignment: Alignment,
-    pub max_width: Option<TargetValue<Length>>,
     pub word_wrap: WordWrap,
 }
 ```
 
-`Layout` describes a **block-level** component's relationship to its parent
-only. Appearance (background, fill, color) is deliberately *not* here — that is
-a `Style` concern (see §6).
+`Layout` describes a **block-level** component's CSS box only. Paint is
+deliberately *not* here — color, `background`, and `border` are `Style`
+concerns (see §6). The painted inner gutter that the deleted `Fill` once
+expressed is now `padding` (geometry, here) + `Style.background` (paint). Total
+horizontal occupancy is `margin + border + padding + used_width`, matching CSS
+`box-sizing: content-box`; renderers must reserve the cells a drawn border
+consumes.
 
-`Layout::default()` is zero margins, `Alignment::Left`, no `max_width`, and
-`WordWrap::None`. The `Default` impl is hand-written: `word_wrap` is explicitly
-`WordWrap::None`, **not** `WordWrap::default()` (which is a wrapping policy).
-Deriving `Default` here was the original implementation and caused a
-crate-wide regression — every `Prose` silently began wrapping — so the
-hand-written impl is load-bearing, not incidental.
+`width` and `max_width` are orthogonal and compose (CSS `width` + `max-width`):
+`Auto` + an 80ch cap, or `FitContent` + a 100ch cap, are both expressible — the
+expressiveness gain over the deprecated flat `PageFill`, which could state only
+one sizing fact at a time.
+
+`Layout::default()` is zero margins, zero padding, `Width::Auto`,
+`Alignment::Left`, no `max_width`, and `WordWrap::None`. The `Default` impl is
+hand-written: `word_wrap` is explicitly `WordWrap::None`, **not**
+`WordWrap::default()` (which is a wrapping policy). Deriving `Default` here was
+the original implementation and caused a crate-wide regression — every `Prose`
+silently began wrapping — so the hand-written impl is load-bearing, not
+incidental. `Layout::default()` + `Style::default()` is bit-identical to a node
+with no layout/style config; a node carrying *neither* attr renders identically
+and skips the styling pass (absence is the cheap default).
+
+### Serialization contract
+
+`Layout`, `Edges`, and `Width` derive serde. `Width` is
+`#[serde(rename_all = "snake_case")]` → `"auto"` / `"fit_content"` / `"fixed"`.
+The new `padding` and `width` fields are `#[serde(default)]`, so an older
+serialized tree carrying only `margin` / `alignment` / `max_width` /
+`word_wrap` deserializes to `Layout { padding: Edges::default(), width:
+Width::Auto, .. }`. The `Margin → Edges` change is an API rename, not a field
+rename: the `margin` field stays named `margin`; the new field is `padding`.
 
 ### Validation — `LayoutError`
 
-`Layout::validate()`, `Margin::validate()`, and `TargetValue::validate()`
-return the first `LayoutError`:
+`Layout::validate()` (covering `margin`, `padding`, `width`, and `max_width`),
+`Edges::validate()`, `Width::validate()`, and `TargetValue::validate()` return
+the first `LayoutError`:
 
 - `InvalidPercent` — a percentage outside `0.0..=100.0`, or non-finite.
 - `NonUniversalUnit` — a `Length::Css` in a `Universal` branch.
@@ -101,12 +130,14 @@ tree the renderers lower it as-is. See §5 for why this matters.
 
 ## 3. Layout on the render tree
 
-`Layout` rides on a block `RenderNode` via `NodeAttrs`, serialized as JSON
-under the layout hint namespace:
+`Layout` rides on a block `RenderNode` as the typed `NodeAttrs::layout` sparse
+field (`Option<Box<Layout>>`), not as a serialized `data`-bag entry — so a
+renderer reads it with no serde round-trip:
 
 ```rust
 node.attrs.set_layout(&layout);
-let recovered: Option<Layout> = node.attrs.layout();
+let recovered: Option<Layout> = node.attrs.layout();   // clone
+let borrowed: Option<&Layout> = node.attrs.layout_ref(); // hot path, no clone
 ```
 
 `TreeRenderable::tree_layout(&self) -> Option<Layout>` is the optional hook a
@@ -125,23 +156,41 @@ Each renderer consumes `Layout` on its own terms.
 
 **Browser** (`renderable/src/tree/render/browser.rs`, `layout_to_css`) lowers a
 node's `Layout` to an inline `style` attribute: margins to `margin-*`, vertical
-sides (`top`/`bottom`) lowered to `lh` units, `max_width` to `max-width`, and
-alignment to `auto` margins **only when a `max_width` is present**. `word_wrap`
-becomes `white-space:nowrap` (`None`) or `overflow-wrap:break-word` (any
-wrapping variant).
+sides (`top`/`bottom`) lowered to `lh` units, `padding` to `padding-*` (same
+unit rules as margin), `width` to a `width` declaration (`Auto` omits it,
+`FitContent` → `width:fit-content`, `Fixed(tv)` → an explicit `width`),
+`max_width` to `max-width`, and alignment to `auto` margins **only when a
+`max_width` is present**. `word_wrap` becomes `white-space:nowrap` (`None`) or
+`overflow-wrap:break-word` (any wrapping variant). It also emits
+`box-sizing:content-box` on any node that lowers a non-default `width`,
+`padding`, or `border`, so a page's global `* { box-sizing:border-box }` reset
+cannot silently reinterpret the renderable content-box width contract.
 
 **Terminal** (`biscuit-terminal`, `render_tree::render::render_with_layout` and
-`LayoutTerminalExt`) resolves margins to whole cells against the available
-width via the shared `resolve_cells` helper (`Ch(n)`→`n`, `Percent(p)`→
-`round(width*p/100)`, `Zero`/`Css`/absent→`0`, resolving for
-`RenderTarget::Terminal`). It narrows the child render width by left+right
-margins, prefixes each line, block-aligns the component as a unit, and emits
-top/bottom margins as blank rows. The legacy `LayoutTerminalExt` retains
-`apply_layout` / `apply_block_layout` for the bespoke (non-tree) component path.
+`LayoutTerminalExt`) resolves margins, `padding`, and the `width` modes to
+whole cells against the available width via the shared `resolve_cells` helper
+(`Ch(n)`→`n`, `Percent(p)`→`round(width*p/100)`, `Zero`/`Css`/absent→`0`,
+resolving for `RenderTarget::Terminal`). It resolves the content-box width from
+`layout.width` — `Auto` fills `available − margin − padding − border`,
+`Fixed(tv)` resolves `tv` clamped to that cap, `FitContent` renders once at the
+cap then re-renders at the measured widest line — narrows the child render
+width accordingly, renders the content at exactly the content-box width, and
+paints `padding` + `border` **around** it (a `Fixed(n)` box keeps all `n`
+content columns; the border is never carved out of them). It then **block-aligns
+the box within `available − margin`** for every width mode (`margin:auto`
+semantics): the painted box is `content_width + padding + border`, and when it
+is narrower than the area — a sub-available `Fixed` / `FitContent` box, or an
+`Auto` box capped by `max_width` — the alignment offset positions the whole box
+(center/right). A box that fills the area centers its visible content instead.
+Top/bottom margins emit as blank rows. The `padding` box is painted by
+`paint_text` with `Style.background`; the margin stays transparent. The legacy
+`LayoutTerminalExt` retains `apply_layout` / `apply_block_layout` for the
+bespoke (non-tree) component path.
 
-> The terminal renderer **does not apply `max_width`** — it is a Browser-only
-> property. `max_width` only influences the terminal path indirectly, by being
-> the precondition for browser block-alignment.
+> `max_width` caps the terminal content box just as it does in the browser, and
+> the capped box is block-placed within `available − margin`. There is no
+> separate terminal `max_width` rule beyond that cap-then-place — the property is
+> not a terminal no-op.
 
 **Markdown** deliberately **ignores** `Layout` entirely. Markdown body output
 is byte-identical whether or not a node carries a layout, and no diagnostic is
@@ -178,14 +227,20 @@ Known gaps and loose ends:
 - **`TerminalRenderContext::active_layout` is a dead field** — set by
   `with_layout`, never read. The terminal renderer reads `node.attrs.layout()`
   directly. The field is retained for API shape; remove it or wire a consumer.
-- **Terminal `max_width` is a silent no-op** (see §4) — consistent with the
-  spec, but a Browser/Terminal asymmetry a reader would not expect.
-- **darkmatter's `LayoutContext` page-frame pass is retained.** `DarkmatterPage`
-  now builds a `renderable::layout::Layout` (see §7) and the document body
-  renders through the tree terminal renderer, but `apply_row_decoration` still
-  runs as the page-frame **post-pass** that wraps the rendered body in page-level
-  margins, padding, and background. This is a complementary step (page frame vs.
-  body content), not a "not yet on the tree" fallback.
+- **Terminal `max_width` caps the content box and the capped box is
+  block-placed** (see §4) — symmetric with the browser, not a no-op.
+- **darkmatter's `LayoutContext` page-frame pass is retained — by decision, not
+  omission.** `DarkmatterPage` builds a `renderable::layout::Layout` (see §7) and
+  the document body renders through the tree terminal renderer, but
+  `apply_row_decoration` still runs as the page-frame **post-pass** that wraps the
+  rendered body in page-level margins, padding, and background. The closeout
+  audit signed this off as the constrained **Option A** slim page frame: it is a
+  viewport-level assembler operating on the *folded output*, carrying no
+  component policy, inspecting no component node kinds, and mutating no component
+  content (pinned by `page_frame_chrome_ignores_component_policy_content` and
+  `page_frame_vertical_margin_only_wraps_component_body`). This is a complementary
+  step (page frame vs. body content), not a "not yet on the tree" fallback. See
+  `renderable/features/_completed/2026-06-06-tree-closeout/traversal-inventory.md`.
 - **Drift is recorded, not eliminated.** The `render_comparison` `KNOWN_DRIFT`
   ledgers carry the tree-vs-bespoke divergences. Some entries are the tree path
   being *more* correct than the legacy bespoke renderer (e.g. applying vertical
@@ -203,20 +258,39 @@ sits*, `Style` decides *what the box looks like*. A component declares a
 
 ```rust
 pub struct Style {
-    pub color: Option<TargetValue<PerMode<Color>>>,
-    pub background: Option<TargetValue<PerMode<Color>>>,
+    pub color: Option<TargetValue<PerMode<PaintColor>>>,
+    pub background: Option<TargetValue<PerMode<PaintColor>>>,  // paints content + padding box
     pub emphasis: TextEmphasis,
-    pub border: Option<Border>,
-    pub fill: Option<Fill>,
+    pub border: Option<Border>,                               // Border.color is also PaintColor
 }
 ```
 
-- **`color` / `background`** — foreground and box background color.
+- **`color` / `background`** — foreground and box background paint. They carry
+  `PaintColor` (a `Color` plus an `Opacity` alpha byte), not bare `Color`, so
+  alpha survives the tree without a side channel; `Border.color` is `PaintColor`
+  too. `PerMode` accepts `impl Into<PaintColor>`, so opaque construction from a
+  `Color` stays concise. The terminal target reads `PaintColor::color` and
+  ignores the alpha at every color depth; the browser lowers the pair to
+  `rgb(...)` / `rgba(...)` (or a `transparent` / `currentColor` / `inherit`
+  keyword) through the shared `paint_to_css_color`. `Opacity` defaults to opaque
+  and is elided from the serialized form when opaque, so an alpha-less tree
+  serializes exactly as it did before alpha existed. Per CSS, `background` paints
+  the content box *and* the `Layout.padding` box (out to the border edge), but
+  not the margin.
 - **`emphasis`** — the shared `TextEmphasis` leaf (bold, dim, italic,
-  underline, strikethrough, blink), also reused by `Prose`.
+  underline, strikethrough, blink, inverse), also reused by `Prose`.
 - **`border`** — `Border { color, weight, line_style, sides, radius }`.
-- **`fill`** — `Fill { color, intensity, band, inset }`: painted-band
-  behavior, deliberately distinct from `background`.
+
+The former `fill` field and the whole fill abstraction (its intensity and band
+knobs) are **deleted**. The only thing fill offered beyond the box model was the
+implicit adaptive tint of its subtle / pronounced intensities; that survives as
+the `Background` constructor namespace — `Background::subtle()` / `pronounced()`
+return the `TargetValue<PerMode<Color>>` value `background` already holds
+(`Background` is zero-sized and never stored). The painted bands fill drew are
+now expressed structurally: a painted gutter is `Layout.padding` + `background`,
+a band hugging the text is `Layout.width: FitContent` + `alignment` +
+`background`. `Style::is_empty()` treats a `Style` carrying only
+`Background::subtle()` / `pronounced()` as non-empty.
 
 `PerMode<T>` (`Universal` / `Adaptive { light, dark }`) is the light/dark
 adaptation wrapper, composed with `TargetValue` for color-bearing fields as
@@ -225,14 +299,19 @@ adaptation wrapper, composed with `TargetValue` for color-bearing fields as
 
 ### Style on the render tree
 
-`Style` rides on `NodeAttrs` under the `renderable.style` hint namespace, with
-`set_style` / `style` accessors mirroring `set_layout` / `layout`. Unlike
-`Layout`, `Style` may attach to block nodes **and** inline `Span` nodes.
+`Style` rides on `NodeAttrs` as the typed `style` sparse field
+(`Option<Box<Style>>`), with `set_style` / `style` / `style_ref` accessors
+mirroring `set_layout` / `layout` / `layout_ref`. Unlike `Layout`, `Style` may
+attach to block nodes **and** inline `Span` nodes.
 
 Inheritance is **limited**: only the text-appearance fields — `color` and
 `emphasis` — cascade through tree traversal (`Style::inherited_from`). The
-box-painting fields — `background`, `border`, `fill` — never inherit and stay
-explicit on the node that paints them.
+box-painting fields — `background` and `border` — never inherit and stay
+explicit on the node that paints them. Every render fold threads this push-down
+through one shared resolver, `renderable::tree::InheritedStyle`: `enter` returns
+both the effective `Style` for the current node and the child context to thread
+into its descendants, so the inheritance rule lives in exactly one place rather
+than being re-implemented per renderer.
 
 ### Per-target consumption
 
@@ -248,9 +327,14 @@ explicit on the node that paints them.
   dashed / dotted line style, per-side selection, and **rounded corners** via
   `Border::radius` (any non-zero radius selects the light-arc corner set; a
   heavy or double border has no arc variant and keeps square corners).
-- `fill` paints a background band: `FillBand::Full` (the available width),
-  `Padded` (the content band), or `Indented` (inset from both edges).
-  `Fill::inset` adds leading unpainted columns and narrows the band.
+> Terminal painting of the `padding` box, `Width` resolution (`Auto` /
+> `Fixed` / `FitContent`), and `Background` tints landed in the *renderer-folds*
+> sub-spec. `render_with_layout` resolves the content-box width and clamps it
+> against `available − margin − padding − border`; `FitContent` measures the
+> content's widest line then re-renders at that width. `paint_text` paints the
+> `padding` box with `Style.background`, and the implicit one-cell interior
+> border gap was removed so `Layout.padding` is the single source of inner
+> spacing.
 
 > **Code blocks are outside this `Style` primitive.** Syntax-highlighted code
 > panels are driven by darkmatter's `ThemePair` + `ColorMode`, not `Style`. As a
@@ -276,9 +360,14 @@ layers to CSS during fragment emission:
   selectors and the per-mode color), `opacity:0.6`, and a small CSS
   keyframe animation respectively.
 
-`border` and `fill` lowering to CSS is **not yet wired** — the helper
-explicitly leaves those two layers for a follow-up. The terminal target
-remains the only consumer of border glyphs and fill bands today.
+`border` is lowered to CSS by `style_css_declarations`: `weight` maps to a
+`border-width` px step (`Thin`→1px, `Medium`→2px, `Thick`→3px), `line_style` to
+the matching `border-style` keyword (`Solid`/`Dashed`/`Dotted`/`Double`),
+`color` through the existing `PerMode`→CSS color path, and `radius` to
+`border-radius`. `BorderSides::All` emits the `border-*` shorthands;
+`BorderSides::Sides { .. }` emits per-side `border-{side}-{width,style,color}`
+for each enabled edge; `BorderSides::None` emits nothing. The terminal target
+also renders border glyphs.
 
 **Markdown** ignores `Style` entirely — Markdown body output is byte-identical
 whether or not a node carries a style, with no diagnostic.
@@ -329,18 +418,13 @@ blink) is unit-tested in `tree/render/browser.rs`'s test module.
 
 Known gaps:
 
-- **Browser `Style` lowering is partial.** Color, background, emphasis
+- **Browser `Style` lowering is complete.** Color, background, emphasis
   (the `<strong>` / `<em>` / `<s>` wrappers for inline, the equivalent
-  CSS for block), underline variants, dim, and blink are wired. The
-  box-painting layers — `border` and `fill` — are intentionally **not**
-  lowered yet (`style_css_declarations` documents the gap explicitly).
-  Adding them requires defining the CSS semantics for the typed
-  `Border` weight / line-style / radius matrix and the `Fill` band /
-  inset model.
-- **`render_border` width mismatch.** The terminal border's top/bottom rule is
-  two columns narrower than the content row — the interior padding spaces are
-  not counted in the rule width. It affects square and rounded borders alike
-  and predates the `Style` migration; tracked for a separate fix.
+  CSS for block), underline variants, dim, and blink are wired, and the
+  box-painting `border` layer (weight / line-style / radius / per-side matrix)
+  now lowers to CSS via `style_css_declarations`. `padding` and `Width` (the
+  box-model replacement for the deleted `Fill` band) lower to `padding-*` and
+  `width` via `layout_to_css`.
 - **Darkmatter `style:` frontmatter is a separate policy layer.** Its v1
   schema is now wired through sub-spec #7 (see §7), but it applies page and
   component policy to `DarkmatterPage`; it does not mean Markdown frontmatter
@@ -349,20 +433,31 @@ Known gaps:
 ## 7. darkmatter migration
 
 `DarkmatterPage` keeps its public builder API (`with_margin`, `with_padding`,
-`with_max_width`, alignment/fill setters) unchanged. Internally it now builds a
+`with_max_width`, alignment/fill setters) unchanged. Internally it builds a
 `renderable::layout::Layout` from its page settings rather than doing bespoke
 `PageMargin` arithmetic.
 
-The page-layout value types — `PageMargin`, `PagePadding`, `PageFill`,
-`PageAlignment` — are now `#[deprecated]` in favor of `renderable::layout`.
-They remain `pub` (the darkmatter CLI builds them from flags) and carry
-conversion bridges:
+The darkmatter cutover is complete. The deprecated page-layout value types —
+`PageMargin`, `PagePadding`, `PageFill`, `PageAlignment`, `WidthUnit`, and
+`PageComponent::Lists` — and their conversion bridges have been **deleted**.
+`DarkmatterPage` now stores `renderable::layout::Edges`,
+`TargetValue<Length>`, and `ComponentPolicy` directly; `style:` frontmatter
+lowers straight into the per-component `ComponentPolicy` — a
+`renderable::layout::Layout` plus `color` / `bg_color` carried as alpha-bearing
+`renderable::style::PaintColor`. The parsed `StyleColor` (which carries optional
+Tailwind/hex opacity) is lowered to `PaintColor` at the parser/apply boundary,
+so opacity rides in the paint's alpha channel rather than a side channel — there
+is no `StyleColor` left on post-construction component types.
 
-- `From<PageMargin>` / `From<PagePadding>` → `renderable::layout::Margin`
-- `From<PageAlignment>` → `renderable::layout::Alignment`
-- `TryFrom<WidthUnit>` → `Length`, and `TryFrom<PageFill>` →
-  `Option<TargetValue<Length>>` for the width-cap meaning, with a separate
-  `PageFill::margin_contribution()` for the inset meaning.
+The render tree is built **complete** during construction: darkmatter's
+context-aware fold (`render_tree::build_context`, a `TreeBuildContext`) bakes
+component policy, page-inheriting color, alpha paint, text layout, and HR
+defaults onto the nodes as it folds, and each target then runs **one fold** over
+that tree. The old post-fold `decorate` pass and the `darkmatter.style` /
+`darkmatter.li` render hints have been **deleted**; the browser fold lowers
+alpha straight to `rgba(...)` with no post-render HTML rewrite. The render-tree
+folds perform all width, padding, alignment, and CSS resolution. `DarkmatterPage`
+survives as a slim, renderable-typed page frame.
 
 ### `style:` frontmatter status
 

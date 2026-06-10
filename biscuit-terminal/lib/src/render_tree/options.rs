@@ -265,13 +265,13 @@ impl TerminalRenderContext {
     ///
     /// ```
     /// use biscuit_terminal::render_tree::TerminalRenderContext;
-    /// use renderable::layout::{Layout, Length, Margin};
+    /// use renderable::layout::{Layout, Length, Edges};
     ///
     /// let ctx = TerminalRenderContext::fallback();
     /// assert!(ctx.active_layout.is_none());
     ///
     /// let layout = Layout {
-    ///     margin: Margin::y(Length::ch(1)),
+    ///     margin: Edges::y(Length::ch(1)),
     ///     ..Layout::default()
     /// };
     /// let with_layout = ctx.with_layout(Some(layout.clone()));
@@ -451,11 +451,11 @@ mod tests {
 
     #[test]
     fn for_child_preserves_layout() {
-        use renderable::layout::{Layout, Length, Margin};
+        use renderable::layout::{Layout, Length, Edges};
 
         let ctx = TerminalRenderContext::fallback();
         let layout = Layout {
-            margin: Margin::y(Length::ch(2)),
+            margin: Edges::y(Length::ch(2)),
             ..Layout::default()
         };
         let with_layout = ctx.with_layout(Some(layout.clone()));
@@ -492,11 +492,11 @@ mod tests {
 
     #[test]
     fn with_layout_sets_layout() {
-        use renderable::layout::{Layout, Length, Margin};
+        use renderable::layout::{Layout, Length, Edges};
 
         let ctx = TerminalRenderContext::fallback();
         let layout = Layout {
-            margin: Margin::x(Length::ch(3)),
+            margin: Edges::x(Length::ch(3)),
             ..Layout::default()
         };
         let with_layout = ctx.with_layout(Some(layout.clone()));
@@ -506,15 +506,15 @@ mod tests {
 
     #[test]
     fn with_layout_replaces_existing_layout() {
-        use renderable::layout::{Layout, Length, Margin};
+        use renderable::layout::{Layout, Length, Edges};
 
         let ctx = TerminalRenderContext::fallback();
         let layout1 = Layout {
-            margin: Margin::y(Length::ch(1)),
+            margin: Edges::y(Length::ch(1)),
             ..Layout::default()
         };
         let layout2 = Layout {
-            margin: Margin::y(Length::ch(5)),
+            margin: Edges::y(Length::ch(5)),
             ..Layout::default()
         };
 
@@ -526,12 +526,12 @@ mod tests {
 
     #[test]
     fn with_layout_preserves_width_and_indent() {
-        use renderable::layout::{Layout, Length, Margin};
+        use renderable::layout::{Layout, Length, Edges};
 
         let ctx = TerminalRenderContext::fallback();
         let indented = ctx.for_child(5, 3);
         let layout = Layout {
-            margin: Margin::y(Length::ch(1)),
+            margin: Edges::y(Length::ch(1)),
             ..Layout::default()
         };
         let with_layout = indented.with_layout(Some(layout));

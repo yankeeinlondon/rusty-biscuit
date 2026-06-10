@@ -40,11 +40,12 @@
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use renderable::tree::{
     ColumnAlign, Diagnostic, Document, DocumentMetadata, Frontmatter as TreeFrontmatter,
-    FrontmatterFormat, HeadingDepth, HintNamespace, NodeKind, Provenance, RenderNode,
-    SourceDescriptor, SourceId, SourceLocation, SourceSpan,
+    FrontmatterFormat, HeadingDepth, HrAlignment, HrKind, HrWeight, NodeKind, Provenance,
+    RenderNode, SourceDescriptor, SourceId, SourceLocation, SourceSpan, ThematicBreakAttrs,
 };
 use std::ops::Range;
 
+use super::build_context::{TreeBuildContext, apply_node_policy, apply_page_colors};
 use super::source::single_source_registry;
 use crate::markdown::inline::HorizontalRuleAttrs;
 
@@ -142,16 +143,19 @@ enum ContainerKind {
 }
 
 /// The mutable state threaded through the fold.
-struct Fold {
+struct Fold<'ctx> {
     /// Container stack; the last entry is the innermost open container.
     stack: Vec<Frame>,
     /// The single source every parsed node refers to.
     source: SourceId,
     /// Diagnostics accumulated during the fold.
     diagnostics: Vec<Diagnostic>,
+    /// Construction-time policy; `None` on the plain fold, `Some` on the
+    /// context-aware fold that bakes component policy into nodes.
+    ctx: Option<&'ctx TreeBuildContext<'ctx>>,
 }
 
-impl Fold {
+impl Fold<'_> {
     /// Builds a [`SourceSpan`] for a parsed node spanning `range`.
     fn parsed_span(&self, range: Range<usize>) -> SourceSpan {
         SourceSpan {
@@ -174,11 +178,13 @@ impl Fold {
     }
 
     /// Appends a leaf node carrying a parsed span over `range`.
-    fn push_leaf(&mut self, kind_node: RenderNode, range: Range<usize>) {
+    fn push_leaf(&mut self, mut kind_node: RenderNode, range: Range<usize>) {
         let span = self.parsed_span(range);
-        let mut node = kind_node;
-        node.span = span;
-        self.push_child(node);
+        kind_node.span = span;
+        if let Some(ctx) = self.ctx {
+            apply_node_policy(&mut kind_node, ctx);
+        }
+        self.push_child(kind_node);
     }
 
     /// Feeds a single `(Event, Range)` pair through the fold's main dispatch.
@@ -276,6 +282,7 @@ pub fn fold_markdown_to_document_with_metadata(
         }],
         source: source_id,
         diagnostics: Vec::new(),
+        ctx: None,
     };
 
     for (event, range) in Parser::new_ext(input, options).into_offset_iter() {
@@ -340,7 +347,8 @@ pub fn fold_markdown_with_frontmatter(
 /// paragraph that the block-extension processor lifted from the event stream.
 ///
 /// The returned node has [`Provenance::Generated`] (it was synthesized from a
-/// paragraph) and carries the parsed `darkmatter.hr.*` hints. `body_range`
+/// paragraph) and carries the parsed HR styling in the typed
+/// [`ThematicBreakAttrs`] field. `body_range`
 /// must point at the original paragraph body bytes — not the wider
 /// `End(Paragraph)` range — so the produced
 /// [`renderable::tree::SourceLocation`] is byte-identical to the retired
@@ -358,26 +366,21 @@ fn lower_hr_attrs_to_node(
             bytes: body_range,
         }),
     };
-    let hr_ns = HintNamespace("darkmatter.hr");
-    if let Some(kind) = attrs.kind.as_ref().or(attrs.legacy_style.as_ref()) {
-        node.attrs.set_hint(hr_ns, "kind", serde_json::json!(kind));
-    }
-    if let Some(alignment) = attrs.alignment {
-        node.attrs
-            .set_hint(hr_ns, "alignment", serde_json::json!(alignment));
-    }
-    if let Some(weight) = attrs.weight {
-        node.attrs
-            .set_hint(hr_ns, "weight", serde_json::json!(weight));
-    }
-    if let Some(width) = attrs.width {
-        node.attrs
-            .set_hint(hr_ns, "width", serde_json::json!(width));
-    }
-    if let Some(color) = attrs.color {
-        node.attrs
-            .set_hint(hr_ns, "color", serde_json::json!(color));
-    }
+    node.attrs.set_thematic_break(&ThematicBreakAttrs {
+        // The canonical `kind` key wins over the deprecated `style:` alias.
+        // Author text is parsed to the shared enums here, at the single fold
+        // boundary; an unrecognized spelling becomes `None` and the renderers
+        // fall back to their defaults.
+        kind: attrs
+            .kind
+            .or(attrs.legacy_style)
+            .as_deref()
+            .and_then(HrKind::from_authored),
+        alignment: attrs.alignment.as_deref().and_then(HrAlignment::from_authored),
+        weight: attrs.weight.as_deref().and_then(HrWeight::from_authored),
+        width: attrs.width,
+        color: attrs.color,
+    });
     node
 }
 
@@ -401,8 +404,8 @@ fn lower_hr_attrs_to_node(
 ///    range is mapped back to the original source through the rewriter's
 ///    provenance table.
 ///
-/// HR-attribute paragraphs fold to a [`NodeKind::ThematicBreak`] with
-/// `darkmatter.hr.*` hints (and [`Provenance::Generated`] because the event was
+/// HR-attribute paragraphs fold to a [`NodeKind::ThematicBreak`] with typed
+/// [`ThematicBreakAttrs`] (and [`Provenance::Generated`] because the event was
 /// synthesized from a paragraph). The body fold sees only Markdown content;
 /// darkmatter's already extracted frontmatter flows into
 /// [`DocumentMetadata::frontmatter`].
@@ -446,6 +449,7 @@ pub fn fold_markdown_spanned_with_frontmatter(
         }],
         source: source_id,
         diagnostics: Vec::new(),
+        ctx: None,
     };
 
     // 3. Plain fold. `Fold::end` dispatches `~~…~~` containers to `Extended`
@@ -455,7 +459,10 @@ pub fn fold_markdown_spanned_with_frontmatter(
         match be {
             BlockExtensionEvent::Standard(event, range) => fold.feed_event(event, range),
             BlockExtensionEvent::HorizontalRule { attrs, body_range } => {
-                let node = lower_hr_attrs_to_node(attrs, body_range, fold.source);
+                let mut node = lower_hr_attrs_to_node(attrs, body_range, fold.source);
+                if let Some(ctx) = fold.ctx {
+                    apply_node_policy(&mut node, ctx);
+                }
                 fold.push_child(node);
             }
         }
@@ -507,7 +514,103 @@ pub fn fold_markdown_spanned_with_frontmatter(
     (document, diagnostics)
 }
 
-impl Fold {
+/// Context-aware span fold: identical to [`fold_markdown_spanned_with_frontmatter`]
+/// but attaches construction-time policy (component layout, colors, text-layout
+/// hints, structured directives, HR defaults) from `ctx` as nodes are built.
+///
+/// The resulting [`Document`] is the complete typed render input — no
+/// post-fold decoration or attribute injection is needed.
+///
+/// ## Returns
+///
+/// The folded [`Document`] and any non-fatal [`Diagnostic`]s.
+#[must_use]
+pub(crate) fn fold_markdown_spanned_with_context(
+    source: SourceDescriptor,
+    md: &crate::markdown::Markdown,
+    ctx: &TreeBuildContext,
+) -> (Document, Vec<Diagnostic>) {
+    use super::block_extension::{BlockExtensionEvent, BlockExtensionProcessor};
+    use super::inline_extension::rewrite_inline_extensions;
+
+    let metadata = DocumentMetadata {
+        frontmatter: md.frontmatter().raw_source().map(|raw| TreeFrontmatter {
+            format: FrontmatterFormat::Yaml,
+            raw: raw.to_string(),
+        }),
+    };
+    let (registry, source_id) = single_source_registry(source);
+
+    let rewrite = rewrite_inline_extensions(md.content());
+
+    let options = render_tree_parser_options();
+    let parser = Parser::new_ext(rewrite.source.as_ref(), options).into_offset_iter();
+    let chain = BlockExtensionProcessor::new(parser);
+
+    let mut fold = Fold {
+        stack: vec![Frame {
+            tag: ContainerKind::Root,
+            children: Vec::new(),
+            start: 0,
+        }],
+        source: source_id,
+        diagnostics: Vec::new(),
+        ctx: Some(ctx),
+    };
+
+    for be in chain {
+        match be {
+            BlockExtensionEvent::Standard(event, range) => fold.feed_event(event, range),
+            BlockExtensionEvent::HorizontalRule { attrs, body_range } => {
+                let mut node = lower_hr_attrs_to_node(attrs, body_range, fold.source);
+                if let Some(ctx) = fold.ctx {
+                    apply_node_policy(&mut node, ctx);
+                }
+                fold.push_child(node);
+            }
+        }
+    }
+
+    while fold.stack.len() > 1 {
+        let frame = fold.stack.pop().expect("len checked");
+        fold.diagnostics.push(Diagnostic::structural(
+            "unclosed container in event stream",
+            None,
+        ));
+        if let Some(parent) = fold.stack.last_mut() {
+            parent.children.extend(frame.children);
+        }
+    }
+
+    let root_children = fold.stack.pop().map(|f| f.children).unwrap_or_default();
+    let mut diagnostics = fold.diagnostics;
+    let mut root = RenderNode::root(root_children);
+
+    // Apply page-level colors to the root so they inherit to all descendants.
+    apply_page_colors(&mut root, ctx);
+
+    if !rewrite.provenance.is_empty() {
+        resolve_node_spans(&mut root, &rewrite.provenance);
+        for diagnostic in &mut diagnostics {
+            if let Some(location) = diagnostic
+                .span
+                .as_mut()
+                .and_then(|span| span.location.as_mut())
+            {
+                location.bytes = rewrite.provenance.resolve_range(location.bytes.clone());
+            }
+        }
+    }
+
+    let document = Document {
+        sources: registry,
+        metadata,
+        root,
+    };
+    (document, diagnostics)
+}
+
+impl Fold<'_> {
     /// Handles an `Event::Start`, pushing a container frame.
     fn start(&mut self, tag: Tag<'_>, range: Range<usize>) {
         let kind = match tag {
@@ -682,12 +785,18 @@ impl Fold {
                 // a darkmatter inline-extension envelope produced by the source
                 // rewriter (`==mark==` / `⌄dim⌄`). Peek the leading marker and
                 // dispatch accordingly.
-                let node = self.dispatch_strikethrough(children, span);
+                let mut node = self.dispatch_strikethrough(children, span);
+                if let Some(ctx) = self.ctx {
+                    apply_node_policy(&mut node, ctx);
+                }
                 self.push_child(node);
             }
             other => {
                 let mut node = build_container(other, children);
                 node.span = span;
+                if let Some(ctx) = self.ctx {
+                    apply_node_policy(&mut node, ctx);
+                }
                 self.push_child(node);
             }
         }
@@ -1536,6 +1645,7 @@ mod tests {
             }],
             source: SourceId(0),
             diagnostics: Vec::new(),
+            ctx: None,
         };
         fold.task_marker(true, 0..3);
         assert_eq!(fold.diagnostics.len(), 1);
@@ -1680,15 +1790,9 @@ mod tests {
             None
         }
         let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
-        let ns = renderable::tree::HintNamespace("darkmatter.hr");
-        assert_eq!(
-            hr.attrs.get_hint(ns, "kind"),
-            Some(&serde_json::json!("waves"))
-        );
-        assert_eq!(
-            hr.attrs.get_hint(ns, "width"),
-            Some(&serde_json::json!("50%"))
-        );
+        let tb = hr.attrs.thematic_break_ref().expect("HR styling attached");
+        assert_eq!(tb.kind, Some(HrKind::Waves));
+        assert_eq!(tb.width.as_deref(), Some("50%"));
         // Generated provenance: this HR was synthesized from a paragraph.
         assert_eq!(hr.span.provenance, Provenance::Generated);
         assert!(hr.span.location.is_some());
@@ -1757,10 +1861,9 @@ mod tests {
         }
         let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
         assert_eq!(hr.span.provenance, Provenance::Parsed);
-        let ns = renderable::tree::HintNamespace("darkmatter.hr");
         assert!(
-            hr.attrs.get_hint(ns, "kind").is_none(),
-            "plain rule must not carry HR hints"
+            hr.attrs.thematic_break_ref().is_none(),
+            "plain rule must not carry HR styling"
         );
     }
 

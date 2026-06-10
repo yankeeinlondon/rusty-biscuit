@@ -1,7 +1,8 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Roo), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-05-26
+last_updated: 2026-06-07
+hash: bbb32528c11dc53d-6f5b5a9c0c1fe80d
 ---
 
 ## Overview
@@ -94,8 +95,10 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
 | `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|sync]` | Reporting and sync for Claudine JSONL logs |
 | `claudine completions <shell>` | Generate shell completions |
-| `claudine context [--values\|--expressions\|--side-effects]` | Show Darkmatter runtime context, expression engine, and side effects |
+| `claudine context [--values\|--expressions\|--side-effects]` | Show Darkmatter context variables, expression engine, and side-effect capabilities |
 | `claudine` *(no subcommand)* | Render rich grouped help |
+
+**Context command:** `claudine context` renders from Darkmatter's public typed descriptor catalogs, not from parsed Markdown. The default report shows every context variable grouped by category with `Property` (`ctx.NAME`), `Type`, and `Description` columns. `--values` replaces `Description` with live captured values (nulls shown, not dropped). `--expressions` shows the expression-language overview plus the complete function catalog grouped by category. `--side-effects` shows the capability catalog with `Capability`, `Description`, and `Safety` columns; it is documentation-only and does not invoke, probe, or check availability of any capability. All reports share a 140ch-inclusive width contract, inverse-styled inline code, and `UnorderedList` bullet formatting.
 
 **Wrapper & composition notes:**
 

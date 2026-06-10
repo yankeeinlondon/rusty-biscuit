@@ -33,8 +33,9 @@
 use renderable::color::TerminalCodeContext;
 use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
-    ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HintNamespace, NodeKind,
-    ProgressHints, RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
+    ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HrAlignment, HrKind,
+    HrWeight, InheritedStyle, NodeKind, ProgressHints, RenderError, RenderNode, RenderStrictness,
+    Rendered, Severity, TableColumnHints, TableTerminalHints, TextLayoutHints, TextOverflow,
 };
 #[cfg(feature = "image")]
 use renderable::tree::TerminalMermaidMode;
@@ -57,8 +58,11 @@ use crate::components::table::{
     ColumnType, Conditional, Table, TableCellContent, TableColumn, TableWidthPlan, VerticalAlign,
 };
 use crate::discovery::detection::ColorDepth;
-use crate::utils::block_constraint::{split_lines, visible_width, wrap_lines};
+use crate::utils::block_constraint::{
+    split_lines, split_trailing_escapes, visible_width, wrap_lines,
+};
 use crate::utils::layout::{Alignment, WordWrap};
+use crate::utils::word_wrap::truncate;
 
 use super::options::{ImagePlaceholder, TerminalRenderOptions};
 use super::style;
@@ -66,6 +70,10 @@ use super::style;
 /// Maximum size of an inline terminal image at [`GraphicsMode::Rich`], matching
 /// the legacy terminal image renderer's 10 MiB ceiling.
 const MAX_TERMINAL_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+
+/// The ellipsis used when typed [`TextLayoutHints`] truncate a link label or
+/// image placeholder that exceeds its resolved field.
+const ELLIPSIS: &str = "…";
 
 /// Renders a render-tree node to a terminal string.
 ///
@@ -101,7 +109,7 @@ pub fn render_terminal_node(
     let mut writer = Writer {
         opts,
         diagnostics: Vec::new(),
-        effective: Style::default(),
+        inherited: InheritedStyle::root(),
     };
 
     // Warning-severity validation findings escalate to an error under Strict
@@ -179,12 +187,13 @@ struct Writer<'a> {
     opts: &'a TerminalRenderOptions,
     diagnostics: Vec<Diagnostic>,
     /// The text appearance (`color`, `emphasis`) inherited from styled
-    /// ancestor blocks. Per Spec B D6 only these fields inherit; the
-    /// box-painting fields (`background`, `border`, `fill`) never do and are
-    /// kept cleared here. A styled node folds its own text appearance into
-    /// this before rendering its subtree (see [`Writer::render_styled`]) so
-    /// descendant paragraphs and inline spans see the ancestor color/emphasis.
-    effective: Style,
+    /// ancestor blocks, carried by the shared [`InheritedStyle`] resolver. Per
+    /// Spec B D6 only these fields inherit; the box-painting fields
+    /// (`background`, `border`) never do. A styled node folds its own text
+    /// appearance into this before rendering its subtree (see
+    /// [`Writer::render_styled`]) so descendant paragraphs and inline spans see
+    /// the ancestor color/emphasis.
+    inherited: InheritedStyle,
 }
 
 impl Writer<'_> {
@@ -196,8 +205,8 @@ impl Writer<'_> {
     /// prefixed by the left margin (plus any alignment offset), and the
     /// vertical margins emit leading/trailing blank lines.
     fn render(&mut self, node: &RenderNode) -> Result<String, RenderError> {
-        match node.attrs.layout() {
-            Some(layout) if !is_inline_kind(&node.kind) => self.render_with_layout(node, &layout),
+        match node.attrs.layout_ref() {
+            Some(layout) if !is_inline_kind(&node.kind) => self.render_with_layout(node, layout),
             _ => self.render_styled(node),
         }
     }
@@ -213,11 +222,11 @@ impl Writer<'_> {
     /// [`Style`]: renderable::style::Style
     /// [`Layout`]: renderable::layout::Layout
     fn render_styled(&mut self, node: &RenderNode) -> Result<String, RenderError> {
-        let Some(style) = node.attrs.style().filter(|s| !s.is_empty()) else {
+        let Some(style) = node.attrs.style_ref().filter(|s| !s.is_empty()) else {
             return self.render_kind(node);
         };
 
-        let overhead = style::border_horizontal_overhead(&style);
+        let overhead = style::border_horizontal_overhead(style);
         let inner_width = self
             .opts
             .context
@@ -225,17 +234,18 @@ impl Writer<'_> {
             .saturating_sub(overhead)
             .max(1);
 
-        // Fold this node's text appearance into the inherited `effective`
-        // style for the duration of its subtree, so descendant paragraphs and
-        // inline spans see the ancestor color/emphasis (Spec B D6). Only the
-        // inheriting fields are carried — the box-painting layers are cleared.
-        let prev_effective = std::mem::take(&mut self.effective);
-        let merged = style.inherited_from(&prev_effective);
-        self.effective = Style {
-            color: merged.color,
-            emphasis: merged.emphasis,
-            ..Style::default()
-        };
+        // The painted padding box. `render_with_layout` already subtracted the
+        // horizontal padding from the content width, so painting it back here
+        // reconstitutes the full box without double-counting.
+        let padding = self.resolve_padding(node);
+
+        // Enter this node through the shared resolver: its text appearance is
+        // threaded into the child context for the duration of its subtree, so
+        // descendant paragraphs and inline spans see the ancestor
+        // color/emphasis (Spec B D6). The resolver carries only the inheriting
+        // fields forward — the box-painting layers are cleared.
+        let (child_ctx, _) = self.inherited.enter(Some(style));
+        let prev = std::mem::replace(&mut self.inherited, child_ctx);
 
         let content = if overhead > 0 {
             self.render_kind_in_width(node, inner_width)
@@ -243,15 +253,33 @@ impl Writer<'_> {
             self.render_kind(node)
         };
 
-        self.effective = prev_effective;
+        self.inherited = prev;
         let content = content?;
 
-        Ok(style::apply_style(
+        // No `Layout` width mode here, so the box hugs its content (`None`).
+        Ok(style::apply_style_with_padding(
             &content,
-            &style,
+            style,
             &self.opts.context.terminal,
-            inner_width,
+            None,
+            padding,
         ))
+    }
+
+    /// Resolves a node's [`Layout`](renderable::layout::Layout) padding into
+    /// whole terminal cells, against the current available width. Returns
+    /// [`style::Padding::ZERO`] when the node carries no layout.
+    fn resolve_padding(&self, node: &RenderNode) -> style::Padding {
+        let available = self.opts.context.available_width;
+        match node.attrs.layout_ref() {
+            Some(layout) => style::Padding {
+                top: resolve_cells(&layout.padding.top, available),
+                right: resolve_cells(&layout.padding.right, available),
+                bottom: resolve_cells(&layout.padding.bottom, available),
+                left: resolve_cells(&layout.padding.left, available),
+            },
+            None => style::Padding::ZERO,
+        }
     }
 
     /// Renders a single node by kind within a constrained width.
@@ -271,11 +299,58 @@ impl Writer<'_> {
         let mut sub = Writer {
             opts: &narrowed,
             diagnostics: Vec::new(),
-            effective: self.effective.clone(),
+            inherited: self.inherited.clone(),
         };
         let result = sub.render_kind(node);
         self.diagnostics.append(&mut sub.diagnostics);
         result
+    }
+
+    /// Renders `node`'s content within `content_width` and paints its `Style`
+    /// text appearance, `padding` band, and border around it.
+    ///
+    /// `padding` is supplied pre-resolved (cells, parent basis) so a `%` padding
+    /// is never re-resolved against the narrowed content width. The content is
+    /// rendered at exactly `content_width`; the caller has already reserved the
+    /// padding and border around it in the width budget, so the paint step adds
+    /// those cells back. Padding is reserved and painted even when the node
+    /// carries no non-empty `Style` — transparent CSS padding still occupies
+    /// cells.
+    fn render_painted(
+        &mut self,
+        node: &RenderNode,
+        content_width: u32,
+        padding: style::Padding,
+    ) -> Result<String, RenderError> {
+        let Some(style) = node.attrs.style_ref().filter(|s| !s.is_empty()) else {
+            let content = self.render_kind_in_width(node, content_width)?;
+            return Ok(style::apply_style_with_padding(
+                &content,
+                &Style::default(),
+                &self.opts.context.terminal,
+                Some(content_width),
+                padding,
+            ));
+        };
+
+        // Enter this node through the shared resolver: its text appearance is
+        // threaded into the child context for the duration of its subtree, so
+        // descendant paragraphs and inline spans see the ancestor
+        // color/emphasis (Spec B D6). The resolver carries only the inheriting
+        // fields forward — the box-painting layers are cleared.
+        let (child_ctx, _) = self.inherited.enter(Some(style));
+        let prev = std::mem::replace(&mut self.inherited, child_ctx);
+        let content = self.render_kind_in_width(node, content_width);
+        self.inherited = prev;
+        let content = content?;
+
+        Ok(style::apply_style_with_padding(
+            &content,
+            style,
+            &self.opts.context.terminal,
+            Some(content_width),
+            padding,
+        ))
     }
 
     /// Renders a node's content within the constraints of a [`Layout`].
@@ -294,10 +369,44 @@ impl Writer<'_> {
         let top = resolve_cells(&layout.margin.top, available);
         let bottom = resolve_cells(&layout.margin.bottom, available);
 
-        // Render the content within the width left after horizontal margins.
-        // Clamp to at least 1: a width-0 sub-render is degenerate for the
-        // downstream components (matching `render_columns`'s `.max(1)`).
-        let mut content_width = available.saturating_sub(left + right).max(1);
+        // Resolve `padding` into cells **once**, against the parent available
+        // width. The painted box (`style.rs`) reuses these exact counts, so a
+        // `%` padding has a single, stable basis and is never re-resolved
+        // against the narrowed content width.
+        let padding = self.resolve_padding(node);
+        let padding_lr = padding.left + padding.right;
+
+        // Drawn vertical border edges, reserved around the content box. The
+        // paint step adds these glyph cells back, so the content renders at
+        // exactly `content_width` and the border is added *around* it (a
+        // `Fixed(n)` box keeps all `n` content columns).
+        let border_lr = node
+            .attrs
+            .style_ref()
+            .filter(|s| !s.is_empty())
+            .map_or(0, style::border_horizontal_overhead);
+
+        // Largest permitted content box: the space left after margin, padding,
+        // and border are reserved (CSS box-order clamp:
+        // `margin + border + padding + used ≤ available`). Clamp to at least 1:
+        // a width-0 sub-render is degenerate for downstream components.
+        let auto_cap = available
+            .saturating_sub(left + right + padding_lr + border_lr)
+            .max(1);
+
+        // Resolve the content-box width from `layout.width`. `Auto` fills the
+        // cap; `Fixed` resolves the requested length, clamped down to the cap;
+        // `FitContent` runs a bounded measure pass — render once at the cap,
+        // measure the widest visible line, and shrink to it.
+        let mut content_width = match &layout.width {
+            renderable::layout::Width::Auto => auto_cap,
+            renderable::layout::Width::Fixed(tv) => {
+                resolve_cells(tv, available).min(auto_cap).max(1)
+            }
+            renderable::layout::Width::FitContent => {
+                self.measure_fit_content(node, auto_cap)?.min(auto_cap).max(1)
+            }
+        };
 
         // Apply max_width cap if declared. The resolved cap further narrows
         // the available width so children receive a reduced inner width and
@@ -305,28 +414,30 @@ impl Writer<'_> {
         if let Some(mw) = &layout.max_width {
             let cap = resolve_cells(mw, available);
             if cap > 0 {
-                content_width = content_width.min(cap);
+                content_width = content_width.min(cap).max(1);
             }
         }
-        let content = {
-            let mut narrowed = self.opts.clone();
-            narrowed.context.available_width = content_width;
-            narrowed.context.width = content_width;
-            narrowed.context.terminal.fixed_width = Some(content_width);
-            let mut sub = Writer {
-                opts: &narrowed,
-                diagnostics: Vec::new(),
-                effective: self.effective.clone(),
-            };
-            let rendered = sub.render_styled(node);
-            self.diagnostics.append(&mut sub.diagnostics);
-            rendered?
-        };
 
-        // Alignment offset: extra left padding when the content is narrower
-        // than the space available between the horizontal margins.
+        // Render the content at exactly `content_width` and paint the `Style`,
+        // `padding` band, and border around it. Padding is reserved and painted
+        // even when the node carries no `Style`.
+        let content = self.render_painted(node, content_width, padding)?;
+
+        // Place the painted box within the content area between the margins
+        // (`available − margin`). The painted box is `content_width` plus the
+        // reserved padding and border. When that box is narrower than the area
+        // — a sub-available `Fixed` / `FitContent` box, or an `Auto` box capped
+        // by `max_width` — the alignment offset positions the whole box. When
+        // the box fills the area, the offset instead centers the visible
+        // content within it (an `Auto` block whose short content is centered).
+        let box_width = content_width + padding_lr + border_lr;
+        let align_area = available.saturating_sub(left + right);
         let widest = content.split('\n').map(visible_width).max().unwrap_or(0);
-        let slack = content_width.saturating_sub(widest);
+        let slack = if box_width < align_area {
+            align_area - box_width
+        } else {
+            align_area.saturating_sub(widest)
+        };
         let align_offset = match layout.alignment {
             Alignment::Left => 0,
             Alignment::Center => slack / 2,
@@ -355,6 +466,36 @@ impl Writer<'_> {
         Ok(out)
     }
 
+    /// Measures the natural content-box width for a [`Width::FitContent`] node.
+    ///
+    /// Renders the node's content once at `cap` — the largest permitted
+    /// content box — and returns the widest visible line. This is the bounded
+    /// measurement pass: `cap` (not an unbounded width) caps the throwaway
+    /// render, so wrapping content cannot blow up the measured width. The
+    /// caller clamps the result under `max_width` and the cap, then re-renders
+    /// the content at the resolved width.
+    ///
+    /// The pass renders the node's *content* (via [`Self::render_kind`]) rather
+    /// than its painted box, so the measured width excludes the `padding` and
+    /// `border` that the painted box adds around it. Diagnostics from this
+    /// throwaway pass are discarded — the caller's final content render
+    /// re-emits them.
+    ///
+    /// [`Width::FitContent`]: renderable::layout::Width::FitContent
+    fn measure_fit_content(&self, node: &RenderNode, cap: u32) -> Result<u32, RenderError> {
+        let mut narrowed = self.opts.clone();
+        narrowed.context.available_width = cap;
+        narrowed.context.width = cap;
+        narrowed.context.terminal.fixed_width = Some(cap);
+        let mut sub = Writer {
+            opts: &narrowed,
+            diagnostics: Vec::new(),
+            inherited: self.inherited.clone(),
+        };
+        let rendered = sub.render_kind(node)?;
+        Ok(rendered.split('\n').map(visible_width).max().unwrap_or(0))
+    }
+
     /// Renders a single block-level node by its [`NodeKind`], without applying
     /// any node-level [`Layout`].
     fn render_kind(&mut self, node: &RenderNode) -> Result<String, RenderError> {
@@ -369,7 +510,8 @@ impl Writer<'_> {
                 }
             }
             NodeKind::Heading { depth, children } => {
-                let effective = heading_effective(depth.get()).inherited_from(&self.effective);
+                let effective =
+                    heading_effective(depth.get()).inherited_from(self.inherited.effective());
                 let markup = self.render_inline(children, &effective)?;
                 Ok(self.render_heading_line(depth.get(), &markup))
             }
@@ -378,7 +520,8 @@ impl Writer<'_> {
                 heading,
                 children,
             } => {
-                let effective = heading_effective(depth.get()).inherited_from(&self.effective);
+                let effective =
+                    heading_effective(depth.get()).inherited_from(self.inherited.effective());
                 let markup = self.render_inline(heading, &effective)?;
                 let heading_output = self.render_heading_line(depth.get(), &markup);
                 let body = self.render_blocks(children)?;
@@ -393,12 +536,12 @@ impl Writer<'_> {
                 // paragraph's own appearance (via `render_styled`) and any
                 // styled ancestor block, so a nested styled span restores the
                 // ancestor color/emphasis after it.
-                let effective = self.effective.clone();
+                let effective = self.inherited.effective().clone();
                 let markup = self.render_inline(children, &effective)?;
-                if let Some(hints) = node.attrs.progress_hints() {
+                if let Some(hints) = node.attrs.progress_hints_ref() {
                     // A progress bar is a single fixed-width glyph run; wrapping
                     // it would split the bar, so it is emitted as-is.
-                    let bar = render_progress_bar(&hints, &markup, self.opts.context.color_depth);
+                    let bar = render_progress_bar(hints, &markup, self.opts.context.color_depth);
                     Ok(self.render_prose(&bar))
                 } else if self.opts.context.wrap_prose {
                     // Top-level paragraphs wrap to the post-margin content width,
@@ -411,9 +554,9 @@ impl Writer<'_> {
                 }
             }
             NodeKind::BlockQuote { children } => {
-                if let Some(hints) = node.attrs.columns_hints() {
-                    self.render_columns(children, &hints)
-                } else if node.attrs.style().is_some_and(|s| !s.is_empty()) {
+                if let Some(hints) = node.attrs.columns_hints_ref() {
+                    self.render_columns(children, hints)
+                } else if node.attrs.style_ref().is_some_and(|s| !s.is_empty()) {
                     // The node carries a declared `Style` — a migrated
                     // `BlockQuote` component projects its border, fill, and
                     // colors onto the node. `render_styled` lowers that
@@ -482,7 +625,7 @@ impl Writer<'_> {
                 let table = self.render_table(align, children, node)?;
                 // A table title/caption is emitted above the top border. An
                 // empty or whitespace-only title is ignored.
-                match node.attrs.table_title() {
+                match node.attrs.table_title_ref() {
                     Some(title) if !title.trim().is_empty() => {
                         Ok(format!("{}\n{table}", title.trim()))
                     }
@@ -571,7 +714,7 @@ impl Writer<'_> {
                 // call.
                 NodeKind::Text { value } => output.push_str(value),
                 kind if is_inline_kind(kind) => {
-                    let effective = self.effective.clone();
+                    let effective = self.inherited.effective().clone();
                     let markup = self.render_inline_node(child, &effective)?;
                     output.push_str(&markup);
                 }
@@ -689,7 +832,7 @@ impl Writer<'_> {
         let mut sub = Writer {
             opts: &narrowed,
             diagnostics: Vec::new(),
-            effective: self.effective.clone(),
+            inherited: self.inherited.clone(),
         };
         let result = sub.render_blocks(children);
         self.diagnostics.append(&mut sub.diagnostics);
@@ -756,6 +899,61 @@ impl Writer<'_> {
         Ok(output)
     }
 
+    /// Applies a node's typed [`TextLayoutHints`] to a single rendered visible
+    /// run (a link label or an image alt-text placeholder).
+    ///
+    /// `width` establishes an exact field: shorter content is padded per
+    /// `alignment`, and longer content is truncated with an ellipsis only when
+    /// `overflow` is [`TextOverflow::Truncate`]. `max_width` is a hard ceiling:
+    /// content exceeding it is always truncated with an ellipsis. When both are
+    /// present, the field is the requested `width` clamped down to the
+    /// `max_width` cap. All measurement and truncation is display-width aware —
+    /// Unicode columns plus embedded SGR / OSC escapes — via [`visible_width`]
+    /// and [`truncate`], so the tree's own text is never mutated; only this
+    /// rendered projection is padded or shortened.
+    fn apply_text_layout(&self, content: String, hints: &TextLayoutHints) -> String {
+        let available = self.opts.context.available_width;
+        let resolve = |tv: &renderable::layout::TargetValue<renderable::layout::Length>| {
+            let cells = resolve_cells(tv, available);
+            (cells > 0).then_some(cells)
+        };
+        let cap = hints.max_width.as_ref().and_then(resolve);
+        let field = hints
+            .width
+            .as_ref()
+            .and_then(resolve)
+            .map(|w| cap.map_or(w, |c| w.min(c)));
+
+        let mut content = content;
+        // Hard `max_width` ceiling: always truncate content that exceeds it.
+        if let Some(cap) = cap
+            && visible_width(&content) > cap
+        {
+            content = truncate_keeping_trailing_escapes(&content, cap);
+        }
+        // Exact `width` field: pad shorter content per alignment; truncate
+        // longer content only when the overflow policy asks for it.
+        if let Some(field) = field {
+            let now = visible_width(&content);
+            if now > field {
+                if hints.overflow == TextOverflow::Truncate {
+                    content = truncate_keeping_trailing_escapes(&content, field);
+                }
+            } else if now < field {
+                let pad = (field - now) as usize;
+                content = match hints.alignment {
+                    Alignment::Left => format!("{content}{}", " ".repeat(pad)),
+                    Alignment::Right => format!("{}{content}", " ".repeat(pad)),
+                    Alignment::Center => {
+                        let left = pad / 2;
+                        format!("{}{content}{}", " ".repeat(left), " ".repeat(pad - left))
+                    }
+                };
+            }
+        }
+        content
+    }
+
     /// Projects a single inline node into terminal SGR output.
     fn render_inline_node(
         &mut self,
@@ -775,7 +973,7 @@ impl Writer<'_> {
                 let mut child_effective = effective.clone();
                 child_effective.emphasis.italic = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
-                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Strong { children } => {
@@ -783,7 +981,7 @@ impl Writer<'_> {
                 let mut child_effective = effective.clone();
                 child_effective.emphasis.bold = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
-                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Delete { children } => {
@@ -791,7 +989,7 @@ impl Writer<'_> {
                 let mut child_effective = effective.clone();
                 child_effective.emphasis.strikethrough = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
-                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Span { children } => {
@@ -799,7 +997,7 @@ impl Writer<'_> {
                 // text-appearance layers (color, emphasis) inherit from the
                 // enclosing `effective` appearance; box-painting layers
                 // (border, fill) and background have no inline meaning here.
-                match node.attrs.style().filter(|s| !s.is_empty()) {
+                match node.attrs.style_ref().filter(|s| !s.is_empty()) {
                     Some(span_style) => {
                         let child_effective = span_style.inherited_from(effective);
                         let inner = self.render_inline(children, &child_effective)?;
@@ -807,11 +1005,9 @@ impl Writer<'_> {
                         let open = style::text_appearance_sgr(&child_effective, term);
                         // Reset, then restore the ancestor appearance so the
                         // run after the span keeps the inherited color/emphasis.
-                        let close = format!(
-                            "{}{}",
-                            style::SGR_RESET,
-                            style::text_appearance_sgr(effective, term),
-                        );
+                        // An empty `open` (e.g. a no-color terminal) closes to
+                        // nothing rather than a stray reset.
+                        let close = style::appearance_close(&open, effective, term);
                         Ok(format!("{open}{styled}{close}"))
                     }
                     None => {
@@ -824,7 +1020,7 @@ impl Writer<'_> {
                 let mut child_effective = effective.clone();
                 child_effective.emphasis.dim = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
-                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{value}{close}"), &node.attrs.classes, effective, term))
             }
             NodeKind::Link {
@@ -837,7 +1033,7 @@ impl Writer<'_> {
                 // appearance inherits from the enclosing `effective` and wraps
                 // the visible link text; the OSC8 escapes are added around the
                 // already-styled text so the color rides inside the hyperlink.
-                let link_effective = match node.attrs.style().filter(|s| !s.is_empty()) {
+                let link_effective = match node.attrs.style_ref().filter(|s| !s.is_empty()) {
                     Some(link_style) => link_style.inherited_from(effective),
                     None => effective.clone(),
                 };
@@ -846,12 +1042,16 @@ impl Writer<'_> {
                     inner
                 } else {
                     let open = style::text_appearance_sgr(&link_effective, term);
-                    let close = format!(
-                        "{}{}",
-                        style::SGR_RESET,
-                        style::text_appearance_sgr(effective, term),
-                    );
+                    let close = style::appearance_close(&open, effective, term);
                     format!("{open}{inner}{close}")
+                };
+                // Typed `text_layout` pads/truncates the visible *label* before
+                // the OSC8 escapes wrap it, so the link's structured children
+                // stay intact in the tree while the rendered label fits its
+                // resolved field.
+                let styled = match node.attrs.text_layout_ref() {
+                    Some(hints) => self.apply_text_layout(styled, hints),
+                    None => styled,
                 };
                 if url.is_empty() {
                     Ok(styled)
@@ -868,26 +1068,34 @@ impl Writer<'_> {
                 // node). A successfully rendered inline image is left unstyled —
                 // color has no meaning for a raster cell.
                 let fallback = || {
-                    let inner = match self.opts.context.image_placeholder {
+                    // Build the complete placeholder from the intact source alt;
+                    // the tree's `Image.alt` is never mutated, only this
+                    // projection.
+                    let placeholder = match self.opts.context.image_placeholder {
                         ImagePlaceholder::Bracket => format!("[{alt}]"),
                         ImagePlaceholder::Block => format!("▉ IMAGE[{alt}]"),
                     };
-                    match node.attrs.style().filter(|s| !s.is_empty()) {
+                    let styled = match node.attrs.style_ref().filter(|s| !s.is_empty()) {
                         Some(img_style) => {
                             let img_effective = img_style.inherited_from(effective);
                             if img_effective == *effective {
-                                inner
+                                placeholder
                             } else {
                                 let open = style::text_appearance_sgr(&img_effective, term);
-                                let close = format!(
-                                    "{}{}",
-                                    style::SGR_RESET,
-                                    style::text_appearance_sgr(effective, term),
-                                );
-                                format!("{open}{inner}{close}")
+                                let close = style::appearance_close(&open, effective, term);
+                                format!("{open}{placeholder}{close}")
                             }
                         }
-                        None => inner,
+                        None => placeholder,
+                    };
+                    // Typed `text_layout` shapes the *complete visible
+                    // placeholder* — brackets or `▉ IMAGE[..]` framing included —
+                    // so `width` establishes the exact rendered placeholder
+                    // width per the spec, not the bare alt run. Mirrors the link
+                    // path, which shapes the styled label after its SGR wrap.
+                    match node.attrs.text_layout_ref() {
+                        Some(hints) => self.apply_text_layout(styled, hints),
+                        None => styled,
                     }
                 };
                 match self.opts.context.graphics_mode {
@@ -923,7 +1131,7 @@ impl Writer<'_> {
                     _ => return Ok(inner),
                 }
                 let open = style::text_appearance_sgr(&child_effective, term);
-                let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+                let close = style::appearance_close(&open, effective, term);
                 Ok(format!("{open}{inner}{close}"))
             }
             // A non-inline node appearing in an inline position is a
@@ -1001,7 +1209,6 @@ impl Writer<'_> {
             &format!("{prefix}{title}"),
             &heading_style,
             &self.opts.context.terminal,
-            self.opts.context.available_width,
         )
     }
 
@@ -1032,14 +1239,21 @@ impl Writer<'_> {
             }
         }
 
-        let hints = attrs.list_hints();
-        let bullet = hints.bullet.unwrap_or_else(|| "- ".to_string());
+        let hints = attrs.list_hints_ref();
+        let bullet = hints
+            .and_then(|h| h.bullet.as_deref())
+            .unwrap_or("- ")
+            .to_string();
         let origin = start.unwrap_or(1);
 
         // The indent for nested block children: explicit hint, else the
         // default for the list kind (4 for ordered, bullet width otherwise).
         let default_indent = if ordered { 4 } else { visible_width(&bullet) };
-        let indent_children = hints.indent_children.unwrap_or(default_indent);
+        let indent_children = hints
+            .and_then(|h| h.indent_children)
+            .unwrap_or(default_indent);
+        // Absent list hints fall back to the default `hanging_indent` (`true`).
+        let hanging_indent = hints.is_none_or(|h| h.hanging_indent);
 
         let mut lines = Vec::with_capacity(children.len());
         for (offset, child) in children.iter().enumerate() {
@@ -1052,7 +1266,7 @@ impl Writer<'_> {
             lines.push(self.render_list_item(
                 child,
                 &prefix,
-                hints.hanging_indent,
+                hanging_indent,
                 indent_children,
             )?);
         }
@@ -1145,11 +1359,13 @@ impl Writer<'_> {
                     // the item label inherits its color / emphasis, then wrap
                     // the rendered label with the matching SGR — without this
                     // the projection's `Style` never reaches terminal output.
-                    let item_style = item_child.attrs.style().filter(|s| !s.is_empty());
-                    let render_effective = item_style
+                    let item_style = item_child.attrs.style_ref().filter(|s| !s.is_empty());
+                    let render_effective =
+                        item_style.map(|s| s.inherited_from(self.inherited.effective()));
+                    let effective = render_effective
                         .as_ref()
-                        .map(|s| s.inherited_from(&self.effective));
-                    let effective = render_effective.as_ref().unwrap_or(&self.effective).clone();
+                        .unwrap_or_else(|| self.inherited.effective())
+                        .clone();
                     let markup = match &item_child.kind {
                         NodeKind::Paragraph { children } => {
                             self.render_inline(children, &effective)?
@@ -1160,7 +1376,7 @@ impl Writer<'_> {
                     let label = match item_style {
                         Some(style) => {
                             let open =
-                                style::text_appearance_sgr(&style, &self.opts.context.terminal);
+                                style::text_appearance_sgr(style, &self.opts.context.terminal);
                             if open.is_empty() {
                                 label
                             } else {
@@ -1218,7 +1434,7 @@ impl Writer<'_> {
         // task-state glyph replaces the default `[ ] ` / `[x] ` checkbox. The
         // marker applies only to the checkbox — description styling stays in
         // the item's child nodes and `Style`.
-        let check_marker = match node.attrs.task_hints() {
+        let check_marker = match node.attrs.task_hints_ref() {
             Some(hints) => task_state_marker(hints.state, &self.opts.context.terminal),
             None => match checked {
                 Some(true) => "[x] ".to_string(),
@@ -1228,27 +1444,45 @@ impl Writer<'_> {
         };
         let full_prefix = format!("{prefix}{check_marker}");
 
-        // A decorated right/center-aligned list item lifts its marker to its own
-        // line and left-pads the body block, matching the legacy
-        // `for_terminal_with_layout` model (the marker stays in the list's
-        // column; the body shifts as one block). Gated strictly on the
-        // `darkmatter.li` hint the decoration pass sets — the default path never
-        // sets it, so its inline rendering below is byte-unchanged.
-        if let Some(pad) = list_item_align_pad(node) {
-            // The marker keeps its trailing space and stays in the list's
-            // column (legacy emits `"- "` / `"1. "` on its own line).
-            let mut out = full_prefix.clone();
-            for child in item_children {
-                out.push('\n');
-                let body = match &child.kind {
-                    NodeKind::Paragraph { children } => {
-                        self.render_inline(children, &Style::default())?
-                    }
-                    _ => self.render(child)?,
-                };
-                out.push_str(&indent_block(&body, pad));
+        // A typed `text_layout` on the list item lifts the marker to its own
+        // line and left-pads the body *block* per its resolved alignment, keeping
+        // the marker structurally separate from the body placement. The body
+        // block occupies its resolved field (`width`/`max_width`, capped by the
+        // available width); that field-wide block is then positioned within the
+        // available width — so the pad is the surplus between the available width
+        // and the field, not between the field and the rendered content. A
+        // `Left`/no-field alignment yields no pad and falls through to the inline
+        // rendering below.
+        if let Some(hints) = node.attrs.text_layout_ref() {
+            let available = self.opts.context.available_width;
+            let field = hints
+                .width
+                .as_ref()
+                .or(hints.max_width.as_ref())
+                .map(|tv| resolve_cells(tv, available))
+                .filter(|cells| *cells > 0)
+                .unwrap_or(available)
+                .min(available);
+            let surplus = available.saturating_sub(field);
+            let pad = match hints.alignment {
+                Alignment::Left => 0,
+                Alignment::Center => surplus / 2,
+                Alignment::Right => surplus,
+            };
+            if pad > 0 {
+                let mut out = full_prefix.clone();
+                for child in item_children {
+                    let body = match &child.kind {
+                        NodeKind::Paragraph { children } => {
+                            self.render_inline(children, &Style::default())?
+                        }
+                        _ => self.render(child)?,
+                    };
+                    out.push('\n');
+                    out.push_str(&indent_block(&body, pad));
+                }
+                return Ok(out);
             }
-            return Ok(out);
         }
 
         let mut out = String::new();
@@ -1569,9 +1803,13 @@ impl Writer<'_> {
             .iter()
             .enumerate()
             .map(|(idx, text)| {
-                let hints = table_node.attrs.table_column_hints(idx);
+                let default_hints = TableColumnHints::default();
+                let hints = table_node
+                    .attrs
+                    .table_column_hints_ref(idx)
+                    .unwrap_or(&default_hints);
                 let kind = first_data_kinds.get(idx).and_then(|k| k.as_deref());
-                build_table_column(text, idx, align, &hints, kind)
+                build_table_column(text, idx, align, hints, kind)
             })
             .collect();
 
@@ -1585,7 +1823,11 @@ impl Writer<'_> {
             return Ok(String::new());
         }
 
-        let terminal_hints = table_node.attrs.table_terminal_hints();
+        let default_terminal_hints = TableTerminalHints::default();
+        let terminal_hints = table_node
+            .attrs
+            .table_terminal_hints_ref()
+            .unwrap_or(&default_terminal_hints);
         let table = Table::new()
             .with_columns(columns.clone())
             .with_data(data.clone());
@@ -1621,9 +1863,9 @@ impl Writer<'_> {
                 NodeKind::TableRow { children } => children.first(),
                 _ => None,
             })
-            .and_then(|cell| cell.attrs.style())
+            .and_then(|cell| cell.attrs.style_ref())
             .filter(|s| !s.is_empty())
-            .map(|s| style::text_appearance_sgr(&s, &self.opts.context.terminal))
+            .map(|s| style::text_appearance_sgr(s, &self.opts.context.terminal))
             .filter(|sgr| !sgr.is_empty());
 
         Ok(emit_table(
@@ -1669,10 +1911,10 @@ impl Writer<'_> {
     /// cell renders visibly instead of being flattened. A cell with no
     /// declared style (or one that lowers to nothing) is returned unchanged.
     fn apply_cell_style(&self, cell: &RenderNode, content: String) -> String {
-        let Some(cell_style) = cell.attrs.style().filter(|s| !s.is_empty()) else {
+        let Some(cell_style) = cell.attrs.style_ref().filter(|s| !s.is_empty()) else {
             return content;
         };
-        let open = style::text_appearance_sgr(&cell_style, &self.opts.context.terminal);
+        let open = style::text_appearance_sgr(cell_style, &self.opts.context.terminal);
         if open.is_empty() {
             return content;
         }
@@ -1805,68 +2047,60 @@ fn wrap_column_lines(rendered: &str, width: u32) -> String {
     wrap_lines(lines, &WordWrap::WrapProse(None, None), width).join("\n")
 }
 
-/// Builds a [`HorizontalRule`] from `darkmatter.hr.*` hints on a
+/// Builds a [`HorizontalRule`] from the typed [`ThematicBreakAttrs`] on a
 /// [`NodeKind::ThematicBreak`] node.
 ///
 /// Darkmatter's fold lowers HR-attribute paragraphs (e.g.
 /// `--- { kind: waves, weight: thick }`) into a [`NodeKind::ThematicBreak`]
-/// whose [`NodeAttrs::data`] carries string-valued hints under the
-/// `darkmatter.hr` namespace — see
-/// `renderable/features/2026-05-20-darkmatter-tree/span-aware-processor-design.md`.
-/// The visual rule kind lives under the canonical `kind` hint (legacy `style`
-/// is normalized to `kind` during the fold). Without consuming those hints the
+/// whose typed [`NodeAttrs::thematic_break`] field carries the authored styling.
+/// The visual rule kind lives under the canonical `kind` field (legacy `style`
+/// is normalized to `kind` during the fold). Without consuming those attrs the
 /// terminal renderer would emit a plain rule for every HR regardless of
 /// authored attributes (review-4 finding 2).
 ///
-/// Unknown enum values fall back to the [`HorizontalRule`] defaults so a
-/// malformed `kind: dashse` still produces output rather than panicking.
+/// `kind`/`alignment`/`weight` are the shared [`HrKind`]/[`HrAlignment`]/
+/// [`HrWeight`] enums; an unrecognized authored spelling becomes `None` at the
+/// fold boundary, so a malformed `kind: dashse` leaves the rule at its default
+/// rather than panicking.
 ///
-/// [`NodeAttrs::data`]: renderable::tree::NodeAttrs
+/// [`ThematicBreakAttrs`]: renderable::tree::ThematicBreakAttrs
+/// [`NodeAttrs::thematic_break`]: renderable::tree::NodeAttrs::thematic_break
 fn horizontal_rule_from_attrs(attrs: &renderable::tree::NodeAttrs) -> HorizontalRule {
-    const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
-
-    let hint_str = |key: &str| -> Option<String> {
-        attrs
-            .get_hint(HR_NS, key)
-            .and_then(|v| v.as_str().map(str::to_string))
+    let mut rule = HorizontalRule::new();
+    let Some(hr) = attrs.thematic_break_ref() else {
+        return rule;
     };
 
-    let mut rule = HorizontalRule::new();
-    if let Some(kind) = hint_str("kind") {
-        rule = match kind.as_str() {
-            "dashes" => rule.style(RuleStyle::Dashes),
-            "dots" => rule.style(RuleStyle::Dots),
-            "waves" => rule.style(RuleStyle::Waves),
-            "line-star" => rule.style(RuleStyle::LineStar),
-            "line-circle" => rule.style(RuleStyle::LineCircle),
-            "inset-line" => rule.style(RuleStyle::InsetLine),
-            "curtain-rod" => rule.style(RuleStyle::CurtainRod),
-            _ => rule,
-        };
+    if let Some(kind) = hr.kind {
+        rule = rule.style(match kind {
+            HrKind::Dashes => RuleStyle::Dashes,
+            HrKind::Dots => RuleStyle::Dots,
+            HrKind::Waves => RuleStyle::Waves,
+            HrKind::LineStar => RuleStyle::LineStar,
+            HrKind::LineCircle => RuleStyle::LineCircle,
+            HrKind::InsetLine => RuleStyle::InsetLine,
+            HrKind::CurtainRod => RuleStyle::CurtainRod,
+        });
     }
-    if let Some(alignment) = hint_str("alignment") {
-        rule = match alignment.as_str() {
-            "full" => rule.alignment(RuleAlignment::Full),
-            // `center` is the `style.hr` schema-canonical spelling (projected by
-            // page-level HR defaults); `centered` is the inline-attribute alias.
-            "center" | "centered" => rule.alignment(RuleAlignment::Centered),
-            "left" => rule.alignment(RuleAlignment::Left),
-            "right" => rule.alignment(RuleAlignment::Right),
-            _ => rule,
-        };
+    if let Some(alignment) = hr.alignment {
+        rule = rule.alignment(match alignment {
+            HrAlignment::Full => RuleAlignment::Full,
+            HrAlignment::Center => RuleAlignment::Centered,
+            HrAlignment::Left => RuleAlignment::Left,
+            HrAlignment::Right => RuleAlignment::Right,
+        });
     }
-    if let Some(weight) = hint_str("weight") {
-        rule = match weight.as_str() {
-            "thin" => rule.weight(RuleWeight::Thin),
-            "medium" => rule.weight(RuleWeight::Medium),
-            "thick" => rule.weight(RuleWeight::Thick),
-            _ => rule,
-        };
+    if let Some(weight) = hr.weight {
+        rule = rule.weight(match weight {
+            HrWeight::Thin => RuleWeight::Thin,
+            HrWeight::Medium => RuleWeight::Medium,
+            HrWeight::Thick => RuleWeight::Thick,
+        });
     }
-    if let Some(width) = hint_str("width") {
+    if let Some(width) = hr.width.as_deref() {
         rule = rule.width(width);
     }
-    if let Some(color) = hint_str("color") {
+    if let Some(color) = hr.color.as_deref() {
         rule = rule.color(color);
     }
     rule
@@ -1926,6 +2160,25 @@ pub(crate) fn resolve_cells(
         Some(Length::Percent(p)) => ((width as f32) * p / 100.0).round() as u32,
         Some(Length::Css(_)) => 0,
     }
+}
+
+/// Truncates `content` to `width` visible columns with an ellipsis while
+/// keeping the trailing escape envelope.
+///
+/// A styled link or image label is `open + visible + close`, where `close` is
+/// the SGR reset that restores the ancestor appearance. Plain [`truncate`]
+/// keeps only the visible prefix and drops the cut tail — including that
+/// trailing `close` — so the node's color would bleed into following content.
+/// Splitting the trailing escape run off, truncating the body, and re-appending
+/// it preserves the reset regardless of where the cut lands. When `content`
+/// already fits, this is a no-op.
+fn truncate_keeping_trailing_escapes(content: &str, width: u32) -> String {
+    let (body, trailing) = split_trailing_escapes(content);
+    format!(
+        "{}{}",
+        truncate(body, &ELLIPSIS.to_string(), &width),
+        trailing
+    )
 }
 
 /// The inherited text appearance for a heading's inline content.
@@ -1999,21 +2252,6 @@ fn prefix_first_line(prefix: &str, body: &str) -> String {
     out
 }
 
-/// The left pad (in cells) for a decorated non-left-aligned list item, or
-/// `None` for the default inline rendering.
-///
-/// Reads the `darkmatter.li` `pad` hint the darkmatter decoration pass sets for
-/// `Center` / `Right`-aligned lists; the pad is the precomputed left offset
-/// (`alignment_padding(Li, li_width)`). A missing or non-positive hint means the
-/// item renders inline (the default-path contract).
-fn list_item_align_pad(node: &RenderNode) -> Option<u32> {
-    let pad = node
-        .attrs
-        .get_hint(HintNamespace("darkmatter.li"), "pad")?
-        .as_u64()?;
-    (pad > 0).then_some(pad as u32)
-}
-
 /// Applies recognized semantic classes as direct SGR escapes.
 ///
 /// `mark` highlights via reverse video, `dim` dims, and `sup`/`sub` are
@@ -2036,7 +2274,7 @@ fn apply_classes(inner: &str, classes: &[String], effective: &Style, term: &crat
     };
     let child_effective = style.inherited_from(effective);
     let open = style::text_appearance_sgr(&child_effective, term);
-    let close = format!("{}{}", style::SGR_RESET, style::text_appearance_sgr(effective, term));
+    let close = style::appearance_close(&open, effective, term);
     format!("{open}{inner}{close}")
 }
 
@@ -2124,7 +2362,7 @@ fn table_row_cell_kinds(row: &RenderNode) -> Vec<Option<String>> {
     };
     children
         .iter()
-        .map(|cell| cell.attrs.table_cell_hints().map(|h| h.kind))
+        .map(|cell| cell.attrs.table_cell_hints_ref().map(|h| h.kind.clone()))
         .collect()
 }
 
@@ -2149,6 +2387,11 @@ fn build_table_column(
     if let Some(w) = hints.fixed_width {
         col = col.with_fixed_width(w as usize);
     }
+    // Restore the per-column wrap override so the render-tree planner and cell
+    // wrapper break long tokens the same way the bespoke planner did.
+    if let Some(wrap) = &hints.word_wrap {
+        col = col.with_word_wrap(wrap.clone());
+    }
     col = col.with_when(conditional_from_hint(hints.conditional));
     col = col.with_uniform_alignment(hints.uniform_alignment);
     // Reconstruct droppability from the authoritative `droppable` flag. A
@@ -2171,7 +2414,7 @@ fn build_table_column(
 /// so numeric/currency cells re-render with their readable formatting.
 /// Malformed or absent hints degrade to the rendered `text`.
 fn reconstruct_cell(attrs: &renderable::tree::NodeAttrs, text: String) -> TableCellContent {
-    let Some(hints) = attrs.table_cell_hints() else {
+    let Some(hints) = attrs.table_cell_hints_ref() else {
         return TableCellContent::Text(text);
     };
     match hints.kind.as_str() {
@@ -2197,6 +2440,7 @@ fn reconstruct_cell(attrs: &renderable::tree::NodeAttrs, text: String) -> TableC
                 _ => TableCellContent::Text(text),
             }
         }
+        "styled_prose" => TableCellContent::Text(text),
         // "text" and anything unrecognized keep the rendered text.
         _ => TableCellContent::Text(text),
     }
@@ -2861,6 +3105,245 @@ mod render_tree_tests {
         assert!(strip_escape_codes(&out.output).contains("site"));
     }
 
+    /// A non-OSC8 terminal at `width`, so a link renders as the
+    /// `[label](url)` fallback whose visible label is easy to assert against.
+    fn no_osc_opts(width: u32) -> TerminalRenderOptions {
+        let term = Terminal::builder()
+            .width(width)
+            .osc_link_support(false)
+            .build();
+        TerminalRenderOptions::new(&term, RenderStrictness::Warn)
+    }
+
+    fn text_layout_link(label: &str, hints: TextLayoutHints) -> RenderNode {
+        let mut link =
+            RenderNode::link("https://example.com", None, vec![RenderNode::text(label)]);
+        link.attrs.set_text_layout(&hints);
+        RenderNode::paragraph(vec![link])
+    }
+
+    #[test]
+    fn render_tree_link_text_layout_exact_width_pads_per_alignment() {
+        use renderable::layout::{Length, TargetValue};
+        // `width: 20` establishes an exact field; the short label is padded.
+        let node = text_layout_link(
+            "HI",
+            TextLayoutHints {
+                width: Some(TargetValue::universal(Length::ch(20))),
+                ..Default::default()
+            },
+        );
+        let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+        // The 20-column field is padded left-aligned inside the link label.
+        assert_eq!(
+            stripped,
+            format!("[HI{}](https://example.com)", " ".repeat(18))
+        );
+    }
+
+    #[test]
+    fn render_tree_link_text_layout_max_width_truncates_with_ellipsis() {
+        use renderable::layout::{Length, TargetValue};
+        // `max_width: 8` only truncates content that exceeds the cap.
+        let node = text_layout_link(
+            "A very long hyperlink label",
+            TextLayoutHints {
+                max_width: Some(TargetValue::universal(Length::ch(8))),
+                overflow: TextOverflow::Truncate,
+                ..Default::default()
+            },
+        );
+        let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+        assert_eq!(stripped, "[A very …](https://example.com)");
+        // The visible label is exactly the 8-column cap.
+        assert_eq!(visible_width("A very …"), 8);
+    }
+
+    #[test]
+    fn render_tree_link_text_layout_truncation_preserves_style_reset() {
+        use renderable::color::BasicColor;
+        use renderable::layout::{Length, TargetValue};
+        // A colored link truncated by `max_width` must still emit its closing
+        // SGR reset; otherwise the truncated tail (which carries the reset) is
+        // dropped and the link's color leaks into the following inline text.
+        let mut link = RenderNode::link(
+            "https://example.com",
+            None,
+            vec![RenderNode::text("A very long hyperlink label")],
+        );
+        link.attrs.set_style(&fg_style(BasicColor::Red));
+        link.attrs.set_text_layout(&TextLayoutHints {
+            max_width: Some(TargetValue::universal(Length::ch(8))),
+            overflow: TextOverflow::Truncate,
+            ..Default::default()
+        });
+        let para = RenderNode::paragraph(vec![link, RenderNode::text(" tail")]);
+        let out = render_terminal_node(&para, &no_osc_opts(60)).expect("render");
+        assert_no_color_bleed(&out.output, "tail");
+    }
+
+    #[test]
+    fn render_tree_image_text_layout_truncation_preserves_style_reset() {
+        use renderable::color::BasicColor;
+        use renderable::layout::{Length, TargetValue};
+        // A colored image placeholder truncated by `max_width` must likewise
+        // keep its closing reset so the following inline text is not colored.
+        let mut image = RenderNode::image("pic.png", None, "a very long alt text");
+        image.attrs.set_style(&fg_style(BasicColor::Red));
+        image.attrs.set_text_layout(&TextLayoutHints {
+            max_width: Some(TargetValue::universal(Length::ch(10))),
+            overflow: TextOverflow::Truncate,
+            ..Default::default()
+        });
+        let para = RenderNode::paragraph(vec![image, RenderNode::text(" tail")]);
+        let out = render_terminal_node(&para, &no_osc_opts(60)).expect("render");
+        assert_no_color_bleed(&out.output, "tail");
+    }
+
+    #[test]
+    fn render_tree_link_text_layout_keeps_structured_children_in_tree() {
+        use renderable::layout::{Length, TargetValue};
+        // Rendering a padded link must not mutate the link's structured
+        // children — the tree keeps the original label nodes.
+        let mut link = RenderNode::link(
+            "https://example.com",
+            None,
+            vec![RenderNode::strong(vec![RenderNode::text("HI")])],
+        );
+        link.attrs.set_text_layout(&TextLayoutHints {
+            width: Some(TargetValue::universal(Length::ch(20))),
+            ..Default::default()
+        });
+        let node = RenderNode::paragraph(vec![link.clone()]);
+        let _ = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
+        // The link node still carries its `Strong` child subtree unchanged.
+        match &link.kind {
+            NodeKind::Link { children, .. } => {
+                assert!(matches!(children[0].kind, NodeKind::Strong { .. }));
+            }
+            other => panic!("expected a Link, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn render_tree_image_text_layout_truncates_complete_placeholder() {
+        use renderable::layout::{Length, TargetValue};
+        let mut image = RenderNode::image("pic.png", None, "a very long alt text");
+        image.attrs.set_text_layout(&TextLayoutHints {
+            max_width: Some(TargetValue::universal(Length::ch(10))),
+            overflow: TextOverflow::Truncate,
+            ..Default::default()
+        });
+        let node = RenderNode::paragraph(vec![image]);
+        let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+        // `text_layout` shapes the *complete bracket placeholder*: the whole
+        // `[a very long alt text]` is truncated to the 10-column cap, so the
+        // visible placeholder fills exactly the field — framing included.
+        assert_eq!(visible_width(&stripped), 10, "{stripped:?}");
+        assert!(stripped.ends_with('…'), "{stripped:?}");
+        assert!(stripped.starts_with("[a very"), "{stripped:?}");
+    }
+
+    #[test]
+    fn render_tree_image_text_layout_exact_width_includes_bracket_framing() {
+        use renderable::layout::{Alignment, Length, TargetValue};
+        // A six-column exact width must produce a six-column *visible*
+        // placeholder — the brackets count toward the field, not on top of it.
+        let mut image = RenderNode::image("pic.png", None, "ab");
+        image.attrs.set_text_layout(&TextLayoutHints {
+            width: Some(TargetValue::universal(Length::ch(6))),
+            // Right alignment pads on the left so the assertion is robust to any
+            // trailing-whitespace trimming in block rendering.
+            alignment: Alignment::Right,
+            ..Default::default()
+        });
+        let node = RenderNode::paragraph(vec![image]);
+        let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+        assert_eq!(visible_width(&stripped), 6, "{stripped:?}");
+        assert!(stripped.ends_with("[ab]"), "{stripped:?}");
+    }
+
+    #[test]
+    fn render_tree_image_text_layout_exact_width_includes_block_framing() {
+        use renderable::layout::{Alignment, Length, TargetValue};
+        use super::super::options::ImagePlaceholder;
+        // The block placeholder `▉ IMAGE[ab]` is 11 columns wide; a 16-column
+        // exact width pads it (right-aligned) to fill the field, framing
+        // included, rather than padding only the alt inside the brackets.
+        let mut image = RenderNode::image("pic.png", None, "ab");
+        image.attrs.set_text_layout(&TextLayoutHints {
+            width: Some(TargetValue::universal(Length::ch(16))),
+            alignment: Alignment::Right,
+            ..Default::default()
+        });
+        let node = RenderNode::paragraph(vec![image]);
+        let mut opts = no_osc_opts(60);
+        opts.context.image_placeholder = ImagePlaceholder::Block;
+        let out = render_terminal_node(&node, &opts).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+        assert_eq!(visible_width(&stripped), 16, "{stripped:?}");
+        assert!(stripped.ends_with("▉ IMAGE[ab]"), "{stripped:?}");
+    }
+
+    #[test]
+    fn render_tree_list_item_text_layout_lifts_marker_and_pads_body() {
+        use renderable::layout::{Alignment as RAlignment, Length, TargetValue};
+        // A right- and a center-aligned item both lift the `- ` marker to its
+        // own line and left-pad the body; right pads more than center.
+        let build = |alignment: RAlignment| {
+            let mut item = RenderNode::list_item(
+                None,
+                vec![RenderNode::paragraph(vec![RenderNode::text("Item")])],
+            );
+            item.attrs.set_text_layout(&TextLayoutHints {
+                max_width: Some(TargetValue::universal(Length::ch(40))),
+                alignment,
+                ..Default::default()
+            });
+            RenderNode::list(false, None, vec![item])
+        };
+
+        let render_pad = |alignment: RAlignment| -> usize {
+            let out = render_terminal_node(&build(alignment), &no_osc_opts(60)).expect("render");
+            let stripped = strip_escape_codes(&out.output);
+            let mut lines = stripped.lines();
+            // The marker sits on its own line.
+            assert_eq!(lines.next().unwrap().trim_end(), "-");
+            let body = lines.next().expect("body line");
+            assert!(body.trim_start().starts_with("Item"), "{body:?}");
+            body.len() - body.trim_start().len()
+        };
+
+        let right = render_pad(RAlignment::Right);
+        let center = render_pad(RAlignment::Center);
+        assert!(right > center, "right pad {right} should exceed center {center}");
+        assert!(center > 0, "center pad should be positive");
+    }
+
+    #[test]
+    fn render_tree_text_layout_does_not_mutate_tree_across_widths() {
+        use renderable::layout::{Length, TargetValue};
+        let node = text_layout_link(
+            "A very long hyperlink label",
+            TextLayoutHints {
+                max_width: Some(TargetValue::universal(Length::ch(8))),
+                overflow: TextOverflow::Truncate,
+                ..Default::default()
+            },
+        );
+        let pristine = node.clone();
+        let narrow = render_terminal_node(&node, &no_osc_opts(20)).expect("render");
+        let wide = render_terminal_node(&node, &no_osc_opts(80)).expect("render");
+        // The same immutable tree renders at both widths; the cap is absolute
+        // (ch), so the outputs match and the tree is untouched.
+        assert_eq!(narrow.output, wide.output);
+        assert_eq!(node, pristine, "rendering must not mutate the tree");
+    }
+
     #[test]
     fn render_tree_table_uses_header_row() {
         let table = RenderNode::table(
@@ -3274,23 +3757,23 @@ mod render_tree_tests {
             &tree,
             &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
         )
-        .expect("render");
-        let plain = strip_escape_codes(&out.output);
-        let line = plain.lines().next().unwrap_or("");
-        assert!(
-            line.starts_with(' '),
-            "center-aligned content with max_width should have leading space, got: {line:?}"
-        );
+        .expect("render")
+        .output;
+        // The `max_width: 10` box is sub-available, so center alignment places
+        // the 10-cell box within the 80-cell width: (80 − 10) / 2 = 35. (A loose
+        // `starts_with(' ')` would also pass the old content-centering model;
+        // the exact offset pins the box-placement behavior.)
+        assert_eq!(lead_spaces_of_line_with(&out, "hi"), 35);
     }
 
     #[test]
     fn render_tree_max_width_with_margins() {
-        use renderable::layout::{Layout, Length, Margin, TargetValue};
+        use renderable::layout::{Layout, Length, Edges, TargetValue};
 
         let term = Terminal::new_optimistic(80);
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hello")]);
         para.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(4)),
+            margin: Edges::x(Length::ch(4)),
             max_width: Some(TargetValue::universal(Length::ch(20))),
             ..Layout::default()
         });
@@ -3310,7 +3793,7 @@ mod render_tree_tests {
 
     #[test]
     fn render_tree_nested_layout_composition_under_max_width() {
-        use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue};
+        use renderable::layout::{Alignment, Layout, Length, Edges, TargetValue};
 
         let term = Terminal::new_optimistic(80);
 
@@ -3321,7 +3804,7 @@ mod render_tree_tests {
                 "content",
             )])]);
         block.attrs.set_layout(&Layout {
-            margin: Margin::x(Length::ch(2)),
+            margin: Edges::x(Length::ch(2)),
             max_width: Some(TargetValue::universal(Length::ch(30))),
             alignment: Alignment::Right,
             ..Layout::default()
@@ -3337,15 +3820,591 @@ mod render_tree_tests {
             plain.contains("content"),
             "nested content should still be rendered"
         );
-        let max_line = plain.lines().map(|l| l.len()).max().unwrap_or(0);
+        // `max_width: 30` caps the box; right alignment then places that
+        // sub-available box at the right edge of the content area between the
+        // margins. align_area = 80 − 2 − 2 = 76; slack = 76 − 30 = 46; the box's
+        // left edge lands at left-margin(2) + 46 = 48.
+        assert_eq!(
+            lead_spaces_of_line_with(&out.output, "content"),
+            48,
+            "right-aligned max_width box is pushed to the right edge of the area"
+        );
+    }
+
+    /// Counts the leading spaces of the first rendered line that carries
+    /// `needle`, after stripping ANSI escapes. The alignment offset (slack on
+    /// the resolved content box) shows up as this lead, so it is a stable proxy
+    /// for the content-box width the renderer resolved.
+    fn lead_spaces_of_line_with(out: &str, needle: &str) -> usize {
+        let plain = strip_escape_codes(out);
+        let line = plain
+            .lines()
+            .find(|l| l.contains(needle))
+            .unwrap_or_else(|| panic!("no line containing {needle:?} in:\n{plain}"))
+            .to_string();
+        line.len() - line.trim_start().len()
+    }
+
+    #[test]
+    fn render_tree_width_fixed_sets_content_box() {
+        use renderable::layout::{Alignment, Layout, Length, TargetValue, Width};
+
+        // available 80; Fixed(20) center → the 20-cell box is centered within
+        // the available width (`margin:auto` semantics): (80 - 20) / 2 = 30
+        // leading spaces place the box's left edge, and "hi" sits at it. With
+        // the default `Auto` the box would fill 80 and the lead would be 0.
+        let term = Terminal::new_optimistic(80);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            alignment: Alignment::Center,
+            ..Layout::default()
+        });
+        let tree = RenderNode::root(vec![para]);
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render")
+        .output;
+        assert_eq!(lead_spaces_of_line_with(&out, "hi"), 30);
+    }
+
+    #[test]
+    fn render_tree_width_auto_fills_after_margin() {
+        use renderable::layout::{Alignment, Edges, Layout, Length};
+
+        // Auto + 5ch horizontal margins on available 80: the content box fills
+        // the remaining 70 cells, so centering "x" yields (70 - 1) / 2 = 34
+        // plus the 5ch left margin = 39 leading spaces.
+        let term = Terminal::new_optimistic(80);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_layout(&Layout {
+            margin: Edges::x(Length::ch(5)),
+            alignment: Alignment::Center,
+            ..Layout::default()
+        });
+        let tree = RenderNode::root(vec![para]);
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render")
+        .output;
+        assert_eq!(lead_spaces_of_line_with(&out, "x"), 39);
+    }
+
+    #[test]
+    fn render_tree_fixed_width_is_clamped_by_available_minus_margin_padding() {
+        use renderable::layout::{Edges, Layout, Length, TargetValue, Width};
+
+        // Fixed(100) asks for more than the box can hold: the content box clamps
+        // to available − 2*margin − 2*padding = 80 − 20 − 10 = 50, so wrapping
+        // content reflows to at most 50 columns. The padding subtraction is the
+        // discriminator — without it the cap would be 60. (Lead is no longer a
+        // proxy: a box that fills its content area has no placement slack.)
+        let plain = render_block_with_layout_wrapped(
+            "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi",
+            Layout {
+                margin: Edges::x(Length::ch(10)),
+                padding: Edges::x(Length::ch(5)),
+                width: Width::Fixed(TargetValue::universal(Length::ch(100))),
+                ..Layout::default()
+            },
+            80,
+        );
         assert!(
-            max_line <= 34,
-            "inner 2ch margins + max_width 30 should keep lines <= 34, got {max_line}"
+            content_box_cols(&plain) <= 50,
+            "Fixed(100) must clamp the content box to 50 (available − margin − padding): {plain:?}"
+        );
+    }
+
+    /// Renders a single `"hi"` paragraph carrying `layout` at `available` and
+    /// returns the leading-space alignment offset of the content line — the
+    /// position of the painted box's left edge within the content area.
+    fn alignment_lead(layout: renderable::layout::Layout, available: u32) -> usize {
+        let term = Terminal::new_optimistic(available);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&layout);
+        let tree = RenderNode::root(vec![para]);
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render")
+        .output;
+        lead_spaces_of_line_with(&out, "hi")
+    }
+
+    #[test]
+    fn render_tree_fixed_alignment_places_box() {
+        use renderable::layout::{Alignment, Layout, Length, TargetValue, Width};
+        // A 20-cell `Fixed` box (no margin) is placed within the 80-cell area:
+        // left flush (0), centered ((80−20)/2 = 30), right flush (80−20 = 60).
+        let fixed = |a| Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            alignment: a,
+            ..Layout::default()
+        };
+        assert_eq!(alignment_lead(fixed(Alignment::Left), 80), 0);
+        assert_eq!(alignment_lead(fixed(Alignment::Center), 80), 30);
+        assert_eq!(alignment_lead(fixed(Alignment::Right), 80), 60);
+    }
+
+    #[test]
+    fn render_tree_capped_auto_alignment_places_box() {
+        use renderable::layout::{Alignment, Layout, Length, TargetValue};
+        // `Auto` capped by `max_width: 20` is sub-available, so it is placed like
+        // a 20-cell box — the defect the review flagged for capped `Auto`.
+        let capped = |a| Layout {
+            max_width: Some(TargetValue::universal(Length::ch(20))),
+            alignment: a,
+            ..Layout::default()
+        };
+        assert_eq!(alignment_lead(capped(Alignment::Left), 80), 0);
+        assert_eq!(alignment_lead(capped(Alignment::Center), 80), 30);
+        assert_eq!(alignment_lead(capped(Alignment::Right), 80), 60);
+    }
+
+    #[test]
+    fn render_tree_fit_content_alignment_places_box() {
+        use renderable::layout::{Alignment, Layout, Width};
+        // `FitContent` shrinks the box to the 2-cell content, then places it:
+        // left (0), centered ((80−2)/2 = 39), right (80−2 = 78).
+        let fit = |a| Layout {
+            width: Width::FitContent,
+            alignment: a,
+            ..Layout::default()
+        };
+        assert_eq!(alignment_lead(fit(Alignment::Left), 80), 0);
+        assert_eq!(alignment_lead(fit(Alignment::Center), 80), 39);
+        assert_eq!(alignment_lead(fit(Alignment::Right), 80), 78);
+    }
+
+    #[test]
+    fn render_tree_percent_padding_resolves_against_parent_width() {
+        use renderable::layout::{Edges, Layout, Length};
+        // 10% horizontal padding at available 80 resolves to 8 cells per side,
+        // against the parent width — once. The buggy double-resolution would
+        // re-resolve against the narrowed 64-cell content box and yield 6. With
+        // no background the left padding shows as 8 leading spaces before the
+        // content, which also proves padding is reserved with an empty `Style`.
+        let layout = Layout {
+            padding: Edges::x(Length::Percent(10.0)),
+            ..Layout::default()
+        };
+        assert_eq!(alignment_lead(layout, 80), 8);
+    }
+
+    #[test]
+    fn render_tree_transparent_padding_reserves_cells_without_style() {
+        use renderable::layout::{Edges, Layout, Length};
+        // A node with `padding` but no `Style` still reserves the cells: the
+        // left padding renders as leading spaces even though nothing is painted.
+        let layout = Layout {
+            padding: Edges::x(Length::ch(4)),
+            ..Layout::default()
+        };
+        assert_eq!(alignment_lead(layout, 80), 4);
+    }
+
+    #[test]
+    fn render_tree_border_is_added_around_fixed_content_box() {
+        use renderable::layout::{Alignment, Layout, Length, TargetValue, Width};
+        use renderable::style::{Border, BorderSides, Style};
+        // The border is added *around* the `Fixed(20)` content box rather than
+        // carved out of it, so the box is 22 cells wide (20 content + 2 drawn
+        // edges). Centered in 80 the box's left edge lands at (80 − 22) / 2 = 29
+        // — one cell tighter than the borderless box (lead 30), the difference
+        // being the reserved border. (Old code subtracted the border from the
+        // content, shrinking it to 18 and mis-placing the box.)
+        let term = Terminal::new_optimistic(80);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("ab")]);
+        para.attrs.set_layout(&Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            alignment: Alignment::Center,
+            ..Layout::default()
+        });
+        para.attrs.set_style(&Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Border::default()
+            }),
+            ..Style::default()
+        });
+        let tree = RenderNode::root(vec![para]);
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render")
+        .output;
+        assert_eq!(lead_spaces_of_line_with(&out, "ab"), 29);
+    }
+
+    #[test]
+    fn render_tree_fixed_background_paints_full_content_box() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+        use renderable::style::{Background, Style};
+        // A `Fixed(20)` box with short content paints its full 20-cell band, not
+        // the 2-cell text. The painted-band width is the discriminator the review
+        // flagged: the box width must follow the resolved content box.
+        let layout = Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 80);
+        let line = out.lines().find(|l| l.contains("hi")).expect("content line");
+        assert_eq!(
+            background_run_width(line),
+            20,
+            "Fixed(20) background must paint all 20 cells: {line:?}"
         );
     }
 
     #[test]
-    fn render_tree_layout_on_inline_node_warn_strictness() {
+    fn render_tree_fixed_border_encloses_full_content_box() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+        use renderable::style::{Border, BorderSides, Style};
+        // The direct analogue of the `bt block hi --width 20 --border all`
+        // reproduction: the border encloses 20 content cells (box width 22), not
+        // the 2-cell text.
+        let layout = Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            ..Layout::default()
+        };
+        let style = Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Border::default()
+            }),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 80);
+        assert_eq!(
+            bordered_box_width(&out),
+            22,
+            "Fixed(20) + border must enclose 20 content cells (20 + 2 edges): {out:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_auto_background_fills_available_width() {
+        use renderable::layout::{Layout, Width};
+        use renderable::style::{Background, Style};
+        // An `Auto` box fills the available content width, so its background
+        // spans the whole 40-cell area even with 2-cell content.
+        let layout = Layout {
+            width: Width::Auto,
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 40);
+        let line = out.lines().find(|l| l.contains("hi")).expect("content line");
+        assert_eq!(
+            background_run_width(line),
+            40,
+            "Auto background must fill the 40-cell available width: {line:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_auto_border_encloses_available_width() {
+        use renderable::layout::{Layout, Width};
+        use renderable::style::{Border, BorderSides, Style};
+        // An `Auto` box with a border fills available − 2 edges = 38 content
+        // cells, so the drawn box is the full 40-cell width.
+        let layout = Layout {
+            width: Width::Auto,
+            ..Layout::default()
+        };
+        let style = Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Border::default()
+            }),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 40);
+        assert_eq!(
+            bordered_box_width(&out),
+            40,
+            "Auto + border must enclose available − 2 edges = 38 cells: {out:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_capped_auto_background_paints_cap() {
+        use renderable::layout::{Layout, Length, TargetValue};
+        use renderable::style::{Background, Style};
+        // `Auto` capped by `max_width: 20` paints a 20-cell band — the cap is the
+        // content box, and the painted box follows it.
+        let layout = Layout {
+            max_width: Some(TargetValue::universal(Length::ch(20))),
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 80);
+        let line = out.lines().find(|l| l.contains("hi")).expect("content line");
+        assert_eq!(
+            background_run_width(line),
+            20,
+            "max_width-capped Auto background must paint the 20-cell cap: {line:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_fit_content_background_matches_widest_line() {
+        use renderable::layout::{Layout, Width};
+        use renderable::style::{Background, Style};
+        // `FitContent` shrinks the box to the widest line ("there" = 5), so the
+        // painted band is exactly 5 — the floor is a no-op for FitContent.
+        let layout = Layout {
+            width: Width::FitContent,
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi\nthere", layout, style, 40);
+        for line in out.lines().filter(|l| l.contains("hi") || l.contains("there")) {
+            assert_eq!(
+                background_run_width(line),
+                5,
+                "FitContent band must match the widest line (5): {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_tree_fixed_background_multiline_is_uniform() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+        use renderable::style::{Background, Style};
+        // Two lines of differing length inside a `Fixed(20)` box are each painted
+        // to a uniform 20-cell band, so the background is a solid rectangle.
+        let layout = Layout {
+            width: Width::Fixed(TargetValue::universal(Length::ch(20))),
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi\nthere", layout, style, 80);
+        for line in out.lines().filter(|l| l.contains("hi") || l.contains("there")) {
+            assert_eq!(
+                background_run_width(line),
+                20,
+                "every content row of a Fixed(20) box paints 20 cells: {line:?}"
+            );
+        }
+    }
+
+    /// Builds a one-paragraph document, records `layout` and `style` on it, and
+    /// renders it through the terminal fold at `width`, returning the raw
+    /// (SGR-bearing) output.
+    fn render_block_with_layout_and_style(
+        text: &str,
+        layout: renderable::layout::Layout,
+        style: Style,
+        width: u32,
+    ) -> String {
+        let term = Terminal::new_optimistic(width);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text(text)]);
+        para.attrs.set_layout(&layout);
+        para.attrs.set_style(&style);
+        let tree = RenderNode::root(vec![para]);
+        render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render")
+        .output
+    }
+
+    /// Counts the leading spaces of a raw line that appear *before* any SGR
+    /// escape. The transparent margin is emitted as raw spaces ahead of the
+    /// painted box, so this is a stable proxy for "margin is not painted".
+    fn leading_unstyled_spaces(line: &str) -> usize {
+        let mut count = 0;
+        for ch in line.chars() {
+            if ch == ' ' {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        count
+    }
+
+    /// Whether the raw `line` contains a contiguous painted background run of at
+    /// least `n` visible cells.
+    fn has_background_run_of_width(line: &str, n: usize) -> bool {
+        background_run_width(line) >= n
+    }
+
+    /// The widest contiguous painted background run on `line`, in visible cells.
+    ///
+    /// SGR sequences are parsed (rather than matched byte-for-byte, per the L2
+    /// capture rule): a `48;…` / basic background code opens the run, a `0`/`49`
+    /// reset closes it, and the visible cells between are counted. This is the
+    /// exact painted-band width — the discriminator for a fixed/auto box that
+    /// must paint its full resolved width rather than shrink to its text.
+    fn background_run_width(line: &str) -> usize {
+        let chars: Vec<char> = line.chars().collect();
+        let mut idx = 0;
+        let mut bg_active = false;
+        let mut run = 0usize;
+        let mut max = 0usize;
+        while idx < chars.len() {
+            if chars[idx] == '\x1b' && chars.get(idx + 1) == Some(&'[') {
+                let start = idx + 2;
+                let mut j = start;
+                while j < chars.len() && !chars[j].is_ascii_alphabetic() {
+                    j += 1;
+                }
+                if chars.get(j) == Some(&'m') {
+                    let params: String = chars[start..j].iter().collect();
+                    if let Some(on) = sgr_sets_background(&params) {
+                        bg_active = on;
+                        if !on {
+                            run = 0;
+                        }
+                    }
+                }
+                idx = j + 1;
+                continue;
+            }
+            if bg_active {
+                run += 1;
+                max = max.max(run);
+            }
+            idx += 1;
+        }
+        max
+    }
+
+    /// The visible width of the bordered box drawn around `needle`'s content,
+    /// measured from the top rule of the rendered output.
+    ///
+    /// Strips ANSI escapes and returns the visible width of the first line that
+    /// is a horizontal border rule (begins with a corner glyph). The interior
+    /// (content columns) is this width minus the two drawn vertical edges.
+    fn bordered_box_width(out: &str) -> usize {
+        let plain = strip_escape_codes(out);
+        let rule = plain
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with('┌') || l.starts_with('┏') || l.starts_with('╔') || l.starts_with('╭'))
+            .unwrap_or_else(|| panic!("no top border rule in:\n{plain}"));
+        visible_width(rule) as usize
+    }
+
+    /// Interprets an SGR parameter string: `Some(true)` if it opens a
+    /// background, `Some(false)` if it resets one, `None` if it is irrelevant.
+    fn sgr_sets_background(params: &str) -> Option<bool> {
+        let parts: Vec<&str> = params.split(';').collect();
+        // A leading `0` (or empty `\x1b[m`) is a full reset.
+        if params.is_empty() || parts.first() == Some(&"0") {
+            return Some(false);
+        }
+        // `48` opens an extended background; `49` resets it. RGB/256 components
+        // that follow `48` are skipped because `48` is matched first.
+        for part in &parts {
+            match *part {
+                "48" => return Some(true),
+                "49" => return Some(false),
+                _ => {
+                    if let Ok(code) = part.parse::<u16>()
+                        && ((40..=47).contains(&code) || (100..=107).contains(&code))
+                    {
+                        return Some(true);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn render_tree_padding_is_painted_with_background_margin_is_not() {
+        use renderable::layout::{Edges, Layout, Length};
+        use renderable::style::{Background, Style};
+
+        // margin 2 (transparent) + padding 3 (painted) + content, background
+        // subtle. The 2 leading margin cells carry no background SGR; the
+        // padding cells plus content do.
+        let layout = Layout {
+            margin: Edges::x(Length::ch(2)),
+            padding: Edges::x(Length::ch(3)),
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 40);
+        let first = out.lines().find(|l| l.contains("hi")).expect("line with hi");
+        assert_eq!(
+            leading_unstyled_spaces(first),
+            2,
+            "margin must stay transparent: {first:?}"
+        );
+        assert!(
+            has_background_run_of_width(first, 3 + 2 + 3),
+            "padding + content must be painted: {first:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_padding_top_bottom_paint_blank_rows() {
+        use renderable::layout::{Edges, Layout, Length};
+        use renderable::style::{Background, Style};
+
+        // Vertical padding of 1 paints a blank background row above and below
+        // the content row.
+        let layout = Layout {
+            padding: Edges::all(Length::ch(1)),
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 40);
+        let lines: Vec<&str> = out.lines().collect();
+        let content_idx = lines
+            .iter()
+            .position(|l| l.contains("hi"))
+            .expect("content line");
+        // A painted blank row sits directly above and below the content row.
+        let band = 1 + 2 + 1; // left pad + "hi" + right pad
+        assert!(content_idx >= 1, "expected a padding row above: {lines:?}");
+        assert!(
+            has_background_run_of_width(lines[content_idx - 1], band),
+            "top padding row painted: {:?}",
+            lines[content_idx - 1]
+        );
+        assert!(
+            has_background_run_of_width(lines[content_idx + 1], band),
+            "bottom padding row painted: {:?}",
+            lines.get(content_idx + 1)
+        );
+    }
+
+    #[test]
+    fn render_tree_layout_on_inline_node_is_a_validation_error() {
         use renderable::layout::Layout;
 
         let term = Terminal::new_optimistic(80);
@@ -3354,34 +4413,21 @@ mod render_tree_tests {
         text.attrs.set_layout(&Layout::default());
         let tree = RenderNode::root(vec![RenderNode::paragraph(vec![text])]);
 
-        let out = render_terminal_node(
-            &tree,
-            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
-        )
-        .expect("warn should succeed");
-        assert!(
-            out.diagnostics
-                .iter()
-                .any(|d| d.message.contains("block-level")),
-            "warn strictness should produce a diagnostic about block-level"
-        );
-        assert!(strip_escape_codes(&out.output).contains("hello"));
-
-        let out = render_terminal_node(
-            &tree,
-            &TerminalRenderOptions::new(&term, RenderStrictness::Lossy),
-        )
-        .expect("lossy should succeed");
-        assert!(strip_escape_codes(&out.output).contains("hello"));
-
-        let result = render_terminal_node(
-            &tree,
-            &TerminalRenderOptions::new(&term, RenderStrictness::Strict),
-        );
-        assert!(
-            matches!(result, Err(RenderError::InvalidTree { .. })),
-            "strict should escalate inline-layout warning to error"
-        );
+        // Layout on an inline node is an error-severity validation finding, so
+        // the validation gate rejects the tree before strictness is consulted —
+        // every strictness level fails identically.
+        for strictness in [
+            RenderStrictness::Warn,
+            RenderStrictness::Lossy,
+            RenderStrictness::Strict,
+        ] {
+            let result =
+                render_terminal_node(&tree, &TerminalRenderOptions::new(&term, strictness));
+            assert!(
+                matches!(result, Err(RenderError::InvalidTree { .. })),
+                "{strictness:?} should reject inline layout as an error"
+            );
+        }
     }
 
     #[test]
@@ -3420,6 +4466,20 @@ mod render_tree_tests {
         // The bordered block stays within the available width.
         let widest = plain.split('\n').map(visible_width).max().unwrap_or(0);
         assert!(widest <= 80, "bordered block overflowed: {widest}");
+    }
+
+    /// Asserts the run of `raw` preceding the first occurrence of `marker`
+    /// closes any opened SGR color with a reset, so a styled-and-truncated
+    /// inline node does not bleed its color into the following text.
+    #[cfg(test)]
+    fn assert_no_color_bleed(raw: &str, marker: &str) {
+        let pos = raw
+            .find(marker)
+            .unwrap_or_else(|| panic!("marker {marker:?} not found in {raw:?}"));
+        assert!(
+            raw[..pos].contains(style::SGR_RESET),
+            "expected an SGR reset before {marker:?}, got: {raw:?}"
+        );
     }
 
     /// Builds a universal foreground-color [`Style`] for a [`BasicColor`].
@@ -3515,10 +4575,10 @@ mod render_tree_tests {
 
     #[test]
     fn render_tree_inline_span_emphasis_does_not_leak_box_layers() {
-        use renderable::style::{Border, BorderSides, Fill, Style, TextEmphasis};
+        use renderable::style::{Border, BorderSides, Style, TextEmphasis};
 
-        // Border and fill are box-painting layers with no inline meaning: a
-        // `Span` declaring them must not draw box-drawing glyphs inline.
+        // Border is a box-painting layer with no inline meaning: a `Span`
+        // declaring it must not draw box-drawing glyphs inline.
         let mut span = RenderNode::span(vec![], vec![RenderNode::text("word")]);
         span.attrs.set_style(&Style {
             emphasis: TextEmphasis {
@@ -3529,7 +4589,6 @@ mod render_tree_tests {
                 sides: BorderSides::All,
                 ..Border::default()
             }),
-            fill: Some(Fill::default()),
             ..Style::default()
         });
         let para = RenderNode::paragraph(vec![RenderNode::text("x "), span]);
@@ -3656,7 +4715,7 @@ mod render_tree_tests {
         let mut writer = Writer {
             opts: &options,
             diagnostics: Vec::new(),
-            effective: Style::default(),
+            inherited: InheritedStyle::root(),
         };
         let out = writer.render(&cell).expect("render cell");
         assert!(
@@ -3665,10 +4724,11 @@ mod render_tree_tests {
         );
     }
 
-    /// Review-4 finding 2: a `NodeKind::ThematicBreak` carrying
-    /// `darkmatter.hr.*` hints must render the corresponding styled rule,
-    /// not collapse to the default dashed rule. Without this wiring the
-    /// fold's HR-attribute storage would never reach the user's terminal.
+    /// Review-4 finding 2: a `NodeKind::ThematicBreak` carrying typed
+    /// [`ThematicBreakAttrs`](renderable::tree::ThematicBreakAttrs) must render
+    /// the corresponding styled rule, not collapse to the default dashed rule.
+    /// Without this wiring the fold's HR-attribute storage would never reach the
+    /// user's terminal.
     ///
     /// The test uses a text-tier terminal (`ImageSupport::None`) so the
     /// `HorizontalRule`'s SVG-to-Kitty image tier is bypassed and the
@@ -3676,11 +4736,12 @@ mod render_tree_tests {
     #[test]
     fn render_tree_thematic_break_consumes_darkmatter_hr_hints() {
         use crate::discovery::detection::ImageSupport;
-        use renderable::tree::HintNamespace;
 
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+            kind: Some(HrKind::Waves),
+            ..Default::default()
+        });
 
         let term = Terminal::builder()
             .width(40)
@@ -3701,26 +4762,20 @@ mod render_tree_tests {
         );
     }
 
-    /// `horizontal_rule_from_attrs` must accept both the `style.hr`
-    /// schema-canonical `center` (projected by page-level HR defaults) and the
-    /// inline-attribute alias `centered`, mapping both to
-    /// [`RuleAlignment::Centered`]. Without the `center` arm a page-default
-    /// centered rule would silently fall back to `Full`.
+    /// `horizontal_rule_from_attrs` maps the shared [`HrAlignment::Center`]
+    /// (the canonical spelling both the `centered` inline alias and the
+    /// `style.hr` page default parse to) onto [`RuleAlignment::Centered`].
+    /// Without that arm a page-default centered rule would silently fall back
+    /// to `Full`.
     #[test]
-    fn horizontal_rule_from_attrs_accepts_center_and_centered() {
-        use renderable::tree::HintNamespace;
-
-        let ns = HintNamespace("darkmatter.hr");
-        for alignment in ["center", "centered"] {
-            let mut attrs = renderable::tree::NodeAttrs::default();
-            attrs.set_hint(ns, "alignment", serde_json::json!(alignment));
-            let rule = horizontal_rule_from_attrs(&attrs);
-            assert_eq!(
-                *rule.rule_alignment(),
-                RuleAlignment::Centered,
-                "{alignment:?} must map to RuleAlignment::Centered",
-            );
-        }
+    fn horizontal_rule_from_attrs_centers_on_hr_alignment_center() {
+        let mut attrs = renderable::tree::NodeAttrs::default();
+        attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+            alignment: Some(HrAlignment::Center),
+            ..Default::default()
+        });
+        let rule = horizontal_rule_from_attrs(&attrs);
+        assert_eq!(*rule.rule_alignment(), RuleAlignment::Centered);
     }
 
     /// A `NodeKind::ThematicBreak` with no hints must still render through
@@ -3745,8 +4800,10 @@ mod render_tree_tests {
     fn render_tree_thematic_break_off_mode_suppresses_image_tier() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+            kind: Some(HrKind::Waves),
+            ..Default::default()
+        });
 
         let term = Terminal::builder()
             .width(40)
@@ -3776,8 +4833,10 @@ mod render_tree_tests {
     fn render_tree_thematic_break_rich_mode_uses_image_tier_when_available() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+            kind: Some(HrKind::Waves),
+            ..Default::default()
+        });
 
         let term = Terminal::builder()
             .width(40)
@@ -3802,8 +4861,10 @@ mod render_tree_tests {
     fn render_tree_thematic_break_vector_mode_uses_text_tier() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+            kind: Some(HrKind::Waves),
+            ..Default::default()
+        });
 
         let term = Terminal::builder()
             .width(40)
@@ -3833,8 +4894,10 @@ mod render_tree_tests {
     fn render_tree_thematic_break_force_graphics_rasterizes_on_unsupported_terminal() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
-        let ns = HintNamespace("darkmatter.hr");
-        hr.attrs.set_hint(ns, "kind", serde_json::json!("waves"));
+        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+            kind: Some(HrKind::Waves),
+            ..Default::default()
+        });
 
         let term = Terminal::builder()
             .width(40)
@@ -3918,6 +4981,126 @@ mod render_tree_tests {
         assert!(
             tree_out.contains("\x1b[1m"),
             "bold SGR missing: {tree_out:?}"
+        );
+    }
+
+    /// Builds a one-paragraph document, records `layout` on it, and renders it
+    /// through the terminal fold at `width` with prose wrapping enabled (so a
+    /// reflowed `FitContent` box is observable), returning the ANSI-stripped
+    /// output.
+    fn render_block_with_layout_wrapped(
+        text: &str,
+        layout: renderable::layout::Layout,
+        width: u32,
+    ) -> String {
+        let term = Terminal::new_optimistic(width);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text(text)]);
+        para.attrs.set_layout(&layout);
+        let tree = RenderNode::root(vec![para]);
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.wrap_prose = true;
+        let out = render_terminal_node(&tree, &opts).expect("render").output;
+        strip_escape_codes(&out)
+    }
+
+    /// The widest content-box column count: the maximum trimmed visible width
+    /// over all rendered lines. Trimming strips the alignment lead, leaving the
+    /// box width.
+    fn content_box_cols(plain: &str) -> usize {
+        plain
+            .lines()
+            .map(|l| visible_width(l.trim()))
+            .max()
+            .unwrap_or(0) as usize
+    }
+
+    #[test]
+    fn render_tree_fit_content_sizes_box_to_widest_line() {
+        use renderable::layout::{Alignment, Layout, Width};
+        use renderable::style::{Background, Style};
+
+        // Two lines; FitContent shrinks the painted box to the widest line
+        // ("there" = 5) instead of filling the available width, then centers
+        // that shrunk box within the available 40 cells. The painted-band
+        // width is the discriminator: an `Auto` fallback would paint the full
+        // 40-cell band and place it flush-left.
+        let layout = Layout {
+            width: Width::FitContent,
+            alignment: Alignment::Center,
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi\nthere", layout, style, 40);
+        let line = out
+            .lines()
+            .find(|l| l.contains("there"))
+            .expect("line with content");
+        assert!(
+            has_background_run_of_width(line, 5),
+            "painted band must fit the widest line: {line:?}"
+        );
+        assert!(
+            !has_background_run_of_width(line, 8),
+            "painted band must not fill the available width: {line:?}"
+        );
+        assert!(
+            leading_unstyled_spaces(line) > 0,
+            "FitContent box must be centered within the available width: {line:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_fit_content_shrinks_below_max_width() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+        use renderable::style::{Background, Style};
+
+        // A generous `max_width` is only a ceiling: FitContent still shrinks the
+        // painted box to the 2-cell content, not the 20-cell cap.
+        let layout = Layout {
+            width: Width::FitContent,
+            max_width: Some(TargetValue::universal(Length::ch(20))),
+            ..Layout::default()
+        };
+        let style = Style {
+            background: Some(Background::subtle()),
+            ..Style::default()
+        };
+        let out = render_block_with_layout_and_style("hi", layout, style, 40);
+        let line = out
+            .lines()
+            .find(|l| l.contains("hi"))
+            .expect("line with content");
+        assert!(
+            has_background_run_of_width(line, 2),
+            "painted band must fit the content: {line:?}"
+        );
+        assert!(
+            !has_background_run_of_width(line, 5),
+            "painted band must shrink below max_width: {line:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_fit_content_is_capped_by_max_width() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+
+        // Short words so the box can reflow to the cap; max_width 3 caps the
+        // FitContent box below its natural single-line width (13 cells).
+        let plain = render_block_with_layout_wrapped(
+            "a b c d e f g",
+            Layout {
+                width: Width::FitContent,
+                max_width: Some(TargetValue::universal(Length::ch(3))),
+                ..Layout::default()
+            },
+            80,
+        );
+        assert!(
+            content_box_cols(&plain) <= 3,
+            "max_width must cap the FitContent box: {plain:?}"
         );
     }
 }

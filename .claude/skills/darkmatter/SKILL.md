@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 751ea2392b8b3231-9ca2fad7c946f821
+hash: 751ea2392b8b3231-3cb2b295b95a3f38
 last_updated: 2026-06-08
 ---
 
@@ -186,3 +186,29 @@ the `biscuit-terminal` skill for terminal tree rendering.
   ordinary prose follows the real mode.
 - Horizontal rules: canonical styling is `style.hr.*` with `apply_hr_style`;
   top-level `hr:` and inline `{ style: ... }` remain deprecated aliases.
+- The darkmatter cutover is complete: deprecated `PageMargin`, `PagePadding`,
+  `PageAlignment`, `PageFill`, `WidthUnit`, and `PageComponent::Lists` have
+  been deleted. `style:` frontmatter lowers **directly** into a per-component
+  `ComponentPolicy` — a `renderable::layout::Layout` plus `color` / `bg_color`
+  carried as alpha-bearing `renderable::style::PaintColor`. The parsed
+  `StyleColor` is lowered to `PaintColor` at the parser/apply boundary
+  (`style/apply.rs`), so opacity rides in the paint's alpha channel; no
+  `StyleColor` survives on post-construction component types.
+- Production rendering is **one context-aware fold followed by one target fold**.
+  Darkmatter's `render_tree::build_context` (`TreeBuildContext`) bakes component
+  policy, page-inheriting color, alpha paint, hyperlink/image text layout,
+  structured link/image browser attrs, and HR defaults onto the nodes during
+  construction; the target fold then resolves all width, padding, alignment, and
+  CSS. The old post-fold `decorate` pass (`decorate_document` / `component_for`)
+  and the `darkmatter.style` / `darkmatter.li` render hints are **deleted** — the
+  browser fold lowers alpha straight to `rgba(...)` with no HTML rewrite, and a
+  malformed fenced code-block directive remains a fatal
+  `MarkdownError::InvalidLineRange` via the `validate_code_directives` preflight
+  the HTML entry points run over the folded tree. `DarkmatterPage` survives as a
+  slim, renderable-typed page frame — the constrained **Option A** boundary
+  signed off by the CSS Box Architecture closeout
+  (`renderable/features/_completed/2026-06-06-tree-closeout`): a viewport-level assembler (page
+  width/margin/padding, full-page background, max-width centering,
+  `PageBackground::Pronounced` code-theme contrast, browser page-wrapper metadata
+  + stylesheet assembly) that wraps the *folded output*, carrying no component
+  policy, inspecting no component node kinds, and mutating no component content.

@@ -194,17 +194,12 @@ fn fixture_connector_geometry_records_divergence() {
 /// bespoke renderer. The tree projection lowers `dim_gitignore` into typed
 /// `Style { dim: true }` on the entry paragraph.
 ///
-/// **Observed gap (Stage 3a.3):** The scanner currently hardcodes
-/// `is_ignored: false` on every entry (see `FileSystem::scan_dir`: "Will be
-/// set properly with ignore crate in Phase 8"). Neither path actually emits
-/// dim SGR for any entry today, so this fixture can only assert that both
-/// paths agree on the **absence** of dim. When Phase 8 lands, this fixture
-/// will flip to a real divergence — the tree path's
-/// `render_tree_connector_list` drops the per-item paragraph `Style` (see
-/// the dotfile fixture's recorded gap) and will not emit `\x1b[2m` until
-/// that is fixed.
+/// Now that hierarchical gitignore semantics are wired (the scanner marks
+/// `is_ignored` via the `GitignoreMatcher` rather than hardcoding `false`),
+/// **both** paths emit dim SGR for the ignored entry. This fixture asserts
+/// that parity.
 #[test]
-fn fixture_gitignore_styling_records_divergence() {
+fn fixture_gitignore_styling_dims_in_both_paths() {
     let dir = tempfile::tempdir().expect("create tempdir");
     fs::write(dir.path().join(".gitignore"), "ignored.txt\n").expect(".gitignore");
     fs::write(dir.path().join("ignored.txt"), "x").expect("ignored.txt");
@@ -220,15 +215,14 @@ fn fixture_gitignore_styling_records_divergence() {
     let bespoke = fs.render(&term);
     let via_tree = render_via_tree(&fs, &term);
 
-    // Both paths currently emit zero dim SGR because `is_ignored` is always
-    // false. Document the joint absence so a future Phase-8 commit forces
-    // this fixture to be revisited.
+    // Both paths honor the resolved `is_ignored` flag and dim the ignored
+    // entry; assert the parity.
     let dim_bespoke = bespoke.contains("\x1b[2m") || bespoke.contains(";2m");
     let dim_tree = via_tree.contains("\x1b[2m") || via_tree.contains(";2m");
     assert!(
-        !dim_bespoke && !dim_tree,
-        "expected both paths to emit no dim SGR today (is_ignored is hardcoded \
-         to false); bespoke={dim_bespoke}, tree={dim_tree}"
+        dim_bespoke && dim_tree,
+        "expected both paths to emit dim SGR for the ignored entry; \
+         bespoke={dim_bespoke}, tree={dim_tree}"
     );
 
     // Content (icon-name spacing aside) is otherwise present in both paths.

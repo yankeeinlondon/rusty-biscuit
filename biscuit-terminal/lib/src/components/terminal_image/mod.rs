@@ -310,12 +310,12 @@ impl TerminalRenderable for TerminalImage {
 /// ```rust,no_run
 /// use biscuit_terminal::components::terminal_image::TerminalImage;
 /// use biscuit_terminal::components::renderable::TerminalRenderable;
-/// use biscuit_terminal::utils::layout::{Alignment, Layout, Length, Margin, TargetValue};
+/// use biscuit_terminal::utils::layout::{Alignment, Layout, Length, Edges, TargetValue};
 /// use std::path::Path;
 ///
 /// let image = TerminalImage::new(Path::new("diagram.svg")).unwrap()
 ///     .with_layout(Layout {
-///         margin: Margin::x(Length::percent(10.0).unwrap()),
+///         margin: Edges::x(Length::percent(10.0).unwrap()),
 ///         alignment: Alignment::Center,
 ///         ..Layout::default()
 ///     });

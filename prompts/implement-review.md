@@ -1,17 +1,17 @@
 ---
 $schema:
-    - iteration: number
-      spec: string(required)
-    - review: string(required)
-      iteration: number
+    review: string(required)
+    spec: string
+    design: string
 name: Implement Review Suggestions
 description: |-
     Implements all the recommendations/suggestions produced in a review. Provide either:
 
-    1. a review path and optionally an iteration number (if not 1) 
-    2. a spec path and optionally an iteration number (if not 1)
-iteration: 1
-area: "{{ ctx.current_package ? ctx.current_package : ctx.current_package_area }}"
+    1. a `review` path is required
+    2. optionally a `spec` path if this a review of **feature** or **fix**
+    3. optionally provide a `design` path if there design file for the **feature** or **fix**
+area: "{{ ctx.area }}"
+has_skill: true
 target: "{{ review || spec }}"
 file: "$(basename '{{target}}')"
 dir: "$(dirname '{{target}}')"
@@ -20,8 +20,10 @@ spec_path: "@{{area}}/{{dir}}/{{file}}"
 ---
 ::block when="spec"
 ## Context
-
+::block when="has_skill"
 - Use the '{{area}}' agent skill when reviewing
+::end-block
+
 - This review is focused on the '{{area}}' package area which has the following packages:
 
     ::shell sniff repo packages --package-area "{{ctx.current_package_area}}" --md

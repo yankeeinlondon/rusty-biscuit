@@ -27,21 +27,31 @@ mod document;
 pub mod embed;
 mod error;
 pub mod graphics;
+mod inherit;
 mod node;
 pub mod render;
 mod source;
 mod validate;
 
 pub use attrs::{
-    CodeRenderHints, ColumnConditional, ColumnWidthKind, ColumnsHints, HintNamespace,
-    ListMarkerPolicy, ListRenderHints, NodeAttrs, ProgressHints, SequenceJoin, TableCellHints,
-    TableColumnHints, TableTerminalHints, TaskHints, TaskState,
+    AriaAttrName, BrowserAttrNameError, BrowserAttrs, CodeRenderHints, ColumnConditional,
+    ColumnWidthKind, ColumnsHints, ComponentHints, DataAttrName, HintNamespace, HrAlignment,
+    HrKind, HrWeight, ImageBrowserAttrs, ImageDecoding, ImageLoading, LinkBrowserAttrs,
+    LinkRelation, LinkTarget, ListMarkerPolicy, ListRenderHints, NodeAttrs, ProgressHints,
+    SequenceJoin, TableCellHints, TableColumnHints, TableHints, TableTerminalHints, TaskHints,
+    TaskState, TextLayoutHints, TextOverflow, ThematicBreakAttrs,
 };
+// Test-only instrumentation (gated): exposed so a downstream crate's perf-gate
+// test can observe the `NodeAttrs::data` hint-access counter while folding a
+// corpus through renderable. See the `hint-access-counter` feature.
+#[cfg(any(test, feature = "hint-access-counter"))]
+pub use attrs::{hint_accesses, reset_hint_accesses};
 pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
 pub use embed::{
     EMBED_CLOSE, EMBED_MARKER_SUFFIX, EMBED_OPEN_PREFIX, EmbedError, decode_embedded_open,
     encode_embedded_subtree, is_embedded_close,
 };
+pub use inherit::InheritedStyle;
 pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
 pub use error::{RenderError, RenderStrictness, Rendered};
 pub use graphics::horizontal_rule_svg;
@@ -126,7 +136,7 @@ mod tests {
 
     #[test]
     fn tree_renderable_can_supply_a_layout() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
 
         struct Demo;
         impl TreeRenderable for Demo {
@@ -135,7 +145,7 @@ mod tests {
             }
             fn tree_layout(&self) -> Option<Layout> {
                 Some(Layout {
-                    margin: Margin::x(Length::ch(1)),
+                    margin: Edges::x(Length::ch(1)),
                     ..Layout::default()
                 })
             }

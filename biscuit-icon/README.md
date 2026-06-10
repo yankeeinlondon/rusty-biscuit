@@ -198,7 +198,7 @@ The `Icon` struct then provides builder methods for stylizing the icon:
 
 The CLI binary `icon` has an API surface of:
 
-- `sets <filter>` provides the list of icon sets as a striped, four-column table (`Set`, `Prefix`, `Total`, `Cached`); you can optionally filter down the returned sets with the `<filter>` param. The `Total` column shows the upstream icon count when known (or `Unknown` when not reported), and `Cached` shows how many icons from that set are stored locally. Output adapts to terminal size: a single table when all rows fit, or two balanced side-by-side tables when rows exceed the available height and the terminal is wide enough.
+- `sets <filter>` provides the list of icon sets as a striped, four-column table (`Set`, `Prefix`, `Total`, `Cached`); you can optionally filter down the returned sets with the `<filter>` param. The `Total` column shows the upstream icon count when known (or `Unknown` when not reported), and `Cached` shows how many icons from that set are stored locally. In terminals that support OSC8 hyperlinks, each `Set` name links to its Iconify catalog page (`https://icon-sets.iconify.design/{prefix}`); elsewhere it renders as plain text. Output adapts to terminal size: a single table when all rows fit, or two balanced side-by-side tables when rows exceed the available height and the terminal is wide enough.
 - `icons [filter] [--from <csv>]`
     - provides a list of icons (and icon names) whose name includes the `filter` parameter
     - when `filter` is omitted, only offline icons (built-in domain catalog and local cache) are listed

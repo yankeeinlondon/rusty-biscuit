@@ -1122,46 +1122,49 @@ mod tests {
         compose
     }
 
+    /// Leading spaces of the first non-empty line (the alignment offset).
+    fn leading_spaces(out: &str) -> usize {
+        let line = out.lines().find(|l| !l.is_empty()).unwrap_or("");
+        line.len() - line.trim_start().len()
+    }
+
     #[test]
     fn test_layout_center_alignment_adds_leading_space() {
-        // With `max_width` declared, alignment is observable as the
-        // alignment offset within the capped region; without it, an empty
-        // sequence-join Compose has nothing to align.
+        // `max_width: 10` makes the box sub-available; center alignment then
+        // places the 10-cell box within the 40-cell terminal (`margin:auto`
+        // semantics): slack = 40 − 10 = 30, center → 15 leading spaces.
         let compose = compose_with_max_width("hi", 10).alignment(Alignment::Center);
         let out = render_at(&compose, 40);
-        let line = out.lines().find(|l| !l.is_empty()).unwrap_or("");
-        // 10ch cap, content "hi" is 2 chars → slack = 8, center → 4 leading
-        // spaces (then "hi").
-        assert!(
-            line.starts_with("    hi"),
-            "center under max_width=10 should leave 4 leading spaces, got {line:?}"
+        assert_eq!(
+            leading_spaces(&out),
+            15,
+            "center under max_width=10 centers the box within 40: {out:?}"
         );
     }
 
     #[test]
     fn test_layout_right_alignment_pushes_content() {
+        // Right alignment pushes the 10-cell box to the right edge of the
+        // 40-cell terminal: slack = 30 → 30 leading spaces.
         let compose = compose_with_max_width("hi", 10).alignment(Alignment::Right);
         let out = render_at(&compose, 40);
-        let line = out.lines().find(|l| !l.is_empty()).unwrap_or("");
-        // 10ch cap, content "hi" is 2 chars → slack = 8 → right → 8 leading.
-        assert!(
-            line.starts_with("        hi"),
-            "right under max_width=10 should leave 8 leading spaces, got {line:?}"
+        assert_eq!(
+            leading_spaces(&out),
+            30,
+            "right under max_width=10 pushes the box to the right edge: {out:?}"
         );
     }
 
     #[test]
     fn test_layout_max_width_with_alignment_is_observable_for_short_content() {
-        // For raw Text (sequence-join) max_width caps the alignment band but
-        // does not re-wrap verbatim text. With short content shorter than the
-        // cap, alignment is observable via the leading-space slack.
+        // The sub-available box is placed within the available width even for
+        // short content: center → (40 − 10) / 2 = 15 leading spaces.
         let compose = compose_with_max_width("hi", 10).alignment(Alignment::Center);
         let out = render_at(&compose, 40);
-        let line = out.lines().find(|l| !l.is_empty()).unwrap_or("");
-        // Slack = 10-2 = 8 → center = 4 leading spaces.
-        assert!(
-            line.starts_with("    hi"),
-            "center under max_width=10 should leave 4 leading spaces, got {line:?}"
+        assert_eq!(
+            leading_spaces(&out),
+            15,
+            "center under max_width=10 centers the box within 40: {out:?}"
         );
     }
 
