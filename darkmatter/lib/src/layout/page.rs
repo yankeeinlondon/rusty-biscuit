@@ -1936,6 +1936,99 @@ mod tests {
         );
     }
 
+    /// sRGB relative luminance (0.0 black .. 1.0 white) of an RGB triple.
+    fn rel_luminance(r: u8, g: u8, b: u8) -> f32 {
+        fn channel(value: u8) -> f32 {
+            let value = f32::from(value) / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+    }
+
+    /// RGB of the truecolor background (`\x1b[48;2;r;g;bm`) active where `needle`
+    /// is drawn — the last such background set before `needle` in `haystack`.
+    fn active_bg_at(haystack: &str, needle: &str) -> (u8, u8, u8) {
+        let idx = haystack
+            .find(needle)
+            .unwrap_or_else(|| panic!("missing {needle:?} in render:\n{haystack:?}"));
+        let marker = "\x1b[48;2;";
+        let start = haystack[..idx]
+            .rfind(marker)
+            .unwrap_or_else(|| panic!("no truecolor background before {needle:?}"));
+        let rest = &haystack[start + marker.len()..];
+        let end = rest.find('m').expect("unterminated SGR");
+        let nums: Vec<u8> = rest[..end]
+            .split(';')
+            .map(|n| n.parse().expect("rgb component"))
+            .collect();
+        (nums[0], nums[1], nums[2])
+    }
+
+    /// The Motivating Defect (simplified-rendering spec): in a real DARK terminal
+    /// whose option-derived color mode disagrees (the CLI fills
+    /// `options.color_mode` from an env-only detector that can resolve Light while
+    /// the terminal is Dark), the code panel must still invert against the
+    /// *terminal* mode and separate from the dark page surface. Pre-fix the panel
+    /// inverts against the option mode and renders dark-on-dark.
+    #[test]
+    fn code_panel_separates_from_page_surface_in_dark_terminal() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Dark;
+
+        let md: Markdown =
+            "# TitleMarker\n\nProseMarker paragraph.\n\n```rust\nfn codemarker() {}\n```\n".into();
+
+        let out = DarkmatterPage::new(&term)
+            .with_page_background(PageBackground::Subtle)
+            .with_color_mode(ColorMode::Light)
+            .render(&md)
+            .unwrap();
+
+        let page_bg = active_bg_at(&out, "TitleMarker");
+        let panel_bg = active_bg_at(&out, "codemarker");
+        let page_lum = rel_luminance(page_bg.0, page_bg.1, page_bg.2);
+        let panel_lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+
+        assert!(
+            (page_lum - panel_lum).abs() > 0.15,
+            "code panel must separate from the dark page surface: \
+             page bg {page_bg:?} (lum {page_lum:.3}) vs panel bg {panel_bg:?} (lum {panel_lum:.3})"
+        );
+    }
+
+    /// Symmetric case: a real LIGHT terminal with a disagreeing option mode. The
+    /// panel must invert against the terminal (Light) and separate from the light
+    /// page surface.
+    #[test]
+    fn code_panel_separates_from_page_surface_in_light_terminal() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Light;
+
+        let md: Markdown =
+            "# TitleMarker\n\nProseMarker paragraph.\n\n```rust\nfn codemarker() {}\n```\n".into();
+
+        let out = DarkmatterPage::new(&term)
+            .with_page_background(PageBackground::Subtle)
+            .with_color_mode(ColorMode::Dark)
+            .render(&md)
+            .unwrap();
+
+        let page_bg = active_bg_at(&out, "TitleMarker");
+        let panel_bg = active_bg_at(&out, "codemarker");
+        let page_lum = rel_luminance(page_bg.0, page_bg.1, page_bg.2);
+        let panel_lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+
+        assert!(
+            (page_lum - panel_lum).abs() > 0.15,
+            "code panel must separate from the light page surface: \
+             page bg {page_bg:?} (lum {page_lum:.3}) vs panel bg {panel_bg:?} (lum {panel_lum:.3})"
+        );
+    }
+
     /// Page-frame boundary (closeout Option A): the page frame is independent of
     /// component policy entirely — neither its presence nor its content. Two
     /// pages with identical frame geometry but different component-policy
