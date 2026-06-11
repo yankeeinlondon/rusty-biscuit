@@ -17,6 +17,7 @@
 use darkmatter::markdown::FrontmatterMap;
 use darkmatter::markdown::schemas::{
     EffectiveSchema, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType,
+    TypeExpr,
 };
 use serde_json::{Map, Value};
 
@@ -185,8 +186,12 @@ fn atom_prefers_string(atom: &PropertyAtom) -> bool {
     if atom.is_array {
         return false;
     }
+    let primitive = match &atom.ty {
+        TypeExpr::Primitive(p) => *p,
+        TypeExpr::InlineObject(_) => return false,
+    };
     matches!(
-        atom.ty,
+        primitive,
         SimplifiedType::String
             | SimplifiedType::Date
             | SimplifiedType::DateTime

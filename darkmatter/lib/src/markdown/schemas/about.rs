@@ -1,0 +1,834 @@
+//! Typed descriptor catalog for the SimplifiedSchema authoring language.
+//!
+//! This catalog is the **authoritative implementation-bound reference** for
+//! `md schema about`. Every supported type keyword, constraint, schema shape,
+//! inline object rule, and coercion rule is described as a typed descriptor
+//! rather than as hand-maintained prose so the CLI report and library callers
+//! see exactly the same content, and so the parity tests below catch
+//! additions, removals, and renames in the underlying grammar (see
+//! [`super::simplified::types`]).
+//!
+//! The catalog is a static, compile-time constant. Accessing it performs no
+//! document parsing, no context capture, no `EffectEngine` construction, no
+//! file-resolution, and no network access.
+//!
+//! See `darkmatter/features/2026-06-10-schema-improvement/spec.md` for the
+//! authoring reference that the descriptor surface mirrors.
+
+/// All schema-language type keywords, in display order.
+///
+/// The set is **closed**: the test
+/// [`simplified_type_keyword_set_matches_descriptor_set`] asserts the
+/// `SimplifiedType` enum and this descriptor list agree exactly.
+pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
+    SchemaTypeDescriptor {
+        keyword: "string",
+        description: "Any YAML string scalar.",
+        accepted_constraints: "min, max, not-empty, pattern, default, required",
+        json_schema_effect: "{ \"type\": \"string\" } plus minLength / maxLength / pattern / default",
+    },
+    SchemaTypeDescriptor {
+        keyword: "date",
+        description: "ISO-8601 date (`YYYY-MM-DD`).",
+        accepted_constraints: "default, required",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"date\" }",
+    },
+    SchemaTypeDescriptor {
+        keyword: "datetime",
+        description: "ISO-8601 datetime.",
+        accepted_constraints: "default, required",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"date-time\" }",
+    },
+    SchemaTypeDescriptor {
+        keyword: "time",
+        description: "Time of day with optional timezone.",
+        accepted_constraints: "default, required",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"time\" }",
+    },
+    SchemaTypeDescriptor {
+        keyword: "number",
+        description: "Any JSON number.",
+        accepted_constraints: "min, max, integer, default, required",
+        json_schema_effect: "{ \"type\": \"number\" } (or `integer` when `integer` is set) with optional minimum / maximum",
+    },
+    SchemaTypeDescriptor {
+        keyword: "numberlike",
+        description: "A JSON number or a numeric string. String forms are coerced to a real number.",
+        accepted_constraints: "default, required",
+        json_schema_effect: "anyOf: [ { \"type\": \"number\" }, { \"type\": \"string\", \"pattern\": \"^-?\\d+(\\.\\d+)?$\" } ]",
+    },
+    SchemaTypeDescriptor {
+        keyword: "boolean",
+        description: "Any JSON boolean.",
+        accepted_constraints: "default, required",
+        json_schema_effect: "{ \"type\": \"boolean\" } with optional default",
+    },
+    SchemaTypeDescriptor {
+        keyword: "boolish",
+        description: "A JSON boolean or one of the string spellings `true` / `false` (any case). String forms are coerced to a real boolean.",
+        accepted_constraints: "default, required",
+        json_schema_effect: "anyOf: [ { \"type\": \"boolean\" }, { \"enum\": [\"true\", \"false\", \"True\", \"False\", \"TRUE\", \"FALSE\"] } ]",
+    },
+    SchemaTypeDescriptor {
+        keyword: "object",
+        description: "Opaque YAML/JSON object. Accepts any shape; no nested schema authoring in v1.",
+        accepted_constraints: "default, required",
+        json_schema_effect: "{ \"type\": \"object\" } with no `additionalProperties: false` (root-schema behaviour preserved)",
+    },
+    SchemaTypeDescriptor {
+        keyword: "file",
+        description: "File reference resolved via `biscuit-file::FileReference`. Accepts a single path or an array of paths.",
+        accepted_constraints: "match(glob, ...), default, required",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-file\" } plus x-darkmatter-match when `match(...)` is set",
+    },
+    SchemaTypeDescriptor {
+        keyword: "enum",
+        description: "Value must be one of the constraint-supplied members.",
+        accepted_constraints: "<members>; default; required",
+        json_schema_effect: "{ \"enum\": [ ... ] } with optional default",
+    },
+    SchemaTypeDescriptor {
+        keyword: "url",
+        description: "Absolute URL.",
+        accepted_constraints: "scheme(http, https, ...), default, required",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"uri\" } plus x-darkmatter-url-scheme when `scheme(...)` is set",
+    },
+    SchemaTypeDescriptor {
+        keyword: "email",
+        description: "RFC 5322 addr-spec.",
+        accepted_constraints: "default, required",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"email\" }",
+    },
+    SchemaTypeDescriptor {
+        keyword: "any",
+        description: "Anything. Only `required` is meaningful.",
+        accepted_constraints: "required",
+        json_schema_effect: "{} (empty schema)",
+    },
+];
+
+/// Returns all schema-language type descriptors in display order.
+pub fn schema_type_descriptors() -> &'static [SchemaTypeDescriptor] {
+    SCHEMA_TYPE_DESCRIPTORS
+}
+
+/// All schema-language constraints, in display order.
+///
+/// The test [`constraint_set_matches_descriptor_set`] asserts the
+/// `Constraint` enum and the descriptor `keyword`s agree exactly, so adding
+/// a new constraint variant breaks the test until the descriptor is updated.
+pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
+    // ── universal ──────────────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "required",
+        keyword: "required",
+        form: "required",
+        target_types: "all types (and array properties)",
+        argument_arity: "0",
+        description: "The property must be present. Hoisted to the parent `required` array by the converter.",
+        json_schema_effect: "parent's `required` list contains the property name",
+    },
+    SchemaConstraintDescriptor {
+        name: "default",
+        keyword: "default",
+        form: "default(value)",
+        target_types: "all types (and array properties for the property default)",
+        argument_arity: "1",
+        description: "Default value emitted as JSON Schema `default`. A property-level union with conflicting defaults is a conversion error.",
+        json_schema_effect: "parent's `default` set to the argument",
+    },
+    // ── numeric ────────────────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "min (number)",
+        keyword: "min",
+        form: "min(n)",
+        target_types: "number",
+        argument_arity: "1",
+        description: "Numeric `minimum` (number types).",
+        json_schema_effect: "minimum set to n",
+    },
+    SchemaConstraintDescriptor {
+        name: "max (number)",
+        keyword: "max",
+        form: "max(n)",
+        target_types: "number",
+        argument_arity: "1",
+        description: "Numeric `maximum` (number types).",
+        json_schema_effect: "maximum set to n",
+    },
+    SchemaConstraintDescriptor {
+        name: "integer",
+        keyword: "integer",
+        form: "integer",
+        target_types: "number",
+        argument_arity: "0",
+        description: "Restrict to integer values.",
+        json_schema_effect: "type is `integer` instead of `number`",
+    },
+    // ── string ─────────────────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "min (string)",
+        keyword: "min",
+        form: "min(n) (string context)",
+        target_types: "string",
+        argument_arity: "1",
+        description: "Minimum length in Unicode code points.",
+        json_schema_effect: "minLength set to n",
+    },
+    SchemaConstraintDescriptor {
+        name: "max (string)",
+        keyword: "max",
+        form: "max(n) (string context)",
+        target_types: "string",
+        argument_arity: "1",
+        description: "Maximum length in Unicode code points.",
+        json_schema_effect: "maxLength set to n",
+    },
+    SchemaConstraintDescriptor {
+        name: "not-empty",
+        keyword: "not-empty",
+        form: "not-empty",
+        target_types: "string",
+        argument_arity: "0",
+        description: "Disallow empty / whitespace-only strings.",
+        json_schema_effect: "pattern set to \"\\\\S\"",
+    },
+    SchemaConstraintDescriptor {
+        name: "pattern",
+        keyword: "pattern",
+        form: "pattern(regex)",
+        target_types: "string",
+        argument_arity: "1",
+        description: "ECMA-262 regex the value must match.",
+        json_schema_effect: "pattern set to the supplied regex",
+    },
+    // ── enum ───────────────────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "<members>",
+        keyword: "<members>",
+        form: "enum(member, member, ...)",
+        target_types: "enum",
+        argument_arity: "1+",
+        description: "Positional members of the enumeration. Required by the grammar — at least one member must be present.",
+        json_schema_effect: "enum list of supplied members",
+    },
+    // ── file ───────────────────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "match",
+        keyword: "match",
+        form: "match(glob, ...)",
+        target_types: "file",
+        argument_arity: "1+",
+        description: "Glob patterns the resolved path must match. Patterns starting with `!` exclude.",
+        json_schema_effect: "x-darkmatter-match set to the glob list",
+    },
+    // ── url ────────────────────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "scheme",
+        keyword: "scheme",
+        form: "scheme(http, https, ...)",
+        target_types: "url",
+        argument_arity: "1+",
+        description: "Allowed URL schemes (lowercased).",
+        json_schema_effect: "x-darkmatter-url-scheme set to the scheme list",
+    },
+    // ── array ──────────────────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "unique",
+        keyword: "unique",
+        form: "unique",
+        target_types: "array (array-level)",
+        argument_arity: "0",
+        description: "Array items must be distinct.",
+        json_schema_effect: "uniqueItems set to true",
+    },
+    SchemaConstraintDescriptor {
+        name: "min (array)",
+        keyword: "min",
+        form: "min(n) (array-level)",
+        target_types: "array (array-level)",
+        argument_arity: "1",
+        description: "Minimum number of items in an array.",
+        json_schema_effect: "minItems set to n",
+    },
+    SchemaConstraintDescriptor {
+        name: "max (array)",
+        keyword: "max",
+        form: "max(n) (array-level)",
+        target_types: "array (array-level)",
+        argument_arity: "1",
+        description: "Maximum number of items in an array.",
+        json_schema_effect: "maxItems set to n",
+    },
+];
+
+/// Returns all schema-language constraint descriptors in display order.
+pub fn schema_constraint_descriptors() -> &'static [SchemaConstraintDescriptor] {
+    SCHEMA_CONSTRAINT_DESCRIPTORS
+}
+
+/// All supported `$schema` shapes, in display order.
+pub const SCHEMA_SHAPE_DESCRIPTORS: &[SchemaShapeDescriptor] = &[
+    SchemaShapeDescriptor {
+        name: "Single object",
+        form: "single mapping",
+        example: "title: string(required)",
+        description: "A YAML mapping from property names to type expressions. Validation passes when the frontmatter satisfies every property.",
+    },
+    SchemaShapeDescriptor {
+        name: "Root-level union",
+        form: "sequence of mappings / file references",
+        example: "- title: string\n- ./schemas/post.yaml",
+        description: "A YAML sequence whose arms are either inline mappings or file-reference strings. Validation passes when at least one arm validates.",
+    },
+    SchemaShapeDescriptor {
+        name: "Property-level union",
+        form: "sequence of strings under a property",
+        example: "data: [string, \"{ foo: string }\"]",
+        description: "A YAML sequence of type-and-constraint strings at a single property position. The property accepts any of the listed atoms.",
+    },
+    SchemaShapeDescriptor {
+        name: "Inline object literal",
+        form: "{ prop: type-expr, ... }",
+        example: "{ foo: string(required), bar: number }",
+        description: "An anonymous typed object declared inside a single type expression. Compiles to `{ \"type\": \"object\", \"properties\": ..., \"additionalProperties\": false }`.",
+    },
+];
+
+/// Returns all schema shape descriptors in display order.
+pub fn schema_shape_descriptors() -> &'static [SchemaShapeDescriptor] {
+    SCHEMA_SHAPE_DESCRIPTORS
+}
+
+/// Inline object grammar rules and limits, in display order.
+pub const INLINE_OBJECT_RULE_DESCRIPTORS: &[InlineObjectRuleDescriptor] = &[
+    InlineObjectRuleDescriptor {
+        name: "Brace delimiters",
+        rule: "{ prop: type-expr, prop: type-expr }",
+        description: "Curly-brace delimited, comma-separated property list. Mirrors JSON / YAML object syntax.",
+    },
+    InlineObjectRuleDescriptor {
+        name: "Whitespace ignored",
+        rule: "whitespace inside { ... } is insignificant",
+        description: "Spaces and line breaks immediately after `{`, before `}`, around `,`, around `:`, and at the start / end of a property's type expression are ignored. Multi-line inline objects parse identically to single-line forms.",
+    },
+    InlineObjectRuleDescriptor {
+        name: "Identifier rules",
+        rule: "[A-Za-z0-9_-]+ (no leading character class restriction; leading digits allowed)",
+        description: "Property names are unquoted identifiers. `name`, `foo_id`, `x-custom`, `api2_version`, and `123abc` are accepted; `display name`, `@type`, `x.custom`, and quoted keys are rejected.",
+    },
+    InlineObjectRuleDescriptor {
+        name: "Property syntax",
+        rule: "four forms: bare, constrained, with description, constrained with description",
+        description: "Inline object property values follow the same four syntax forms as top-level SimplifiedSchema properties. The `->` description arrow is allowed per property.",
+    },
+    InlineObjectRuleDescriptor {
+        name: "Description termination",
+        rule: "until next top-level `,` or `}` at the current depth",
+        description: "Inside an inline object, `->` descriptions consume text until the next comma or closing brace at the current object's nesting level. Commas inside inline descriptions are out of scope.",
+    },
+    InlineObjectRuleDescriptor {
+        name: "Array suffix",
+        rule: "{ ... }[] and { ... }[](constraints)",
+        description: "Inline objects support the `[]` array suffix and the array-level constraint list. Item constraints before `[]` are not valid for inline object arrays.",
+    },
+    InlineObjectRuleDescriptor {
+        name: "Postfix constraints",
+        rule: "{ ... }(required) and { ... }[](min(1); required)",
+        description: "Constraints after the closing `}` attach to the property's value (single object) or to the array property (`[]` form). Constraints on nested properties stay nested.",
+    },
+    InlineObjectRuleDescriptor {
+        name: "Nesting depth",
+        rule: "max 32 inline object levels",
+        description: "The grammar parser enforces a hard maximum of 32 inline object nesting levels. Exceeding it returns `SchemaError::Grammar`.",
+    },
+    InlineObjectRuleDescriptor {
+        name: "additionalProperties default",
+        rule: "additionalProperties: false on every inline object",
+        description: "Inline object fragments always emit `additionalProperties: false`. The root schema's default of `true` is intentionally not inherited.",
+    },
+    InlineObjectRuleDescriptor {
+        name: "required hoisting",
+        rule: "inner `required` stays on the inline object fragment",
+        description: "An `required` constraint on a nested property stays inside the inline object fragment. The property-level union hoisting logic operates on `PropertyAtom` constraints, not on nested `SchemaShape` properties.",
+    },
+];
+
+/// Returns all inline object rule descriptors in display order.
+pub fn inline_object_rule_descriptors() -> &'static [InlineObjectRuleDescriptor] {
+    INLINE_OBJECT_RULE_DESCRIPTORS
+}
+
+/// Compose-time coercion rules, in display order.
+pub const COERCION_RULE_DESCRIPTORS: &[CoercionRuleDescriptor] = &[
+    CoercionRuleDescriptor {
+        name: "boolean / boolish",
+        rule: "\"true\" / \"false\" -> real boolean",
+        description: "Strings matching `true` / `false` (any case) coerce to a real boolean when the target type is `boolean` or `boolish`.",
+    },
+    CoercionRuleDescriptor {
+        name: "number / numberlike",
+        rule: "numeric string -> real number",
+        description: "Strings matching the numberlike pattern (`^-?\\d+(\\.\\d+)?$`) coerce to a real number when the target type is `number` or `numberlike`.",
+    },
+    CoercionRuleDescriptor {
+        name: "Nested inline object scalars",
+        rule: "recurse into inline object fields",
+        description: "Coercion recurses into inline object fields and inline object arrays. For example, `/authors/0/active` coerces from `\"true\"` to `true` when the schema path is `authors: \"{ active: boolean }[]\"`.",
+    },
+    CoercionRuleDescriptor {
+        name: "Unambiguous property-level union",
+        rule: "exactly one arm validates after per-arm coercion",
+        description: "For property-level unions the compose stage builds a coerced candidate per arm, validates each candidate against its arm, and commits the coerced value only when exactly one candidate validates.",
+    },
+    CoercionRuleDescriptor {
+        name: "Zero-match union",
+        rule: "leave original uncoerced",
+        description: "When no union arm validates after per-arm coercion the original value is left uncoerced and normal validation reports the failure without coercion guessing.",
+    },
+    CoercionRuleDescriptor {
+        name: "Ambiguous union",
+        rule: "leave original uncoerced",
+        description: "When multiple union arms validate after per-arm coercion the original value is left uncoerced and normal validation / reporting proceeds from the original value.",
+    },
+    CoercionRuleDescriptor {
+        name: "$(...)-pending values",
+        rule: "skip coercion until after shell expansion",
+        description: "Coercion skips values that still hold `$(...)` shell-expansion pendings. Problems on those fields are deferred to the post-shell re-validation pass when frontmatter shell expansion is enabled; otherwise they fail fast.",
+    },
+];
+
+/// Returns all compose-time coercion rule descriptors in display order.
+pub fn coercion_rule_descriptors() -> &'static [CoercionRuleDescriptor] {
+    COERCION_RULE_DESCRIPTORS
+}
+
+/// Validation behaviour notes that affect how the schema language is consumed,
+/// in display order.
+pub const VALIDATION_BEHAVIOR_DESCRIPTORS: &[ValidationBehaviorDescriptor] = &[
+    ValidationBehaviorDescriptor {
+        name: "Root additionalProperties",
+        rule: "additionalProperties: true at the root",
+        description: "The root schema object defaults to `additionalProperties: true`. Extra keys at the document root never fail validation by themselves.",
+    },
+    ValidationBehaviorDescriptor {
+        name: "Inline object additionalProperties",
+        rule: "additionalProperties: false on every inline object",
+        description: "Inline objects are explicit shape declarations. Extra keys on an inline object value fail validation with `additionalProperties: false`.",
+    },
+    ValidationBehaviorDescriptor {
+        name: "Opaque object preserved",
+        rule: "object compiles without additionalProperties: false",
+        description: "The `object` type compiles to `{ \"type\": \"object\" }` with no `additionalProperties: false`. v1 backwards-compat is preserved.",
+    },
+    ValidationBehaviorDescriptor {
+        name: "File references",
+        rule: "file type resolves via biscuit-file at validation time",
+        description: "`file` references are resolved via `biscuit-file::FileReference` at validation time. The current working directory is the default base for `file` properties; resolution is per-document for file-reference property values.",
+    },
+    ValidationBehaviorDescriptor {
+        name: "Schema detection",
+        rule: "detect emits object for object-typed values",
+        description: "`md schema detect` continues to emit `object` for any object-typed value, even when sample values have a uniform shape. Authors must hand-write inline object schemas.",
+    },
+    ValidationBehaviorDescriptor {
+        name: "Coercion timing",
+        rule: "after --set / --state and interpolation, before shell expansion",
+        description: "Coercion runs after frontmatter `--set` / `--state` overrides and interpolation, but before shell expansion. The coerced values are written back into the frontmatter so downstream compose stages see real booleans / numbers.",
+    },
+    ValidationBehaviorDescriptor {
+        name: "Baseline merge",
+        rule: "baseline properties merge into the effective schema",
+        description: "A configured baseline schema is merged with the document's `$schema` (or used alone when no `$schema` is present). Properties defined in the baseline are validated as if they appeared in the document schema.",
+    },
+    ValidationBehaviorDescriptor {
+        name: "Validator cache",
+        rule: "compiled validators are LRU-cached per process",
+        description: "The compiled `jsonschema::Validator` is LRU-cached per process (default 256 entries, override via `DRAFT_VALIDATOR_CACHE_SIZE`). Repeated validation against the same effective schema reuses the compiled validator.",
+    },
+];
+
+/// Returns all validation behaviour descriptors in display order.
+pub fn validation_behavior_descriptors() -> &'static [ValidationBehaviorDescriptor] {
+    VALIDATION_BEHAVIOR_DESCRIPTORS
+}
+
+// ── Descriptor types ────────────────────────────────────────────────────
+
+/// Descriptor for a single schema-language type keyword.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SchemaTypeDescriptor {
+    /// Canonical lowercase keyword used in the grammar.
+    pub keyword: &'static str,
+    /// Human-readable description of the type's meaning.
+    pub description: &'static str,
+    /// Comma-separated list of constraints accepted on this type.
+    pub accepted_constraints: &'static str,
+    /// Effect on the generated Draft 2020-12 JSON Schema fragment.
+    pub json_schema_effect: &'static str,
+}
+
+/// Descriptor for a single schema-language constraint.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SchemaConstraintDescriptor {
+    /// Display name of the constraint. May be disambiguated with a type
+    /// context, e.g. `min (number)`, when the same keyword has different
+    /// behaviours on different types.
+    pub name: &'static str,
+    /// Canonical keyword as it appears in the grammar. Mirrors
+    /// [`Constraint::keyword`] so descriptor ↔ implementation parity is
+    /// testable.
+    pub keyword: &'static str,
+    /// Surface form of the constraint, including the `(...)` suffix when applicable.
+    pub form: &'static str,
+    /// Types the constraint applies to.
+    pub target_types: &'static str,
+    /// Number of arguments the constraint accepts.
+    pub argument_arity: &'static str,
+    /// Short description of the constraint's behaviour.
+    pub description: &'static str,
+    /// Effect on the generated Draft 2020-12 JSON Schema fragment.
+    pub json_schema_effect: &'static str,
+}
+
+/// Descriptor for a single schema shape / grammar form.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SchemaShapeDescriptor {
+    /// Display name of the shape.
+    pub name: &'static str,
+    /// Surface form (YAML / grammar shape).
+    pub form: &'static str,
+    /// Short example.
+    pub example: &'static str,
+    /// Short description.
+    pub description: &'static str,
+}
+
+/// Descriptor for a single inline object grammar rule.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineObjectRuleDescriptor {
+    /// Display name of the rule.
+    pub name: &'static str,
+    /// One-line rule summary.
+    pub rule: &'static str,
+    /// Short description of the rule and its consequences.
+    pub description: &'static str,
+}
+
+/// Descriptor for a single compose-time coercion rule.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoercionRuleDescriptor {
+    /// Display name of the rule.
+    pub name: &'static str,
+    /// One-line rule summary.
+    pub rule: &'static str,
+    /// Short description of the rule and its non-coercion cases.
+    pub description: &'static str,
+}
+
+/// Descriptor for a single validation-behaviour note.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidationBehaviorDescriptor {
+    /// Display name of the note.
+    pub name: &'static str,
+    /// One-line rule summary.
+    pub rule: &'static str,
+    /// Short description.
+    pub description: &'static str,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::simplified::types::{Constraint, SimplifiedType};
+    use crate::markdown::schemas::simplified::parse_yaml_schema;
+    use crate::markdown::schemas::simplified::grammar;
+    use crate::markdown::schemas::simplified::{PropertyDef, SimplifiedSchema, TypeExpr};
+    use std::collections::HashSet;
+
+    /// Every `SimplifiedType` variant has exactly one type descriptor, and
+    /// every type descriptor maps to a parseable implemented type.
+    #[test]
+    fn simplified_type_keyword_set_matches_descriptor_set() {
+        let descriptor_keywords: HashSet<&str> = SCHEMA_TYPE_DESCRIPTORS
+            .iter()
+            .map(|d| d.keyword)
+            .collect();
+
+        let mut implemented: HashSet<&'static str> = HashSet::new();
+        for ty in [
+            SimplifiedType::String,
+            SimplifiedType::Date,
+            SimplifiedType::DateTime,
+            SimplifiedType::Time,
+            SimplifiedType::Number,
+            SimplifiedType::NumberLike,
+            SimplifiedType::Boolean,
+            SimplifiedType::Boolish,
+            SimplifiedType::Object,
+            SimplifiedType::File,
+            SimplifiedType::Enum,
+            SimplifiedType::Url,
+            SimplifiedType::Email,
+            SimplifiedType::Any,
+        ] {
+            implemented.insert(ty.as_keyword());
+        }
+
+        let missing_descriptors: Vec<_> = implemented.difference(&descriptor_keywords).collect();
+        let extra_descriptors: Vec<_> = descriptor_keywords.difference(&implemented).collect();
+
+        assert!(
+            missing_descriptors.is_empty(),
+            "SimplifiedType keywords without descriptors: {missing_descriptors:?}"
+        );
+        assert!(
+            extra_descriptors.is_empty(),
+            "Descriptor keywords without SimplifiedType: {extra_descriptors:?}"
+        );
+    }
+
+    /// Every descriptor's `keyword` round-trips through the
+    /// `SimplifiedType::from_keyword` parser.
+    #[test]
+    fn descriptor_keywords_are_parseable() {
+        for d in SCHEMA_TYPE_DESCRIPTORS {
+            let parsed = SimplifiedType::from_keyword(d.keyword);
+            assert_eq!(
+                parsed.map(|t| t.as_keyword()),
+                Some(d.keyword),
+                "descriptor keyword `{}` did not round-trip through from_keyword",
+                d.keyword
+            );
+        }
+    }
+
+    /// Every implemented `Constraint` variant has descriptor coverage, and
+    /// every descriptor maps to a real variant.
+    #[test]
+    fn constraint_set_matches_descriptor_set() {
+        let descriptor_keywords: HashSet<&str> = SCHEMA_CONSTRAINT_DESCRIPTORS
+            .iter()
+            .map(|d| d.keyword)
+            .collect();
+
+        let mut implemented: HashSet<&'static str> = HashSet::new();
+        for c in [
+            Constraint::Required,
+            Constraint::Default(serde_json::Value::Null),
+            Constraint::Min(0.0),
+            Constraint::Max(0.0),
+            Constraint::Integer,
+            Constraint::MinLen(0),
+            Constraint::MaxLen(0),
+            Constraint::NotEmpty,
+            Constraint::Pattern(String::new()),
+            Constraint::Members(Vec::new()),
+            Constraint::Match(Vec::new()),
+            Constraint::Scheme(Vec::new()),
+            Constraint::Unique,
+            Constraint::MinItems(0),
+            Constraint::MaxItems(0),
+        ] {
+            implemented.insert(c.keyword());
+        }
+
+        let missing_descriptors: Vec<_> =
+            implemented.difference(&descriptor_keywords).collect();
+        let extra_descriptors: Vec<_> =
+            descriptor_keywords.difference(&implemented).collect();
+
+        assert!(
+            missing_descriptors.is_empty(),
+            "Constraint keywords without descriptors: {missing_descriptors:?}"
+        );
+        assert!(
+            extra_descriptors.is_empty(),
+            "Descriptor keywords without Constraint: {extra_descriptors:?}"
+        );
+    }
+
+    /// Traversal order is stable across repeated access.
+    #[test]
+    fn descriptor_traversal_order_is_deterministic() {
+        let types_again: Vec<&str> = SCHEMA_TYPE_DESCRIPTORS.iter().map(|d| d.keyword).collect();
+        let types_third: Vec<&str> =
+            schema_type_descriptors().iter().map(|d| d.keyword).collect();
+        assert_eq!(types_again, types_third);
+
+        let constraints_again: Vec<&str> =
+            SCHEMA_CONSTRAINT_DESCRIPTORS.iter().map(|d| d.name).collect();
+        let constraints_third: Vec<&str> =
+            schema_constraint_descriptors().iter().map(|d| d.name).collect();
+        assert_eq!(constraints_again, constraints_third);
+
+        let shapes_again: Vec<&str> = SCHEMA_SHAPE_DESCRIPTORS.iter().map(|d| d.name).collect();
+        let shapes_third: Vec<&str> =
+            schema_shape_descriptors().iter().map(|d| d.name).collect();
+        assert_eq!(shapes_again, shapes_third);
+
+        let rules_again: Vec<&str> =
+            INLINE_OBJECT_RULE_DESCRIPTORS.iter().map(|d| d.name).collect();
+        let rules_third: Vec<&str> =
+            inline_object_rule_descriptors().iter().map(|d| d.name).collect();
+        assert_eq!(rules_again, rules_third);
+
+        let coercion_again: Vec<&str> = COERCION_RULE_DESCRIPTORS.iter().map(|d| d.name).collect();
+        let coercion_third: Vec<&str> =
+            coercion_rule_descriptors().iter().map(|d| d.name).collect();
+        assert_eq!(coercion_again, coercion_third);
+
+        let validation_again: Vec<&str> =
+            VALIDATION_BEHAVIOR_DESCRIPTORS.iter().map(|d| d.name).collect();
+        let validation_third: Vec<&str> =
+            validation_behavior_descriptors().iter().map(|d| d.name).collect();
+        assert_eq!(validation_again, validation_third);
+    }
+
+    /// Descriptor keys / signatures are unique within each catalog.
+    #[test]
+    fn descriptor_keys_are_unique() {
+        let mut seen = HashSet::new();
+        for d in SCHEMA_TYPE_DESCRIPTORS {
+            assert!(
+                seen.insert(d.keyword),
+                "duplicate type descriptor keyword: {}",
+                d.keyword
+            );
+        }
+        let mut seen = HashSet::new();
+        for d in SCHEMA_CONSTRAINT_DESCRIPTORS {
+            assert!(
+                seen.insert(d.name),
+                "duplicate constraint descriptor name: {}",
+                d.name
+            );
+        }
+        let mut seen = HashSet::new();
+        for d in SCHEMA_SHAPE_DESCRIPTORS {
+            assert!(
+                seen.insert(d.name),
+                "duplicate shape descriptor name: {}",
+                d.name
+            );
+        }
+        let mut seen = HashSet::new();
+        for d in INLINE_OBJECT_RULE_DESCRIPTORS {
+            assert!(
+                seen.insert(d.name),
+                "duplicate inline-object rule descriptor name: {}",
+                d.name
+            );
+        }
+        let mut seen = HashSet::new();
+        for d in COERCION_RULE_DESCRIPTORS {
+            assert!(
+                seen.insert(d.name),
+                "duplicate coercion rule descriptor name: {}",
+                d.name
+            );
+        }
+        let mut seen = HashSet::new();
+        for d in VALIDATION_BEHAVIOR_DESCRIPTORS {
+            assert!(
+                seen.insert(d.name),
+                "duplicate validation behaviour descriptor name: {}",
+                d.name
+            );
+        }
+    }
+
+    /// Accessing every catalog performs no document parsing, no context
+    /// capture, no `EffectEngine` construction, no file resolution, and no
+    /// network access. Constructing and reading the catalogs is pure
+    /// static metadata access — this test exists as a regression guard so
+    /// the catalogs never start touching state on read.
+    #[test]
+    fn catalog_access_performs_no_capture() {
+        let _ = schema_type_descriptors();
+        let _ = schema_constraint_descriptors();
+        let _ = schema_shape_descriptors();
+        let _ = inline_object_rule_descriptors();
+        let _ = coercion_rule_descriptors();
+        let _ = validation_behavior_descriptors();
+    }
+
+    /// Descriptor examples in the shape catalog parse to a
+    /// `SimplifiedSchema` without error. The shape catalog's examples are
+    /// chosen to match the catalog label: the `Single object` example is a
+    /// YAML mapping, the `Root-level union` and `Property-level union`
+    /// examples are YAML sequences, and the `Inline object literal` example
+    /// is a string-layer type expression with braces.
+    #[test]
+    fn descriptor_shape_examples_parse() {
+        for d in SCHEMA_SHAPE_DESCRIPTORS {
+            match d.name {
+                "Single object" => {
+                    let value: serde_yaml_ng::Value =
+                        serde_yaml_ng::from_str(d.example).expect("yaml must parse");
+                    let schema = parse_yaml_schema(&value)
+                        .expect("single-mapping example must parse as a SimplifiedSchema");
+                    assert!(
+                        matches!(schema, SimplifiedSchema::Single(_)),
+                        "Single object example did not parse as Single: {schema:?}"
+                    );
+                }
+                "Root-level union" => {
+                    let value: serde_yaml_ng::Value =
+                        serde_yaml_ng::from_str(d.example).expect("yaml must parse");
+                    let schema = parse_yaml_schema(&value)
+                        .expect("root-union example must parse as a SimplifiedSchema");
+                    assert!(
+                        matches!(schema, SimplifiedSchema::Union(_)),
+                        "Root-level union example did not parse as Union: {schema:?}"
+                    );
+                }
+                "Property-level union" => {
+                    // The example embeds a brace literal inside a YAML
+                    // sequence. Round-trip the inline-object part through
+                    // the grammar parser and then assemble a YAML scalar for
+                    // the property-level-union path.
+                    let brace_start = d.example.find('[').map(|i| i + 1).unwrap_or(0);
+                    let brace_end = d.example.rfind(']').unwrap_or(d.example.len());
+                    let inner = &d.example[brace_start..brace_end];
+                    let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
+                    assert!(
+                        parts.len() >= 2,
+                        "Property-level union example must list at least two type expressions"
+                    );
+                    for part in &parts {
+                        let stripped = part.trim_matches('"');
+                        let _ = grammar::parse_type_expr("test", stripped)
+                            .unwrap_or_else(|e| {
+                                panic!("union arm `{stripped}` failed to parse: {e:?}")
+                            });
+                    }
+                    let wrapped = format!("x: [{arm_a}, {arm_b}]", arm_a = parts[0], arm_b = parts[1]);
+                    let value: serde_yaml_ng::Value =
+                        serde_yaml_ng::from_str(&wrapped).expect("yaml must parse");
+                    let schema = parse_yaml_schema(&value)
+                        .expect("property-union example must parse as a SimplifiedSchema");
+                    let shape = match schema {
+                        SimplifiedSchema::Single(s) => s,
+                        other => panic!("expected Single, got {other:?}"),
+                    };
+                    let prop = shape.properties.get("x").expect("x property");
+                    assert!(
+                        matches!(prop, PropertyDef::Union(_)),
+                        "Property-level union example did not parse as PropertyDef::Union: {prop:?}"
+                    );
+                }
+                "Inline object literal" => {
+                    let atom = grammar::parse_type_expr("test", d.example)
+                        .expect("inline-object example must parse as a type expression");
+                    assert!(
+                        matches!(atom.ty, TypeExpr::InlineObject(_)),
+                        "Inline object literal example did not parse as TypeExpr::InlineObject: {:?}",
+                        atom.ty
+                    );
+                }
+                other => panic!("unexpected shape descriptor: {other}"),
+            }
+        }
+    }
+}

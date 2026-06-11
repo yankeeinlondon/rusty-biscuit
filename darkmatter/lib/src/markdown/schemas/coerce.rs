@@ -35,6 +35,15 @@ pub enum CoercionTarget {
     ToString,
     /// An array whose elements coerce by the inner target.
     Array(Box<CoercionTarget>),
+    /// An inline object fragment: recurse into the named properties. Each
+    /// property's value is coerced by the corresponding target; properties
+    /// not listed are left untouched.
+    ///
+    /// The schema shape is `{"type":"object","properties":{...},
+    /// "additionalProperties":false}` — the form `convert::inline_object_fragment`
+    /// emits. The opaque `object` keyword (no `properties`) is outside the
+    /// matrix and yields `None` from `coercion_target`.
+    Object(Vec<(String, CoercionTarget)>),
 }
 
 /// Result of coercing a whole instance against a schema.
@@ -50,9 +59,23 @@ pub struct CoercionOutcome {
 /// `None` when the fragment is outside the coercion matrix.
 ///
 /// Only the specific shapes [`super::simplified::convert`] emits are
-/// recognized; anything else (objects, `any`, bare enums, multi-type `type`
-/// arrays, generic `string|number` unions) yields `None` and is left to the
-/// validator untouched.
+/// recognized; anything else (opaque `object`, `any`, bare enums, multi-type
+/// `type` arrays, generic unions not matching boolish/numberlike) yields
+/// `None` and is left to the validator untouched.
+///
+/// Inline object fragments (`{"type":"object","properties":{...},
+/// "additionalProperties":false}`) are recognized and yield
+/// [`CoercionTarget::Object`] so the coercion engine can recurse into the
+/// named properties. An inline object with an unrecognised property type
+/// yields `None` for the whole object — mixing recognisable and
+/// unrecognisable children in a single object defeats the unambiguous path
+/// the matrix guarantees.
+///
+/// Per-arm coercion for property-level unions is handled by
+/// [`coerce_object`], which calls `coerce_property_union` directly when it
+/// encounters an `anyOf` at a property position. The specific boolish /
+/// numberlike shapes (the only `anyOf` forms Darkmatter itself emits at the
+/// property level today) are matched here for the matrix lookup.
 pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
     let obj = property_schema.as_object()?;
 
@@ -74,9 +97,30 @@ pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
             let inner = coercion_target(items)?;
             Some(CoercionTarget::Array(Box::new(inner)))
         }
-        // "object" and anything else fall outside the matrix.
+        "object" => inline_object_target(obj),
+        // "any" and anything else fall outside the matrix.
         _ => None,
     }
+}
+
+/// Builds an [`CoercionTarget::Object`] from the inline object fragment's
+/// `properties` map, or returns `None` if any property schema is outside the
+/// coercion matrix. An opaque `object` (no `properties` field) is not an
+/// inline object and yields `None`.
+fn inline_object_target(obj: &Map<String, Value>) -> Option<CoercionTarget> {
+    let props = obj.get("properties").and_then(Value::as_object)?;
+    if props.is_empty() {
+        // An empty inline object (`{}`) carries no coercions; recognising
+        // it as `Object([])` would be a no-op pass-through, so yield `None`
+        // to keep the matrix narrow.
+        return None;
+    }
+    let mut inner = Vec::with_capacity(props.len());
+    for (k, v) in props {
+        let target = coercion_target(v)?;
+        inner.push((k.clone(), target));
+    }
+    Some(CoercionTarget::Object(inner))
 }
 
 /// Recognizes the two `anyOf` shapes Darkmatter emits, matching them *exactly*
@@ -229,6 +273,18 @@ fn arm_accepts(validator: &Validator, candidate: &Value, shell_pending: &HashSet
 /// Non-union object pass: coerce each instance property that the schema
 /// declares with a recognized target. Properties absent from the schema or
 /// instance, or with no recognized target, are untouched.
+///
+/// For each declared property:
+/// 1. [`coercion_target`] is consulted first. It recognises the single-type
+///    forms (`string`, `boolean`, …) plus the specific boolish / numberlike
+///    `anyOf` shapes — and inline object fragments with recursable
+///    properties (Phase 2). When it returns a target, that target is used.
+/// 2. If `coercion_target` returns `None` but the property schema is an
+///    `anyOf` of multiple arms, [`coerce_property_union`] is tried: each
+///    arm gets a coerced candidate, the candidate is validated against the
+///    arm, and the original value is replaced only when exactly one arm's
+///    candidate validates. The spec's "no guessing" rule (zero or multiple
+///    matches leave the value untouched) is enforced there.
 fn coerce_object(schema: &Value, instance: &Value) -> CoercionOutcome {
     let (Some(props), Some(obj)) = (
         schema.get("properties").and_then(Value::as_object),
@@ -246,10 +302,21 @@ fn coerce_object(schema: &Value, instance: &Value) -> CoercionOutcome {
         let Some(prop_schema) = props.get(name) else {
             continue;
         };
-        let Some(target) = coercion_target(prop_schema) else {
+        // 1. Specific shape: single-type, inline object, or boolish/numberlike
+        //    anyOf. `coercion_target` returns a single coherent target so the
+        //    per-arm pass below is unnecessary.
+        if let Some(target) = coercion_target(prop_schema) {
+            if let Some(coerced) = coerce_value(&target, value) {
+                out.insert(name.clone(), coerced);
+                changed = true;
+            }
             continue;
-        };
-        if let Some(coerced) = coerce_value(&target, value) {
+        }
+        // 2. Property-level union with per-arm coercion. Only reached when the
+        //    `anyOf` is not a boolish / numberlike / specific-shape match.
+        if let Some(arm_schemas) = prop_schema.get("anyOf").and_then(Value::as_array)
+            && let Some(coerced) = coerce_property_union(arm_schemas, value)
+        {
             out.insert(name.clone(), coerced);
             changed = true;
         }
@@ -261,7 +328,41 @@ fn coerce_object(schema: &Value, instance: &Value) -> CoercionOutcome {
     }
 }
 
-/// Applies a scalar/array coercion target to one value.
+/// Per-arm coercion for a property-level union schema.
+///
+/// For each arm:
+/// 1. Compute the arm's [`CoercionTarget`] via [`coercion_target`].
+/// 2. Build a candidate value by applying the target (or, if the arm is
+///    outside the matrix, fall back to the original value).
+/// 3. Validate the candidate against the arm schema.
+///
+/// The candidate is committed only when **exactly one** arm's candidate
+/// validates — preserving the spec's "no guessing" rule for ambiguous
+/// unions (multiple matching arms) and zero-match unions (no arm can
+/// accept the value). An arm whose validator fails to compile is skipped
+/// without affecting the outcome.
+fn coerce_property_union(arms: &[Value], value: &Value) -> Option<Value> {
+    let mut valid_candidates: Vec<Value> = Vec::new();
+    for arm in arms {
+        let candidate = match coercion_target(arm) {
+            Some(target) => coerce_value(&target, value).unwrap_or_else(|| value.clone()),
+            None => value.clone(),
+        };
+        let Ok(validator) = build_validator(arm) else {
+            continue;
+        };
+        if validator.is_valid(&candidate) {
+            valid_candidates.push(candidate);
+        }
+    }
+    if valid_candidates.len() == 1 {
+        valid_candidates.pop()
+    } else {
+        None
+    }
+}
+
+/// Applies a scalar/array/object coercion target to one value.
 ///
 /// Returns `Some(replacement)` when the value was converted, `None` to leave it
 /// untouched. The scalar rules only fire on a *mismatched* JSON type, so an
@@ -273,6 +374,7 @@ fn coerce_value(target: &CoercionTarget, value: &Value) -> Option<Value> {
         CoercionTarget::ToNumber => coerce_to_number(value),
         CoercionTarget::ToString => coerce_to_string(value),
         CoercionTarget::Array(inner) => coerce_array(inner, value),
+        CoercionTarget::Object(props) => coerce_inline_object(props, value),
     }
 }
 
@@ -330,6 +432,34 @@ fn coerce_array(inner: &CoercionTarget, value: &Value) -> Option<Value> {
         }
     }
     changed.then_some(Value::Array(out))
+}
+
+/// Recursively coerces the named properties of an inline object value.
+///
+/// Only the properties listed in `props` are inspected; properties in
+/// `value` that the schema does not declare are passed through untouched.
+/// The returned value is `Some(coerced_object)` only when at least one
+/// listed property was actually converted — this keeps the recursion
+/// idempotent and lets the caller set [`CoercionOutcome::changed`] cheaply.
+fn coerce_inline_object(
+    props: &[(String, CoercionTarget)],
+    value: &Value,
+) -> Option<Value> {
+    let Value::Object(obj) = value else {
+        return None;
+    };
+    let mut out = obj.clone();
+    let mut changed = false;
+    for (name, inner_target) in props {
+        let Some(field) = obj.get(name) else {
+            continue;
+        };
+        if let Some(coerced) = coerce_value(inner_target, field) {
+            out.insert(name.clone(), coerced);
+            changed = true;
+        }
+    }
+    changed.then_some(Value::Object(out))
 }
 
 /// Mirrors `^-?\d+(\.\d+)?$` exactly without compiling a runtime regex: an
@@ -883,6 +1013,255 @@ mod tests {
             }
         });
         let instance = json!({ "a": null, "b": [1, 2], "c": {"k": "v"} });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(!outcome.changed);
+        assert_eq!(outcome.value, instance);
+    }
+
+    // ── Inline object coercion (Phase 2) ────────────────────────────────
+
+    #[test]
+    fn recognizes_inline_object_fragment() {
+        // The shape `convert::inline_object_fragment` emits:
+        // `{"type":"object","properties":{...},"additionalProperties":false}`.
+        let frag = json!({
+            "type": "object",
+            "properties": {
+                "enabled": {"type": "boolean"},
+                "retries": {"type": "number"}
+            },
+            "additionalProperties": false
+        });
+        match coercion_target(&frag) {
+            Some(CoercionTarget::Object(props)) => {
+                assert_eq!(props.len(), 2);
+                assert!(props.iter().any(|(k, t)| k == "enabled" && *t == CoercionTarget::ToBoolean));
+                assert!(props.iter().any(|(k, t)| k == "retries" && *t == CoercionTarget::ToNumber));
+            }
+            other => panic!("expected Object, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn opaque_object_without_properties_is_not_recognised() {
+        // The opaque `object` keyword (no `properties`) is outside the
+        // matrix — coercion must not recurse into it.
+        assert_eq!(coercion_target(&json!({"type": "object"})), None);
+    }
+
+    #[test]
+    fn inline_object_with_unrecognised_property_is_not_recognised() {
+        // A nested property whose schema is outside the matrix disqualifies
+        // the whole inline object from the matrix — mixing recognised and
+        // unrecognised children defeats the unambiguous path.
+        let frag = json!({
+            "type": "object",
+            "properties": {
+                "ok": {"type": "boolean"},
+                "weird": {"type": "object"} // opaque nested object, not in matrix
+            },
+            "additionalProperties": false
+        });
+        assert_eq!(coercion_target(&frag), None);
+    }
+
+    #[test]
+    fn inline_object_value_coerces_declared_properties() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "retries": {"type": "number"}
+                    },
+                    "additionalProperties": false
+                }
+            }
+        });
+        let instance = json!({
+            "config": {
+                "enabled": "true",
+                "retries": "3",
+                "untouched": "x"
+            }
+        });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["config"]["enabled"], json!(true));
+        assert_eq!(outcome.value["config"]["retries"], json!(3));
+        // Properties not declared by the schema are left untouched.
+        assert_eq!(outcome.value["config"]["untouched"], json!("x"));
+    }
+
+    #[test]
+    fn inline_object_value_with_no_coercible_fields_unchanged() {
+        // Every nested property is already the right type — no coercion
+        // happens, and the function reports `changed: false`.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "label": {"type": "string"}
+                    },
+                    "additionalProperties": false
+                }
+            }
+        });
+        let instance = json!({
+            "config": {
+                "enabled": true,
+                "label": "ready"
+            }
+        });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(!outcome.changed);
+        assert_eq!(outcome.value, instance);
+    }
+
+    #[test]
+    fn inline_object_value_must_be_object_to_recurse() {
+        // The inline object fragment expects an object value; any other
+        // JSON type is left alone and the validator handles it.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"}
+                    },
+                    "additionalProperties": false
+                }
+            }
+        });
+        let instance = json!({ "config": "not-an-object" });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(!outcome.changed);
+        assert_eq!(outcome.value, instance);
+    }
+
+    #[test]
+    fn array_of_inline_objects_coerces_per_item() {
+        // `{ enabled: boolean }[]` produces an array target whose inner
+        // target is `Object([("enabled", ToBoolean)])`. Each item's
+        // `enabled` is coerced independently.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "authors": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "active": {"type": "boolean"},
+                            "score": {"type": "number"}
+                        },
+                        "additionalProperties": false
+                    }
+                }
+            }
+        });
+        let instance = json!({
+            "authors": [
+                { "active": "true", "score": "4.5" },
+                { "active": "false", "score": "-1" }
+            ]
+        });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["authors"][0]["active"], json!(true));
+        assert_eq!(outcome.value["authors"][0]["score"], json!(4.5));
+        assert_eq!(outcome.value["authors"][1]["active"], json!(false));
+        assert_eq!(outcome.value["authors"][1]["score"], json!(-1));
+    }
+
+    // ── Per-arm coercion for property-level unions (Phase 2) ───────────
+
+    #[test]
+    fn per_arm_coercion_commits_unambiguous_inline_object_arm() {
+        // Schema: an inline object arm + a string arm. The value is an
+        // object with a numeric string for `count`; only the inline
+        // object arm's coerced candidate validates.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "metadata": {
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "key": {"type": "string"},
+                                "count": {"type": "number"}
+                            },
+                            "additionalProperties": false
+                        },
+                        {"type": "string"}
+                    ]
+                }
+            }
+        });
+        let instance = json!({
+            "metadata": { "key": "visits", "count": "42" }
+        });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["metadata"]["key"], json!("visits"));
+        assert_eq!(outcome.value["metadata"]["count"], json!(42));
+    }
+
+    #[test]
+    fn per_arm_coercion_leaves_zero_match_value_untouched() {
+        // An array value is not coercible into the inline object arm
+        // (it's not an object) and not coercible into the string arm
+        // (it's not a scalar). Per-arm coercion produces no candidate,
+        // so the original value is left for the validator to reject.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "metadata": {
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "key": {"type": "string"},
+                                "count": {"type": "number"}
+                            },
+                            "additionalProperties": false
+                        },
+                        {"type": "string"}
+                    ]
+                }
+            }
+        });
+        let instance = json!({ "metadata": ["a", "b"] });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(!outcome.changed);
+        assert_eq!(outcome.value, instance);
+    }
+
+    #[test]
+    fn per_arm_coercion_leaves_ambiguous_value_untouched() {
+        // `"42"` is itself a string and matches the string arm directly;
+        // `"42"` also coerces to `42` and matches the number arm. Two
+        // arms validate after coercion, so the value is left alone
+        // (no guessing).
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "count": {
+                    "anyOf": [
+                        {"type": "number"},
+                        {"type": "string"}
+                    ]
+                }
+            }
+        });
+        let instance = json!({ "count": "42" });
         let outcome = coerce_frontmatter(&schema, &instance);
         assert!(!outcome.changed);
         assert_eq!(outcome.value, instance);

@@ -43,6 +43,7 @@
 //! [`Constraint`]: crate::markdown::schemas::simplified::Constraint
 //! [`SchemaError`]: crate::markdown::schemas::errors::SchemaError
 
+pub mod about;
 pub mod coerce;
 pub mod completion;
 pub mod detect;
@@ -62,12 +63,18 @@ use serde_json::Value;
 
 use crate::markdown::{Markdown, compose::ComposeSource};
 
+pub use about::{
+    CoercionRuleDescriptor, InlineObjectRuleDescriptor, SchemaConstraintDescriptor, SchemaShapeDescriptor,
+    SchemaTypeDescriptor, ValidationBehaviorDescriptor, coercion_rule_descriptors,
+    inline_object_rule_descriptors, schema_constraint_descriptors, schema_shape_descriptors,
+    schema_type_descriptors, validation_behavior_descriptors,
+};
 pub use completion::{CompletionKind, CompletionSuggestion};
 pub use detect::{DetectOptions, detect_from_document, detect_schema, schema_to_yaml};
 pub use errors::SchemaError;
 pub use simplified::{
     Constraint, DRAFT_2020_12, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SimplifiedType, parse_yaml_schema, to_json_schema,
+    SimplifiedType, TypeExpr, parse_yaml_schema, to_json_schema,
 };
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
@@ -491,7 +498,7 @@ mod tests {
                 m.insert(
                     "owner".into(),
                     PropertyDef::Single(PropertyAtom {
-                        ty: SimplifiedType::String,
+                        ty: TypeExpr::Primitive(SimplifiedType::String),
                         is_array: false,
                         constraints: vec![Constraint::Required],
                         array_constraints: vec![],
@@ -521,7 +528,7 @@ mod tests {
                 m.insert(
                     "owner".into(),
                     PropertyDef::Single(PropertyAtom {
-                        ty: SimplifiedType::String,
+                        ty: TypeExpr::Primitive(SimplifiedType::String),
                         is_array: false,
                         constraints: vec![Constraint::Required],
                         array_constraints: vec![],
@@ -596,7 +603,7 @@ mod tests {
                 m.insert(
                     "enabled".into(),
                     PropertyDef::Single(PropertyAtom {
-                        ty: SimplifiedType::Boolean,
+                        ty: TypeExpr::Primitive(SimplifiedType::Boolean),
                         is_array: false,
                         constraints: vec![],
                         array_constraints: vec![],

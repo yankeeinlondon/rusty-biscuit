@@ -5503,7 +5503,7 @@ Rounded: {{ round(pi) }}"#;
             use crate::markdown::compose::CacheAccessMode;
             use crate::markdown::schemas::{
                 Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
-                SimplifiedType,
+                SimplifiedType, TypeExpr,
             };
             use indexmap::IndexMap;
 
@@ -5512,7 +5512,7 @@ Rounded: {{ round(pi) }}"#;
                 properties.insert(
                     prop.into(),
                     PropertyDef::Single(PropertyAtom {
-                        ty: SimplifiedType::String,
+                        ty: TypeExpr::Primitive(SimplifiedType::String),
                         is_array: false,
                         constraints: vec![Constraint::Required],
                         array_constraints: vec![],

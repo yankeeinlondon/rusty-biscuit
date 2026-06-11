@@ -18,6 +18,7 @@ pub use convert::{DRAFT_2020_12, to_json_schema};
 pub use serialize::serialize_property_atom;
 pub use types::{
     Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
+    TypeExpr,
 };
 
 use indexmap::IndexMap;
@@ -221,8 +222,8 @@ mod tests {
         match foo {
             PropertyDef::Union(arms) => {
                 assert_eq!(arms.len(), 2);
-                assert_eq!(arms[0].ty, SimplifiedType::String);
-                assert_eq!(arms[1].ty, SimplifiedType::Number);
+                assert_eq!(arms[0].ty, TypeExpr::Primitive(SimplifiedType::String));
+                assert_eq!(arms[1].ty, TypeExpr::Primitive(SimplifiedType::Number));
             }
             _ => panic!("expected Union"),
         }
