@@ -4,6 +4,34 @@ phases: 4
 created: "2026-06-10"
 start_phase: 1
 hash: ""
+source_code:
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/schemas/detect.rs
+  - darkmatter/lib/src/markdown/schemas/completion.rs
+  - darkmatter/lib/src/markdown/schemas/coerce.rs
+  - darkmatter/lib/src/markdown/schemas/about.rs
+  - darkmatter/lib/src/markdown/compose/schema_validation.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/cache/hashing.rs
+  - darkmatter/cli/src/args.rs
+  - darkmatter/cli/src/commands.rs
+  - darkmatter/cli/src/commands/schema/mod.rs
+  - darkmatter/cli/src/commands/schema/about.rs
+  - darkmatter/cli/src/commands/schema/assignment.rs
+  - darkmatter/lib/tests/schemas_grammar_proptest.rs
+  - darkmatter/lib/tests/schemas_convert_snapshots.rs
+  - darkmatter/cli/tests/schema_about.rs
+documentation:
+  - darkmatter/docs/topics/schema-definition.md
+  - darkmatter/lib/src/markdown/schemas/about.rs
+packages:
+  - darkmatter
+  - darkmatter-cli
 source_files_during_phase_1:
   - darkmatter/lib/src/markdown/schemas/simplified/types.rs
   - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
@@ -60,9 +88,12 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
-packages:
-  - darkmatter
-  - darkmatter-cli
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+docs_updated_during_phase_4:
+  - darkmatter/docs/topics/schema-definition.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 ---
 
 # Execution Plan: Inline Nested Object Schemas in SimplifiedSchema
@@ -136,21 +167,21 @@ Add inline object literal syntax to the SimplifiedSchema grammar, compile it to 
 
 **Parallelizable:** Documentation update can happen in parallel with final integration testing if Phase 3 is complete.
 
-- [ ] Update `darkmatter/docs/topics/schema-definition.md` with inline object syntax, postfix constraints, identifier rules, description comma limits, nested coercion, and 32-level nesting limit
-- [ ] Document `md schema about` as the implementation-bound CLI reference
-- [ ] Update YAML-shape layer error wording in `mod.rs` for mapping values
-- [ ] Run the full darkmatter test suite (unit + integration)
-- [ ] Run `md schema validate` and `md compose` against example schemas from the spec to verify end-to-end behavior
-- [ ] **Validation checkpoint:** Full test suite passes; no regressions in existing v1 schemas
+- [x] Update `darkmatter/docs/topics/schema-definition.md` with inline object syntax, postfix constraints, identifier rules, description comma limits, nested coercion, and 32-level nesting limit
+- [x] Document `md schema about` as the implementation-bound CLI reference
+- [x] Update YAML-shape layer error wording in `mod.rs` for mapping values
+- [x] Run the full darkmatter test suite (unit + integration)
+- [x] Run `md schema validate` and `md compose` against example schemas from the spec to verify end-to-end behavior
+- [x] **Validation checkpoint:** Full test suite passes; no regressions in existing v1 schemas
 
 ---
 
 ## Risk Mitigation Checkpoints
 
-- [ ] **Grammar ambiguity** — Verify `{` is rejected inside constraint argument lists (existing behavior)
-- [ ] **Parser recursion depth** — Verify depth 33 returns `SchemaError::Grammar` (test in Phase 1)
-- [ ] **`additionalProperties: false` surprise** — Verify opaque `object` still compiles without `additionalProperties: false` (backward-compat test in Phase 2)
-- [ ] **Property-level union hoisting** — Verify inner `required` stays inside inline object fragment, not hoisted to property level (conversion test in Phase 2)
+- [x] **Grammar ambiguity** — Verify `{` is rejected inside constraint argument lists (existing behavior)
+- [x] **Parser recursion depth** — Verify depth 33 returns `SchemaError::Grammar` (test in Phase 1)
+- [x] **`additionalProperties: false` surprise** — Verify opaque `object` still compiles without `additionalProperties: false` (backward-compat test in Phase 2)
+- [x] **Property-level union hoisting** — Verify inner `required` stays inside inline object fragment, not hoisted to property level (conversion test in Phase 2)
 
 ---
 
