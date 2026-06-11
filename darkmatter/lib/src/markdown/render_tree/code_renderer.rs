@@ -103,11 +103,9 @@ impl CodeRenderer for TerminalCodeRenderer {
         };
         let highlighter = match self.terminal.as_ref() {
             Some(term) => CodeHighlighter::for_code_block(code_theme, term, Some(code_theme)),
-            None => CodeHighlighter::for_code_block_mode(
-                code_theme,
-                terminal_mode,
-                Some(code_theme),
-            ),
+            None => {
+                CodeHighlighter::for_code_block_mode(code_theme, terminal_mode, Some(code_theme))
+            }
         };
         // Header/body contrast keys off the resolved theme background, not the
         // requested mode, so single-variant themes still get readable chrome.
