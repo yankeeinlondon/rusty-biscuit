@@ -17,7 +17,9 @@ target_schema:
     logs_directory: { macos: string, windows: string, linux: string }
     log_format: enum(jsonl)
     has_desktop_app: boolean(required)
-    desktop_logs: { same_log_format: boolean, same_directory: boolean }
+    desktop_logs: 
+        same_log_format: boolean
+        same_directory: boolean
     changes: string[]
     requires_claudine_update: boolean(required)
     reason: string
