@@ -33,6 +33,37 @@ It assumes the reader understands the render-tree migration, but it should also
 be useful as a north star for future library callers: code is rendered with
 `CodeBlock`, and Markdown documents are rendered with `DarkmatterPage`.
 
+## Motivating Defect
+
+The concrete defect that motivates this consolidation: in a **dark** terminal,
+fenced code blocks fail to separate from the page — the panel inverts against
+the wrong reference and syntax contrast is poor. A **light** terminal renders
+correctly. The asymmetry is the tell.
+
+Root cause is **two independent color-mode sources**, not a foreground/background
+split (the panel's foreground and background always come from one
+`CodeHighlighter`, so they agree by construction):
+
+- The **page surface** mode is resolved from the real `Terminal::color_mode`
+  (full OSC + macOS `AppleInterfaceStyle` detection).
+- The **code panel** mode is resolved from `options.color_mode`, which the CLI
+  fills from the env-only `detect_color_mode()` (`NO_COLOR` / `COLORFGBG`,
+  default dark) — and `entrypoints.rs` rebuilds the renderer's `Terminal` from
+  that option, discarding the real terminal mode.
+
+When the two detectors agree (the common default) output is consistent, which is
+why light mode looks correct. When they disagree, the panel inverts against the
+wrong mode and the page's subtle surface fill shows around a mis-inverted panel.
+The same divergence exists on the browser path (the panel-background stylesheet
+and the inline highlighter spans resolve their mode independently).
+
+This is structurally a duplication problem: code-block theme/mode is decided in
+many places (four `ThemePair::for_*` wrappers, four `CodeHighlighter::for_*`
+constructors — one of which inverts the mode twice — plus the renderer's own
+mode plumbing and a separate CLI detector). Decision #4 (single source) and
+Decision #8 (resolve once at the component boundary) eliminate the divergence by
+construction; the simplification and the fix are the same change.
+
 ## Goals & Non-Goals
 
 **Goals**
@@ -45,6 +76,13 @@ be useful as a north star for future library callers: code is rendered with
   the tree too and adds `BrowserRenderable`.
 - Centralize `ThemePair -> Theme` resolution so production code resolves themes
   in one place per component.
+- Collapse the duplicated code-block theme/mode resolution — today spread across
+  four `ThemePair::for_*` wrappers, four `CodeHighlighter::for_*` constructors
+  (with a redundant double inversion), the renderer's own mode plumbing, and a
+  separate CLI `detect_color_mode()` source — into a single boundary resolver
+  that produces a resolved `(Theme, ColorMode)` pair and hands it to
+  `CodeHighlighter::from_theme(theme, mode)`. This is both the DRY win and the
+  fix for the Motivating Defect.
 - Make `Terminal` the source of truth for terminal color mode.
 - Make browser rendering use an explicit page color mode, defaulting to dark.
 - Replace `YamlBlock` behavior with `CodeBlock::yaml(...)`, then deprecate and
@@ -85,7 +123,11 @@ be useful as a north star for future library callers: code is rendered with
   code to the same `CodeBlock` path.
 - **Decision #4** - `Terminal` is the source of truth for terminal color mode.
   Terminal rendering must not re-detect or infer color mode from lower-level
-  options when a `Terminal` is available.
+  options when a `Terminal` is available. The **same** `Terminal::color_mode`
+  value must feed both the page surface and the nested code panel; the render
+  path must not derive a second, independent mode (for example via the env-only
+  `detect_color_mode()`) for the code panel. The Motivating Defect below is a
+  direct violation of this rule.
 - **Decision #5** - Browser rendering uses explicit page color mode, defaulting
   to `ColorMode::Dark`.
 - **Decision #6** - `ColorMode::Unknown` is treated as dark for page/prose
@@ -110,7 +152,12 @@ be useful as a north star for future library callers: code is rendered with
   `Markdown::as_terminal(default)`. Refactors must keep terminal and browser
   output stable against that oracle unless a visible change is explicitly called
   out and accepted. Real-terminal (L2) captures are compared semantically, not
-  byte-for-byte (see Testing Requirements).
+  byte-for-byte (see Testing Requirements). **Accepted visible change:** the
+  dark-terminal code-block contrast fix (Motivating Defect) intentionally changes
+  current dark-mode output. Parity must not freeze the buggy dark-mode panel;
+  affected baselines (for example the `pronounced` browser snapshot) are
+  re-captured as part of this feature, and the dark-mode fix is validated by the
+  new cross-surface contrast test rather than held to the old bytes.
 - **Decision #13** - CLI rendering commands use the same `DarkmatterPage` and
   `CodeBlock` components as library callers. The CLI must not retain parallel
   rendering implementations for page layout or code-block output.
@@ -561,6 +608,15 @@ Darkmatter theme/code-block policy.
 - Remove or demote `for_page_mode()` / `for_code_block_mode()` from production
   terminal paths.
 - Make highlighters accept resolved themes only.
+- Fix the Motivating Defect's dual color-mode source: route the **same**
+  `Terminal::color_mode` into both the page surface and the code panel, and stop
+  using the env-only `detect_color_mode()` (and the
+  `term.color_mode = opts.color_mode` rebuild) in the render path.
+- Collapse the four `ThemePair::for_*` wrappers and the four
+  `CodeHighlighter::for_*` constructors (eliminating the double inversion) into
+  the single boundary resolver + `CodeHighlighter::from_theme(theme, mode)`.
+- Re-baseline snapshots invalidated by the accepted dark-mode contrast fix (for
+  example the `pronounced` browser snapshot).
 
 ### Phase 3 - Extend `DarkmatterPage` to browser + tree
 
@@ -612,6 +668,16 @@ Darkmatter theme/code-block policy.
   code, language, metadata, theme, and surface.
 - Terminal tests must verify that dark terminals use the inverse code-block
   theme and light terminals use the opposite inverse.
+- A **cross-surface contrast** test must render a full `DarkmatterPage` and
+  assert that the code-panel background luminance is well-separated from the
+  page-surface luminance, in **both** light and dark modes. This is the
+  assertion that catches the Motivating Defect; the existing in-isolation
+  luminosity check (`assert_lighter`) and the `code_renderer` tests do not,
+  because they feed one mode into both surfaces and never cross the page↔panel
+  boundary (and the `code_renderer` tests accept `with_page_surface(...)` colors
+  the renderer never reads). The test must drive a case where the real
+  `Terminal` mode and any option-derived mode would disagree, to prove the
+  single-source rule (Decision #4) holds.
 - Browser tests must verify that the default browser page mode is dark and that
   code blocks resolve against the inverse mode.
 - CLI tests for `md render` must verify the margin, width, max-width,
@@ -670,6 +736,9 @@ characterization oracle above, not to captured frames.
   page-framed output.
 - All code-block output flows through one implementation.
 - Theme resolution for terminal rendering always starts from `Terminal`.
+- Code blocks visibly separate from the page in **both** light and dark
+  terminals — the Motivating Defect is fixed and guarded by the cross-surface
+  contrast test, with a single `Terminal::color_mode` feeding page and panel.
 - Browser rendering has an explicit dark default.
 - `md render` exposes page-level tree-renderer style controls through
   `DarkmatterPage`.
