@@ -42,6 +42,17 @@ impl ColorMode {
             ColorMode::Dark | ColorMode::Unknown => ColorMode::Light,
         }
     }
+
+    /// Because we want `ColorMode` to represent a truthful state
+    /// we have allowed an **Unknown** state but sometimes that state
+    /// gets in the way and we need to resolve to `ColorMode::Unknown`
+    /// to `ColorMode::Dark`
+    pub const fn resolve_unknown(self) -> Self {
+        match self {
+            ColorMode::Unknown => ColorMode::Dark,
+            _ => self,
+        }
+    }
 }
 
 /// Detect the terminal's color depth capability.
