@@ -477,7 +477,7 @@ For property-level unions, coercion is attempted per arm. The compose stage buil
 
 The same conservative rules apply at every nested level — coercion never fires on array- or object-typed values, never crosses a property boundary, and never produces a false accept on a value that is genuinely the wrong type.
 
-## CLI: `md schema about`
+## CLI: `md schema validate`
 
 ```
 md schema validate <FILE_OR_PROP=VALUE>... [--schema <path>] [--format pretty|json] [--quiet]
