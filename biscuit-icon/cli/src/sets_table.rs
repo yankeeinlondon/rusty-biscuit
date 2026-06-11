@@ -379,6 +379,70 @@ mod tests {
     }
 
     #[test]
+    fn title_with_special_chars_is_escaped_through_prose() {
+        // Prose grammar treats `<` and `>` as tag delimiters and `&`/`"` as
+        // markup-friendly text — a title containing any of them must be
+        // escape-quoted by `Prose::escape_text`/`Prose::quoted_attr` so the
+        // render tree never sees them as raw markup. The hyperlink itself
+        // still wraps the (now-escaped) label.
+        let rows = vec![SetRow {
+            prefix: "mdi".into(),
+            title: "Set <with> & \"special\" chars".into(),
+            total: Some(7447),
+            cached: 0,
+        }];
+        let t = Terminal::builder()
+            .width(120)
+            .height(20)
+            .is_tty(true)
+            .osc_link_support(true)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::TrueColor)
+            .build();
+        let output = render_sets(&rows, &t);
+
+        assert!(
+            !output.contains("<blue>") && !output.contains("<a href"),
+            "raw Prose tags must not leak; got:\n{output}"
+        );
+
+        assert!(
+            output.contains("https://icon-sets.iconify.design/mdi"),
+            "OSC8 link to the set's Iconify page must still be emitted; got:\n{output}"
+        );
+
+        assert!(
+            output.contains("Set <with> & \"special\" chars"),
+            "title text must survive the escape pipeline unaltered; got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn set_title_emits_blue_sgr_in_osc8_output() {
+        // The spec calls for `<blue><a href=…>{set-name}</a></blue>`, which
+        // lowers to SGR 34 around the link. This pins the wiring — if the
+        // Prose pipeline ever drops the blue wrapper, the assertion catches
+        // it before a user does.
+        let rows = vec![SetRow {
+            prefix: "mdi".into(),
+            title: "Material Design Icons".into(),
+            total: Some(7447),
+            cached: 0,
+        }];
+        let t = Terminal::builder()
+            .width(120)
+            .height(20)
+            .is_tty(true)
+            .osc_link_support(true)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::TrueColor)
+            .build();
+        let output = render_sets(&rows, &t);
+        assert!(
+            output.contains("\x1b[34m"),
+            "expected the blue basic SGR (ESC[34m) in the OSC8 path; got:\n{output}"
+        );
+    }
+
+    #[test]
     fn wide_and_tall_uses_single_table() {
         let rows = test_rows(5);
         let t = term(120, 20); // 20 height -> 16 rows per table, 5 fits
