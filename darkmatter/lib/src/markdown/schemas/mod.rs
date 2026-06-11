@@ -20,6 +20,7 @@
 //!   validators (`x-darkmatter-match`, `x-darkmatter-url-scheme`).
 //! - [`validate`] — `Validator` construction + LRU [`ValidatorCache`].
 //! - [`resolve`] — `$schema` resolution and baseline merge.
+//! - [`about`] — typed descriptor catalog that backs `md schema about`.
 //! - [`errors`] — [`SchemaError`].
 //!
 //! ## Example
