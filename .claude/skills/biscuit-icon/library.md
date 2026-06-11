@@ -101,6 +101,7 @@ the renderable tree.
 - `nerd_font_char() -> Option<char>` — the Nerd Font codepoint, if the
   curated variant defines one.
 - `svg() -> String` — the assembled, styled `<svg>` string.
+- `css() -> String` — the styled SVG percent-encoded as a CSS `url('data:image/svg+xml,...')` data URI.
 
 ## `Source`
 
