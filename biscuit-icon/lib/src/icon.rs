@@ -153,7 +153,30 @@ impl Icon {
         self.style.assemble(&self.body)
     }
 
-    // --- styling builders ---
+    /// Assembles the styled SVG and returns it as a CSS `url()` data URI.
+    ///
+    /// Percent-encodes characters that are unsafe in a CSS URL literal:
+    /// `#`, `<`, `>`, `"`, `'`, plus ASCII whitespace.
+    #[must_use]
+    pub fn css(&self) -> String {
+        let svg = self.svg();
+        let mut out = String::with_capacity(svg.len() * 2);
+        for c in svg.chars() {
+            match c {
+                '#' => out.push_str("%23"),
+                '<' => out.push_str("%3C"),
+                '>' => out.push_str("%3E"),
+                '"' => out.push_str("%22"),
+                '\'' => out.push_str("%27"),
+                ' ' => out.push_str("%20"),
+                '\n' => out.push_str("%0A"),
+                '\t' => out.push_str("%09"),
+                '\r' => out.push_str("%0D"),
+                c => out.push(c),
+            }
+        }
+        format!("url('data:image/svg+xml,{out}')")
+    }
 
     /// Sets the CSS color (drives `currentColor` for monochrome icons).
     #[must_use]
@@ -329,6 +352,33 @@ mod tests {
         assert_eq!(icon.id(), "ic:baseline-apple");
     }
 
+    #[test]
+    fn css_wraps_encoded_svg_in_url() {
+        use crate::domain::DomainIcon;
+        let css = Os::Apple.icon().color("#d97706").css();
+        assert!(css.starts_with("url('data:image/svg+xml,"), "expected CSS url() prefix; got: {css}");
+        assert!(css.contains("%23d97706"), "expected percent-encoded hex color; got: {css}");
+        assert!(!css.contains('#'), "raw # must be encoded; got: {css}");
+        assert!(!css.contains('\n'), "raw newline must be encoded; got: {css}");
+    }
+
+    #[test]
+    fn css_encodes_url_hostile_characters() {
+        let body = crate::body::IconBody::new(
+            "<path d=\"M0 0\" fill=\"#fff\" title=\"it's ok\"/>",
+            24,
+            24,
+        );
+        let icon = Icon::from_network("test:icon", body);
+        let css = icon.css();
+        assert!(css.contains("%3C"), "expected encoded <; got: {css}");
+        assert!(css.contains("%3E"), "expected encoded >; got: {css}");
+        assert!(css.contains("%22"), "expected encoded double quote; got: {css}");
+        assert!(css.contains("%27"), "expected encoded single quote; got: {css}");
+        assert!(css.contains("%20"), "expected encoded space; got: {css}");
+        assert!(css.contains("%23"), "expected encoded #; got: {css}");
+    }
+
     #[tokio::test]
     async fn iconify_with_non_zero_origin_persists_through_cache() {
         use wiremock::matchers::{method, path, query_param};
@@ -358,5 +408,52 @@ mod tests {
         let cached = Icon::iconify_with("custom:logo", &cache, &client).await.unwrap();
         let cached_svg = cached.svg();
         assert!(cached_svg.contains("viewBox=\"10 20 32 32\""), "expected non-zero viewBox after cache hit; got: {cached_svg}");
+    }
+
+    #[tokio::test]
+    async fn offline_resize_obligation_test() {
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        use crate::domain::Os;
+
+        // 1. Curated icon test:
+        let curated = Os::Apple.icon().width("64").height("64");
+        let svg = curated.svg();
+        assert!(svg.contains("width=\"64\""), "expected width=\"64\"; got: {svg}");
+        assert!(svg.contains("height=\"64\""), "expected height=\"64\"; got: {svg}");
+        assert!(svg.contains("viewBox=\"0 0 24 24\""), "expected preserved viewBox; got: {svg}");
+
+        // 2. Cached Iconify icon test:
+        let server = MockServer::start().await;
+        let json = serde_json::json!({
+            "prefix": "custom",
+            "icons": { "resized": { "body": "<path d=\"M1 1\"/>", "left": 2, "top": 4, "width": 16, "height": 16 } }
+        });
+        
+        Mock::given(method("GET"))
+            .and(path("/custom.json"))
+            .and(query_param("icons", "resized"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json))
+            .expect(1) // must be called exactly once (proving subsequent resizes don't hit the network)
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cache = crate::cache::IconCache::open_at(dir.path().join("icons.db")).unwrap();
+        let client = crate::iconify::IconifyClient::with_base(server.uri());
+
+        // First call - cache miss, hits wiremock.
+        let icon1 = Icon::iconify_with("custom:resized", &cache, &client).await.unwrap();
+        let svg1 = icon1.width("64").height("64").svg();
+        assert!(svg1.contains("width=\"64\""), "expected width=\"64\" on first load; got: {svg1}");
+        assert!(svg1.contains("height=\"64\""), "expected height=\"64\" on first load; got: {svg1}");
+        assert!(svg1.contains("viewBox=\"2 4 16 16\""), "expected preserved viewBox on first load; got: {svg1}");
+
+        // Second call - cache hit, does NOT hit wiremock (resizing is purely local)
+        let icon2 = Icon::iconify_with("custom:resized", &cache, &client).await.unwrap();
+        let svg2 = icon2.width("64").height("64").svg();
+        assert!(svg2.contains("width=\"64\""), "expected width=\"64\" on cache hit; got: {svg2}");
+        assert!(svg2.contains("height=\"64\""), "expected height=\"64\" on cache hit; got: {svg2}");
+        assert!(svg2.contains("viewBox=\"2 4 16 16\""), "expected preserved viewBox on cache hit; got: {svg2}");
     }
 }
