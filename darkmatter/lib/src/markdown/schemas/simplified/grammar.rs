@@ -405,7 +405,8 @@ impl<'a> Parser<'a> {
         if self.lex.peek_byte() == Some(b'{') {
             let shape = self.parse_inline_object_body(0)?;
             // Postfix `()` and `[]` apply to the inline object as a whole.
-            let (constraints, is_array, array_constraints) = self.parse_postfix_after_type()?;
+            let (constraints, is_array, array_constraints) =
+                self.parse_postfix_after_inline_object()?;
             // Top-level description: take the rest of the string (the
             // top-level field has no surrounding `}` to act as a terminator).
             let description = self.parse_top_level_description()?;
@@ -443,22 +444,16 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parses the optional `(item_constraints)`, `[]`, and `[](arr_constraints)`
-    /// suffix that follows a primitive type or an inline object.
-    fn parse_postfix_after_type(
+    /// Parses the optional `(value_constraints)`, `[]`, and
+    /// `[](array_constraints)` suffix that follows an inline object.
+    fn parse_postfix_after_inline_object(
         &mut self,
     ) -> Result<(Vec<Constraint>, bool, Vec<Constraint>), SchemaError> {
-        let mut item_constraints = Vec::new();
+        let mut value_constraints = Vec::new();
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b'(') {
             self.lex.pos += 1;
-            // For inline objects the item constraints attach to the
-            // property's *value* (per Decision #10). The type used for
-            // constraint routing is irrelevant because inline objects
-            // accept only the universal constraints; we pass `String`
-            // to satisfy the existing signature and let the per-type
-            // dispatch accept `required` / `default(...)`.
-            item_constraints = self.parse_constraint_list(SimplifiedType::String, false)?;
+            value_constraints = self.parse_constraint_list(SimplifiedType::String, false)?;
             self.expect(Tok::RParen)?;
         }
 
@@ -466,6 +461,12 @@ impl<'a> Parser<'a> {
         let mut array_constraints = Vec::new();
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b'[') {
+            if !value_constraints.is_empty() {
+                return self.err(
+                    "inline object array constraints must follow `[]`",
+                    self.lex.pos..self.lex.pos + 1,
+                );
+            }
             self.lex.pos += 1;
             self.expect(Tok::RBracket)?;
             is_array = true;
@@ -476,7 +477,7 @@ impl<'a> Parser<'a> {
                 self.expect(Tok::RParen)?;
             }
         }
-        Ok((item_constraints, is_array, array_constraints))
+        Ok((value_constraints, is_array, array_constraints))
     }
 
     /// Top-level `-> description` consumes the rest of the input.
@@ -611,7 +612,8 @@ impl<'a> Parser<'a> {
         // mapping arms at property positions).
         let atom = if self.lex.peek_byte() == Some(b'{') {
             let shape = self.parse_inline_object_body(depth + 1)?;
-            let (constraints, is_array, array_constraints) = self.parse_postfix_after_type()?;
+            let (constraints, is_array, array_constraints) =
+                self.parse_postfix_after_inline_object()?;
             // After the closing `}` and any postfix, an inline object
             // property may also carry a description that terminates at
             // the next `,` or `}` in the *outer* object's body.
@@ -1638,6 +1640,24 @@ mod tests {
             atom.array_constraints,
             vec![Constraint::MinItems(1), Constraint::Required]
         );
+    }
+
+    #[test]
+    fn rejects_inline_object_constraints_before_array_suffix() {
+        for input in [
+            "{ foo: string }(required)[]",
+            "{ foo: string }(default({}))[]",
+            "{ foo: string }(min(1))[]",
+        ] {
+            let err = parse_err(input);
+            let SchemaError::Grammar { message, .. } = err else {
+                panic!("expected grammar error");
+            };
+            assert!(
+                message.contains("inline object array constraints must follow `[]`"),
+                "unexpected error for {input:?}: {message}"
+            );
+        }
     }
 
     #[test]

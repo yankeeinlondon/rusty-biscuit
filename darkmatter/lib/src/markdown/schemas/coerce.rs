@@ -65,11 +65,8 @@ pub struct CoercionOutcome {
 ///
 /// Inline object fragments (`{"type":"object","properties":{...},
 /// "additionalProperties":false}`) are recognized and yield
-/// [`CoercionTarget::Object`] so the coercion engine can recurse into the
-/// named properties. An inline object with an unrecognised property type
-/// yields `None` for the whole object — mixing recognisable and
-/// unrecognisable children in a single object defeats the unambiguous path
-/// the matrix guarantees.
+/// [`CoercionTarget::Object`] so the coercion engine can recurse into
+/// recognized named properties while leaving opaque siblings untouched.
 ///
 /// Per-arm coercion for property-level unions is handled by
 /// [`coerce_object`], which calls `coerce_property_union` directly when it
@@ -104,9 +101,8 @@ pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
 }
 
 /// Builds an [`CoercionTarget::Object`] from the inline object fragment's
-/// `properties` map, or returns `None` if any property schema is outside the
-/// coercion matrix. An opaque `object` (no `properties` field) is not an
-/// inline object and yields `None`.
+/// recognized `properties` entries. An opaque `object` (no `properties` field)
+/// is not an inline object and yields `None`.
 fn inline_object_target(obj: &Map<String, Value>) -> Option<CoercionTarget> {
     let props = obj.get("properties").and_then(Value::as_object)?;
     if props.is_empty() {
@@ -117,10 +113,11 @@ fn inline_object_target(obj: &Map<String, Value>) -> Option<CoercionTarget> {
     }
     let mut inner = Vec::with_capacity(props.len());
     for (k, v) in props {
-        let target = coercion_target(v)?;
-        inner.push((k.clone(), target));
+        if let Some(target) = coercion_target(v) {
+            inner.push((k.clone(), target));
+        }
     }
-    Some(CoercionTarget::Object(inner))
+    (!inner.is_empty()).then_some(CoercionTarget::Object(inner))
 }
 
 /// Recognizes the two `anyOf` shapes Darkmatter emits, matching them *exactly*
@@ -1050,10 +1047,7 @@ mod tests {
     }
 
     #[test]
-    fn inline_object_with_unrecognised_property_is_not_recognised() {
-        // A nested property whose schema is outside the matrix disqualifies
-        // the whole inline object from the matrix — mixing recognised and
-        // unrecognised children defeats the unambiguous path.
+    fn inline_object_with_unrecognized_property_keeps_recognized_targets() {
         let frag = json!({
             "type": "object",
             "properties": {
@@ -1062,7 +1056,13 @@ mod tests {
             },
             "additionalProperties": false
         });
-        assert_eq!(coercion_target(&frag), None);
+        assert_eq!(
+            coercion_target(&frag),
+            Some(CoercionTarget::Object(vec![(
+                "ok".to_string(),
+                CoercionTarget::ToBoolean
+            )]))
+        );
     }
 
     #[test]
@@ -1093,6 +1093,36 @@ mod tests {
         assert_eq!(outcome.value["config"]["retries"], json!(3));
         // Properties not declared by the schema are left untouched.
         assert_eq!(outcome.value["config"]["untouched"], json!("x"));
+    }
+
+    #[test]
+    fn inline_object_value_coerces_mixed_recognized_and_opaque_properties() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "metadata": {"type": "object"}
+                    },
+                    "additionalProperties": false
+                }
+            }
+        });
+        let instance = json!({
+            "config": {
+                "enabled": "true",
+                "metadata": { "source": "user" }
+            }
+        });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["config"]["enabled"], json!(true));
+        assert_eq!(
+            outcome.value["config"]["metadata"],
+            json!({ "source": "user" })
+        );
     }
 
     #[test]
@@ -1180,6 +1210,40 @@ mod tests {
         assert_eq!(outcome.value["authors"][1]["score"], json!(-1));
     }
 
+    #[test]
+    fn array_of_inline_objects_coerces_mixed_recognized_and_opaque_properties() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "authors": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "active": {"type": "boolean"},
+                            "metadata": {"type": "object"}
+                        },
+                        "additionalProperties": false
+                    }
+                }
+            }
+        });
+        let instance = json!({
+            "authors": [
+                { "active": "true", "metadata": { "role": "admin" } },
+                { "active": "false", "metadata": { "role": "reader" } }
+            ]
+        });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["authors"][0]["active"], json!(true));
+        assert_eq!(outcome.value["authors"][1]["active"], json!(false));
+        assert_eq!(
+            outcome.value["authors"][0]["metadata"],
+            json!({ "role": "admin" })
+        );
+    }
+
     // ── Per-arm coercion for property-level unions (Phase 2) ───────────
 
     #[test]
@@ -1212,6 +1276,45 @@ mod tests {
         assert!(outcome.changed);
         assert_eq!(outcome.value["metadata"]["key"], json!("visits"));
         assert_eq!(outcome.value["metadata"]["count"], json!(42));
+    }
+
+    #[test]
+    fn per_arm_coercion_handles_inline_object_arm_with_opaque_sibling() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "metadata": {
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "kind": {"const": "config"},
+                                "enabled": {"type": "boolean"},
+                                "details": {"type": "object"}
+                            },
+                            "required": ["kind", "enabled", "details"],
+                            "additionalProperties": false
+                        },
+                        {"type": "string"}
+                    ]
+                }
+            }
+        });
+        let instance = json!({
+            "metadata": {
+                "kind": "config",
+                "enabled": "true",
+                "details": { "source": "user" }
+            }
+        });
+        let outcome = coerce_frontmatter(&schema, &instance);
+        assert!(outcome.changed);
+        assert_eq!(outcome.value["metadata"]["enabled"], json!(true));
+        assert_eq!(outcome.value["metadata"]["kind"], json!("config"));
+        assert_eq!(
+            outcome.value["metadata"]["details"],
+            json!({ "source": "user" })
+        );
     }
 
     #[test]
