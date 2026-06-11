@@ -23,7 +23,7 @@
 pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     SchemaTypeDescriptor {
         keyword: "string",
-        description: "Any YAML string scalar.",
+        description: "Text.",
         accepted_constraints: "min, max, not-empty, pattern, default, required",
         json_schema_effect: "{ \"type\": \"string\" } plus minLength / maxLength / pattern / default",
     },
@@ -47,37 +47,37 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     },
     SchemaTypeDescriptor {
         keyword: "number",
-        description: "Any JSON number.",
+        description: "A numeric value.",
         accepted_constraints: "min, max, integer, default, required",
         json_schema_effect: "{ \"type\": \"number\" } (or `integer` when `integer` is set) with optional minimum / maximum",
     },
     SchemaTypeDescriptor {
         keyword: "numberlike",
-        description: "A JSON number or a numeric string. String forms are coerced to a real number.",
+        description: "A number, or a string that can be coerced to a number during compose.",
         accepted_constraints: "default, required",
         json_schema_effect: "anyOf: [ { \"type\": \"number\" }, { \"type\": \"string\", \"pattern\": \"^-?\\d+(\\.\\d+)?$\" } ]",
     },
     SchemaTypeDescriptor {
         keyword: "boolean",
-        description: "Any JSON boolean.",
+        description: "A true or false value.",
         accepted_constraints: "default, required",
         json_schema_effect: "{ \"type\": \"boolean\" } with optional default",
     },
     SchemaTypeDescriptor {
         keyword: "boolish",
-        description: "A JSON boolean or one of the string spellings `true` / `false` (any case). String forms are coerced to a real boolean.",
+        description: "A boolean, or a `true` / `false` string that can be coerced during compose.",
         accepted_constraints: "default, required",
         json_schema_effect: "anyOf: [ { \"type\": \"boolean\" }, { \"enum\": [\"true\", \"false\", \"True\", \"False\", \"TRUE\", \"FALSE\"] } ]",
     },
     SchemaTypeDescriptor {
         keyword: "object",
-        description: "Opaque YAML/JSON object. Accepts any shape; no nested schema authoring in v1.",
+        description: "Any object shape. Use an inline object literal when you want to validate nested fields.",
         accepted_constraints: "default, required",
-        json_schema_effect: "{ \"type\": \"object\" } with no `additionalProperties: false` (root-schema behaviour preserved)",
+        json_schema_effect: "{ \"type\": \"object\" } with no `additionalProperties: false` (root-schema behavior preserved)",
     },
     SchemaTypeDescriptor {
         keyword: "file",
-        description: "File reference resolved via `biscuit-file::FileReference`. Accepts a single path or an array of paths.",
+        description: "A path-like file reference. Use `match(...)` to restrict accepted paths.",
         accepted_constraints: "match(glob, ...), default, required",
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-file\" } plus x-darkmatter-match when `match(...)` is set",
     },
@@ -101,7 +101,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     },
     SchemaTypeDescriptor {
         keyword: "any",
-        description: "Anything. Only `required` is meaningful.",
+        description: "Anything. Useful when you only care that a property exists.",
         accepted_constraints: "required",
         json_schema_effect: "{} (empty schema)",
     },
@@ -123,39 +123,40 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         name: "required",
         keyword: "required",
         form: "required",
-        target_types: "all types (and array properties)",
+        target_types: "all types",
         argument_arity: "0",
-        description: "The property must be present. Hoisted to the parent `required` array by the converter.",
+        description: "The property must be present.",
         json_schema_effect: "parent's `required` list contains the property name",
     },
     SchemaConstraintDescriptor {
         name: "default",
         keyword: "default",
         form: "default(value)",
-        target_types: "all types (and array properties for the property default)",
+        target_types: "all types",
         argument_arity: "1",
-        description: "Default value emitted as JSON Schema `default`. A property-level union with conflicting defaults is a conversion error.",
+        description: "Provides the value to use when the property is absent.",
         json_schema_effect: "parent's `default` set to the argument",
     },
-    // ── numeric ────────────────────────────────────────────────────────
+    // ── shared scalar / array bounds ───────────────────────────────────
     SchemaConstraintDescriptor {
-        name: "min (number)",
+        name: "min",
         keyword: "min",
-        form: "min(n)",
-        target_types: "number",
+        form: "min(number)",
+        target_types: "string | number | array",
         argument_arity: "1",
-        description: "Numeric `minimum` (number types).",
-        json_schema_effect: "minimum set to n",
+        description: "Sets the minimum allowed size or value.",
+        json_schema_effect: "string: minLength; number: minimum; array: minItems",
     },
     SchemaConstraintDescriptor {
-        name: "max (number)",
+        name: "max",
         keyword: "max",
-        form: "max(n)",
-        target_types: "number",
+        form: "max(number)",
+        target_types: "string | number | array",
         argument_arity: "1",
-        description: "Numeric `maximum` (number types).",
-        json_schema_effect: "maximum set to n",
+        description: "Sets the maximum allowed size or value.",
+        json_schema_effect: "string: maxLength; number: maximum; array: maxItems",
     },
+    // ── numeric ────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
         name: "integer",
         keyword: "integer",
@@ -166,24 +167,6 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         json_schema_effect: "type is `integer` instead of `number`",
     },
     // ── string ─────────────────────────────────────────────────────────
-    SchemaConstraintDescriptor {
-        name: "min (string)",
-        keyword: "min",
-        form: "min(n) (string context)",
-        target_types: "string",
-        argument_arity: "1",
-        description: "Minimum length in Unicode code points.",
-        json_schema_effect: "minLength set to n",
-    },
-    SchemaConstraintDescriptor {
-        name: "max (string)",
-        keyword: "max",
-        form: "max(n) (string context)",
-        target_types: "string",
-        argument_arity: "1",
-        description: "Maximum length in Unicode code points.",
-        json_schema_effect: "maxLength set to n",
-    },
     SchemaConstraintDescriptor {
         name: "not-empty",
         keyword: "not-empty",
@@ -209,7 +192,7 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         form: "enum(member, member, ...)",
         target_types: "enum",
         argument_arity: "1+",
-        description: "Positional members of the enumeration. Required by the grammar — at least one member must be present.",
+        description: "Lists the allowed values. At least one member is required.",
         json_schema_effect: "enum list of supplied members",
     },
     // ── file ───────────────────────────────────────────────────────────
@@ -219,7 +202,7 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         form: "match(glob, ...)",
         target_types: "file",
         argument_arity: "1+",
-        description: "Glob patterns the resolved path must match. Patterns starting with `!` exclude.",
+        description: "Glob patterns the file path must match. Patterns starting with `!` exclude.",
         json_schema_effect: "x-darkmatter-match set to the glob list",
     },
     // ── url ────────────────────────────────────────────────────────────
@@ -237,28 +220,10 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         name: "unique",
         keyword: "unique",
         form: "unique",
-        target_types: "array (array-level)",
+        target_types: "array",
         argument_arity: "0",
         description: "Array items must be distinct.",
         json_schema_effect: "uniqueItems set to true",
-    },
-    SchemaConstraintDescriptor {
-        name: "min (array)",
-        keyword: "min",
-        form: "min(n) (array-level)",
-        target_types: "array (array-level)",
-        argument_arity: "1",
-        description: "Minimum number of items in an array.",
-        json_schema_effect: "minItems set to n",
-    },
-    SchemaConstraintDescriptor {
-        name: "max (array)",
-        keyword: "max",
-        form: "max(n) (array-level)",
-        target_types: "array (array-level)",
-        argument_arity: "1",
-        description: "Maximum number of items in an array.",
-        json_schema_effect: "maxItems set to n",
     },
 ];
 
@@ -273,25 +238,25 @@ pub const SCHEMA_SHAPE_DESCRIPTORS: &[SchemaShapeDescriptor] = &[
         name: "Single object",
         form: "single mapping",
         example: "title: string(required)",
-        description: "A YAML mapping from property names to type expressions. Validation passes when the frontmatter satisfies every property.",
+        description: "Use this for the common case: property names mapped to type expressions.",
     },
     SchemaShapeDescriptor {
         name: "Root-level union",
         form: "sequence of mappings / file references",
         example: "- title: string\n- ./schemas/post.yaml",
-        description: "A YAML sequence whose arms are either inline mappings or file-reference strings. Validation passes when at least one arm validates.",
+        description: "Use this when a document may follow one of several schema alternatives.",
     },
     SchemaShapeDescriptor {
         name: "Property-level union",
         form: "sequence of strings under a property",
         example: "data: [string, \"{ foo: string }\"]",
-        description: "A YAML sequence of type-and-constraint strings at a single property position. The property accepts any of the listed atoms.",
+        description: "Use this when one property may have one of several allowed types.",
     },
     SchemaShapeDescriptor {
         name: "Inline object literal",
         form: "{ prop: type-expr, ... }",
         example: "{ foo: string(required), bar: number }",
-        description: "An anonymous typed object declared inside a single type expression. Compiles to `{ \"type\": \"object\", \"properties\": ..., \"additionalProperties\": false }`.",
+        description: "Use this to validate a nested object without creating a separate schema file.",
     },
 ];
 
@@ -303,54 +268,54 @@ pub fn schema_shape_descriptors() -> &'static [SchemaShapeDescriptor] {
 /// Inline object grammar rules and limits, in display order.
 pub const INLINE_OBJECT_RULE_DESCRIPTORS: &[InlineObjectRuleDescriptor] = &[
     InlineObjectRuleDescriptor {
-        name: "Brace delimiters",
-        rule: "{ prop: type-expr, prop: type-expr }",
-        description: "Curly-brace delimited, comma-separated property list. Mirrors JSON / YAML object syntax.",
+        name: "Object shape",
+        rule: "`{ title: string, rating: number }`",
+        description: "Write fields inside braces as a comma-separated list.",
     },
     InlineObjectRuleDescriptor {
-        name: "Whitespace ignored",
-        rule: "whitespace inside { ... } is insignificant",
-        description: "Spaces and line breaks immediately after `{`, before `}`, around `,`, around `:`, and at the start / end of a property's type expression are ignored. Multi-line inline objects parse identically to single-line forms.",
+        name: "Whitespace",
+        rule: "Multi-line objects parse the same as one-line objects.",
+        description: "Add spaces or line breaks wherever they make the schema easier to read.",
     },
     InlineObjectRuleDescriptor {
-        name: "Identifier rules",
-        rule: "[A-Za-z0-9_-]+ (no leading character class restriction; leading digits allowed)",
-        description: "Property names are unquoted identifiers. `name`, `foo_id`, `x-custom`, `api2_version`, and `123abc` are accepted; `display name`, `@type`, `x.custom`, and quoted keys are rejected.",
+        name: "Property names",
+        rule: "`name`, `foo_id`, `x-custom`, `api2_version`, and `123abc` are valid.",
+        description: "Use unquoted names made from letters, numbers, `_`, and `-`.",
     },
     InlineObjectRuleDescriptor {
-        name: "Property syntax",
-        rule: "four forms: bare, constrained, with description, constrained with description",
-        description: "Inline object property values follow the same four syntax forms as top-level SimplifiedSchema properties. The `->` description arrow is allowed per property.",
+        name: "Property values",
+        rule: "Properties can be bare, constrained, or described.",
+        description: "Use the same type expression syntax inside an inline object that you use at the top level.",
     },
     InlineObjectRuleDescriptor {
-        name: "Description termination",
-        rule: "until next top-level `,` or `}` at the current depth",
-        description: "Inside an inline object, `->` descriptions consume text until the next comma or closing brace at the current object's nesting level. Commas inside inline descriptions are out of scope.",
+        name: "Descriptions",
+        rule: "A `->` description ends at the next comma or closing brace for that object.",
+        description: "Keep inline descriptions short and avoid commas inside them.",
     },
     InlineObjectRuleDescriptor {
-        name: "Array suffix",
-        rule: "{ ... }[] and { ... }[](constraints)",
-        description: "Inline objects support the `[]` array suffix and the array-level constraint list. Item constraints before `[]` are not valid for inline object arrays.",
+        name: "Arrays",
+        rule: "`{ title: string }[]`",
+        description: "Add `[]` after the object when the property is an array of objects.",
     },
     InlineObjectRuleDescriptor {
-        name: "Postfix constraints",
-        rule: "{ ... }(required) and { ... }[](min(1); required)",
-        description: "Constraints after the closing `}` attach to the property's value (single object) or to the array property (`[]` form). Constraints on nested properties stay nested.",
+        name: "Object constraints",
+        rule: "`{ title: string }(required)` and `{ title: string }[](min(1); required)`",
+        description: "Put constraints after the closing brace, or after `[]` for an array of objects.",
     },
     InlineObjectRuleDescriptor {
         name: "Nesting depth",
-        rule: "max 32 inline object levels",
-        description: "The grammar parser enforces a hard maximum of 32 inline object nesting levels. Exceeding it returns `SchemaError::Grammar`.",
+        rule: "Maximum depth: 32 inline object levels.",
+        description: "Deeply nested schemas are supported, but they are usually harder to read.",
     },
     InlineObjectRuleDescriptor {
-        name: "additionalProperties default",
-        rule: "additionalProperties: false on every inline object",
-        description: "Inline object fragments always emit `additionalProperties: false`. The root schema's default of `true` is intentionally not inherited.",
+        name: "Extra keys",
+        rule: "Inline objects use `additionalProperties: false`.",
+        description: "A nested object may only contain the fields declared in the inline object.",
     },
     InlineObjectRuleDescriptor {
-        name: "required hoisting",
-        rule: "inner `required` stays on the inline object fragment",
-        description: "An `required` constraint on a nested property stays inside the inline object fragment. The property-level union hoisting logic operates on `PropertyAtom` constraints, not on nested `SchemaShape` properties.",
+        name: "Nested required fields",
+        rule: "`required` stays with the object where it is written.",
+        description: "A required nested field is required inside its parent object, not at the document root.",
     },
 ];
 
@@ -362,39 +327,39 @@ pub fn inline_object_rule_descriptors() -> &'static [InlineObjectRuleDescriptor]
 /// Compose-time coercion rules, in display order.
 pub const COERCION_RULE_DESCRIPTORS: &[CoercionRuleDescriptor] = &[
     CoercionRuleDescriptor {
-        name: "boolean / boolish",
-        rule: "\"true\" / \"false\" -> real boolean",
-        description: "Strings matching `true` / `false` (any case) coerce to a real boolean when the target type is `boolean` or `boolish`.",
+        name: "Booleans",
+        rule: "`true` and `false`, in any case, become real booleans.",
+        description: "When the schema expects `boolean` or `boolish`, common string forms are converted for you.",
     },
     CoercionRuleDescriptor {
-        name: "number / numberlike",
-        rule: "numeric string -> real number",
-        description: "Strings matching the numberlike pattern (`^-?\\d+(\\.\\d+)?$`) coerce to a real number when the target type is `number` or `numberlike`.",
+        name: "Numbers",
+        rule: "Numeric strings become real numbers.",
+        description: "When the schema expects `number` or `numberlike`, strings such as `42` or `3.14` are converted for you.",
     },
     CoercionRuleDescriptor {
-        name: "Nested inline object scalars",
-        rule: "recurse into inline object fields",
-        description: "Coercion recurses into inline object fields and inline object arrays. For example, `/authors/0/active` coerces from `\"true\"` to `true` when the schema path is `authors: \"{ active: boolean }[]\"`.",
+        name: "Nested values",
+        rule: "Coercion recurses into inline objects and arrays of inline objects.",
+        description: "Nested fields get the same boolean and number treatment as top-level fields.",
     },
     CoercionRuleDescriptor {
-        name: "Unambiguous property-level union",
-        rule: "exactly one arm validates after per-arm coercion",
-        description: "For property-level unions the compose stage builds a coerced candidate per arm, validates each candidate against its arm, and commits the coerced value only when exactly one candidate validates.",
+        name: "Clear union match",
+        rule: "Exactly one union arm must match after coercion.",
+        description: "Darkmatter only commits a coerced union value when the result is unambiguous.",
     },
     CoercionRuleDescriptor {
-        name: "Zero-match union",
-        rule: "leave original uncoerced",
-        description: "When no union arm validates after per-arm coercion the original value is left uncoerced and normal validation reports the failure without coercion guessing.",
+        name: "No union match",
+        rule: "The original value is kept.",
+        description: "If no union arm matches, validation reports the problem without guessing a conversion.",
     },
     CoercionRuleDescriptor {
-        name: "Ambiguous union",
-        rule: "leave original uncoerced",
-        description: "When multiple union arms validate after per-arm coercion the original value is left uncoerced and normal validation / reporting proceeds from the original value.",
+        name: "Ambiguous union match",
+        rule: "The original value is kept.",
+        description: "If more than one union arm matches, Darkmatter leaves the value alone instead of choosing for you.",
     },
     CoercionRuleDescriptor {
-        name: "$(...)-pending values",
-        rule: "skip coercion until after shell expansion",
-        description: "Coercion skips values that still hold `$(...)` shell-expansion pendings. Problems on those fields are deferred to the post-shell re-validation pass when frontmatter shell expansion is enabled; otherwise they fail fast.",
+        name: "Shell-expanded values",
+        rule: "Values containing `$(...)` are deferred until shell expansion has run.",
+        description: "Darkmatter waits to coerce values that are not final yet.",
     },
 ];
 
@@ -403,52 +368,52 @@ pub fn coercion_rule_descriptors() -> &'static [CoercionRuleDescriptor] {
     COERCION_RULE_DESCRIPTORS
 }
 
-/// Validation behaviour notes that affect how the schema language is consumed,
+/// Validation behavior notes that affect how the schema language is consumed,
 /// in display order.
 pub const VALIDATION_BEHAVIOR_DESCRIPTORS: &[ValidationBehaviorDescriptor] = &[
     ValidationBehaviorDescriptor {
-        name: "Root additionalProperties",
-        rule: "additionalProperties: true at the root",
-        description: "The root schema object defaults to `additionalProperties: true`. Extra keys at the document root never fail validation by themselves.",
+        name: "Extra root keys",
+        rule: "Root schemas allow extra frontmatter keys.",
+        description: "A document may contain frontmatter properties that are not named in `$schema`.",
     },
     ValidationBehaviorDescriptor {
-        name: "Inline object additionalProperties",
-        rule: "additionalProperties: false on every inline object",
-        description: "Inline objects are explicit shape declarations. Extra keys on an inline object value fail validation with `additionalProperties: false`.",
+        name: "Extra nested keys",
+        rule: "Inline objects use `additionalProperties: false`.",
+        description: "Nested inline objects are explicit shapes; undeclared keys fail validation.",
     },
     ValidationBehaviorDescriptor {
-        name: "Opaque object preserved",
-        rule: "object compiles without additionalProperties: false",
-        description: "The `object` type compiles to `{ \"type\": \"object\" }` with no `additionalProperties: false`. v1 backwards-compat is preserved.",
+        name: "Plain objects",
+        rule: "`object` accepts any object shape.",
+        description: "Use an inline object when you want Darkmatter to validate fields inside the object.",
     },
     ValidationBehaviorDescriptor {
         name: "File references",
-        rule: "file type resolves via biscuit-file at validation time",
-        description: "`file` references are resolved via `biscuit-file::FileReference` at validation time. The current working directory is the default base for `file` properties; resolution is per-document for file-reference property values.",
+        rule: "`file` values resolve through biscuit-file.",
+        description: "Relative file paths are resolved from the current document context.",
     },
     ValidationBehaviorDescriptor {
         name: "Schema detection",
-        rule: "detect emits object for object-typed values",
-        description: "`md schema detect` continues to emit `object` for any object-typed value, even when sample values have a uniform shape. Authors must hand-write inline object schemas.",
+        rule: "`md schema detect` emits `object` for object-shaped values.",
+        description: "Write inline object schemas by hand when you want nested validation.",
     },
     ValidationBehaviorDescriptor {
         name: "Coercion timing",
-        rule: "after --set / --state and interpolation, before shell expansion",
-        description: "Coercion runs after frontmatter `--set` / `--state` overrides and interpolation, but before shell expansion. The coerced values are written back into the frontmatter so downstream compose stages see real booleans / numbers.",
+        rule: "Coercion runs after `--set`, `--state`, and interpolation.",
+        description: "Later compose stages see the coerced booleans and numbers.",
     },
     ValidationBehaviorDescriptor {
         name: "Baseline merge",
-        rule: "baseline properties merge into the effective schema",
-        description: "A configured baseline schema is merged with the document's `$schema` (or used alone when no `$schema` is present). Properties defined in the baseline are validated as if they appeared in the document schema.",
+        rule: "Baseline properties merge into the effective schema.",
+        description: "A configured baseline schema is combined with the document schema, or used alone when the document has no `$schema`.",
     },
     ValidationBehaviorDescriptor {
         name: "Validator cache",
-        rule: "compiled validators are LRU-cached per process",
-        description: "The compiled `jsonschema::Validator` is LRU-cached per process (default 256 entries, override via `DRAFT_VALIDATOR_CACHE_SIZE`). Repeated validation against the same effective schema reuses the compiled validator.",
+        rule: "Compiled validators are LRU-cached per process.",
+        description: "Repeated validation against the same effective schema reuses the compiled validator.",
     },
 ];
 
-/// Returns all validation behaviour descriptors in display order.
+/// Returns all validation behavior descriptors in display order.
 pub fn validation_behavior_descriptors() -> &'static [ValidationBehaviorDescriptor] {
     VALIDATION_BEHAVIOR_DESCRIPTORS
 }
@@ -473,7 +438,7 @@ pub struct SchemaTypeDescriptor {
 pub struct SchemaConstraintDescriptor {
     /// Display name of the constraint. May be disambiguated with a type
     /// context, e.g. `min (number)`, when the same keyword has different
-    /// behaviours on different types.
+    /// behaviors on different types.
     pub name: &'static str,
     /// Canonical keyword as it appears in the grammar. Mirrors
     /// [`Constraint::keyword`] so descriptor ↔ implementation parity is
@@ -485,7 +450,7 @@ pub struct SchemaConstraintDescriptor {
     pub target_types: &'static str,
     /// Number of arguments the constraint accepts.
     pub argument_arity: &'static str,
-    /// Short description of the constraint's behaviour.
+    /// Short description of the constraint's behavior.
     pub description: &'static str,
     /// Effect on the generated Draft 2020-12 JSON Schema fragment.
     pub json_schema_effect: &'static str,
@@ -526,7 +491,7 @@ pub struct CoercionRuleDescriptor {
     pub description: &'static str,
 }
 
-/// Descriptor for a single validation-behaviour note.
+/// Descriptor for a single validation-behavior note.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidationBehaviorDescriptor {
     /// Display name of the note.
@@ -732,7 +697,7 @@ mod tests {
         for d in VALIDATION_BEHAVIOR_DESCRIPTORS {
             assert!(
                 seen.insert(d.name),
-                "duplicate validation behaviour descriptor name: {}",
+                "duplicate validation behavior descriptor name: {}",
                 d.name
             );
         }

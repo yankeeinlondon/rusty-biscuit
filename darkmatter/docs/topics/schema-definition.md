@@ -18,7 +18,7 @@ This topic covers the practical usage of schemas for standalone validation, sche
 - A **baseline schema** that every document inherits.
 - A `md schema validate` CLI subcommand with `pretty` and `json` output.
 - A `md schema detect` CLI subcommand that infers a SimplifiedSchema from existing documents.
-- A library API ([`DarkmatterSchemas`](#library-api)) for embedding the same behaviour.
+- A library API ([`DarkmatterSchemas`](#library-api)) for embedding the same behavior.
 - Schema-aware completion hints for downstream shell-completion tooling.
 
 ## The `$schema` Frontmatter Property
@@ -71,7 +71,7 @@ Every property value follows one of four shapes:
 - **Whitespace** inside `(...)` and inside `{ ... }` is insignificant. Quote the whole scalar so YAML keeps it as a string when whitespace is present.
 - **Multiple constraints** are separated by `;`.
 - **Optional by default** — properties are optional unless `required` appears in the constraint list.
-- **Arrays** are written by appending `[]` to the type. Item-level constraints sit inside the parens that precede the brackets; array-level constraints sit in a second parens after the brackets.
+- **Arrays** are written by appending `[]` to the type. Item constraints sit inside the parens that precede the brackets; constraints on the array itself sit in a second parens after the brackets.
 - **Descriptions** (`-> ...`) populate the `description` annotation in the generated JSON Schema. Inside an inline object, a description terminates at the next top-level comma or closing brace (see [Inline Object Literals](#inline-object-literals)).
 - **Inline object literals** are an extension of the type-expression grammar. The whole `{ ... }` body is a single string scalar that the string-layer parser recognizes. YAML mapping values at a property position are still errors — quote the mapping as a string to opt into inline object syntax.
 
@@ -166,7 +166,7 @@ $schema:
     images:      "file(match('*.png', '*.jpg'))[](min(1))"
 ```
 
-The array form `file[]` adds the standard array-level constraints (`min`, `max`, `unique`).
+The array form `file[]` adds the standard constraints on the array itself (`min`, `max`, `unique`).
 
 ### URLs
 
@@ -188,7 +188,7 @@ $schema:
 
 ### Array Constraints
 
-Place item constraints inside the parens **before** `[]`; place array-level constraints in a second parens **after** `[]`.
+Place item constraints inside the parens **before** `[]`; place constraints on the array itself in a second parens **after** `[]`.
 
 ```yaml
 $schema:
@@ -294,7 +294,7 @@ If you need deeper typing, reference an external JSON Schema file with `$schema:
 
 ### `additionalProperties: false`
 
-Every inline object compiles to a JSON Schema fragment that sets `additionalProperties: false`. This is the intended default — declaring an inline object is a signal that the author wants shape restriction. It differs from the root schema default (`additionalProperties: true`) and from the opaque `object` type, which still compiles to `{ "type": "object" }` with no `additionalProperties: false`. Authors used to the root default may be surprised; this is documented behaviour. A future `lenient` constraint on the inline object body may opt back to `true`.
+Every inline object compiles to a JSON Schema fragment that sets `additionalProperties: false`. This is the intended default — declaring an inline object is a signal that the author wants shape restriction. It differs from the root schema default (`additionalProperties: true`) and from the opaque `object` type, which still compiles to `{ "type": "object" }` with no `additionalProperties: false`. Authors used to the root default may be surprised; this is documented behavior. A future `lenient` constraint on the inline object body may opt back to `true`.
 
 ### YAML Mapping vs. Inline Object
 
@@ -314,7 +314,7 @@ $schema:
 
 An inline object compiles to the same Draft 2020-12 JSON Schema shape a hand-written `{ "type": "object", "properties": ..., "required": ..., "additionalProperties": false }` would produce, with `required` populated from per-property `required` constraints and the inline object's own `required` postfix hoisted to the parent `required` array.
 
-For an array of inline objects, the `items` sub-schema is the inline object fragment and the array-level `minItems` / `maxItems` / `uniqueItems` / `required` come from the postfix constraints after `[]`.
+For an array of inline objects, the `items` sub-schema is the inline object fragment and `minItems` / `maxItems` / `uniqueItems` / `required` come from the postfix constraints after `[]`.
 
 ## Unions
 
@@ -591,7 +591,7 @@ Line/column positions are drawn from the **original frontmatter text** (with the
 
 Parse errors and schema-load failures emit JSON entries with an `error` key (`"frontmatter_parse"` or `"schema"`) and an empty `problems` array.
 
-### Behaviour Without `$schema`
+### Behavior Without `$schema`
 
 - With a baseline configured, the document is validated against the baseline alone.
 - Without a baseline and without `$schema`, validation succeeds vacuously and `pretty` mode prints `valid (no schema; vacuously valid)`.
@@ -675,7 +675,7 @@ $schema:
 md schema about
 ```
 
-`md schema about` is the **implementation-bound reference** for the SimplifiedSchema authoring language. It prints a human-readable report covering schema shapes, the type vocabulary, the constraint vocabulary, inline object rules, validation behaviour, and coercion rules.
+`md schema about` is the **implementation-bound reference** for the SimplifiedSchema authoring language. It prints a human-readable report covering schema shapes, the type vocabulary, the constraint vocabulary, inline object rules, validation behavior, and coercion rules.
 
 ```
 SimplifiedSchema Language Reference
@@ -693,7 +693,7 @@ SimplifiedSchema Language Reference
     - …
   ## Coercion Rules
     - …
-  ## Validation Behaviour
+  ## Validation Behavior
     - …
 ```
 
@@ -839,7 +839,7 @@ Load markdown
 
 The stage is **not** part of the `ComposeOperation` enum — it cannot be excluded via `ComposeOptions::only(...)` or `disable(...)`.
 
-### Behaviour
+### Behavior
 
 - When the document declares `$schema` **and** validation fails, compose aborts with `MarkdownError::SchemaValidationFailed`.
 - When a baseline schema is set via `ComposeOptions::with_baseline_schema(...)` and the document lacks `$schema`, the baseline alone is validated.
@@ -892,7 +892,7 @@ Schema-preparation errors (unparseable `$schema`, missing referenced file, etc.)
 
 - **No remote `$schema`.** Download referenced schemas locally for now.
 - **No `$ref` or reusable inline fragments.** Inline objects are anonymous; reuse still requires an external JSON Schema file.
-- **No `lenient` opt-out for inline object `additionalProperties: false`.** Every inline object rejects extra keys. Authors who want looser object typing should drop down to the opaque `object` type, which preserves the root-schema `additionalProperties: true` behaviour.
+- **No `lenient` opt-out for inline object `additionalProperties: false`.** Every inline object rejects extra keys. Authors who want looser object typing should drop down to the opaque `object` type, which preserves the root-schema `additionalProperties: true` behavior.
 - **Hard 32-level inline object nesting cap.** The parser rejects deeper nesting with `SchemaError::Grammar`. Reference a JSON Schema file for deeper typing.
 - **No inline object detection.** `md schema detect` continues to emit `object` for object-typed values; inline object schemas must be hand-written.
 - **No quoted inline object property names.** Rename to a valid identifier (alphanumeric, `-`, `_`, leading digits allowed) or use a JSON Schema file.
@@ -907,7 +907,7 @@ Schema-preparation errors (unparseable `$schema`, missing referenced file, etc.)
 
 ## See Also
 
-- [Schemas specification](../../features/_completed/2026-05-11-schemas/spec.md) — authoritative behaviour, EBNF grammar, ADRs.
+- [Schemas specification](../../features/_completed/2026-05-11-schemas/spec.md) — authoritative behavior, EBNF grammar, ADRs.
 - [Compose schema specification](../../features/2026-05-23-compose-schema/spec.md) — schema validation in the compose pipeline.
 - [Inline object spec](../../features/2026-06-10-schema-improvement/spec.md) — inline object literals, postfix constraints, nesting rules, and the `md schema about` descriptor catalog.
 - [`json-schema-primitives.md`](./json-schema-primitives.md) — JSON Schema primitives reused under the hood.
