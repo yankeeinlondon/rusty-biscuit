@@ -60,6 +60,10 @@ pub struct TerminalRenderContext {
     pub color_depth: ColorDepth,
     /// The terminal light/dark mode.
     pub color_mode: ColorMode,
+    /// The detected terminal foreground/text color, when available.
+    pub page_text_color: Option<(u8, u8, u8)>,
+    /// The detected terminal background color, when available.
+    pub page_background_color: Option<(u8, u8, u8)>,
     /// Whether the terminal renders OSC8 hyperlinks.
     pub hyperlinks: bool,
     /// The terminal image-protocol support level.
@@ -166,6 +170,8 @@ impl TerminalRenderContext {
             width,
             color_depth: term.color_depth,
             color_mode: term.color_mode.clone(),
+            page_text_color: term.text_color.map(|c| (c.r, c.g, c.b)),
+            page_background_color: term.background_color.map(|c| (c.r, c.g, c.b)),
             hyperlinks: term.osc_link_support,
             image_support: term.image_support.clone(),
             supports_unicode: term.supports_unicode,
