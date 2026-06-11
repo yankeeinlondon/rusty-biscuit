@@ -174,7 +174,12 @@ impl LayoutContext {
                     ColorMode::Dark | ColorMode::Unknown => PAGE_BG_SUBTLE_DARK,
                     ColorMode::Light => PAGE_BG_SUBTLE_LIGHT,
                 };
-                (Some(bg), options_color_mode)
+                // Decision #4: the page surface and the nested code panel must
+                // resolve against the SAME mode. `surface_mode` is the terminal's
+                // mode (Unknown falls back to the option mode); keying the render
+                // mode off it — not the independent `options_color_mode` — keeps
+                // the inverted code panel separated from the page surface.
+                (Some(bg), surface_mode)
             }
             PageBackground::Pronounced => {
                 let (bg, inverted) = match surface_mode {
