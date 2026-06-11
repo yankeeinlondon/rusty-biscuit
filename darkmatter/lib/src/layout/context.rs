@@ -171,14 +171,14 @@ impl LayoutContext {
             PageBackground::Transparent => (None, options_color_mode),
             PageBackground::Subtle => {
                 let bg = match surface_mode {
-                    ColorMode::Dark => PAGE_BG_SUBTLE_DARK,
+                    ColorMode::Dark | ColorMode::Unknown => PAGE_BG_SUBTLE_DARK,
                     ColorMode::Light => PAGE_BG_SUBTLE_LIGHT,
                 };
                 (Some(bg), options_color_mode)
             }
             PageBackground::Pronounced => {
                 let (bg, inverted) = match surface_mode {
-                    ColorMode::Dark => (PAGE_BG_PRONOUNCED_DARK, ColorMode::Light),
+                    ColorMode::Dark | ColorMode::Unknown => (PAGE_BG_PRONOUNCED_DARK, ColorMode::Light),
                     ColorMode::Light => (PAGE_BG_PRONOUNCED_LIGHT, ColorMode::Dark),
                 };
                 (Some(bg), inverted)
