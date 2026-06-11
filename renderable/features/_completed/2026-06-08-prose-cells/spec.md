@@ -1,5 +1,5 @@
 ---
-status: ready for planning and implementation
+status: implemented
 reviewed: true
 date: 2026-06-08
 owner: ken

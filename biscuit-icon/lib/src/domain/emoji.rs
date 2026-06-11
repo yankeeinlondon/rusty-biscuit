@@ -1,4 +1,4 @@
-use strum_macros::{Display, EnumIter, EnumString};
+use strum::{Display, EnumIter, EnumString};
 
 use crate::body::IconBody;
 use crate::domain::DomainIcon;
