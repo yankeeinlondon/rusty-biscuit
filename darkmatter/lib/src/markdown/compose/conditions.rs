@@ -11,7 +11,6 @@
 //! [Darkmatter Expressions](../../../../docs/topics/darkmatter-expressions.md)
 //! topic for the full grammar.
 
-use super::EffectiveState;
 use super::expression::{CtxLookup, EvaluationLookup, evaluate, is_truthy, parse_condition};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
@@ -125,9 +124,9 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
 /// Returns [`ConditionError::Parse`] when the expression cannot be parsed,
 /// or [`ConditionError::Eval`] when evaluation fails (e.g. unknown function).
 /// Both variants include the source expression, line number, and source context.
-pub fn evaluate_condition(
+pub fn evaluate_condition<L: EvaluationLookup>(
     expr: &str,
-    state: &EffectiveState,
+    state: &L,
     line: usize,
     ctx: SourceContext,
 ) -> Result<bool, ConditionError> {
@@ -331,7 +330,7 @@ impl EvaluationLookup for ShortcutLookup<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::{ComposeContext, EffectiveStateBuilder};
+    use crate::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
     use serde_json::{Value, json};
     use std::collections::HashMap;
 

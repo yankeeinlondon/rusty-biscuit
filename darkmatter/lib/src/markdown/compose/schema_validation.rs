@@ -716,6 +716,23 @@ mod tests {
     }
 
     #[test]
+    fn inline_object_mixed_opaque_sibling_still_coerces_recognized_field() {
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 config: \"{ enabled: boolean, metadata: object }\"\n\
+             config:\n\
+             \x20 enabled: \"true\"\n\
+             \x20 metadata:\n\
+             \x20   source: user\n",
+        );
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        let config = &md.frontmatter().as_map()["config"];
+        assert_eq!(config["enabled"], serde_json::json!(true));
+        assert_eq!(config["metadata"], serde_json::json!({ "source": "user" }));
+    }
+
+    #[test]
     fn inline_object_array_nested_coercion() {
         // Each array item's nested scalar is coerced independently.
         let mut md = md_with_schema(
@@ -734,6 +751,27 @@ mod tests {
         assert_eq!(authors[0]["score"], serde_json::json!(4.5));
         assert_eq!(authors[1]["active"], serde_json::json!(false));
         assert_eq!(authors[1]["score"], serde_json::json!(-2));
+    }
+
+    #[test]
+    fn inline_object_array_mixed_opaque_sibling_still_coerces_recognized_field() {
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 authors: \"{ active: boolean, metadata: object }[]\"\n\
+             authors:\n\
+             \x20 - active: \"true\"\n\
+             \x20   metadata:\n\
+             \x20     role: admin\n\
+             \x20 - active: \"false\"\n\
+             \x20   metadata:\n\
+             \x20     role: reader\n",
+        );
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        let authors = &md.frontmatter().as_map()["authors"];
+        assert_eq!(authors[0]["active"], serde_json::json!(true));
+        assert_eq!(authors[1]["active"], serde_json::json!(false));
+        assert_eq!(authors[0]["metadata"], serde_json::json!({ "role": "admin" }));
     }
 
     #[test]
@@ -785,6 +823,27 @@ mod tests {
         let metadata = &md.frontmatter().as_map()["metadata"];
         assert_eq!(metadata["key"], serde_json::json!("visits"));
         assert_eq!(metadata["count"], serde_json::json!(42));
+    }
+
+    #[test]
+    fn inline_object_union_with_opaque_sibling_coerces_recognized_field() {
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 metadata:\n\
+             \x20   - \"{ kind: string(required), enabled: boolean(required), details: object(required) }\"\n\
+             \x20   - string\n\
+             metadata:\n\
+             \x20 kind: config\n\
+             \x20 enabled: \"true\"\n\
+             \x20 details:\n\
+             \x20   source: user\n",
+        );
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        let metadata = &md.frontmatter().as_map()["metadata"];
+        assert_eq!(metadata["enabled"], serde_json::json!(true));
+        assert_eq!(metadata["kind"], serde_json::json!("config"));
+        assert_eq!(metadata["details"], serde_json::json!({ "source": "user" }));
     }
 
     #[test]

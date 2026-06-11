@@ -892,7 +892,9 @@ impl Markdown {
                 report.replacements_applied = self.run_replacement_stage(state, options);
                 Ok(())
             }
-            ComposeOperation::PageBlocks => self.run_page_blocks_stage(state, report),
+            ComposeOperation::PageBlocks => {
+                self.run_page_blocks_stage(state, options, runtime, report)
+            }
             ComposeOperation::Interpolation => {
                 report.interpolations_applied =
                     self.run_interpolation_stage(state, options, runtime, report)?;
@@ -1398,6 +1400,8 @@ impl Markdown {
     fn run_page_blocks_stage(
         &mut self,
         state: &EffectiveState,
+        options: &ComposeOptions,
+        runtime: &shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         debug!("compose: running page blocks");
@@ -1426,10 +1430,14 @@ impl Markdown {
             warn_unknown_options(region, report);
         }
 
+        let lookup = state::ResolvingLookup::new(
+            state,
+            options.expression_resolution_context(&runtime.remote_fetch),
+        );
         self.content = page_blocks::engine::render_page_blocks(
             &self.content,
             &regions,
-            state,
+            &lookup,
             report,
             source,
         )?;
@@ -1529,9 +1537,13 @@ impl Markdown {
             }
 
             if let Some(expr) = &directive.options.when_expr {
+                let lookup = state::ResolvingLookup::new(
+                    state,
+                    options.expression_resolution_context(remote_fetch),
+                );
                 let should_include = transclusion::evaluate_condition(
                     expr,
-                    state,
+                    &lookup,
                     directive.line,
                     self.source_context_for_errors(),
                 )?;
@@ -4362,6 +4374,35 @@ Rounded: {{ round(pi) }}"#;
         assert!(composed.content().contains("before"));
         assert!(composed.content().contains("after"));
         assert_eq!(report.page_blocks_skipped, 1);
+    }
+
+    #[test]
+    fn page_block_condition_can_read_frontmatter_from_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let review = dir.path().join("review.md");
+        std::fs::write(&review, "---\nready: true\n---\n# Review\n").unwrap();
+
+        let content = concat!(
+            "---\nreview_path: review.md\n---\n\n",
+            "::block when=\"frontmatter(review_path, 'ready') == true\"\n\n",
+            "ready block\n\n",
+            "::end-block\n",
+        );
+        std::fs::write(&root, content).unwrap();
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::PageBlocks])
+            .with_source_file(&root);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+        assert!(
+            composed.content().contains("ready block"),
+            "page block should evaluate filesystem expression functions, got:\n{}",
+            composed.content()
+        );
+        assert_eq!(report.page_blocks_rendered, 1);
     }
 
     #[test]
