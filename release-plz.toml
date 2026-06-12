@@ -93,11 +93,11 @@ changelog_path = "unchained-ai/model_id/CHANGELOG.md"
 
 # Placeholder packages - exclude from releases
 [[package]]
-name = "tui-chrome"
+name = "biscuit-tui"
 release = false
 
 [[package]]
-name = "tui-chrome-cli"
+name = "biscuit-tui-cli"
 release = false
 
 [[package]]
