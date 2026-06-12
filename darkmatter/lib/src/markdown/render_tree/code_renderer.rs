@@ -50,6 +50,23 @@ impl TerminalCodeRenderer {
         }
     }
 
+    /// Creates a new [`TerminalCodeRenderer`] with a caller-supplied
+    /// [`CodeBlockMode`].
+    ///
+    /// Use this when the renderer's `Terminal` source is not bound and the
+    /// caller still wants to control the panel's contrast against the
+    /// page — for example, the direct `Markdown::as_terminal(opts)` entry
+    /// point, where `opts.code_block_mode` is the only signal available
+    /// and the `context.color_mode()` (set from `opts.color_mode`) supplies
+    /// the page-side mode.
+    #[must_use]
+    pub fn new_with_code_block_mode(code_block_mode: CodeBlockMode) -> Self {
+        Self {
+            terminal: None,
+            code_block_mode,
+        }
+    }
+
     /// Creates a [`TerminalCodeRenderer`] bound to the detected terminal.
     #[must_use]
     pub fn for_terminal(term: &Terminal, code_block_mode: CodeBlockMode) -> Self {
@@ -98,21 +115,34 @@ impl CodeRenderer for TerminalCodeRenderer {
             return None;
         }
         let hints = attrs.code_hints();
-        let terminal_mode: ColorMode = self
+        // The page surface and the code panel must share a single source of
+        // truth (Phase 2): a `Terminal` bound to the renderer is the
+        // preferred source (it carries the caller's real detected mode); if
+        // no terminal is bound (the entry-point path), fall back to the
+        // context's `color_mode()` (which the entry point sets from
+        // `opts.color_mode` so the page and panel agree). The
+        // [`ThemePair::resolve_for_surface`](crate::markdown::highlighting::themes::ThemePair::resolve_for_surface)
+        // boundary resolver feeds both surfaces from the same source.
+        let page_mode: ColorMode = self
             .terminal
             .as_ref()
-            .map_or_else(|| context.color_mode().into(), Terminal::color_mode);
+            .map(Terminal::color_mode)
+            .unwrap_or_else(|| context.color_mode().into());
         let code_theme = match context.code_theme_name() {
             Some(name) => ThemePair::from_str_or_default(name),
             None => ThemePair::OneHalf,
         };
-        // `terminal_mode` is the page color mode. The code block's variant is
-        // resolved by `code_block_mode` (default `Inverse`). For `Inverse` this
-        // is `terminal_mode.inverted()` — byte-identical to the previous
-        // `for_code_block(_mode)` path, which resolved the same inverted variant
-        // and selected `code_theme` directly (override wins, THEME env ignored).
-        let code_mode = self.code_block_mode.resolve(terminal_mode);
-        let highlighter = CodeHighlighter::new(code_theme, code_mode);
+        let surface = self
+            .terminal
+            .as_ref()
+            .map(crate::markdown::highlighting::Surface::Terminal)
+            .unwrap_or(crate::markdown::highlighting::Surface::Mode(page_mode));
+        let resolved = code_theme.resolve_for_surface(
+            surface,
+            Some(code_theme),
+            self.code_block_mode,
+        );
+        let highlighter = CodeHighlighter::from_theme(resolved.theme, resolved.color_mode);
         // Header/body contrast keys off the resolved theme background, not the
         // requested mode, so single-variant themes still get readable chrome.
         let color_mode = crate::markdown::output::code_block::mode_for_background(
@@ -127,7 +157,11 @@ impl CodeRenderer for TerminalCodeRenderer {
         let options = TerminalOptions {
             code_theme,
             prose_theme: code_theme,
-            color_mode: terminal_mode,
+            // `page_mode` is the resolved page color mode the code panel
+            // inverted against. Threading it through `TerminalOptions`
+            // here keeps `render_terminal_code_block`'s padding/header
+            // math consistent with the panel background.
+            color_mode: page_mode,
             include_line_numbers: context.line_numbers(),
             color_depth: Some(ColorDepth::TrueColor),
             image_mode: TerminalImageMode::Never,
@@ -203,11 +237,12 @@ impl CodeRenderer for TerminalCodeRenderer {
         // and `YamlBlock`'s browser path so render-tree HTML, legacy `as_html`,
         // and `YamlBlock` agree (Defect D). Single-variant themes (dracula/nord/
         // monokai/vs-dark) are a deliberate no-op.
-        let highlighter = CodeHighlighter::for_code_block_mode(
-            options.code_theme,
-            options.color_mode,
+        let resolved = options.code_theme.resolve_for_surface(
+            crate::markdown::highlighting::Surface::Mode(options.color_mode),
             Some(options.code_theme),
+            crate::markdown::highlighting::CodeBlockMode::default(),
         );
+        let highlighter = CodeHighlighter::from_theme(resolved.theme, resolved.color_mode);
         let code_meta = build_code_meta(lang.unwrap_or(""), meta);
         let language = lang.unwrap_or("");
 
@@ -589,15 +624,16 @@ mod tests {
         let code = "fn main() {}";
         let meta = build_code_meta("rust", None);
 
+        let inverted_resolved = opts.code_theme.resolve_for_surface(
+            crate::markdown::highlighting::Surface::Mode(opts.color_mode),
+            Some(opts.code_theme),
+            crate::markdown::highlighting::CodeBlockMode::default(),
+        );
         let inverted = render_html_code_block(
             code,
             "rust",
             &meta,
-            &CodeHighlighter::for_code_block_mode(
-                opts.code_theme,
-                opts.color_mode,
-                Some(opts.code_theme),
-            ),
+            &CodeHighlighter::from_theme(inverted_resolved.theme, inverted_resolved.color_mode),
             &opts,
         )
         .expect("inverted highlight");

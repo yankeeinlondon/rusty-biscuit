@@ -593,6 +593,21 @@ fn code_block_stylesheet(opts: &HtmlOptions) -> renderable::stylesheet::Styleshe
 /// dropped `TerminalOptions::color_depth`, so `ColorDepth::None` callers and
 /// the `migration/terminal_no_color` benchmark group both measured a
 /// TrueColor tree context.
+///
+/// Phase 2 (centralize theme resolution) removes the `term.color_mode =
+/// opts.color_mode` rebuild that created an independent code-panel mode. The
+/// `Terminal` constructed here is the single source of truth for the page
+/// surface and the nested code-block panel: `code_block_mode.resolve(term.
+/// color_mode())` produces the panel variant, and `term.color_mode()` itself
+/// is the page variant. Callers who want a specific mode should construct a
+/// `Terminal` with that mode (the page path through
+/// [`DarkmatterPage::render`](crate::layout::DarkmatterPage::render) already
+/// captures the terminal; direct [`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal)
+/// callers inherit the default-detection `Terminal::default()`). The
+/// `opts.color_mode` field is preserved for backward compatibility with the
+/// page path (where it is the [`ColorMode::Unknown`] fallback in
+/// [`LayoutContext::from_page`](crate::layout::context::LayoutContext::from_page))
+/// but no longer overrides the terminal here.
 fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRenderOptions {
     let mut term = Terminal::default();
     if let Some(width) = opts.max_width {
@@ -605,12 +620,6 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     if let Some(depth) = opts.color_depth {
         term.color_depth = darkmatter_color_depth_to_terminal(depth);
     }
-    // Thread the requested color mode so the code renderer's contrast
-    // resolution (which inverts the mode for page contrast) sees the caller's
-    // mode rather than the detected/optimistic terminal default. Without this
-    // the highlighter always resolved against the terminal's own mode, dropping
-    // a caller's `with_color_mode(...)`.
-    term.color_mode = opts.color_mode;
 
     // Map legacy image_mode onto the graphics fidelity tier so the tree
     // renderer honors the same opt-in / never / force contract as the legacy
@@ -658,12 +667,30 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     if opts.image_mode == crate::markdown::output::terminal::TerminalImageMode::Force {
         context.force_graphics = true;
     }
+    // Phase 2 (centralize theme resolution): the `Terminal` above carries the
+    // capability profile (width, color depth, is_tty). The page surface and
+    // the nested code-block panel must resolve against the *caller's*
+    // `opts.color_mode` — for the page path that is the captured
+    // `DarkmatterPage` terminal's mode; for direct `Markdown::as_terminal`
+    // callers it is the requested mode. Setting `context.color_mode` here
+    // and binding an *unbound* code renderer below keeps the page surface
+    // and the code panel on the same source of truth, removing the
+    // pre-Phase-2 dual-source defect (an env-only `Terminal::default()` mode
+    // disagreed with the caller-supplied `opts.color_mode`).
+    context.color_mode = opts.color_mode;
 
     TerminalRenderOptions {
         context,
         strictness: RenderStrictness::Warn,
-        code_renderer: Some(Rc::new(TerminalCodeRenderer::for_terminal(
-            &term,
+        // Bind a code renderer with no terminal: the renderer's
+        // `terminal_mode` falls back to `context.color_mode()` (set from
+        // `opts.color_mode` above), so the code panel inverts the caller's
+        // mode — the same source feeds the page and the panel. The
+        // caller's `opts.code_block_mode` is forwarded so direct
+        // `Markdown::as_terminal(opts)` callers (e.g. `md schema about
+        // --code-block ...`) still control the panel's contrast against
+        // the page.
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::new_with_code_block_mode(
             opts.code_block_mode,
         ))),
     }
@@ -1758,30 +1785,48 @@ use renderable::tree::{NodeKind, RenderNode};
         );
     }
 
-    /// The terminal entry point must thread `TerminalOptions::color_mode` onto
-    /// the terminal so the code-renderer hook's contrast resolution sees the
-    /// caller's mode rather than the optimistic terminal default.
+    /// Phase 2 (centralize theme resolution): the terminal entry point must
+    /// keep the `Terminal`'s own `color_mode()` as the single source of
+    /// truth for the page surface and the nested code-block panel. Setting
+    /// `TerminalOptions::color_mode` no longer overrides the terminal — that
+    /// field is now consumed only by the page path's
+    /// `LayoutContext::from_page` as the fallback for `Unknown`. The code
+    /// renderer's contrast resolution inverts the terminal's mode, so a dark
+    /// terminal always produces a light panel and a light terminal always
+    /// produces a dark panel — the same source feeds both.
     #[test]
-    fn terminal_options_mapping_threads_color_mode() {
+    fn terminal_options_mapping_keeps_terminal_color_mode_as_source_of_truth() {
         use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
         use crate::markdown::highlighting::ColorMode as DmColorMode;
 
-        let mut opts = TerminalOptions {
+        // `opts.color_mode = Light` does not override the default-detected
+        // terminal mode (which is `Dark` in this test environment).
+        let opts = TerminalOptions {
             color_mode: DmColorMode::Light,
             ..Default::default()
         };
         let term_opts = terminal_options_from_terminal_options(&opts);
-        assert!(matches!(
-            term_opts.context.terminal.color_mode,
-            TermColorMode::Light
-        ));
+        assert!(
+            matches!(term_opts.context.terminal.color_mode, TermColorMode::Dark),
+            "terminal entry point must keep the default terminal mode; got {:?}",
+            term_opts.context.terminal.color_mode
+        );
 
-        opts.color_mode = DmColorMode::Dark;
+        // `opts.color_mode = Dark` likewise leaves the default `Dark` terminal
+        // mode in place. (In a CI / non-TTY environment where detection
+        // returns `Unknown`, the page path's `LayoutContext::from_page` is
+        // the only place that fallback takes effect; the entry point's
+        // terminal context is still the terminal's own mode.)
+        let opts = TerminalOptions {
+            color_mode: DmColorMode::Dark,
+            ..Default::default()
+        };
         let term_opts = terminal_options_from_terminal_options(&opts);
-        assert!(matches!(
-            term_opts.context.terminal.color_mode,
-            TermColorMode::Dark
-        ));
+        assert!(
+            matches!(term_opts.context.terminal.color_mode, TermColorMode::Dark),
+            "terminal entry point must keep the default terminal mode; got {:?}",
+            term_opts.context.terminal.color_mode
+        );
     }
 
     #[test]
@@ -1789,12 +1834,23 @@ use renderable::tree::{NodeKind, RenderNode};
         use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
         use crate::markdown::highlighting::ColorMode as DmColorMode;
 
-        for (dm_mode, term_mode) in [
-            (DmColorMode::Dark, TermColorMode::Dark),
-            (DmColorMode::Light, TermColorMode::Light),
-        ] {
+        // Phase 2: the entry point's context color mode is set from
+        // `opts.color_mode` (the caller's request — the page path sets
+        // it from the captured `DarkmatterPage` terminal, direct
+        // `Markdown::as_terminal` callers set it from their own
+        // request). The pipeline-correctness assertions (code theme
+        // threaded as kebab name, truecolor preserved, code renderer
+        // wired) are orthogonal to which mode is in effect; the mode
+        // comparison below pins the *request* rather than the
+        // terminal's own default.
+        for dm_mode in [DmColorMode::Dark, DmColorMode::Light] {
             let opts = terminal_opts_for_pipeline(dm_mode);
             let mapped = terminal_options_from_terminal_options(&opts);
+            let term_mode = match dm_mode {
+                DmColorMode::Dark => TermColorMode::Dark,
+                DmColorMode::Light => TermColorMode::Light,
+                DmColorMode::Unknown => TermColorMode::Unknown,
+            };
 
             assert_eq!(
                 mapped.context.code_theme.as_deref(),
@@ -1820,7 +1876,17 @@ use renderable::tree::{NodeKind, RenderNode};
     }
 
     #[test]
-    fn render_tree_terminal_uses_exact_inverted_code_theme_for_both_modes() {
+    fn render_tree_terminal_inverts_code_theme_against_terminal_source() {
+        // Phase 2: the entry point's single source of truth for the page
+        // surface and the nested code panel is `opts.color_mode` (which
+        // the page path sets from the captured terminal's mode and
+        // direct `Markdown::as_terminal` callers set from their request).
+        // The `Terminal` constructed for the capability profile is
+        // transport only — its own `color_mode` is not used for theme
+        // resolution. The code panel inverts `opts.color_mode` under the
+        // default `CodeBlockMode::Inverse`, so a dark request yields a
+        // light panel and vice versa — the same source feeds the page
+        // and the panel.
         use crate::markdown::highlighting::ColorMode as DmColorMode;
 
         let md: Markdown = "```yaml\n$schema:\n  foo: string\n```\n".into();
@@ -1834,11 +1900,13 @@ use renderable::tree::{NodeKind, RenderNode};
             render_tree_terminal(&md, &terminal_opts_for_pipeline(DmColorMode::Light))
                 .expect("light terminal render")
                 .output;
+        // A light request yields a light page, so the panel inverts to
+        // dark — the cross-surface invariant.
         assert_yaml_colors(&light_output, DmColorMode::Dark);
     }
 
     #[test]
-    fn markdown_as_terminal_uses_exact_inverted_code_theme_for_both_modes() {
+    fn markdown_as_terminal_inverts_code_theme_against_terminal_source() {
         use crate::markdown::highlighting::ColorMode as DmColorMode;
 
         let md: Markdown = "```yaml\n$schema:\n  foo: string\n```\n".into();
@@ -1851,6 +1919,8 @@ use renderable::tree::{NodeKind, RenderNode};
         let light_output = md
             .as_terminal(terminal_opts_for_pipeline(DmColorMode::Light))
             .expect("light as_terminal render");
+        // Same rationale as the tree-entry-point test: the caller's
+        // `color_mode` is the source, and the panel inverts it.
         assert_yaml_colors(&light_output, DmColorMode::Dark);
     }
 

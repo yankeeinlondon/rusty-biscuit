@@ -48,6 +48,8 @@ pub struct PageStyleOverrides {
     pub padding_left: bool,
     pub max_width: bool,
     pub background: bool,
+    /// `style.page.bg-color` claimed by a CLI flag (e.g. `--page-bg-color`).
+    pub background_color: bool,
     pub alignment: bool,
     pub align_images: bool,
     pub align_lists: bool,
@@ -306,6 +308,14 @@ pub fn apply_page_style(
         && let Some(bg) = page_style.background
     {
         page = page.with_page_background(bg);
+    }
+
+    // Page background color — claimed by `--page-bg-color` so the
+    // frontmatter value is skipped.
+    if !overrides.background_color
+        && let Some(bg_color) = page_style.bg_color.as_ref()
+    {
+        page = page.with_page_bg_color(bg_color.to_paint_color());
     }
 
     // Max width — stored as the authored `Length`. Percent resolves against the

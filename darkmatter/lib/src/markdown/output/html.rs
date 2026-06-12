@@ -118,17 +118,20 @@ impl Default for HtmlOptions {
 /// Computes the `.code-block` panel background color (`#rrggbb`) for `options`.
 ///
 /// Code blocks contrast against the page, so the code `ThemePair` resolves
-/// against the **inverted** color mode (`options.color_mode.inverted()`) — a
-/// dark page gets a light code panel and vice versa (Defect D). The render-tree
-/// browser entry point reuses this so its injected `.code-block` rule matches
-/// the computed code-panel background, rather than re-deriving the
-/// theme/inversion math.
+/// against the **inverted** color mode (a dark page gets a light code panel
+/// and vice versa — Defect D). The render-tree browser entry point reuses
+/// this so its injected `.code-block` rule matches the computed code-panel
+/// background, rather than re-deriving the theme/inversion math. Routes
+/// through [`ThemePair::resolve_for_surface`](crate::markdown::highlighting::themes::ThemePair::resolve_for_surface)
+/// so the same boundary resolver the public `CodeBlock` and `DarkmatterPage`
+/// use feeds this helper.
 pub(crate) fn code_block_background_hex(options: &HtmlOptions) -> String {
-    let highlighter = CodeHighlighter::for_code_block_mode(
-        options.code_theme,
-        options.color_mode,
+    let resolved = options.code_theme.resolve_for_surface(
+        crate::markdown::highlighting::Surface::Mode(options.color_mode),
         Some(options.code_theme),
+        crate::markdown::highlighting::CodeBlockMode::default(),
     );
+    let highlighter = CodeHighlighter::from_theme(resolved.theme, resolved.color_mode);
     let bg = highlighter
         .theme()
         .settings

@@ -29,6 +29,7 @@
 
 pub mod block;
 pub mod cleanup;
+pub mod code_block;
 pub mod compose;
 pub mod delta;
 pub mod dsl;
@@ -39,6 +40,7 @@ pub mod hash;
 pub mod highlighting;
 pub mod inline;
 mod inline_html;
+pub mod language_grammar;
 pub mod normalize;
 pub mod output;
 pub mod reference;
@@ -52,11 +54,13 @@ pub use delta::{
     BrokenLink, ChangeAction, CodeBlockChange, ContentChange, DeltaStatistics, DocumentChange,
     FrontmatterChange, MarkdownDelta, MovedSection, SectionId, SectionPath,
 };
+pub use code_block::{CodeBlock, CodeBlockError};
 pub use frontmatter::{Frontmatter, MergeStrategy};
 pub use hash::{
     ComputedHash, DetailedValue, FmHashPair, MdHashKind, MdHashOptions, ParseMdHashKindError,
     SectionTuple,
 };
+pub use language_grammar::{LanguageGrammar, LanguageGrammarError};
 pub use normalize::{
     HeadingAdjustment, HeadingLevel, NormalizationError, NormalizationReport, StructureIssue,
     StructureIssueKind, StructureValidation, ViolationCorrection,
@@ -69,6 +73,7 @@ pub use reference::{
 pub use render_tree::TerminalCodeRenderer;
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
+#[allow(deprecated)]
 pub use yaml_block::{YamlBlock, YamlBlockError};
 
 use std::path::Path;

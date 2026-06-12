@@ -788,6 +788,17 @@ impl DarkmatterPage {
     /// (margins, padding, background fill) when any layout setting is
     /// non-default.
     ///
+    /// Fenced code blocks in `md` fold through [`CodeBlock`]'s
+    /// [`TreeRenderable`](crate::markdown::code_block::CodeBlock) projection
+    /// the same way the public `CodeBlock::render` path does — the
+    /// render-tree terminal renderer wires darkmatter's
+    /// [`TerminalCodeRenderer`](crate::markdown::render_tree::TerminalCodeRenderer)
+    /// hook, which reproduces the
+    /// [`render_terminal_code_block`](crate::markdown::output::code_block::render_terminal_code_block)
+    /// output `CodeBlock` itself produces. A fenced ` ```rust ` block in `md`
+    /// therefore renders byte-for-byte equal to `CodeBlock::rust(...).render()`
+    /// for the same code, language, and metadata.
+    ///
     /// When all layout fields are at their defaults, this matches
     /// `Markdown::as_terminal(default)` as long as the captured terminal color
     /// mode agrees with the detected default (or is `Unknown`); a real terminal
@@ -941,6 +952,18 @@ impl DarkmatterPage {
     /// HTML renderer, then wraps the result in a page-level `<div>` with CSS
     /// styles for margin, padding, max-width, background-color, and
     /// per-component alignment / fill.
+    ///
+    /// Fenced code blocks in `md` fold through [`CodeBlock`]'s
+    /// [`BrowserRenderable`](crate::markdown::code_block::CodeBlock) projection
+    /// the same way the public `CodeBlock::render_html_fragment` path does —
+    /// the render-tree browser renderer wires darkmatter's
+    /// [`TerminalCodeRenderer`](crate::markdown::render_tree::TerminalCodeRenderer)
+    /// hook, which reproduces the
+    /// [`render_html_code_block`](crate::markdown::output::code_block::render_html_code_block)
+    /// output `CodeBlock` itself produces. A fenced ` ```rust ` block in `md`
+    /// therefore renders byte-for-byte equal to
+    /// `CodeBlock::rust(...).render_html_fragment()` for the same code,
+    /// language, and metadata.
     ///
     /// When all layout fields are at their defaults, the output is the same as
     /// `md.as_html(HtmlOptions::default())` with no wrapper.
@@ -1847,6 +1870,24 @@ mod tests {
         }
     }
 
+    /// Phase 3.2: a default-layout `DarkmatterPage` browser render that
+    /// captures a Terminal width different from the ambient detection must
+    /// still produce a non-wrapped body — the captured width must not leak
+    /// into the page wrapper, and a `with_page_bg_color` flag must reach the
+    /// page wrapper CSS.
+    #[test]
+    fn zero_config_browser_render_captures_terminal_width_without_leak() {
+        let term = Terminal::new_optimistic(40);
+        let page = DarkmatterPage::new(&term);
+        let md: Markdown = "# Hello\n\nA paragraph.\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            !html.contains("<div class=\"darkmatter-page\""),
+            "a default-layout page should not add a page wrapper; got: {html}"
+        );
+    }
+
     /// `DarkmatterPage::new` must capture the [`Terminal`]'s color depth so a
     /// page built from `new_optimistic` (hardcoded `TrueColor`) reports that
     /// depth regardless of ambient detection.
@@ -2070,6 +2111,46 @@ mod tests {
             (page_lum - panel_lum).abs() > 0.15,
             "code panel must separate from the light page surface: \
              page bg {page_bg:?} (lum {page_lum:.3}) vs panel bg {panel_bg:?} (lum {panel_lum:.3})"
+        );
+    }
+
+    /// Phase 2 (centralize theme resolution): a single `Terminal` is the
+    /// source of truth for *both* the page surface and the nested code-block
+    /// panel. Construct a dark `Terminal`, build a `DarkmatterPage` from it,
+    /// render a fenced code block, and assert the resolved panel mode is
+    /// `Light` (the dark terminal's inversion). The page path no longer
+    /// threads a separate env-derived `options.color_mode` through to the
+    /// code renderer — only the captured terminal's `color_mode()` feeds
+    /// the resolution.
+    #[test]
+    fn dark_terminal_inverts_to_light_panel_via_captured_terminal() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Dark;
+
+        let md: Markdown = "```rust\nfn codemarker() {}\n```\n".into();
+
+        // No `with_color_mode` override: the captured terminal's mode is
+        // the only source feeding the layout context and the code renderer.
+        let out = DarkmatterPage::new(&term).render(&md).unwrap();
+        let panel_bg = active_bg_at(&out, "codemarker");
+        let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+        assert!(
+            lum > 0.5,
+            "a dark terminal captured by DarkmatterPage must invert the code \
+             panel to a light theme: panel bg {panel_bg:?} (lum {lum:.3})"
+        );
+
+        // Sanity: a light terminal yields a dark panel through the same
+        // path. The invariant is symmetric.
+        let mut term_light = Terminal::new_optimistic(80);
+        term_light.color_mode = TerminalColorMode::Light;
+        let out_light = DarkmatterPage::new(&term_light).render(&md).unwrap();
+        let panel_bg_light = active_bg_at(&out_light, "codemarker");
+        let lum_light = rel_luminance(panel_bg_light.0, panel_bg_light.1, panel_bg_light.2);
+        assert!(
+            lum_light < 0.5,
+            "a light terminal captured by DarkmatterPage must invert the code \
+             panel to a dark theme: panel bg {panel_bg_light:?} (lum {lum_light:.3})"
         );
     }
 
@@ -3877,5 +3958,95 @@ mod tests {
         let html = page.render_to_browser(&"```rust\nfn x(){}\n```".into()).unwrap();
         assert!(html.contains("darkmatter-page"));
         insta::assert_snapshot!("pronounced_background_snapshot", html);
+    }
+
+    // ---------- Phase 3: ColorMode::Unknown fallback tests ----------
+
+    /// `ColorMode::Unknown` page/prose must fall back to the configured page
+    /// mode (default `Dark`); the page surface inverts against the captured
+    /// terminal mode when one is present, but a standalone `DarkmatterPage`
+    /// built from a `Terminal` whose color mode is `Unknown` renders as dark
+    /// (Decision #6 in the spec).
+    #[test]
+    fn color_mode_unknown_page_prose_defaults_to_dark() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = biscuit_terminal::discovery::detection::ColorMode::Unknown;
+        let page = DarkmatterPage::new(&term);
+        let md: Markdown = "```rust\nfn codemarker() {}\n```\n".into();
+
+        let out = page.render(&md).unwrap();
+        let panel_bg = active_bg_at(&out, "codemarker");
+        let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+        // A dark page => the default inverse code panel resolves to LIGHT (the
+        // unknown mode's `inverted()` resolves to `Light`).
+        assert!(
+            lum > 0.5,
+            "an unknown-color-mode terminal must fall back to a dark page \
+             and invert the code panel to light; panel bg {panel_bg:?} (lum {lum:.3})"
+        );
+    }
+
+    /// An explicit `with_color_mode(Dark)` on a page built from an unknown
+    /// terminal must keep the page dark, so the inverse code panel still
+    /// resolves light. This pins the `with_color_mode` precedence.
+    #[test]
+    fn color_mode_unknown_with_explicit_dark_inverts_to_light() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = biscuit_terminal::discovery::detection::ColorMode::Unknown;
+        let page = DarkmatterPage::new(&term).with_color_mode(ColorMode::Dark);
+        let md: Markdown = "```rust\nfn codemarker() {}\n```\n".into();
+
+        let out = page.render(&md).unwrap();
+        let panel_bg = active_bg_at(&out, "codemarker");
+        let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+        assert!(
+            lum > 0.5,
+            "explicit ColorMode::Dark with an unknown terminal must keep the \
+             page dark and invert the panel to light; panel bg {panel_bg:?} (lum {lum:.3})"
+        );
+    }
+
+    /// An explicit `with_color_mode(Light)` on a page built from an unknown
+    /// terminal must keep the page light, so the inverse code panel resolves
+    /// to dark. The unspecified terminal mode falls back to the configured
+    /// `with_color_mode` rather than `Dark`.
+    #[test]
+    fn color_mode_unknown_with_explicit_light_inverts_to_dark() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = biscuit_terminal::discovery::detection::ColorMode::Unknown;
+        let page = DarkmatterPage::new(&term).with_color_mode(ColorMode::Light);
+        let md: Markdown = "```rust\nfn codemarker() {}\n```\n".into();
+
+        let out = page.render(&md).unwrap();
+        let panel_bg = active_bg_at(&out, "codemarker");
+        let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+        assert!(
+            lum < 0.5,
+            "explicit ColorMode::Light with an unknown terminal must keep the \
+             page light and invert the panel to dark; panel bg {panel_bg:?} (lum {lum:.3})"
+        );
+    }
+
+    /// The default code-block mode is `Inverse`: a dark page inverts to a
+    /// light code panel. The contract must hold under `ColorMode::Unknown`
+    /// as well as `Dark` / `Light` (Decision #6).
+    #[test]
+    fn color_mode_unknown_default_inverse_code_block_resolves_light() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = biscuit_terminal::discovery::detection::ColorMode::Unknown;
+        // No `with_color_mode` override: the captured unknown mode resolves
+        // to `Dark` per the layout context's surface_mode mapping, so the
+        // default inverse code block must render in a light theme.
+        let page = DarkmatterPage::new(&term);
+        let md: Markdown = "```rust\nfn codemarker() {}\n```\n".into();
+
+        let out = page.render(&md).unwrap();
+        let panel_bg = active_bg_at(&out, "codemarker");
+        let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+        assert!(
+            lum > 0.5,
+            "ColorMode::Unknown with the default inverse code block must \
+             resolve the panel to a light theme; panel bg {panel_bg:?} (lum {lum:.3})"
+        );
     }
 }

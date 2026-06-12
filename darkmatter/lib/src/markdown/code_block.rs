@@ -1,0 +1,809 @@
+//! Atomic code-block rendering component.
+//!
+//! [`CodeBlock`] is the public Darkmatter component for rendering a single
+//! syntax-highlighted code block. It is independent of Markdown parsing: the
+//! terminal and browser render paths fold through the same shared
+//! [`render_terminal_code_block`](crate::markdown::output::code_block::render_terminal_code_block)
+//! and
+//! [`render_html_code_block`](crate::markdown::output::code_block::render_html_code_block)
+//! helpers that Markdown fences use, so output stays byte-compatible with a
+//! Markdown ` ```rust ` (or ` ```yaml `) fence for the same code, language,
+//! and metadata.
+//!
+//! ## Examples
+//!
+//! ```
+//! use darkmatter::markdown::code_block::CodeBlock;
+//!
+//! let block = CodeBlock::rust("fn main() {}");
+//! assert_eq!(block.code(), "fn main() {}");
+//! ```
+
+use std::any::Any;
+use std::path::Path;
+use std::rc::Rc;
+
+use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
+use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
+use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::layout::Layout;
+use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::tree::{
+    BrowserRenderOptions, CodeRenderHints, RenderNode, RenderStrictness, TreeRenderable,
+    render_browser_node,
+};
+use thiserror::Error;
+
+use crate::markdown::dsl::{CodeBlockMeta, parse_code_info};
+use crate::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
+use crate::markdown::language_grammar::LanguageGrammar;
+use crate::markdown::render_tree::TerminalCodeRenderer;
+
+/// Errors that can occur when constructing or working with a [`CodeBlock`].
+#[derive(Debug, Error)]
+pub enum CodeBlockError {
+    /// Failed to read source file from disk.
+    #[error("Failed to read code source: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// A code-block DSL directive (in the `meta` text) failed to parse.
+    #[error("Invalid code-block directive: {0}")]
+    InvalidDirective(String),
+}
+
+/// Atomic code-block rendering component.
+///
+/// `CodeBlock` is the public Darkmatter component for rendering one
+/// syntax-highlighted code block. It stores **both** the parsed
+/// [`CodeBlockMeta`] (which drives rendering decisions such as title,
+/// highlight ranges, and line numbering) and the raw fence remainder text
+/// (`raw_meta`). The raw text is retained because the Markdown render
+/// target re-emits the fence info string verbatim (`{lang} {raw_meta}`)
+/// and the TOC tracks the full info string for change detection.
+/// Re-deriving the fence text from the parsed struct alone would risk
+/// reordering keys or normalizing quoting and whitespace, breaking
+/// byte-exact Markdown parity. When a `CodeBlock` is constructed
+/// directly (not from a fence), `raw_meta` is `None` and the fence is
+/// serialized from `meta`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodeBlock {
+    code: String,
+    language: Option<LanguageGrammar>,
+    meta: CodeBlockMeta,
+    raw_meta: Option<String>,
+    theme: Option<ThemePair>,
+    layout: Layout,
+}
+
+impl CodeBlock {
+    /// Constructs a [`CodeBlock`] from a raw code string and an optional
+    /// fence language token.
+    ///
+    /// The language token is resolved through
+    /// [`LanguageGrammar::from_fence_token`]. Pass `None` for an
+    /// unspecified language (plain text).
+    pub fn new(code: impl Into<String>, language: Option<impl AsRef<str>>) -> Self {
+        let code = code.into();
+        let language = language.map(|lang| LanguageGrammar::from_fence_token(lang));
+        Self {
+            code,
+            language,
+            meta: CodeBlockMeta::default(),
+            raw_meta: None,
+            theme: None,
+            layout: Layout::default(),
+        }
+    }
+
+    /// Sets the [`LanguageGrammar`] for this block, overriding the token
+    /// captured at construction.
+    pub fn with_language(mut self, language: LanguageGrammar) -> Self {
+        self.language = Some(language);
+        self
+    }
+
+    /// Sets the language from a raw fence-style token, resolved through
+    /// [`LanguageGrammar::from_fence_token`].
+    pub fn with_fence_language(mut self, language: impl AsRef<str>) -> Self {
+        self.language = Some(LanguageGrammar::from_fence_token(language));
+        self
+    }
+
+    /// Replaces the parsed [`CodeBlockMeta`] for this block.
+    pub fn with_meta(mut self, meta: CodeBlockMeta) -> Self {
+        self.meta = meta;
+        self
+    }
+
+    /// Sets the theme override used for this block. When `None` (the
+    /// default), the block resolves themes through the page context
+    /// (terminal mode or `DarkmatterPage` policy).
+    pub fn with_theme(mut self, theme: ThemePair) -> Self {
+        self.theme = Some(theme);
+        self
+    }
+
+    /// Returns a [`CodeBlock`] for YAML content (language token `"yaml"`).
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::code_block::CodeBlock;
+    ///
+    /// let block = CodeBlock::yaml("foo: 1\nbar: 2");
+    /// assert_eq!(block.code(), "foo: 1\nbar: 2");
+    /// ```
+    pub fn yaml(code: impl Into<String>) -> Self {
+        Self::new(code, Some::<String>("yaml".into()))
+    }
+
+    /// Returns a [`CodeBlock`] for Rust content (language token `"rust"`).
+    pub fn rust(code: impl Into<String>) -> Self {
+        Self::new(code, Some::<String>("rust".into()))
+    }
+
+    /// Returns a [`CodeBlock`] for JSON content (language token `"json"`).
+    pub fn json(code: impl Into<String>) -> Self {
+        Self::new(code, Some::<String>("json".into()))
+    }
+
+    /// Returns a [`CodeBlock`] for TOML content (language token `"toml"`).
+    pub fn toml(code: impl Into<String>) -> Self {
+        Self::new(code, Some::<String>("toml".into()))
+    }
+
+    /// Reads a file from disk and wraps its contents in a [`CodeBlock`].
+    ///
+    /// The language is inferred from the file extension via
+    /// [`LanguageGrammar::from_fence_token`]; unknown extensions flow
+    /// through [`LanguageGrammar::OtherByToken`].
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`CodeBlockError::Io`] if the file cannot be read.
+    pub fn from_source_file(path: impl AsRef<Path>) -> Result<Self, CodeBlockError> {
+        let path = path.as_ref();
+        let code = std::fs::read_to_string(path)?;
+        let lang_token = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_string();
+        Ok(Self::new(code, Some(lang_token)))
+    }
+
+    /// Constructs a [`CodeBlock`] from a parsed [`CodeBlockMeta`] and the
+    /// raw fence remainder text (the info string beyond the language).
+    ///
+    /// This is the path the Markdown fold uses: it splits the info string
+    /// into `lang` + `raw_meta`, and the spec says `CodeBlock` must keep
+    /// the raw text alongside the parsed struct so it can re-emit the
+    /// fence verbatim. Callers building a `CodeBlock` from a fence use
+    /// this constructor; directly-constructed blocks pass `None` for
+    /// `raw_meta` and the constructor serializes the meta instead.
+    pub fn from_fence_parts(
+        code: impl Into<String>,
+        language: Option<impl AsRef<str>>,
+        raw_meta: Option<String>,
+        meta: CodeBlockMeta,
+    ) -> Self {
+        let code = code.into();
+        let language = language.map(|lang| LanguageGrammar::from_fence_token(lang));
+        Self {
+            code,
+            language,
+            meta,
+            raw_meta,
+            theme: None,
+            layout: Layout::default(),
+        }
+    }
+
+    /// Returns the code text this block holds.
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    /// Consumes the block and returns the stored code text.
+    pub fn into_code(self) -> String {
+        self.code
+    }
+
+    /// Returns a reference to the resolved language grammar, if any.
+    pub fn language(&self) -> Option<&LanguageGrammar> {
+        self.language.as_ref()
+    }
+
+    /// Returns a reference to the parsed [`CodeBlockMeta`].
+    pub fn meta(&self) -> &CodeBlockMeta {
+        &self.meta
+    }
+
+    /// Returns the raw fence remainder (info string beyond the language
+    /// token) when this block was constructed from one. `None` for
+    /// directly-constructed blocks.
+    pub fn raw_meta(&self) -> Option<&str> {
+        self.raw_meta.as_deref()
+    }
+
+    /// Returns the explicit theme override, if any.
+    pub fn theme(&self) -> Option<ThemePair> {
+        self.theme
+    }
+
+    /// Builds the bare [`NodeKind::Code`](renderable::tree::NodeKind::Code)
+    /// node this block projects into the render tree.
+    ///
+    /// The node carries [`CodeRenderHints`] requesting a header row, the
+    /// resolved language label, and syntax highlighting, so a tree renderer
+    /// wired with darkmatter's [`TerminalCodeRenderer`] reproduces the
+    /// highlighted header-plus-body output. The stored [`Layout`] is
+    /// attached when non-default so the renderer applies margins,
+    /// alignment, and word-wrap.
+    fn code_node(&self) -> RenderNode {
+        let lang = self.language.as_ref().map(|g| g.to_string());
+        let lang_label = lang.clone().unwrap_or_default();
+        let meta = self
+            .raw_meta
+            .clone()
+            .or_else(|| serialize_meta(&self.meta));
+        let mut node = RenderNode::code(lang, meta, self.code.clone());
+        node.attrs.set_code_hints(&CodeRenderHints {
+            header_row: true,
+            language_label: Some(lang_label),
+            highlight: true,
+        });
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
+        node
+    }
+
+    /// Resolves a `CodeBlockMeta` from raw fence info string parts
+    /// (`{lang} {raw_meta}`). Used to wire `with_meta` so callers can
+    /// pass a parsed meta from a fenced block.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`CodeBlockError::InvalidDirective`] if the info string
+    /// contains a malformed DSL directive.
+    pub fn meta_from_fence(lang: &str, raw_meta: Option<&str>) -> Result<CodeBlockMeta, CodeBlockError> {
+        let info = match raw_meta {
+            Some(m) if !m.trim().is_empty() => format!("{lang} {m}"),
+            _ => lang.to_string(),
+        };
+        parse_code_info(&info).map_err(|e| CodeBlockError::InvalidDirective(e.to_string()))
+    }
+}
+
+impl TreeRenderable for CodeBlock {
+    /// Projects the block into a root-wrapped code node.
+    ///
+    /// The projection is a plain `NodeKind::Code` subtree carrying the
+    /// language and raw info-string metadata. **No syntax highlighting
+    /// happens here** — terminal and browser target folds remain
+    /// responsible for rendering the code panel.
+    fn render_tree(&self) -> RenderNode {
+        RenderNode::root(vec![self.code_node()])
+    }
+}
+
+impl TerminalRenderable for CodeBlock {
+    /// Renders the code block as an ANSI-styled terminal string.
+    ///
+    /// Routes through darkmatter's [`TerminalCodeRenderer`], the same
+    /// shared `render_terminal_code_block` helper Markdown fences use,
+    /// so a [`CodeBlock::yaml(...)]` produces output byte-for-byte equal
+    /// to a Markdown ` ```yaml ` fence for the same code, language, and
+    /// metadata.
+    fn render(&self, term: &Terminal) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn)
+            .with_code_renderer(Rc::new(TerminalCodeRenderer::for_terminal(
+                term,
+                CodeBlockMode::default(),
+            )));
+        match render_terminal_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "CodeBlock",
+                    error = %error,
+                    "render_terminal_node failed; emitting plain fallback"
+                );
+                format!("\n{}\n", self.code())
+            }
+        }
+    }
+
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
+        let width = term_width.unwrap_or(80);
+        let term = Terminal::new_optimistic(width);
+        self.render(&term)
+    }
+
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn is_block_level(&self) -> bool {
+        true
+    }
+
+    /// Exposes the bare code-node projection through the canonical
+    /// [`TerminalRenderable::render_tree_node`] hook so a parent component
+    /// that embeds a `CodeBlock` consumes it structurally.
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        Some(self.code_node())
+    }
+}
+
+impl BrowserRenderable for CodeBlock {
+    /// Renders the code block as a `<pre><code class="language-…">…</code></pre>`
+    /// HTML fragment through darkmatter's [`TerminalCodeRenderer`], the same
+    /// `render_html_code_block` path Markdown fences use, so a
+    /// [`CodeBlock::yaml(...)]` produces output byte-for-byte equal to a
+    /// Markdown ` ```yaml ` fence for the same code, language, and
+    /// metadata.
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = BrowserRenderOptions {
+            code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+            ..Default::default()
+        };
+        match render_browser_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "CodeBlock",
+                    error = %error,
+                    "render_browser_node failed; emitting escaped plain fallback"
+                );
+                BrowserFragment::new()
+                    .define_as_text_fragment(self.code().to_string())
+                    .finalize()
+            }
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// Internal helper that returns a snapshot of how a [`CodeBlock`] should be
+/// rendered for a given terminal context, without going through the render
+/// tree. This is what the tree's [`TerminalCodeRenderer`] uses today; the
+/// `CodeBlock` API now mirrors that shape so callers can render a block
+/// directly without a `RenderNode` detour.
+///
+/// Returns `(header_row_string_or_none, body_string)`. Either field may be
+/// `None` to indicate the component should fall through to a plain render.
+#[allow(dead_code, clippy::too_many_arguments)]
+pub(crate) fn render_code_block_for_terminal(
+    code: &str,
+    language: &str,
+    meta: &CodeBlockMeta,
+    highlighter: &crate::markdown::highlighting::CodeHighlighter,
+    options: &super::output::terminal::TerminalOptions,
+    page_mode: ColorMode,
+    code_block_mode: CodeBlockMode,
+    width: Option<u16>,
+) -> Result<(Option<String>, String), crate::markdown::MarkdownError> {
+    let _ = code_block_mode.resolve(page_mode);
+    let color_mode = super::output::code_block::mode_for_background(
+        highlighter
+            .theme()
+            .settings
+            .background
+            .unwrap_or(syntect::highlighting::Color::BLACK),
+    );
+    let body = super::output::code_block::render_terminal_code_block(
+        code,
+        language,
+        highlighter,
+        options,
+        meta,
+        color_mode,
+        width,
+        None,
+    )?;
+    let header = if meta.title.is_some() {
+        let bg = highlighter
+            .theme()
+            .settings
+            .background
+            .unwrap_or(syntect::highlighting::Color::BLACK);
+        Some(super::output::terminal::format_header_row(
+            meta.title.as_deref(),
+            language,
+            bg,
+            color_mode,
+            width.unwrap_or(80),
+        ))
+    } else {
+        None
+    };
+    Ok((header, body))
+}
+
+/// Serializes a [`CodeBlockMeta`] back into the fence-info-string format the
+/// [`parse_code_info`](crate::markdown::dsl::parse_code_info) DSL accepts:
+/// `key="value" key=val …`.
+///
+/// Returns `None` when the meta carries no directives the parser recognizes,
+/// so a freshly-constructed `CodeBlock` without `title` / `line-numbering` /
+/// `highlight` does not emit a stray meta string on the projected node.
+fn serialize_meta(meta: &CodeBlockMeta) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(title) = &meta.title {
+        parts.push(format!("title=\"{}\"", title.replace('"', "\\\"")));
+    }
+    if meta.line_numbering {
+        parts.push("line-numbering=true".to_string());
+    }
+    if !meta.highlight.is_empty() {
+        parts.push(format!("highlight={}", meta.highlight));
+    }
+    // Custom keys: round-trip unknown directives verbatim.
+    for (k, v) in &meta.custom {
+        if v.contains(' ') || v.contains('"') {
+            parts.push(format!("{k}=\"{}\"", v.replace('"', "\\\"")));
+        } else {
+            parts.push(format!("{k}={v}"));
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
+    use serial_test::serial;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    /// Restores an env var to its prior value, removing it if previously unset.
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn capture(key: &'static str) -> Self {
+            Self {
+                key,
+                prev: std::env::var(key).ok(),
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => unsafe { std::env::set_var(self.key, v) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
+
+    #[test]
+    fn new_stores_code_without_language() {
+        let block = CodeBlock::new("foo: 1", None::<String>);
+        assert_eq!(block.code(), "foo: 1");
+        assert!(block.language().is_none());
+    }
+
+    #[test]
+    fn new_with_language_resolves_grammar() {
+        let block = CodeBlock::new("fn main() {}", Some("rust"));
+        assert_eq!(block.code(), "fn main() {}");
+        assert!(matches!(block.language(), Some(LanguageGrammar::Rust)));
+    }
+
+    #[test]
+    fn yaml_constructor_sets_yaml_grammar() {
+        let block = CodeBlock::yaml("foo: 1");
+        assert!(matches!(block.language(), Some(LanguageGrammar::Yaml)));
+    }
+
+    #[test]
+    fn rust_constructor_sets_rust_grammar() {
+        let block = CodeBlock::rust("fn main() {}");
+        assert!(matches!(block.language(), Some(LanguageGrammar::Rust)));
+    }
+
+    #[test]
+    fn json_constructor_sets_json_grammar() {
+        let block = CodeBlock::json("{\"k\":1}");
+        assert!(matches!(block.language(), Some(LanguageGrammar::Json)));
+    }
+
+    #[test]
+    fn toml_constructor_sets_toml_grammar() {
+        let block = CodeBlock::toml("k = 1");
+        assert!(matches!(block.language(), Some(LanguageGrammar::Toml)));
+    }
+
+    #[test]
+    fn with_language_overrides_constructor() {
+        let block = CodeBlock::yaml("foo: 1").with_language(LanguageGrammar::Json);
+        assert!(matches!(block.language(), Some(LanguageGrammar::Json)));
+    }
+
+    #[test]
+    fn with_fence_language_resolves_grammar() {
+        let block = CodeBlock::new("fn main() {}", None::<String>).with_fence_language("rust");
+        assert!(matches!(block.language(), Some(LanguageGrammar::Rust)));
+    }
+
+    #[test]
+    fn with_fence_language_handles_yml_alias() {
+        let block = CodeBlock::new("foo: 1", None::<String>).with_fence_language("yml");
+        assert!(matches!(block.language(), Some(LanguageGrammar::Yaml)));
+    }
+
+    #[test]
+    fn with_meta_replaces_meta() {
+        let mut meta = CodeBlockMeta::default();
+        meta.title = Some("Demo".to_string());
+        let block = CodeBlock::rust("fn main() {}").with_meta(meta.clone());
+        assert_eq!(block.meta().title, Some("Demo".to_string()));
+    }
+
+    #[test]
+    fn with_theme_stores_override() {
+        let block = CodeBlock::rust("fn main() {}").with_theme(ThemePair::Github);
+        assert_eq!(block.theme(), Some(ThemePair::Github));
+    }
+
+    #[test]
+    fn from_source_file_reads_and_infers_extension() {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(b"fn main() {}").unwrap();
+
+        let block = CodeBlock::from_source_file(file.path()).unwrap();
+        assert_eq!(block.code(), "fn main() {}");
+        // Tempfile names end in `.tmp`; the language should fall through
+        // to a token variant and resolve via alias or extension.
+        assert!(block.language().is_some());
+    }
+
+    #[test]
+    fn from_source_file_missing_returns_io_error() {
+        let result = CodeBlock::from_source_file("/nonexistent/path/file.rs");
+        assert!(matches!(result, Err(CodeBlockError::Io(_))));
+    }
+
+    #[test]
+    fn code_node_carries_language_and_hints() {
+        let block = CodeBlock::yaml("foo: 1");
+        let node = block.code_node();
+        match &node.kind {
+            renderable::tree::NodeKind::Code { lang, meta, value } => {
+                assert_eq!(lang.as_deref(), Some("yaml"));
+                assert!(meta.is_none());
+                assert_eq!(value, "foo: 1");
+            }
+            _ => panic!("expected Code node"),
+        }
+        let hints = node.attrs.code_hints();
+        assert!(hints.header_row);
+        assert!(hints.highlight);
+        assert_eq!(hints.language_label.as_deref(), Some("yaml"));
+    }
+
+    #[test]
+    fn render_tree_projects_root_with_code_child() {
+        let block = CodeBlock::rust("fn main() {}");
+        let tree = <CodeBlock as TreeRenderable>::render_tree(&block);
+        match &tree.kind {
+            renderable::tree::NodeKind::Root { children } => {
+                assert_eq!(children.len(), 1);
+            }
+            _ => panic!("expected Root node"),
+        }
+    }
+
+    #[test]
+    fn render_optimistic_emits_ansi() {
+        let block = CodeBlock::yaml("foo: 1");
+        let out = TerminalRenderable::render_optimistic(&block, None);
+        assert!(out.contains("\x1b["), "expected ANSI styling; got {out:?}");
+        let plain = crate::testing::strip_ansi_codes(&out);
+        assert!(plain.contains("foo: 1"));
+    }
+
+    #[test]
+    fn render_in_width_still_emits_ansi() {
+        let block = CodeBlock::yaml("foo: 1");
+        let term = Terminal::new_optimistic(40);
+        let out = TerminalRenderable::render(&block, &term);
+        assert!(!out.is_empty());
+        assert!(out.contains("\x1b["));
+    }
+
+    #[test]
+    fn render_html_fragment_contains_language_class() {
+        let block = CodeBlock::yaml("foo: 1");
+        let html = BrowserRenderable::render_html_fragment(&block).render();
+        assert!(html.contains("language-yaml"), "html: {html}");
+    }
+
+    #[test]
+    fn render_html_fragment_escapes_special_chars() {
+        let block = CodeBlock::yaml("script: \"<script>alert('xss')</script>\"");
+        let html = BrowserRenderable::render_html_fragment(&block).render();
+        assert!(
+            html.contains("&lt;script&gt;") || html.contains("&#60;script&#62;"),
+            "html: {html}"
+        );
+    }
+
+    #[test]
+    fn is_block_level_is_true() {
+        let block = CodeBlock::rust("fn main() {}");
+        assert!(TerminalRenderable::is_block_level(&block));
+    }
+
+    #[test]
+    fn as_any_returns_code_block() {
+        let block = CodeBlock::rust("fn main() {}");
+        let any_ref = TerminalRenderable::as_any(&block);
+        assert!(any_ref.downcast_ref::<CodeBlock>().is_some());
+    }
+
+    #[test]
+    fn left_margin_is_applied() {
+        let mut block = CodeBlock::yaml("foo: 1\nbar: 2");
+        block.layout_mut().margin.left = TargetValue::universal(Length::ch(4));
+
+        let out = TerminalRenderable::render(&block, &Terminal::default());
+        let plain = crate::testing::strip_ansi_codes(&out);
+        for line in plain.lines().filter(|l| !l.trim().is_empty()) {
+            assert!(
+                line.starts_with("    "),
+                "expected 4-space left margin, got: {line:?}"
+            );
+        }
+    }
+
+    /// `CodeBlock` is block-level and the `YamlBlock` parity tests
+    /// reuse this guarantee, so guard it explicitly.
+    #[test]
+    #[serial]
+    fn dark_and_light_render_differ() {
+        let _no_color = EnvVarGuard::capture("NO_COLOR");
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        unsafe { std::env::remove_var("NO_COLOR") };
+        unsafe { std::env::set_var("CODE_THEME", "github") };
+
+        let block = CodeBlock::yaml("foo: 1\nbar: 2");
+
+        let mut dark = Terminal::new_optimistic(80);
+        dark.color_mode = biscuit_terminal::discovery::detection::ColorMode::Dark;
+        let dark_out = TerminalRenderable::render(&block, &dark);
+
+        let mut light = Terminal::new_optimistic(80);
+        light.color_mode = biscuit_terminal::discovery::detection::ColorMode::Light;
+        let light_out = TerminalRenderable::render(&block, &light);
+
+        assert_ne!(dark_out, light_out, "dark/light renders must differ");
+    }
+
+    /// Empty blocks still produce a valid highlighted code block (matching
+    /// the empty-YAML `YamlBlock` parity expectation).
+    #[test]
+    fn empty_code_still_renders() {
+        let block = CodeBlock::yaml("");
+        let out = TerminalRenderable::render(&block, &Terminal::new_optimistic(80));
+        assert!(out.contains("\x1b["));
+        let html = BrowserRenderable::render_html_fragment(&block).render();
+        assert!(html.contains("language-yaml"));
+    }
+
+    /// A `CodeBlock::rust(...)` carrying a `title` produces a terminal
+    /// header containing the title.
+    #[test]
+    fn title_reaches_terminal_header() {
+        let mut meta = CodeBlockMeta::default();
+        meta.title = Some("Demo".to_string());
+        let block = CodeBlock::rust("fn main() {}").with_meta(meta);
+        let out = TerminalRenderable::render(&block, &Terminal::new_optimistic(80));
+        let plain = crate::testing::strip_ansi_codes(&out);
+        assert!(plain.contains("Demo"), "expected title in terminal output: {plain:?}");
+    }
+
+    /// The browser fragment must wrap a rust block in `<pre><code class="language-rust">`.
+    #[test]
+    fn browser_emits_rust_language_class() {
+        let block = CodeBlock::rust("fn main() {}");
+        let html = BrowserRenderable::render_html_fragment(&block).render();
+        assert!(html.contains("language-rust"), "html: {html}");
+    }
+
+    /// `from_source_file` for a `.yaml` file should resolve the YAML
+    /// language through the extension alias.
+    #[test]
+    fn from_source_file_yaml_extension() {
+        let mut file = NamedTempFile::with_suffix(".yaml").unwrap();
+        file.write_all(b"foo: 1\n").unwrap();
+        let block = CodeBlock::from_source_file(file.path()).unwrap();
+        assert!(matches!(block.language(), Some(LanguageGrammar::Yaml)));
+    }
+
+    /// Phase 3.1: a fenced ` ```rust ` block in a markdown document must
+    /// route through `CodeBlock`'s shared helper, so the markdown-rendered
+    /// output is byte-for-byte equal to a direct `CodeBlock::rust(...).render`
+    /// for the same code, language, and metadata.
+    #[test]
+    fn fenced_rust_block_routes_through_code_block() {
+        use crate::markdown::output::terminal::TerminalOptions;
+        use crate::markdown::Markdown;
+
+        let code = "fn main() {}\n";
+
+        // Direct: `CodeBlock::rust(code).render(term)`
+        let block = CodeBlock::rust(code);
+        let term = Terminal::new_optimistic(80);
+        let direct = TerminalRenderable::render(&block, &term);
+
+        // Via markdown fence: same code, same language, same terminal.
+        let md: Markdown = format!("```rust\n{code}```\n").into();
+        let opts = TerminalOptions {
+            color_depth: Some(crate::markdown::output::terminal::ColorDepth::TrueColor),
+            ..Default::default()
+        };
+        let fenced = md.as_terminal(opts).unwrap();
+
+        assert_eq!(
+            direct, fenced,
+            "fenced rust block must equal CodeBlock::rust(...).render"
+        );
+    }
+
+    /// Phase 3.1: a fenced ` ```rust ` block in a markdown document must
+    /// produce browser output byte-for-byte equal to a direct
+    /// `CodeBlock::rust(...).render_html_fragment`.
+    #[test]
+    fn fenced_rust_block_browser_routes_through_code_block() {
+        use crate::markdown::Markdown;
+
+        let code = "fn main() {}\n";
+
+        let block = CodeBlock::rust(code);
+        let direct = BrowserRenderable::render_html_fragment(&block).render();
+
+        let md: Markdown = format!("```rust\n{code}```\n").into();
+        let html_options = crate::markdown::output::html::HtmlOptions::default();
+        let fenced = md.as_html(html_options).unwrap();
+
+        assert!(
+            fenced.contains("language-rust"),
+            "markdown fence must emit language-rust class; html: {fenced}"
+        );
+        // The direct render's <pre><code class="language-rust"> wrapper must
+        // appear in the markdown-rendered HTML.
+        assert!(
+            direct.contains("<pre><code class=\"language-rust\">"),
+            "direct CodeBlock::rust fragment must contain the pre/code wrapper; got: {direct}"
+        );
+        assert!(
+            fenced.contains("<pre><code class=\"language-rust\">"),
+            "markdown fence must contain the same <pre><code class=...> wrapper as CodeBlock::rust; html: {fenced}"
+        );
+    }
+}
