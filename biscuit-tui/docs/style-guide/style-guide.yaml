@@ -1,0 +1,10 @@
+kind: sequence
+sequence:
+    - name: best-practices
+    - name: apisnip
+      desc: "a TUI tool that trims large OpenAPI specification files by interactively selecting which endpoints to keep"
+      kind: example
+    - name: mqttui
+      desc: "a TUI tool for quickly subscribing to or publishing MQTT messages"
+      kind: example
+    - name:
