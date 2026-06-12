@@ -310,12 +310,12 @@ impl TerminalRenderable for TerminalImage {
 /// ```rust,no_run
 /// use biscuit_terminal::components::terminal_image::TerminalImage;
 /// use biscuit_terminal::components::renderable::TerminalRenderable;
-/// use biscuit_terminal::utils::layout::{Alignment, Layout, Length, Margin, TargetValue};
+/// use biscuit_terminal::utils::layout::{Alignment, Layout, Length, Edges, TargetValue};
 /// use std::path::Path;
 ///
 /// let image = TerminalImage::new(Path::new("diagram.svg")).unwrap()
 ///     .with_layout(Layout {
-///         margin: Margin::x(Length::percent(10.0).unwrap()),
+///         margin: Edges::x(Length::percent(10.0).unwrap()),
 ///         alignment: Alignment::Center,
 ///         ..Layout::default()
 ///     });
@@ -450,14 +450,23 @@ impl TerminalImage {
     /// Load the image from disk.
     ///
     /// Supports raster formats (PNG, JPEG, GIF, WebP, etc.) via the `image` crate
-    /// and SVG files via `resvg` rasterization.
+    /// and SVG files via `resvg` rasterization when the `image` feature is enabled.
     ///
     /// ## Errors
     ///
     /// Returns `TerminalImageError::ImageLoadError` if the image cannot be loaded.
+    /// Returns `TerminalImageError::UnsupportedTerminal` for SVG files when the `image`
+    /// feature is disabled.
     pub fn load_image(&self) -> Result<DynamicImage, TerminalImageError> {
         if self.is_svg() {
-            self.load_svg()
+            #[cfg(feature = "image")]
+            {
+                self.load_svg()
+            }
+            #[cfg(not(feature = "image"))]
+            {
+                Err(TerminalImageError::UnsupportedTerminal)
+            }
         } else {
             let img = ImageReader::open(&self.filename)?
                 .with_guessed_format()?
@@ -481,6 +490,7 @@ impl TerminalImage {
     }
 
     /// Rasterize an SVG file to a `DynamicImage` using resvg.
+    #[cfg(feature = "image")]
     fn load_svg(&self) -> Result<DynamicImage, TerminalImageError> {
         let svg_data = std::fs::read(&self.filename)?;
         let tree = resvg::usvg::Tree::from_data(&svg_data, &resvg::usvg::Options::default())

@@ -236,21 +236,21 @@ fn test_double_verbose_flag() {
 }
 
 #[test]
-fn with_network_flag_parses() {
-    // The flag should be accepted globally; pair with a fast subcommand
-    // so the test doesn't pay full-detection cost.
+fn with_network_global_flag_is_rejected() {
     cargo_bin_cmd!("sniff")
         .args(["--with-network", "repo", "name"])
         .assert()
-        .success();
+        .failure()
+        .stderr(predicate::str::contains("--with-network"));
 }
 
 #[test]
-fn with_network_flag_parses_before_json() {
+fn with_network_subcommand_flag_is_rejected() {
     cargo_bin_cmd!("sniff")
-        .args(["--with-network", "repo", "name", "--json"])
+        .args(["repo", "name", "--with-network"])
         .assert()
-        .success();
+        .failure()
+        .stderr(predicate::str::contains("--with-network"));
 }
 
 #[test]
@@ -4061,6 +4061,35 @@ fn test_repo_root_json_perf_stdout_is_valid_json() {
 }
 
 #[test]
+fn test_repo_root_is_absolute_without_base_from_subdir() {
+    // Regression: discovering with the default "." (no --base) from a
+    // subdirectory must still print an absolute root, not a relative ".."/".".
+    let (_dir, repo_path) = create_test_repo();
+    let subdir = repo_path.join("nested/deep");
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .current_dir(&subdir)
+        .args(["repo", "root"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let printed = stdout.trim();
+    let root = Path::new(printed);
+    assert!(root.is_absolute(), "root must be absolute, got: {printed:?}");
+    assert!(
+        !printed.ends_with('/'),
+        "root must not have a trailing separator, got: {printed:?}"
+    );
+    assert_eq!(
+        std::fs::canonicalize(root).unwrap(),
+        std::fs::canonicalize(&repo_path).unwrap(),
+        "root must resolve to the repository working directory"
+    );
+}
+
+#[test]
 fn test_repo_dirty_files_json_perf_stdout_is_valid_json() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
@@ -5049,6 +5078,186 @@ fn create_test_repo_with_worktree() -> (tempfile::TempDir, PathBuf, PathBuf) {
     (dir, repo_path, worktree_path)
 }
 
+/// Add one commit on the branch checked out in `worktree_path`, advancing it
+/// past the base branch so its ahead-count is non-zero.
+fn commit_in_worktree(worktree_path: &Path, relative: &str, content: &str) {
+    std::fs::write(worktree_path.join(relative), content).unwrap();
+    let repo = git2::Repository::open(worktree_path).unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new(relative)).unwrap();
+    index.write().unwrap();
+    let sig = repo.signature().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "worktree commit", &tree, &[&head])
+        .unwrap();
+}
+
+/// Repo with two linked worktrees: `even-wt` left at main's tip, and `ahead-wt`
+/// advanced by one commit so it is one ahead of the base branch. Returns
+/// `(tempdir, main_repo_path, even_wt_path, ahead_wt_path)`.
+fn create_test_repo_with_two_worktrees() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+    let (dir, repo_path) = create_test_repo();
+    let repo = git2::Repository::open(&repo_path).unwrap();
+
+    let even_path = repo_path.join("even-wt");
+    repo.worktree("even-wt", &even_path, None).unwrap();
+
+    let ahead_path = repo_path.join("ahead-wt");
+    repo.worktree("ahead-wt", &ahead_path, None).unwrap();
+    commit_in_worktree(&ahead_path, "extra.txt", "extra\n");
+
+    (dir, repo_path, even_path, ahead_path)
+}
+
+/// Case A: from inside a linked worktree, the report shows the main worktree
+/// location, the current worktree's own details, and a count of the rest.
+#[test]
+fn test_git_status_from_linked_worktree_renders_case_a() {
+    let (_dir, _repo, _even, ahead) = create_test_repo_with_two_worktrees();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            ahead.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+
+    assert!(stdout.contains("main:"), "Case A shows main location: {stdout}");
+    assert!(
+        stdout.contains("Current Worktree:"),
+        "Case A shows current worktree: {stdout}"
+    );
+    assert!(
+        stdout.contains("ahead-wt"),
+        "current worktree named by its directory: {stdout}"
+    );
+    // The current worktree gets full detail, so its real ahead-count shows.
+    assert!(
+        stdout.contains("1 ahead"),
+        "current worktree ahead-count is computed: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 other active worktrees in this repo"),
+        "exactly one other linked worktree (even-wt): {stdout}"
+    );
+}
+
+/// Case B: from the main worktree, the report shows the current (main) worktree
+/// and a count of all linked worktrees.
+#[test]
+fn test_git_status_from_main_worktree_renders_case_b() {
+    let (_dir, repo, _even, _ahead) = create_test_repo_with_two_worktrees();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+
+    assert!(
+        stdout.contains("Current Worktree:"),
+        "Case B shows current worktree: {stdout}"
+    );
+    assert!(
+        stdout.contains("2 other active worktrees"),
+        "both linked worktrees counted as other: {stdout}"
+    );
+    assert!(
+        !stdout.contains("main:"),
+        "Case B omits the separate main location line: {stdout}"
+    );
+}
+
+/// Default JSON computes ahead/behind only for the current worktree; a
+/// divergent *non-current* worktree reports `ahead == 0` (not computed).
+/// `--refresh-remotes` (full detail) restores its real ahead-count.
+#[test]
+fn test_git_status_json_worktree_ahead_is_lazy_by_default() {
+    let (_dir, repo, _even, _ahead) = create_test_repo_with_two_worktrees();
+
+    let read_ahead = |args: &[&str]| -> u64 {
+        let assert = cargo_bin_cmd!("sniff").args(args).assert().success();
+        let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+        let json: Value = serde_json::from_str(stdout.trim())
+            .unwrap_or_else(|e| panic!("not JSON: {e}\n{stdout}"));
+        json["worktrees"]["ahead-wt"]["ahead"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("missing worktrees.ahead-wt.ahead: {json}"))
+    };
+
+    // Default: ahead-wt is not the current worktree, so its ahead-count is
+    // skipped and reported as 0 even though it is genuinely one ahead.
+    let lazy = read_ahead(&[
+        "--base",
+        repo.to_str().unwrap(),
+        "repo",
+        "git-status",
+        "--json",
+    ]);
+    assert_eq!(lazy, 0, "non-current worktree ahead must be lazy (0) by default");
+
+    // Full detail (deep) computes it: ahead-wt is one ahead of main.
+    let eager = read_ahead(&[
+        "--base",
+        repo.to_str().unwrap(),
+        "repo",
+        "git-status",
+        "--json",
+        "--refresh-remotes",
+    ]);
+    assert_eq!(eager, 1, "full detail restores the real ahead-count");
+}
+
+/// Text and JSON must agree on which worktree is current.
+#[test]
+fn test_git_status_text_and_json_agree_on_current_worktree() {
+    let (_dir, _repo, _even, ahead) = create_test_repo_with_two_worktrees();
+    let base = ahead.to_str().unwrap();
+
+    let json_assert = cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "git-status", "--json"])
+        .assert()
+        .success();
+    let json_out = String::from_utf8(json_assert.get_output().stdout.clone()).unwrap();
+    let json: Value = serde_json::from_str(json_out.trim()).unwrap();
+
+    let current: Vec<&str> = json["worktrees"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(_, v)| v["is_current"].as_bool() == Some(true))
+        .map(|(k, _)| k.as_str())
+        .collect();
+    assert_eq!(
+        current,
+        vec!["ahead-wt"],
+        "JSON marks exactly the running worktree as current: {json}"
+    );
+
+    let text_assert = cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "git-status", "--plain"])
+        .assert()
+        .success();
+    let text = String::from_utf8(text_assert.get_output().stdout.clone()).unwrap();
+    assert!(
+        text.contains("ahead-wt"),
+        "text names the same current worktree: {text}"
+    );
+}
+
 #[test]
 fn test_repo_worktree_inside_linked_worktree_returns_name() {
     let (_dir, _repo_path, worktree_path) = create_test_repo_with_worktree();
@@ -5201,7 +5410,7 @@ fn test_repo_worktree_help_mentions_subcommand() {
 
 #[test]
 fn test_repo_worktrees_default_output() {
-    let (_dir, repo_path, worktree_path) = create_test_repo_with_worktree();
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
     let assert = cargo_bin_cmd!("sniff")
         .args(["--base", repo_path.to_str().unwrap(), "repo", "worktrees"])
@@ -5209,7 +5418,7 @@ fn test_repo_worktrees_default_output() {
         .success();
 
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-    let lines: Vec<&str> = stdout.trim().lines().collect();
+    let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(
         lines.len(),
         2,
@@ -5218,6 +5427,31 @@ fn test_repo_worktrees_default_output() {
     assert!(
         lines.iter().any(|l| l.contains("my-worktree")),
         "should list linked worktree: {stdout}"
+    );
+    // No worktree line may begin with whitespace; non-current entries are
+    // unprefixed, current entries use a "* " marker.
+    for line in &lines {
+        assert!(
+            !line.starts_with(' '),
+            "worktree line must not start with a space: {line:?}"
+        );
+    }
+
+    // The default output must be byte-identical to `--list`.
+    let list = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--list",
+        ])
+        .assert()
+        .success();
+    let list_stdout = String::from_utf8(list.get_output().stdout.clone()).unwrap();
+    assert_eq!(
+        stdout, list_stdout,
+        "default output must match `--list` output"
     );
 }
 
@@ -5332,6 +5566,121 @@ fn test_repo_worktrees_verbose_output() {
 }
 
 #[test]
+fn test_repo_worktrees_list_verbose_composes_and_has_no_leading_space() {
+    // `-v` must compose with `--list`: metadata is appended, structure stays
+    // one-per-line, and no line begins with whitespace. Bare `-v` must be
+    // byte-identical to `--list -v`.
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let list_v = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--list",
+            "-v",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let list_v_out = String::from_utf8(list_v.get_output().stdout.clone()).unwrap();
+
+    for line in list_v_out.lines() {
+        assert!(
+            !line.starts_with(' '),
+            "verbose list line must not start with a space: {line:?}"
+        );
+        assert!(
+            line.contains("located at"),
+            "verbose list line must include metadata: {line:?}"
+        );
+    }
+
+    let bare_v = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "-v",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let bare_v_out = String::from_utf8(bare_v.get_output().stdout.clone()).unwrap();
+    assert_eq!(
+        bare_v_out, list_v_out,
+        "bare `-v` must match `--list -v`"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_md_verbose_keeps_bullet_and_metadata() {
+    // `--md -v` must keep the markdown bullet AND append metadata.
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--md",
+            "-v",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    for line in stdout.lines() {
+        assert!(
+            line.starts_with("- "),
+            "md verbose line must start with '- ': {line:?}"
+        );
+        assert!(
+            line.contains("located at"),
+            "md verbose line must include metadata: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_repo_worktrees_csv_verbose_single_line_with_metadata() {
+    // `--csv -v` must stay a single comma-separated line and gain metadata.
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--csv",
+            "-v",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(
+        stdout.trim().lines().count(),
+        1,
+        "csv verbose must be a single line: {stdout}"
+    );
+    assert!(
+        stdout.contains("located at"),
+        "csv verbose must include metadata: {stdout}"
+    );
+    assert!(
+        stdout.contains("my-worktree"),
+        "csv verbose must list worktree name: {stdout}"
+    );
+}
+
+#[test]
 fn test_repo_worktrees_json_output() {
     let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
 
@@ -5432,7 +5781,7 @@ fn test_repo_worktrees_current_marker_from_linked_worktree() {
 
 #[test]
 fn test_repo_worktrees_detached_head() {
-    let (dir, repo_path) = create_test_repo();
+    let (_dir, repo_path) = create_test_repo();
     let repo = git2::Repository::open(&repo_path).unwrap();
 
     let worktree_path = repo_path.join("detached-wt");
@@ -5982,5 +6331,30 @@ fn test_repo_area_on_error_prints_message_to_stdout() {
     assert!(
         stdout.contains("n/a"),
         "--on-error message must reach stdout, got: {stdout:?}"
+    );
+}
+
+#[test]
+fn test_repo_git_status_outside_git_repo_is_graceful() {
+    let dir = tempfile::tempdir().unwrap();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            dir.path().to_str().unwrap(),
+            "--plain",
+            "repo",
+            "git-status",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stdout.is_empty(),
+        "git-status outside a repo should produce no stdout, got: {stdout:?}"
+    );
+    assert!(
+        stderr.is_empty(),
+        "git-status outside a repo should produce no stderr, got: {stderr:?}"
     );
 }

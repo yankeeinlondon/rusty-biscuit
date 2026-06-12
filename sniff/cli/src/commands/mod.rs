@@ -728,7 +728,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return handle_no_results(*no_error, on_error, cli.plain, &perf);
             }
-            crate::args::RepoAction::Worktrees { md, list, csv, .. } => {
+            crate::args::RepoAction::Worktrees { md, list: _, csv, .. } => {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
@@ -740,42 +740,63 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if cli.json {
                     let json = output::repo_json::worktrees_value(&entries);
                     output::print_json_value(json, perf.build_report().as_ref());
+                } else if cli.verbose > 0 {
+                    // Verbose composes with the selected format rather than
+                    // overriding it: every entry gains a "(on <branch> branch,
+                    // located at <path>)" suffix while the format's structure
+                    // (csv single line, md bullet, plain list) is preserved.
+                    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                    let terminal = biscuit_terminal::terminal::Terminal::default();
+                    let render = |markup: &str| {
+                        biscuit_terminal::components::prose::Prose::new(markup).render(&terminal)
+                    };
+                    let bodies: Vec<(bool, String)> = entries
+                        .iter()
+                        .map(|entry| {
+                            let branch_text = if entry.is_detached {
+                                "detached HEAD".to_string()
+                            } else {
+                                entry.branch.clone().unwrap_or_else(|| "unknown".to_string())
+                            };
+                            let display_path = match home {
+                                Some(ref home) => match entry.path.strip_prefix(home) {
+                                    Ok(stripped) => format!("~/{}", stripped.display()),
+                                    Err(_) => entry.path.display().to_string(),
+                                },
+                                None => entry.path.display().to_string(),
+                            };
+                            let absolute_path = entry.path.display().to_string();
+                            let body = format!(
+                                "<b>{}</b> (on <green>{branch_text}</green> branch, located at <a href=\"{absolute_path}\">{display_path}</a>)",
+                                entry.name
+                            );
+                            (entry.is_current, body)
+                        })
+                        .collect();
+                    let rendered = if *csv {
+                        bodies
+                            .iter()
+                            .map(|(_, body)| render(body))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                            + "\n"
+                    } else {
+                        bodies
+                            .iter()
+                            .map(|(is_current, body)| {
+                                let marker = if *is_current { "* " } else { "" };
+                                let prefix =
+                                    if *md { format!("- {marker}") } else { marker.to_string() };
+                                render(&format!("{prefix}{body}"))
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                            + "\n"
+                    };
+                    output::emit_text(&rendered, cli.plain);
                 } else if *csv {
                     let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
                     println!("{}", names.join(", "));
-                } else if cli.verbose > 0 {
-                    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-                    let terminal = biscuit_terminal::terminal::Terminal::default();
-                    let mut lines = Vec::new();
-                    for entry in &entries {
-                        let marker = if entry.is_current { "* " } else { "  " };
-                        let branch_text = if entry.is_detached {
-                            "detached HEAD".to_string()
-                        } else {
-                            entry
-                                .branch
-                                .clone()
-                                .unwrap_or_else(|| "unknown".to_string())
-                        };
-                        let display_path = if let Some(ref home) = home {
-                            if let Ok(stripped) = entry.path.strip_prefix(home) {
-                                format!("~/{}", stripped.display())
-                            } else {
-                                entry.path.display().to_string()
-                            }
-                        } else {
-                            entry.path.display().to_string()
-                        };
-                        let absolute_path = entry.path.display().to_string();
-                        let markup = format!(
-                            "{marker}<b>{}</b> (on <green>{}</green> branch, located at <a href=\"{}\">{}</a>)",
-                            entry.name, branch_text, absolute_path, display_path
-                        );
-                        let prose = biscuit_terminal::components::prose::Prose::new(&markup);
-                        lines.push(prose.render(&terminal));
-                    }
-                    let rendered = lines.join("\n") + "\n";
-                    output::emit_text(&rendered, cli.plain);
                 } else if *md {
                     let mut out = String::new();
                     for entry in &entries {
@@ -783,17 +804,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         writeln!(out, "- {}{}", marker, entry.name).unwrap();
                     }
                     output::emit_text(&out, cli.plain);
-                } else if *list {
-                    let mut out = String::new();
-                    for entry in &entries {
-                        let marker = if entry.is_current { "* " } else { "" };
-                        writeln!(out, "{}{}", marker, entry.name).unwrap();
-                    }
-                    output::emit_text(&out, cli.plain);
                 } else {
                     let mut out = String::new();
                     for entry in &entries {
-                        let marker = if entry.is_current { "* " } else { "  " };
+                        let marker = if entry.is_current { "* " } else { "" };
                         writeln!(out, "{}{}", marker, entry.name).unwrap();
                     }
                     output::emit_text(&out, cli.plain);
@@ -996,6 +1010,37 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .without_docs()
                         .without_formatting(),
                 ),
+            Some(crate::args::RepoAction::GitStatus {
+                package,
+                package_area,
+                ..
+            }) => {
+                // `git-status` renders only the git section (Status, Worktrees,
+                // Meta). Repo language scanning, docs, formatting, and the file
+                // inventory are never displayed, yet `RepoRequest::full()` alone
+                // costs 10-50x a structure scan — the dominant fixed cost that
+                // kept the command above the 500ms target. Drop all of it.
+                //
+                // Repo *structure* is still required to resolve a
+                // `--package`/`--package-area` scope to a path; in that case
+                // keep the cheap `structure()` scan only.
+                let needs_packages = package.is_some() || package_area.is_some();
+                let fs = FilesystemRequest::new()
+                    .git(git_request.clone())
+                    .without_docs()
+                    .without_formatting()
+                    .without_file_inventory();
+                let fs = if needs_packages {
+                    fs.repo(RepoRequest::structure())
+                } else {
+                    fs.without_repo()
+                };
+                DetectionPlan::new()
+                    .without_os()
+                    .without_hardware()
+                    .without_network()
+                    .filesystem(fs)
+            }
             _ => DetectionPlan::new()
                 .without_os()
                 .without_hardware()

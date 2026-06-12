@@ -69,6 +69,12 @@ pub enum ComposeOperation {
     /// table of contents from an external document's headings.
     TocLinking,
 
+    /// Expands `::file-links` directives by discovering a bounded set of
+    /// document files and rendering them as a linked
+    /// [`FileSystem`](biscuit_terminal::components::filesystem::FileSystem)
+    /// tree.
+    FileLinks,
+
     /// Normalizes markdown formatting: injects blank lines between
     /// block elements and aligns table columns.
     Cleanup,
@@ -169,7 +175,7 @@ pub enum ComposePhase {
 
 impl ComposeOperation {
     /// Total number of compose operations.
-    pub const COUNT: usize = 15;
+    pub const COUNT: usize = 16;
 
     /// Stable discriminant index for fixed-size operation sets.
     pub const fn index(self) -> usize {
@@ -185,10 +191,11 @@ impl ComposeOperation {
             Self::FrontmatterTransclusion => 8,
             Self::CodeTransclusion => 9,
             Self::TocLinking => 10,
-            Self::Cleanup => 11,
-            Self::Normalization => 12,
-            Self::LinkResolve => 13,
-            Self::LinkNormalization => 14,
+            Self::FileLinks => 11,
+            Self::Cleanup => 12,
+            Self::Normalization => 13,
+            Self::LinkResolve => 14,
+            Self::LinkNormalization => 15,
         }
     }
 
@@ -207,7 +214,8 @@ impl ComposeOperation {
             Self::BlockTransclusion
             | Self::FrontmatterTransclusion
             | Self::CodeTransclusion
-            | Self::TocLinking => ComposePhase::Transclusion,
+            | Self::TocLinking
+            | Self::FileLinks => ComposePhase::Transclusion,
 
             Self::Cleanup | Self::Normalization => ComposePhase::InlinePost,
 
@@ -232,6 +240,7 @@ impl ComposeOperation {
             Self::FrontmatterTransclusion,
             Self::CodeTransclusion,
             Self::TocLinking,
+            Self::FileLinks,
             // Inline Post (serial)
             Self::Cleanup,
             Self::Normalization,
@@ -260,6 +269,7 @@ impl std::fmt::Display for ComposeOperation {
             Self::FrontmatterTransclusion => write!(f, "FrontmatterTransclusion"),
             Self::CodeTransclusion => write!(f, "CodeTransclusion"),
             Self::TocLinking => write!(f, "TocLinking"),
+            Self::FileLinks => write!(f, "FileLinks"),
             Self::Cleanup => write!(f, "Cleanup"),
             Self::Normalization => write!(f, "Normalization"),
             Self::LinkResolve => write!(f, "LinkResolve"),
@@ -2257,6 +2267,7 @@ mod tests {
                 ComposeOperation::FrontmatterTransclusion,
                 ComposeOperation::CodeTransclusion,
                 ComposeOperation::TocLinking,
+                ComposeOperation::FileLinks,
                 ComposeOperation::Cleanup,
                 ComposeOperation::Normalization,
                 ComposeOperation::LinkNormalization,
@@ -2293,6 +2304,7 @@ mod tests {
                 ComposePhase::Transclusion,
             ),
             (ComposeOperation::TocLinking, ComposePhase::Transclusion),
+            (ComposeOperation::FileLinks, ComposePhase::Transclusion),
             (ComposeOperation::Cleanup, ComposePhase::InlinePost),
             (ComposeOperation::Normalization, ComposePhase::InlinePost),
             (ComposeOperation::LinkResolve, ComposePhase::InlinePre),
@@ -2789,8 +2801,8 @@ mod tests {
     }
 
     #[test]
-    fn default_order_has_fifteen_operations() {
-        assert_eq!(ComposeOperation::default_order().len(), 15);
+    fn default_order_has_sixteen_operations() {
+        assert_eq!(ComposeOperation::default_order().len(), 16);
     }
 
     #[test]

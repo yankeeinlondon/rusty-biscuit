@@ -625,7 +625,7 @@ pub fn render_pull_requests_verbose(prs: &[PullRequestInfo]) -> String {
 pub fn render_pull_requests_empty(state: sniff::remote::PullRequestState) -> String {
     let term = Terminal::default();
     let msg = format!("No {} pull requests found", state.as_str());
-    Prose::new(&msg).render(&term)
+    Prose::new(&msg).display(&term)
 }
 
 /// Print remote report as JSON.

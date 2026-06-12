@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 751ea2392b8b3231-4f881740e58563f7
-last_updated: 2026-06-04
+hash: 751ea2392b8b3231-3cb2b295b95a3f38
+last_updated: 2026-06-08
 ---
 
 # darkmatter
@@ -104,7 +104,7 @@ The compose pipeline runs in three phases:
 
 **Transclusion** (concurrent):
 
-- `::file`, `::code`, `::toc-linking`, `prologue`/`epilogue`
+- `::file`, `::code`, `::toc-linking`, `::file-links`, `prologue`/`epilogue`
 
 **Inline Post** (serial):
 
@@ -114,6 +114,12 @@ The compose pipeline runs in three phases:
 
 - Link normalization (absolute → portable paths).
 
+Context capture happens once at compose start, driven by `sniff` (OS, hardware,
+git repo structure, monorepo discovery, file changes, document inventory).
+Only the context groups actually referenced by the document are captured
+(demand-driven). The `--allow-ctx-override` CLI flag downgrades non-object
+`ctx` frontmatter errors to warnings.
+
 See `compose.md` for the full API, interpolation syntax, and transclusion details.
 
 ## Schema Validation
@@ -121,10 +127,11 @@ See `compose.md` for the full API, interpolation syntax, and transclusion detail
 Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via **SimplifiedSchema** — a single-line YAML grammar that compiles to Draft 2020-12 JSON Schema. Key surfaces:
 
 - `$schema` frontmatter property (inline, file reference, or root-level union).
-- `md schema validate` and `md schema detect` CLI subcommands.
+- `md schema validate`, `md schema detect`, and `md schema about` CLI subcommands.
 - `DarkmatterSchemas` library API with baseline merging and LRU validator cache.
 - Always-on compose pipeline stage (after `--set`/`--state` and interpolation, before shell expansion) that also **coerces** schema-recognized scalars to their declared types and writes them back (default-on; `$(...)`-pending values are skipped and coerced at post-shell re-validation).
 - `ComposeOptions::with_baseline_schema(...)` for programmatic baseline injection.
+- Typed schema-language descriptor catalog (`schema_type_descriptors()`, `schema_constraint_descriptors()`, `schema_shape_descriptors()`, `inline_object_rule_descriptors()`, `coercion_rule_descriptors()`, `validation_behavior_descriptors()`) — the authoritative source for `md schema about` and the same surface library callers render their own reports from.
 
 See `darkmatter/docs/topics/schema-definition.md` for the full topic documentation.
 
@@ -153,6 +160,7 @@ Open only the topic file needed for the task:
 | Topic | File |
 |-------|------|
 | Compose pipeline | `compose.md` |
+| Context variables (`ctx.*`: date/time, repo, file changes, OS, hardware, docs) | `darkmatter/docs/topics/context-variables.md` |
 | Schema validation | `darkmatter/docs/topics/schema-definition.md` |
 | Terminal rendering options | `terminal.md` |
 | Frontmatter model | `frontmatter.md` |
@@ -179,3 +187,29 @@ the `biscuit-terminal` skill for terminal tree rendering.
   ordinary prose follows the real mode.
 - Horizontal rules: canonical styling is `style.hr.*` with `apply_hr_style`;
   top-level `hr:` and inline `{ style: ... }` remain deprecated aliases.
+- The darkmatter cutover is complete: deprecated `PageMargin`, `PagePadding`,
+  `PageAlignment`, `PageFill`, `WidthUnit`, and `PageComponent::Lists` have
+  been deleted. `style:` frontmatter lowers **directly** into a per-component
+  `ComponentPolicy` — a `renderable::layout::Layout` plus `color` / `bg_color`
+  carried as alpha-bearing `renderable::style::PaintColor`. The parsed
+  `StyleColor` is lowered to `PaintColor` at the parser/apply boundary
+  (`style/apply.rs`), so opacity rides in the paint's alpha channel; no
+  `StyleColor` survives on post-construction component types.
+- Production rendering is **one context-aware fold followed by one target fold**.
+  Darkmatter's `render_tree::build_context` (`TreeBuildContext`) bakes component
+  policy, page-inheriting color, alpha paint, hyperlink/image text layout,
+  structured link/image browser attrs, and HR defaults onto the nodes during
+  construction; the target fold then resolves all width, padding, alignment, and
+  CSS. The old post-fold `decorate` pass (`decorate_document` / `component_for`)
+  and the `darkmatter.style` / `darkmatter.li` render hints are **deleted** — the
+  browser fold lowers alpha straight to `rgba(...)` with no HTML rewrite, and a
+  malformed fenced code-block directive remains a fatal
+  `MarkdownError::InvalidLineRange` via the `validate_code_directives` preflight
+  the HTML entry points run over the folded tree. `DarkmatterPage` survives as a
+  slim, renderable-typed page frame — the constrained **Option A** boundary
+  signed off by the CSS Box Architecture closeout
+  (`renderable/features/_completed/2026-06-06-tree-closeout`): a viewport-level assembler (page
+  width/margin/padding, full-page background, max-width centering,
+  `PageBackground::Pronounced` code-theme contrast, browser page-wrapper metadata
+  + stylesheet assembly) that wraps the *folded output*, carrying no component
+  policy, inspecting no component node kinds, and mutating no component content.

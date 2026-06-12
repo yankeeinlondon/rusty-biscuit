@@ -29,6 +29,7 @@ block-beta
         fmTransclusion("<a href='./transclusion/fm-transclusion.md'>Frontmatter Transclusion 🏁</a>")
         codeBlockTransclusion("<a href='./transclusion/code-transclusion.md'>Code Block Transclusion 🏁</a>")
         tocLinking("<a href='./inline/toc-linking.md'>TOC Linking 🏁</a>")
+        fileLinks("<a href='./inline/file-links.md'>File Links 🏁</a>")
         promptExpansion("<a href='./transclusion/prompt-expansion.md'>🧠 Prompt Expansion</a>")
         summarization("<a href='./transclusion/summarization.md'>🧠 Summarization</a>")
         consolidation("<a href='./transclusion/consolidation.md'>🧠 Consolidation</a>")

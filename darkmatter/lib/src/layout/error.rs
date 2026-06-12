@@ -34,8 +34,7 @@ pub enum PageRenderError {
     #[error("max_width must be greater than zero")]
     MaxWidthZero,
 
-    /// A [`WidthUnit::Percent`](super::WidthUnit::Percent) value was outside
-    /// the valid `0.0..=100.0` range.
+    /// A percentage value was outside the valid `0.0..=100.0` range.
     #[error("invalid percent value: {0} (expected 0.0..=100.0)")]
     InvalidPercent(f32),
 

@@ -7,7 +7,7 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::{Length, Margin};
+use biscuit_terminal::utils::layout::{Length, Edges};
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 
 pub(crate) const PROMPT_BORDER: &str = "┃ ";
@@ -108,7 +108,7 @@ fn style_system_prompt_blockquote(mut quote: BlockQuote) -> BlockQuote {
     quote = quote
         .with_left_block_color(Color::Tailwind(Tailwind::Orange500))
         .with_border(SYSTEM_PROMPT_BORDER);
-    quote.layout_mut().margin = Margin::x(Length::ch(PROMPT_LEFT_MARGIN));
+    quote.layout_mut().margin = Edges::x(Length::ch(PROMPT_LEFT_MARGIN));
     // Content is already wrapped at `prompt_body_width(term)` by darkmatter,
     // so re-wrapping inside the BlockQuote would just chop trailing ANSI off
     // already-fit lines. `WordWrap::None` preserves the rendered geometry.
@@ -123,7 +123,7 @@ pub fn create_user_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuo
     let mut quote = BlockQuote::from(rendered)
         .with_left_block_color(Color::Tailwind(Tailwind::Green500))
         .with_border(PROMPT_BORDER);
-    quote.layout_mut().margin = Margin::x(Length::ch(PROMPT_LEFT_MARGIN));
+    quote.layout_mut().margin = Edges::x(Length::ch(PROMPT_LEFT_MARGIN));
     // See note in `style_system_prompt_blockquote`.
     quote.layout_mut().word_wrap = WordWrap::None;
     quote

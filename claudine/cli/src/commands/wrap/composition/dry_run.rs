@@ -720,7 +720,7 @@ mod tests {
 
     #[test]
     fn table_preserves_one_ch_left_margin() {
-        // The table is rendered with `Margin::x(Length::ch(1))`, so every
+        // The table is rendered with `Edges::x(Length::ch(1))`, so every
         // table line must start with a single space (the 1ch left offset).
         let render = render_with(
             Some("doc"),

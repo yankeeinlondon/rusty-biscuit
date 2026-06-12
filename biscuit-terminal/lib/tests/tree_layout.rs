@@ -1,14 +1,14 @@
 //! Integration tests: the terminal tree renderer applies node-level `Layout`.
 
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
-use renderable::layout::{Layout, Length, Margin};
+use renderable::layout::{Layout, Length, Edges};
 use renderable::tree::RenderNode;
 
 #[test]
 fn terminal_renderer_applies_left_margin_in_cells() {
     let mut para = RenderNode::paragraph(vec![RenderNode::text("hello")]);
     para.attrs.set_layout(&Layout {
-        margin: Margin::x(Length::ch(4)),
+        margin: Edges::x(Length::ch(4)),
         ..Layout::default()
     });
     let root = RenderNode::root(vec![para]);
@@ -27,7 +27,7 @@ fn terminal_renderer_applies_left_margin_in_cells() {
 fn terminal_renderer_resolves_percent_margin_against_width() {
     let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
     para.attrs.set_layout(&Layout {
-        margin: Margin::x(Length::percent(10.0).unwrap()),
+        margin: Edges::x(Length::percent(10.0).unwrap()),
         ..Layout::default()
     });
     let root = RenderNode::root(vec![para]);

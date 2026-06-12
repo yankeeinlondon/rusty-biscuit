@@ -432,9 +432,11 @@ fn malformed_cell_hints_degrade_to_text() {
 }
 
 #[test]
-fn malformed_conditional_token_defaults_to_always() {
-    // A column hint with a bogus conditional token must not hide the column.
-    use renderable::tree::HintNamespace;
+fn always_conditional_column_stays_visible_when_narrow() {
+    // An `Always` conditional column is never hidden, regardless of width. The
+    // conditional now lives in a typed `ColumnConditional` field, so a
+    // malformed token can no longer reach this path.
+    use renderable::tree::TableColumnHints;
 
     let mut table = RenderNode::table(
         vec![ColumnAlign::Left],
@@ -443,16 +445,18 @@ fn malformed_conditional_token_defaults_to_always() {
             RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text("Val")])]),
         ],
     );
-    table.attrs.set_hint(
-        HintNamespace::TABLE,
-        "column.0.conditional",
-        serde_json::json!("garbage"),
+    table.attrs.set_table_column_hints(
+        0,
+        &TableColumnHints {
+            conditional: ColumnConditional::Always,
+            ..TableColumnHints::default()
+        },
     );
 
     let out = strip_ansi(&render_tree(&table, 40));
     assert!(
         out.contains("Col") && out.contains("Val"),
-        "malformed conditional defaults to always-visible:\n{out}"
+        "always-conditional column stays visible when narrow:\n{out}"
     );
 }
 

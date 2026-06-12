@@ -14,8 +14,10 @@ dirs = "6"
 ec4rs = "1"
 futures = { version = "0.3", optional = true }
 getifaddrs = "0.6.0"
-# Production git access is pure-Rust gix; git2 (libgit2) is retained only as a
-# dev-dependency for building deterministic test/benchmark fixtures.
+# Production git access is pure-Rust gix. git2 (libgit2) is retained ONLY as a
+# dev-dependency, and only for the fixture operations gix has no write API for —
+# worktree-snapshot commits, checkout, and linked-worktree creation — plus the
+# libgit2 differential-parity oracle. Everything gix can do uses gix.
 gix = { version = "=0.84.0", default-features = false, features = [
     "sha1",
     "revision",
@@ -71,7 +73,8 @@ winreg = "0.55"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-# Used only to build deterministic git fixtures in tests/benches.
+# Fixture writes gix has no API for (worktree-snapshot commits, checkout,
+# linked-worktree creation) + the libgit2 parity oracle. See note above.
 git2 = "0.20.3"
 proptest = "1"
 serial_test = "3"

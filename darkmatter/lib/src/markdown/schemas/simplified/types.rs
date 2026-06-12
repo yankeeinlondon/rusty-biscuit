@@ -66,11 +66,26 @@ pub enum PropertyDef {
     Union(Vec<PropertyAtom>),
 }
 
+/// A type expression is either a primitive type keyword or an inline object
+/// literal declared with `{ ... }` syntax.
+///
+/// `TypeExpr` is `Clone` but not `Copy` because the inline-object arm carries
+/// an owned [`SchemaShape`]. Call sites that previously matched on
+/// `atom.ty: SimplifiedType` now match on `atom.ty: TypeExpr` and handle the
+/// `Primitive` / `InlineObject` arms.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeExpr {
+    /// Built-in primitive type keyword (`string`, `number`, `object`, etc.).
+    Primitive(SimplifiedType),
+    /// Inline object literal: `{ foo: string, bar: number }`.
+    InlineObject(SchemaShape),
+}
+
 /// One arm of a property-level union (or the body of a non-union property).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropertyAtom {
-    /// The base type the atom describes.
-    pub ty: SimplifiedType,
+    /// The type expression for this atom (primitive or inline object).
+    pub ty: TypeExpr,
 
     /// Whether the type was suffixed with `[]`.
     pub is_array: bool,
@@ -91,7 +106,18 @@ impl PropertyAtom {
     /// Convenience constructor for a bare-typed atom with no constraints.
     pub fn bare(ty: SimplifiedType) -> Self {
         Self {
-            ty,
+            ty: TypeExpr::Primitive(ty),
+            is_array: false,
+            constraints: Vec::new(),
+            array_constraints: Vec::new(),
+            description: None,
+        }
+    }
+
+    /// Convenience constructor for a bare inline-object atom.
+    pub fn bare_inline_object(shape: SchemaShape) -> Self {
+        Self {
+            ty: TypeExpr::InlineObject(shape),
             is_array: false,
             constraints: Vec::new(),
             array_constraints: Vec::new(),
@@ -297,7 +323,17 @@ mod tests {
     #[test]
     fn property_atom_bare_defaults_are_empty() {
         let atom = PropertyAtom::bare(SimplifiedType::String);
-        assert_eq!(atom.ty, SimplifiedType::String);
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::String));
+        assert!(!atom.is_array);
+        assert!(atom.constraints.is_empty());
+        assert!(atom.array_constraints.is_empty());
+        assert!(atom.description.is_none());
+    }
+
+    #[test]
+    fn property_atom_bare_inline_object_defaults_are_empty() {
+        let atom = PropertyAtom::bare_inline_object(SchemaShape::new());
+        assert_eq!(atom.ty, TypeExpr::InlineObject(SchemaShape::new()));
         assert!(!atom.is_array);
         assert!(atom.constraints.is_empty());
         assert!(atom.array_constraints.is_empty());

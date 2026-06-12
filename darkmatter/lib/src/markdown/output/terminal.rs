@@ -754,7 +754,7 @@ impl Default for TerminalOptions {
 /// RGB tuple: (255, 255, 255) for dark mode (white text), (0, 0, 0) for light mode (black text)
 fn header_text_color(color_mode: ColorMode) -> (u8, u8, u8) {
     match color_mode {
-        ColorMode::Dark => (255, 255, 255), // WHITE
+        ColorMode::Dark | ColorMode::Unknown => (255, 255, 255), // WHITE
         ColorMode::Light => (0, 0, 0),      // BLACK
     }
 }
@@ -828,7 +828,7 @@ pub(crate) fn format_header_row(
     if let Some(t) = title {
         // Bold + BG + FG + space + title + space + reset
         output.push_str(&format!(
-            "\x1b[1m\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m {} \x1b[0m",
+            "\x1b[0m\x1b[1m\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m {} \x1b[0m",
             bg_color.r, bg_color.g, bg_color.b, text_color.0, text_color.1, text_color.2, t
         ));
     }
@@ -842,7 +842,7 @@ pub(crate) fn format_header_row(
     if show_language {
         // BG + FG + space + lang + space + reset
         output.push_str(&format!(
-            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m {} \x1b[0m",
+            "\x1b[0m\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m {} \x1b[0m",
             bg_color.r, bg_color.g, bg_color.b, text_color.0, text_color.1, text_color.2, lang
         ));
     }
@@ -880,7 +880,7 @@ pub(crate) fn adjust_background(
     light_delta: (u8, u8, u8),
 ) -> Color {
     match color_mode {
-        ColorMode::Dark => Color {
+        ColorMode::Dark | ColorMode::Unknown => Color {
             r: base.r.saturating_add(dark_delta.0).min(235),
             g: base.g.saturating_add(dark_delta.1).min(235),
             b: base.b.saturating_add(dark_delta.2).min(235),
@@ -927,6 +927,15 @@ mod tests {
             depth,
             ColorDepth::TrueColor | ColorDepth::Colors256 | ColorDepth::Colors16 | ColorDepth::None
         ));
+    }
+
+    #[test]
+    fn default_code_theme_uses_page_theme_pair() {
+        let options = TerminalOptions::default();
+        assert_eq!(
+            options.code_theme, options.prose_theme,
+            "code blocks should use the page ThemePair and let the renderer invert the color mode",
+        );
     }
 
     #[test]

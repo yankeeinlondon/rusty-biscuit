@@ -1,13 +1,14 @@
 ---
-description: Target-agnostic layout configuration in the renderable library — Layout, TargetValue, Length, Margin, and Alignment.
+description: Target-agnostic layout configuration in the renderable library — Layout, TargetValue, Length, Edges, Width, and Alignment.
 ---
 
 # Layout Module
 
 `renderable::layout` is the single, target-agnostic layout primitive. It
-describes a **block-level** component's relationship to its parent — margins,
-alignment within the parent, max-width, and content wrapping. Appearance
-(background, fill) is a `Style` concern and is *not* represented here.
+describes a **block-level** component's CSS box — margins, padding, content-box
+width, max-width, alignment within the parent, and content wrapping. Appearance
+(background, border) is a `Style` concern and is *not* represented here; the
+painted inner gutter is `padding` (geometry, here) + `Style.background` (paint).
 
 The layout rides on render-tree nodes via `NodeAttrs::set_layout` and is
 consumed by the Browser renderer (lowered to inline CSS) and the Terminal
@@ -20,34 +21,43 @@ Terminal ANSI-width application lives in `biscuit-terminal` as the
 
 > The legacy `LayoutHints`, the old `MaxWidth` / `RowFill` enums, and the old
 > `Margin` enum (`Margin::Chars` / `Margin::Percent` / `Margin::Offset`) have
-> been removed. There is now one `Layout` struct.
+> been removed. There is now one `Layout` struct. The four-sided box is named
+> `Edges` (no `Margin` type alias remains).
 
 ## Layout
 
 ```rust
-use renderable::layout::{Layout, Margin, Alignment, Length, TargetValue, WordWrap};
+use renderable::layout::{Layout, Edges, Width, Alignment, Length, TargetValue, WordWrap};
 
 let layout = Layout {
-    margin: Margin {
-        left: TargetValue::universal(Length::ch(4)),
-        right: TargetValue::universal(Length::ch(4)),
-        ..Margin::default()
-    },
+    margin: Edges::x(Length::ch(4)),     // transparent outer space
+    padding: Edges::x(Length::ch(2)),    // reserved inner space; painted by Style.background
+    width: Width::FitContent,            // size the content box to the widest line
     alignment: Alignment::Center,
     max_width: Some(TargetValue::universal(Length::ch(80))),
     word_wrap: WordWrap::WrapProse(Some(8), None),
 };
 ```
 
-`Layout::default()` is zero margins, `Alignment::Left`, no `max_width`, and
-`WordWrap::None` — note this is the hand-written default, *not*
-`WordWrap::default()` (which is a wrapping policy).
+`Layout` follows the CSS box model: `margin` is transparent outer space,
+`padding` is reserved inner space that `Style.background` paints, and `width`
+is the content-box sizing mode (orthogonal to the `max_width` cap). Total
+horizontal occupancy is `margin + border + padding + width` (content-box
+sizing, CSS default).
 
-`Layout::validate()` (and `Margin::validate()` / `TargetValue::validate()`)
-returns the first `LayoutError` from `margin` or `max_width`. Validation is
-**opt-in**: a caller constructing a `Layout` should call it, but the render
-pipeline does not — once a `Layout` is on the tree the renderers lower it
-as-is. Only *placement* (block-only) is enforced, by tree validation.
+`Layout::default()` is zero margins, zero padding, `Width::Auto`,
+`Alignment::Left`, no `max_width`, and `WordWrap::None` — note `word_wrap` is
+the hand-written default, *not* `WordWrap::default()` (which is a wrapping
+policy). `Layout::default()` paired with `Style::default()` is bit-identical to
+a node with no layout/style config — a node with *no* `Layout` and *no* `Style`
+attr renders identically and skips the styling pass entirely.
+
+`Layout::validate()` (and `Edges::validate()` / `Width::validate()` /
+`TargetValue::validate()`) returns the first `LayoutError` from `margin`,
+`padding`, `width`, or `max_width`. Validation is **opt-in**: a caller
+constructing a `Layout` should call it, but the render pipeline does not — once
+a `Layout` is on the tree the renderers lower it as-is. Only *placement*
+(block-only) is enforced, by tree validation.
 
 ## Length
 
@@ -78,20 +88,54 @@ TargetValue::universal(Length::ch(2))  // same value for every target
 
 A target absent from a `PerTarget` map does not receive that property.
 
-## Margin
+## Edges
 
-A four-sided box; each side is a `TargetValue<Length>`.
+A four-sided box (`top` / `right` / `bottom` / `left`), used for **both**
+`margin` and `padding`; each side is a `TargetValue<Length>`. Renamed from the
+former `Margin` struct so it reads honestly for both fields.
 
 ```rust
-use renderable::layout::{Margin, Length};
+use renderable::layout::{Edges, Length};
 
-Margin::default()       // all four sides Zero
-Margin::all(Length::ch(2))   // every side
-Margin::x(Length::ch(4))     // left + right
-Margin::y(Length::ch(1))     // top + bottom
+Edges::default()            // all four sides Zero
+Edges::all(Length::ch(2))   // every side
+Edges::x(Length::ch(4))     // left + right
+Edges::y(Length::ch(1))     // top + bottom
 ```
 
 The browser renderer lowers vertical sides (`top` / `bottom`) to `lh`.
+
+## Width
+
+The content-box sizing mode (CSS `width`), orthogonal to and composing with the
+`max_width` cap.
+
+```rust
+use renderable::layout::{Width, Length, TargetValue};
+
+Width::Auto                                              // fill the parent's available width (default)
+Width::FitContent                                        // size to the content's widest line (CSS fit-content)
+Width::Fixed(TargetValue::universal(Length::ch(60)))     // an explicit width
+Width::fit_content()                                     // FitContent constructor
+```
+
+`Width` serializes `snake_case`: `"auto"`, `"fit_content"`, and `"fixed"`.
+`width` and `max_width` are independent, so `FitContent` + a `max_width` cap, or
+`Auto` + a cap, are both expressible. The sizing rule, in target units after
+`TargetValue` resolves:
+
+```text
+base = match width { Auto => available_width,
+                     FitContent => content_widest_line,
+                     Fixed(n) => n };
+used_width = clamp(base, 0, min(available_width, max_width.unwrap_or(available_width)));
+```
+
+> The painted-band capabilities of the deleted `Fill` map onto this vocabulary:
+> a painted inner gutter is `padding` + `Style.background`; a band hugging the
+> text is `Width::FitContent` + `alignment` + `Style.background`. See
+> [Style Module](./style.md) for the `Background::subtle()` / `pronounced()`
+> tints.
 
 ## Alignment
 
@@ -119,8 +163,10 @@ LayoutError::EmptyPerTarget         // empty PerTarget map
 
 ## Carrying Layout on the Render Tree
 
-`Layout` is stored on a node via `NodeAttrs::set_layout` and recovered with
-`NodeAttrs::layout`.
+`Layout` is stored on a node as the typed `NodeAttrs::layout` sparse field
+(`Option<Box<Layout>>`) via `NodeAttrs::set_layout`, and recovered with
+`NodeAttrs::layout` (clone) or `NodeAttrs::layout_ref` (borrowed, hot path) —
+no serde round-trip through the `data` bag.
 
 ```rust
 use renderable::layout::Layout;

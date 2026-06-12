@@ -192,6 +192,14 @@ pub(crate) fn validate(
 
         match &record.target {
             ReferenceTarget::LocalPath { raw } => {
+                // ::file-links targets are glob patterns or dir+depth specs, not
+                // actual file paths — skip existence validation and defer to
+                // compose-time discovery.
+                if record.origin.syntax == super::types::ReferenceSyntax::DirectiveFileLinks {
+                    report.references_valid += 1;
+                    continue;
+                }
+
                 // Check for fragment in local path (e.g., "./other.md#section")
                 let raw_str = raw.to_string_lossy();
                 let (path_part, fragment) = split_path_fragment(&raw_str);

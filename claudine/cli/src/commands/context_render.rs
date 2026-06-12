@@ -5,7 +5,7 @@ use biscuit_terminal::components::table::table::{Table, TableColumn};
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
-use biscuit_terminal::utils::layout::{Alignment, Length, Margin, TargetValue, WordWrap};
+use biscuit_terminal::utils::layout::{Alignment, Edges, Length, TargetValue, WordWrap};
 
 /// Maximum visible width for context reports, including margins, borders, and
 /// separators.
@@ -149,7 +149,7 @@ pub fn render_unordered_list(items: &[String], term: &Terminal) -> String {
 /// - Below 140ch the table uses the available width without overflow
 #[allow(dead_code)]
 pub fn configure_shared_table(table: &mut Table) {
-    table.layout_mut().margin = Margin::x(Length::ch(1));
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 }
 
 /// Renders `table` under the shared width contract.

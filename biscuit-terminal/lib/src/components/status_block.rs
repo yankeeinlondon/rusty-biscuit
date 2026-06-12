@@ -24,7 +24,7 @@ use crate::{
     terminal::Terminal,
     utils::{
         color::Color,
-        layout::{Layout, Length, Margin, TargetValue},
+        layout::{Layout, Length, Edges, TargetValue},
         wrap_policy::WordWrap,
     },
 };
@@ -87,9 +87,9 @@ impl StatusBlock {
             border_color: None,
             border: DEFAULT_BORDER.to_string(),
             layout: Layout {
-                margin: Margin {
+                margin: Edges {
                     right: TargetValue::universal(Length::ch(5)),
-                    ..Margin::default()
+                    ..Edges::default()
                 },
                 word_wrap: WordWrap::WrapProse(Some(8), None),
                 ..Layout::default()
@@ -308,6 +308,16 @@ impl StatusBlock {
                     ..Border::default()
                 }),
                 ..Style::default()
+            });
+            // The thick left border's inner gap is `padding` now — the terminal
+            // tree renderer no longer inserts an implicit space inside the
+            // border — so reserve one cell to reproduce the `┃ ` gap.
+            node.attrs.set_layout(&Layout {
+                padding: Edges {
+                    left: TargetValue::universal(Length::ch(1)),
+                    ..Edges::default()
+                },
+                ..Layout::default()
             });
             children.push(node);
         } else if let Some(hint_text) = self.non_blank_hint() {

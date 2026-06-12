@@ -12,9 +12,11 @@ pub mod style;
 
 pub use style::{RuleAlignment, RuleStyle, RuleWeight};
 
+#[cfg(feature = "image")]
 use std::io::Cursor;
 
 use crate::components::renderable::TerminalRenderable;
+#[cfg(feature = "image")]
 use crate::components::terminal_image::TerminalImage;
 use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
 use crate::terminal::Terminal;
@@ -371,39 +373,47 @@ impl HorizontalRule {
         height_cells: u32,
     ) -> Option<String> {
         let term_width = term.width() as usize;
-        let png = match rasterize_svg_to_png(svg.as_bytes()) {
-            Ok(png) => png,
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    "horizontal rule image rendering failed; falling back to text"
-                );
-                return None;
-            }
-        };
+        #[cfg(feature = "image")]
+        {
+            let png = match rasterize_svg_to_png(svg.as_bytes()) {
+                Ok(png) => png,
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "horizontal rule image rendering failed; falling back to text"
+                    );
+                    return None;
+                }
+            };
 
-        // Both Kitty-protocol terminals and modern iTerm2 accept
-        // `render_kitty_cells` for cell-sized inline images; see the rustdoc
-        // note on `render_image_tier` for the reasoning behind the unified
-        // emitter.
-        let image =
-            TerminalImage::default().render_kitty_cells(&png, rule_width as u32, height_cells);
-        let content_width = rule_width;
-        let x_offset = match self.alignment {
-            RuleAlignment::Full | RuleAlignment::Left => 0,
-            RuleAlignment::Centered => term_width.saturating_sub(content_width) / 2,
-            RuleAlignment::Right => term_width.saturating_sub(content_width),
-        };
-        let prefix = if x_offset > 0 {
-            format!("\x1b[{}C", x_offset)
-        } else {
-            String::new()
-        };
+            // Both Kitty-protocol terminals and modern iTerm2 accept
+            // `render_kitty_cells` for cell-sized inline images; see the rustdoc
+            // note on `render_image_tier` for the reasoning behind the unified
+            // emitter.
+            let image =
+                TerminalImage::default().render_kitty_cells(&png, rule_width as u32, height_cells);
+            let content_width = rule_width;
+            let x_offset = match self.alignment {
+                RuleAlignment::Full | RuleAlignment::Left => 0,
+                RuleAlignment::Centered => term_width.saturating_sub(content_width) / 2,
+                RuleAlignment::Right => term_width.saturating_sub(content_width),
+            };
+            let prefix = if x_offset > 0 {
+                format!("\x1b[{}C", x_offset)
+            } else {
+                String::new()
+            };
 
-        Some(format!(
-            "\x1b[s{}{}\x1b[u\x1b[{}B\r",
-            prefix, image, height_cells
-        ))
+            Some(format!(
+                "\x1b[s{}{}\x1b[u\x1b[{}B\r",
+                prefix, image, height_cells
+            ))
+        }
+        #[cfg(not(feature = "image"))]
+        {
+            let _ = (term_width, svg, rule_width, height_cells);
+            None
+        }
     }
 
     fn render_image_svg(&self, pixel_width: u32, pixel_height: u32, default_color: &str) -> String {
@@ -703,6 +713,7 @@ impl HorizontalRule {
     }
 }
 
+#[cfg(feature = "image")]
 pub(crate) fn rasterize_svg_to_png(svg_data: &[u8]) -> Result<Vec<u8>, String> {
     let tree = resvg::usvg::Tree::from_data(svg_data, &resvg::usvg::Options::default())
         .map_err(|err| format!("SVG parse error: {err}"))?;
@@ -874,6 +885,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "image")]
     fn test_render_uses_kitty_image_tier_when_supported() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Waves)
@@ -1586,6 +1598,7 @@ mod tests {
     // ================================================================
 
     #[test]
+    #[cfg(feature = "image")]
     fn test_render_uses_image_tier_when_iterm() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
@@ -1627,6 +1640,7 @@ mod tests {
     // ================================================================
 
     #[test]
+    #[cfg(feature = "image")]
     fn test_rasterize_svg_to_png_fails_on_garbage() {
         let result = rasterize_svg_to_png(b"<not-an-svg>");
         assert!(
@@ -1636,6 +1650,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "image")]
     #[tracing_test::traced_test]
     fn test_render_image_tier_falls_through_on_rasterization_failure() {
         // Feed `render_image_tier_from_svg` deliberately broken SVG bytes
@@ -2633,9 +2648,9 @@ mod tests {
     fn test_render_to_browser_percent_margin() {
         use crate::utils::layout::Layout;
         let layout = Layout {
-            margin: crate::utils::layout::Margin {
+            margin: crate::utils::layout::Edges {
                 top: TargetValue::universal(Length::percent(2.0).unwrap()),
-                ..crate::utils::layout::Margin::default()
+                ..crate::utils::layout::Edges::default()
             },
             ..Layout::default()
         };
@@ -2877,7 +2892,7 @@ mod tests {
         fn parity_with_custom_margins() {
             let rule = HorizontalRule::new()
                 .with_layout(crate::utils::layout::Layout {
-                    margin: crate::utils::layout::Margin {
+                    margin: crate::utils::layout::Edges {
                         top: renderable::layout::TargetValue::universal(
                             renderable::layout::Length::ch(2),
                         ),

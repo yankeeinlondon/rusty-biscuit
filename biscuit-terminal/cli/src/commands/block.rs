@@ -3,33 +3,32 @@ use crate::commands::shared::{detect_terminal_honoring_force_color, print_exampl
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use clap::Args as ClapArgs;
-use renderable::layout::{Length, TargetValue};
-use renderable::style::{
-    Border, BorderSides, Fill, FillBand, FillIntensity, PerMode, Style, TextEmphasis,
-};
+use renderable::layout::{Alignment, Edges, Layout, Length, TargetValue, Width};
+use renderable::style::{Background, Border, BorderSides, PerMode, Style, TextEmphasis};
 use renderable::tree::{RenderNode, RenderStrictness};
 
 const BLOCK_EXAMPLE: &str = "Release candidate passed";
-const BLOCK_EXAMPLE_CMD: &str = r#"bt block "Release candidate passed" --fg green --bold --border left --fill subtle --fill-band indented"#;
+const BLOCK_EXAMPLE_CMD: &str =
+    r#"bt block "Release candidate passed" --fg green --bold --border left --fill subtle"#;
 
-/// The fill intensity selected by `--fill`.
+/// The adaptive background tint selected by `--fill`.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum FillArg {
     /// A faint tint.
     Subtle,
-    /// A strong, clearly visible band.
+    /// A strong, clearly visible tint.
     Pronounced,
 }
 
-/// The band a `--fill` paints across the available width.
+/// Horizontal placement of the block within the available width.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum FillBandArg {
-    /// Paint the full available width.
-    Full,
-    /// Paint the content band only.
-    Padded,
-    /// Paint an indented band, inset from both edges.
-    Indented,
+pub enum AlignArg {
+    /// Flush left (default).
+    Left,
+    /// Centered within the available width.
+    Center,
+    /// Flush right.
+    Right,
 }
 
 /// Which sides a `--border` is drawn on.
@@ -82,17 +81,9 @@ pub struct BlockArgs {
     #[arg(long)]
     pub strike: bool,
 
-    /// Paint a background fill band behind the text.
+    /// Paint an adaptive background tint behind the text.
     #[arg(long, value_enum)]
     pub fill: Option<FillArg>,
-
-    /// The band painted by `--fill`.
-    #[arg(long = "fill-band", value_enum, default_value = "full")]
-    pub fill_band: FillBandArg,
-
-    /// Inset, in columns, applied to the fill band.
-    #[arg(long)]
-    pub inset: Option<u32>,
 
     /// Draw a border around the block.
     #[arg(long, value_enum)]
@@ -105,6 +96,26 @@ pub struct BlockArgs {
     /// Corner radius, in columns; any non-zero value rounds the corners.
     #[arg(long = "border-radius")]
     pub border_radius: Option<u32>,
+
+    /// Padding reserved inside the box, in columns, on all four sides.
+    #[arg(long)]
+    pub padding: Option<u32>,
+
+    /// Transparent horizontal margin, in columns, on the left and right.
+    #[arg(long)]
+    pub margin: Option<u32>,
+
+    /// Content-box width: `auto`, `fit` (fit-content), or a column count.
+    #[arg(long)]
+    pub width: Option<String>,
+
+    /// Maximum content-box width, in columns; caps the resolved width.
+    #[arg(long = "max-width")]
+    pub max_width: Option<u32>,
+
+    /// Horizontal placement of a sub-available box within the terminal width.
+    #[arg(long, value_enum)]
+    pub align: Option<AlignArg>,
 }
 
 impl BlockArgs {
@@ -130,20 +141,9 @@ impl BlockArgs {
         };
 
         if let Some(fill) = self.fill {
-            let intensity = match fill {
-                FillArg::Subtle => FillIntensity::Subtle,
-                FillArg::Pronounced => FillIntensity::Pronounced,
-            };
-            let band = match self.fill_band {
-                FillBandArg::Full => FillBand::Full,
-                FillBandArg::Padded => FillBand::Padded,
-                FillBandArg::Indented => FillBand::Indented,
-            };
-            style.fill = Some(Fill {
-                color: None,
-                intensity,
-                band,
-                inset: self.inset.map(|n| TargetValue::universal(Length::ch(n))),
+            style.background = Some(match fill {
+                FillArg::Subtle => Background::subtle(),
+                FillArg::Pronounced => Background::pronounced(),
             });
         }
 
@@ -191,6 +191,51 @@ impl BlockArgs {
 
         Ok(style)
     }
+
+    /// Builds the node [`Layout`] from the box-model flags, or `None` when no
+    /// layout flag is set (so the default render path is unchanged).
+    fn build_layout(&self) -> color_eyre::Result<Option<Layout>> {
+        let mut layout = Layout::default();
+        let mut touched = false;
+
+        if let Some(p) = self.padding {
+            layout.padding = Edges::all(Length::ch(p));
+            touched = true;
+        }
+        if let Some(m) = self.margin {
+            layout.margin = Edges::x(Length::ch(m));
+            touched = true;
+        }
+        if let Some(width) = &self.width {
+            layout.width = match width.as_str() {
+                "auto" => Width::Auto,
+                "fit" | "fit-content" => Width::FitContent,
+                other => {
+                    let cells: u32 = other.parse().map_err(|_| {
+                        color_eyre::eyre::eyre!(
+                            "--width expects `auto`, `fit`, or a column count, got {other:?}"
+                        )
+                    })?;
+                    Width::Fixed(TargetValue::universal(Length::ch(cells)))
+                }
+            };
+            touched = true;
+        }
+        if let Some(mw) = self.max_width {
+            layout.max_width = Some(TargetValue::universal(Length::ch(mw)));
+            touched = true;
+        }
+        if let Some(align) = self.align {
+            layout.alignment = match align {
+                AlignArg::Left => Alignment::Left,
+                AlignArg::Center => Alignment::Center,
+                AlignArg::Right => Alignment::Right,
+            };
+            touched = true;
+        }
+
+        Ok(touched.then_some(layout))
+    }
 }
 
 impl Run for BlockArgs {
@@ -213,12 +258,14 @@ impl Run for BlockArgs {
             style_args.bold = true;
             style_args.border.get_or_insert(BorderArg::Left);
             style_args.fill.get_or_insert(FillArg::Subtle);
-            style_args.fill_band = FillBandArg::Indented;
         }
         let style = style_args.build_style()?;
 
         let mut node = RenderNode::paragraph(vec![RenderNode::text(text)]);
         node.attrs.set_style(&style);
+        if let Some(layout) = style_args.build_layout()? {
+            node.attrs.set_layout(&layout);
+        }
         let root = RenderNode::root(vec![node]);
 
         let term = detect_terminal_honoring_force_color();

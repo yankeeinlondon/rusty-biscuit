@@ -20,10 +20,10 @@ You are a planning agent. Convert the following documents into a high confidence
 ::block when="spec"
 
 - Functional Specification: {{ctx.current_package_area}}/{{spec}}
-  ::end-block
-  ::block when="design"
+::end-block
+::block when="design"
 - Technical Design: {{ctx.current_package_area}}/{{design}}
-  ::end-block
+::end-block
 
 ## Requirements
 
@@ -38,8 +38,9 @@ You are a planning agent. Convert the following documents into a high confidence
 
 ## Closure
 
-- Save the plan as "{{ctx.repo_root}}{{area}}/{{dir}}/{{plan}}" in the same directory as the design document(s).
+- Save the plan as "{{ctx.repo_root}}/{{area}}/{{dir}}/{{plan}}"
 - Add frontmatter to the plan document and set:
+    - `agent` set this to "{{env.AGENT}}"
     - `phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format
     - `start_phase` set this to the starting phase number; usually 1 but may be 0 sometimes
