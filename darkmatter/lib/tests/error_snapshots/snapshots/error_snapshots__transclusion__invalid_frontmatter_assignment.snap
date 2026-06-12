@@ -3,6 +3,7 @@ source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
 ⤫ TransclusionError: invalid frontmatter assignment
+┃ 
 ┃ Invalid frontmatter override in directive:
 ┃ 
 ┃ ```md
@@ -11,4 +12,5 @@ expression: out
 ┃       6 │ line 6
 ┃ 
 ┃ Value: bogus
-Error: expected JSON5 object
+┃ 
+┃ Error: expected JSON5 object

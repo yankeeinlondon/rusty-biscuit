@@ -3,6 +3,7 @@ source: darkmatter/lib/tests/error_snapshots/condition.rs
 expression: out
 ---
 ⤫ ConditionError: parse failed
+┃ 
 ┃ Condition parsing failed for when="a &&& b":
 ┃ 
 ┃ ```md
@@ -13,4 +14,10 @@ expression: out
 ┃     ^ (near position 3)
 ┃ 
 ┃ Message: unexpected token
-Operators: &&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  . | Helpers: has_key, contains, length, number, round, min, max, abs, first, last, is_string, is_number, is_array, is_null, is_object, is_empty, starts_with, ends_with, lower, upper, capitalize, kebab_case, snake_case, camel_case, pascal_case, title_case, is_date, is_date_time, is_today, is_yesterday, is_tomorrow, is_this_month, is_this_year
+┃ 
+┃ Operators: &&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  . |
+┃ Helpers: has_key, contains, length, number, round, min, max, abs, first,
+┃ last, is_string, is_number, is_array, is_null, is_object, is_empty,
+┃ starts_with, ends_with, lower, upper, capitalize, kebab_case,
+┃ snake_case, camel_case, pascal_case, title_case, is_date, is_date_time,
+┃ is_today, is_yesterday, is_tomorrow, is_this_month, is_this_year
