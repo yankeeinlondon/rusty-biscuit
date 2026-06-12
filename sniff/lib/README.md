@@ -367,7 +367,10 @@ Comprehensive filesystem analysis including Git, monorepo detection, language br
 
 #### Git Detection
 
-Uses `libgit2` (via `git2` crate) for repository inspection.
+Uses the pure-Rust `gix` (gitoxide) crate for repository inspection. Every
+production repository open rejects untrusted repositories (`bail_if_untrusted`),
+and the existing out-of-process `git fetch --quiet --prune` is retained for
+remote-tracking refresh.
 
 **Key Types:**
 
@@ -719,8 +722,11 @@ pub enum SniffError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Git error: {0}")]
-    Git(#[from] git2::Error),
+    #[error("Git error during {operation}: {source}")]
+    Git {
+        operation: &'static str,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     #[error("Not a git repository: {0}")]
     NotARepository(PathBuf),
@@ -835,7 +841,7 @@ let metadata = provider.get_repo_metadata("rust-lang", "cargo").await?;
 | Crate | Version | Purpose |
 |-------|---------|---------|
 | `sysinfo` | 0.38 | CPU, memory, storage detection |
-| `git2` | 0.20 | Git repository inspection |
+| `gix` | =0.84.0 | Pure-Rust Git repository inspection (status, diff, history, refs, remotes, config, worktrees) |
 | `biscuit-hash` | workspace | xxHash content hashing for document fingerprinting |
 | `biscuit-file` | workspace | TOML/YAML file parsing |
 | `getifaddrs` | 0.6 | Network interface enumeration |

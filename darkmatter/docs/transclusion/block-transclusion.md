@@ -2,7 +2,7 @@
 
 ## Local Markdown Files
 
-The most basic and most often used form of transclusion in Darkmatter is where you inject another local Markdown file into your Markdown document.
+The most basic and most often used form of transclusion in Darkmatter is where you inject another local Markdown file into your Markdown document. For listing document files as a linked tree instead of inlining their content, see the [`::file-links`](../inline/file-links.md) directive.
 
 ```md
 ## My Section

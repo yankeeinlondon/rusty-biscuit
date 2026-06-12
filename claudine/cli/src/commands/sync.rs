@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
-use biscuit_terminal::utils::layout::{Length, Margin};
+use biscuit_terminal::utils::layout::{Length, Edges};
 use clap::Args;
 use color_eyre::eyre::Result;
 
@@ -172,7 +172,7 @@ fn build_provider_section(provider: Provider, actions: Vec<SyncAction>) -> Unord
     }
 
     let mut list = UnorderedList::from(items).with_bullet("• ");
-    list.layout_mut().margin = Margin::y(Length::ch(1));
+    list.layout_mut().margin = Edges::y(Length::ch(1));
     list
 }
 

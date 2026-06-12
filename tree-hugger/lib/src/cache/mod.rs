@@ -414,15 +414,15 @@ impl PersistentCache {
         if enabled && !cache_dir.exists() {
             let _ = std::fs::create_dir_all(&cache_dir);
         }
-        Self {
-            cache_dir,
-            enabled,
-        }
+        Self { cache_dir, enabled }
     }
 
     /// Opens the default user cache directory for tree-hugger.
     pub fn default_cache(project_id: &str, enabled: bool) -> Self {
-        let cache_dir = std::env::temp_dir().join("tree-hugger").join("cache").join(project_id);
+        let cache_dir = std::env::temp_dir()
+            .join("tree-hugger")
+            .join("cache")
+            .join(project_id);
         Self::open(cache_dir, enabled)
     }
 
@@ -463,11 +463,7 @@ impl PersistentCache {
 
     fn entry_path(&self, key: &str) -> PathBuf {
         // Shard by first two chars of key to avoid too many files in one dir
-        let shard = if key.len() >= 2 {
-            &key[..2]
-        } else {
-            "00"
-        };
+        let shard = if key.len() >= 2 { &key[..2] } else { "00" };
         self.cache_dir.join(shard).join(format!("{key}.json"))
     }
 }
@@ -797,14 +793,8 @@ mod tests {
 
     #[test]
     fn enabled_rules_fingerprint_changes_with_order() {
-        let fp1 = enabled_rules_fingerprint(&[
-            "unwrap-call".to_string(),
-            "dbg-macro".to_string(),
-        ]);
-        let fp2 = enabled_rules_fingerprint(&[
-            "dbg-macro".to_string(),
-            "unwrap-call".to_string(),
-        ]);
+        let fp1 = enabled_rules_fingerprint(&["unwrap-call".to_string(), "dbg-macro".to_string()]);
+        let fp2 = enabled_rules_fingerprint(&["dbg-macro".to_string(), "unwrap-call".to_string()]);
         // Order matters because it's a comma-joined string
         assert_ne!(fp1, fp2);
     }

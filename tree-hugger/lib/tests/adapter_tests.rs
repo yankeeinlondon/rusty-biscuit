@@ -22,7 +22,10 @@ fn test_oxlint_adapter_metadata() {
     assert_eq!(adapter.name(), "oxlint");
     assert_eq!(
         adapter.supported_languages(),
-        vec![ProgrammingLanguage::JavaScript, ProgrammingLanguage::TypeScript]
+        vec![
+            ProgrammingLanguage::JavaScript,
+            ProgrammingLanguage::TypeScript
+        ]
     );
 }
 
@@ -267,23 +270,33 @@ fn test_mixed_language_adapter_selection() {
     let oxlint = OxlintAdapter::new();
 
     // JS/TS should be supported
-    assert!(oxlint
-        .supported_languages()
-        .contains(&ProgrammingLanguage::JavaScript));
-    assert!(oxlint
-        .supported_languages()
-        .contains(&ProgrammingLanguage::TypeScript));
+    assert!(
+        oxlint
+            .supported_languages()
+            .contains(&ProgrammingLanguage::JavaScript)
+    );
+    assert!(
+        oxlint
+            .supported_languages()
+            .contains(&ProgrammingLanguage::TypeScript)
+    );
 
     // Other languages should not be supported
-    assert!(!oxlint
-        .supported_languages()
-        .contains(&ProgrammingLanguage::Rust));
-    assert!(!oxlint
-        .supported_languages()
-        .contains(&ProgrammingLanguage::Python));
-    assert!(!oxlint
-        .supported_languages()
-        .contains(&ProgrammingLanguage::Go));
+    assert!(
+        !oxlint
+            .supported_languages()
+            .contains(&ProgrammingLanguage::Rust)
+    );
+    assert!(
+        !oxlint
+            .supported_languages()
+            .contains(&ProgrammingLanguage::Python)
+    );
+    assert!(
+        !oxlint
+            .supported_languages()
+            .contains(&ProgrammingLanguage::Go)
+    );
 }
 
 #[test]
@@ -339,7 +352,10 @@ fn test_oxlint_json_normalization() {
     assert_eq!(messages.len(), 2);
 
     let first = &messages[0];
-    assert_eq!(first["message"].as_str(), Some("Unexpected console statement"));
+    assert_eq!(
+        first["message"].as_str(),
+        Some("Unexpected console statement")
+    );
     assert_eq!(first["rule_id"].as_str(), Some("no-console"));
     assert_eq!(first["severity"].as_u64(), Some(1));
 

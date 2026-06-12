@@ -267,6 +267,8 @@ async fn async_main(
                     config_loading: perf_config_loading,
                     pre_dispatch,
                     prep_phase: std::time::Duration::ZERO,
+                    process_start,
+                    prep_substages: Vec::new(),
                 })
             } else {
                 None
@@ -305,6 +307,8 @@ async fn async_main(
             config_loading: perf_config_loading,
             pre_dispatch,
             prep_phase: std::time::Duration::ZERO,
+            process_start,
+            prep_substages: Vec::new(),
         })
     } else {
         None

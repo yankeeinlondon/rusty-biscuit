@@ -15,6 +15,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::collections::BTreeSet;
+use std::io::IsTerminal;
 
 use clap::Args;
 use claudine::composition::{
@@ -320,6 +321,23 @@ pub fn run_inline_compose(
     std::process::exit(code);
 }
 
+/// Record a named prep work unit (P-5a) when `--perf` is active.
+///
+/// Each unit is a disjoint sub-window of the `compose_entry` → request prep
+/// window, so the recorded timings carve `prep_phase` into reconciling
+/// `Structural` children (`shell approval` being the usual dominant cost),
+/// leaving the small remainder in `prep → unattributed`.
+fn record_prep_substage(
+    out: &mut Vec<crate::perf::SubstageTiming>,
+    enabled: bool,
+    name: &'static str,
+    started: std::time::Instant,
+) {
+    if enabled {
+        out.push(crate::perf::SubstageTiming::new(name, started.elapsed()));
+    }
+}
+
 fn run_compose_inner(
     args: ComposeArgs,
     verbose: u8,
@@ -327,22 +345,12 @@ fn run_compose_inner(
 ) -> Result<i32> {
     let compose_entry = std::time::Instant::now();
     let ComposeArgs { shared, args } = args;
+    let perf_enabled = shared.perf;
+    let mut prep_substages: Vec<crate::perf::SubstageTiming> = Vec::new();
     let parsed = parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
-
-    // Receipt banner: immediate feedback that the request was accepted.
-    // Suppressed only by `--silent`. Per spec W1, `--quiet` follows the
-    // existing execution header's detail rules — which include emitting
-    // the brief one-liner — so the banner appears under `--quiet`.
-    if !shared.silent {
-        use biscuit_terminal::components::renderable::TerminalRenderable;
-        use biscuit_terminal::components::status::Status;
-        let term = crate::log::terminal();
-        let status = Status::from_prose(format!("→ Composing {file}…"));
-        crate::log::message(&status.render(&term));
-    }
 
     // Install the process-scoped SIGINT handler now so Ctrl+C during the
     // (potentially slow) compose prep phase produces the same INFO notice
@@ -365,7 +373,9 @@ fn run_compose_inner(
     let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
 
+    let prep_t = std::time::Instant::now();
     let source = composition::resolve_composition_source(&file)?;
+    record_prep_substage(&mut prep_substages, perf_enabled, "frontmatter load", prep_t);
 
     // Schema-aware pre-prepare validation. Runs BEFORE the preflight
     // compose pass so the user-visible error surface is Claudine's
@@ -376,6 +386,7 @@ fn run_compose_inner(
     // dropped in place. Schema-load failures, invalid required values,
     // and missing required values (non-interactive) surface as typed
     // errors here, never as Darkmatter raw errors.
+    let schema_t = std::time::Instant::now();
     let (source, set_overrides) = {
         let interactive_opts =
             super::schema_interactive::resolve_interactive_options(shared.silent);
@@ -389,6 +400,9 @@ fn run_compose_inner(
         super::schema_interactive::emit_dropped_optional_warnings(&pre.dropped_optionals);
         (pre.source, pre.set_overrides)
     };
+    // Includes any interactive collection wait when stdin is a TTY; in the
+    // common non-interactive / dry-run `--perf` case this is pure validation.
+    record_prep_substage(&mut prep_substages, perf_enabled, "schema validation", schema_t);
 
     let _compose_span = info_span!(
         "compose",
@@ -402,11 +416,13 @@ fn run_compose_inner(
     // immediately after source resolution. The context owns the single
     // source-repo-root discovery, the loaded selection config, and the
     // installed-provider snapshot used by every later prep phase.
+    let prep_ctx_t = std::time::Instant::now();
     let prep_context = super::wrap::composition::CompositionPrepContext::new(
         &file,
         &source.resolved_path,
         &shared.excluded(),
     )?;
+    record_prep_substage(&mut prep_substages, perf_enabled, "prep context", prep_ctx_t);
 
     // -- Eager target resolution -------------------------------------------
     // Resolve the execution target *before* composing templates so that
@@ -429,8 +445,32 @@ fn run_compose_inner(
     let mut env_overrides: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
     if let Some(ref target) = resolved_target {
-        super::wrap::composition::install_agent_env_for_composition(target, &mut env_overrides);
+        super::wrap::composition::install_agent_env_for_composition(target, shared.yolo, &mut env_overrides);
     }
+
+    // Render the execution line the moment the agent is known. Eager
+    // resolution above prompts the interactive picker when the agent is
+    // ambiguous, so by this point the target is settled for every real
+    // run — and this lands *before* the expensive prepare/compose work, so
+    // the user sees immediate feedback. The lone case without a target is
+    // a `--dry-run` with an unresolved agent; the executor emits the
+    // header itself there after rendering the unresolved state.
+    let header_emitted = match (shared.silent, resolved_target.as_ref()) {
+        (false, Some(target)) => super::wrap::composition::emit_execution_header(
+            target.provider,
+            shared.yolo,
+            shared.interactive,
+            verbose > 0,
+            shared.repo,
+            false, // is_inline
+            false, // sequence
+            shared.operation.as_deref(),
+            &file,
+            prep_context.launch_workspace.package_context.clone(),
+            &crate::log::terminal(),
+        ),
+        _ => false,
+    };
 
     // ── Pre-flight shell approval ────────────────────────────────────
     //
@@ -467,6 +507,7 @@ fn run_compose_inner(
         shared.yolo,
     );
 
+    let shell_approval_t = std::time::Instant::now();
     let preflight = {
         let _span = info_span!("compose_prep.shell_preflight").entered();
         composition::resolve_shell_approvals(
@@ -476,6 +517,7 @@ fn run_compose_inner(
             &approval_options,
         )?
     };
+    record_prep_substage(&mut prep_substages, perf_enabled, "shell approval", shell_approval_t);
 
     // Post-prep interrupt checkpoint. If the user pressed Ctrl+C during
     // any of the prep phases (compose source parse, target resolution,
@@ -557,6 +599,7 @@ fn run_compose_inner(
                 prep_launch_context: Some(prep_context.launch_context.clone()),
                 prep_env_context: Some(prep_context.env_context.clone()),
                 prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+                header_emitted,
             };
 
             let outcome = super::wrap::composition::execute_composition_request_inner(
@@ -664,10 +707,12 @@ fn run_compose_inner(
         prep_launch_context: Some(prep_context.launch_context.clone()),
         prep_env_context: Some(prep_context.env_context.clone()),
         prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+        header_emitted,
     };
 
     if let Some(ref mut timings) = startup_timings {
         timings.prep_phase = compose_entry.elapsed();
+        timings.prep_substages = prep_substages;
     }
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
@@ -680,22 +725,12 @@ fn run_inline_compose_inner(
 ) -> Result<i32> {
     let inline_compose_entry = std::time::Instant::now();
     let InlineComposeArgs { shared, args } = args;
+    let perf_enabled = shared.perf;
+    let mut prep_substages: Vec<crate::perf::SubstageTiming> = Vec::new();
     let parsed = parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
-
-    // Receipt banner: immediate feedback that the request was accepted.
-    // Suppressed only by `--silent`. Per spec W1, `--quiet` follows the
-    // existing execution header's detail rules — which include emitting
-    // the brief one-liner — so the banner appears under `--quiet`.
-    if !shared.silent {
-        use biscuit_terminal::components::renderable::TerminalRenderable;
-        use biscuit_terminal::components::status::Status;
-        let term = crate::log::terminal();
-        let status = Status::from_prose(format!("→ Composing {file}…"));
-        crate::log::message(&status.render(&term));
-    }
 
     // Install the process-scoped SIGINT handler now so Ctrl+C during the
     // (potentially slow) compose prep phase produces the same INFO notice
@@ -724,11 +759,13 @@ fn run_inline_compose_inner(
         None
     };
 
+    let frontmatter_load_t = std::time::Instant::now();
     let source = match composition::resolve_composition_source(&file) {
         Ok(source) => {
-            if let Some(ref t) = term {
-                claudine::harness::report::report_source_file(&file, &source.resolved_path, t);
-            }
+            // The "resolved source file" success line is deferred until
+            // after the execution header (see the reporting block below the
+            // early header) so nothing prints before the header. The
+            // not-found error path stays fail-fast in the `Err` arm.
             let _inline_span = info_span!(
                 "inline_compose",
                 file = %source.resolved_path.display(),
@@ -754,6 +791,32 @@ fn run_inline_compose_inner(
             return Err(e.into());
         }
     };
+    record_prep_substage(
+        &mut prep_substages,
+        perf_enabled,
+        "frontmatter load",
+        frontmatter_load_t,
+    );
+
+    // -- Fail-fast: inline-compose / sequence mismatch ----------------------
+    //
+    // A document authoring both a non-null `prompt` and a non-null `sequence`
+    // defines an inline sequence and must run under `claudine sequence`. Reject
+    // it here — after load/parse (so `FrontmatterParse` keeps precedence) but
+    // before the prompt-property pre-validation, schema scrubbing, overrides,
+    // composition, provider selection, and execution. Detection reads authored
+    // frontmatter only; `set_overrides` never participate.
+    if composition::is_inline_sequence_mismatch(&source) {
+        let raw_yaml =
+            composition::capture_frontmatter_yaml(&source.original_text).unwrap_or_default();
+        let stderr_is_tty = std::io::stderr().is_terminal();
+        return Err(CompositionError::InlineComposeSequenceMismatch {
+            source_path: source.resolved_path.clone(),
+            raw_yaml,
+            stderr_is_tty,
+        }
+        .into());
+    }
 
     // -- Pre-validation: prompt frontmatter property ------------------------
     //
@@ -774,7 +837,12 @@ fn run_inline_compose_inner(
         .and_then(|v| v.as_str())
         .is_some_and(|s| !s.trim().is_empty());
 
-    if let Some(ref t) = term {
+    // Fail-fast diagnostics (missing / present-but-empty) print before the
+    // header; the success line is deferred to the reporting block after the
+    // early header so nothing precedes the execution line.
+    if let Some(ref t) = term
+        && !(has_prompt && is_non_empty)
+    {
         claudine::harness::report::report_prompt_property(has_prompt, is_non_empty, t);
     }
 
@@ -797,6 +865,7 @@ fn run_inline_compose_inner(
     // check so the inline-compose contract takes precedence over the
     // generic schema check. See the same call in `run_compose_inner` for
     // the full rationale.
+    let schema_t = std::time::Instant::now();
     let (source, set_overrides) = {
         let interactive_opts =
             super::schema_interactive::resolve_interactive_options(shared.silent);
@@ -810,15 +879,18 @@ fn run_inline_compose_inner(
         super::schema_interactive::emit_dropped_optional_warnings(&pre.dropped_optionals);
         (pre.source, pre.set_overrides)
     };
+    record_prep_substage(&mut prep_substages, perf_enabled, "schema validation", schema_t);
 
     // Phase 2 (2026-05-09-slow-prep): single source-root discovery for the
     // whole inline-compose invocation; downstream prep phases reuse this
     // context rather than rediscovering the repo root.
+    let prep_ctx_t = std::time::Instant::now();
     let prep_context = super::wrap::composition::CompositionPrepContext::new(
         &file,
         &source.resolved_path,
         &shared.excluded(),
     )?;
+    record_prep_substage(&mut prep_substages, perf_enabled, "prep context", prep_ctx_t);
 
     // -- Eager target resolution ------------------------------------------
     let raw_hints =
@@ -838,7 +910,39 @@ fn run_inline_compose_inner(
     let mut env_overrides: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
     if let Some(ref target) = resolved_target {
-        super::wrap::composition::install_agent_env_for_composition(target, &mut env_overrides);
+        super::wrap::composition::install_agent_env_for_composition(target, shared.yolo, &mut env_overrides);
+    }
+
+    // Render the execution line the moment the agent is known — see the
+    // matching block in `run_compose_inner` for the rationale. `is_inline`
+    // is `true` here so the header shows the inline-compose badge.
+    let header_emitted = match (shared.silent, resolved_target.as_ref()) {
+        (false, Some(target)) => super::wrap::composition::emit_execution_header(
+            target.provider,
+            shared.yolo,
+            shared.interactive,
+            verbose > 0,
+            shared.repo,
+            true, // is_inline
+            false, // sequence
+            shared.operation.as_deref(),
+            &file,
+            prep_context.launch_workspace.package_context.clone(),
+            &crate::log::terminal(),
+        ),
+        _ => false,
+    };
+
+    // Deferred success reports: the execution header has now been emitted,
+    // so the source-file and prompt-property confirmations belong here in
+    // the reporting section (success messages must not precede the header).
+    // The missing / present-but-empty variants already printed fail-fast
+    // above.
+    if let Some(ref t) = term {
+        claudine::harness::report::report_source_file(&file, &source.resolved_path, t);
+        if has_prompt && is_non_empty {
+            claudine::harness::report::report_prompt_property(has_prompt, is_non_empty, t);
+        }
     }
 
     // ── Pre-flight shell approval ────────────────────────────────────
@@ -872,6 +976,7 @@ fn run_inline_compose_inner(
         shared.yolo,
     );
 
+    let shell_approval_t = std::time::Instant::now();
     let preflight = {
         let _span = info_span!("compose_prep.shell_preflight").entered();
         composition::resolve_shell_approvals(
@@ -881,6 +986,7 @@ fn run_inline_compose_inner(
             &approval_options,
         )?
     };
+    record_prep_substage(&mut prep_substages, perf_enabled, "shell approval", shell_approval_t);
 
     // Post-prep interrupt checkpoint. If the user pressed Ctrl+C during
     // any of the prep phases (compose source parse, target resolution,
@@ -965,6 +1071,7 @@ fn run_inline_compose_inner(
                 prep_launch_context: Some(prep_context.launch_context.clone()),
                 prep_env_context: Some(prep_context.env_context.clone()),
                 prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+                header_emitted,
             };
 
             let outcome = super::wrap::composition::execute_composition_request_inner(
@@ -1071,10 +1178,12 @@ fn run_inline_compose_inner(
         prep_launch_context: Some(prep_context.launch_context.clone()),
         prep_env_context: Some(prep_context.env_context.clone()),
         prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+        header_emitted,
     };
 
     if let Some(ref mut timings) = startup_timings {
         timings.prep_phase = inline_compose_entry.elapsed();
+        timings.prep_substages = prep_substages;
     }
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)

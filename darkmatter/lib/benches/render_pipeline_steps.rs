@@ -176,10 +176,108 @@ fn bench_darkmatter_components(c: &mut Criterion) {
     group.finish();
 }
 
+/// The styled-production corpus: a `style:`-frontmatter document exercising the
+/// closeout spec's full performance-corpus feature list (spec section 6) —
+/// alpha foreground/background, component fixed/max width and alignment, list
+/// text-layout, ordered lists, and typed browser link/image attrs. Mirrors the
+/// `structural_gate` corpus so the benchmark and the structural gate measure the
+/// same styled tree.
+const STYLED_CORPUS: &str = "\
+---
+style:
+    page:
+        color: slate-200
+        max-width: 100
+    block-quote:
+        bg-color: red-500/50
+        color: slate-200/50
+        max-width: 50
+    table:
+        alignment: center
+        width: 40
+    hyperlinks:
+        width: 20
+    li:
+        alignment: right
+        max-width: 40
+    ol:
+        max-width: 40
+    images:
+        local-style:
+            color: red-500
+            width: 40
+---
+
+> A quoted paragraph.
+
+| A | B |
+|---|---|
+| 1 | 2 |
+
+- Item one
+- Item two
+
+1. First
+2. Second
+
+[Click](https://example.com \"class='btn' style='color: blue;' target='_blank' prompt='Run it' data-id='42'\")
+
+![A](./local.png \"style='color: green;'\")
+
+---
+";
+
+/// Applies the full `style:` pipeline to a fresh [`DarkmatterPage`], exactly as
+/// the production CLI / page paths do.
+fn apply_styles(page: DarkmatterPage, md: &Markdown) -> DarkmatterPage {
+    use darkmatter::style::{
+        BespokeStyleOverrides, ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides,
+        PageStyleOverrides, apply_bespoke_style, apply_color_style, apply_component_style,
+        apply_hr_style, apply_list_style, apply_page_style, from_frontmatter,
+    };
+    let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
+    let page = apply_page_style(page, &style, PageStyleOverrides::default()).expect("page style");
+    let page = apply_component_style(page, &style, ComponentStyleOverrides::default())
+        .expect("component style");
+    let page = apply_list_style(page, &style, ListStyleOverrides::default()).expect("list style");
+    let page = apply_hr_style(page, &style, HrStyleOverrides::default()).expect("hr style");
+    let page = apply_color_style(page, &style).expect("color style");
+    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).expect("bespoke style")
+}
+
+/// Benchmarks the **real styled production entry points** —
+/// [`DarkmatterPage::render`] / [`DarkmatterPage::render_to_browser`] over a
+/// fully-styled page — so the measured path is exactly what the production CLI
+/// pays, including the `style:` pipeline and the typed-tree fold (closeout spec
+/// section 6).
+fn bench_styled_production_paths(c: &mut Criterion) {
+    let term = Terminal::new_optimistic(120);
+    let md: Markdown = STYLED_CORPUS.into();
+
+    let mut group = c.benchmark_group("styled_production");
+    group.sample_size(20);
+
+    group.bench_function("page_styled/terminal", |b| {
+        b.iter(|| {
+            let page = apply_styles(DarkmatterPage::new(&term).with_max_width(100), &md);
+            page.render(black_box(&md)).expect("styled terminal render")
+        })
+    });
+    group.bench_function("page_styled/browser", |b| {
+        b.iter(|| {
+            let page = apply_styles(DarkmatterPage::new(&term).with_max_width(100), &md);
+            page.render_to_browser(black_box(&md))
+                .expect("styled browser render")
+        })
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_render_pipeline_terminal,
     bench_render_pipeline_browser,
     bench_darkmatter_components,
+    bench_styled_production_paths,
 );
 criterion_main!(benches);

@@ -15,6 +15,13 @@ name = "render_cicd_fixture"
 path = "src/bin/render_cicd_fixture.rs"
 required-features = ["test-fixtures"]
 
+# Test-only helper rendered inside a real terminal by the Level 2 git-status
+# styling test (double-underline headers, worktree hyperlinks, blank-row layout).
+[[bin]]
+name = "render_git_status_fixture"
+path = "src/bin/render_git_status_fixture.rs"
+required-features = ["test-fixtures"]
+
 [features]
 test-fixtures = []
 
@@ -25,10 +32,9 @@ clap_complete = { version = "4", features = ["unstable-dynamic"] }
 futures = "0.3"
 inquire = "0.9"
 rayon = "1.11.0"
-git2 = "0.20"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 darkmatter = { path = "../../darkmatter/lib" }
 sniff = { path = "../lib", features = ["network", "remote"] }
 strum = { version = "0.28", features = ["derive"] }
@@ -41,6 +47,8 @@ url = "2"
 assert_cmd = "2"
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 expectrl = "0.8"
+# Only to snapshot worktrees into commits when building CLI test repos —
+# gix has no worktree-staging write API. See sniff-lib's dev-dep note.
 git2 = "0.20"
 insta = { version = "1", features = ["json"] }
 predicates = "3"

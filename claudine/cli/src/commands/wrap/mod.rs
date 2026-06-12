@@ -310,7 +310,6 @@ pub fn run_provider_wrapper(
         return Ok(());
     }
 
-    let wrapper_start = std::time::Instant::now();
     let mut perf_collector =
         startup_timings.map(|timings| crate::perf::CommandPerfCollector::new("Wrapper", timings));
 
@@ -331,9 +330,7 @@ pub fn run_provider_wrapper(
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.
     if let Some(collector) = perf_collector {
-        let total = wrapper_start.elapsed();
-        let report = collector.into_report(total);
-        eprint!("{}", crate::perf::render_perf_report(&report));
+        crate::perf::emit_report(&collector.into_report());
     }
 
     std::process::exit(code);
@@ -709,6 +706,7 @@ fn run_provider_wrapper_inner(
         repo_requested,
         needs_mcp_shadow_home,
         launch_workspace,
+        false,
     )?;
 
     if !silent_requested && !quiet_requested {
@@ -1322,6 +1320,7 @@ fn run_provider_wrapper_inner(
             detail_requested,
             &summary_details.lock().unwrap().clone(),
             Some(&section_stream),
+            stream_result.agent_pid,
         );
 
         let stderr_text = summary.stderr_text.clone();
@@ -1508,6 +1507,7 @@ mod tests {
             }),
             warnings: Vec::new(),
             shadow_home_path: None,
+            perf_substages: Vec::new(),
         };
 
         let rendered = crate::output::package_name_display(&env_plan).unwrap();
@@ -1531,6 +1531,7 @@ mod tests {
             }),
             warnings: Vec::new(),
             shadow_home_path: None,
+            perf_substages: Vec::new(),
         };
 
         assert!(crate::output::package_name_display(&env_plan).is_none());

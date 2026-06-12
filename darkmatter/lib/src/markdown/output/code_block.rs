@@ -34,8 +34,8 @@ use syntect::util::LinesWithEndings;
 /// * `target_width` - Optional component render width. When `Some`, each line
 ///   pads to exactly `target_width` visible columns using the line background
 ///   color instead of clearing to the terminal edge with `\x1b[K`. This is
-///   what `PageFill::Max`, `Explicit`, `Pad`, and `Indent` need so the code
-///   block body honours its resolved width.
+///   what component `Layout.max_width`, `width`, and `padding` need so the
+///   code block body honours its resolved width.
 ///
 /// ## Returns
 ///
@@ -90,6 +90,10 @@ pub(crate) fn render_terminal_code_block(
         } else {
             bg_color
         };
+
+        // Code blocks are self-contained surfaces. Clear inherited text
+        // attributes before applying the theme's own background and foreground.
+        output.push_str("\x1b[0m");
 
         // Set background color for the line (applies to gutter and content)
         output.push_str(&format!(
@@ -165,7 +169,7 @@ pub(crate) fn render_terminal_code_block(
     match target_width {
         Some(w) => {
             output.push_str(&format!(
-                "\x1b[48;2;{};{};{}m{}\x1b[0m",
+                "\x1b[0m\x1b[48;2;{};{};{}m{}\x1b[0m",
                 bg_color.r,
                 bg_color.g,
                 bg_color.b,
@@ -174,7 +178,7 @@ pub(crate) fn render_terminal_code_block(
         }
         None => {
             output.push_str(&format!(
-                "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m",
+                "\x1b[0m\x1b[48;2;{};{};{}m\x1b[K\x1b[0m",
                 bg_color.r, bg_color.g, bg_color.b
             ));
         }
@@ -410,14 +414,14 @@ pub(crate) fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Co
 pub(crate) fn emit_padding_row(bg_color: Color, target_width: Option<u16>) -> String {
     match target_width {
         Some(w) => format!(
-            "\x1b[48;2;{};{};{}m{}\x1b[0m\n",
+            "\x1b[0m\x1b[48;2;{};{};{}m{}\x1b[0m\n",
             bg_color.r,
             bg_color.g,
             bg_color.b,
             " ".repeat(w as usize)
         ),
         None => format!(
-            "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m\n",
+            "\x1b[0m\x1b[48;2;{};{};{}m\x1b[K\x1b[0m\n",
             bg_color.r, bg_color.g, bg_color.b
         ),
     }
@@ -558,6 +562,33 @@ mod tests {
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("\x1b["));
+    }
+
+    #[test]
+    fn test_render_terminal_code_block_clears_inherited_text_attributes() {
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::OneHalf,
+            ColorMode::Light,
+        );
+        let options = test_options();
+        let meta = CodeBlockMeta::default();
+
+        let output = render_terminal_code_block(
+            "foo: string\n",
+            "yaml",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Light,
+            Some(40),
+            None,
+        )
+        .expect("render code block");
+
+        assert!(
+            output.contains("\x1b[0m\x1b[48;2;"),
+            "code rows must reset inherited SGR state before applying themed code colors: {output:?}"
+        );
     }
 
     #[test]

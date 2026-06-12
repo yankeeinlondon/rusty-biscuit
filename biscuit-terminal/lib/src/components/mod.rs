@@ -1,12 +1,15 @@
 pub mod block_quote;
 pub mod compose;
 pub mod filesystem;
+#[cfg(feature = "image")]
 pub mod graph_expression;
 pub mod horizontal_rule;
 pub mod image_options;
 pub mod inline_content;
 pub mod list;
+#[cfg(feature = "image")]
 pub mod mermaid;
+pub mod metrics_tree;
 pub mod pad;
 pub mod progress;
 pub mod prose;

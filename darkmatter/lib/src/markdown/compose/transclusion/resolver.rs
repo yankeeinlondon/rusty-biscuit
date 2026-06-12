@@ -356,8 +356,8 @@ mod tests {
         // Canonicalize the tempdir root to resolve macOS /var -> /private/var symlink
         let root = std::fs::canonicalize(dir.path()).unwrap();
 
-        // Initialize a real git repo so git2::Repository::discover() works
-        git2::Repository::init(&root).unwrap();
+        // Initialize a real git repo so repo-root discovery works
+        gix::init(&root).unwrap();
 
         let nested = root.join("docs");
         std::fs::create_dir_all(&nested).unwrap();
@@ -449,7 +449,7 @@ mod tests {
         std::fs::write(&source_path, "# root").unwrap();
 
         // Initialize a git repo so FileReference works
-        git2::Repository::init(&root).unwrap();
+        gix::init(&root).unwrap();
 
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(&root).unwrap();

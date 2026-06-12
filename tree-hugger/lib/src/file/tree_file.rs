@@ -93,6 +93,51 @@ impl TreeFile {
         })
     }
 
+    /// Returns the source text of the parsed file.
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    /// Returns the root node of the parsed syntax tree.
+    ///
+    /// Exposed within the crate for analyses that must walk the concrete
+    /// syntax tree directly (e.g. control-flow nesting depth) rather than the
+    /// extracted symbol records.
+    pub(crate) fn root_node(&self) -> Node<'_> {
+        self.tree.root_node()
+    }
+
+    /// Returns the byte ranges of all comment nodes detected by the comments
+    /// query for this file's language.
+    ///
+    /// ## Returns
+    /// Returns a list of `(start_byte, end_byte)` ranges covering comment nodes.
+    /// Returns an empty vector if no comments query is available.
+    ///
+    /// ## Errors
+    /// Returns an error if the comments query fails to compile.
+    pub fn comment_ranges(&self) -> Result<Vec<(usize, usize)>, TreeHuggerError> {
+        let query = query_for(self.grammar_ref(), QueryKind::Comments)?;
+        if query.pattern_count() == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut cursor = QueryCursor::new();
+        let root = self.tree.root_node();
+        let mut ranges = Vec::new();
+        let mut matches = cursor.matches(query.as_ref(), root, self.source.as_bytes());
+        matches.advance();
+
+        while let Some(query_match) = matches.get() {
+            for capture in query_match.captures {
+                ranges.push((capture.node.start_byte(), capture.node.end_byte()));
+            }
+            matches.advance();
+        }
+
+        Ok(ranges)
+    }
+
     /// Returns a reference to the grammar this file was parsed with for query
     /// compilation.
     fn grammar_ref(&self) -> GrammarRef<'_> {
@@ -167,6 +212,7 @@ impl TreeFile {
                 let (source, original_name, alias) =
                     self.extract_import_metadata(node, &name, self.language);
                 let statement_range = self.import_statement_range(node, self.language);
+                let is_reexport = self.import_is_reexport(node, self.language);
 
                 imports.push(ImportSymbol {
                     name,
@@ -177,6 +223,7 @@ impl TreeFile {
                     language: self.language,
                     file: self.file.clone(),
                     source,
+                    is_reexport,
                 });
             }
 
@@ -495,6 +542,24 @@ impl TreeFile {
         };
 
         statement.map(range_for_node)
+    }
+
+    /// Reports whether an import re-exports its symbol (part of the public API).
+    ///
+    /// Only languages with explicit re-export syntax are detected; others return
+    /// `false`. Rust: a `use` declaration carrying a `visibility_modifier`
+    /// (`pub use`, `pub(crate) use`, …) is a re-export.
+    fn import_is_reexport(&self, node: Node, language: ProgrammingLanguage) -> bool {
+        match language {
+            ProgrammingLanguage::Rust => find_ancestor_by_kind(node, "use_declaration")
+                .map(|stmt| {
+                    let mut cursor = stmt.walk();
+                    stmt.children(&mut cursor)
+                        .any(|child| child.kind() == "visibility_modifier")
+                })
+                .unwrap_or(false),
+            _ => false,
+        }
     }
 
     /// Extracts import metadata for JavaScript/TypeScript.
@@ -1315,6 +1380,12 @@ impl TreeFile {
 
             // Skip if referenced
             if referenced_names.contains(name) {
+                continue;
+            }
+
+            // Skip re-exports (e.g. Rust `pub use`): exporting the symbol is the
+            // use, so a missing local reference is expected, not a defect.
+            if import.is_reexport {
                 continue;
             }
 

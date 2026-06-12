@@ -72,6 +72,23 @@ fn redact_session_id(input: &str) -> String {
     )
 }
 
+fn redact_claudine_pid(input: &str) -> String {
+    const PREFIX: &str = "CLAUDINE_PID=";
+    let mut result = input.to_string();
+    let mut search_from = 0;
+    while let Some(start) = result[search_from..].find(PREFIX) {
+        let start = search_from + start;
+        let value_start = start + PREFIX.len();
+        let value_end = result[value_start..]
+            .find(|c: char| !c.is_ascii_digit())
+            .map(|i| value_start + i)
+            .unwrap_or(result.len());
+        result.replace_range(value_start..value_end, "<redacted>");
+        search_from = start + PREFIX.len() + "<redacted>".len();
+    }
+    result
+}
+
 fn redact_temp_home(input: &str) -> String {
     const MARKER: &str = "HOME=/var/folders/";
     let Some(start) = input.find(MARKER) else {
@@ -452,7 +469,7 @@ exit 0
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let redacted = redact_workspace_paths(
         workspace.path(),
-        &redact_temp_home(&redact_session_id(&strip_ansi(&stderr))),
+        &redact_claudine_pid(&redact_temp_home(&redact_session_id(&strip_ansi(&stderr)))),
     );
     insta::assert_snapshot!(redacted);
 }
@@ -1160,16 +1177,12 @@ exit 0
         "stderr should contain Performance section; got: {plain}"
     );
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead section; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
     );
     assert!(
-        plain.contains("Agent Execution"),
-        "stderr should contain Agent Execution section; got: {plain}"
-    );
-    assert!(
-        plain.contains("launches:"),
-        "stderr should show launch count; got: {plain}"
+        plain.contains("agent execution"),
+        "stderr should contain the agent execution bucket; got: {plain}"
     );
 }
 
@@ -1205,8 +1218,8 @@ exit 1
         "stderr should contain Performance section; got: {plain}"
     );
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead section; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
     );
     assert!(
         plain.contains("dry run") || plain.contains("skipped"),
@@ -1531,6 +1544,199 @@ printf '%s' 'Final assistant response' > "$LAST"
         1
     );
     assert!(log_contents.contains("\"provider_summary\":{\"raw_summary\""));
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — PID capture end-to-end verification
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn wrapper_injects_claudine_pid_into_provider_env() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    let env_path = workspace.path().join("env.txt");
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+{
+  printf 'CLAUDINE_PID=%s\n' "$CLAUDINE_PID"
+  if [ -n "${AGENT_PID:-}" ]; then
+    printf 'HAS_AGENT_PID=1\n'
+  else
+    printf 'HAS_AGENT_PID=0\n'
+  fi
+} > "$CLAUDINE_ENV_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ENV_FILE", &env_path)
+        .args(["codex", "--", "--version"])
+        .assert()
+        .success();
+
+    let env_lines = fs::read_to_string(&env_path).unwrap();
+    assert!(
+        env_lines.contains("CLAUDINE_PID="),
+        "provider must receive CLAUDINE_PID; got: {env_lines}"
+    );
+    let claudine_pid_value = env_lines
+        .lines()
+        .find(|l| l.starts_with("CLAUDINE_PID="))
+        .and_then(|l| l.strip_prefix("CLAUDINE_PID="))
+        .unwrap_or("");
+    assert!(
+        !claudine_pid_value.is_empty(),
+        "CLAUDINE_PID must not be empty; got: {env_lines}"
+    );
+    assert!(
+        claudine_pid_value.parse::<u32>().is_ok(),
+        "CLAUDINE_PID must be a valid PID; got: {env_lines}"
+    );
+    assert!(
+        env_lines.contains("HAS_AGENT_PID=0"),
+        "provider must not receive AGENT_PID in its environment; got: {env_lines}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_structured_summary_includes_pids_in_jsonl() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"thread.started","thread_id":"thread-pid-test"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"pid test"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":5},"duration_ms":1000,"status":"completed"}'
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args(["codex", "--model", "codex-mini", "test prompt"])
+        .assert()
+        .success();
+
+    let log_path = today_log_path(&fake_home);
+    let log_contents = fs::read_to_string(log_path).unwrap();
+
+    let summary_line = log_contents
+        .lines()
+        .find(|line| line.contains("\"synthetic_kind\":\"stream_wrapper_summary\""))
+        .expect("summary event should be written");
+
+    let summary: serde_json::Value = serde_json::from_str(summary_line).unwrap();
+
+    let claudine_pid = summary
+        .get("env")
+        .and_then(|e| e.get("claudine_pid"))
+        .and_then(|v| v.as_u64());
+    assert!(
+        claudine_pid.is_some(),
+        "summary event must include env.claudine_pid; got: {summary_line}"
+    );
+
+    let agent_pid = summary.get("agent_pid").and_then(|v| v.as_u64());
+    assert!(
+        agent_pid.is_some(),
+        "summary event must include agent_pid after successful spawn; got: {summary_line}"
+    );
+
+    // Review-1 Finding 1: live per-event records (not just the lifecycle
+    // summary) must carry agent_pid once the child has spawned. These are the
+    // synthetic `stream_semantic_event` rows the sink logs for every event.
+    let semantic_line = log_contents
+        .lines()
+        .find(|line| line.contains("\"synthetic_kind\":\"stream_semantic_event\""))
+        .expect("at least one live semantic event should be logged");
+    let semantic: serde_json::Value = serde_json::from_str(semantic_line).unwrap();
+    assert!(
+        semantic.get("agent_pid").and_then(|v| v.as_u64()).is_some(),
+        "live semantic event must include agent_pid after spawn; got: {semantic_line}"
+    );
+    assert!(
+        semantic
+            .get("env")
+            .and_then(|e| e.get("claudine_pid"))
+            .and_then(|v| v.as_u64())
+            .is_some(),
+        "live semantic event must include env.claudine_pid; got: {semantic_line}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_dry_run_does_not_fabricate_agent_pid_in_jsonl() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+echo "SHOULD NOT RUN"
+exit 1
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["codex", "--dry-run", "--", "--version"])
+        .assert()
+        .success();
+
+    let log_path = today_log_path(workspace.path());
+    assert!(
+        !log_path.exists(),
+        "dry run must not create a JSONL log file; found: {log_path:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_missing_binary_does_not_fabricate_agent_pid_in_jsonl() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // Do NOT create a codex binary — binary resolution will fail.
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["codex", "--", "--version"])
+        .assert()
+        .failure();
+
+    let log_path = today_log_path(workspace.path());
+    assert!(
+        !log_path.exists(),
+        "failed binary resolution must not create a JSONL log file; found: {log_path:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -4808,6 +5014,363 @@ fn sequence_dry_run_fail_fast_on_composition_error() {
 }
 
 // ---------------------------------------------------------------------------
+// review-2 — sequence --dry-run agent-resolution states (no explicit provider)
+//
+// `claudine sequence --dry-run` with no `--<provider>` flag must NOT run the
+// legacy non-TTY resolver (which auto-picks or aborts) before the per-step
+// dry-run seam. Each step must instead render the classified agent-resolution
+// state into the metadata table, exactly like `compose --dry-run`. These L1
+// tests cover the states a bare sequence can hit: no-agent, single-invalid,
+// single-not-installed, and zero-installed-list.
+// ---------------------------------------------------------------------------
+
+/// Run `claudine sequence compose.md --dry-run` (no explicit provider) over a
+/// two-step sequence whose frontmatter carries `agent_line` (empty for the
+/// no-agent case), with only `installed` providers on PATH. Returns
+/// `(success, ansi_stripped_stdout, ansi_stripped_stderr)` and asserts that no
+/// provider ever launched.
+#[cfg(unix)]
+fn run_sequence_dry_run_agent_state(
+    agent_line: &str,
+    installed: &[&str],
+) -> (bool, String, String) {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // Any installed provider writes a sentinel; under --dry-run it must never
+    // run, regardless of how the agent state resolves.
+    let sentinel = workspace.path().join("provider-ran.flag");
+    for slug in installed {
+        write_executable(
+            &path_dir.join(slug),
+            &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", sentinel.display()),
+        );
+    }
+
+    let compose_file = workspace.path().join("compose.md");
+    fs::write(
+        &compose_file,
+        format!("---\nsequence:\n  - step_one\n  - step_two\n{agent_line}---\nSEQ_BODY_MARKER\n"),
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        // Restrict PATH to the fake bin so only `installed` providers count.
+        .env("PATH", &path_dir)
+        .current_dir(workspace.path())
+        .args(["sequence", "compose.md", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !sentinel.exists(),
+        "provider must not execute under sequence --dry-run"
+    );
+
+    (
+        output.status.success(),
+        strip_ansi(&String::from_utf8_lossy(&output.stdout)),
+        strip_ansi(&String::from_utf8_lossy(&output.stderr)),
+    )
+}
+
+/// No frontmatter `agent` and no explicit provider: every step renders the
+/// no-agent state instead of aborting through the legacy resolver.
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_no_agent_renders_state_per_step() {
+    let (ok, stdout, stderr) = run_sequence_dry_run_agent_state("", &["goose"]);
+    assert!(ok, "no-agent sequence dry-run should succeed; stderr:\n{stderr}");
+    // Both composed bodies still reach stdout.
+    assert_eq!(
+        stdout.matches("SEQ_BODY_MARKER").count(),
+        2,
+        "each step's body must reach stdout; stdout:\n{stdout}"
+    );
+    // The no-agent breakdown renders once per step (one per metadata table).
+    assert!(
+        stderr.matches("didn't specify the Agent").count() >= 2,
+        "each step must render the no-agent state; stderr:\n{stderr}"
+    );
+}
+
+/// A scalar invalid `agent` (`agent: not-real`) is non-fatal under dry-run:
+/// every step renders the single-invalid cell rather than aborting.
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_single_invalid_renders_state_per_step() {
+    let (ok, _stdout, stderr) =
+        run_sequence_dry_run_agent_state("agent: not-real\n", &["claude"]);
+    assert!(ok, "single-invalid sequence dry-run should succeed; stderr:\n{stderr}");
+    assert!(
+        stderr.matches("Invalid Agent").count() >= 2,
+        "each step must render the single-invalid cell; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("not-real"),
+        "the invalid hint must be named; stderr:\n{stderr}"
+    );
+}
+
+/// A single valid-but-not-installed `agent` (`agent: gemini`, only `claude`
+/// installed) renders the not-installed cell per step under dry-run.
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_single_not_installed_renders_state_per_step() {
+    let (ok, _stdout, stderr) =
+        run_sequence_dry_run_agent_state("agent: gemini\n", &["claude"]);
+    assert!(
+        ok,
+        "single-not-installed sequence dry-run should succeed; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.matches("Agent Not Installed").count() >= 2,
+        "each step must render the not-installed cell; stderr:\n{stderr}"
+    );
+}
+
+/// A frontmatter `agent` list resolving to zero installed providers — here an
+/// all-invalid list (`agent: [not-real, also-fake]`), which is deterministic
+/// regardless of which providers the host has installed — renders the
+/// zero-installed-list state per step under dry-run.
+#[cfg(unix)]
+#[test]
+fn sequence_dry_run_zero_installed_list_renders_state_per_step() {
+    let (ok, _stdout, stderr) =
+        run_sequence_dry_run_agent_state("agent: [not-real, also-fake]\n", &["claude"]);
+    assert!(
+        ok,
+        "zero-installed-list sequence dry-run should succeed; stderr:\n{stderr}"
+    );
+    // `installed/valid` is the single-token signature of the zero-installed
+    // header; it survives table word-wrap.
+    assert!(
+        stderr.matches("installed/valid").count() >= 2,
+        "each step must render the zero-installed-list state; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Invalid Agent"),
+        "a list state must not render the single-invalid scalar cell; stderr:\n{stderr}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Live (non-dry-run) sequence agent-resolution gate
+//
+// The dry-run table promises a prompting state would prompt-or-abort; the
+// real `sequence` command must honor that. In a no-TTY session every
+// prompting state aborts with the same styled `AgentResolutionFailed`
+// message — never auto-running a substitute provider through the legacy
+// favorite/default resolver. These tests are the live counterpart to the
+// `sequence_dry_run_*_renders_state_per_step` tests above.
+// ---------------------------------------------------------------------------
+
+/// Run `claudine sequence compose.md` (live: no `--dry-run`, no explicit
+/// provider) over a two-step sequence whose frontmatter carries `agent_line`,
+/// with only `installed` providers on PATH and **no TTY** (piped empty stdin).
+///
+/// Each installed provider records a launch by writing a sentinel via the
+/// POSIX shell builtin `: > file` — claudine restricts the child PATH to the
+/// fake bin, so an external `touch` would not resolve, but a redirect always
+/// does. Returns `(exit_code, ansi_stripped_stderr, provider_ran)`.
+#[cfg(unix)]
+fn run_sequence_live_agent_state(agent_line: &str, installed: &[&str]) -> (i32, String, bool) {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let sentinel = workspace.path().join("provider-ran.flag");
+    for slug in installed {
+        write_executable(
+            &path_dir.join(slug),
+            &format!("#!/bin/sh\n: > '{}'\nexit 0\n", sentinel.display()),
+        );
+    }
+
+    let compose_file = workspace.path().join("compose.md");
+    fs::write(
+        &compose_file,
+        format!("---\nsequence:\n  - step_one\n  - step_two\n{agent_line}---\nSEQ_BODY_MARKER\n"),
+    )
+    .unwrap();
+
+    let stdin_file = workspace.path().join("empty-stdin.txt");
+    fs::write(&stdin_file, "").unwrap();
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        // Restrict PATH to the fake bin so only `installed` providers count.
+        .env("PATH", &path_dir)
+        .pipe_stdin(&stdin_file)
+        .unwrap()
+        .current_dir(workspace.path())
+        .args(["sequence", "compose.md"])
+        .output()
+        .unwrap();
+
+    (
+        output.status.code().unwrap_or(-1),
+        strip_ansi(&String::from_utf8_lossy(&output.stderr)),
+        sentinel.exists(),
+    )
+}
+
+/// No frontmatter `agent` and no explicit provider in a no-TTY session: the
+/// live run aborts with the no-agent breakdown instead of auto-picking the
+/// favorite/default and launching a provider.
+#[cfg(unix)]
+#[test]
+fn sequence_live_no_agent_aborts_without_launching_provider() {
+    let (code, stderr, ran) = run_sequence_live_agent_state("", &["claude"]);
+    assert!(!ran, "no provider may launch for a no-agent live sequence");
+    assert_eq!(code, 1, "no-agent live sequence must abort; stderr:\n{stderr}");
+    assert!(
+        stderr.contains("agent resolution failed"),
+        "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("didn't specify the Agent"),
+        "abort body must be the same no-agent breakdown the dry-run table shows; stderr:\n{stderr}"
+    );
+}
+
+/// A scalar invalid `agent` (`agent: not-real`) aborts live in no-TTY mode
+/// with the imperative `Invalid Agent:` message — it must NOT fall back to the
+/// only installed provider.
+#[cfg(unix)]
+#[test]
+fn sequence_live_single_invalid_aborts_without_launching_provider() {
+    let (code, stderr, ran) = run_sequence_live_agent_state("agent: not-real\n", &["claude"]);
+    assert!(!ran, "no provider may launch for an invalid-agent live sequence");
+    assert_eq!(code, 1, "invalid-agent live sequence must abort; stderr:\n{stderr}");
+    assert!(
+        stderr.contains("agent resolution failed"),
+        "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Invalid Agent") && stderr.contains("not-real"),
+        "abort body must name the invalid hint; stderr:\n{stderr}"
+    );
+}
+
+/// A single valid-but-not-installed `agent` (`agent: gemini`, only `claude`
+/// installed) aborts live in no-TTY mode rather than substituting `claude`.
+#[cfg(unix)]
+#[test]
+fn sequence_live_single_not_installed_aborts_without_launching_provider() {
+    let (code, stderr, ran) = run_sequence_live_agent_state("agent: gemini\n", &["claude"]);
+    assert!(!ran, "no provider may launch for a not-installed-agent live sequence");
+    assert_eq!(
+        code, 1,
+        "not-installed-agent live sequence must abort; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("agent resolution failed"),
+        "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Agent Not Installed"),
+        "abort body must be the not-installed breakdown; stderr:\n{stderr}"
+    );
+}
+
+/// A frontmatter `agent` list resolving to zero installed providers
+/// (`agent: [not-real, also-fake]`) aborts live in no-TTY mode.
+#[cfg(unix)]
+#[test]
+fn sequence_live_zero_installed_list_aborts_without_launching_provider() {
+    let (code, stderr, ran) =
+        run_sequence_live_agent_state("agent: [not-real, also-fake]\n", &["claude"]);
+    assert!(!ran, "no provider may launch for a zero-installed-list live sequence");
+    assert_eq!(
+        code, 1,
+        "zero-installed-list live sequence must abort; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("agent resolution failed"),
+        "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("installed/valid"),
+        "abort body must be the zero-installed-list breakdown; stderr:\n{stderr}"
+    );
+}
+
+/// Counterpart guard: an auto-selectable state (`agent: claude`, installed)
+/// must NOT abort — the gate only fires for prompting states. The provider
+/// launches and the run succeeds.
+#[cfg(unix)]
+#[test]
+fn sequence_live_auto_selectable_launches_provider() {
+    let (code, stderr, ran) = run_sequence_live_agent_state("agent: claude\n", &["claude"]);
+    assert!(
+        ran,
+        "an auto-selectable agent must launch the provider; stderr:\n{stderr}"
+    );
+    assert_eq!(
+        code, 0,
+        "auto-selectable live sequence must succeed; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("agent resolution failed"),
+        "auto-selectable state must not trip the resolution gate; stderr:\n{stderr}"
+    );
+}
+
+/// `--silent` suppresses status chatter but must not suppress the
+/// agent-resolution abort: a no-TTY invalid-agent live sequence still aborts
+/// with the styled message (mirrors the direct-compose `--silent` guarantee).
+#[cfg(unix)]
+#[test]
+fn sequence_live_silent_does_not_suppress_agent_resolution_abort() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let sentinel = workspace.path().join("provider-ran.flag");
+    write_executable(
+        &path_dir.join("claude"),
+        &format!("#!/bin/sh\n: > '{}'\nexit 0\n", sentinel.display()),
+    );
+
+    let compose_file = workspace.path().join("compose.md");
+    fs::write(
+        &compose_file,
+        "---\nsequence:\n  - step_one\nagent: not-real\n---\nSEQ_BODY_MARKER\n",
+    )
+    .unwrap();
+
+    let stdin_file = workspace.path().join("empty-stdin.txt");
+    fs::write(&stdin_file, "").unwrap();
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .pipe_stdin(&stdin_file)
+        .unwrap()
+        .current_dir(workspace.path())
+        .args(["sequence", "compose.md", "--silent"])
+        .output()
+        .unwrap();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(!sentinel.exists(), "no provider may launch under the abort");
+    assert_eq!(output.status.code(), Some(1), "must abort; stderr:\n{stderr}");
+    assert!(
+        stderr.contains("agent resolution failed") && stderr.contains("Invalid Agent"),
+        "--silent must not suppress the agent-resolution abort message; stderr:\n{stderr}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Phase 6 — cross-cutting hardening (stdout/stderr discipline, error
 // surfaces, quiet/silent matrix)
 // ---------------------------------------------------------------------------
@@ -5650,6 +6213,84 @@ exit 0
     }
 }
 
+/// Phase 6 regression: service-less new-format stderr lines must be consumed
+/// by the bridge and not leak as raw `timestamp=` passthrough during compose.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn compose_opencode_serviceless_stderr_lines_are_consumed() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nHello\n").unwrap();
+
+    // Fake opencode emits the exact service-less lines observed in the
+    // wild (spec.md:17-24) plus matching NDJSON stdout so the wrapper
+    // completes normally.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.352Z level=INFO run=df5a9474 message=tracking hash=86a6603a' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.460Z level=INFO run=df5a9474 message=loop session.id=ses_14db step=1' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.559Z level=INFO run=df5a9474 message=tracking hash=86a6603a' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.574Z level=INFO run=df5a9474 message=process session.id=ses_14db' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.574Z level=INFO run=df5a9474 message=stream providerID=zai-coding-plan modelID=glm-5.1' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:27.575Z level=INFO run=df5a9474 message="llm runtime selected"' >&2
+printf '%s\n' 'timestamp=2026-06-10T16:11:31.461Z level=INFO run=df5a9474 message=evaluated permission=glob' >&2
+printf '%s\n' '{"type":"init","session_id":"ses_14db","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"ses_14db"}'
+printf '%s\n' '{"type":"text","text":"Done."}'
+printf '%s\n' '{"type":"step_complete","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2},"duration_ms":50}'
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+
+    // The user-visible regression: raw timestamp= lines must not appear.
+    assert!(
+        !stderr.contains("timestamp="),
+        "raw timestamp= lines must be consumed by the bridge, not passthrough to stderr; got: {stderr}"
+    );
+
+    // Verify the JSONL summary contains the expected stderr diagnostics.
+    let row = read_summary_row(&fake_home);
+    let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
+    assert_eq!(
+        diagnostics["log_records_parsed"].as_u64().unwrap_or(0),
+        7,
+        "all 7 new-format lines should be parsed; row={row}",
+    );
+    // The bridge should have promoted the service-less lifecycle lines into
+    // semantic events (StepLoop, LlmCall, PermissionEvaluated).  They won't
+    // be visible in the summary directly, but the diagnostics counter proves
+    // the bridge consumed and classified them rather than leaving them as
+    // raw passthrough.
+    assert_eq!(
+        row["extra"]["exit_code"],
+        serde_json::json!(0),
+        "session should succeed: row={row}",
+    );
+}
+
 // ============================================================================
 // Performance flag tests
 // ============================================================================
@@ -5686,12 +6327,12 @@ fn compose_perf_emits_report_to_stderr() {
         "stderr should contain Performance section; got: {plain}"
     );
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead section; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
     );
     assert!(
-        plain.contains("Agent Execution"),
-        "stderr should contain Agent Execution section; got: {plain}"
+        plain.contains("agent execution"),
+        "stderr should contain the agent execution bucket; got: {plain}"
     );
 }
 
@@ -5777,12 +6418,12 @@ fn inline_compose_perf_emits_report_to_stderr() {
         "stderr should contain Performance section; got: {plain}"
     );
     assert!(
-        plain.contains("CLI Overhead"),
-        "stderr should contain CLI Overhead section; got: {plain}"
+        plain.contains("pre-dispatch"),
+        "stderr should contain the pre-dispatch bucket; got: {plain}"
     );
     assert!(
-        plain.contains("Agent Execution"),
-        "stderr should contain Agent Execution section; got: {plain}"
+        plain.contains("agent execution"),
+        "stderr should contain the agent execution bucket; got: {plain}"
     );
 }
 
@@ -5919,22 +6560,22 @@ fn perf_arg_parsing_includes_clap_time() {
     // The arg parsing line must be present and show a duration.
     // We allow 0µs because timer resolution varies, but the line must exist.
     assert!(
-        plain.contains("arg parsing:"),
+        plain.contains("arg parsing"),
         "perf report must include arg parsing timing; got: {plain}"
     );
 
     // Ensure the other startup timings are also present, confirming the
-    // full CLI Overhead section is rendered.
+    // pre-dispatch and environment-setup buckets are rendered.
     assert!(
-        plain.contains("config loading:"),
+        plain.contains("config loading"),
         "perf report must include config loading timing; got: {plain}"
     );
     assert!(
-        plain.contains("tracing init:"),
+        plain.contains("tracing init"),
         "perf report must include tracing init timing; got: {plain}"
     );
     assert!(
-        plain.contains("environment setup:"),
+        plain.contains("environment setup"),
         "perf report must include environment setup timing; got: {plain}"
     );
 }

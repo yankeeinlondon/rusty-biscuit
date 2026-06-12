@@ -389,7 +389,9 @@ mod tests {
                 primary_language: Some("Rust".to_string()),
                 package_area: Some("claudine".to_string()),
                 package: Some("claudine-cli".to_string()),
+                claudine_pid: None,
             },
+            agent_pid: None,
         }
     }
 

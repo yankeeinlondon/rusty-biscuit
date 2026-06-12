@@ -203,7 +203,7 @@ impl TerminalRenderable for YamlBlock {
     fn render(&self, term: &Terminal) -> String {
         let node = <Self as TreeRenderable>::render_tree(self);
         let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn)
-            .with_code_renderer(Rc::new(TerminalCodeRenderer::new()));
+            .with_code_renderer(Rc::new(TerminalCodeRenderer::for_terminal(term)));
         match render_terminal_node(&node, &opts) {
             Ok(rendered) => rendered.output,
             Err(error) => {

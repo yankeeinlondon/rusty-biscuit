@@ -53,12 +53,17 @@ implement `TreeRenderable`, `MarkdownRenderable`, `BrowserRenderable`, and
 `TerminalRenderable::render_tree_node`, with `render_tree_node` delegating to
 the same private projection helper as `TreeRenderable::render_tree`.
 
-Stage 3 closed the structural projection gap for nested components:
-`BlockQuote`, `StatusBlock`, and `FileSystem` now provide `render_tree_node`
+The structural projection gap for nested components is closed:
+`BlockQuote`, `StatusBlock`, and `FileSystem` provide `render_tree_node`
 overrides, and containers project migrated children structurally instead of
-falling back to ANSI-stripped text. `FileSystem::render` still uses its
-bespoke terminal path; that terminal flip is deferred to Stage 4 pending
-connector-list `Style` lowering and icon-name spacing parity.
+falling back to ANSI-stripped text. The connector-list per-item `Style` lowering
+gap is closed too (`render_tree_connector_list` applies each list item's
+`Paragraph` `Style`), so `FileSystem`'s terminal styling is at parity.
+`FileSystem::render` still uses its bespoke terminal path: that flip stays
+**deferred as an accepted specialization** — the target-agnostic projection emits
+portable Unicode icons and cannot reproduce the bespoke Nerd Font terminal icons.
+`FileSystem` is off the darkmatter production path, so this is not a blocker (CSS
+Box Architecture closeout disposition; see its `component-assessment.md`).
 
 The **projection layer** (`render_tree::projection`) converts
 `RenderableTerminalContent` into tree nodes:
@@ -83,28 +88,70 @@ RenderableTerminalContent::to_tree_nodes(
 The terminal tree renderer renders headings/sections, ordered/unordered
 lists, and tables **natively** — it no longer delegates back to the bespoke
 `Section`, `OrderedList`/`UnorderedList`, or `Table` components. Progress
-widgets render from `renderable.widget.progress.*` hints on a `Paragraph`;
-two-column layouts render from `renderable.widget.columns.*` hints on a
-`BlockQuote`. Tables use a two-pass pre-scan / emit renderer that reuses the
-table module's width-planning utilities (but not `Table::render()`).
+widgets render from the typed `ComponentHints::Progress` group on a `Paragraph`;
+two-column layouts render from `ComponentHints::Columns` on a `BlockQuote`
+(typed `NodeAttrs::component` fields, not `data`-bag hints). Tables use a
+two-pass pre-scan / emit renderer that reuses the table module's width-planning
+utilities (but not `Table::render()`).
 
 ## Layout
 
 The terminal tree renderer applies a block node's `renderable::layout::Layout`
-(read from `NodeAttrs::layout()`). It resolves each margin to whole cells
-against the available width via the shared `resolve_cells` helper
-(`Ch(n)`→`n`, `Percent(p)`→`round(width*p/100)`, `Zero`/`Css`/absent→`0`,
-resolving for `RenderTarget::Terminal`), narrows the child render width by
-left+right margins, prefixes each line, block-aligns the component as a unit,
-and emits top/bottom margins as blank rows. `max_width` is **not** applied
-(Browser-only). Migrated components seed their own `Layout` onto the
-projected node, so layout flows through whether a component is rendered via
-the tree or composed bespoke.
+(read from `NodeAttrs::layout()`). It resolves margins, `padding`, and the
+`width` modes to whole cells against the available width via the shared
+`resolve_cells` helper (`Ch(n)`→`n`, `Percent(p)`→`round(width*p/100)`,
+`Zero`/`Css`/absent→`0`, resolving for `RenderTarget::Terminal`). The
+content-box width comes from `layout.width`: `Auto` fills
+`available − margin − padding − border`, `Fixed(tv)` resolves `tv` clamped to
+that cap, and `FitContent` renders once at the cap then re-renders at the
+measured widest line. `padding` is resolved into cells **once** against the
+parent available width (so a `%` padding has a single basis) and threaded into
+the paint step; the content renders at exactly the content-box width and
+`padding` + `border` are painted **around** it (a `Fixed(n)` box keeps all `n`
+content columns — the border is not carved out of them). The resolved
+content-box width is passed to the paint layer as a **floor**: a background band
+or bordered interior fills the full resolved width even when the text is
+narrower, so a `Fixed`/`Auto` box paints all its columns rather than shrinking to
+the widest line (`FitContent` already measured that line, so the floor is a
+no-op there; a left-only border with no background stays ragged). The box is then
+**block-placed within `available − margin`** for every width mode (`margin:auto`
+semantics): a sub-available `Fixed` / `FitContent` / `max_width`-capped box is
+centered/right-offset as a unit, while a box that fills the area centers its
+visible content. Top/bottom margins emit as blank rows. The `padding` box is
+painted by `paint_text` with `Style.background`; the margin stays transparent —
+padding cells are still reserved even with an empty `Style`. Drawn borders
+reserve only their glyph cells (one per vertical edge) — no implicit interior
+gap, so `Layout.padding` is the single source of inner spacing. `max_width` caps
+the content box and the capped box is block-placed (symmetric with the browser).
+Migrated components seed their own `Layout` onto the projected node, so layout
+flows through whether a component is rendered via the tree or composed bespoke.
 
 `LayoutTerminalExt` (`utils::layout`) — `apply_layout` / `apply_block_layout` /
 `available_width` — is the bespoke (non-tree) path's terminal layout
 application, now reading the same `Layout` type. The legacy `RowFill` /
 `MaxWidth` / `Margin` enum and the `row_fill_strategy` builder are removed.
+
+## Text Layout
+
+The terminal renderer is the only target that consumes
+`NodeAttrs::text_layout` (typed `TextLayoutHints`: `width`, `max_width`,
+`alignment`, `overflow`). `Writer::apply_text_layout` resolves `width` /
+`max_width` to cells against the render width, pads per `alignment`, and
+truncates overflow with `…` via the ANSI-aware `word_wrap::truncate`. It is
+wired into three node shapes without mutating the tree:
+
+- **`Link`** — the link label/display text is shaped to the resolved field
+  (the structured link children stay intact for OSC 8 / fallback).
+- **`Image`** — the `▉ IMAGE[alt]` placeholder is shaped with the alt text
+  *inside* the brackets; the source `alt` stays intact on the node.
+- **`ListItem`** — the marker is lifted out and the item body is block-aligned
+  and padded within the resolved field; the marker stays structurally separate
+  from body placement.
+
+`width` establishes an exact field width and pads shorter content; `max_width`
+only truncates content that exceeds the cap. Resolution happens during the fold,
+so rendering one tree at different widths never mutates it. The browser and
+Markdown folds ignore `text_layout`.
 
 ## Code-Render Hook
 

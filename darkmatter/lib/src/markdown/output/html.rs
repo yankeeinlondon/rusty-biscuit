@@ -124,7 +124,11 @@ impl Default for HtmlOptions {
 /// the computed code-panel background, rather than re-deriving the
 /// theme/inversion math.
 pub(crate) fn code_block_background_hex(options: &HtmlOptions) -> String {
-    let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode.inverted());
+    let highlighter = CodeHighlighter::for_code_block_mode(
+        options.code_theme,
+        options.color_mode,
+        Some(options.code_theme),
+    );
     let bg = highlighter
         .theme()
         .settings

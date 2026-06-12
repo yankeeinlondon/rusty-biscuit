@@ -53,6 +53,22 @@ pub(crate) struct ProcessResult<T> {
     pub(crate) data: T,
     pub(crate) termination: claudine::harness::ProcessTermination,
     pub(crate) telemetry: ProcessTelemetry,
+    /// Immediate child PID returned by `std::process::Command::spawn()`,
+    /// captured immediately after a successful spawn. `None` only appears
+    /// in fabricated results (e.g. parse-failure fallbacks) — a real
+    /// spawn either produces `Some(child.id())` here or returns `Err`
+    /// before `ProcessResult` is constructed.
+    ///
+    /// Per-attempt by construction: every call to a spawn function
+    /// returns a fresh `ProcessResult`, so harness retries and
+    /// composition iterations never inherit a stale PID from a prior
+    /// attempt.
+    //
+    // Read in Phase 3 by the dispatch / stream-summary / reporting
+    // surfaces; flagged here so the Phase 2 capture-only change does
+    // not trip `-D warnings`.
+    #[allow(dead_code)]
+    pub(crate) agent_pid: Option<u32>,
 }
 
 /// Renders streamed assistant text as Markdown, flushing at block boundaries.
@@ -346,11 +362,16 @@ pub(crate) type ReasoningCallback = Box<dyn FnMut(&str) + Send + 'static>;
 /// reasoning directly through its section-aware stderr emitter. The second
 /// parameter is retained for signature compatibility.
 ///
+/// The trailing `Option<u32>` is the immediate child PID captured after a
+/// successful spawn (invoked from the reader thread, so the PID is already
+/// known). Builders stamp it onto their sink so live records carry
+/// `EventMeta.agent_pid`.
+///
 /// [`SemanticEvent::OutputText`]: claudine::stream::semantic::SemanticEvent::OutputText
 /// [`SemanticEvent::Reasoning`]: claudine::stream::semantic::SemanticEvent::Reasoning
 /// [`LiveSemanticSink`]: super::live_semantic_sink::LiveSemanticSink
 pub(crate) type SemanticParserBuilder = Box<
-    dyn FnOnce(OutputTextCallback, ReasoningCallback) -> Box<dyn SemanticStreamParser>
+    dyn FnOnce(OutputTextCallback, ReasoningCallback, Option<u32>) -> Box<dyn SemanticStreamParser>
         + Send
         + 'static,
 >;

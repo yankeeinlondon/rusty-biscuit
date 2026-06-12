@@ -69,6 +69,12 @@ pub enum ComposeOperation {
     /// table of contents from an external document's headings.
     TocLinking,
 
+    /// Expands `::file-links` directives by discovering a bounded set of
+    /// document files and rendering them as a linked
+    /// [`FileSystem`](biscuit_terminal::components::filesystem::FileSystem)
+    /// tree.
+    FileLinks,
+
     /// Normalizes markdown formatting: injects blank lines between
     /// block elements and aligns table columns.
     Cleanup,
@@ -169,7 +175,7 @@ pub enum ComposePhase {
 
 impl ComposeOperation {
     /// Total number of compose operations.
-    pub const COUNT: usize = 15;
+    pub const COUNT: usize = 16;
 
     /// Stable discriminant index for fixed-size operation sets.
     pub const fn index(self) -> usize {
@@ -185,10 +191,11 @@ impl ComposeOperation {
             Self::FrontmatterTransclusion => 8,
             Self::CodeTransclusion => 9,
             Self::TocLinking => 10,
-            Self::Cleanup => 11,
-            Self::Normalization => 12,
-            Self::LinkResolve => 13,
-            Self::LinkNormalization => 14,
+            Self::FileLinks => 11,
+            Self::Cleanup => 12,
+            Self::Normalization => 13,
+            Self::LinkResolve => 14,
+            Self::LinkNormalization => 15,
         }
     }
 
@@ -207,7 +214,8 @@ impl ComposeOperation {
             Self::BlockTransclusion
             | Self::FrontmatterTransclusion
             | Self::CodeTransclusion
-            | Self::TocLinking => ComposePhase::Transclusion,
+            | Self::TocLinking
+            | Self::FileLinks => ComposePhase::Transclusion,
 
             Self::Cleanup | Self::Normalization => ComposePhase::InlinePost,
 
@@ -232,6 +240,7 @@ impl ComposeOperation {
             Self::FrontmatterTransclusion,
             Self::CodeTransclusion,
             Self::TocLinking,
+            Self::FileLinks,
             // Inline Post (serial)
             Self::Cleanup,
             Self::Normalization,
@@ -260,6 +269,7 @@ impl std::fmt::Display for ComposeOperation {
             Self::FrontmatterTransclusion => write!(f, "FrontmatterTransclusion"),
             Self::CodeTransclusion => write!(f, "CodeTransclusion"),
             Self::TocLinking => write!(f, "TocLinking"),
+            Self::FileLinks => write!(f, "FileLinks"),
             Self::Cleanup => write!(f, "Cleanup"),
             Self::Normalization => write!(f, "Normalization"),
             Self::LinkResolve => write!(f, "LinkResolve"),
@@ -1573,6 +1583,112 @@ impl ComposeContext {
     }
 }
 
+/// A timing span for a single executed `::shell` directive (DM-3).
+///
+/// `command_display` is redacted, whitespace-normalized, and length-capped
+/// (OQ-2 Option B); `command_hash` is a stable non-crypto xxHash of the raw
+/// command for local correlation without exposing the full text.
+///
+/// ## Notes
+///
+/// Only the timing fields are carried. A span is recorded only on the
+/// success path (the executor returns `Err` for a non-zero exit, which
+/// propagates before the span is taken), and shell results are not cached,
+/// so neither an exit status nor a cache flag would carry signal here.
+/// Surfacing them accurately would require widening the directive executor's
+/// return type — deliberately out of scope (NG-1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellCommandSpan {
+    /// Redacted, whitespace-normalized, length-capped command text.
+    pub command_display: String,
+    /// Lowercase hex xxHash of the raw (un-redacted) command.
+    pub command_hash: String,
+    /// Wall-clock time spent executing this directive.
+    pub elapsed: Duration,
+}
+
+/// Redact, whitespace-normalize, and length-cap a raw shell command for
+/// display (OQ-2 Option B).
+///
+/// Collapses whitespace, masks common secret/credential patterns with `***`,
+/// and truncates the final string to 80 display characters (appending `…`).
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::compose::redact_shell_command;
+///
+/// let out = redact_shell_command("curl -H 'Authorization: Bearer abc123'");
+/// assert!(out.contains("Bearer ***"));
+/// ```
+pub fn redact_shell_command(raw: &str) -> String {
+    use std::sync::LazyLock;
+
+    // Authorization headers / bearer tokens.
+    static BEARER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)bearer\s+[^\s'\x22]+").expect("valid bearer regex")
+    });
+    // Secret-carrying flags in `--flag=VALUE` form.
+    static FLAG_EQ_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)(--(?:token|password|api-?key|secret))=\S+")
+            .expect("valid flag-eq regex")
+    });
+    // Secret-carrying flags in `--flag VALUE` (space-separated) form.
+    static FLAG_SP_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)(--(?:token|password|api-?key|secret))(\s+)\S+")
+            .expect("valid flag-space regex")
+    });
+    // URL credentials: scheme://user:pass@host.
+    static URL_CRED_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/\s:@]+:[^/\s@]+@")
+            .expect("valid url-cred regex")
+    });
+    // Query-string secrets: ?token=… / &access_token=… / &password=… / &key=….
+    static QUERY_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)([?&](?:access_token|token|password|api-?key|secret|key)=)[^&\s'\x22]+")
+            .expect("valid query regex")
+    });
+    // Long opaque token-like blobs (JWT / base64): mixes letters and digits,
+    // no slash, length >= 40.
+    static BLOB_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"[A-Za-z0-9_\-.+=]{40,}").expect("valid blob regex")
+    });
+
+    // Collapse all whitespace runs to single spaces and trim.
+    let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    let mut out = normalized;
+    out = BEARER_RE.replace_all(&out, "Bearer ***").into_owned();
+    out = FLAG_EQ_RE.replace_all(&out, "$1=***").into_owned();
+    out = FLAG_SP_RE.replace_all(&out, "$1$2***").into_owned();
+    out = URL_CRED_RE.replace_all(&out, "$1***@").into_owned();
+    out = QUERY_RE.replace_all(&out, "$1***").into_owned();
+    // Only redact blobs that look token-like: contain both a letter and a
+    // digit. This avoids masking ordinary long words while catching JWTs and
+    // base64 secrets. (Blobs containing `/` are already excluded by the class.)
+    out = BLOB_RE
+        .replace_all(&out, |caps: &regex::Captures<'_>| {
+            let m = &caps[0];
+            let has_alpha = m.bytes().any(|b| b.is_ascii_alphabetic());
+            let has_digit = m.bytes().any(|b| b.is_ascii_digit());
+            if has_alpha && has_digit {
+                "***".to_string()
+            } else {
+                m.to_string()
+            }
+        })
+        .into_owned();
+
+    // Length-cap the final redacted string to 80 display chars.
+    const MAX_CHARS: usize = 80;
+    if out.chars().count() > MAX_CHARS {
+        let truncated: String = out.chars().take(MAX_CHARS).collect();
+        format!("{truncated}…")
+    } else {
+        out
+    }
+}
+
 /// A single timing metric from the compose pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComposePerfMetric {
@@ -1591,6 +1707,12 @@ pub struct ComposePerfReport {
     pub total: Duration,
     /// Per-stage metrics in deterministic order.
     pub metrics: Vec<ComposePerfMetric>,
+    /// Per-`::shell`-directive timing spans (DM-3). Populated only when
+    /// perf collection is enabled.
+    pub shell_spans: Vec<ShellCommandSpan>,
+    /// Per-group context-capture timings (DM-4), as `(group_name, elapsed)`.
+    /// Populated only when perf collection is enabled.
+    pub capture_timings: Vec<(String, Duration)>,
 }
 
 /// Named compose pipeline stages for type-safe metric identification.
@@ -1642,12 +1764,44 @@ impl std::fmt::Display for ComposeStage {
     }
 }
 
+impl ComposeStage {
+    /// Returns the `ComposePhase` this stage belongs to (DM-2).
+    ///
+    /// Feeds the claudine perf tree, where the 17 flat stages nest under
+    /// their four phases.
+    pub fn phase(&self) -> ComposePhase {
+        match self {
+            Self::FrontmatterInterpolation
+            | Self::SchemaValidation
+            | Self::FrontmatterShellExpansion
+            | Self::EffectiveStateBuild
+            | Self::TextReplacement
+            | Self::PageBlocks
+            | Self::Interpolation
+            | Self::ShellExpansion
+            | Self::ShellBlocks
+            | Self::LinkResolve => ComposePhase::InlinePre,
+
+            Self::TransclusionParse
+            | Self::TransclusionPrepare
+            | Self::TransclusionResolve
+            | Self::TransclusionApply => ComposePhase::Transclusion,
+
+            Self::Cleanup | Self::Normalization => ComposePhase::InlinePost,
+
+            Self::LinkNormalization => ComposePhase::Finalization,
+        }
+    }
+}
+
 impl ComposePerfReport {
     /// Creates an empty perf report.
     pub fn new() -> Self {
         Self {
             total: Duration::ZERO,
             metrics: Vec::new(),
+            shell_spans: Vec::new(),
+            capture_timings: Vec::new(),
         }
     }
 
@@ -1668,6 +1822,11 @@ impl ComposePerfReport {
                 self.metrics.push(*other_metric);
             }
         }
+
+        self.shell_spans
+            .extend(other.shell_spans.iter().cloned());
+        self.capture_timings
+            .extend(other.capture_timings.iter().cloned());
     }
 }
 
@@ -2108,6 +2267,7 @@ mod tests {
                 ComposeOperation::FrontmatterTransclusion,
                 ComposeOperation::CodeTransclusion,
                 ComposeOperation::TocLinking,
+                ComposeOperation::FileLinks,
                 ComposeOperation::Cleanup,
                 ComposeOperation::Normalization,
                 ComposeOperation::LinkNormalization,
@@ -2144,6 +2304,7 @@ mod tests {
                 ComposePhase::Transclusion,
             ),
             (ComposeOperation::TocLinking, ComposePhase::Transclusion),
+            (ComposeOperation::FileLinks, ComposePhase::Transclusion),
             (ComposeOperation::Cleanup, ComposePhase::InlinePost),
             (ComposeOperation::Normalization, ComposePhase::InlinePost),
             (ComposeOperation::LinkResolve, ComposePhase::InlinePre),
@@ -2404,6 +2565,7 @@ mod tests {
                     calls: 2,
                 },
             ],
+            ..Default::default()
         };
         let child = ComposePerfReport {
             total: Duration::from_millis(7),
@@ -2419,6 +2581,7 @@ mod tests {
                     calls: 1,
                 },
             ],
+            ..Default::default()
         };
 
         parent.merge(&child);
@@ -2463,6 +2626,7 @@ mod tests {
                 elapsed: Duration::from_millis(5),
                 calls: 1,
             }],
+            ..Default::default()
         });
 
         report_a.merge(report_b);
@@ -2483,6 +2647,7 @@ mod tests {
                 elapsed: Duration::from_millis(3),
                 calls: 1,
             }],
+            ..Default::default()
         });
 
         let mut report_b = ComposeReport::new();
@@ -2493,6 +2658,7 @@ mod tests {
                 elapsed: Duration::from_millis(2),
                 calls: 1,
             }],
+            ..Default::default()
         });
 
         report_a.merge(report_b);
@@ -2562,8 +2728,81 @@ mod tests {
     }
 
     #[test]
-    fn default_order_has_fifteen_operations() {
-        assert_eq!(ComposeOperation::default_order().len(), 15);
+    fn compose_stage_phase_mapping() {
+        assert_eq!(ComposeStage::ShellExpansion.phase(), ComposePhase::InlinePre);
+        assert_eq!(
+            ComposeStage::TransclusionApply.phase(),
+            ComposePhase::Transclusion
+        );
+        assert_eq!(ComposeStage::Cleanup.phase(), ComposePhase::InlinePost);
+        assert_eq!(
+            ComposeStage::LinkNormalization.phase(),
+            ComposePhase::Finalization
+        );
+    }
+
+    #[test]
+    fn redact_shell_command_masks_bearer_token() {
+        let out = redact_shell_command("curl -H 'Authorization: Bearer abc123def456'");
+        assert!(out.contains("Bearer ***"), "got: {out}");
+        assert!(!out.contains("abc123def456"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_shell_command_masks_token_flag() {
+        let out = redact_shell_command("gh --token=ghp_secretvalue123 repo list");
+        assert!(out.contains("--token=***"), "got: {out}");
+        assert!(!out.contains("ghp_secretvalue123"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_shell_command_masks_space_separated_flag() {
+        let out = redact_shell_command("tool --password hunter2value list");
+        assert!(out.contains("--password ***"), "got: {out}");
+        assert!(!out.contains("hunter2value"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_shell_command_masks_url_credentials() {
+        let out = redact_shell_command("git clone https://user:secretpw@example.com/repo.git");
+        assert!(out.contains("https://***@example.com"), "got: {out}");
+        assert!(!out.contains("secretpw"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_shell_command_masks_query_secret() {
+        let out = redact_shell_command("curl 'https://api.test/v1?access_token=qsValue9876xyz'");
+        assert!(out.contains("access_token=***"), "got: {out}");
+        assert!(!out.contains("qsValue9876xyz"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_shell_command_masks_long_jwt_blob() {
+        // A JWT-like opaque blob (letters + digits, >= 40 chars, no slash).
+        let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload1234567890abcdef";
+        let out = redact_shell_command(&format!("echo {jwt}"));
+        assert!(out.contains("***"), "got: {out}");
+        assert!(!out.contains(jwt), "got: {out}");
+    }
+
+    #[test]
+    fn redact_shell_command_normalizes_whitespace() {
+        let out = redact_shell_command("echo\t hello\n\n   world");
+        assert_eq!(out, "echo hello world");
+    }
+
+    #[test]
+    fn redact_shell_command_length_caps() {
+        let raw = "echo ".to_string() + &"a".repeat(200);
+        let out = redact_shell_command(&raw);
+        // 80 chars + the ellipsis.
+        assert_eq!(out.chars().count(), 81, "got: {out}");
+        assert!(out.ends_with('…'), "got: {out}");
+    }
+
+    #[test]
+    fn default_order_has_sixteen_operations() {
+        assert_eq!(ComposeOperation::default_order().len(), 16);
     }
 
     #[test]

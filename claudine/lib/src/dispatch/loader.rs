@@ -800,6 +800,7 @@ mod tests {
             agent_type: None,
             notification_type: None,
             notification_message: None,
+            agent_pid: None,
             extra: HashMap::new(),
             env: EnvironmentContext::default(),
         };

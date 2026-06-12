@@ -1,10 +1,14 @@
 ---
 sequence: "@claudine/docs/providers.yaml"
+file: "@claudine/docs/research/agent-cli/{{state.file}}"
+agent: "{{state.name}}"
 ---
+
+
 
 You are responsible for updating the CLI documentation for the {{state.desc}} agent software:
 
-- the current document resides at "@claudine/docs/research/agent-cli/{{state.file}}"
+- the current document resides at "{{file}}"
 - review the current state to understand the structure and contents
     - if the document doesn't have a H2 section called `## CLI Switch Summary` then you are to add it
 - The `## CLI Switch Summary` should be the FULL list of CLI parameters/switches which the Agent provides

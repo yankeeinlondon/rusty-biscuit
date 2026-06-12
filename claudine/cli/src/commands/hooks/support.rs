@@ -3,7 +3,7 @@ use color_eyre::eyre::Result;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::utils::layout::{Alignment, Length, Margin};
+use biscuit_terminal::utils::layout::{Alignment, Length, Edges};
 use claudine::events::event_support_matrix;
 use claudine::provider::EventSupportLevel;
 
@@ -32,7 +32,7 @@ pub(super) fn run_support() -> Result<()> {
     }
 
     let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
-    table.layout_mut().margin = Margin::x(Length::ch(1));
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 
     for matrix_row in matrix {
         let mut row: Vec<TableCellContent> = vec![matrix_row.event.as_pascal_case().into()];

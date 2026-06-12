@@ -17,6 +17,14 @@ path = "src/lib.rs"
 # "N ignored" block) before the Criterion `[[bench]]` targets.
 bench = false
 
+[features]
+default = []
+# Test-only instrumentation. Enables process-wide counters that let downstream
+# test suites assert a documentation-only code path constructs no `EffectEngine`
+# and attempts no network access. Off by default; production builds carry no
+# counter state and expose none of the instrumentation API.
+effects-instrumentation = []
+
 [dependencies]
 # Tracing
 tracing = "0.1"
@@ -73,7 +81,7 @@ similar = { version = "2.6", features = ["inline"] }
 quick-xml = "0.39"
 
 # Terminal image rendering and mermaid diagrams (via biscuit-terminal)
-biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 
 # Hashing (for Mermaid diagram caching and markdown TOC)
 biscuit-hash = { path = "../../biscuit-hash/lib" }
@@ -87,11 +95,18 @@ jsonschema = { version = "0.42", default-features = false }
 sha2 = "0.10"
 
 [dev-dependencies]
+# Re-declares the renderable path dep with the test-only `hint-access-counter`
+# feature so the structural performance gate (`render_tree::structural_gate`)
+# can observe the `NodeAttrs::data` hint-access counter while folding a styled
+# corpus through the real Darkmatter entry points. Cargo unifies this with the
+# `[dependencies]` declaration for the test build.
+renderable = { path = "../../renderable", features = ["hint-access-counter"] }
 tokio = { version = "1.48", features = ["full", "test-util"] }
 tracing-test = "0.2"
 insta = "1.41"
 serial_test = "3.0"
-git2 = "0.20"
+# Only used to `init` a throwaway repo in transclusion tests; pure-Rust, no libgit2.
+gix = { version = "=0.84.0", default-features = false, features = ["sha1"] }
 proptest = "1.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }

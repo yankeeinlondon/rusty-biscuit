@@ -173,7 +173,12 @@ pub trait RemoteRepoProvider: Send + Sync {
         // Try to fetch actual workflow runs first; fall back to presence detection
         let cicd = match self.list_workflow_runs(owner, repo, 5).await {
             Ok(runs) if !runs.is_empty() => runs,
-            _ => self.detect_cicd(owner, repo).await.unwrap_or(None).into_iter().collect(),
+            _ => self
+                .detect_cicd(owner, repo)
+                .await
+                .unwrap_or(None)
+                .into_iter()
+                .collect(),
         };
         let org_repos = self.list_org_repos(owner).await.unwrap_or_default();
         let key_urls = self.build_key_urls(owner, repo);

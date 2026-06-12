@@ -34,12 +34,16 @@ Rust, TypeScript, JavaScript, Go, Python, Java, C#, C, C++, Swift, Scala, PHP, P
 | `lint --allow <rule>` | Demote rule to info |
 | `lint --strict` | Promote all warnings to errors |
 | `lint --experimental-semantics` | Enable experimental semantic rules |
+| `god-files [DIR]` | Identify oversized source files ripe for refactoring |
+| `god-files --high-risk` | Show only high-risk files |
 | `completions` | Generate shell completions (Bash, Zsh, Fish, PowerShell) |
 
 ### Library API (`TreeFile`)
 
 ```rust
 let file = TreeFile::new("src/lib.rs")?;
+file.source();              // Source text of the parsed file
+file.comment_ranges()?;     // Byte ranges of comment nodes
 file.symbols()?;            // All symbols
 file.symbol_records()?;     // v2 parse records
 file.symbol_index_v2()?;    // v2 parse->bind->semantic->docs pipeline output
@@ -66,7 +70,7 @@ Function, Method, Type, Class, Interface, Enum, Trait, Module, Namespace, Variab
 - **Query caching**: Global `OnceLock<QueryCache>` for thread-safe caching
 - **Builtin database**: Per-language builtin lists to avoid false positive undefined-symbol/undefined-module errors
 - **Schema v2**: `shared/schema_v2` with facet-based `SymbolRecord` and staged `FileSymbolIndex`
-- **CLI filters**: `hug <subcommand> <filter...>` with all-files default scan for symbol commands
+- **CLI filters**: `hug <subcommand> <filter...>` with all-files default scan for symbol commands. A pathless scan honors `.gitignore` and skips test-data dirs by default (`**/fixtures/**`, `**/__fixtures__/**`, `**/snapshots/**`, `**/testdata/**`); an explicit path/glob re-includes a targeted file. `lint` scans hide clean files (single-file lint still shows `(no diagnostics)`).
 
 ## Detailed Documentation
 
@@ -90,7 +94,9 @@ Built-in rules are registered in `RuleRegistry` with metadata:
 - Language support, default enablement, examples, caveats
 - `requires_experimental_semantics` gates low-confidence semantic rules
 
-Default-off pattern rules (`console-log`, `print-call`, `fmt-println`) detect debug artifacts. Enable with `--warn <rule>` or `--deny <rule>`.
+Default-off pattern rules are silent unless opted in with `--warn <rule>` or `--deny <rule>` (the registry's `enabled_by_default` flag is enforced by the CLI policy layer, `apply_lint_policy`):
+- Debug artifacts: `console-log`, `print-call`, `fmt-println`.
+- `restriction` category: `unwrap-call`, `expect-call` — valid, deliberate constructs, not anomalies. Enable per-rule or via `--deny category:restriction`. `--allow`/`--strict` never enable an off-by-default rule.
 
 Experimental rules (`undefined-symbol`, `unused-symbol`, `undefined-module`) are disabled by default. Enable with `TreeFile::experimental_semantics = true` or `--experimental-semantics` in the CLI.
 

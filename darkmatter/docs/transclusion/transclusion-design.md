@@ -20,7 +20,7 @@ This design is meant to be implementation-ready and aligned with the current Sta
 
 In scope:
 
-1. Block/code transclusion (`::file`, `::code`, `::url`) design and execution model
+1. Block/code transclusion (`::file`, `::code`, `::url`) and file-link tree rendering (`::file-links`) design and execution model
 2. Frontmatter transclusion (`prologue`, `epilogue`)
 3. Recursive processing model, cycle detection, and depth limits
 4. State inheritance semantics (parent -> child)
@@ -98,7 +98,7 @@ From the transclusion docs, Stage 2 must support:
 Pipeline order remains:
 
 1. Stage 1 (Preparation): replacement -> interpolation -> cleanup -> normalization
-2. Stage 2 (Transclusion): directive transclusion (`::file`, `::code`; `::url` future) -> frontmatter transclusion
+2. Stage 2 (Transclusion): directive transclusion (`::file`, `::code`, `::file-links`; `::url` future) -> frontmatter transclusion
 3. Stage 3 (Rendering)
 
 Rationale:

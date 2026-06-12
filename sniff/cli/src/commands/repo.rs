@@ -43,10 +43,7 @@ pub(super) fn handle_repo_packages(
     let root = if base_dir.is_some() {
         explicit.to_path_buf()
     } else {
-        git2::Repository::discover(explicit)
-            .ok()
-            .and_then(|repo| repo.workdir().map(std::path::PathBuf::from))
-            .unwrap_or_else(|| explicit.to_path_buf())
+        sniff::filesystem::repo_root(explicit)?.unwrap_or_else(|| explicit.to_path_buf())
     };
 
     let info = match detect_repo_structure(&root)? {
@@ -131,10 +128,7 @@ pub(super) fn handle_repo_package_areas(
     let root = if base_dir.is_some() {
         explicit.to_path_buf()
     } else {
-        git2::Repository::discover(explicit)
-            .ok()
-            .and_then(|repo| repo.workdir().map(std::path::PathBuf::from))
-            .unwrap_or_else(|| explicit.to_path_buf())
+        sniff::filesystem::repo_root(explicit)?.unwrap_or_else(|| explicit.to_path_buf())
     };
 
     let info = match detect_repo_structure(&root)? {

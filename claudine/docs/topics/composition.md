@@ -133,6 +133,48 @@ Steps:
 - **`policy`** — content freshness policy (coming soon)
 - **`blast_radius`** — list of source files that trigger re-generation when changed
 
+### Inline-Compose / Sequence Mismatch
+
+A document that authors **both** a non-null `prompt` and a non-null `sequence`
+defines an *inline sequence*: each sequence state is meant to invoke an
+inline-compose operation using the `prompt`. Running such a document with
+`inline-compose` would execute the prompt once, ignoring the sequence — so
+`inline-compose` rejects it and directs the user to `claudine sequence`
+instead.
+
+```yaml
+prompt: |-
+  How do you say "{{state.name}}" in Italian?
+sequence:
+  - name: Hello
+  - name: Goodbye
+```
+
+Detection rules:
+
+- The mismatch triggers when the **authored** frontmatter has a `prompt` key
+  whose value is not `null` **and** a `sequence` key whose value is not `null`.
+  Value type and validity are never inspected — empty strings, empty lists,
+  scalars, mappings, and other wrong-type-but-non-null values all count.
+- `prompt: null`, `sequence: null`, or an absent key does **not** trigger the
+  mismatch; ordinary `inline-compose` validation continues.
+- Detection reads authored frontmatter only. Command-line `key=value` overrides
+  and `--set` neither create nor suppress the mismatch.
+
+The check runs **before** prompt-property validation, schema processing,
+override application, composition, provider selection, and execution, so it is
+fully fail-fast: no shell commands run, no provider launches, and the source
+file is never mutated. Malformed frontmatter retains its existing
+`FrontmatterParse` diagnostic, which takes precedence because no reliable
+frontmatter keys are available to inspect.
+
+The diagnostic identifies the resolved document (OSC8-linked when supported),
+names both `prompt` and `sequence`, points to `claudine sequence`, and notes the
+upcoming `sections` feature. When the error output stream is a TTY it also
+echoes the authored frontmatter YAML verbatim; when stderr is not a TTY the YAML
+is withheld (to avoid exposing frontmatter) and the diagnostic says so. There is
+no flag to reveal the YAML in non-TTY output.
+
 ## Provider Selection
 
 Provider selection behaves differently in **TTY** (interactive terminal) and **non-TTY** (piped or CI) modes. In both modes, explicit `--<provider>` flags always win unconditionally.
@@ -678,15 +720,41 @@ Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure
 
 ## Performance Reporting
 
-Composition commands support an opt-in `--perf` flag that prints a detailed performance breakdown to stderr after execution completes. The report includes:
+Composition commands (and the provider wrappers) support an opt-in `--perf` flag that prints a performance breakdown to stderr after execution completes. The report is a single **reconciling tree** rooted at the `Performance` headline:
 
-- **CLI Overhead** — arg parsing, config loading, tracing init, and environment setup.
-- **Composition Report** — when `compose` or `inline-compose` (or each step of a `sequence`) triggers document preparation, the Darkmatter composition timings are shown (total time plus per-stage breakdown: interpolation, shell expansion, transclusion apply, etc.).
-- **Agent Execution** — launches, first-response latency, total execution time, and provider-reported API duration when available.
+```text
+Performance                         384.0ms  100%
+├─ pre-dispatch                       29.1ms    8%
+│  ├─ arg parsing                     20.3ms    5%
+│  ├─ tracing init                     3.5ms   <1%
+│  └─ config loading                  23.3ms    6%
+├─ prep phase                        204.3ms   53%
+│  ├─ frontmatter load                33.7ms    9%
+│  ├─ schema validation                4.1ms    1%
+│  ├─ shell approval                  12.3ms    3%
+│  ├─ composition                      4.0ms    1%
+│  │  └─ shell expansion                33µs   <1%  ×2
+│  └─ unattributed                   148.4ms   39%
+├─ environment setup                  85.7ms   22%
+│  ├─ system prompt                   81.6ms   21%  ▇ HOT
+│  └─ unattributed                     1.2ms   <1%
+├─ agent execution                        —       —  (dry run)
+└─ unattributed                       65.0ms   17%
+```
+
+The model and its invariants:
+
+- **Headline is true wall-clock.** The `Performance` total is sampled once at report-build from a single process-start baseline, so it can never disagree with the body the way a mid-flight timer could.
+- **Structural buckets reconcile.** Every `Structural` node's children (plus a synthetic `unattributed` remainder) sum back to the node's own total. The top-level buckets (`pre-dispatch`, `prep phase`, `environment setup`, `agent execution`) therefore sum back to the headline. A debug assertion enforces this at runtime; a unit test (TR-4) enforces it for every command shape.
+- **Breakdown rows itemize without double-counting.** Darkmatter composition stages and the `pre-dispatch`/agent sub-rows are `Breakdown` children — shown and percentaged, but excluded from the reconciliation sum so no cost appears twice. Single-shot `compose`/`inline-compose` nest the `composition` subtree under `prep phase`; `sequence` attaches the merged composition under `environment setup`.
+- **Percent column** shows each row's share of wall-clock (`100%` at the root, `<1%` for sub-one-percent slivers).
+- **`HOT` marker** flags the single dominant leaf when it clears the materiality floor (≥20% of wall-clock).
+- **Run counts** (`×N`) appear on a composition stage that ran more than once.
+- **Dry runs** render `agent execution` as an `—` leaf annotated `(dry run)`; the agent never launches.
 
 For `sequence`, the report is aggregated across all steps: launches and total execution time are summed, first-response latencies are averaged (with the minimum shown in a note), and composition metrics are merged. The report appears exactly once at the end of the run, after the sequence summary.
 
-`--perf` is emitted unconditionally when passed, even alongside `--silent` or `--quiet`, because it is an explicit opt-in.
+`--perf` is a stderr-only artifact — it never writes to stdout, so it does not interfere with piped composition output. It is emitted unconditionally when passed, even alongside `--silent` or `--quiet`, because it is an explicit opt-in.
 
 > **Note:** `provider_api_duration` is only populated for structured-streaming providers. Legacy providers (e.g., Goose) omit this line.
 

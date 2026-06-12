@@ -3,7 +3,7 @@ pub mod drift;
 pub mod inventory;
 pub mod provenance;
 
-pub use provenance::{query_provenance, vendor_query_provenance, overlay_query_provenance};
+pub use provenance::{overlay_query_provenance, query_provenance, vendor_query_provenance};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -91,14 +91,13 @@ pub fn query_for(grammar: GrammarRef<'_>, kind: QueryKind) -> Result<Arc<Query>,
 
     let source = resolve_query_text(grammar.language, kind)?;
 
-    let query =
-        Arc::new(
-            Query::new(grammar.grammar, &source).map_err(|source| TreeHuggerError::QueryError {
-                language: grammar.language,
-                kind,
-                source,
-            })?,
-        );
+    let query = Arc::new(Query::new(grammar.grammar, &source).map_err(|source| {
+        TreeHuggerError::QueryError {
+            language: grammar.language,
+            kind,
+            source,
+        }
+    })?);
 
     let mut guard = cache
         .lock()
@@ -372,10 +371,8 @@ pub fn severity_for_rule(rule_id: &str) -> DiagnosticSeverity {
         | "dead-code" | "undefined-module" => DiagnosticSeverity::Warning,
         // Warning-level rules (pattern)
         "unwrap-call" | "expect-call" | "dbg-macro" | "eval-call" | "exec-call"
-        | "debugger-statement" | "breakpoint-call" | "deprecated-syntax"
-        | "console-log" | "print-call" | "fmt-println" => {
-            DiagnosticSeverity::Warning
-        }
+        | "debugger-statement" | "breakpoint-call" | "deprecated-syntax" | "console-log"
+        | "print-call" | "fmt-println" => DiagnosticSeverity::Warning,
         // Default to info
         _ => DiagnosticSeverity::Info,
     }

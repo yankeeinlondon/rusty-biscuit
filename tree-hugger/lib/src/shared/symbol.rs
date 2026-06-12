@@ -153,6 +153,15 @@ impl ProgrammingLanguage {
         }
     }
 
+    /// Returns true for all current programming-language variants.
+    ///
+    /// This predicate future-proofs against markup or data grammars
+    /// (e.g. CSS, HTML) that may be added later.
+    pub fn is_programming_language(&self) -> bool {
+        // Every supported grammar today is a programming language.
+        true
+    }
+
     /// Returns all supported languages.
     pub fn all() -> Vec<Self> {
         vec![
@@ -231,7 +240,7 @@ impl fmt::Display for ProgrammingLanguage {
 }
 
 /// Categorizes a discovered symbol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SymbolKind {
     Function,
     Method,
@@ -613,6 +622,11 @@ pub struct ImportSymbol {
     /// The source module path (e.g., `"fs"`, `"typing"`, `"std::io"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Whether this import re-exports the symbol (e.g. Rust `pub use`), making it
+    /// part of the public API rather than a local-only import. Re-exports are
+    /// "used" by being exported, so the `unused-import` rule must not flag them.
+    #[serde(skip)]
+    pub is_reexport: bool,
 }
 
 /// A reference to a symbol (identifier usage).

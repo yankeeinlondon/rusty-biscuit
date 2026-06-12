@@ -12,6 +12,13 @@ bench = false
 
 [features]
 clap = ["dep:clap"]
+# Test-only instrumentation: exposes the `NodeAttrs::data` hint-access counter
+# (`reset_hint_accesses`/`hint_accesses`) so a downstream crate's perf-gate test
+# can fold a corpus through renderable and assert zero renderable-owned bag
+# round-trips. Carries a thread-local counter and per-`set/get/remove_hint`
+# bookkeeping, so it must never be enabled in a release build — enable it only
+# from a `[dev-dependencies]` entry (see `biscuit-terminal`).
+hint-access-counter = []
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

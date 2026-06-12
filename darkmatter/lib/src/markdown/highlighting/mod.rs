@@ -13,10 +13,18 @@ pub use themes::{
     detect_prose_theme, get_code_theme_for_prose,
 };
 
+use biscuit_terminal::terminal::Terminal;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::Theme as SyntectTheme;
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
+
+pub enum ColorModeOptions<'a> {
+    Terminal(Terminal),
+    TerminalRef(&'a Terminal),
+    ColorMode(ColorMode),
+    ColorModeRef(&'a ColorMode),
+}
 
 /// Primary API for syntax highlighting with theme support.
 ///
@@ -31,7 +39,6 @@ use syntect::util::LinesWithEndings;
 pub struct CodeHighlighter {
     syntax_set: &'static SyntaxSet,
     theme: SyntectTheme,
-    theme_pair: ThemePair,
     color_mode: ColorMode,
 }
 
@@ -52,7 +59,57 @@ impl CodeHighlighter {
         Self {
             syntax_set,
             theme,
-            theme_pair,
+            color_mode,
+        }
+    }
+
+    pub(crate) fn for_code_block_mode(
+        default_theme: ThemePair,
+        terminal_mode: ColorMode,
+        theme: Option<ThemePair>,
+    ) -> Self {
+        let theme_pair = default_theme.selected(theme);
+        Self::from_resolved(
+            terminal_mode.inverted(),
+            theme_pair.for_code_block_mode(terminal_mode, None),
+        )
+    }
+
+    /// Creates a highlighter for a code block using the terminal's inverse color mode.
+    pub fn for_code_block(
+        default_theme: ThemePair,
+        term: &Terminal,
+        theme: Option<ThemePair>,
+    ) -> Self {
+        let theme_pair = default_theme.selected(theme);
+        Self::from_resolved(
+            term.color_mode().inverted(),
+            theme_pair.for_code_block(term, None),
+        )
+    }
+
+    /// Creates a highlighter for page/prose content using the terminal's color mode.
+    pub fn for_page(default_theme: ThemePair, term: &Terminal, theme: Option<ThemePair>) -> Self {
+        let theme_pair = default_theme.selected(theme);
+        Self::from_resolved(term.color_mode(), theme_pair.for_page(term, None))
+    }
+
+    pub(crate) fn for_page_mode(
+        default_theme: ThemePair,
+        terminal_mode: ColorMode,
+        theme: Option<ThemePair>,
+    ) -> Self {
+        let theme_pair = default_theme.selected(theme);
+        Self::from_resolved(terminal_mode, theme_pair.for_page_mode(terminal_mode, None))
+    }
+
+    fn from_resolved(color_mode: ColorMode, theme: themes::Theme) -> Self {
+        let syntax_set = grammars::load_syntax_set();
+        let theme = themes::load_resolved_theme(theme);
+
+        Self {
+            syntax_set,
+            theme,
             color_mode,
         }
     }
@@ -67,48 +124,9 @@ impl CodeHighlighter {
         &self.theme
     }
 
-    /// Returns the current theme pair.
-    pub fn theme_pair(&self) -> ThemePair {
-        self.theme_pair
-    }
-
     /// Returns the current color mode.
     pub fn color_mode(&self) -> ColorMode {
         self.color_mode
-    }
-
-    /// Updates the color mode and reloads the theme.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
-    ///
-    /// let mut highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-    /// highlighter.set_color_mode(ColorMode::Light);
-    /// ```
-    pub fn set_color_mode(&mut self, color_mode: ColorMode) {
-        if self.color_mode != color_mode {
-            self.color_mode = color_mode;
-            self.theme = themes::load_theme(self.theme_pair, color_mode);
-        }
-    }
-
-    /// Updates the theme pair and reloads the theme.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
-    ///
-    /// let mut highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-    /// highlighter.set_theme_pair(ThemePair::Solarized);
-    /// ```
-    pub fn set_theme_pair(&mut self, theme_pair: ThemePair) {
-        if self.theme_pair != theme_pair {
-            self.theme_pair = theme_pair;
-            self.theme = themes::load_theme(theme_pair, self.color_mode);
-        }
     }
 }
 
@@ -167,7 +185,7 @@ pub fn highlight_yaml_lines_with_theme(
     theme_pair: ThemePair,
     color_mode: ColorMode,
 ) -> Vec<String> {
-    let highlighter = CodeHighlighter::new(theme_pair, color_mode);
+    let highlighter = CodeHighlighter::for_page_mode(theme_pair, color_mode, Some(theme_pair));
     let syntax = highlighter
         .syntax_set()
         .find_syntax_by_extension("yaml")
@@ -220,29 +238,13 @@ mod tests {
     #[test]
     fn test_code_highlighter_new() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        assert_eq!(highlighter.theme_pair(), ThemePair::Github);
         assert_eq!(highlighter.color_mode(), ColorMode::Dark);
     }
 
     #[test]
     fn test_code_highlighter_default() {
         let highlighter = CodeHighlighter::default();
-        assert_eq!(highlighter.theme_pair(), ThemePair::Base16Ocean);
         assert_eq!(highlighter.color_mode(), ColorMode::Dark);
-    }
-
-    #[test]
-    fn test_set_color_mode() {
-        let mut highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        highlighter.set_color_mode(ColorMode::Light);
-        assert_eq!(highlighter.color_mode(), ColorMode::Light);
-    }
-
-    #[test]
-    fn test_set_theme_pair() {
-        let mut highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        highlighter.set_theme_pair(ThemePair::Solarized);
-        assert_eq!(highlighter.theme_pair(), ThemePair::Solarized);
     }
 
     #[test]

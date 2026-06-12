@@ -4,10 +4,12 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+use biscuit_terminal::discovery::detection::ColorDepth;
+use biscuit_terminal::prelude::{Prose, Terminal, TerminalRenderable, WordWrap, strip_escape_codes};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
+use clap_complete::Shell;
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
 use clap_complete::env::{CompleteEnv, Shells};
-use clap_complete::Shell;
 use owo_colors::{OwoColorize, Style};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
@@ -19,12 +21,13 @@ use tree_hugger::cache::{
     PersistentCache, SymbolSnapshot,
 };
 use tree_hugger::{
-    CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo,
-    FileSummary, FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
+    CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary,
+    FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
     ProgrammingLanguage, RuleRegistry, RuleSelector, SchemaVersion, SourceContext, SymbolInfo,
     SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError, TypeMetadata, VariantInfo,
     find_git_root, find_package_root,
 };
+use tree_hugger::god_files::{GodAnalysis, GodFiles, RefactorHint, RiskBand, SymbolBlock};
 mod import_format;
 mod prelude;
 mod scanner;
@@ -33,7 +36,6 @@ use import_format::*;
 use prelude::*;
 use scanner::*;
 
-
 #[derive(Parser, Debug)]
 #[command(
     name = "hug",
@@ -41,27 +43,6 @@ use scanner::*;
     about = "Tree Hugger diagnostics and symbol tooling"
 )]
 struct Cli {
-    /// Glob patterns for files to exclude from scanning
-    #[arg(
-        long,
-        value_name = "GLOB",
-        global = true,
-        display_order = 10,
-        value_hint = ValueHint::AnyPath,
-        add = ArgValueCompleter::new(complete_source_path),
-    )]
-    exclude_files: Vec<String>,
-
-    /// Glob patterns for symbol names to exclude from output
-    #[arg(long, value_name = "GLOB", global = true, display_order = 11)]
-    exclude_symbols: Vec<String>,
-
-    /// Force a specific language. Explicitly named files are parsed with this
-    /// language even when their extension maps elsewhere or is absent; directory
-    /// scans are restricted to this language's extensions.
-    #[arg(long, value_enum, global = true)]
-    language: Option<LanguageArg>,
-
     /// Output as JSON
     #[arg(long, global = true)]
     json: bool,
@@ -70,34 +51,58 @@ struct Cli {
     #[arg(long, global = true)]
     plain: bool,
 
+    #[command(subcommand)]
+    command: Command,
+}
+
+/// Scan options shared by symbol-listing subcommands.
+#[derive(clap::Args, Debug, Clone)]
+struct ScanOptions {
+    /// Glob patterns for files to exclude from scanning
+    #[arg(
+        long,
+        value_name = "GLOB",
+        display_order = 10,
+        value_hint = ValueHint::AnyPath,
+        add = ArgValueCompleter::new(complete_source_path),
+    )]
+    exclude_files: Vec<String>,
+
+    /// Glob patterns for symbol names to exclude from output
+    #[arg(long, value_name = "GLOB", display_order = 11)]
+    exclude_symbols: Vec<String>,
+
+    /// Force a specific language. Explicitly named files are parsed with this
+    /// language even when their extension maps elsewhere or is absent; directory
+    /// scans are restricted to this language's extensions.
+    #[arg(long, value_enum)]
+    language: Option<LanguageArg>,
+
     /// Disable persistent and in-process caching.
     ///
     /// All files are re-parsed and re-analyzed on every invocation.
-    #[arg(long, global = true)]
+    #[arg(long)]
     no_cache: bool,
 
     /// Show symbol-level documentation comments in output
-    #[arg(long, global = true)]
+    #[arg(long)]
     comments: bool,
 
     /// Group symbol output by file path
-    #[arg(long, global = true)]
+    #[arg(long)]
     group_by_file: bool,
 
     /// Group symbol output by module path (directory/module scope)
-    #[arg(long, global = true)]
+    #[arg(long)]
     group_by_module: bool,
 
     /// Sort symbols by kind before name
-    #[arg(long, global = true)]
+    #[arg(long)]
     sort_by_kind: bool,
 
     /// Sort symbols by module before other sort keys
-    #[arg(long, global = true)]
+    #[arg(long)]
     sort_by_module: bool,
-
-    #[command(subcommand)]
-    command: Command,
 }
 
 impl Cli {
@@ -143,6 +148,9 @@ struct CommonArgs {
     /// Show only symbols explicitly exported by the prelude module
     #[arg(long, conflicts_with = "exported", display_order = 31)]
     prelude: bool,
+
+    #[clap(flatten)]
+    scan: ScanOptions,
 }
 
 /// Arguments for the classes command
@@ -186,6 +194,9 @@ struct ClassArgs {
     /// Show only classes explicitly exported by the prelude module
     #[arg(long, conflicts_with = "exported")]
     prelude: bool,
+
+    #[clap(flatten)]
+    scan: ScanOptions,
 }
 
 /// Arguments for the lint command
@@ -242,6 +253,9 @@ struct LintArgs {
     /// List registered lint rules and exit.
     #[arg(long, display_order = 45)]
     list_rules: bool,
+
+    #[clap(flatten)]
+    scan: ScanOptions,
 }
 
 /// Arguments for the completions command
@@ -250,6 +264,18 @@ struct CompletionsArgs {
     /// The shell to generate completions for
     #[arg(value_enum)]
     shell: Shell,
+}
+
+/// Arguments for the god-files command
+#[derive(clap::Args, Debug, Clone)]
+struct GodFilesArgs {
+    /// Directory to scan (defaults to current directory)
+    #[arg(value_name = "DIR", value_hint = ValueHint::DirPath)]
+    dir: Option<PathBuf>,
+
+    /// Show only high-risk files
+    #[arg(long)]
+    high_risk: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -288,6 +314,8 @@ Examples:
   hug completions powershell >> $PROFILE
 ")]
     Completions(CompletionsArgs),
+    /// Identify oversized source files that are strong candidates for refactoring
+    GodFiles(GodFilesArgs),
 }
 
 impl Command {
@@ -300,7 +328,7 @@ impl Command {
             | Self::Imports(args) => &args.filters,
             Self::Lint(args) => &args.filters,
             Self::Classes(args) => &args.filters,
-            Self::Completions(_) => &[],
+            Self::Completions(_) | Self::GodFiles(_) => &[],
         }
     }
 
@@ -309,7 +337,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.exported,
             Self::Classes(args) => args.exported,
-            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) => false,
+            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => false,
         }
     }
 
@@ -318,7 +346,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.prelude,
             Self::Classes(args) => args.prelude,
-            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) => false,
+            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => false,
         }
     }
 
@@ -344,7 +372,7 @@ impl Command {
                 static_only: args.static_only,
                 instance_only: args.instance_only,
             }),
-            Self::Completions(_) => None,
+            Self::Completions(_) | Self::GodFiles(_) => None,
         }
     }
 }
@@ -513,17 +541,26 @@ struct OutputConfig {
 
 static SOURCE_LINE_CACHE: OnceLock<Mutex<HashMap<PathBuf, Vec<String>>>> = OnceLock::new();
 
+/// Whether `CLICOLOR_FORCE` requests colored output regardless of TTY.
+///
+/// Follows the common convention: any value other than unset or `0` forces
+/// color on. Lets non-interactive callers (and tests) opt into styled output.
+fn color_forced() -> bool {
+    std::env::var("CLICOLOR_FORCE").is_ok_and(|value| value != "0")
+}
+
 impl OutputConfig {
     fn new(format: OutputFormat, show_comments: bool) -> Self {
         match format {
             OutputFormat::Pretty => {
-                // Check NO_COLOR environment variable and TTY
+                // Color is enabled for an interactive TTY (honoring NO_COLOR),
+                // or forced on regardless of TTY by CLICOLOR_FORCE.
                 let no_color = std::env::var("NO_COLOR").is_ok();
                 let is_tty = std::io::stdout().is_terminal();
-                let use_colors = !no_color && is_tty;
+                let use_colors = color_forced() || (!no_color && is_tty);
                 Self {
                     use_colors,
-                    use_hyperlinks: use_colors && is_tty,
+                    use_hyperlinks: use_colors,
                     show_comments,
                 }
             }
@@ -822,21 +859,59 @@ fn main() -> Result<(), TreeHuggerError> {
         return Ok(());
     }
 
-    let language = cli.language.map(ProgrammingLanguage::from);
-    let filters = cli.command.filters();
     let output_format = cli.output_format();
-    let output_config = OutputConfig::new(output_format, cli.comments);
-    let render_options = SymbolRenderOptions {
-        group_by_file: cli.group_by_file,
-        group_by_module: cli.group_by_module,
-        sort_by_kind: cli.sort_by_kind,
-        sort_by_module: cli.sort_by_module,
-    };
 
     let root_dir = current_dir()?;
     let git_root = find_git_root(&root_dir).unwrap_or_else(|_| root_dir.clone());
     let pkg_root = find_package_root(&root_dir, &git_root);
     let display_root = Some(git_root.clone());
+
+    // Handle god-files command early (separate analysis pipeline)
+    if let Command::GodFiles(args) = &cli.command {
+        let dir = args.dir.as_deref().unwrap_or_else(|| Path::new("."));
+        // Reject an invalid scan root up front. A missing path or a non-directory
+        // is an invocation error, not a successful empty scan; collapsing it into
+        // a 0/0 report would hide CI/configuration mistakes.
+        if !dir.is_dir() {
+            let reason = if dir.exists() {
+                "god-files scan path is not a directory"
+            } else {
+                "god-files scan directory does not exist"
+            };
+            return Err(TreeHuggerError::Io {
+                path: dir.to_path_buf(),
+                source: std::io::Error::other(reason),
+            });
+        }
+        let god_files = GodFiles::new(dir);
+        let analyses = god_files.analysis();
+        let output_config = OutputConfig::new(output_format, false);
+
+        match output_format {
+            OutputFormat::Json => {
+                // `--high-risk` filters the emitted set for every output format,
+                // not just the rendered report (spec §5.1).
+                let emitted: Vec<&GodAnalysis> = if args.high_risk {
+                    analyses
+                        .iter()
+                        .filter(|a| a.risk == RiskBand::High)
+                        .collect()
+                } else {
+                    analyses.iter().collect()
+                };
+                let json =
+                    serde_json::to_string_pretty(&emitted).map_err(|source| TreeHuggerError::Io {
+                        path: PathBuf::from("<stdout>"),
+                        source: std::io::Error::other(source),
+                    })?;
+                println!("{json}");
+            }
+            OutputFormat::Pretty | OutputFormat::Plain => {
+                render_god_files(analyses, &output_config, args.high_risk);
+            }
+        }
+        return Ok(());
+    }
 
     let command_kind = cli.command.kind().expect("completions already handled");
     let analysis_options = AnalysisOptions::from_command(&command_kind);
@@ -852,20 +927,69 @@ fn main() -> Result<(), TreeHuggerError> {
         return Ok(());
     }
 
+    // Extract scan options from the subcommand args. God-files and completions
+    // are handled earlier; every remaining subcommand carries a `ScanOptions`.
+    let (language, exclude_files, exclude_symbols, comments, no_cache, group_by_file, group_by_module, sort_by_kind, sort_by_module) = match &cli.command {
+        Command::Functions(args)
+        | Command::Types(args)
+        | Command::Symbols(args)
+        | Command::Imports(args) => (
+            args.scan.language.map(ProgrammingLanguage::from),
+            &args.scan.exclude_files,
+            &args.scan.exclude_symbols,
+            args.scan.comments,
+            args.scan.no_cache,
+            args.scan.group_by_file,
+            args.scan.group_by_module,
+            args.scan.sort_by_kind,
+            args.scan.sort_by_module,
+        ),
+        Command::Classes(args) => (
+            args.scan.language.map(ProgrammingLanguage::from),
+            &args.scan.exclude_files,
+            &args.scan.exclude_symbols,
+            args.scan.comments,
+            args.scan.no_cache,
+            args.scan.group_by_file,
+            args.scan.group_by_module,
+            args.scan.sort_by_kind,
+            args.scan.sort_by_module,
+        ),
+        Command::Lint(args) => (
+            args.scan.language.map(ProgrammingLanguage::from),
+            &args.scan.exclude_files,
+            &args.scan.exclude_symbols,
+            args.scan.comments,
+            args.scan.no_cache,
+            args.scan.group_by_file,
+            args.scan.group_by_module,
+            args.scan.sort_by_kind,
+            args.scan.sort_by_module,
+        ),
+        _ => unreachable!(),
+    };
+    let filters = cli.command.filters();
+    let output_config = OutputConfig::new(output_format, comments);
+    let render_options = SymbolRenderOptions {
+        group_by_file,
+        group_by_module,
+        sort_by_kind,
+        sort_by_module,
+    };
+
     let scan_filters = classify_filters(filters, &command_kind, language);
-    let excluded_symbol_globs = cli
-        .exclude_symbols
+    let excluded_symbol_globs = exclude_symbols
         .iter()
         .filter_map(|glob| normalize_excluded_symbol_glob(glob))
         .collect::<Vec<_>>();
 
     let mut files = if scan_filters.file_filters.is_empty() {
-        collect_files(&pkg_root, &[], &cli.exclude_files, language)?
+        collect_files(&pkg_root, &[], exclude_files, language)?
     } else {
         collect_files(
             &pkg_root,
             &scan_filters.file_filters,
-            &cli.exclude_files,
+            exclude_files,
             language,
         )?
     };
@@ -893,18 +1017,17 @@ fn main() -> Result<(), TreeHuggerError> {
 
     let analysis_cache = InMemorySymbolCache::new(files.len().max(1));
     let in_process_cache = InProcessCache::with_config(CacheConfig {
-        enabled: !cli.no_cache,
+        enabled: !no_cache,
         persistent: false,
         capacity: files.len().max(1),
     });
-    let persistent_cache = if cli.no_cache {
+    let persistent_cache = if no_cache {
         None
     } else {
         let project_id = pkg_root
             .to_string_lossy()
             .replace(['/', '\\', ':', ' ', '.'], "_");
-        Some(PersistentCache::default_cache(
-            &project_id, true))
+        Some(PersistentCache::default_cache(&project_id, true))
     };
 
     // Handle classes command separately due to different output structure
@@ -1059,13 +1182,27 @@ fn main() -> Result<(), TreeHuggerError> {
                     render_options,
                 );
             } else {
+                // Multi-file lint scans hide clean files; a single explicit
+                // target still shows `(no diagnostics)` as confirmation.
+                let suppress_clean_lint =
+                    matches!(command_kind, CommandKind::Lint { .. }) && summaries.len() > 1;
+                let mut rendered_any = false;
                 for summary in &summaries {
-                    render_summary(
+                    rendered_any |= render_summary(
                         summary,
                         &command_kind,
                         &output_config,
                         display_root.as_deref(),
+                        suppress_clean_lint,
                     );
+                }
+                if suppress_clean_lint && !rendered_any {
+                    let msg = format!("No lint diagnostics in {} files.", summaries.len());
+                    if output_config.use_colors {
+                        println!("{}", msg.green());
+                    } else {
+                        println!("{msg}");
+                    }
                 }
             }
         }
@@ -1123,14 +1260,8 @@ fn current_dir() -> Result<PathBuf, TreeHuggerError> {
 }
 
 /// Directory names skipped when completing filter paths (build/dep output).
-const COMPLETION_SKIPPED_DIRS: &[&str] = &[
-    "target",
-    "node_modules",
-    "dist",
-    "build",
-    "vendor",
-    ".git",
-];
+const COMPLETION_SKIPPED_DIRS: &[&str] =
+    &["target", "node_modules", "dist", "build", "vendor", ".git"];
 
 /// Dynamic completer for FILTER positionals.
 ///
@@ -1587,6 +1718,9 @@ fn import_symbols_from_index(index: &FileSymbolIndex) -> Vec<ImportSymbol> {
             language: index.language,
             file: index.file.clone(),
             source: import.source.clone(),
+            // The v2 ImportRecord carries no re-export marker; the `unused-import`
+            // lint runs on the v1 `imported_symbols()` path, which sets this.
+            is_reexport: false,
         })
         .collect()
 }
@@ -1673,13 +1807,8 @@ fn render_symbol_doc_comment(comment: Option<&str>, config: &OutputConfig, inden
     }
 }
 
-fn render_summary(
-    summary: &FileSummary,
-    command: &CommandKind,
-    config: &OutputConfig,
-    display_root: Option<&Path>,
-) {
-    // Render file header with optional hyperlink
+/// Prints the `path (Language)` file header, with an optional hyperlink.
+fn print_file_header(summary: &FileSummary, config: &OutputConfig, display_root: Option<&Path>) {
     let file_display = display_path(&summary.file, display_root);
     let header = if config.use_hyperlinks {
         hyperlink(&summary.file, 1, &file_display)
@@ -1696,47 +1825,75 @@ fn render_summary(
     } else {
         println!("{} ({})", header, summary.language);
     }
+}
 
+/// Renders one file's results, returning whether anything was printed.
+///
+/// When `suppress_clean_lint` is set (multi-file lint scans), a file with no
+/// visible diagnostics is skipped entirely — header included — so real findings
+/// are not buried under a `(no diagnostics)` line per clean file. A single-file
+/// lint still prints `(no diagnostics)` as explicit confirmation.
+fn render_summary(
+    summary: &FileSummary,
+    command: &CommandKind,
+    config: &OutputConfig,
+    display_root: Option<&Path>,
+    suppress_clean_lint: bool,
+) -> bool {
+    if let CommandKind::Lint {
+        lint_only,
+        syntax_only,
+        deny,
+        warn,
+        allow,
+        strict,
+        experimental_semantics,
+        ..
+    } = command
+    {
+        let registry = RuleRegistry::new();
+        let filtered = apply_lint_policy(
+            &summary.lint,
+            &registry,
+            deny,
+            warn,
+            allow,
+            *strict,
+            *experimental_semantics,
+        );
+        let has_visible =
+            (!*syntax_only && !filtered.is_empty()) || (!*lint_only && !summary.syntax.is_empty());
+        if suppress_clean_lint && !has_visible {
+            return false;
+        }
+
+        print_file_header(summary, config, display_root);
+        render_diagnostics_filtered(
+            &filtered,
+            &summary.syntax,
+            &summary.file,
+            config,
+            *lint_only,
+            *syntax_only,
+        );
+        println!();
+        return true;
+    }
+
+    print_file_header(summary, config, display_root);
     match command {
         CommandKind::Imports => render_imports(&summary.imports, config),
         CommandKind::Functions | CommandKind::Types | CommandKind::Symbols => {
             render_symbols(&summary.symbols, config)
         }
-        CommandKind::Lint {
-            lint_only,
-            syntax_only,
-            deny,
-            warn,
-            allow,
-            strict,
-            experimental_semantics,
-            ..
-        } => {
-            let registry = RuleRegistry::new();
-            let filtered = apply_lint_policy(
-                &summary.lint,
-                &registry,
-                deny,
-                warn,
-                allow,
-                *strict,
-                *experimental_semantics,
-            );
-            render_diagnostics_filtered(
-                &filtered,
-                &summary.syntax,
-                &summary.file,
-                config,
-                *lint_only,
-                *syntax_only,
-            );
-        }
+        CommandKind::Lint { .. } => unreachable!("lint is handled above"),
         CommandKind::Classes { .. } => {
             // Classes are rendered separately
         }
     }
 
     println!();
+    true
 }
 
 fn render_rule_list(format: OutputFormat) -> Result<(), TreeHuggerError> {
@@ -2463,8 +2620,7 @@ fn apply_lint_policy(
 ) -> Vec<LintDiagnostic> {
     use tree_hugger::rule_registry::apply_policy;
 
-    lint
-        .iter()
+    lint.iter()
         .cloned()
         .filter_map(|mut diagnostic| {
             let rule_id = diagnostic.rule.as_deref()?;
@@ -2478,6 +2634,22 @@ fn apply_lint_policy(
             }
 
             if rule.requires_experimental_semantics && !experimental_semantics {
+                return None;
+            }
+
+            // Off-by-default rules (e.g. the `restriction` category) are silent
+            // unless explicitly opted in by a `--warn`/`--deny` selector that
+            // targets them. `--allow` only demotes severity and `--strict` only
+            // escalates warnings; neither enables a disabled rule. Experimental
+            // rules are exempt — they are gated above by `--experimental-semantics`.
+            let explicitly_enabled = warn
+                .iter()
+                .chain(deny.iter())
+                .any(|selector| selector.matches(&rule));
+            if !rule.requires_experimental_semantics
+                && !rule.enabled_by_default
+                && !explicitly_enabled
+            {
                 return None;
             }
 
@@ -2935,5 +3107,283 @@ fn render_field_section(
         }
 
         render_symbol_doc_comment(field.doc_comment.as_deref(), config, "        ");
+    }
+}
+
+// ============================================================================
+// God-files rendering
+// ============================================================================
+
+/// Build the [`Terminal`] used to render the god-files report.
+///
+/// A non-styling terminal (no color, no OSC8) is used for `--plain`/`--json`
+/// so `Prose` emits clean, escape-free bytes; the styled path detects real
+/// capabilities so color and hyperlink degradation are capability-aware.
+fn god_terminal(config: &OutputConfig) -> Terminal {
+    if !config.use_colors {
+        Terminal::builder()
+            .is_tty(false)
+            .color_depth(ColorDepth::None)
+            .osc_link_support(false)
+            .build()
+    } else if color_forced() {
+        // Forced color may run without a real TTY (CI, captured output, tests);
+        // an optimistic terminal guarantees full color + OSC8 capabilities.
+        Terminal::new_optimistic(120)
+    } else {
+        Terminal::new()
+    }
+}
+
+/// Render a single line of `Prose` markup at a fixed indentation.
+///
+/// Indentation is applied outside the markup so leading whitespace is never
+/// consumed by the markup parser, and word-wrap is disabled to preserve the
+/// report's hand-laid columns. `plain` strips any residual escapes (emphasis
+/// SGR is not gated by color depth) so `--plain`/`--json` output is clean.
+fn prose_line(term: &Terminal, plain: bool, indent: usize, markup: &str) {
+    let rendered = Prose::new(markup)
+        .with_word_wrap(WordWrap::None)
+        .render(term);
+    let rendered = if plain {
+        strip_escape_codes(rendered)
+    } else {
+        rendered
+    };
+    println!("{}{}", " ".repeat(indent), rendered);
+}
+
+/// Build a percent-encoded `file://` URL for an absolute path.
+fn file_url(absolute_path: &str) -> String {
+    const FILE_URL_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'/').remove(b':');
+    let encoded = utf8_percent_encode(absolute_path, FILE_URL_ENCODE_SET);
+    format!("file://{encoded}")
+}
+
+/// Render the full god-files report via biscuit-terminal `Prose`.
+fn render_god_files(analyses: &[GodAnalysis], config: &OutputConfig, high_risk_only: bool) {
+    let term = god_terminal(config);
+    let plain = !config.use_colors;
+
+    let high_count = analyses.iter().filter(|a| a.risk == RiskBand::High).count();
+    let moderate_count = analyses
+        .iter()
+        .filter(|a| a.risk == RiskBand::Moderate)
+        .count();
+
+    // Report heading: two count lines, always printed (including the 0/0 case
+    // for an empty scan), so the band totals are always visible.
+    prose_line(
+        &term,
+        plain,
+        0,
+        &format!(
+            "- There are <yellow>{moderate_count}</yellow> files with moderate risk of being considered _god files_"
+        ),
+    );
+    prose_line(
+        &term,
+        plain,
+        0,
+        &format!(
+            "- There are <red>{high_count}</red> files with <b>high risk</b> of being considered _god files_"
+        ),
+    );
+
+    // High-risk section (omitted entirely when empty).
+    if high_count > 0 {
+        println!();
+        prose_line(&term, plain, 0, "<b><uu>High risk</uu></b>");
+        for analysis in analyses.iter().filter(|a| a.risk == RiskBand::High) {
+            render_god_analysis(&term, plain, analysis);
+        }
+    }
+
+    // Moderate-risk section. Suppressed in full (heading and bodies) under
+    // `--high-risk`; otherwise omitted only when empty.
+    if !high_risk_only && moderate_count > 0 {
+        println!();
+        prose_line(&term, plain, 0, "<b><uu>Moderate risk</uu></b>");
+        for analysis in analyses.iter().filter(|a| a.risk == RiskBand::Moderate) {
+            render_god_analysis(&term, plain, analysis);
+        }
+    }
+}
+
+/// Render a single god-file analysis.
+fn render_god_analysis(term: &Terminal, plain: bool, analysis: &GodAnalysis) {
+    let color = match analysis.risk {
+        RiskBand::High => "red",
+        RiskBand::Moderate => "yellow",
+    };
+
+    let rel = Prose::escape_text(&analysis.relative_path.display().to_string());
+    let label = if term.osc_link_support {
+        let url = file_url(analysis.file.raw());
+        format!("<a href={}>{rel}</a>", Prose::quoted_attr(&url))
+    } else {
+        rel
+    };
+
+    prose_line(
+        term,
+        plain,
+        0,
+        &format!(
+            "- the {label} file is <b><{color}>{sloc}</{color}></b> lines of code",
+            sloc = analysis.effective_sloc
+        ),
+    );
+
+    // Diagnostic note for degraded (e.g. unparseable) analyses.
+    if let Some(note) = &analysis.note {
+        prose_line(
+            term,
+            plain,
+            2,
+            &format!("- <dim>note: {}</dim>", Prose::escape_text(note)),
+        );
+    }
+
+    // Largest blocks.
+    if !analysis.blocks.is_empty() {
+        prose_line(
+            term,
+            plain,
+            2,
+            "- the largest blocks in this file are composed by these symbols:",
+        );
+        for block in &analysis.blocks {
+            render_symbol_block(term, plain, block);
+        }
+        if analysis.blocks_truncated > 0 {
+            prose_line(
+                term,
+                plain,
+                4,
+                &format!("- <dim>…and {} more</dim>", analysis.blocks_truncated),
+            );
+        }
+    }
+
+    // Compact signals line.
+    prose_line(
+        term,
+        plain,
+        2,
+        &format!(
+            "- <dim>top-level symbols: {tl} · max depth: {depth} · imports: {imports} · TODO/FIXME: {todo} · comments: {density:.0}%</dim>",
+            tl = analysis.top_level_symbol_count,
+            depth = analysis.max_nesting_depth,
+            imports = analysis.import_fan_out,
+            todo = analysis.todo_fixme_count,
+            density = analysis.comment_density * 100.0,
+        ),
+    );
+
+    // Refactor hints.
+    for hint in &analysis.refactor_hints {
+        prose_line(
+            term,
+            plain,
+            2,
+            &format!("- <dim>{}</dim>", format_refactor_hint(hint)),
+        );
+    }
+}
+
+/// Render a single symbol block line plus any container call-out.
+fn render_symbol_block(term: &Terminal, plain: bool, block: &SymbolBlock) {
+    let kind = block.kind.to_string();
+    let kind_markup = match color_tag_for_kind(block.kind) {
+        Some(tag) => format!("<{tag}>{kind}</{tag}>"),
+        None => kind,
+    };
+    let name = Prose::escape_text(&block.name);
+
+    let members = match &block.many_members {
+        Some(callout) => format!("  ({} members)", callout.member_count),
+        None => String::new(),
+    };
+    let doc = match &block.doc_summary {
+        Some(summary) => format!(" <dim>— {}</dim>", Prose::escape_text(summary)),
+        None => String::new(),
+    };
+
+    prose_line(
+        term,
+        plain,
+        4,
+        &format!(
+            "- {kind_markup} <b>{name}</b>  <dim>[{start}–{end}]</dim>  {sloc} sloc{members}{doc}",
+            start = block.start_line,
+            end = block.end_line,
+            sloc = block.sloc,
+        ),
+    );
+
+    if let Some(callout) = &block.many_members {
+        for member in &callout.members {
+            let m_kind = member.kind.to_string();
+            let m_kind_markup = match color_tag_for_kind(member.kind) {
+                Some(tag) => format!("<{tag}>{m_kind}</{tag}>"),
+                None => m_kind,
+            };
+            let m_name = Prose::escape_text(&member.name);
+            prose_line(
+                term,
+                plain,
+                6,
+                &format!("- {m_kind_markup} {m_name}  {} sloc", member.sloc),
+            );
+        }
+        let remaining = callout.member_count.saturating_sub(callout.members.len());
+        if remaining > 0 {
+            prose_line(term, plain, 6, &format!("- <dim>…and {remaining} more</dim>"));
+        }
+    }
+}
+
+/// Prose color tag for a symbol kind, mirroring [`style_for_kind`].
+fn color_tag_for_kind(kind: SymbolKind) -> Option<&'static str> {
+    match kind {
+        SymbolKind::Function | SymbolKind::Method => Some("green"),
+        SymbolKind::Type | SymbolKind::Class | SymbolKind::Interface => Some("magenta"),
+        SymbolKind::Enum | SymbolKind::Field => Some("cyan"),
+        SymbolKind::Trait | SymbolKind::Namespace | SymbolKind::Module => Some("yellow"),
+        SymbolKind::Variable | SymbolKind::Parameter => Some("blue"),
+        SymbolKind::Macro => Some("red"),
+        SymbolKind::Constant => Some("bright-blue"),
+        SymbolKind::Unknown => None,
+    }
+}
+
+/// Format a refactor hint as a short human-readable sentence (spec §5.3).
+fn format_refactor_hint(hint: &RefactorHint) -> String {
+    match hint {
+        RefactorHint::DominatedBySingleSymbol { name, share } => {
+            format!(
+                "likely refactor: `{}` holds {:.0}% of the code — split by responsibility",
+                Prose::escape_text(name),
+                share * 100.0
+            )
+        }
+        RefactorHint::ManyUnrelatedTopLevel { count } => {
+            format!("likely refactor: {count} unrelated top-level symbols — split by responsibility")
+        }
+        RefactorHint::DeeplyNested { depth } => {
+            format!("likely refactor: deeply nested (depth {depth}) — extract / flatten")
+        }
+        RefactorHint::HighCoupling { import_fan_out } => {
+            format!(
+                "likely refactor: high coupling ({import_fan_out} imports) — expect wide refactor blast radius"
+            )
+        }
+        RefactorHint::LowCodeDensity { comment_density } => {
+            format!(
+                "likely refactor: low code density ({:.0}% comments) — mostly comments/docs",
+                comment_density * 100.0
+            )
+        }
     }
 }

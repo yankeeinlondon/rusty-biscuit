@@ -6,7 +6,8 @@
 //! every code path.
 
 use darkmatter::markdown::schemas::simplified::{
-    Constraint, PropertyAtom, SimplifiedType, grammar::parse_type_expr, serialize_property_atom,
+    Constraint, PropertyAtom, SimplifiedType, TypeExpr, grammar::parse_type_expr,
+    serialize_property_atom,
 };
 use proptest::prelude::*;
 
@@ -149,7 +150,7 @@ fn atom_strategy() -> impl Strategy<Value = PropertyAtom> {
         let desc = description_strategy();
         (Just(ty), item, array, is_arr, desc).prop_map(
             |(ty, item, array, is_array, description)| PropertyAtom {
-                ty,
+                ty: TypeExpr::Primitive(ty),
                 is_array,
                 constraints: item,
                 array_constraints: if is_array { array } else { vec![] },

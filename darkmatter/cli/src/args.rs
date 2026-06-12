@@ -1,13 +1,7 @@
-// The CLI maps `--align-*` / `--fill-*` arguments onto the deprecated
-// page-layout types (`PageAlignment`, `PageFill`, `WidthUnit`), which remain
-// the public construction path through the `DarkmatterPage` builder. The
-// migration to `renderable::layout::Layout` is tracked separately.
-#![allow(deprecated)]
-
 use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
-use darkmatter::layout::{PageAlignment, PageBackground, PageFill, WidthUnit};
+use darkmatter::layout::PageBackground;
 use darkmatter::markdown::highlighting::ThemePair;
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -486,6 +480,23 @@ pub enum SchemaTarget {
         #[arg(long)]
         merge: bool,
     },
+
+    /// Print the SimplifiedSchema language reference.
+    ///
+    /// Renders a human-readable report covering schema shapes, the type
+    /// vocabulary, constraints, inline object syntax, validation behaviour,
+    /// and compose-time coercion. The report is generated from the typed
+    /// schema-language descriptor catalog in
+    /// `darkmatter::markdown::schemas`; the same catalog is available to
+    /// library callers via the `schema_type_descriptors()`,
+    /// `schema_constraint_descriptors()`, `schema_shape_descriptors()`,
+    /// `inline_object_rule_descriptors()`, `coercion_rule_descriptors()`,
+    /// and `validation_behavior_descriptors()` functions.
+    ///
+    /// The command is documentation-only: it does not parse documents,
+    /// capture context, construct an `EffectEngine`, resolve file
+    /// references, or perform network access.
+    About,
 }
 
 /// Output format for `md schema validate`.
@@ -706,40 +717,40 @@ pub struct Cli {
     pub align_code_blocks: Option<PageAlignmentArg>,
 
     /// Default fill for all components
-    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
-    pub fill: Option<PageFill>,
+    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    pub fill: Option<CliFill>,
 
     /// Image fill
-    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
-    pub fill_images: Option<PageFill>,
+    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    pub fill_images: Option<CliFill>,
 
     /// List fill
-    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
-    pub fill_lists: Option<PageFill>,
+    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    pub fill_lists: Option<CliFill>,
 
     /// Unordered list fill
-    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
-    pub fill_ul: Option<PageFill>,
+    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    pub fill_ul: Option<CliFill>,
 
     /// Ordered list fill
-    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
-    pub fill_ol: Option<PageFill>,
+    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    pub fill_ol: Option<CliFill>,
 
     /// List item fill
-    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
-    pub fill_li: Option<PageFill>,
+    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    pub fill_li: Option<CliFill>,
 
     /// Block quote fill
-    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
-    pub fill_block_quotes: Option<PageFill>,
+    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    pub fill_block_quotes: Option<CliFill>,
 
     /// Table fill
-    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
-    pub fill_tables: Option<PageFill>,
+    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    pub fill_tables: Option<CliFill>,
 
     /// Code block fill
-    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
-    pub fill_code_blocks: Option<PageFill>,
+    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    pub fill_code_blocks: Option<CliFill>,
 
     /// Promote schema-validation warnings (unknown / deprecated keys) to errors.
     #[arg(long)]
@@ -947,7 +958,7 @@ impl From<PageBackgroundArg> for PageBackground {
     }
 }
 
-/// CLI-usable [`PageAlignment`] wrapper.
+/// CLI-usable alignment wrapper.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum PageAlignmentArg {
     /// Left-aligned.
@@ -958,13 +969,82 @@ pub enum PageAlignmentArg {
     Right,
 }
 
-impl From<PageAlignmentArg> for PageAlignment {
+impl From<PageAlignmentArg> for renderable::layout::Alignment {
     fn from(arg: PageAlignmentArg) -> Self {
         match arg {
-            PageAlignmentArg::Left => PageAlignment::Left,
-            PageAlignmentArg::Center => PageAlignment::Center,
-            PageAlignmentArg::Right => PageAlignment::Right,
+            PageAlignmentArg::Left => renderable::layout::Alignment::Left,
+            PageAlignmentArg::Center => renderable::layout::Alignment::Center,
+            PageAlignmentArg::Right => renderable::layout::Alignment::Right,
         }
+    }
+}
+
+/// CLI-local fill descriptor that maps directly onto renderable [`Layout`]
+/// properties.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CliFill {
+    /// Default. Component may use the full content width.
+    Full,
+    /// Symmetric padding on both sides.
+    Pad(renderable::layout::Length),
+    /// One-sided padding driven by the component's alignment.
+    Indent(renderable::layout::Length),
+    /// Cap on the component's render width.
+    Max(renderable::layout::Length),
+    /// Explicit render width.
+    Explicit(renderable::layout::Length),
+}
+
+/// Parses a [`CliFill`] string.
+///
+/// Grammar: `full`, `pad=<n|n%>`, `indent=<n|n%>`, `max=<n|n%>`, `explicit=<n|n%>`
+pub fn parse_cli_fill(s: &str) -> Result<CliFill, String> {
+    let s = s.trim();
+
+    if s.eq_ignore_ascii_case("full") {
+        return Ok(CliFill::Full);
+    }
+
+    let (kind, rest) = s
+        .split_once('=')
+        .ok_or_else(|| format!("fill must be 'full' or 'kind=value', got '{s}'"))?;
+
+    let kind = kind.trim().to_ascii_lowercase();
+    let rest = rest.trim();
+
+    if rest.is_empty() {
+        return Err(format!("fill value missing after '=' in '{s}'"));
+    }
+
+    let length = parse_cli_length(rest)?;
+
+    match kind.as_str() {
+        "pad" => Ok(CliFill::Pad(length)),
+        "indent" => Ok(CliFill::Indent(length)),
+        "max" => Ok(CliFill::Max(length)),
+        "explicit" => Ok(CliFill::Explicit(length)),
+        _ => Err(format!(
+            "unknown fill kind '{kind}', expected pad/indent/max/explicit"
+        )),
+    }
+}
+
+/// Parses a length string (`n` or `n%`) into a renderable [`Length`].
+fn parse_cli_length(s: &str) -> Result<renderable::layout::Length, String> {
+    let s = s.trim();
+    if let Some(num) = s.strip_suffix('%') {
+        let p: f32 = num
+            .parse()
+            .map_err(|_| format!("'{s}' is not a valid percentage"))?;
+        if !(0.0..=100.0).contains(&p) {
+            return Err(format!("percentage must be 0-100, got {p}"));
+        }
+        Ok(renderable::layout::Length::Percent(p))
+    } else {
+        let n: u16 = s
+            .parse()
+            .map_err(|_| format!("'{s}' is not a valid positive integer"))?;
+        Ok(renderable::layout::Length::ch(u32::from(n)))
     }
 }
 
@@ -986,59 +1066,6 @@ pub fn parse_max_width(s: &str) -> Result<u16, String> {
         Err("--max-width must be greater than 0".to_string())
     } else {
         Ok(value)
-    }
-}
-
-/// Parses a [`PageFill`] string.
-///
-/// Grammar: `full`, `pad=<n|n%>`, `indent=<n|n%>`, `max=<n|n%>`, `explicit=<n|n%>`
-pub fn parse_page_fill(s: &str) -> Result<PageFill, String> {
-    let s = s.trim();
-
-    if s.eq_ignore_ascii_case("full") {
-        return Ok(PageFill::Full);
-    }
-
-    let (kind, rest) = s
-        .split_once('=')
-        .ok_or_else(|| format!("fill must be 'full' or 'kind=value', got '{s}'"))?;
-
-    let kind = kind.trim().to_ascii_lowercase();
-    let rest = rest.trim();
-
-    if rest.is_empty() {
-        return Err(format!("fill value missing after '=' in '{s}'"));
-    }
-
-    let unit = parse_width_unit(rest)?;
-
-    match kind.as_str() {
-        "pad" => Ok(PageFill::Pad(unit)),
-        "indent" => Ok(PageFill::Indent(unit)),
-        "max" => Ok(PageFill::Max(unit)),
-        "explicit" => Ok(PageFill::Explicit(unit)),
-        _ => Err(format!(
-            "unknown fill kind '{kind}', expected pad/indent/max/explicit"
-        )),
-    }
-}
-
-/// Parses a [`WidthUnit`] string (`n` or `n%`).
-fn parse_width_unit(s: &str) -> Result<WidthUnit, String> {
-    let s = s.trim();
-    if let Some(num) = s.strip_suffix('%') {
-        let p: f32 = num
-            .parse()
-            .map_err(|_| format!("'{s}' is not a valid percentage"))?;
-        if !(0.0..=100.0).contains(&p) {
-            return Err(format!("percentage must be 0-100, got {p}"));
-        }
-        Ok(WidthUnit::Percent(p))
-    } else {
-        let n: u16 = s
-            .parse()
-            .map_err(|_| format!("'{s}' is not a valid positive integer"))?;
-        Ok(WidthUnit::Fixed(n))
     }
 }
 
@@ -1297,78 +1324,78 @@ mod tests {
     }
 
     #[test]
-    fn parse_page_fill_full() {
-        assert_eq!(parse_page_fill("full").unwrap(), PageFill::Full);
-        assert_eq!(parse_page_fill("FULL").unwrap(), PageFill::Full);
+    fn parse_cli_fill_full() {
+        assert_eq!(parse_cli_fill("full").unwrap(), CliFill::Full);
+        assert_eq!(parse_cli_fill("FULL").unwrap(), CliFill::Full);
     }
 
     #[test]
-    fn parse_page_fill_pad_fixed() {
+    fn parse_cli_fill_pad_fixed() {
         assert_eq!(
-            parse_page_fill("pad=4").unwrap(),
-            PageFill::Pad(WidthUnit::Fixed(4))
+            parse_cli_fill("pad=4").unwrap(),
+            CliFill::Pad(renderable::layout::Length::ch(4))
         );
     }
 
     #[test]
-    fn parse_page_fill_pad_percent() {
+    fn parse_cli_fill_pad_percent() {
         assert_eq!(
-            parse_page_fill("pad=10%").unwrap(),
-            PageFill::Pad(WidthUnit::Percent(10.0))
+            parse_cli_fill("pad=10%").unwrap(),
+            CliFill::Pad(renderable::layout::Length::Percent(10.0))
         );
     }
 
     #[test]
-    fn parse_page_fill_indent_max_explicit() {
+    fn parse_cli_fill_indent_max_explicit() {
         assert_eq!(
-            parse_page_fill("indent=2").unwrap(),
-            PageFill::Indent(WidthUnit::Fixed(2))
+            parse_cli_fill("indent=2").unwrap(),
+            CliFill::Indent(renderable::layout::Length::ch(2))
         );
         assert_eq!(
-            parse_page_fill("max=40").unwrap(),
-            PageFill::Max(WidthUnit::Fixed(40))
+            parse_cli_fill("max=40").unwrap(),
+            CliFill::Max(renderable::layout::Length::ch(40))
         );
         assert_eq!(
-            parse_page_fill("explicit=60").unwrap(),
-            PageFill::Explicit(WidthUnit::Fixed(60))
+            parse_cli_fill("explicit=60").unwrap(),
+            CliFill::Explicit(renderable::layout::Length::ch(60))
         );
     }
 
     #[test]
-    fn parse_page_fill_rejects_unknown_kind() {
-        assert!(parse_page_fill("unknown=4").is_err());
+    fn parse_cli_fill_rejects_unknown_kind() {
+        assert!(parse_cli_fill("unknown=4").is_err());
     }
 
     #[test]
-    fn parse_page_fill_rejects_percent_over_100() {
-        assert!(parse_page_fill("pad=150%").is_err());
+    fn parse_cli_fill_rejects_percent_over_100() {
+        assert!(parse_cli_fill("pad=150%").is_err());
     }
 
     #[test]
-    fn parse_page_fill_rejects_negative() {
-        assert!(parse_page_fill("pad=-1").is_err());
+    fn parse_cli_fill_rejects_negative() {
+        assert!(parse_cli_fill("pad=-1").is_err());
     }
 
     #[test]
-    fn parse_page_fill_rejects_malformed() {
-        assert!(parse_page_fill("pad").is_err());
-        assert!(parse_page_fill("=").is_err());
+    fn parse_cli_fill_rejects_malformed() {
+        assert!(parse_cli_fill("pad").is_err());
+        assert!(parse_cli_fill("=").is_err());
     }
 
     #[test]
-    fn parse_width_unit_fixed() {
-        assert_eq!(parse_width_unit("80").unwrap(), WidthUnit::Fixed(80));
+    fn parse_cli_length_fixed() {
+        assert_eq!(parse_cli_length("80").unwrap(), renderable::layout::Length::ch(80));
     }
 
     #[test]
-    fn parse_width_unit_percent() {
-        assert_eq!(parse_width_unit("50%").unwrap(), WidthUnit::Percent(50.0));
+    fn parse_cli_length_percent() {
+        assert_eq!(parse_cli_length("50%").unwrap(), renderable::layout::Length::Percent(50.0));
     }
 
     #[test]
-    fn parse_width_unit_rejects_out_of_range_percent() {
-        assert!(parse_width_unit("150%").is_err());
-        assert!(parse_width_unit("-10%").is_err());
+    fn parse_cli_length_rejects_out_of_range_percent() {
+        assert!(parse_cli_length("150%").is_err());
+        assert!(parse_cli_length("-10%").is_err());
     }
 
     #[test]
@@ -1445,5 +1472,16 @@ mod tests {
     fn cli_line_numbers_omitted_is_none() {
         let cli = Cli::try_parse_from(["md", "doc.md"]).unwrap();
         assert_eq!(cli.line_numbers, None);
+    }
+
+    #[test]
+    fn schema_about_parses_as_schema_target() {
+        let cli = Cli::try_parse_from(["md", "schema", "about"]).unwrap();
+        match cli.command {
+            Some(Command::Schema {
+                target: SchemaTarget::About,
+            }) => {}
+            other => panic!("expected Schema::About, got {other:?}"),
+        }
     }
 }

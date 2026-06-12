@@ -476,7 +476,10 @@ mod tests {
     #[test]
     fn area_for_dir_returns_package_name_when_inside_package() {
         let repo = monorepo_with_areas();
-        assert_eq!(repo.area_for_dir(Path::new("/repo/sniff/lib/src")), "sniff-lib");
+        assert_eq!(
+            repo.area_for_dir(Path::new("/repo/sniff/lib/src")),
+            "sniff-lib"
+        );
     }
 
     #[test]

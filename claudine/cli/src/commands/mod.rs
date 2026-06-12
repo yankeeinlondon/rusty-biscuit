@@ -4,6 +4,7 @@ pub mod completions;
 pub mod compose;
 pub mod config_tui;
 pub mod context;
+pub mod context_render;
 pub mod handle;
 pub mod help;
 pub mod hooks;

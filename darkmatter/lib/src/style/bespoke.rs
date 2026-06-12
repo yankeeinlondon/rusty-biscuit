@@ -1063,7 +1063,7 @@ mod tests {
         let md: Markdown = "[link](https://example.com)".into();
         let html = page.render_to_browser(&md).unwrap();
         assert!(
-            html.contains("color: rgb(251, 44, 54)"),
+            html.contains("color:rgb(251, 44, 54)"),
             "HTML should contain red hyperlink color. html={}",
             html
         );
@@ -1105,12 +1105,12 @@ mod tests {
         let md: Markdown = "[local](./file.md) and [remote](https://example.com)".into();
         let html = page.render_to_browser(&md).unwrap();
         assert!(
-            html.contains("color: rgb(43, 127, 255)"),
+            html.contains("color:rgb(43, 127, 255)"),
             "local link should be blue. html={}",
             html
         );
         assert!(
-            html.contains("color: rgb(251, 44, 54)"),
+            html.contains("color:rgb(251, 44, 54)"),
             "remote link should be red. html={}",
             html
         );
@@ -1155,17 +1155,17 @@ mod tests {
         let html = page.render_to_browser(&md).unwrap();
 
         assert!(
-            html.contains("color: green"),
+            html.contains("color:green"),
             "per-link `color: green` must survive. html={}",
             html
         );
         assert!(
-            !html.contains("color: rgb(251, 44, 54)"),
+            !html.contains("color:rgb(251, 44, 54)"),
             "frontmatter red must NOT overwrite the per-link color. html={}",
             html
         );
         assert!(
-            html.contains("background-color: rgb(43, 127, 255)"),
+            html.contains("background-color:rgb(43, 127, 255)"),
             "frontmatter `background-color` must fill the unset property. html={}",
             html
         );
@@ -1361,7 +1361,7 @@ mod tests {
         let md: Markdown = "![alt](./local.png)".into();
         let html = page.render_to_browser(&md).unwrap();
         assert!(
-            html.contains("color: rgb(251, 44, 54)"),
+            html.contains("color:rgb(251, 44, 54)"),
             "HTML should contain red local image color. html={}",
             html
         );
@@ -1397,7 +1397,7 @@ mod tests {
         let md: Markdown = "![alt](https://example.com/remote.png)".into();
         let html = page.render_to_browser(&md).unwrap();
         assert!(
-            !html.contains("color: rgb(251, 44, 54)"),
+            !html.contains("color:rgb(251, 44, 54)"),
             "HTML should NOT contain red local image color for remote image. html={}",
             html
         );
@@ -1450,8 +1450,13 @@ mod tests {
         use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
         use renderable::layout::{Alignment, Length};
 
+        // A minimal frame (`margin-left`) deliberately selects the optimistic
+        // profile so OSC8 is available. Under the review-5 capability model the
+        // hyperlink *width* is a local text-layout attr that applies regardless
+        // of profile, while OSC8 availability follows the deliberate frame (or an
+        // OSC8-capable terminal) — never the hyperlink-style match itself.
         let term = Terminal::new_optimistic(80);
-        let page = DarkmatterPage::new(&term);
+        let page = DarkmatterPage::new(&term).with_margin_left(1);
         let style = StyleFrontmatter {
             hyperlinks: Some(HyperlinkStyle {
                 common: CommonStyle {
@@ -1470,12 +1475,11 @@ mod tests {
         let output = page.render(&md).unwrap();
 
         // Width 10 + Left alignment over text "hi" (2 cells) must pad with
-        // 8 trailing spaces. The optimistic terminal falls back to the
-        // tree renderer's `[label](url)` no-OSC8 form, so the padded label
-        // sits inside the brackets alongside `(https://example.com)`.
+        // 8 trailing spaces, and the framed page's optimistic profile emits the
+        // padded label inside an OSC8 hyperlink.
         assert!(
-            output.contains("hi        ") && output.contains("(https://example.com)"),
-            "padded display text not present. output={:?}",
+            output.contains("hi        ") && output.contains("]8;;https://example.com"),
+            "padded display text inside an OSC8 hyperlink not present. output={:?}",
             output
         );
     }
@@ -1653,12 +1657,9 @@ mod tests {
         let md: Markdown = "![a](./local.png)".into();
         let output = page.render(&md).unwrap();
 
-        // The tree path applies `local_image_style` (width 40, Right) to the alt
-        // text itself, so the placeholder becomes `▉ IMAGE[<pad>a]` with the
-        // padding inside the brackets — a documented parity-difference from the
-        // legacy serializer, which padded the whole `▉ IMAGE[a]` string. The
-        // alt `a` (1 cell) right-aligns into 40 cells, so a substantial leading
-        // run of spaces precedes it inside the brackets.
+        // The tree path shapes the *complete* placeholder (width 40, Right):
+        // `▉ IMAGE[a]` is right-aligned within the 40-cell field, so the padding
+        // precedes the placeholder and the alt inside the brackets is untouched.
         let fallback_line = output
             .lines()
             .find(|l| l.contains("▉ IMAGE["))
@@ -1668,10 +1669,15 @@ mod tests {
             .and_then(|(_, rest)| rest.split_once(']'))
             .map(|(inner, _)| inner)
             .unwrap_or("");
-        let leading = inner.chars().take_while(|c| *c == ' ').count();
+        assert_eq!(
+            inner, "a",
+            "alt inside the brackets must be untouched: {fallback_line:?}"
+        );
+        let leading = fallback_line.chars().take_while(|c| *c == ' ').count();
+        let field_width = fallback_line.trim_end().chars().count();
         assert!(
-            leading >= 28 && inner.trim() == "a",
-            "alt should be right-padded to ~40 cells inside the placeholder, got {leading} leading: {fallback_line:?}"
+            leading >= 28 && field_width == 40,
+            "placeholder should be right-aligned within the 40-cell field, got {leading} leading, width {field_width}: {fallback_line:?}"
         );
     }
 

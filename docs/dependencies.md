@@ -18,6 +18,8 @@ This is a Rust workspace with the following modules:
 - `biscuit-file/cli/Cargo.toml` - File utilities CLI (`bf`)
 - `biscuit-hash/lib/Cargo.toml` - Hashing library (xxHash, BLAKE3, Argon2id)
 - `biscuit-hash/cli/Cargo.toml` - Hashing CLI (`bh`)
+- `biscuit-icon/lib/Cargo.toml` - Curated offline domain icons + on-demand Iconify lookup (renderable, biscuit-terminal, rusqlite bundled, reqwest, strum)
+- `biscuit-icon/cli/Cargo.toml` - Icon CLI (`icon`) (clap, clap_complete unstable-dynamic, color-eyre)
 - `biscuit-speaks/lib/Cargo.toml` - Cross-platform TTS library
 - `biscuit-terminal/lib/Cargo.toml` - Terminal detection, image rendering, diagrams
 - `biscuit-terminal/cli/Cargo.toml` - Terminal inspector CLI (`bt`)
@@ -544,9 +546,9 @@ This is a Rust workspace with the following modules:
 
 ### Git
 
-- [git2](https://github.com/rust-lang/git2-rs) _v0.20.3_ [📄](https://docs.rs/git2)
+- [gix](https://github.com/GitoxideLabs/gitoxide) _v0.84.0_ [📄](https://docs.rs/gix)
 
-    _Threadsafe and memory-safe Rust bindings to libgit2 for interoperating with git repositories._
+    _Pure-Rust Git repository inspection library (status, diff, history, refs, remotes, config, worktrees)._
 
     _Tags: git, vcs, development-tools_
 
@@ -795,6 +797,12 @@ This is a Rust workspace with the following modules:
     _HTML entity encoding for safe HTML output generation._
 
     _Tags: html, escaping, security_
+
+- [memchr](https://github.com/BurntSushi/memchr) _v2.7_ [📄](https://docs.rs/memchr)
+
+    _Fast substring and byte search routines (memmem, memchr, memrchr) with SIMD acceleration. Used by `tree-hugger` for zero-allocation newline counting during god-file candidate screening._
+
+    _Tags: text-processing, performance, search_
 
 - [regex](https://github.com/rust-lang/regex) _v1.11_ [📄](https://docs.rs/regex)
 

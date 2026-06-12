@@ -3,7 +3,6 @@
 
 use super::*;
 
-
 pub(crate) fn is_block_like_dead_code_container(kind: &str) -> bool {
     kind.contains("block")
         || kind.contains("body")
@@ -200,10 +199,15 @@ pub(crate) fn is_definition_like_reference(node: Node<'_>, language: Programming
                 | "shorthand_property_identifier_pattern"
                 | "pair_pattern"
         ),
-        ProgrammingLanguage::Rust => matches!(
-            parent.kind(),
-            "parameter" | "self_parameter" | "field_declaration" | "use_as_clause"
-        ),
+        ProgrammingLanguage::Rust => match parent.kind() {
+            // In `value: Type` / `field: Type`, the binding name (pattern/name)
+            // is definition-like, but the `type` child is a genuine reference —
+            // excluding it makes type-only imports look unused. Skip only the
+            // non-type child.
+            "parameter" | "field_declaration" => parent.child_by_field_name("type") != Some(node),
+            "self_parameter" | "use_as_clause" => true,
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -325,7 +329,11 @@ pub(crate) fn body_span_for_declaration(node: Node<'_>) -> Option<TextSpan> {
         .map(text_span_for_node)
 }
 
-pub(crate) fn symbol_kind_v2_for_node(record: &SymbolRecord, node: Node<'_>, source: &str) -> SymbolKindV2 {
+pub(crate) fn symbol_kind_v2_for_node(
+    record: &SymbolRecord,
+    node: Node<'_>,
+    source: &str,
+) -> SymbolKindV2 {
     match node.kind() {
         "type_alias_declaration" => SymbolKindV2::TypeAlias,
         "method_definition" => {

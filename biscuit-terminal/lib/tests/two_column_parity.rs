@@ -381,7 +381,7 @@ fn percent_left_width_survives_projection() {
 #[test]
 fn layout_recorded_on_node_attrs() {
     let mut cols = TwoColumn::new("L", "R");
-    cols.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(Length::ch(2));
+    cols.layout_mut().margin = biscuit_terminal::utils::layout::Edges::x(Length::ch(2));
     let node = <TwoColumn as TreeRenderable>::render_tree(&cols);
     assert!(
         node.attrs.layout().is_some(),

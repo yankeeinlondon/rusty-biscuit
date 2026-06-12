@@ -224,11 +224,19 @@ bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75"
 bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75" --striped
 bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75" --striped --stripe-bg blue
 bt table --columns "Name,Score" --row "Ann,90" --bold-header --body-color cyan
+bt table --columns "Status,Count,Price" --column-types ",int,usd" --mixed-row "<b>active</b>,1234,9.99"
 ```
 
 Options:
-- `--columns`: Comma-separated column headers (required)
+- `--columns`: Comma-separated column headers (required). Header text is literal
+- `--column-types`: Comma-separated column types, positionally aligned with
+  `--columns` (`int`/`integer`, `float`, a currency code `usd`/`gbp`/`eur`, or
+  empty/`string` for a text column). A numeric or currency type declares a
+  right-aligned column that formats its `--mixed-row` cells
 - `--row`: Comma-separated cell values (repeatable — one per data row)
+- `--mixed-row`: Comma-separated row whose cells take their kind from each
+  column's type — numeric columns parse a typed, right-aligned value, other
+  columns parse `Prose` markup (left-aligned). Repeatable
 - `--striped`: Apply an alternating background stripe to even data rows
 - `--stripe-bg`: Explicit stripe background color (named or `#rrggbb`)
 - `--stripe-text`: Explicit stripe text color (named or `#rrggbb`)

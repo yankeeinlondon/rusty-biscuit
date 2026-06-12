@@ -571,9 +571,12 @@ fn level2_blockquote_indent_fill_caps_wrap_width() {
         frame.plain
     );
     let max_len = quote_lines.iter().map(|l| l.chars().count()).max().unwrap();
+    // Indent(20) sets padding-left = 20ch. The content box is 60 cols,
+    // and the prefix consumes 4 cols, leaving 56 cols for text.
+    // Total line width = 20 (pad) + 4 (prefix) + text ≤ 80.
     assert!(
-        max_len <= 60,
-        "blockquote lines should be capped to 60 cols (80 - 20 indent), got max={max_len}. plain:\n{}",
+        max_len <= 80,
+        "blockquote lines must be capped to 80 cols by Indent(20) padding; got max={max_len}. plain:\n{}",
         frame.plain
     );
 }
@@ -859,6 +862,38 @@ fn max_bg_luma_on_line(raw: &str, needle: &str) -> Option<f32> {
     None
 }
 
+fn min_fg_luma_on_line(raw: &str, needle: &str) -> Option<f32> {
+    let re = regex_lite_fg();
+    for line in raw.lines().rev() {
+        let plain = biscuit_test_harness::strip_ansi(line);
+        if plain.contains(needle) {
+            let mut best: Option<f32> = None;
+            for (r, g, b) in re(line) {
+                let l = luma(r, g, b);
+                best = Some(best.map_or(l, |m: f32| m.min(l)));
+            }
+            return best;
+        }
+    }
+    None
+}
+
+fn max_fg_luma_on_line(raw: &str, needle: &str) -> Option<f32> {
+    let re = regex_lite_fg();
+    for line in raw.lines().rev() {
+        let plain = biscuit_test_harness::strip_ansi(line);
+        if plain.contains(needle) {
+            let mut best: Option<f32> = None;
+            for (r, g, b) in re(line) {
+                let l = luma(r, g, b);
+                best = Some(best.map_or(l, |m: f32| m.max(l)));
+            }
+            return best;
+        }
+    }
+    None
+}
+
 /// Tiny hand-rolled scan for truecolor background SGRs, handling both the
 /// legacy `\x1b[48;2;R;G;Bm` (semicolon) and the ITU `\x1b[48:2::R:G:Bm`
 /// (colon, with empty colorspace) forms WezTerm emits in `get-text --escapes`.
@@ -878,6 +913,25 @@ fn regex_lite_bg() -> impl Fn(&str) -> Vec<(u32, u32, u32)> {
                 .collect();
             // Background truecolor: leading `48 2` then R G B.
             if nums.len() >= 5 && nums[0] == 48 && nums[1] == 2 {
+                out.push((nums[2], nums[3], nums[4]));
+            }
+        }
+        out
+    }
+}
+
+fn regex_lite_fg() -> impl Fn(&str) -> Vec<(u32, u32, u32)> {
+    |line: &str| {
+        let mut out = Vec::new();
+        for chunk in line.split("\x1b[").skip(1) {
+            let Some(mend) = chunk.find('m') else {
+                continue;
+            };
+            let nums: Vec<u32> = chunk[..mend]
+                .split([';', ':'])
+                .filter_map(|s| s.parse::<u32>().ok())
+                .collect();
+            if nums.len() >= 5 && nums[0] == 38 && nums[1] == 2 {
                 out.push((nums[2], nums[3], nums[4]));
             }
         }
@@ -953,6 +1007,125 @@ fn level2_code_block_inverts_to_light_in_dark_terminal() {
     assert!(
         code_luma > 140.0,
         "code panel should be LIGHT (high luma) in a dark terminal, got luma {code_luma:.0}. \
+         plain:\n{}",
+        frame.plain
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_default_code_block_inverts_background_and_foreground() {
+    let mut captured: Option<CapturedFrame> = None;
+    let mut bg: Option<f32> = None;
+    let mut min_fg: Option<f32> = None;
+    let mut max_fg: Option<f32> = None;
+
+    for _ in 0..3 {
+        let Some((frame, _)) = run_md_env(
+            CODE_DOC,
+            "--max-width 60",
+            &[("COLORFGBG", "15;0")], // bg index 0 => dark terminal
+        ) else {
+            return;
+        };
+
+        bg = max_bg_luma_on_line(&frame.raw, "FooBar");
+        min_fg = min_fg_luma_on_line(&frame.raw, "FooBar");
+        max_fg = max_fg_luma_on_line(&frame.raw, "FooBar");
+        captured = Some(frame);
+        if bg.is_some() && min_fg.is_some() && max_fg.is_some() {
+            break;
+        }
+    }
+
+    let frame = captured.expect("capture should be present");
+    let code_bg = bg.unwrap_or_else(|| {
+        panic!(
+            "no truecolor background found on the default-theme code line. raw:\n{}",
+            frame.raw
+        )
+    });
+    let darkest_fg = min_fg.unwrap_or_else(|| {
+        panic!(
+            "no truecolor foreground found on the default-theme code line. raw:\n{}",
+            frame.raw
+        )
+    });
+    let brightest_fg = max_fg.unwrap_or_else(|| {
+        panic!(
+            "no truecolor foreground found on the default-theme code line. raw:\n{}",
+            frame.raw
+        )
+    });
+
+    assert!(
+        code_bg > 175.0,
+        "default code block should use a light page-inverted background in a dark terminal, got luma {code_bg:.0}. \
+         plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        darkest_fg < 140.0,
+        "default code block should use dark token foregrounds on the light inverted background, got darkest luma {darkest_fg:.0}. \
+         plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        brightest_fg < 190.0,
+        "default code block should not keep bright dark-theme foregrounds on the light inverted background, got brightest luma {brightest_fg:.0}. \
+         plain:\n{}",
+        frame.plain
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_code_block_clears_inherited_dim_before_theme_colors() {
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
+    }
+
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("dim-code.md");
+    fs::write(&file_path, CODE_DOC).unwrap();
+
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().unwrap();
+
+    let cmd = format!(
+        "printf '\\033[2m'; COLORFGBG='15;0' md {} --max-width 60",
+        file_path.display()
+    );
+
+    let mut captured: Option<CapturedFrame> = None;
+    let mut bg: Option<f32> = None;
+    for _ in 0..3 {
+        run_with_sentinel(harness, "clear");
+        let frame = run_with_sentinel(harness, &cmd);
+        bg = max_bg_luma_on_line(&frame.raw, "FooBar");
+        captured = Some(frame);
+        if bg.is_some() {
+            break;
+        }
+    }
+
+    let frame = captured.expect("capture should be present");
+    let code_bg = bg.unwrap_or_else(|| {
+        panic!(
+            "no truecolor background found on the dim-inherited code line. raw:\n{}",
+            frame.raw
+        )
+    });
+
+    assert!(
+        code_bg > 175.0,
+        "code block must clear inherited dim before applying the page-inverted background, got luma {code_bg:.0}. \
          plain:\n{}",
         frame.plain
     );
@@ -1891,22 +2064,33 @@ style:
         kind: waves
 ---
 
-Lead
+hr_waves_lead_anchor
 
 ---
 
-Trail
+hr_waves_tail_anchor
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    // Force the text tier: in a graphics-capable terminal the styled HR
+    // rasterizes to an image and no glyph reaches a text row (review-1
+    // finding 3). The assertion is also anchored between sentinels so a stray
+    // `~` from the shell prompt cannot satisfy it.
+    let Some((frame, _)) = run_md_env(body, "--max-width 60", &[("TERMINAL_IMAGES", "0")]) else {
         return;
     };
 
-    let has_waves = frame.plain.contains('\u{224B}') || frame.plain.contains('~');
+    let Some((plain, _)) =
+        locate_hr_between_sentinels(&frame, "hr_waves_lead_anchor", "hr_waves_tail_anchor")
+    else {
+        panic!(
+            "expected a waves HR rule row between the sentinels but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame.plain, frame.raw
+        );
+    };
+
     assert!(
-        has_waves,
-        "style.hr.kind: waves must produce the waves glyph (`≋` or `~`). plain:\n{}",
-        frame.plain
+        plain.contains('\u{224B}') || plain.contains('~'),
+        "style.hr.kind: waves must produce the waves glyph (`≋` or `~`) on the rule row; got: {plain:?}",
     );
 }
 
@@ -1923,7 +2107,11 @@ style:
         weight: thick
 ---
 
+hr_weight_lead_anchor
+
 ---
+
+hr_weight_tail_anchor
 "#;
     let body_thin = r#"---
 style:
@@ -1932,39 +2120,49 @@ style:
         weight: thin
 ---
 
+hr_weight_lead_anchor
+
 ---
+
+hr_weight_tail_anchor
 "#;
 
-    let Some((frame_thick, _)) = run_md(body_thick, "--max-width 60") else {
+    // Force the text tier so the weight difference appears as glyphs rather than
+    // pixels, and isolate the rule row between sentinels so the comparison
+    // cannot accidentally match the (per-invocation distinct) command echo
+    // (review-1 finding 3).
+    let Some((frame_thick, _)) =
+        run_md_env(body_thick, "--max-width 60", &[("TERMINAL_IMAGES", "0")])
+    else {
         return;
     };
-    let Some((frame_thin, _)) = run_md(body_thin, "--max-width 60") else {
+    let Some((frame_thin, _)) =
+        run_md_env(body_thin, "--max-width 60", &[("TERMINAL_IMAGES", "0")])
+    else {
         return;
     };
 
-    let thick_rule_line = frame_thick
-        .plain
-        .lines()
-        .find(|l| l.contains('\u{2501}') || l.contains('\u{254D}') || l.contains('-'))
-        .map(str::to_string)
-        .unwrap_or_default();
-    let thin_rule_line = frame_thin
-        .plain
-        .lines()
-        .find(|l| l.contains('\u{2500}') || l.contains('\u{254C}') || l.contains('-'))
-        .map(str::to_string)
-        .unwrap_or_default();
+    let Some((thick_rule_line, _)) =
+        locate_hr_between_sentinels(&frame_thick, "hr_weight_lead_anchor", "hr_weight_tail_anchor")
+    else {
+        panic!(
+            "expected a thick HR rule row but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame_thick.plain, frame_thick.raw
+        );
+    };
+    let Some((thin_rule_line, _)) =
+        locate_hr_between_sentinels(&frame_thin, "hr_weight_lead_anchor", "hr_weight_tail_anchor")
+    else {
+        panic!(
+            "expected a thin HR rule row but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame_thin.plain, frame_thin.raw
+        );
+    };
 
-    assert!(
-        !thick_rule_line.is_empty() && !thin_rule_line.is_empty(),
-        "expected rule line in both captures.\nthick plain:\n{}\nthin plain:\n{}",
-        frame_thick.plain,
-        frame_thin.plain
-    );
     assert_ne!(
         thick_rule_line.trim(),
         thin_rule_line.trim(),
-        "thick and thin HR weights must render visibly different glyphs"
+        "thick and thin HR weights must render visibly different glyphs",
     );
 }
 
@@ -2015,16 +2213,25 @@ hr_color_lead_anchor
 hr_color_tail_anchor
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    // Force the text tier: in a graphics-capable terminal (WezTerm supports the
+    // Kitty graphics protocol) a styled HR rasterizes to an image, so the text
+    // rule row — and the foreground SGR this test asserts — never appears. The
+    // color is a text-rule property, so it must be exercised on the text tier
+    // (review-1 finding 3).
+    let Some((frame, _)) = run_md_env(body, "--max-width 60", &[("TERMINAL_IMAGES", "0")]) else {
         return;
     };
 
     let Some((_plain, raw)) =
         locate_hr_between_sentinels(&frame, "hr_color_lead_anchor", "hr_color_tail_anchor")
     else {
-        // Capture missed the rule line (scroll/timing). Treat as a skip
-        // rather than a failure to keep Level 2 tests stable across hosts.
-        return;
+        // The harness was available and `md` completed (we have a frame), so a
+        // missing rule row is a real failure of a terminal-visible requirement,
+        // not an environment skip (review-1 finding 3).
+        panic!(
+            "expected an HR rule row between the sentinels but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame.plain, frame.raw
+        );
     };
 
     let red_semi = "\x1b[38;2;251;44;54m";
@@ -2055,14 +2262,22 @@ hr_bg_lead_anchor
 hr_bg_tail_anchor
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    // Force the text tier so the rule paints as a real row (see the color test):
+    // a graphics-capable terminal would rasterize the styled HR to an image and
+    // the background SGR would never reach a text row (review-1 finding 3).
+    let Some((frame, _)) = run_md_env(body, "--max-width 60", &[("TERMINAL_IMAGES", "0")]) else {
         return;
     };
 
     let Some((_plain, raw)) =
         locate_hr_between_sentinels(&frame, "hr_bg_lead_anchor", "hr_bg_tail_anchor")
     else {
-        return;
+        // Harness available + `md` completed: a missing rule row is a real
+        // failure, not an environment skip (review-1 finding 3).
+        panic!(
+            "expected an HR rule row between the sentinels but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame.plain, frame.raw
+        );
     };
 
     let bg_present = raw.contains("\x1b[48;2;") || raw.contains("\x1b[48:2:");
@@ -2109,10 +2324,16 @@ hr_align_lead_anchor
 hr_align_tail_anchor
 "#;
 
-    let Some((frame_center, _)) = run_md(centered, "--max-width 60") else {
+    // Force the text tier: a rasterized HR encodes alignment in pixels, not in
+    // leading whitespace, so the indent comparison this test makes is only
+    // meaningful on the text rule (review-1 finding 3).
+    let Some((frame_center, _)) =
+        run_md_env(centered, "--max-width 60", &[("TERMINAL_IMAGES", "0")])
+    else {
         return;
     };
-    let Some((frame_left, _)) = run_md(left, "--max-width 60") else {
+    let Some((frame_left, _)) = run_md_env(left, "--max-width 60", &[("TERMINAL_IMAGES", "0")])
+    else {
         return;
     };
     let Some((plain_center, _)) = locate_hr_between_sentinels(
@@ -2120,12 +2341,20 @@ hr_align_tail_anchor
         "hr_align_lead_anchor",
         "hr_align_tail_anchor",
     ) else {
-        return;
+        // Harness available + `md` completed: a missing rule row is a real
+        // failure, not an environment skip (review-1 finding 3).
+        panic!(
+            "expected a centered HR rule row but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame_center.plain, frame_center.raw
+        );
     };
     let Some((plain_left, _)) =
         locate_hr_between_sentinels(&frame_left, "hr_align_lead_anchor", "hr_align_tail_anchor")
     else {
-        return;
+        panic!(
+            "expected a left-aligned HR rule row but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame_left.plain, frame_left.raw
+        );
     };
 
     let center_indent = plain_center.chars().take_while(|c| *c == ' ').count();
@@ -2156,13 +2385,21 @@ hr_width_lead_anchor
 hr_width_tail_anchor
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    // Force the text tier: a rasterized HR encodes its width in pixels, so the
+    // visible-glyph-count cap this test asserts only applies to the text rule
+    // (review-1 finding 3).
+    let Some((frame, _)) = run_md_env(body, "--max-width 60", &[("TERMINAL_IMAGES", "0")]) else {
         return;
     };
     let Some((plain, _)) =
         locate_hr_between_sentinels(&frame, "hr_width_lead_anchor", "hr_width_tail_anchor")
     else {
-        return;
+        // Harness available + `md` completed: a missing rule row is a real
+        // failure, not an environment skip (review-1 finding 3).
+        panic!(
+            "expected an HR rule row between the sentinels but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
+            frame.plain, frame.raw
+        );
     };
 
     // Count only the visible rule glyphs (skip the left padding). Dashes
@@ -2352,6 +2589,82 @@ fn level2_style_hyperlinks_width_pads_label_in_terminal() {
     );
 }
 
+/// Regression (review-1, finding 1): an exact `style.hyperlinks.width` is an
+/// exact field, so a label wider than the field must be truncated in a real
+/// terminal — the visible field must not overflow the five columns.
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_hyperlinks_exact_width_truncates_label_in_terminal() {
+    let body = "---\nstyle:\n  hyperlinks:\n    width: 5\n---\n\n\
+        [A very long hyperlink label](https://example.com)\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    // The five-column field truncates with an ellipsis; the overflowing tail of
+    // the label must be absent from the visible capture.
+    assert!(
+        frame.plain.contains('…'),
+        "expected the long label truncated to an ellipsis. plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        !frame.plain.contains("hyperlink label"),
+        "the overflowing label tail must not appear in the visible field. plain:\n{}",
+        frame.plain
+    );
+}
+
+/// Regression (review-3): truncating a colored hyperlink label must keep its
+/// closing SGR reset, so inline text following the truncated link does not
+/// inherit the link's color in a real terminal.
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_hyperlinks_truncation_does_not_bleed_color_in_terminal() {
+    // A red link with an exact 8-cell width truncates, immediately followed by
+    // an unstyled trailing marker on the same line.
+    let body = "---\nstyle:\n  hyperlinks:\n    color: red-500\n    width: 8\n---\n\n\
+        [A very long hyperlink label](https://example.com) ZZTRAIL\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    let red_semi = "38;2;251;44;54";
+    let red_colon = "38:2::251:44:54";
+    assert!(
+        frame.raw.contains(red_semi) || frame.raw.contains(red_colon),
+        "expected the link's red foreground SGR in the capture. raw len={}",
+        frame.raw.len()
+    );
+
+    // The trailing marker must not sit inside the link's red run: there must be
+    // an SGR reset (or default-foreground) between the last red introduction and
+    // the marker. WezTerm reconstructs SGR per cell, so a leaked color would
+    // wrap the marker cells with red and no intervening reset.
+    let trail_pos = frame
+        .raw
+        .find("ZZTRAIL")
+        .unwrap_or_else(|| panic!("trailing marker missing in raw capture. plain:\n{}", frame.plain));
+    let before = &frame.raw[..trail_pos];
+    let red_idx = before
+        .rfind(red_semi)
+        .or_else(|| before.rfind(red_colon))
+        .unwrap_or_else(|| {
+            panic!("link's red SGR must precede the trailing marker. raw:\n{}", frame.raw)
+        });
+    let between = &before[red_idx..];
+    assert!(
+        between.contains("\x1b[0m")
+            || between.contains("\x1b[m")
+            || between.contains("\x1b[39m"),
+        "trailing text inherits the truncated link color: no reset between the \
+         red SGR and the marker. raw:\n{}",
+        frame.raw
+    );
+}
+
 /// `style.images.local-style.color` + `bg-color` must color a local image's
 /// fallback alt text in a real terminal. Remote images must not pick this up.
 #[test]
@@ -2388,8 +2701,8 @@ fn level2_style_images_local_style_colors_fallback_in_terminal() {
     );
 }
 
-/// `style.images.local-style.width: 40` + `alignment: right` must right-pad
-/// the local image fallback line to 40 visible cells.
+/// `style.images.local-style.width: 40` + `alignment: right` must right-align
+/// the *complete* fallback placeholder within 40 visible cells.
 #[test]
 #[serial(level2_terminal)]
 fn level2_style_images_local_style_width_alignment_in_terminal() {
@@ -2400,8 +2713,9 @@ fn level2_style_images_local_style_width_alignment_in_terminal() {
         return;
     };
 
-    // The tree path applies local image width/alignment to the alt text
-    // itself, so the placeholder is `▉ IMAGE[<pad>A]`.
+    // The tree path shapes the *complete* placeholder: `▉ IMAGE[A]` is
+    // right-aligned within the 40-cell field, so the padding precedes the
+    // placeholder and the alt inside the brackets is untouched.
     let fallback_line = frame
         .plain
         .lines()
@@ -2412,9 +2726,98 @@ fn level2_style_images_local_style_width_alignment_in_terminal() {
         .and_then(|(_, rest)| rest.split_once(']'))
         .map(|(inner, _)| inner)
         .unwrap_or("");
-    let leading_spaces = inner.chars().take_while(|c| *c == ' ').count();
+    assert_eq!(
+        inner, "A",
+        "alt inside the brackets must be untouched: {fallback_line:?}"
+    );
+    let leading_spaces = fallback_line.chars().take_while(|c| *c == ' ').count();
+    let field_width = fallback_line.trim_end().chars().count();
     assert!(
-        leading_spaces >= 28 && inner.trim() == "A",
-        "expected right-aligned width:40 alt text inside fallback, got {leading_spaces} leading: {fallback_line:?}"
+        leading_spaces >= 28 && field_width == 40,
+        "expected the complete placeholder right-aligned within 40 cells, got {leading_spaces} leading, width {field_width}: {fallback_line:?}"
+    );
+}
+
+/// A long alt under an exact `width` must truncate the *complete* placeholder
+/// to the field in a real terminal — the visible field must not overflow.
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_images_exact_width_truncates_long_alt_in_terminal() {
+    let body = "---\nstyle:\n  images:\n    local-style:\n      width: 12\n---\n\n\
+        ![A very long image alt text](./no-such-image.png)\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    // The exact 12-column field truncates with an ellipsis; the overflowing
+    // tail of the alt must be absent and the visible placeholder must fill
+    // exactly the field, framing included.
+    let placeholder_line = frame
+        .plain
+        .lines()
+        .find(|l| l.contains('…'))
+        .unwrap_or_else(|| panic!("placeholder line missing in plain capture:\n{}", frame.plain));
+    assert!(
+        !placeholder_line.contains("image alt text"),
+        "the overflowing alt tail must not appear in the visible field: {placeholder_line:?}"
+    );
+    assert_eq!(
+        placeholder_line.trim_end().chars().count(),
+        12,
+        "the complete visible placeholder must fill exactly the 12-column field: {placeholder_line:?}"
+    );
+}
+
+/// Regression (review-4): truncating a colored local-image placeholder must keep
+/// its closing SGR reset, so inline text following the truncated image does not
+/// inherit the image's color in a real terminal. Links and images use distinct
+/// renderer branches, so the hyperlink color-bleed regression
+/// (`level2_style_hyperlinks_truncation_does_not_bleed_color_in_terminal`) does
+/// not cover the image placeholder's reset — this verifies it separately.
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_images_truncation_does_not_bleed_color_in_terminal() {
+    // A red local-image placeholder with an exact 12-cell width truncates the
+    // long alt, immediately followed by an unstyled trailing marker on the same
+    // line.
+    let body = "---\nstyle:\n  images:\n    local-style:\n      color: red-500\n      width: 12\n---\n\n\
+        ![A very long image alt text](./no-such-image.png) ZZTRAIL\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    let red_semi = "38;2;251;44;54";
+    let red_colon = "38:2::251:44:54";
+    assert!(
+        frame.raw.contains(red_semi) || frame.raw.contains(red_colon),
+        "expected the local image's red foreground SGR in the capture. raw len={}",
+        frame.raw.len()
+    );
+
+    // The trailing marker must not sit inside the image's red run: there must be
+    // an SGR reset (or default-foreground) between the last red introduction and
+    // the marker. WezTerm reconstructs SGR per cell, so a leaked color would
+    // wrap the marker cells with red and no intervening reset.
+    let trail_pos = frame
+        .raw
+        .find("ZZTRAIL")
+        .unwrap_or_else(|| panic!("trailing marker missing in raw capture. plain:\n{}", frame.plain));
+    let before = &frame.raw[..trail_pos];
+    let red_idx = before
+        .rfind(red_semi)
+        .or_else(|| before.rfind(red_colon))
+        .unwrap_or_else(|| {
+            panic!("image's red SGR must precede the trailing marker. raw:\n{}", frame.raw)
+        });
+    let between = &before[red_idx..];
+    assert!(
+        between.contains("\x1b[0m")
+            || between.contains("\x1b[m")
+            || between.contains("\x1b[39m"),
+        "trailing text inherits the truncated image color: no reset between the \
+         red SGR and the marker. raw:\n{}",
+        frame.raw
     );
 }

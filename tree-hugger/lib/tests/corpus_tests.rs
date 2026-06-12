@@ -85,13 +85,9 @@ fn test_manifest_builder() {
 #[test]
 fn test_manifest_items_for_tier() {
     let manifest = CorpusManifest::new("Test")
+        .add_item(CorpusItem::new("fast", "local/fast", "Rust").with_tiers(vec![CorpusTier::Smoke]))
         .add_item(
-            CorpusItem::new("fast", "local/fast", "Rust")
-                .with_tiers(vec![CorpusTier::Smoke]),
-        )
-        .add_item(
-            CorpusItem::new("slow", "local/slow", "Rust")
-                .with_tiers(vec![CorpusTier::Expanded]),
+            CorpusItem::new("slow", "local/slow", "Rust").with_tiers(vec![CorpusTier::Expanded]),
         )
         .add_item(
             CorpusItem::new("all", "local/all", "Rust")
@@ -134,14 +130,20 @@ fn test_manifest_yaml_roundtrip() {
 
 #[test]
 fn test_oracle_config() {
-    let oracle = OracleConfig::new("oxlint", vec!["JavaScript".to_string(), "TypeScript".to_string()])
-        .with_version("0.2.x")
-        .with_rule_mapping("no-console", "console-log");
+    let oracle = OracleConfig::new(
+        "oxlint",
+        vec!["JavaScript".to_string(), "TypeScript".to_string()],
+    )
+    .with_version("0.2.x")
+    .with_rule_mapping("no-console", "console-log");
 
     assert_eq!(oracle.tool, "oxlint");
     assert_eq!(oracle.version.as_deref(), Some("0.2.x"));
     assert_eq!(oracle.languages.len(), 2);
-    assert_eq!(oracle.rule_mapping.get("no-console"), Some(&"console-log".to_string()));
+    assert_eq!(
+        oracle.rule_mapping.get("no-console"),
+        Some(&"console-log".to_string())
+    );
 }
 
 // ============================================================================
@@ -165,20 +167,18 @@ fn test_corpus_diagnostic_from_diagnostic() {
         rule: Some("unwrap-call".to_string()),
         context: None,
         metadata: Some(DiagnosticMetadata {
-            category: DiagnosticCategory::Suspicious,
+            category: DiagnosticCategory::Restriction,
             confidence: DiagnosticConfidence::High,
             source: DiagnosticSource::TreeSitterQuery,
             default_severity: DiagnosticSeverity::Warning,
             effective_severity: DiagnosticSeverity::Warning,
-            is_enabled_by_default: true,
+            is_enabled_by_default: false,
             requires_experimental_semantics: false,
         }),
     };
 
     let corpus_root = PathBuf::from("/project");
-    let corpus_diag = CorpusDiagnostic::from_diagnostic(&diagnostic,
-        corpus_root.as_path(),
-    );
+    let corpus_diag = CorpusDiagnostic::from_diagnostic(&diagnostic, corpus_root.as_path());
 
     assert_eq!(corpus_diag.rule, Some("unwrap-call".to_string()));
     assert_eq!(corpus_diag.line, 5);
@@ -207,9 +207,7 @@ fn test_corpus_diagnostic_path_redaction() {
     };
 
     let corpus_root = PathBuf::from("/project");
-    let corpus_diag = CorpusDiagnostic::from_diagnostic(&diagnostic,
-        corpus_root.as_path(),
-    );
+    let corpus_diag = CorpusDiagnostic::from_diagnostic(&diagnostic, corpus_root.as_path());
 
     assert_eq!(corpus_diag.message, "Error at <REDACTED>");
 }
@@ -239,8 +237,16 @@ fn test_threshold_report_zero_threshold() {
 #[test]
 fn test_threshold_report_budget_threshold() {
     let mut report = ThresholdReport::new();
-    report.record("undefined-symbol", Some(CorpusConfidence::Low), Threshold::Budget(10));
-    report.record("undefined-symbol", Some(CorpusConfidence::Low), Threshold::Budget(10));
+    report.record(
+        "undefined-symbol",
+        Some(CorpusConfidence::Low),
+        Threshold::Budget(10),
+    );
+    report.record(
+        "undefined-symbol",
+        Some(CorpusConfidence::Low),
+        Threshold::Budget(10),
+    );
 
     let threshold = report.rules.get("undefined-symbol").unwrap();
     assert_eq!(threshold.count, 2);
@@ -250,7 +256,11 @@ fn test_threshold_report_budget_threshold() {
 #[test]
 fn test_threshold_report_experimental_unlimited() {
     let mut report = ThresholdReport::new();
-    report.record("unused-symbol", Some(CorpusConfidence::Experimental), Threshold::Zero);
+    report.record(
+        "unused-symbol",
+        Some(CorpusConfidence::Experimental),
+        Threshold::Zero,
+    );
 
     // Experimental rules don't fail the zero threshold because they're opt-in
     let threshold = report.rules.get("unused-symbol").unwrap();
@@ -265,7 +275,11 @@ fn test_threshold_report_multiple_rules() {
     let mut report = ThresholdReport::new();
     report.record("unwrap-call", Some(CorpusConfidence::High), Threshold::Zero);
     report.record("dbg-macro", Some(CorpusConfidence::High), Threshold::Zero);
-    report.record("console-log", Some(CorpusConfidence::High), Threshold::Budget(5));
+    report.record(
+        "console-log",
+        Some(CorpusConfidence::High),
+        Threshold::Budget(5),
+    );
 
     assert!(!report.is_clean());
     assert_eq!(report.rules.len(), 3);
@@ -329,12 +343,12 @@ fn test_redact_snapshot_text_redacts_paths() {
 fn test_redact_snapshot_text_redacts_temp() {
     let temp = std::env::temp_dir().to_string_lossy().to_string();
     let text = format!("Created file at {}/test_file.rs", temp);
-    let redacted = redact_snapshot_text(
-        &text, std::path::Path::new("/project"));
+    let redacted = redact_snapshot_text(&text, std::path::Path::new("/project"));
     // Should contain either <TMP> or <REDACTED> since both temp and path redaction apply
     assert!(
         redacted.contains("<TMP>") || redacted.contains("<REDACTED>"),
-        "Expected temp to be redacted, got: {}", redacted
+        "Expected temp to be redacted, got: {}",
+        redacted
     );
 }
 
@@ -421,22 +435,33 @@ fn test_normalize_diagnostics_sorts_and_dedupes() {
 #[test]
 fn test_run_smoke_corpus() {
     let manifest = CorpusManifest::new("Smoke test")
-        .add_item(CorpusItem::new("item1", "local/item1", "Rust").with_tiers(vec![CorpusTier::Smoke]))
-        .add_item(CorpusItem::new("item2", "local/item2", "Rust").with_tiers(vec![CorpusTier::Expanded]));
+        .add_item(
+            CorpusItem::new("item1", "local/item1", "Rust").with_tiers(vec![CorpusTier::Smoke]),
+        )
+        .add_item(
+            CorpusItem::new("item2", "local/item2", "Rust").with_tiers(vec![CorpusTier::Expanded]),
+        );
 
     let result = run_smoke_corpus(&manifest);
 
     assert_eq!(result.tier, CorpusTier::Smoke);
     assert_eq!(result.entries.len(), 1);
-    assert_eq!(result.entries[0].relative_path, PathBuf::from("local/item1"));
+    assert_eq!(
+        result.entries[0].relative_path,
+        PathBuf::from("local/item1")
+    );
     assert!(result.elapsed_ms.is_none());
 }
 
 #[test]
 fn test_run_expanded_corpus() {
     let manifest = CorpusManifest::new("Expanded test")
-        .add_item(CorpusItem::new("item1", "local/item1", "Rust").with_tiers(vec![CorpusTier::Smoke]))
-        .add_item(CorpusItem::new("item2", "local/item2", "Rust").with_tiers(vec![CorpusTier::Expanded]));
+        .add_item(
+            CorpusItem::new("item1", "local/item1", "Rust").with_tiers(vec![CorpusTier::Smoke]),
+        )
+        .add_item(
+            CorpusItem::new("item2", "local/item2", "Rust").with_tiers(vec![CorpusTier::Expanded]),
+        );
 
     let result = run_expanded_corpus(&manifest);
 
@@ -447,8 +472,9 @@ fn test_run_expanded_corpus() {
 
 #[test]
 fn test_run_benchmark_corpus() {
-    let manifest = CorpusManifest::new("Benchmark test")
-        .add_item(CorpusItem::new("item1", "local/item1", "Rust").with_tiers(vec![CorpusTier::Smoke]));
+    let manifest = CorpusManifest::new("Benchmark test").add_item(
+        CorpusItem::new("item1", "local/item1", "Rust").with_tiers(vec![CorpusTier::Smoke]),
+    );
 
     let result = run_benchmark_corpus(&manifest);
 

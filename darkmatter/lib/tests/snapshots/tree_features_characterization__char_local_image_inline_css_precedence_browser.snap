@@ -1,0 +1,6 @@
+---
+source: darkmatter/lib/tests/tree_features_characterization.rs
+assertion_line: 264
+expression: render_browser_body(&md)
+---
+<p><img style="width:40ch;color:blue" src="./local.png" alt="A"></p>
