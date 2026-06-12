@@ -3,10 +3,12 @@ source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
 ⤫ TransclusionError: duplicate frontmatter property
+┃ 
 ┃ Duplicate assignment to property title found in:
 ┃ 
 ┃ ```md
 ┃       5 │ line 5
 ┃     > 6 │ line 6
 ┃       7 │ line 7
-Use only one assignment per property name on a directive line.
+┃ 
+┃ Use only one assignment per property name on a directive line.

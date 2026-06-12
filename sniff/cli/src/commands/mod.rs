@@ -728,7 +728,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return handle_no_results(*no_error, on_error, cli.plain, &perf);
             }
-            crate::args::RepoAction::Worktrees { md, list, csv, .. } => {
+            crate::args::RepoAction::Worktrees { md, list: _, csv, .. } => {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
@@ -802,13 +802,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     for entry in &entries {
                         let marker = if entry.is_current { "* " } else { "" };
                         writeln!(out, "- {}{}", marker, entry.name).unwrap();
-                    }
-                    output::emit_text(&out, cli.plain);
-                } else if *list {
-                    let mut out = String::new();
-                    for entry in &entries {
-                        let marker = if entry.is_current { "* " } else { "" };
-                        writeln!(out, "{}{}", marker, entry.name).unwrap();
                     }
                     output::emit_text(&out, cli.plain);
                 } else {
@@ -1017,6 +1010,37 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .without_docs()
                         .without_formatting(),
                 ),
+            Some(crate::args::RepoAction::GitStatus {
+                package,
+                package_area,
+                ..
+            }) => {
+                // `git-status` renders only the git section (Status, Worktrees,
+                // Meta). Repo language scanning, docs, formatting, and the file
+                // inventory are never displayed, yet `RepoRequest::full()` alone
+                // costs 10-50x a structure scan — the dominant fixed cost that
+                // kept the command above the 500ms target. Drop all of it.
+                //
+                // Repo *structure* is still required to resolve a
+                // `--package`/`--package-area` scope to a path; in that case
+                // keep the cheap `structure()` scan only.
+                let needs_packages = package.is_some() || package_area.is_some();
+                let fs = FilesystemRequest::new()
+                    .git(git_request.clone())
+                    .without_docs()
+                    .without_formatting()
+                    .without_file_inventory();
+                let fs = if needs_packages {
+                    fs.repo(RepoRequest::structure())
+                } else {
+                    fs.without_repo()
+                };
+                DetectionPlan::new()
+                    .without_os()
+                    .without_hardware()
+                    .without_network()
+                    .filesystem(fs)
+            }
             _ => DetectionPlan::new()
                 .without_os()
                 .without_hardware()

@@ -1705,4 +1705,106 @@ mod tests {
         );
         assert!(!rendered.contains('<'), "no markup in Display: {rendered}");
     }
+
+    // -------------------------------------------------------------------------
+    // Phase 4: regression — hint inside block quote for composition errors
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn unsupported_interactive_schema_hint_appears_inside_block_quote_border() {
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let err = CompositionError::UnsupportedInteractiveSchema {
+            source_path: PathBuf::from("prompts/review.md"),
+            property: "spec".to_string(),
+            shape: "(unknown)".to_string(),
+        };
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        let hint_token = "Pass the value with key=value";
+        let hint_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|l| l.contains(hint_token))
+            .collect();
+        assert!(
+            !hint_lines.is_empty(),
+            "hint text must appear in rendered output: {rendered}"
+        );
+        for hint_line in &hint_lines {
+            assert!(
+                hint_line.contains('┃'),
+                "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
+            );
+        }
+
+        let body_token = "cannot be collected interactively";
+        assert!(
+            rendered.contains(body_token),
+            "body text must appear: {rendered}"
+        );
+    }
+
+    #[test]
+    fn missing_properties_hint_appears_inside_block_quote_border() {
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let err = CompositionError::MissingProperties {
+            source_path: PathBuf::from("prompts/plan.md"),
+            missing: vec![MissingProperty {
+                name: "target".to_string(),
+                type_label: Some("string".to_string()),
+                description: None,
+                interactive_shape: None,
+            }],
+            frontmatter_description: None,
+            pointer_paths: Vec::new(),
+        };
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        let hint_token = "Pass key=value";
+        let hint_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|l| l.contains(hint_token))
+            .collect();
+        assert!(
+            !hint_lines.is_empty(),
+            "hint text must appear in rendered output: {rendered}"
+        );
+        for hint_line in &hint_lines {
+            assert!(
+                hint_line.contains('┃'),
+                "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_load_hint_appears_inside_block_quote_border() {
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let err = CompositionError::SchemaLoad {
+            source_path: PathBuf::from("prompts/deploy.md"),
+            message: "unsupported protocol".to_string(),
+        };
+        let term = Terminal::new_optimistic(80);
+        let rendered = strip_escape_codes(err.report_block_error(&term));
+
+        let hint_token = "Verify the `$schema` path";
+        let hint_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|l| l.contains(hint_token))
+            .collect();
+        assert!(
+            !hint_lines.is_empty(),
+            "hint text must appear in rendered output: {rendered}"
+        );
+        for hint_line in &hint_lines {
+            assert!(
+                hint_line.contains('┃'),
+                "regression: hint must appear inside block quote border, got: {hint_line:?}\nfull output:\n{rendered}"
+            );
+        }
+    }
 }

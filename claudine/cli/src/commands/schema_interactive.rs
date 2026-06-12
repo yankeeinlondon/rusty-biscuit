@@ -30,7 +30,7 @@ use claudine::composition::{
     PreValidatedSchema, PropertyState, PropertyStatus, ResolvedCompositionSource,
     SchemaStatusReport, TextFormat, build_schema_status_report, pre_validate_schema,
 };
-use tui_chrome::prelude::*;
+use biscuit_tui::prelude::*;
 
 use crate::log;
 

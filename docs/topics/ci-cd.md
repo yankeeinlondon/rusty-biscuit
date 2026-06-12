@@ -137,7 +137,7 @@ public repository.
     conventional-commit aware (`feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `chore(deps)`,
     `chore`) and skips `chore(release)`.
 
-- **No release for excluded packages.** `tui-chrome`, `tui-chrome-cli`, `tabby`, and the `ui`
+- **No release for excluded packages.** `biscuit-tui`, `biscuit-tui-cli`, `tabby`, and the `ui`
     package opt out.
 
 ### Versioning policy

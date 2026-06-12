@@ -32,4 +32,4 @@ We will allow that a verbose command reach out to _related_ peer data and theref
 > TODO: need to talk about:
 >
 > - approprite use of STDOUT vs STDERR
-> - annoucing `--with-network` and `-v` when there is a variant available
+> - announcing command-local network opt-ins and `-v` when there is a variant available

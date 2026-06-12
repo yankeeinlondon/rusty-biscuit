@@ -122,7 +122,7 @@ fn parse_rows_typed_parses_chosen_many_from_comma_string() {
 
 #[test]
 fn write_matrix_raw_emits_array_of_row_objects() {
-    use tui_chrome::RowCell;
+    use biscuit_tui::RowCell;
 
     let rows = vec![Row {
         cells: vec![
@@ -146,7 +146,7 @@ fn write_matrix_raw_emits_array_of_row_objects() {
 
 #[test]
 fn write_matrix_null_emits_key_equals_value_nul_separated() {
-    use tui_chrome::RowCell;
+    use biscuit_tui::RowCell;
 
     let rows = vec![Row {
         cells: vec![RowCell {
@@ -161,7 +161,7 @@ fn write_matrix_null_emits_key_equals_value_nul_separated() {
 
 #[test]
 fn write_matrix_boolean_emits_json_bool_not_string() {
-    use tui_chrome::RowCell;
+    use biscuit_tui::RowCell;
 
     let rows = vec![Row {
         cells: vec![RowCell {
@@ -178,7 +178,7 @@ fn write_matrix_boolean_emits_json_bool_not_string() {
 
 #[test]
 fn write_matrix_chosen_many_emits_json_array() {
-    use tui_chrome::RowCell;
+    use biscuit_tui::RowCell;
 
     let rows = vec![Row {
         cells: vec![RowCell {

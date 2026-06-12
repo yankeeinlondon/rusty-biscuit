@@ -15,6 +15,13 @@ name = "render_cicd_fixture"
 path = "src/bin/render_cicd_fixture.rs"
 required-features = ["test-fixtures"]
 
+# Test-only helper rendered inside a real terminal by the Level 2 git-status
+# styling test (double-underline headers, worktree hyperlinks, blank-row layout).
+[[bin]]
+name = "render_git_status_fixture"
+path = "src/bin/render_git_status_fixture.rs"
+required-features = ["test-fixtures"]
+
 [features]
 test-fixtures = []
 

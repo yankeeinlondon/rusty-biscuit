@@ -10,7 +10,7 @@
 //! ## Examples
 //!
 //! ```
-//! use tui_chrome::prelude::*;
+//! use biscuit_tui::prelude::*;
 //!
 //! let input: ChoiceInput = ChoiceInput::new("toppings", "Pick toppings")
 //!     .with_options(vec![

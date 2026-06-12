@@ -146,7 +146,7 @@ packages:
   - darkmatter
   - darkmatter-cli
   - biscuit-terminal-cli
-  - tui-chrome-cli
+  - biscuit-tui-cli
 source_files_during_phase_6:
   - .claude/skills/rust-testing/SKILL.md
   - docs/testing-strategy.md

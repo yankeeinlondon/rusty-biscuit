@@ -1,22 +1,22 @@
-//! TTY provider selection UI built on `tui-chrome`.
+//! TTY provider selection UI built on `biscuit-tui`.
 //!
 //! This module contains the one-shot interactive picker used by
 //! `compose` and `inline-compose` when no explicit `--<provider>` flag
 //! was given and the session has a TTY, plus the sequence review
-//! screen built on `tui-chrome::InputTable`.
+//! screen built on `biscuit-tui::InputTable`.
 
 use std::io;
 
+use biscuit_tui::components::input_table::TextInputConfig;
+use biscuit_tui::prelude::*;
 use claudine::composition::{
     ProviderPickerOption, ProviderPickerPlan, ResolvedExecutionTarget, SequenceStepDraft,
 };
 use claudine::provider::Provider;
-use tui_chrome::components::input_table::TextInputConfig;
-use tui_chrome::prelude::*;
 
 /// Prompt the user to select a single provider from a picker plan.
 ///
-/// Built on [`tui_chrome::ChooseOne`] + [`tui_chrome::run_standalone`].
+/// Built on [`biscuit_tui::ChooseOne`] + [`biscuit_tui::run_standalone`].
 /// Maps each [`ProviderPickerOption`] to a [`ChoiceOption`], honours
 /// `plan.default_index` as the initial selection, and translates
 /// [`EventOutcome::Submitted`] into the selected [`Provider`] and
@@ -44,7 +44,7 @@ pub fn prompt_one_shot_provider(plan: ProviderPickerPlan) -> io::Result<Provider
 
 /// Present a multi-step review screen for sequence execution.
 ///
-/// Built on [`tui_chrome::InputTable`] + [`tui_chrome::run_standalone`].
+/// Built on [`biscuit_tui::InputTable`] + [`biscuit_tui::run_standalone`].
 /// Each step becomes one row with three columns:
 ///
 /// 1. **Step label** (`StaticText`) — the step name, read-only.

@@ -183,7 +183,7 @@ Provider selection behaves differently in **TTY** (interactive terminal) and **n
 
 When stdout is a terminal and no explicit `--<provider>` flag is given:
 
-1. **Interactive picker** — a `tui-chrome` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
+1. **Interactive picker** — a `biscuit-tui` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
 
 ### Non-TTY Mode
 
