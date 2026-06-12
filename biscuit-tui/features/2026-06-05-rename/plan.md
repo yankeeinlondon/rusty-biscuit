@@ -91,7 +91,7 @@ packages:
 
 # Plan: Rename `tui-chrome` to `biscuit-tui`
 
-This plan converts `biscuit-tui/features/2026-06-5-rename/spec.md` into an ordered, checkable execution plan. The work is a compile-time breaking change only: public Rust APIs, CLI flags, the `question` binary name, and end-user behavior stay the same.
+This plan converts `biscuit-tui/features/2026-06-05-rename/spec.md` into an ordered, checkable execution plan. The work is a compile-time breaking change only: public Rust APIs, CLI flags, the `question` binary name, and end-user behavior stay the same.
 
 ## Notes for implementers
 
@@ -166,13 +166,13 @@ Must pass.
 
 *Goal: bring all live documentation and the biscuit-tui skill into alignment. This phase is parallelizable with Phase 2 and Phase 3 once code references are stable.*
 
-- [ ] Update `biscuit-tui/README.md`, `biscuit-tui/lib/README.md`, and `biscuit-tui/cli/README.md`.
-- [ ] Update `biscuit-tui/docs/cli-reference.md`.
-- [ ] Update `biscuit-tui/docs/components/*.md` (index, choose_one, choose_many, frame_chrome, input_table, text_input, text_area_input).
-- [ ] Update `biscuit-tui/docs/theming.md`: change `https://docs.rs/tui-chrome/latest/tui_chrome/…` URLs to `https://docs.rs/biscuit-tui/latest/biscuit_tui/…`.
-- [ ] Update `biscuit-tui/docs/dependencies.md` if it names the old crate.
-- [ ] Update `.claude/skills/biscuit-tui/SKILL.md`: crate table, `description:` frontmatter, prose, and all `use tui_chrome::…` examples. Do **not** add a `hash:` frontmatter property.
-- [ ] Update the active package inventory entry from `tui-chrome-cli` to `biscuit-tui-cli` in `features/2026-05-24-testing-best-practices/plan.md`.
+- [x] Update `biscuit-tui/README.md`, `biscuit-tui/lib/README.md`, and `biscuit-tui/cli/README.md`.
+- [x] Update `biscuit-tui/docs/cli-reference.md`.
+- [x] Update `biscuit-tui/docs/components/*.md` (index, choose_one, choose_many, frame_chrome, input_table, text_input, text_area_input).
+- [x] Update `biscuit-tui/docs/theming.md`: change `https://docs.rs/tui-chrome/latest/tui_chrome/…` URLs to `https://docs.rs/biscuit-tui/latest/biscuit_tui/…`.
+- [x] Update `biscuit-tui/docs/dependencies.md` if it names the old crate.
+- [x] Update `.claude/skills/biscuit-tui/SKILL.md`: crate table, `description:` frontmatter, prose, and all `use tui_chrome::…` examples. Do **not** add a `hash:` frontmatter property.
+- [x] Update the active package inventory entry from `tui-chrome-cli` to `biscuit-tui-cli` in `features/2026-05-24-testing-best-practices/plan.md`.
 
 **Validation checkpoint:**
 
@@ -181,8 +181,9 @@ rg -n --hidden 'tui-chrome|tui_chrome' biscuit-tui/ .claude/skills/biscuit-tui/S
   -g '!target/**' \
   -g '!**/features/_completed/**' \
   -g '!**/reviews/**' \
-  -g '!biscuit-tui/features/2026-06-5-rename/spec.md' \
-  -g '!biscuit-tui/features/2026-06-5-rename/plan.md'
+  -g '!biscuit-tui/features/2026-06-05-rename/spec.md' \
+  -g '!biscuit-tui/features/2026-06-05-rename/plan.md' \
+  -g '!biscuit-tui/features/2026-06-05-rename/review-1.md'
 ```
 
 Must produce no output.

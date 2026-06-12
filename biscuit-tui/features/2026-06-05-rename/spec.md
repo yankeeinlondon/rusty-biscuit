@@ -66,8 +66,8 @@ must update its dependency key and imports when it adopts this change.
 - `just build`, `just test`, `just doctest`, and `just lint` pass in both
   `biscuit-tui/` and `claudine/` (the sole external workspace caller).
 - The residual-reference command in [Verification](#verification) returns no
-  unexpected matches. Historical records and this rename specification are
-  intentionally excluded.
+  unexpected matches. Historical records and this feature's own records (the
+  rename specification, plan, and reviews) are intentionally excluded.
 
 ---
 
@@ -218,7 +218,9 @@ left as written:
 - `.claude/skills/claudine/timeline.md`; its entry describes the historical
   migration away from `inquire`.
 - Captured/generated agent output under `claudine/claudine-output/**`.
-- This specification, which necessarily names both the old and new crates.
+- This feature's own records (`biscuit-tui/features/2026-06-05-rename/spec.md`,
+  `plan.md`, and `review-1.md`), which necessarily name both the old and new
+  crates.
 
 Active and unscheduled plans are not historical records and are in scope.
 
@@ -257,7 +259,9 @@ rg -n --hidden 'tui-chrome|tui_chrome' . \
   -g '!features/2026-05-24-testing-best-practices/review-*.md' \
   -g '!.claude/skills/claudine/timeline.md' \
   -g '!claudine/claudine-output/**' \
-  -g '!biscuit-tui/features/2026-06-5-rename/spec.md'
+  -g '!biscuit-tui/features/2026-06-05-rename/spec.md' \
+  -g '!biscuit-tui/features/2026-06-05-rename/plan.md' \
+  -g '!biscuit-tui/features/2026-06-05-rename/review-1.md'
 ```
 
 The metadata command must print exactly the two new package names. The
