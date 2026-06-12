@@ -1,9 +1,6 @@
 ---
 sequence: "@claudine/docs/providers.yaml"
-file: "{{ctx.repo_root}}/claudine/docs/research/agent-logging/{{state.file}}"
-grant:
-    read:
-        - "{{state.user_dir}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/agent-models/{{state.file}}"
 agent: opencode
 model: zai-coding-plan/glm-5.1
 # all target documents we write to should provide this frontmatter
@@ -12,14 +9,7 @@ target_schema:
     last_updated: date(required)
     agent: string(required)
     model: string(required)
-    has_schema: enum(formal,informal,none; required)
-    schema_url: string
-    logs_directory: { macos: string, windows: string, linux: string }
-    log_format: enum(jsonl)
-    has_desktop_app: boolean(required)
-    desktop_logs: 
-        same_log_format: boolean
-        same_directory: boolean
+    
     changes: string[]
     requires_claudine_update: boolean(required)
     reason: string
@@ -32,17 +22,10 @@ Use the 'claudine' skill.
 
 ## Document Structure
 
-Your job is to do detailed research into the **logging** features of the **{{state.desc}}**. You are expected to answer the following questions:
+Your job is to do detailed research into the **model** support in the **{{state.desc}}** solution. You are expected to answer the following questions:
 
-- `## Introduction to {{state.name}} Logging` Section
-    - An overview of log _locations_ for {{state.name}}
-        - Go into details around how logs are organized, split, and archived
-    - Where the logs are kept in storage:
-        - JSONL
-        - SQLite DB
-        - etc.
-    - Whether or not a SQLite (or other) database is used for storing logs
-    - The major **types** of log messages that this provider distinguishes 
+- `## Model's Available` Section
+    - 
 
 - `## Logging Schema` Section
     - Try to identify an "official" schema that {{state.name}} has defined for their log output
