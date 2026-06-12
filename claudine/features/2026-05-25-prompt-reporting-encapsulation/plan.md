@@ -7,6 +7,7 @@ source_files_during_phase_1:
   - claudine/lib/src/system_prompt/mod.rs
   - claudine/lib/src/system_prompt/prepare.rs
   - claudine/lib/src/prompt_reporting/system_prompt.rs
+  - claudine/lib/src/composition/schema_validation.rs
   - claudine/cli/src/output/mod.rs
   - claudine/cli/src/commands/wrap/system_prompt.rs
   - claudine/cli/src/commands/wrap/mod.rs
@@ -14,8 +15,7 @@ source_files_during_phase_1:
   - claudine/cli/tests/system_prompt_perf_bench.rs
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
-skills_files_updated_during_phase_1:
-  - .claude/skills/claudine/SKILL.md
+skills_files_updated_during_phase_1: []
 source_files_during_phase_2:
   - claudine/lib/src/prompt_reporting/types.rs
   - claudine/lib/src/prompt_reporting/frontmatter.rs
@@ -28,7 +28,6 @@ skills_files_updated_during_phase_2: []
 packages:
   - claudine
   - claudine-cli
-  - biscuit-tui
 ---
 
 # Plan: Prompt Reporting Encapsulation (Stage 0)
@@ -39,15 +38,15 @@ Encapsulate the prompt reporting logic into two primary report types and a unifi
 
 Rename the core system prompt type to better reflect its role and align with future stages.
 
-- [ ] Rename `EffectiveSystemPrompt` to `ResolvedSystemPrompt` in `claudine/lib/src/system_prompt/types.rs`.
-- [ ] Update all references in `claudine/lib/src/system_prompt/prepare.rs`.
-- [ ] Update all references in `claudine/lib/src/prompt_reporting/system_prompt.rs`.
-- [ ] Update all references in `claudine/cli/src/commands/wrap/mod.rs`.
-- [ ] Update all references in `claudine/cli/src/commands/wrap/system_prompt.rs`.
-- [ ] Update all references in `claudine/cli/src/commands/wrap/composition/mod.rs`.
-- [ ] Update all references in `claudine/cli/src/output/mod.rs`.
-- [ ] Update all references in `claudine/cli/tests/system_prompt_perf_bench.rs`.
-- [ ] **Validation:** Run `cargo check -p claudine` and `cargo check -p claudine-cli` to ensure no broken references.
+- [x] Rename `EffectiveSystemPrompt` to `ResolvedSystemPrompt` in `claudine/lib/src/system_prompt/types.rs`.
+- [x] Update all references in `claudine/lib/src/system_prompt/prepare.rs`.
+- [x] Update all references in `claudine/lib/src/prompt_reporting/system_prompt.rs`.
+- [x] Update all references in `claudine/cli/src/commands/wrap/mod.rs`.
+- [x] Update all references in `claudine/cli/src/commands/wrap/system_prompt.rs`.
+- [x] Update all references in `claudine/cli/src/commands/wrap/composition/mod.rs`.
+- [x] Update all references in `claudine/cli/src/output/mod.rs`.
+- [x] Update all references in `claudine/cli/tests/system_prompt_perf_bench.rs`.
+- [x] **Validation:** Run `cargo check -p claudine` and `cargo check -p claudine-cli` to ensure no broken references.
 
 ## Phase 2: Unified Verbosity and Precedence
 
