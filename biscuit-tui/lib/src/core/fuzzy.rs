@@ -21,7 +21,7 @@
 //! ## Examples
 //!
 //! ```
-//! use tui_chrome::core::FuzzyFilter;
+//! use biscuit_tui::core::FuzzyFilter;
 //!
 //! let labels = vec![
 //!     "Apple".to_string(),
@@ -79,7 +79,7 @@ impl FuzzyFilter {
     /// ## Examples
     ///
     /// ```
-    /// use tui_chrome::core::FuzzyFilter;
+    /// use biscuit_tui::core::FuzzyFilter;
     ///
     /// let filter = FuzzyFilter::new();
     /// assert!(!filter.is_active());

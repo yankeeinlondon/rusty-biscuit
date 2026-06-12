@@ -9,7 +9,7 @@
 //! ## Examples
 //!
 //! ```
-//! use tui_chrome::prelude::*;
+//! use biscuit_tui::prelude::*;
 //!
 //! let state = TextAreaInputState::new(60, 10)
 //!     .with_label(Label::new("Notes", LabelPosition::Above))
