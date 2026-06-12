@@ -739,8 +739,11 @@ pub struct TerminalOptions {
     pub max_width: Option<u16>,       // Text wrapping width
     pub mermaid_mode: MermaidMode,    // Off, Image, Text
     pub hyperlink_mode: HyperlinkMode, // Auto, Always, Never
+    pub code_block_mode: CodeBlockMode, // Inverse (default), Dark, Light, Same
 }
 ```
+
+Code blocks invert their theme variant relative to the page/terminal for contrast by default (a light code panel on a dark terminal, and vice versa). This is configurable via `code_block_mode` (`CodeBlockMode::{Inverse, Dark, Light, Same}`) on `TerminalOptions`, or `DarkmatterPage::with_code_block_mode(...)` for page layout.
 
 ## CLI
 

@@ -662,7 +662,10 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     TerminalRenderOptions {
         context,
         strictness: RenderStrictness::Warn,
-        code_renderer: Some(Rc::new(TerminalCodeRenderer::for_terminal(&term))),
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::for_terminal(
+            &term,
+            opts.code_block_mode,
+        ))),
     }
 }
 

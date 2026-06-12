@@ -1500,6 +1500,7 @@ title: Test
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
             hr_defaults: None,
+            code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         };
         let output = md.as_terminal(options).unwrap();
 
@@ -1569,6 +1570,7 @@ title: Test
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
             hr_defaults: None,
+            code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         };
         let terminal_output = md.as_terminal(terminal_options).unwrap();
         let terminal_plain = strip_ansi_codes(&terminal_output);

@@ -14,7 +14,7 @@ use renderable::tree::{CodeRenderer, NodeAttrs};
 
 use crate::markdown::{
     dsl::{CodeBlockMeta, parse_code_info},
-    highlighting::{CodeHighlighter, ColorMode, ThemePair},
+    highlighting::{CodeBlockMode, CodeHighlighter, ColorMode, ThemePair},
     output::code_block::{render_html_code_block, render_terminal_code_block},
     output::html::HtmlOptions,
     output::terminal::{
@@ -37,20 +37,25 @@ use crate::markdown::{
 #[derive(Debug, Default, Clone)]
 pub struct TerminalCodeRenderer {
     terminal: Option<Terminal>,
+    code_block_mode: CodeBlockMode,
 }
 
 impl TerminalCodeRenderer {
     /// Creates a new [`TerminalCodeRenderer`].
     #[must_use]
     pub fn new() -> Self {
-        Self { terminal: None }
+        Self {
+            terminal: None,
+            code_block_mode: CodeBlockMode::default(),
+        }
     }
 
     /// Creates a [`TerminalCodeRenderer`] bound to the detected terminal.
     #[must_use]
-    pub fn for_terminal(term: &Terminal) -> Self {
+    pub fn for_terminal(term: &Terminal, code_block_mode: CodeBlockMode) -> Self {
         Self {
             terminal: Some(term.clone()),
+            code_block_mode,
         }
     }
 }
@@ -101,12 +106,13 @@ impl CodeRenderer for TerminalCodeRenderer {
             Some(name) => ThemePair::from_str_or_default(name),
             None => ThemePair::OneHalf,
         };
-        let highlighter = match self.terminal.as_ref() {
-            Some(term) => CodeHighlighter::for_code_block(code_theme, term, Some(code_theme)),
-            None => {
-                CodeHighlighter::for_code_block_mode(code_theme, terminal_mode, Some(code_theme))
-            }
-        };
+        // `terminal_mode` is the page color mode. The code block's variant is
+        // resolved by `code_block_mode` (default `Inverse`). For `Inverse` this
+        // is `terminal_mode.inverted()` — byte-identical to the previous
+        // `for_code_block(_mode)` path, which resolved the same inverted variant
+        // and selected `code_theme` directly (override wins, THEME env ignored).
+        let code_mode = self.code_block_mode.resolve(terminal_mode);
+        let highlighter = CodeHighlighter::new(code_theme, code_mode);
         // Header/body contrast keys off the resolved theme background, not the
         // requested mode, so single-variant themes still get readable chrome.
         let color_mode = crate::markdown::output::code_block::mode_for_background(
@@ -132,6 +138,7 @@ impl CodeRenderer for TerminalCodeRenderer {
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Auto,
             hr_defaults: None,
+            code_block_mode: self.code_block_mode,
         };
 
         // Body: the syntax-highlighted code block, padded to the available
@@ -189,6 +196,7 @@ impl CodeRenderer for TerminalCodeRenderer {
         // Catching the SVG failure here and returning a code-block fragment
         // would hide that failure behind `Some(_)` and bypass strictness.
         let options = HtmlOptions::default();
+        // TODO: honor code_block_mode for browser (terminal-only for now).
         // Code blocks contrast against the page: resolve the theme *variant*
         // against the INVERTED color mode (a light code panel on a dark page,
         // and vice versa). This matches `darkmatter::markdown::output::html::as_html`
@@ -450,6 +458,46 @@ mod tests {
             string_value.g,
             string_value.b,
         );
+    }
+
+    /// `CodeBlockMode` controls which OneHalf variant the terminal code panel
+    /// uses, independent of the page color mode. `Dark` forces the dark
+    /// background, `Light` forces the light one, and `Same` matches the page.
+    #[test]
+    fn terminal_code_block_mode_selects_variant() {
+        use biscuit_terminal::terminal::Terminal;
+
+        let code = "$schema:\n  foo: string\n";
+        let dark_bg = bg_sgr(one_half_background(ColorMode::Dark));
+        let light_bg = bg_sgr(one_half_background(ColorMode::Light));
+        assert_ne!(dark_bg, light_bg, "OneHalf must be a paired theme");
+
+        // A dark page: capture which variant each mode resolves.
+        let term = Terminal::new_optimistic(80);
+
+        let render = |mode: CodeBlockMode| {
+            TerminalCodeRenderer::for_terminal(&term, mode)
+                .render_terminal_code(
+                    Some("yaml"),
+                    code,
+                    None,
+                    &yaml_attrs(),
+                    TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark)
+                        .with_code_theme_name(Some("one-half".into())),
+                )
+                .expect("render")
+        };
+
+        // Dark forces dark variant; Light forces light variant.
+        assert!(render(CodeBlockMode::Dark).contains(&dark_bg));
+        assert!(!render(CodeBlockMode::Dark).contains(&light_bg));
+        assert!(render(CodeBlockMode::Light).contains(&light_bg));
+        assert!(!render(CodeBlockMode::Light).contains(&dark_bg));
+
+        // Inverse on a dark page -> light panel.
+        assert!(render(CodeBlockMode::Inverse).contains(&light_bg));
+        // Same on a dark page -> dark panel.
+        assert!(render(CodeBlockMode::Same).contains(&dark_bg));
     }
 
     #[test]

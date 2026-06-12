@@ -27,7 +27,7 @@
 //! // Output contains ANSI escape codes for terminal display
 //! ```
 
-use crate::markdown::highlighting::{ColorMode, ThemePair};
+use crate::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
 #[cfg(test)]
 use crate::markdown::output::code_block;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
@@ -710,6 +710,13 @@ pub struct TerminalOptions {
     /// default horizontal-rule style instead of reading the deprecated top-level
     /// `hr:` frontmatter block.
     pub hr_defaults: Option<crate::markdown::inline::HorizontalRuleAttrs>,
+    /// Controls how a code block's theme variant is chosen relative to the page
+    /// color mode.
+    ///
+    /// - `Inverse` (default): opposite variant from the page (dark page -> light panel)
+    /// - `Dark` / `Light`: force the named variant
+    /// - `Same`: match the page variant
+    pub code_block_mode: CodeBlockMode,
 }
 
 static DETECTED_COLOR_MODE: std::sync::OnceLock<ColorMode> = std::sync::OnceLock::new();
@@ -738,6 +745,7 @@ impl Default for TerminalOptions {
             mermaid_mode: MermaidMode::default(),
             hyperlink_mode: HyperlinkMode::default(),
             hr_defaults: None,
+            code_block_mode: CodeBlockMode::default(),
         }
     }
 }
@@ -916,6 +924,7 @@ mod tests {
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
             hr_defaults: None,
+            code_block_mode: CodeBlockMode::default(),
         }
     }
 

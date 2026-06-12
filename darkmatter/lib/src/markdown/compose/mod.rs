@@ -6266,6 +6266,7 @@ Rounded: {{ round(pi) }}"#;
                 mermaid_mode: MermaidMode::Off,
                 hyperlink_mode: HyperlinkMode::Always,
                 hr_defaults: None,
+                code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
             };
             let output = composed.as_terminal(options).unwrap();
 

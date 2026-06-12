@@ -15,7 +15,7 @@ use super::context::LayoutContext;
 use super::error::PageRenderError;
 use super::types::{PageBackground, PageComponent};
 use crate::markdown::Markdown;
-use crate::markdown::highlighting::{ColorMode, ThemePair};
+use crate::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
 use crate::markdown::inline::HorizontalRuleAttrs;
 use crate::markdown::output::html::HtmlOptions;
 use crate::markdown::output::terminal::{
@@ -49,10 +49,14 @@ pub struct ComponentPolicy {
 /// construction; the page does not borrow the `Terminal`.
 ///
 /// The builder is consuming (`self -> Self`) for ergonomic chaining. With no
-/// builder calls, [`DarkmatterPage::render`] is byte-for-byte equivalent to
+/// builder calls, [`DarkmatterPage::render`] matches
 /// [`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal) with
-/// default options. Both the zero-config and decorated layout paths route
-/// through the render-tree terminal document renderer; the decorated path
+/// default options whenever the captured terminal's color mode agrees with the
+/// detected default (or the terminal reports `Unknown`). When a real terminal
+/// reports a different mode, the page honors *that* mode — the terminal is the
+/// source of truth (Decision #4), which `Markdown::as_terminal` cannot observe
+/// because it has no `Terminal`. Both the zero-config and decorated layout paths
+/// route through the render-tree terminal document renderer; the decorated path
 /// additionally applies row decoration (margins, padding, background fill).
 ///
 /// ## Examples
@@ -110,6 +114,8 @@ pub struct DarkmatterPage {
     local_hyperlink_style: Option<crate::style::schema::CommonStyle>,
     /// Local image override from `style.images.local-style`.
     local_image_style: Option<crate::style::schema::CommonStyle>,
+    /// How code-block theme variants are chosen relative to the page color mode.
+    code_block_mode: CodeBlockMode,
 }
 
 impl DarkmatterPage {
@@ -146,6 +152,7 @@ impl DarkmatterPage {
             hyperlink_style: None,
             local_hyperlink_style: None,
             local_image_style: None,
+            code_block_mode: CodeBlockMode::default(),
         }
     }
 
@@ -752,6 +759,14 @@ impl DarkmatterPage {
         self
     }
 
+    /// Sets how a code block's theme variant is chosen relative to the page
+    /// color mode (see [`CodeBlockMode`]).
+    #[must_use]
+    pub fn with_code_block_mode(mut self, mode: CodeBlockMode) -> Self {
+        self.code_block_mode = mode;
+        self
+    }
+
     /// Pass through to [`TerminalOptions::prose_theme`].
     pub fn with_prose_theme(mut self, theme: impl Into<String>) -> Self {
         self.options.prose_theme = ThemePair::from_str_or_default(&theme.into());
@@ -773,10 +788,12 @@ impl DarkmatterPage {
     /// (margins, padding, background fill) when any layout setting is
     /// non-default.
     ///
-    /// When all layout fields are at their defaults, this is byte-for-byte
-    /// equivalent to `Markdown::as_terminal(default)`. The decorated path
-    /// threads a `LayoutContext` into the same render-tree terminal renderer
-    /// and then decorates the rendered rows.
+    /// When all layout fields are at their defaults, this matches
+    /// `Markdown::as_terminal(default)` as long as the captured terminal color
+    /// mode agrees with the detected default (or is `Unknown`); a real terminal
+    /// reporting a different mode wins, since the terminal is the source of truth
+    /// (Decision #4). The decorated path threads a `LayoutContext` into the same
+    /// render-tree terminal renderer and then decorates the rendered rows.
     ///
     /// ## Errors
     ///
@@ -810,6 +827,7 @@ impl DarkmatterPage {
         options.include_line_numbers = self.line_numbers;
         options.color_mode = ctx.render_color_mode;
         options.hr_defaults = self.hr_defaults();
+        options.code_block_mode = self.code_block_mode;
 
         // Apply page-level code theme override if set via frontmatter.
         if let Some(theme) = self.page_code_theme {
@@ -1997,6 +2015,32 @@ mod tests {
             (page_lum - panel_lum).abs() > 0.15,
             "code panel must separate from the dark page surface: \
              page bg {page_bg:?} (lum {page_lum:.3}) vs panel bg {panel_bg:?} (lum {panel_lum:.3})"
+        );
+    }
+
+    /// The DEFAULT page background is `Transparent` (the `md render` default, with
+    /// no `--page-bg`). There is no painted page surface to separate from, but the
+    /// code panel must still invert against the *terminal* mode (Decision #4/#9):
+    /// a dark terminal yields a light (inverted) panel even when the option mode
+    /// disagrees. Pre-fix the panel inverts against the option mode.
+    #[test]
+    fn code_panel_inverts_against_terminal_not_option_in_transparent_default() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Dark;
+
+        let md: Markdown = "```rust\nfn codemarker() {}\n```\n".into();
+
+        let out = DarkmatterPage::new(&term)
+            .with_color_mode(ColorMode::Light)
+            .render(&md)
+            .unwrap();
+
+        let panel_bg = active_bg_at(&out, "codemarker");
+        let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+        assert!(
+            lum > 0.5,
+            "a dark terminal must invert the code panel to a light theme regardless \
+             of the option mode: panel bg {panel_bg:?} (lum {lum:.3})"
         );
     }
 

@@ -27,6 +27,75 @@ impl std::fmt::Display for InvalidThemeName {
     }
 }
 
+/// How a code block's theme variant is chosen relative to the page color mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CodeBlockMode {
+    /// Opposite variant from the page (default): dark page -> light panel.
+    #[default]
+    Inverse,
+    /// Always the dark variant.
+    Dark,
+    /// Always the light variant.
+    Light,
+    /// Same variant as the page.
+    Same,
+}
+
+impl CodeBlockMode {
+    /// Resolves the code block's color mode given the page's color mode.
+    #[must_use]
+    pub fn resolve(self, page_mode: ColorMode) -> ColorMode {
+        match self {
+            CodeBlockMode::Inverse => page_mode.inverted(),
+            CodeBlockMode::Same => page_mode,
+            CodeBlockMode::Dark => ColorMode::Dark,
+            CodeBlockMode::Light => ColorMode::Light,
+        }
+    }
+}
+
+impl std::str::FromStr for CodeBlockMode {
+    type Err = InvalidCodeBlockMode;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "inverse" => Ok(CodeBlockMode::Inverse),
+            "dark" => Ok(CodeBlockMode::Dark),
+            "light" => Ok(CodeBlockMode::Light),
+            "same" => Ok(CodeBlockMode::Same),
+            _ => Err(InvalidCodeBlockMode(s.to_string())),
+        }
+    }
+}
+
+impl std::fmt::Display for CodeBlockMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            CodeBlockMode::Inverse => "inverse",
+            CodeBlockMode::Dark => "dark",
+            CodeBlockMode::Light => "light",
+            CodeBlockMode::Same => "same",
+        };
+        f.write_str(name)
+    }
+}
+
+/// Error type for invalid [`CodeBlockMode`] parsing.
+#[derive(Debug, Clone)]
+pub struct InvalidCodeBlockMode(pub String);
+
+impl std::error::Error for InvalidCodeBlockMode {}
+
+impl std::fmt::Display for InvalidCodeBlockMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Invalid code-block mode: '{}'. Valid values: inverse, dark, light, same",
+            self.0
+        )
+    }
+}
+
 /// Primary API surface - theme pairs that adapt to light/dark modes.
 ///
 /// Each variant represents a paired light/dark theme combination.
@@ -94,8 +163,11 @@ impl ThemePair {
     }
 
     pub(crate) fn for_code_block(self, term: &Terminal, theme: Option<ThemePair>) -> Theme {
-        self.selected(theme)
-            .resolve(term.color_mode().inverted())
+        // Code blocks use the OPPOSITE variant from the terminal so the panel
+        // contrasts with the page: a dark terminal gets the light panel, a light
+        // terminal gets the dark panel. The bg+fg pairing within each variant is
+        // coherent; only which variant lands on which terminal is inverted.
+        self.selected(theme).resolve(term.color_mode().inverted())
     }
 
     #[allow(dead_code)]
@@ -104,6 +176,7 @@ impl ThemePair {
     }
 
     pub(crate) fn for_code_block_mode(self, mode: ColorMode, theme: Option<ThemePair>) -> Theme {
+        // Opposite variant from the page mode — see `for_code_block`.
         self.selected(theme).resolve(mode.inverted())
     }
 
@@ -326,10 +399,10 @@ lazy_static! {
 
 /// Returns the default code theme for a given prose theme.
 ///
-/// Code blocks use the page theme pair, resolved against the inverted color
-/// mode by the code renderer. This function therefore returns the prose theme
-/// unchanged; explicit code-theme overrides are handled by
-/// [`detect_code_theme`].
+/// Code blocks use the page theme pair, resolved against a color mode chosen by
+/// the code renderer's [`CodeBlockMode`] (default `Inverse`). This function
+/// therefore returns the prose theme unchanged; explicit code-theme overrides
+/// are handled by [`detect_code_theme`].
 ///
 /// ## Examples
 ///
@@ -373,9 +446,10 @@ pub fn detect_prose_theme() -> ThemePair {
 /// Detects the code theme from environment variables or derives it from the prose theme.
 ///
 /// First checks the `CODE_THEME` environment variable. If not set or invalid,
-/// uses the given prose theme. Code blocks resolve that theme pair against the
-/// inverted color mode, so the default code block theme is the page theme on
-/// the opposite surface.
+/// uses the given prose theme. Code blocks resolve that theme pair against a
+/// color mode chosen by the code renderer's [`CodeBlockMode`] (default
+/// `Inverse`), so by default the code block theme is the page theme on the
+/// opposite surface.
 ///
 /// ## Examples
 ///
@@ -940,5 +1014,54 @@ mod tests {
         }
 
         0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+    }
+
+    #[test]
+    fn code_block_mode_resolve_against_dark_page() {
+        assert_eq!(CodeBlockMode::Inverse.resolve(ColorMode::Dark), ColorMode::Light);
+        assert_eq!(CodeBlockMode::Same.resolve(ColorMode::Dark), ColorMode::Dark);
+        assert_eq!(CodeBlockMode::Dark.resolve(ColorMode::Dark), ColorMode::Dark);
+        assert_eq!(CodeBlockMode::Light.resolve(ColorMode::Dark), ColorMode::Light);
+    }
+
+    #[test]
+    fn code_block_mode_resolve_against_light_page() {
+        assert_eq!(CodeBlockMode::Inverse.resolve(ColorMode::Light), ColorMode::Dark);
+        assert_eq!(CodeBlockMode::Same.resolve(ColorMode::Light), ColorMode::Light);
+        assert_eq!(CodeBlockMode::Dark.resolve(ColorMode::Light), ColorMode::Dark);
+        assert_eq!(CodeBlockMode::Light.resolve(ColorMode::Light), ColorMode::Light);
+    }
+
+    #[test]
+    fn code_block_mode_default_is_inverse() {
+        assert_eq!(CodeBlockMode::default(), CodeBlockMode::Inverse);
+    }
+
+    #[test]
+    fn code_block_mode_from_str_valid() {
+        use std::str::FromStr;
+        assert_eq!(CodeBlockMode::from_str("inverse").unwrap(), CodeBlockMode::Inverse);
+        assert_eq!(CodeBlockMode::from_str("DARK").unwrap(), CodeBlockMode::Dark);
+        assert_eq!(CodeBlockMode::from_str("Light").unwrap(), CodeBlockMode::Light);
+        assert_eq!(CodeBlockMode::from_str(" same ").unwrap(), CodeBlockMode::Same);
+    }
+
+    #[test]
+    fn code_block_mode_from_str_invalid() {
+        use std::str::FromStr;
+        assert!(CodeBlockMode::from_str("sideways").is_err());
+    }
+
+    #[test]
+    fn code_block_mode_display_roundtrips() {
+        use std::str::FromStr;
+        for mode in [
+            CodeBlockMode::Inverse,
+            CodeBlockMode::Dark,
+            CodeBlockMode::Light,
+            CodeBlockMode::Same,
+        ] {
+            assert_eq!(CodeBlockMode::from_str(&mode.to_string()).unwrap(), mode);
+        }
     }
 }

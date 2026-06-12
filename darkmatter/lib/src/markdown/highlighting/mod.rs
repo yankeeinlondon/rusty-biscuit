@@ -9,8 +9,8 @@ pub(crate) mod scope_cache;
 pub(crate) mod themes;
 
 pub use themes::{
-    ColorMode, InvalidThemeName, ThemePair, detect_code_theme, detect_color_mode,
-    detect_prose_theme, get_code_theme_for_prose,
+    CodeBlockMode, ColorMode, InvalidCodeBlockMode, InvalidThemeName, ThemePair, detect_code_theme,
+    detect_color_mode, detect_prose_theme, get_code_theme_for_prose,
 };
 
 use biscuit_terminal::terminal::Terminal;

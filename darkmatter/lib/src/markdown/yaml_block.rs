@@ -19,7 +19,9 @@ use renderable::tree::{
 };
 use thiserror::Error;
 
-use crate::markdown::{Markdown, MarkdownError, render_tree::TerminalCodeRenderer};
+use crate::markdown::{
+    Markdown, MarkdownError, highlighting::CodeBlockMode, render_tree::TerminalCodeRenderer,
+};
 
 /// Errors that can occur when constructing or working with a [`YamlBlock`].
 #[derive(Debug, Error)]
@@ -203,7 +205,10 @@ impl TerminalRenderable for YamlBlock {
     fn render(&self, term: &Terminal) -> String {
         let node = <Self as TreeRenderable>::render_tree(self);
         let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn)
-            .with_code_renderer(Rc::new(TerminalCodeRenderer::for_terminal(term)));
+            .with_code_renderer(Rc::new(TerminalCodeRenderer::for_terminal(
+                term,
+                CodeBlockMode::default(),
+            )));
         match render_terminal_node(&node, &opts) {
             Ok(rendered) => rendered.output,
             Err(error) => {
