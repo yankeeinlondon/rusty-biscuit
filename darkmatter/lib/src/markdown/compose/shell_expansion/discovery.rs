@@ -17,6 +17,7 @@ use crate::markdown::compose::frontmatter_shell_expansion::{
     directive_reachable_pipelines, scan_frontmatter,
 };
 use crate::markdown::compose::prepare_frontmatter_for_compose;
+use crate::markdown::compose::remote_fetch;
 use crate::markdown::compose::shell_expansion::alias::resolve_alias;
 use crate::markdown::compose::shell_expansion::parser::parse_directives;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
@@ -351,6 +352,12 @@ fn collect_frontmatter_commands_recursive(
         .build()?;
 
     let prepared_ctx = prepared.source_context_for_errors();
+    let remote_fetch =
+        remote_fetch::RemoteFetchRuntime::with_store(&options.remote_read_config, None);
+    let lookup = state::ResolvingLookup::new(
+        &state,
+        options.expression_resolution_context(&remote_fetch),
+    );
     for directive in transclusion::parse_directives(prepared.content(), prepared_ctx.clone())? {
         if directive.kind != transclusion::DirectiveKind::File {
             continue;
@@ -359,7 +366,7 @@ fn collect_frontmatter_commands_recursive(
         if let Some(expr) = &directive.options.when_expr
             && !transclusion::evaluate_condition(
                 expr,
-                &state,
+                &lookup,
                 directive.line,
                 prepared_ctx.clone(),
             )?

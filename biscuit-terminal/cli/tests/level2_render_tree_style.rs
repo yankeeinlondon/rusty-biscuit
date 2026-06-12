@@ -527,6 +527,39 @@ fn assert_table_striped<H: TerminalHarness>(harness: &mut H) {
     );
 }
 
+/// Asserts `bt table --example` enables row striping without relying on
+/// FORCE_COLOR. This mirrors the public example path printed in the command
+/// trailer and exercises ordinary biscuit-terminal color detection.
+fn assert_table_example_striped_without_force_color<H: TerminalHarness>(harness: &mut H) {
+    harness
+        .send_command_with_env(
+            "env -u NO_COLOR -u FORCE_COLOR -u CLICOLOR_FORCE bt table --example",
+            &[],
+        )
+        .expect("send_command_with_env failed");
+    let frame = biscuit_test_harness::capture_settled(harness).expect("capture failed");
+
+    let raw_lines: Vec<&str> = frame.raw.lines().collect();
+    let row = frame
+        .plain
+        .lines()
+        .enumerate()
+        .find(|(_, plain)| plain.contains('│') && plain.contains("Renderer"))
+        .and_then(|(i, _)| raw_lines.get(i).map(|r| (*r).to_string()))
+        .unwrap_or_else(|| {
+            panic!(
+                "could not locate striped `bt table --example` row.\nplain:\n{}",
+                frame.plain
+            )
+        });
+    assert!(
+        row.contains("\x1b[48;2;") || row.contains("\x1b[48:2:") || row.contains("\x1b[48;5;"),
+        "expected `bt table --example` to paint the alternate row using detected terminal color support, without FORCE_COLOR. row: {row:?}\nplain:\n{}\nraw:\n{}",
+        frame.plain,
+        frame.raw,
+    );
+}
+
 /// Asserts a `bt table` with typed header / body slot styling renders those
 /// slots visibly in a real terminal: the header row carries a bold SGR
 /// attribute and a data row carries a foreground-color SGR.
@@ -1046,6 +1079,7 @@ fn level2_render_tree_style_in_wezterm() {
     assert_block_rounded_border(harness);
     assert_progress_slot_colors(harness);
     assert_table_striped(harness);
+    assert_table_example_striped_without_force_color(harness);
     assert_table_styled(harness);
     assert_block_painted_padding(harness);
     assert_block_border_adjacency(harness);
@@ -1080,6 +1114,7 @@ fn level2_render_tree_style_in_kitty() {
     assert_block_rounded_border(harness);
     assert_progress_slot_colors(harness);
     assert_table_striped(harness);
+    assert_table_example_striped_without_force_color(harness);
     assert_table_styled(harness);
     assert_block_painted_padding(harness);
     assert_block_border_adjacency(harness);

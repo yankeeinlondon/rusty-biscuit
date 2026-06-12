@@ -480,6 +480,23 @@ pub enum SchemaTarget {
         #[arg(long)]
         merge: bool,
     },
+
+    /// Print the SimplifiedSchema language reference.
+    ///
+    /// Renders a human-readable report covering schema shapes, the type
+    /// vocabulary, constraints, inline object syntax, validation behaviour,
+    /// and compose-time coercion. The report is generated from the typed
+    /// schema-language descriptor catalog in
+    /// `darkmatter::markdown::schemas`; the same catalog is available to
+    /// library callers via the `schema_type_descriptors()`,
+    /// `schema_constraint_descriptors()`, `schema_shape_descriptors()`,
+    /// `inline_object_rule_descriptors()`, `coercion_rule_descriptors()`,
+    /// and `validation_behavior_descriptors()` functions.
+    ///
+    /// The command is documentation-only: it does not parse documents,
+    /// capture context, construct an `EffectEngine`, resolve file
+    /// references, or perform network access.
+    About,
 }
 
 /// Output format for `md schema validate`.
@@ -1455,5 +1472,16 @@ mod tests {
     fn cli_line_numbers_omitted_is_none() {
         let cli = Cli::try_parse_from(["md", "doc.md"]).unwrap();
         assert_eq!(cli.line_numbers, None);
+    }
+
+    #[test]
+    fn schema_about_parses_as_schema_target() {
+        let cli = Cli::try_parse_from(["md", "schema", "about"]).unwrap();
+        match cli.command {
+            Some(Command::Schema {
+                target: SchemaTarget::About,
+            }) => {}
+            other => panic!("expected Schema::About, got {other:?}"),
+        }
     }
 }

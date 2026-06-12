@@ -3,10 +3,11 @@
 //! Provides a curated set of theme pairs that adapt to light/dark modes,
 //! with descriptions and utilities for loading syntect themes.
 
+pub use biscuit_terminal::discovery::detection::ColorMode;
+use biscuit_terminal::terminal::Terminal;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::sync::OnceLock;
 use syntect::highlighting::Theme as SyntectTheme;
 use two_face::theme::{EmbeddedLazyThemeSet, EmbeddedThemeName, extra as extra_themes};
 
@@ -23,49 +24,6 @@ impl std::fmt::Display for InvalidThemeName {
             "Invalid theme name: '{}'. Valid names: github, one-half, base16-ocean, gruvbox, solarized, nord, dracula, monokai, vs-dark",
             self.0
         )
-    }
-}
-
-/// Color mode for theme resolution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ColorMode {
-    /// Light color mode.
-    Light,
-    /// Dark color mode.
-    Dark,
-}
-
-impl ColorMode {
-    /// Returns the opposite color mode.
-    ///
-    /// Used to give **code blocks** a theme that contrasts against the page:
-    /// in a dark terminal the code panel resolves its [`ThemePair`] against
-    /// `Light` (and vice versa), which lifts and separates the code block from
-    /// surrounding prose. Only code blocks invert — prose, headings, tables,
-    /// and the page background follow the terminal's real mode so body text
-    /// stays readable.
-    ///
-    /// Note that the user-facing theme *name* ([`ThemePair`]) is abstracted
-    /// from light/dark; [`ThemePair::resolve`] maps the abstract name **plus** a
-    /// mode to a concrete light or dark theme. Inverting the mode here therefore
-    /// selects the opposite concrete variant of the *same* theme name. A few
-    /// pairs (`dracula`, `nord`, `monokai`, `vs-dark`) are single-variant by
-    /// design and resolve identically under both modes; for those, inversion is
-    /// a deliberate no-op, not a bug.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::markdown::highlighting::ColorMode;
-    ///
-    /// assert_eq!(ColorMode::Dark.inverted(), ColorMode::Light);
-    /// assert_eq!(ColorMode::Light.inverted(), ColorMode::Dark);
-    /// ```
-    pub const fn inverted(self) -> Self {
-        match self {
-            ColorMode::Light => ColorMode::Dark,
-            ColorMode::Dark => ColorMode::Light,
-        }
     }
 }
 
@@ -125,25 +83,57 @@ impl TryFrom<&str> for ThemePair {
 }
 
 impl ThemePair {
+    pub(crate) fn selected(self, theme: Option<ThemePair>) -> ThemePair {
+        theme
+            .or_else(|| {
+                std::env::var("THEME")
+                    .ok()
+                    .and_then(|name| ThemePair::try_from(name.as_str()).ok())
+            })
+            .unwrap_or(self)
+    }
+
+    pub(crate) fn for_code_block(self, term: &Terminal, theme: Option<ThemePair>) -> Theme {
+        self.selected(theme)
+            .resolve(term.color_mode().inverted())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn for_page(self, term: &Terminal, theme: Option<ThemePair>) -> Theme {
+        self.selected(theme).resolve(term.color_mode())
+    }
+
+    pub(crate) fn for_code_block_mode(self, mode: ColorMode, theme: Option<ThemePair>) -> Theme {
+        self.selected(theme).resolve(mode.inverted())
+    }
+
+    pub(crate) fn for_page_mode(self, mode: ColorMode, theme: Option<ThemePair>) -> Theme {
+        self.selected(theme).resolve(mode)
+    }
+
     /// Resolves the theme pair to a specific theme variant based on color mode (light/dark).
     ///
     /// This is an internal method for resolving to the Theme enum.
     pub(crate) fn resolve(self, mode: ColorMode) -> Theme {
         match (self, mode) {
-            (ThemePair::Base16Ocean, ColorMode::Dark) => Theme::Base16OceanDark,
+            (ThemePair::Base16Ocean, ColorMode::Dark | ColorMode::Unknown) => Theme::Base16OceanDark,
             (ThemePair::Base16Ocean, ColorMode::Light) => Theme::Base16OceanLight,
-            (ThemePair::Github, ColorMode::Dark) => Theme::GithubDark,
+            (ThemePair::Github, ColorMode::Dark | ColorMode::Unknown) => Theme::GithubDark,
             (ThemePair::Github, ColorMode::Light) => Theme::GithubLight,
-            (ThemePair::Gruvbox, ColorMode::Dark) => Theme::GruvboxDark,
+            (ThemePair::Gruvbox, ColorMode::Dark | ColorMode::Unknown) => Theme::GruvboxDark,
             (ThemePair::Gruvbox, ColorMode::Light) => Theme::GruvboxLight,
-            (ThemePair::OneHalf, ColorMode::Dark) => Theme::OneHalfDark,
+            (ThemePair::OneHalf, ColorMode::Dark | ColorMode::Unknown) => Theme::OneHalfDark,
             (ThemePair::OneHalf, ColorMode::Light) => Theme::OneHalfLight,
-            (ThemePair::Solarized, ColorMode::Dark) => Theme::SolarizedDark,
+            (ThemePair::Solarized, ColorMode::Dark | ColorMode::Unknown) => Theme::SolarizedDark,
             (ThemePair::Solarized, ColorMode::Light) => Theme::SolarizedLight,
-            (ThemePair::Nord, _) => Theme::Nord,
-            (ThemePair::Dracula, _) => Theme::Dracula,
-            (ThemePair::Monokai, _) => Theme::MonokaiExtended,
-            (ThemePair::VisualStudioDark, _) => Theme::VisualStudioDark,
+            (ThemePair::Nord, ColorMode::Dark | ColorMode::Unknown) => Theme::Nord,
+            (ThemePair::Nord, ColorMode::Light) => Theme::OneHalfLight,
+            (ThemePair::Dracula, ColorMode::Dark | ColorMode::Unknown) => Theme::Dracula,
+            (ThemePair::Dracula, ColorMode::Light) => Theme::OneHalfLight,
+            (ThemePair::Monokai, ColorMode::Dark | ColorMode::Unknown) => Theme::MonokaiExtended,
+            (ThemePair::Monokai, ColorMode::Light) => Theme::OneHalfLight,
+            (ThemePair::VisualStudioDark, ColorMode::Dark | ColorMode::Unknown) => Theme::VisualStudioDark,
+            (ThemePair::VisualStudioDark, ColorMode::Light) => Theme::GithubLight,
         }
     }
 
@@ -221,7 +211,6 @@ impl ThemePair {
 
 /// Internal theme enum - individual theme variants.
 ///
-/// This is the internal representation of themes. External code should
 /// use `ThemePair` which provides light/dark pairing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Theme {
@@ -335,39 +324,23 @@ lazy_static! {
     static ref THEME_SET: EmbeddedLazyThemeSet = extra_themes();
 }
 
-/// Returns the lookup table mapping prose themes to recommended code themes.
-fn code_theme_lookup() -> &'static HashMap<ThemePair, ThemePair> {
-    static LOOKUP: OnceLock<HashMap<ThemePair, ThemePair>> = OnceLock::new();
-    LOOKUP.get_or_init(|| {
-        let mut map = HashMap::new();
-        map.insert(ThemePair::OneHalf, ThemePair::Monokai);
-        map.insert(ThemePair::Base16Ocean, ThemePair::Github);
-        map.insert(ThemePair::Github, ThemePair::Monokai);
-        map.insert(ThemePair::Gruvbox, ThemePair::Github);
-        map.insert(ThemePair::Solarized, ThemePair::Github);
-        map.insert(ThemePair::Nord, ThemePair::Github);
-        map.insert(ThemePair::Dracula, ThemePair::Github);
-        map.insert(ThemePair::Monokai, ThemePair::Monokai);
-        map.insert(ThemePair::VisualStudioDark, ThemePair::Monokai);
-        map
-    })
-}
-
-/// Returns the recommended code theme for a given prose theme.
+/// Returns the default code theme for a given prose theme.
+///
+/// Code blocks use the page theme pair, resolved against the inverted color
+/// mode by the code renderer. This function therefore returns the prose theme
+/// unchanged; explicit code-theme overrides are handled by
+/// [`detect_code_theme`].
 ///
 /// ## Examples
 ///
 /// ```
 /// use darkmatter::markdown::highlighting::{ThemePair, get_code_theme_for_prose};
 ///
-/// assert_eq!(get_code_theme_for_prose(ThemePair::OneHalf), ThemePair::Monokai);
-/// assert_eq!(get_code_theme_for_prose(ThemePair::Base16Ocean), ThemePair::Github);
+/// assert_eq!(get_code_theme_for_prose(ThemePair::OneHalf), ThemePair::OneHalf);
+/// assert_eq!(get_code_theme_for_prose(ThemePair::Base16Ocean), ThemePair::Base16Ocean);
 /// ```
 pub fn get_code_theme_for_prose(prose_theme: ThemePair) -> ThemePair {
-    code_theme_lookup()
-        .get(&prose_theme)
-        .copied()
-        .unwrap_or(ThemePair::Monokai)
+    prose_theme
 }
 
 /// Detects the prose theme from environment variables.
@@ -397,16 +370,18 @@ pub fn detect_prose_theme() -> ThemePair {
     theme
 }
 
-/// Detects the code theme from environment variables or derives it from prose theme.
+/// Detects the code theme from environment variables or derives it from the prose theme.
 ///
 /// First checks the `CODE_THEME` environment variable. If not set or invalid,
-/// derives the code theme from the given prose theme using the lookup table.
+/// uses the given prose theme. Code blocks resolve that theme pair against the
+/// inverted color mode, so the default code block theme is the page theme on
+/// the opposite surface.
 ///
 /// ## Examples
 ///
 /// ```
 /// use darkmatter::markdown::highlighting::{detect_code_theme, ThemePair};
-/// // Derives code theme from prose theme
+/// // Uses the page/prose theme pair by default
 /// let code_theme = detect_code_theme(ThemePair::OneHalf);
 /// ```
 pub fn detect_code_theme(prose_theme: ThemePair) -> ThemePair {
@@ -486,7 +461,10 @@ pub fn detect_color_mode() -> ColorMode {
 ///
 /// Panics if the theme cannot be loaded (should never happen with valid Theme variants).
 pub(crate) fn load_theme(theme_pair: ThemePair, color_mode: ColorMode) -> SyntectTheme {
-    let theme = theme_pair.resolve(color_mode);
+    load_resolved_theme(theme_pair.for_page_mode(color_mode, Some(theme_pair)))
+}
+
+pub(crate) fn load_resolved_theme(theme: Theme) -> SyntectTheme {
     let embedded_name = theme.to_embedded_name();
 
     THEME_SET.get(embedded_name).clone()
@@ -495,6 +473,9 @@ pub(crate) fn load_theme(theme_pair: ThemePair, color_mode: ColorMode) -> Syntec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_terminal::discovery::detection::ColorMode as TerminalColorMode;
+    use biscuit_terminal::terminal::Terminal;
+    use syntect::highlighting::Color;
 
     #[test]
     fn test_color_mode_equality() {
@@ -521,11 +502,10 @@ mod tests {
 
     #[test]
     fn test_theme_pair_resolve_nord() {
-        // Nord is dark-only, so both modes resolve to the same theme
         let dark = ThemePair::Nord.resolve(ColorMode::Dark);
         let light = ThemePair::Nord.resolve(ColorMode::Light);
         assert_eq!(dark, Theme::Nord);
-        assert_eq!(light, Theme::Nord);
+        assert_eq!(light, Theme::OneHalfLight);
     }
 
     #[test]
@@ -590,6 +570,31 @@ mod tests {
 
             let light_theme = load_theme(*theme_pair, ColorMode::Light);
             assert!(light_theme.settings.background.is_some());
+        }
+    }
+
+    #[test]
+    fn all_theme_pair_code_block_backgrounds_are_lighter_in_dark_terminals() {
+        for theme_pair in ThemePair::all() {
+            let dark_terminal_code_theme =
+                theme_pair.for_code_block_mode(ColorMode::Dark, Some(*theme_pair));
+            let light_terminal_code_theme =
+                theme_pair.for_code_block_mode(ColorMode::Light, Some(*theme_pair));
+            let dark_terminal_bg = load_resolved_theme(dark_terminal_code_theme)
+                .settings
+                .background
+                .expect("code block theme should define a background");
+            let light_terminal_bg = load_resolved_theme(light_terminal_code_theme)
+                .settings
+                .background
+                .expect("code block theme should define a background");
+
+            assert_lighter(
+                *theme_pair,
+                "code block background in a dark terminal",
+                dark_terminal_bg,
+                light_terminal_bg,
+            );
         }
     }
 
@@ -660,18 +665,18 @@ mod tests {
     }
 
     #[test]
-    fn test_code_theme_lookup() {
+    fn test_code_theme_defaults_to_prose_theme_pair() {
         assert_eq!(
             get_code_theme_for_prose(ThemePair::OneHalf),
-            ThemePair::Monokai
+            ThemePair::OneHalf
         );
         assert_eq!(
             get_code_theme_for_prose(ThemePair::Github),
-            ThemePair::Monokai
+            ThemePair::Github
         );
         assert_eq!(
             get_code_theme_for_prose(ThemePair::Base16Ocean),
-            ThemePair::Github
+            ThemePair::Base16Ocean
         );
         assert_eq!(
             get_code_theme_for_prose(ThemePair::Monokai),
@@ -750,6 +755,122 @@ mod tests {
 
     #[test]
     #[serial]
+    fn test_theme_pair_selected_uses_option_before_theme_env() {
+        let _env = ScopedEnv::set("THEME", "github");
+        assert_eq!(
+            ThemePair::OneHalf.selected(Some(ThemePair::Gruvbox)),
+            ThemePair::Gruvbox
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_theme_pair_selected_uses_case_insensitive_theme_env() {
+        let _env = ScopedEnv::set("THEME", "gRuVbOx");
+        assert_eq!(ThemePair::OneHalf.selected(None), ThemePair::Gruvbox);
+    }
+
+    #[test]
+    #[serial]
+    fn test_theme_pair_selected_ignores_invalid_theme_env() {
+        let _env = ScopedEnv::set("THEME", "no-such-theme");
+        assert_eq!(ThemePair::OneHalf.selected(None), ThemePair::OneHalf);
+    }
+
+    #[test]
+    #[serial]
+    fn test_theme_pair_for_page_uses_terminal_mode_for_all_pairs() {
+        let _env = ScopedEnv::unset("THEME");
+        for theme_pair in ThemePair::all() {
+            let light = terminal_with_color_mode(TerminalColorMode::Light);
+            let dark = terminal_with_color_mode(TerminalColorMode::Dark);
+            let unknown = terminal_with_color_mode(TerminalColorMode::Unknown);
+
+            assert_eq!(
+                theme_pair.for_page(&light, None),
+                theme_pair.resolve(ColorMode::Light),
+                "page light resolution failed for {:?}",
+                theme_pair
+            );
+            assert_eq!(
+                theme_pair.for_page(&dark, None),
+                theme_pair.resolve(ColorMode::Dark),
+                "page dark resolution failed for {:?}",
+                theme_pair
+            );
+            assert_eq!(
+                theme_pair.for_page(&unknown, None),
+                theme_pair.resolve(ColorMode::Dark),
+                "page unknown-mode fallback failed for {:?}",
+                theme_pair
+            );
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_theme_pair_for_code_block_inverts_terminal_mode_for_all_pairs() {
+        let _env = ScopedEnv::unset("THEME");
+        for theme_pair in ThemePair::all() {
+            let light = terminal_with_color_mode(TerminalColorMode::Light);
+            let dark = terminal_with_color_mode(TerminalColorMode::Dark);
+            let unknown = terminal_with_color_mode(TerminalColorMode::Unknown);
+
+            assert_eq!(
+                theme_pair.for_code_block(&light, None),
+                theme_pair.resolve(ColorMode::Dark),
+                "code light inversion failed for {:?}",
+                theme_pair
+            );
+            assert_eq!(
+                theme_pair.for_code_block(&dark, None),
+                theme_pair.resolve(ColorMode::Light),
+                "code dark inversion failed for {:?}",
+                theme_pair
+            );
+            assert_eq!(
+                theme_pair.for_code_block(&unknown, None),
+                theme_pair.resolve(ColorMode::Light),
+                "code unknown-mode inversion fallback failed for {:?}",
+                theme_pair
+            );
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_theme_pair_for_page_and_code_block_use_theme_env_when_option_missing() {
+        let _env = ScopedEnv::set("THEME", "GITHUB");
+        let dark = terminal_with_color_mode(TerminalColorMode::Dark);
+
+        assert_eq!(
+            ThemePair::OneHalf.for_page(&dark, None),
+            ThemePair::Github.resolve(ColorMode::Dark)
+        );
+        assert_eq!(
+            ThemePair::OneHalf.for_code_block(&dark, None),
+            ThemePair::Github.resolve(ColorMode::Light)
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_theme_pair_for_page_and_code_block_option_overrides_theme_env() {
+        let _env = ScopedEnv::set("THEME", "github");
+        let dark = terminal_with_color_mode(TerminalColorMode::Dark);
+
+        assert_eq!(
+            ThemePair::OneHalf.for_page(&dark, Some(ThemePair::Gruvbox)),
+            ThemePair::Gruvbox.resolve(ColorMode::Dark)
+        );
+        assert_eq!(
+            ThemePair::OneHalf.for_code_block(&dark, Some(ThemePair::Gruvbox)),
+            ThemePair::Gruvbox.resolve(ColorMode::Light)
+        );
+    }
+
+    #[test]
+    #[serial]
     fn test_detect_code_theme_with_env_var() {
         let _env = ScopedEnv::set("CODE_THEME", "dracula");
         assert_eq!(detect_code_theme(ThemePair::Github), ThemePair::Dracula);
@@ -759,8 +880,7 @@ mod tests {
     #[serial]
     fn test_detect_code_theme_without_env_var() {
         let _env = ScopedEnv::unset("CODE_THEME");
-        // Should use lookup table: Github -> Monokai
-        assert_eq!(detect_code_theme(ThemePair::Github), ThemePair::Monokai);
+        assert_eq!(detect_code_theme(ThemePair::OneHalf), ThemePair::OneHalf);
     }
 
     #[test]
@@ -792,5 +912,33 @@ mod tests {
         let _no_color = ScopedEnv::unset("NO_COLOR");
         let _colorfgbg = ScopedEnv::unset("COLORFGBG");
         assert_eq!(detect_color_mode(), ColorMode::Dark);
+    }
+
+    fn terminal_with_color_mode(mode: TerminalColorMode) -> Terminal {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = mode;
+        term
+    }
+
+    fn assert_lighter(theme_pair: ThemePair, label: &str, dark_mode: Color, light_mode: Color) {
+        let dark_luminance = luminance(dark_mode);
+        let light_luminance = luminance(light_mode);
+        assert!(
+            dark_luminance > light_luminance,
+            "{theme_pair:?} {label} should be lighter in dark mode than light mode: dark={dark_mode:?} ({dark_luminance:.3}), light={light_mode:?} ({light_luminance:.3})"
+        );
+    }
+
+    fn luminance(color: Color) -> f32 {
+        fn channel(value: u8) -> f32 {
+            let value = f32::from(value) / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        }
+
+        0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
     }
 }

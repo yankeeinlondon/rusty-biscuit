@@ -1,0 +1,27 @@
+---
+source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+expression: convert_yaml(yaml)
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "replicas": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "host": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "replicas"
+  ],
+  "type": "object"
+}
