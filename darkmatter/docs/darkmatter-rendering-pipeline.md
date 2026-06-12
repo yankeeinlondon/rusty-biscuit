@@ -31,6 +31,7 @@ Every target output will have different capabilities but outside of the **AST** 
 
 
 - [Table Rendering](./rendering/table-rendering.md)      
+- [Block Quotes](./rendering/block-quote.md)
 - [YouTube Embedding](./rendering/youtube-embedding.md)  
 - [Popover](./rendering/popover.md)                      
 - [List Expansion](./rendering/list-expansion.md)        
