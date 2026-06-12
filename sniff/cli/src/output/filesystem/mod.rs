@@ -547,30 +547,62 @@ fn render_header(title: &str, terminal: &Terminal) -> String {
 
 /// Formats a worktree directory path as a blue OSC8 hyperlink.
 ///
-/// The href is the absolute path; the visible label collapses a leading home
-/// directory to `~` (matching the `repo worktrees` verbose format). A basename
-/// alone loses the context a sibling-worktree layout needs to disambiguate.
-fn worktree_path_link(path: &std::path::Path) -> String {
+/// The href is the absolute path; the visible label is computed relative to
+/// the current worktree directory so sibling or parent layouts read as `..`,
+/// `../project`, or `.` instead of a home-abbreviated absolute path.
+fn worktree_path_link(path: &std::path::Path, current_worktree: &std::path::Path) -> String {
     let absolute = path.display().to_string();
-    let label = home_abbreviated(path);
+    let label = relative_path_between(current_worktree, path);
     format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
 }
 
-/// Collapses a leading home-directory prefix to `~` for display.
+/// Computes a relative path from `base` to `target`.
 ///
-/// Falls back to the full absolute path when the path is outside the home
-/// directory or no home directory is resolvable.
-fn home_abbreviated(path: &std::path::Path) -> String {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(std::path::PathBuf::from);
-    match home {
-        Some(home) => match path.strip_prefix(&home) {
-            Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
-            Ok(rest) => format!("~/{}", rest.display()),
-            Err(_) => path.display().to_string(),
-        },
-        None => path.display().to_string(),
+/// Returns `.` when the two paths are the same, otherwise a sequence of `..`
+/// segments and/or the remaining target components. Falls back to the target's
+/// absolute display when the paths do not share a common prefix.
+fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> String {
+    use std::path::MAIN_SEPARATOR_STR;
+
+    if let Ok(rel) = target.strip_prefix(base) {
+        return if rel.as_os_str().is_empty() {
+            ".".to_string()
+        } else {
+            rel.display().to_string()
+        };
+    }
+
+    if let Ok(rel) = base.strip_prefix(target) {
+        let ups = rel.components().count();
+        return std::iter::repeat_n("..", ups)
+            .collect::<Vec<_>>()
+            .join(MAIN_SEPARATOR_STR);
+    }
+
+    let base_components: Vec<_> = base.components().collect();
+    let target_components: Vec<_> = target.components().collect();
+    let common = base_components
+        .iter()
+        .zip(target_components.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    if common == 0 {
+        return target.display().to_string();
+    }
+
+    let ups = base_components.len().saturating_sub(common);
+    let mut parts: Vec<String> = std::iter::repeat_n("..".to_string(), ups).collect();
+    parts.extend(
+        target_components[common..]
+            .iter()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned()),
+    );
+
+    if parts.is_empty() {
+        ".".to_string()
+    } else {
+        parts.join(MAIN_SEPARATOR_STR)
     }
 }
 
@@ -641,7 +673,7 @@ pub fn render_git_section(
             // Case A: running inside a linked worktree. Show where main lives,
             // then this worktree's own details, then a count of the rest.
             let main_root = git.base_repo_root.as_deref().unwrap_or(&git.repo_root);
-            let main_path = worktree_path_link(main_root);
+            let main_path = worktree_path_link(main_root, &git.repo_root);
             wt_list.add(Prose::new(format!(
                 "<b>main:</b> <i>the main worktree for this repo is located at </i>{main_path}"
             )));
@@ -654,10 +686,12 @@ pub fn render_git_section(
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("worktree");
-            let current_path = worktree_path_link(&git.repo_root);
+            let current_path = worktree_path_link(&git.repo_root, &git.repo_root);
             wt_list.add(Prose::new("<b>Current Worktree:</b>".to_string()));
-            wt_list.add(Prose::new(format!(
-                "  - you are in the <b>{current_name}</b> worktree located at {current_path}"
+
+            let mut current_list = UnorderedList::empty();
+            current_list.add(Prose::new(format!(
+                "you are in the <b>{current_name}</b> worktree located at {current_path}"
             )));
 
             // ahead/behind comes from the current worktree's own map entry,
@@ -671,27 +705,37 @@ pub fn render_git_section(
                 Some(wt) => format_ahead_behind_of(wt.ahead, wt.behind, &wt.base_branch),
                 None => format_ahead_behind_of(0, 0, "main"),
             };
-            wt_list.add(Prose::new(format!(
-                "  - this worktree is on the <b>{branch_label}</b> branch and is {ab}"
+            current_list.add(Prose::new(format!(
+                "this worktree is on the <b>{branch_label}</b> branch and is {ab}"
             )));
+            wt_list.add(current_list);
 
             let other_count = git.worktrees.values().filter(|wt| !wt.is_current).count();
-            wt_list.add(Prose::new(format!(
-                "<b>Other Worktrees:</b> there are {other_count} other active worktrees in this repo"
+            wt_list.add(Prose::new("<b>Other Worktrees:</b>".to_string()));
+            let mut other_list = UnorderedList::empty();
+            other_list.add(Prose::new(format!(
+                "there are {other_count} other active worktrees in this repo"
             )));
+            wt_list.add(other_list);
         } else {
             // Case B: running inside the main worktree. The main worktree never
             // appears in the linked-worktree map, so every entry is "other".
-            let main_path = worktree_path_link(&git.repo_root);
+            let main_path = worktree_path_link(&git.repo_root, &git.repo_root);
             wt_list.add(Prose::new("<b>Current Worktree:</b>".to_string()));
-            wt_list.add(Prose::new(format!(
-                "  - you are in the <b>main</b> worktree located at {main_path}"
+
+            let mut current_list = UnorderedList::empty();
+            current_list.add(Prose::new(format!(
+                "you are in the <b>main</b> worktree located at {main_path}"
             )));
+            wt_list.add(current_list);
 
             let other_count = git.worktrees.len();
-            wt_list.add(Prose::new(format!(
-                "<b>Other Worktrees:</b> there are {other_count} other active worktrees in this repo"
+            wt_list.add(Prose::new("<b>Other Worktrees:</b>".to_string()));
+            let mut other_list = UnorderedList::empty();
+            other_list.add(Prose::new(format!(
+                "there are {other_count} other active worktrees in this repo"
             )));
+            wt_list.add(other_list);
         }
 
         writeln!(out, "{}", wt_list.render(&terminal)).unwrap();
@@ -1402,7 +1446,10 @@ mod tests {
                 lines[worktrees_idx - 1].trim().is_empty(),
                 "blank line before Worktrees"
             );
-            assert!(lines[meta_idx - 1].trim().is_empty(), "blank line before Meta");
+            assert!(
+                lines[meta_idx - 1].trim().is_empty(),
+                "blank line before Meta"
+            );
 
             // Exactly one blank line after each header
             assert!(
@@ -1413,7 +1460,10 @@ mod tests {
                 lines[worktrees_idx + 1].trim().is_empty(),
                 "blank line after Worktrees"
             );
-            assert!(lines[meta_idx + 1].trim().is_empty(), "blank line after Meta");
+            assert!(
+                lines[meta_idx + 1].trim().is_empty(),
+                "blank line after Meta"
+            );
 
             // EXACTLY one — not two. The line two rows out from each header (the
             // content side) must be non-blank, proving there is no second blank
@@ -1545,10 +1595,7 @@ mod tests {
                 output.contains("Current Worktree:"),
                 "Case B should show current worktree header"
             );
-            assert!(
-                output.contains("main"),
-                "Case B should mention main branch"
-            );
+            assert!(output.contains("main"), "Case B should mention main branch");
             assert!(
                 output.contains("Other Worktrees:"),
                 "Case B should show other worktrees header"
@@ -1591,31 +1638,28 @@ mod tests {
                 output.contains("Status"),
                 "Status section should still render"
             );
-            assert!(
-                output.contains("Meta"),
-                "Meta section should still render"
-            );
+            assert!(output.contains("Meta"), "Meta section should still render");
         }
 
         #[test]
-        fn git_status_case_a_uses_directory_name_not_branch_and_home_path() {
+        fn git_status_case_a_uses_directory_name_and_relative_path() {
             // The current worktree's display name is its directory basename, and
-            // the path label collapses $HOME to `~`. A branch named differently
-            // from the directory must not be substituted for the name.
-            let home = std::env::var("HOME").expect("HOME set in test env");
-            let wt_dir = format!("{home}/code/login-fix");
-            let main_dir = format!("{home}/code/project");
+            // the path label is relative to the current worktree directory. A
+            // branch named differently from the directory must not be substituted
+            // for the name.
+            let wt_dir = "/tmp/demo/login-fix";
+            let main_dir = "/tmp/demo/project";
 
             let mut git = make_git_info(vec![]);
-            git.repo_root = PathBuf::from(&wt_dir);
-            git.base_repo_root = Some(PathBuf::from(&main_dir));
+            git.repo_root = PathBuf::from(wt_dir);
+            git.base_repo_root = Some(PathBuf::from(main_dir));
             git.in_worktree = true;
             git.current_branch = Some("feature/login".to_string());
             git.worktrees.insert(
                 "feature/login".to_string(),
                 sniff::filesystem::git::WorktreeInfo {
                     branch: "feature/login".to_string(),
-                    filepath: PathBuf::from(&wt_dir),
+                    filepath: PathBuf::from(wt_dir),
                     sha: "abc123".to_string(),
                     dirty: false,
                     ahead: 3,
@@ -1638,25 +1682,50 @@ mod tests {
                 output.contains("feature/login"),
                 "current branch must still be shown: {output}"
             );
-            // The main-worktree label is short enough to survive word-wrap; its
-            // presence proves the `~` collapse is applied. (The current-worktree
-            // label is exercised directly by `home_abbreviated_collapses_home`.)
+            // Main worktree is a sibling directory, so its visible label is
+            // `../project`. The current worktree label relative to itself is `.`.
             assert!(
-                output.contains("~/code/project"),
-                "paths must be home-abbreviated: {output}"
+                output.contains("[../project](file://"),
+                "main worktree label must be relative to the current directory: {output}"
+            );
+            assert!(
+                output.contains("[.](file://"),
+                "current worktree label must be `.` (relative to itself): {output}"
             );
         }
 
         #[test]
-        fn home_abbreviated_collapses_home() {
-            let home = std::env::var("HOME").expect("HOME set in test env");
+        fn relative_path_between_labels_worktree_paths() {
             assert_eq!(
-                home_abbreviated(&PathBuf::from(format!("{home}/code/login-fix"))),
-                "~/code/login-fix"
+                relative_path_between(
+                    &PathBuf::from("/tmp/demo/login-fix"),
+                    &PathBuf::from("/tmp/demo/project")
+                ),
+                "../project"
             );
-            assert_eq!(home_abbreviated(&PathBuf::from(&home)), "~");
-            // Paths outside home are left absolute.
-            assert_eq!(home_abbreviated(&PathBuf::from("/repo/feature")), "/repo/feature");
+            assert_eq!(
+                relative_path_between(
+                    &PathBuf::from("/tmp/demo/login-fix"),
+                    &PathBuf::from("/tmp/demo/login-fix")
+                ),
+                "."
+            );
+            assert_eq!(
+                relative_path_between(&PathBuf::from("/repo/feature"), &PathBuf::from("/repo")),
+                ".."
+            );
+            assert_eq!(
+                relative_path_between(&PathBuf::from("/repo"), &PathBuf::from("/repo/feature")),
+                "feature"
+            );
+            // Paths that share only the root still produce a relative path.
+            assert_eq!(
+                relative_path_between(
+                    &PathBuf::from("/repo/feature"),
+                    &PathBuf::from("/other/project")
+                ),
+                "../../other/project"
+            );
         }
 
         #[test]
@@ -1730,7 +1799,10 @@ mod tests {
 
             let output = render_git_section(&git, 10, 0, false, None, None);
 
-            assert!(output.contains("main:"), "Case A shows main location: {output}");
+            assert!(
+                output.contains("main:"),
+                "Case A shows main location: {output}"
+            );
             assert!(
                 output.contains("detached HEAD"),
                 "detached HEAD must be labeled rather than blank: {output}"
