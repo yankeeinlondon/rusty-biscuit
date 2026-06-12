@@ -6,9 +6,9 @@ severity: usability
 reviewed: true
 status: ready for planning and implementation
 related_code:
-  - darkmatter/lib/src/markdown/schemas/format.rs
-  - darkmatter/lib/src/markdown/schemas/validate.rs
-  - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
 ---
 
 # Schema Validation Error for `file(required)` Misleads Users on Missing Files
@@ -32,7 +32,7 @@ the reference contained a typo (`block-extensions` plural instead of
 `block-extension` singular), but the format-oriented wording led debugging
 toward the target document's contents and schema instead of its path.
 
-The format name is also easy to overread. `darkmatter-file` does not parse the
+The format name is also easy to over-read. `darkmatter-file` does not parse the
 target as Markdown or validate its frontmatter. It verifies only that the value
 is a valid [`FileReference`][file-reference] and resolves to an existing regular
 file under `FileReference`'s current search semantics.
@@ -122,11 +122,11 @@ inventing a failure.
 
 Use these message contracts:
 
-| Failure | Replacement message |
-|---|---|
-| `FileReference::new(value)` returns `Err(error)` | `` `<value>` is not a valid file reference: <error> `` |
-| `reference.resolve()` returns `Err(error)` | `` could not resolve file reference `<value>`: <error> `` |
-| `reference.resolve()` returns `Ok(None)` | `` no existing file matched reference `<value>` while resolving from `<cwd>` `` |
+| Failure                                          | Replacement message                                                             |
+| ------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `FileReference::new(value)` returns `Err(error)` | `` `<value>` is not a valid file reference: <error> ``                          |
+| `reference.resolve()` returns `Err(error)`       | ``could not resolve file reference `<value>`: <error>``                         |
+| `reference.resolve()` returns `Ok(None)`         | `` no existing file matched reference `<value>` while resolving from `<cwd>` `` |
 
 For the `Ok(None)` case, obtain `<cwd>` with `std::env::current_dir()` after the
 failed resolution. If it is unavailable, omit the `while resolving from ...`
@@ -192,19 +192,19 @@ schema error. This prevents direct JSON Schema authors from using
 ## Files Most Likely to Change
 
 - `darkmatter/lib/src/markdown/schemas/format.rs`
-  - Introduce the shared typed file-reference check.
-  - Keep the bool format adapter.
-  - Make glob validation defer file-reference failures.
-  - Require `x-darkmatter-match` to accompany `format: darkmatter-file`.
+    - Introduce the shared typed file-reference check.
+    - Keep the bool format adapter.
+    - Make glob validation defer file-reference failures.
+    - Require `x-darkmatter-match` to accompany `format: darkmatter-file`.
 - `darkmatter/lib/src/markdown/schemas/validate.rs`
-  - Specialize only `darkmatter-file` format messages in `build_problem`.
-  - Preserve the generic message if the rejected instance is not a string or
-    the diagnostic recheck no longer fails.
+    - Specialize only `darkmatter-file` format messages in `build_problem`.
+    - Preserve the generic message if the rejected instance is not a string or
+      the diagnostic recheck no longer fails.
 - `darkmatter/lib/src/markdown/errors/blocks.rs`
-  - No behavior change expected; verify that the new plain messages render and
-    escape correctly.
+    - No behavior change expected; verify that the new plain messages render and
+      escape correctly.
 - `darkmatter/lib/tests/error_snapshots/markdown_error.rs` and schema tests
-  - Update snapshots that intentionally contain the old generic format text.
+    - Update snapshots that intentionally contain the old generic format text.
 
 `darkmatter/lib/src/markdown/schemas/simplified/convert.rs` should not change;
 its current output is part of the compatibility requirement.

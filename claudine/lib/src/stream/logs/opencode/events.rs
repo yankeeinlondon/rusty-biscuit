@@ -1,15 +1,17 @@
 //! JSONL→event translation for OpenCode stderr logs.
 //!
-//! Parses the fixed header (`LEVEL TIMESTAMP +DELTAms ...`) and the
-//! free-form `key=value` body into structured [`OpenCodeLogRecord`]s.
-//! Unknown tags are preserved, missing tags are accepted, and any line
-//! that does not match the header falls through to [`ParsedOpenCodeStderrLine::RawText`].
+//! Parses both OpenCode stderr header formats: the legacy
+//! `LEVEL TIMESTAMP +DELTAms ...` envelope and the newer
+//! `timestamp=... level=...` envelope. The free-form `key=value` body is
+//! normalized into structured [`OpenCodeLogRecord`]s. Unknown tags are
+//! preserved, missing tags are accepted, and any line that does not match
+//! either header falls through to [`ParsedOpenCodeStderrLine::RawText`].
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
-use regex::Regex;
+use regex::{Captures, Regex};
 
 /// Log severity, matching the levels OpenCode emits in the header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,14 +169,38 @@ static HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("opencode log header regex must compile")
 });
 
+static NEW_HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^timestamp=(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)\s+level=(?P<level>DEBUG|INFO|WARN|ERROR)(?:\s+(?P<body>.*))?$",
+    )
+    .expect("opencode new log header regex must compile")
+});
+
 /// Parse a single OpenCode stderr line into either a structured record
 /// or a raw passthrough string.
 pub fn parse_line(line: &str) -> ParsedOpenCodeStderrLine {
     let trimmed_right = line.trim_end_matches(['\r', '\n']);
-    let Some(caps) = HEADER_RE.captures(trimmed_right) else {
-        return ParsedOpenCodeStderrLine::RawText(line.to_string());
-    };
+    if let Some(caps) = HEADER_RE.captures(trimmed_right) {
+        let delta_ms = caps
+            .name("delta")
+            .and_then(|m| m.as_str().parse::<u64>().ok())
+            .unwrap_or(0);
 
+        return parse_captures(line, &caps, delta_ms);
+    }
+
+    if let Some(caps) = NEW_HEADER_RE.captures(trimmed_right) {
+        return parse_captures(line, &caps, 0);
+    }
+
+    ParsedOpenCodeStderrLine::RawText(line.to_string())
+}
+
+fn parse_captures(
+    line: &str,
+    caps: &Captures<'_>,
+    delta_ms: u64,
+) -> ParsedOpenCodeStderrLine {
     let Some(level) = caps
         .name("level")
         .and_then(|m| LogLevel::from_str(m.as_str()))
@@ -187,11 +213,6 @@ pub fn parse_line(line: &str) -> ParsedOpenCodeStderrLine {
         Some(t) => t,
         None => return ParsedOpenCodeStderrLine::RawText(line.to_string()),
     };
-
-    let delta_ms = caps
-        .name("delta")
-        .and_then(|m| m.as_str().parse::<u64>().ok())
-        .unwrap_or(0);
 
     let body = caps.name("body").map(|m| m.as_str()).unwrap_or("");
     let (tags, message) = parse_body(body);
@@ -207,9 +228,17 @@ pub fn parse_line(line: &str) -> ParsedOpenCodeStderrLine {
 }
 
 fn parse_timestamp(value: &str) -> Option<DateTime<Utc>> {
-    NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S")
-        .ok()
-        .map(|naive| Utc.from_utc_datetime(&naive))
+    [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.3fZ",
+        "%Y-%m-%dT%H:%M:%SZ",
+    ]
+    .iter()
+    .find_map(|format| {
+        NaiveDateTime::parse_from_str(value, format)
+            .ok()
+            .map(|naive| Utc.from_utc_datetime(&naive))
+    })
 }
 
 fn parse_body(body: &str) -> (BTreeMap<String, String>, String) {
@@ -307,6 +336,7 @@ fn find_json_end(s: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
 
     #[test]
     fn header_accepts_all_levels() {
@@ -470,5 +500,202 @@ mod tests {
         assert_eq!(record.tags.get("session.id").unwrap(), "s1");
         assert_eq!(record.tags.get("model").unwrap(), "k2p6 message");
         assert_eq!(record.message, "");
+    }
+
+    #[test]
+    fn new_format_parses_info_level() {
+        let line = "timestamp=2026-06-10T16:11:27.352Z level=INFO service=default run=abc message=tracking";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+
+        assert_eq!(record.level, LogLevel::Info);
+        assert_eq!(
+            record.timestamp.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+            "2026-06-10T16:11:27.352Z",
+        );
+        assert_eq!(record.delta_ms, 0);
+        assert_eq!(
+            record.tags.get("service").map(String::as_str),
+            Some("default"),
+        );
+        assert_eq!(record.tags.get("run").map(String::as_str), Some("abc"));
+        assert_eq!(
+            record.tags.get("message").map(String::as_str),
+            Some("tracking"),
+        );
+    }
+
+    #[test]
+    fn new_format_parses_all_levels() {
+        for (level_str, expected) in [
+            ("DEBUG", LogLevel::Debug),
+            ("INFO", LogLevel::Info),
+            ("WARN", LogLevel::Warn),
+            ("ERROR", LogLevel::Error),
+        ] {
+            let line = format!(
+                "timestamp=2026-06-10T16:11:27.352Z level={level_str} service=default"
+            );
+            let ParsedOpenCodeStderrLine::Structured(record) = parse_line(&line) else {
+                panic!("expected Structured for {level_str}");
+            };
+            assert_eq!(record.level, expected, "{level_str}");
+        }
+    }
+
+    #[test]
+    fn new_format_timestamp_includes_millis() {
+        let line = "timestamp=2026-06-10T16:11:27.352Z level=INFO service=default";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+
+        assert_eq!(record.timestamp.timestamp_subsec_millis(), 352);
+        assert_eq!(record.timestamp.nanosecond(), 352_000_000);
+    }
+
+    #[test]
+    fn new_format_preserves_raw_line() {
+        let line = "timestamp=2026-06-10T16:11:27.352Z level=WARN service=default run=abc";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+
+        assert_eq!(record.raw, line);
+    }
+
+    #[test]
+    fn new_format_extracts_tags() {
+        let line = "timestamp=2026-06-10T16:11:27.352Z level=INFO run=abc service=session id=ses_123 parentID=ses_parent title=My task";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+
+        assert_eq!(record.tags.get("run").map(String::as_str), Some("abc"));
+        assert_eq!(
+            record.tags.get("service").map(String::as_str),
+            Some("session"),
+        );
+        assert_eq!(record.tags.get("id").map(String::as_str), Some("ses_123"));
+        assert_eq!(
+            record.tags.get("parentID").map(String::as_str),
+            Some("ses_parent"),
+        );
+        assert_eq!(
+            record.tags.get("title").map(String::as_str),
+            Some("My task"),
+        );
+    }
+
+    #[test]
+    fn new_format_message_tag_captured() {
+        let line = "timestamp=2026-06-10T16:11:27.352Z level=INFO message=tracking hash=abc123";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+
+        assert_eq!(
+            record.tags.get("message").map(String::as_str),
+            Some("tracking"),
+        );
+        assert_eq!(record.tags.get("hash").map(String::as_str), Some("abc123"));
+    }
+
+    #[test]
+    fn new_format_rejects_non_matching() {
+        for line in [
+            "timestamp=not-a-date level=INFO service=default",
+            "time=2026-06-10T16:11:27.352Z level=INFO service=default",
+            "timestamp=2026-06-10T16:11:27.352Z severity=INFO service=default",
+        ] {
+            match parse_line(line) {
+                ParsedOpenCodeStderrLine::RawText(raw) => assert_eq!(raw, line),
+                other => panic!("expected RawText for {line:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn new_format_without_message_tag() {
+        let line = "timestamp=2026-06-10T16:11:27.352Z level=INFO run=abc service=session id=ses_123 parentID=ses_parent";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+
+        assert_eq!(
+            record.tags.get("service").map(String::as_str),
+            Some("session"),
+        );
+        assert_eq!(record.tags.get("id").map(String::as_str), Some("ses_123"));
+        assert!(!record.tags.contains_key("message"));
+        assert_eq!(record.message, "");
+    }
+
+    #[test]
+    fn new_format_without_millis() {
+        let line = "timestamp=2026-06-10T16:11:27Z level=INFO service=default";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+
+        assert_eq!(
+            record.timestamp.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            "2026-06-10T16:11:27Z",
+        );
+        assert_eq!(record.timestamp.timestamp_subsec_millis(), 0);
+    }
+
+    #[test]
+    fn mixed_format_stream_parses_both() {
+        let lines = [
+            (
+                "INFO 2026-04-15T21:28:30 +5ms service=default msg=legacy",
+                LogLevel::Info,
+                "2026-04-15T21:28:30Z",
+                5,
+                "default",
+            ),
+            (
+                "timestamp=2026-06-10T16:11:27.352Z level=WARN service=session id=ses_new",
+                LogLevel::Warn,
+                "2026-06-10T16:11:27Z",
+                0,
+                "session",
+            ),
+            (
+                "ERROR 2026-04-15T21:28:31 +42ms service=llm providerID=legacy modelID=model",
+                LogLevel::Error,
+                "2026-04-15T21:28:31Z",
+                42,
+                "llm",
+            ),
+            (
+                "timestamp=2026-06-10T16:11:28Z level=DEBUG service=permission permission=task",
+                LogLevel::Debug,
+                "2026-06-10T16:11:28Z",
+                0,
+                "permission",
+            ),
+        ];
+
+        for (line, expected_level, expected_ts, expected_delta_ms, expected_service) in lines {
+            let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+                panic!("expected Structured for {line}");
+            };
+
+            assert_eq!(record.level, expected_level, "{line}");
+            assert_eq!(
+                record.timestamp.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+                expected_ts,
+                "{line}",
+            );
+            assert_eq!(record.delta_ms, expected_delta_ms, "{line}");
+            assert_eq!(
+                record.tags.get("service").map(String::as_str),
+                Some(expected_service),
+                "{line}",
+            );
+        }
     }
 }

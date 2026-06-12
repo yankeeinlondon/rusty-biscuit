@@ -1,7 +1,7 @@
 ---
 lessons_learned: "@.claudine/memory/commits.md"
 timeout: 15m
-step_timeout: 8m
+step_timeout: 12m
 show_system_prompt: false
 operation: commit
 agent: opencode

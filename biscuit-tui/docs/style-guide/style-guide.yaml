@@ -1,0 +1,93 @@
+kind: sequence
+template:
+    summary: "{{name}}{{desc ? '(_' + desc + '_)': ''}}"
+    agent: "{{agent ? agent : 'opencode'}}"
+    model: "{{agent ? '' : 'minimax/MiniMax-M3'}}"
+    image: "@biscuit-tui/docs/style-guide/examples/{{name}}.png"
+list:
+    - name: Design Language
+      agent: claude
+    - name: apisnip
+      desc: "a TUI tool that trims large OpenAPI specification files by interactively selecting which endpoints to keep"
+      kind: example
+    - name: mqttui
+      desc: "a TUI tool for quickly subscribing to or publishing MQTT messages"
+      kind: example
+    - name: outside
+      desc: a multi-purpose weather client
+      kind: example
+    - name: pqviewer
+      desc: allows viewing of Apache Parquet files
+      kind: example
+    - name: fx
+      desc: a command-line cross-platform JSON processing tool and terminal viewer
+      kind: example
+    - name: lazygit
+      desc: a TUI for using git interactively in the terminal
+      kind: example
+    - name: forgit
+      desc: a TUI for using git interactively in the terminal
+      kind: example
+    - name: wiper
+      desc: a TUI disk analyzer and cleanup tool
+      kind: example
+    - name: trippy
+      desc: a network monitoring tool
+      kind: example
+    - name: Refine Design Language
+      agent: claude
+    - name: boolean_switch
+      kind: component
+      desc: |-
+          The `boolean_switch` is a TUI component that provides a simple and intuitive toggle interface
+          for boolean values. It renders a "track" with labels representing the "ON" and "OFF" states,
+          and a thumb indicator showing the current selection.
+    - name: choose_many
+      kind: component
+      desc: |-
+          The `choose_many` component is a TUI widget that provides a multi-selection list.
+          It allows users to pick zero or more items from a set of options using a list-based interface
+          with checkbox indicators. Options can be arranged vertically or horizontally.
+      documentation: "@biscuit-tui/docs/components/choose_many.md"
+      agent: codex
+    - name: choose_one
+      kind: component
+      desc: |-
+          The `choose_one` component is a TUI widget that provides a single-selection list.
+          It allows users to pick exactly one item from a set of options using a list-based interface
+          with radio-button style indicators. Options can be arranged vertically (one per row) or
+          horizontally (left-to-right, wrapping).
+      documentation: "@biscuit-tui/docs/components/choose_one.md"
+      agent: codex
+    - name: text_area_input
+      kind: component
+      desc: |-
+          The `TextAreaInput` is a multi-line text editing component for terminal user interfaces. It
+          provides a robust, scrollable editor with support for labels, validation errors, and customizable
+          key bindings.
+      documentation: "@biscuit-tui/docs/components/text_area_input.md"
+      agent: codex
+    - name: text_input
+      kind: component
+      desc: |-
+          The `TextInput` is a single-line text input component for terminal user interfaces. It provides
+          a lightweight way for users to type and edit short strings, such as names, identifiers, or
+          simple commands.
+      documentation: "@biscuit-tui/docs/components/text_input.md"
+      agent: codex
+    - name: input_table
+      kind: component
+      desc: |-
+          The `InputTable` is a grid-based form component for terminal user interfaces. It allows you
+          to arrange multiple rows and columns of heterogeneous editable cells, making it ideal for
+          complex data entry tasks where a single flat list of prompts is insufficient.
+      documentation: "@biscuit-tui/docs/components/input_table.md"
+      agent: claude
+    - name: frame_chrome
+      kind: component
+      desc: |-
+          The `FrameChrome` is a stateful wrapper widget that draws an optional border, title, and margin
+          around any inner component. It is the mechanism by which the CLI's `--border`, `--border-label`,
+          `--border-style`, and `--margin` flags are rendered.
+      documentation: "@biscuit-tui/docs/components/frame_chrome.md"
+      agent: claude

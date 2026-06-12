@@ -451,9 +451,14 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
 
 fn classify_lifecycle(record: &OpenCodeLogRecord) -> Option<LogClassification> {
     let service = record.tags.get("service").map(|s| s.as_str()).unwrap_or("");
+    let inferred_service = if service.is_empty() {
+        infer_service_from_message(record)
+    } else {
+        service
+    };
     let message = record.message.as_str();
 
-    match service {
+    match inferred_service {
         "default" => classify_default_service(record, message),
         "session" => classify_session(record, message),
         "llm" => classify_llm_call(record, message),
@@ -464,6 +469,45 @@ fn classify_lifecycle(record: &OpenCodeLogRecord) -> Option<LogClassification> {
             level: record.level,
         }),
         _ => None,
+    }
+}
+
+/// Infer the `service` tag value from the `message` tag and required sibling
+/// tags when `service` is absent.
+///
+/// OpenCode's new stderr format omits `service=` for many lifecycle records.
+/// The `message` tag still carries the trailing keyword that identifies the
+/// lifecycle class (`loop`, `stream`, `evaluated`, `created`, `opencode`,
+/// `Sent HTTP response`, `exiting loop`), and the required context tags
+/// (`session.id`, `step`, `providerID`, `modelID`, `permission`, `id`,
+/// `version`) are present.  This helper maps those observed shapes back to
+/// the service values the dedicated classifiers expect.
+fn infer_service_from_message(record: &OpenCodeLogRecord) -> &'static str {
+    let msg = record
+        .tags
+        .get("message")
+        .map(|s| s.trim_matches('"'))
+        .unwrap_or("");
+
+    match msg {
+        "loop" | "exiting loop"
+            if record.tags.contains_key("session.id")
+                && record.tags.contains_key("step") =>
+        {
+            "session.prompt"
+        }
+        "exiting loop" if record.tags.contains_key("session.id") => "session.prompt",
+        "stream"
+            if record.tags.contains_key("providerID")
+                && record.tags.contains_key("modelID") =>
+        {
+            "llm"
+        }
+        "evaluated" if record.tags.contains_key("permission") => "permission",
+        "created" if record.tags.contains_key("id") => "session",
+        "opencode" if record.tags.contains_key("version") => "default",
+        "Sent HTTP response" if record.tags.contains_key("http.method") => "default",
+        _ => "",
     }
 }
 
@@ -478,6 +522,14 @@ fn classify_lifecycle(record: &OpenCodeLogRecord) -> Option<LogClassification> {
 /// log-message keyword.
 fn has_trailing_keyword(record: &OpenCodeLogRecord, keyword: &str) -> bool {
     if record.message == keyword {
+        return true;
+    }
+    if record
+        .tags
+        .get("message")
+        .map(|value| value.trim_matches('"') == keyword)
+        .unwrap_or(false)
+    {
         return true;
     }
     let suffix = format!(" {keyword}");
@@ -911,6 +963,261 @@ mod tests {
             classify_raw("just some chatter"),
             LogClassification::Unclassified,
         );
+    }
+
+    fn parse_new_format_record(line: &str) -> OpenCodeLogRecord {
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured for {line}");
+        };
+        record
+    }
+
+    #[test]
+    fn new_format_classifies_session_created() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:27.352Z level=INFO service=session id=ses_primary title=Primary session created",
+        );
+
+        match classify(&record) {
+            LogClassification::SessionCreated { id, parent_id } => {
+                assert_eq!(id, "ses_primary");
+                assert_eq!(parent_id, None);
+            }
+            other => panic!("expected SessionCreated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_classifies_session_created_subagent() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:28.000Z level=INFO service=session id=ses_child parentID=ses_parent title=Child task created",
+        );
+
+        match classify(&record) {
+            LogClassification::SessionCreated { id, parent_id } => {
+                assert_eq!(id, "ses_child");
+                assert_eq!(parent_id.as_deref(), Some("ses_parent"));
+            }
+            other => panic!("expected SessionCreated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_classifies_llm_call() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:29.000Z level=INFO service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_primary small=false agent=build mode=primary stream",
+        );
+
+        match classify(&record) {
+            LogClassification::LlmCall {
+                provider_id,
+                model_id,
+                mode,
+                is_stream,
+            } => {
+                assert_eq!(provider_id, "kimi-for-coding");
+                assert_eq!(model_id, "k2p6");
+                assert_eq!(mode, "primary");
+                assert!(is_stream);
+            }
+            other => panic!("expected LlmCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_classifies_step_loop() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:30.000Z level=INFO service=session.prompt session.id=ses_primary step=2 logSpan.http.span.4=55ms message=loop",
+        );
+
+        match classify(&record) {
+            LogClassification::StepLoop { session_id, step } => {
+                assert_eq!(session_id, "ses_primary");
+                assert_eq!(step, 2);
+            }
+            other => panic!("expected StepLoop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_classifies_step_exit() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:31.000Z level=INFO service=session.prompt session.id=ses_primary logSpan.http.span.4=7437ms message=\"exiting loop\"",
+        );
+
+        match classify(&record) {
+            LogClassification::StepExit { session_id } => {
+                assert_eq!(session_id, "ses_primary");
+            }
+            other => panic!("expected StepExit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_classifies_permission_evaluated() {
+        let record = parse_new_format_record(
+            r#"timestamp=2026-06-10T16:11:32.000Z level=INFO service=permission permission=task pattern=general action={"permission":"*","action":"allow","pattern":"*"} message=evaluated"#,
+        );
+
+        match classify(&record) {
+            LogClassification::PermissionEvaluated {
+                permission,
+                pattern,
+                action,
+            } => {
+                assert_eq!(permission, "task");
+                assert_eq!(pattern, "general");
+                assert_eq!(
+                    action,
+                    r#"{"permission":"*","action":"allow","pattern":"*"}"#
+                );
+            }
+            other => panic!("expected PermissionEvaluated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_step_loop() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:27.460Z level=INFO run=df5a9474 message=loop session.id=ses_14db step=1",
+        );
+
+        match classify(&record) {
+            LogClassification::StepLoop { session_id, step } => {
+                assert_eq!(session_id, "ses_14db");
+                assert_eq!(step, 1);
+            }
+            other => panic!("expected StepLoop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_llm_call() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:27.574Z level=INFO run=df5a9474 message=stream providerID=zai-coding-plan modelID=glm-5.1",
+        );
+
+        match classify(&record) {
+            LogClassification::LlmCall {
+                provider_id,
+                model_id,
+                mode,
+                is_stream,
+            } => {
+                assert_eq!(provider_id, "zai-coding-plan");
+                assert_eq!(model_id, "glm-5.1");
+                assert_eq!(mode, "");
+                assert!(is_stream);
+            }
+            other => panic!("expected LlmCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_permission_evaluated() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:31.461Z level=INFO run=df5a9474 message=evaluated permission=glob pattern=general action=allow",
+        );
+
+        match classify(&record) {
+            LogClassification::PermissionEvaluated {
+                permission,
+                pattern,
+                action,
+            } => {
+                assert_eq!(permission, "glob");
+                assert_eq!(pattern, "general");
+                assert_eq!(action, "allow");
+            }
+            other => panic!("expected PermissionEvaluated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_session_created() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:28.000Z level=INFO run=df5a9474 message=created id=ses_primary title=Primary session",
+        );
+
+        match classify(&record) {
+            LogClassification::SessionCreated { id, parent_id } => {
+                assert_eq!(id, "ses_primary");
+                assert_eq!(parent_id, None);
+            }
+            other => panic!("expected SessionCreated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_boot_banner() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:27.352Z level=INFO run=df5a9474 version=1.14.48 message=opencode",
+        );
+
+        match classify(&record) {
+            LogClassification::BootBanner { version } => {
+                assert_eq!(version, "1.14.48");
+            }
+            other => panic!("expected BootBanner, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_serviceless_classifies_step_exit() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:31.462Z level=INFO run=df5a9474 message=\"exiting loop\" session.id=ses_primary",
+        );
+
+        match classify(&record) {
+            LogClassification::StepExit { session_id } => {
+                assert_eq!(session_id, "ses_primary");
+            }
+            other => panic!("expected StepExit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_format_classifies_tracking_as_unclassified() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:33.000Z level=INFO service=session message=tracking hash=abc123",
+        );
+
+        assert_eq!(classify(&record), LogClassification::Unclassified);
+    }
+
+    #[test]
+    fn new_format_quoted_message_value() {
+        let record = parse_new_format_record(
+            "timestamp=2026-06-10T16:11:34.000Z level=INFO service=llm message=\"llm runtime selected\" providerID=kimi-for-coding modelID=k2p6",
+        );
+
+        assert_eq!(
+            record.tags.get("message").map(String::as_str),
+            Some("\"llm runtime selected\""),
+        );
+        assert_eq!(classify(&record), LogClassification::Unclassified);
+    }
+
+    #[test]
+    fn new_format_error_with_inline_json() {
+        let record = parse_new_format_record(
+            r#"timestamp=2026-06-10T16:11:35.000Z level=ERROR service=llm providerID=kimi-for-coding modelID=k2p6 error={"error":{"name":"AI_APICallError","message":"upstream boom","statusCode":500}}"#,
+        );
+
+        match classify(&record) {
+            LogClassification::ApiFailure {
+                status_code,
+                error_name,
+                message,
+                is_fatal,
+            } => {
+                assert_eq!(status_code, Some(500));
+                assert_eq!(error_name, "AI_APICallError");
+                assert_eq!(message, "AI_APICallError (500: Internal Server Error): upstream boom");
+                assert!(!is_fatal);
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
     }
 
     /// Trailing bare tokens after the last tag become part of that tag's

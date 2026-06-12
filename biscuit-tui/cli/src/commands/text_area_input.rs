@@ -1,13 +1,13 @@
 //! `question text-area-input` subcommand.
 //!
-//! Maps CLI args onto a [`tui_chrome::TextAreaInputState`], runs the
-//! component via [`tui_chrome::run_standalone`], and writes the
+//! Maps CLI args onto a [`biscuit_tui::TextAreaInputState`], runs the
+//! component via [`biscuit_tui::run_standalone`], and writes the
 //! captured multi-line value according to the current [`OutputMode`].
 
 use std::io::{self, Write};
 
 use clap::Args;
-use tui_chrome::{
+use biscuit_tui::{
     ABORTED_KIND, CANCELLED_KIND, FrameChromeConfig, HeightSpec, Label, TextAreaInput,
     TextAreaInputState, run_standalone_with_chrome,
 };

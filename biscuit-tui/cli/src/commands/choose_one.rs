@@ -1,13 +1,13 @@
 //! `question choose-one` subcommand.
 //!
-//! Maps CLI args onto a [`tui_chrome::ChooseOneState`], runs the
-//! component via [`tui_chrome::run_standalone`], and writes the
+//! Maps CLI args onto a [`biscuit_tui::ChooseOneState`], runs the
+//! component via [`biscuit_tui::run_standalone`], and writes the
 //! captured option value according to the current [`OutputMode`].
 
 use std::io::{self, Write};
 
 use clap::Args;
-use tui_chrome::{
+use biscuit_tui::{
     ChoiceInput, ChooseOne, ChooseOneState, HeightSpec, Label, SelectionMode,
     run_standalone_with_chrome,
 };
@@ -133,7 +133,7 @@ fn build_choice_input(args: &ChooseOneArgs) -> io::Result<ChoiceInput<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tui_chrome::CANCELLED_KIND;
+    use biscuit_tui::CANCELLED_KIND;
 
     fn default_args() -> ChooseOneArgs {
         ChooseOneArgs {
@@ -284,7 +284,7 @@ mod tests {
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
-        assert_eq!(input.sort, Some(tui_chrome::SortOrder::Asc));
+        assert_eq!(input.sort, Some(biscuit_tui::SortOrder::Asc));
         let state = ChooseOneState::new(input);
         let labels: Vec<&str> = state.options().iter().map(|o| o.label.as_str()).collect();
         assert_eq!(labels, vec!["Apple", "Berry", "Cherry"]);
@@ -302,7 +302,7 @@ mod tests {
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
-        assert_eq!(input.sort, Some(tui_chrome::SortOrder::Asc));
+        assert_eq!(input.sort, Some(biscuit_tui::SortOrder::Asc));
         let state = ChooseOneState::new(input);
         let labels: Vec<&str> = state.options().iter().map(|o| o.label.as_str()).collect();
         assert_eq!(labels, vec!["Apple", "Berry", "Cherry"]);
@@ -598,7 +598,7 @@ mod tests {
         assert_eq!(input.options[0].value, "apple");
         assert_eq!(
             input.options[0].hotkey,
-            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+            Some(biscuit_tui::HotkeySpec::Ctrl('r'))
         );
         assert_eq!(input.options[1].label, "Blue");
         assert_eq!(input.options[1].value, "sky");
@@ -620,13 +620,13 @@ mod tests {
         assert_eq!(input.options[0].value, "apple");
         assert_eq!(
             input.options[0].hotkey,
-            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+            Some(biscuit_tui::HotkeySpec::Ctrl('r'))
         );
         assert_eq!(input.options[1].label, "Blue");
         assert_eq!(input.options[1].value, "sky");
         assert_eq!(
             input.options[1].hotkey,
-            Some(tui_chrome::HotkeySpec::Alt('b'))
+            Some(biscuit_tui::HotkeySpec::Alt('b'))
         );
         std::fs::remove_file(&path).unwrap();
     }
@@ -644,7 +644,7 @@ mod tests {
         assert_eq!(input.options[0].value, "apple");
         assert_eq!(
             input.options[0].hotkey,
-            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+            Some(biscuit_tui::HotkeySpec::Ctrl('r'))
         );
         assert_eq!(input.options[1].value, "sky");
         std::fs::remove_file(&path).unwrap();
@@ -663,7 +663,7 @@ mod tests {
         assert_eq!(input.options[0].value, "apple");
         assert_eq!(
             input.options[0].hotkey,
-            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+            Some(biscuit_tui::HotkeySpec::Ctrl('r'))
         );
         std::fs::remove_file(&path).unwrap();
     }
@@ -682,13 +682,13 @@ mod tests {
         assert_eq!(input.options[0].value, "apple");
         assert_eq!(
             input.options[0].hotkey,
-            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+            Some(biscuit_tui::HotkeySpec::Ctrl('r'))
         );
         assert_eq!(input.options[1].label, "Blue");
         assert_eq!(input.options[1].value, "sky");
         assert_eq!(
             input.options[1].hotkey,
-            Some(tui_chrome::HotkeySpec::Alt('b'))
+            Some(biscuit_tui::HotkeySpec::Alt('b'))
         );
         std::fs::remove_file(&path).unwrap();
     }
@@ -710,7 +710,7 @@ mod tests {
         assert_eq!(input.options[0].value, "apple");
         assert_eq!(
             input.options[0].hotkey,
-            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+            Some(biscuit_tui::HotkeySpec::Ctrl('r'))
         );
         assert_eq!(input.options[1].label, "Blue");
         assert_eq!(input.options[1].value, "sky");
@@ -758,7 +758,7 @@ mod tests {
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
-        assert_eq!(input.active_color, tui_chrome::ActiveChoiceColor::Grey);
+        assert_eq!(input.active_color, biscuit_tui::ActiveChoiceColor::Grey);
     }
 
     #[test]
@@ -773,7 +773,7 @@ mod tests {
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
-        assert_eq!(input.active_color, tui_chrome::ActiveChoiceColor::Green);
+        assert_eq!(input.active_color, biscuit_tui::ActiveChoiceColor::Green);
     }
 
     #[test]

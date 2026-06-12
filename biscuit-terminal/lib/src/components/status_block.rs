@@ -120,7 +120,13 @@ impl StatusBlock {
         self.body(vec![line.into()])
     }
 
-    /// Sets a prose-formatted hint rendered below the block quote.
+    /// Sets a prose-formatted hint.
+    ///
+    /// When body content is present, the hint is rendered inside the same
+    /// block quote as the body, separated from it by a blank paragraph and
+    /// styled with italic emphasis. When the body is empty, the hint renders
+    /// as a standalone paragraph outside any block quote. Blank hints are
+    /// omitted.
     pub fn hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = Some(hint.into());
         self
@@ -157,6 +163,10 @@ impl StatusBlock {
     fn resolved_border_color(&self) -> Color {
         self.border_color
             .unwrap_or_else(|| self.severity.default_color())
+    }
+
+    fn non_blank_hint(&self) -> Option<&str> {
+        self.hint.as_deref().filter(|h| !h.trim().is_empty())
     }
 
     /// Returns the portable Unicode fallback icon for a [`StatusState`].
@@ -225,8 +235,16 @@ impl StatusBlock {
     /// This is the **single private projection helper**. The
     /// [`TreeRenderable::render_tree`] entry point delegates to it; the
     /// Browser and Markdown adapters render the returned node directly. The
-    /// projection emits a `Root` with one optional header `Paragraph`, one
-    /// optional `BlockQuote` body, and one optional hint `Paragraph`.
+    /// projection emits a `Root` with one optional header `Paragraph` plus a
+    /// body surface that is one of:
+    ///
+    /// - a `BlockQuote` carrying `leading blank, body, [blank, hint]` when
+    ///   body content is present — the trailing `blank, hint` pair is only
+    ///   emitted for a non-blank hint;
+    /// - a standalone `Paragraph` hint when the body is empty and a
+    ///   non-blank hint is configured;
+    /// - nothing beyond the optional header when both body and hint are
+    ///   empty.
     ///
     /// The default border maps to a typed thick left [`Border`] on the body
     /// node so the terminal tree renderer reproduces the `┃ ` glyph. Arbitrary
@@ -253,10 +271,28 @@ impl StatusBlock {
 
         if !self.body.is_empty() {
             let body_text = self.body_plain_text();
-            let mut node =
-                RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
-                    body_text,
-                )])]);
+            let mut block_children: Vec<RenderNode> = Vec::new();
+
+            block_children.push(RenderNode::paragraph(vec![RenderNode::text(
+                String::new(),
+            )]));
+            block_children.push(RenderNode::paragraph(vec![RenderNode::text(body_text)]));
+
+            if let Some(hint_text) = self.non_blank_hint() {
+                block_children.push(RenderNode::paragraph(vec![RenderNode::text(
+                    String::new(),
+                )]));
+
+                let hint = Self::prose_plain_text(hint_text);
+
+                let mut hint_node = RenderNode::paragraph(vec![RenderNode::emphasis(vec![
+                    RenderNode::text(hint),
+                ])]);
+                hint_node.attrs.classes = vec!["status-block__hint".into()];
+                block_children.push(hint_node);
+            }
+
+            let mut node = RenderNode::block_quote(block_children);
             node.attrs.classes = vec!["status-block__body".into()];
             node.attrs.set_style(&Style {
                 border: Some(Border {
@@ -284,9 +320,7 @@ impl StatusBlock {
                 ..Layout::default()
             });
             children.push(node);
-        }
-
-        if let Some(hint_text) = &self.hint {
+        } else if let Some(hint_text) = self.non_blank_hint() {
             let hint = Self::prose_plain_text(hint_text);
             let mut node = RenderNode::paragraph(vec![RenderNode::text(hint)]);
             node.attrs.classes = vec!["status-block__hint".into()];
@@ -377,12 +411,22 @@ impl StatusBlock {
         }
 
         if !self.body.is_empty() {
-            let composed = self
+            let mut composed_parts: Vec<String> = Vec::new();
+
+            let body_composed = self
                 .body
                 .iter()
                 .map(|p| p.render(term))
                 .collect::<Vec<_>>()
                 .join("\n\n");
+            composed_parts.push(body_composed);
+
+            if let Some(hint_text) = self.non_blank_hint() {
+                composed_parts.push(Prose::new(format!("<i>{}</i>", hint_text)).render(term));
+            }
+
+            let composed = composed_parts.join("\n\n");
+            let composed = format!("\n{composed}");
             let mut block =
                 BlockQuote::new(RenderableTerminalContent::String(composed), None::<&str>)
                     .with_left_block_color(self.resolved_border_color())
@@ -391,9 +435,8 @@ impl StatusBlock {
             block.layout_mut().margin.right = self.layout.margin.right.clone();
             block.layout_mut().word_wrap = self.layout.word_wrap.clone();
             parts.push(block.render(term));
-        }
-
-        if let Some(ref hint_text) = self.hint {
+        } else if let Some(hint_text) = self.non_blank_hint() {
+            // No body but there is a hint — keep as a separate paragraph.
             parts.push(Prose::new(hint_text).render(term));
         }
 
@@ -711,7 +754,7 @@ mod tests {
     }
 
     #[test]
-    fn all_parts_emit_three_children_in_order() {
+    fn all_parts_emit_header_and_block_quote_with_hint_inside() {
         let block = StatusBlock::new(StatusState::Error)
             .header("Header")
             .body("Body")
@@ -721,16 +764,31 @@ mod tests {
             NodeKind::Root { children } => children,
             _ => panic!("expected Root"),
         };
-        assert_eq!(children.len(), 3);
+        assert_eq!(children.len(), 2);
         assert!(matches!(children[0].kind, NodeKind::Paragraph { .. }));
         assert!(matches!(children[1].kind, NodeKind::BlockQuote { .. }));
-        assert!(matches!(children[2].kind, NodeKind::Paragraph { .. }));
+        let bq_children = match &children[1].kind {
+            NodeKind::BlockQuote { children } => children,
+            _ => panic!("expected BlockQuote"),
+        };
+        assert_eq!(
+            bq_children.len(),
+            4,
+            "leading blank + body + hint separator blank + hint"
+        );
+        let hint_node = bq_children
+            .iter()
+            .find(|c| c.attrs.classes.iter().any(|cl| cl == "status-block__hint"))
+            .expect("hint paragraph inside block quote");
+        let hint_children = match &hint_node.kind {
+            NodeKind::Paragraph { children } => children,
+            _ => panic!("hint must be a Paragraph"),
+        };
         assert!(
-            children[2]
-                .attrs
-                .classes
+            hint_children
                 .iter()
-                .any(|c| c == "status-block__hint")
+                .any(|c| matches!(c.kind, NodeKind::Emphasis { .. })),
+            "hint paragraph must contain an Emphasis child for portable italic"
         );
     }
 
@@ -1133,8 +1191,6 @@ mod tests {
 
     #[test]
     fn deprecated_failure_serializes_as_error() {
-        // The deprecated `Failure` variant maps to the same fallback icon as
-        // `Error` so old JSON round-trips with no observable visual change.
         #[allow(deprecated)]
         let icon = StatusBlock::severity_icon(&StatusState::Failure);
         assert_eq!(icon, "⤫");

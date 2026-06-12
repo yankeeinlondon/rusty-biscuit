@@ -1,18 +1,18 @@
 ---
 name: biscuit-tui
-description: Expert knowledge for the biscuit-tui package area in the rusty-biscuit monorepo. Provides reusable TUI input components (tui-chrome library) and a CLI (question) for shell-scriptable prompts. Use when building or modifying ratatui-based input widgets, adding new components to the tui-chrome library, working with the question CLI, or implementing standalone/embedded terminal prompts.
+description: Expert knowledge for the biscuit-tui package area in the rusty-biscuit monorepo. Provides reusable TUI input components (biscuit-tui library) and a CLI (question) for shell-scriptable prompts. Use when building or modifying ratatui-based input widgets, adding new components to the biscuit-tui library, working with the question CLI, or implementing standalone/embedded terminal prompts.
 ---
 
 # biscuit-tui
 
-Reusable TUI input components for Rust, built on ratatui. Provides both a library (`tui-chrome`) and a CLI (`question`).
+Reusable TUI input components for Rust, built on ratatui. Provides both a library (`biscuit-tui`) and a CLI (`question`).
 
 ## Package Structure
 
 | Crate | Path | Binary | Purpose |
 |-------|------|--------|---------|
-| `tui-chrome` | `lib/` | — | Input widget library |
-| `tui-chrome-cli` | `cli/` | `question` | CLI front-end |
+| `biscuit-tui` | `lib/` | — | Input widget library |
+| `biscuit-tui-cli` | `cli/` | `question` | CLI front-end |
 
 ## Architecture
 
@@ -31,7 +31,7 @@ Every component follows the same pattern:
 Single-line text input. Uses `tui_input` as private edit engine.
 
 ```rust
-use tui_chrome::prelude::*;
+use biscuit_tui::prelude::*;
 let state = TextInputState::new()
     .with_label(Label::new("Name", LabelPosition::Above))
     .with_max_length(50)
@@ -39,7 +39,7 @@ let state = TextInputState::new()
 ```
 
 #### TextAreaInput
-Multi-line editor. Uses `tui_textarea` as private edit engine. Default submit is `Ctrl+S` (not Enter).
+Multi-line editor. Uses `ratatui_textarea` as private edit engine. Default submit is `Ctrl+S` (not Enter).
 
 ```rust
 let state = TextAreaInputState::new(60, 10)
@@ -88,7 +88,7 @@ let state = ChooseManyState::new(input);
 Wraps any `StatefulWidget` with optional border, title, and margin. Not an input itself — adds visual chrome. Used by the CLI via `--border` / `--border-label` / `--border-style` / `--margin` flags on choose commands.
 
 ```rust
-use tui_chrome::core::{BorderStyle, FrameChrome, FrameChromeConfig, Margin};
+use biscuit_tui::core::{BorderStyle, FrameChrome, FrameChromeConfig, Margin};
 
 let config = FrameChromeConfig {
     border: BorderStyle::Rounded,
@@ -324,10 +324,10 @@ just cli <args>  # run in dev mode
 
 ## Dependencies
 
-- `ratatui` 0.29 — core TUI framework
-- `crossterm` 0.28 — terminal events
-- `tui-input` 0.11 — single-line edit engine
-- `tui-textarea` 0.7 — multi-line edit engine
+- `ratatui` 0.30 — core TUI framework
+- `crossterm` 0.29 — terminal events
+- `tui-input` 0.15 — single-line edit engine
+- `ratatui-textarea` 0.9 — multi-line edit engine (Ratatui-org fork of `tui-textarea`, which caps at ratatui 0.29)
 - `nucleo-matcher` 0.3 — fuzzy matching
 - `serde_yaml_ng` 0.10 — dictionary parsing
 - `thiserror` 2 — error types

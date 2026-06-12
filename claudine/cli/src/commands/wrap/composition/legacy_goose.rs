@@ -9,7 +9,6 @@ use color_eyre::eyre::Result;
 use super::{CompositionExecutionMode, StructuredCodexOutput};
 use crate::commands::wrap::exec;
 use crate::commands::wrap::profile::WrapperProfile;
-use crate::commands::wrap::subagent_watchdog::TimeoutConfig;
 
 /// Run the legacy (non-structured) branch of [`super::execute_without_harness`].
 ///
@@ -31,21 +30,8 @@ pub(crate) fn run_legacy_branch(
     structured_codex_output: Option<&StructuredCodexOutput>,
     child_spawned: &mut bool,
     agent_perf_out: &mut Option<crate::perf::AgentExecutionPerf>,
-    timeout_config: TimeoutConfig,
     term: &Terminal,
 ) -> Result<(i32, String, Option<super::CompositionStreamResult>)> {
-    if timeout_config.any_enabled() {
-        use biscuit_terminal::components::renderable::TerminalRenderable;
-        use biscuit_terminal::components::status::{Status, StatusState};
-        let rendered = Status::new(
-            "timeouts are only enforced in structured-stream mode; \
-             ignoring for this non-structured attempt"
-                .to_string(),
-        )
-        .state(StatusState::Warning)
-        .render(term);
-        eprintln!("{rendered}");
-    }
     match mode {
         CompositionExecutionMode::Inline {
             session_interactive,

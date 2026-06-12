@@ -4,6 +4,7 @@ expression: out
 ---
 ⤫ PageBlockError: The file sample.md has an unterminated ::block / ::end-block
   block definition.
+┃ 
 ┃ The Frontmatter of this document was:
 ┃ 
 ┃ ```yaml
@@ -19,4 +20,5 @@ expression: out
 ┃     >  8 │ ::block when="condition"
 ┃        9 │ body line one
 ┃       10 │ body line two
-Add a matching ::end-block directive to close the region.
+┃ 
+┃ Add a matching ::end-block directive to close the region.

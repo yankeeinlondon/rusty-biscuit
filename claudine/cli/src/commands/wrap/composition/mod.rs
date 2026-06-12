@@ -757,10 +757,15 @@ fn refresh_for_prepared_model_validation(
 /// composition contexts receive it through `env_overrides`.
 pub(crate) fn install_agent_env_for_composition(
     target: &ResolvedExecutionTarget,
+    yolo: bool,
     env_overrides: &mut std::collections::BTreeMap<String, String>,
 ) {
     let slug = target.provider.as_slug().to_string();
     env_overrides.insert("AGENT".to_string(), slug);
+    if let Some(ref model) = target.model {
+        env_overrides.insert("MODEL".to_string(), model.clone());
+    }
+    env_overrides.insert("YOLO".to_string(), yolo.to_string());
 }
 
 /// Render the one-line execution header for a composition run.
@@ -2147,7 +2152,6 @@ fn execute_without_harness(
             structured_codex_output,
             child_spawned,
             agent_perf_out,
-            timeout_config,
             term,
         )?
     };

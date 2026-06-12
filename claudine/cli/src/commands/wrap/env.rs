@@ -1341,10 +1341,10 @@ edition = "2024"
 
         assert_eq!(ctx.launch_cwd, docs_dir);
         assert_eq!(
-            ctx.repo_root.as_deref(),
-            Some(canonical_repo_root.as_path())
+            ctx.repo_root.as_deref().map(canonical_or_self),
+            Some(canonical_repo_root.clone())
         );
-        assert_eq!(ctx.child_cwd.as_path(), canonical_repo_root.as_path());
+        assert_eq!(canonical_or_self(&ctx.child_cwd), canonical_repo_root);
         assert!(ctx.package_context.is_none());
         assert!(
             ctx.warnings
