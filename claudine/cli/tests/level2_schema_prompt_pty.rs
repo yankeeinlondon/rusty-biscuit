@@ -184,7 +184,7 @@ fn compose_command(workspace_dir: &std::path::Path, bin_dir: &std::path::Path, m
     cmd.env("HOME", workspace_dir);
     cmd.env("PATH", augmented_path(bin_dir));
     // Give the TUI a deterministic terminal type with truecolor support
-    // so the inquire/tui-chrome rendering path picks a consistent style.
+    // so the inquire/biscuit-tui rendering path picks a consistent style.
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env_remove("NO_COLOR");

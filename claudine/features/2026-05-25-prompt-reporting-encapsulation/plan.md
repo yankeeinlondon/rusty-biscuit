@@ -28,7 +28,7 @@ skills_files_updated_during_phase_2: []
 packages:
   - claudine
   - claudine-cli
-  - tui-chrome
+  - biscuit-tui
 ---
 
 # Plan: Prompt Reporting Encapsulation (Stage 0)

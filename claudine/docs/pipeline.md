@@ -94,7 +94,7 @@ correctly.
 |---|------|-------|
 | B3.1 | **Parse selection hints from raw frontmatter** [M] | `agent:` / `model:` (no compose). Treats template-shaped values as absent. |
 | B3.2 | **Eager target resolution** [M] | `compose_prep.eager_target`. Branches on TTY vs non-TTY: |
-| B3.2.tty | **TTY: explicit-flag wins; otherwise picker** [O-flag] | If `--<provider>` set, pick directly. Otherwise build a picker plan, render a one-shot `tui-chrome::ChooseOne` picker. |
+| B3.2.tty | **TTY: explicit-flag wins; otherwise picker** [O-flag] | If `--<provider>` set, pick directly. Otherwise build a picker plan, render a one-shot `biscuit-tui::ChooseOne` picker. |
 | B3.2.nontty | **Non-TTY: strict resolution chain** [M] | `--<provider>` > singular `agent:` > list `agent:` > `favorite_agent` > hard error. |
 | B3.3 | **Probe model resolution (no catalog)** [M] | First pass to learn the `ModelResolutionReason`. |
 | B3.4 | **`compose_prep.model_catalog` refresh** [O-fm] | Skipped when `model:` is absent **or** the resolved reason is `ExplicitCli` / `ProviderEnv` / `GenericEnv`. Provider-scoped: Claude/Codex are O(1) static, OpenCode/Qwen shell out to `<provider> models`, Gemini/Kimi/Goose are user-overrides only. |
