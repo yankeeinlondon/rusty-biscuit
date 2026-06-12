@@ -1,13 +1,13 @@
 # Theming & Configuration
 
-This page documents the shared configuration types used by every `tui-chrome` component: [`Label`](#label), [`LabelPosition`](#labelposition), [`ComponentTheme`](#componenttheme), and [`KeyBindings`](#keybindings).
+This page documents the shared configuration types used by every `biscuit-tui` component: [`Label`](#label), [`LabelPosition`](#labelposition), [`ComponentTheme`](#componenttheme), and [`KeyBindings`](#keybindings).
 
 ## `Label`
 
-A [`Label`](https://docs.rs/tui-chrome/latest/tui_chrome/core/struct.Label.html) pairs display text with a [`LabelPosition`](#labelposition) describing where it renders relative to the component body.
+A [`Label`](https://docs.rs/biscuit-tui/latest/biscuit_tui/core/struct.Label.html) pairs display text with a [`LabelPosition`](#labelposition) describing where it renders relative to the component body.
 
 ```rust
-use tui_chrome::{Label, LabelPosition};
+use biscuit_tui::{Label, LabelPosition};
 
 let label = Label::new("Username", LabelPosition::Left);
 ```
@@ -31,7 +31,7 @@ The four supported label positions:
 
 ## `ComponentTheme`
 
-[`ComponentTheme`](https://docs.rs/tui-chrome/latest/tui_chrome/core/struct.ComponentTheme.html) centralises the glyphs and styles used across every component. Each state struct owns its own theme instance, which can be mutated at runtime or replaced wholesale via `.with_theme(...)`.
+[`ComponentTheme`](https://docs.rs/biscuit-tui/latest/biscuit_tui/core/struct.ComponentTheme.html) centralises the glyphs and styles used across every component. Each state struct owns its own theme instance, which can be mutated at runtime or replaced wholesale via `.with_theme(...)`.
 
 ### Fields
 
@@ -61,7 +61,7 @@ The four supported label positions:
 ### Usage
 
 ```rust
-use tui_chrome::ComponentTheme;
+use biscuit_tui::ComponentTheme;
 
 let mut theme = ComponentTheme::default();
 theme.help_hint = "Space=Toggle  Enter=Submit  Esc=Cancel".to_string();
@@ -71,7 +71,7 @@ let state = TextInputState::new().with_theme(theme);
 
 ## `KeyBindings`
 
-[`KeyBindings`](https://docs.rs/tui-chrome/latest/tui_chrome/core/struct.KeyBindings.html) is a plain struct of `Vec<KeyEvent>` per logical action. Components match incoming `KeyEvent`s against the binding lists and fall through to `EventOutcome::Ignored` when no binding matches.
+[`KeyBindings`](https://docs.rs/biscuit-tui/latest/biscuit_tui/core/struct.KeyBindings.html) is a plain struct of `Vec<KeyEvent>` per logical action. Components match incoming `KeyEvent`s against the binding lists and fall through to `EventOutcome::Ignored` when no binding matches.
 
 ### Default Bindings
 
@@ -91,7 +91,7 @@ let state = TextInputState::new().with_theme(theme);
 
 ```rust
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use tui_chrome::KeyBindings;
+use biscuit_tui::KeyBindings;
 
 let bindings = KeyBindings {
     submit: vec![KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)],
@@ -103,14 +103,14 @@ let state = TextInputState::new().with_key_bindings(bindings);
 
 ## Standalone vs Embedded
 
-`tui-chrome` components support two integration patterns:
+`biscuit-tui` components support two integration patterns:
 
 ### Standalone
 
-The component owns the terminal for the duration of a single prompt. Use [`run_standalone`](https://docs.rs/tui-chrome/latest/tui_chrome/fn.run_standalone.html) or [`run_standalone_with_chrome`](https://docs.rs/tui-chrome/latest/tui_chrome/fn.run_standalone_with_chrome.html):
+The component owns the terminal for the duration of a single prompt. Use [`run_standalone`](https://docs.rs/biscuit-tui/latest/biscuit_tui/fn.run_standalone.html) or [`run_standalone_with_chrome`](https://docs.rs/biscuit-tui/latest/biscuit_tui/fn.run_standalone_with_chrome.html):
 
 ```rust
-use tui_chrome::{run_standalone, TextInput, TextInputState};
+use biscuit_tui::{run_standalone, TextInput, TextInputState};
 
 let state = TextInputState::new();
 let result = run_standalone(TextInput::new(), state, None);

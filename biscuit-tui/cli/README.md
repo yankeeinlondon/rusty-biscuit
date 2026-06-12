@@ -1,6 +1,6 @@
 # question
 
-A CLI for the `tui-chrome` library. Exposes each input component as a subcommand, making them directly usable in shell scripts and pipelines.
+A CLI for the `biscuit-tui` library. Exposes each input component as a subcommand, making them directly usable in shell scripts and pipelines.
 
 ## Installation
 
@@ -358,24 +358,24 @@ no spurious failures.
 ```sh
 # All levels at once — Level 2 auto-skips when tooling is missing, Level 3 skips
 # unless RUN_LEVEL3=1 is set
-just test          # or: cargo test -p tui-chrome -p tui-chrome-cli
+just test          # or: cargo test -p biscuit-tui -p biscuit-tui-cli
 
 # Level 1 only — library unit tests (TestBackend, buffer asserts)
-cargo test -p tui-chrome
+cargo test -p biscuit-tui
 
 # Level 1 only — CLI PTY tests (manufactured input bytes via `expectrl`)
-cargo test -p tui-chrome-cli --test keyboard_protocol
+cargo test -p biscuit-tui-cli --test keyboard_protocol
 
 # Level 2 (and Level 3 when gated on) — real terminal harness
 # Auto-skips individual tests when tmux / wezterm / kitty / cliclick is missing
-cargo test -p tui-chrome-cli --test real_terminal_render
+cargo test -p biscuit-tui-cli --test real_terminal_render
 
 # Level 3 — OS-level keyboard injection. Focus must stay on the spawned
 # terminal window during the test (cliclick on macOS, xdotool on Linux).
-RUN_LEVEL3=1 cargo test -p tui-chrome-cli --test real_terminal_render
+RUN_LEVEL3=1 cargo test -p biscuit-tui-cli --test real_terminal_render
 
 # Run a single test by name (works at any level)
-cargo test -p tui-chrome-cli --test real_terminal_render \
+cargo test -p biscuit-tui-cli --test real_terminal_render \
     level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr -- --nocapture
 ```
 
@@ -409,6 +409,6 @@ typically gets dropped before WezTerm sees it. For verifying the
 
 For library documentation and design details, see:
 
-- [tui-chrome library README](../lib/README.md)
+- [biscuit-tui library README](../lib/README.md)
 - [spec.md](../features/2026-04-16-input-tui/spec.md)
 - [tech-design.md](../features/2026-04-16-input-tui/tech-design.md)

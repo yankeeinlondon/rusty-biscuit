@@ -1,7 +1,92 @@
 ---
 phases: 5
 created: 2026-06-11
-start_phase: 1
+start_phase: 5
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+  - biscuit-tui/README.md
+  - biscuit-tui/lib/README.md
+  - biscuit-tui/cli/README.md
+  - biscuit-tui/docs/cli-reference.md
+  - biscuit-tui/docs/theming.md
+  - biscuit-tui/docs/components/index.md
+  - biscuit-tui/docs/components/choose_one.md
+  - biscuit-tui/docs/components/choose_many.md
+  - biscuit-tui/docs/components/frame_chrome.md
+  - biscuit-tui/docs/components/input_table.md
+  - biscuit-tui/docs/components/text_input.md
+  - biscuit-tui/docs/components/text_area_input.md
+  - .claude/skills/biscuit-tui/SKILL.md
+  - features/2026-05-24-testing-best-practices/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/biscuit-tui/SKILL.md
+source_files_during_phase_3:
+  - claudine/cli/src/commands/schema_interactive.rs
+  - claudine/cli/src/commands/wrap/selection_ui.rs
+  - claudine/cli/tests/level2_schema_prompt_pty.rs
+docs_updated_during_phase_3:
+  - claudine/cli/README.md
+  - claudine/docs/pipeline.md
+  - claudine/docs/topics/execution-flow.md
+  - claudine/docs/topics/composition.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_1:
+  - biscuit-tui/lib/Cargo.toml
+  - biscuit-tui/cli/Cargo.toml
+  - biscuit-tui/justfile
+  - claudine/cli/Cargo.toml
+  - release-plz.toml
+docs_updated_during_phase_1:
+  - docs/dependencies.md
+  - docs/topics/ci-cd.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - biscuit-tui/lib/src/prelude.rs
+  - biscuit-tui/lib/src/components/text_area_input.rs
+  - biscuit-tui/lib/src/components/text_input.rs
+  - biscuit-tui/lib/src/components/boolean_switch.rs
+  - biscuit-tui/lib/src/components/input_table/table.rs
+  - biscuit-tui/lib/src/components/choose_one.rs
+  - biscuit-tui/lib/src/components/choose.rs
+  - biscuit-tui/lib/src/components/choose_many.rs
+  - biscuit-tui/lib/src/core/sort.rs
+  - biscuit-tui/lib/src/core/frame.rs
+  - biscuit-tui/lib/src/core/fuzzy.rs
+  - biscuit-tui/lib/src/core/event.rs
+  - biscuit-tui/lib/src/core/theme.rs
+  - biscuit-tui/lib/src/core/mod.rs
+  - biscuit-tui/lib/src/helpers/choice_builders.rs
+  - biscuit-tui/lib/tests/public_api_names.rs
+  - biscuit-tui/cli/src/main.rs
+  - biscuit-tui/cli/src/option_sources.rs
+  - biscuit-tui/cli/src/choice_normalize.rs
+  - biscuit-tui/cli/src/commands/choose_one.rs
+  - biscuit-tui/cli/src/commands/choose_many.rs
+  - biscuit-tui/cli/src/commands/common_choose.rs
+  - biscuit-tui/cli/src/commands/text_input.rs
+  - biscuit-tui/cli/src/commands/text_area_input.rs
+  - biscuit-tui/cli/src/commands/boolean_switch.rs
+  - biscuit-tui/cli/src/commands/mod.rs
+  - biscuit-tui/cli/src/commands/input_table/mod.rs
+  - biscuit-tui/cli/src/commands/input_table/columns.rs
+  - biscuit-tui/cli/src/commands/input_table/tests.rs
+  - biscuit-tui/cli/tests/choose_cli.rs
+  - biscuit-tui/cli/tests/common/pty.rs
+  - biscuit-tui/cli/tests/completions_shell.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+  - biscuit-tui/lib
+  - biscuit-tui/cli
+  - claudine/cli
 ---
 
 # Plan: Rename `tui-chrome` to `biscuit-tui`
@@ -18,14 +103,14 @@ This plan converts `biscuit-tui/features/2026-06-5-rename/spec.md` into an order
 
 *Goal: make Cargo, just, and repo config reflect the new package names before any source imports are updated.*
 
-- [ ] Rename `package.name` from `tui-chrome` to `biscuit-tui` in `biscuit-tui/lib/Cargo.toml`.
-- [ ] Rename `package.name` from `tui-chrome-cli` to `biscuit-tui-cli` in `biscuit-tui/cli/Cargo.toml`.
-- [ ] Update the in-area dependency key from `tui-chrome = { path = "../lib" }` to `biscuit-tui = { path = "../lib" }` in `biscuit-tui/cli/Cargo.toml`.
-- [ ] Update `biscuit-tui/justfile`: change `LIBRARY := "tui-chrome"` to `"biscuit-tui"`, `CLI := "tui-chrome-cli"` to `"biscuit-tui-cli"`, and update all echo/label strings that mention the old names (keep the `question` binary arg unchanged).
-- [ ] Update `release-plz.toml`: rename both `name = "tui-chrome"` and `name = "tui-chrome-cli"` entries.
-- [ ] Update root `docs/dependencies.md`: rename `tui-chrome` / `tui-chrome-cli` entries and the `_Interactive prompt CLI…_` description.
-- [ ] Update root `docs/topics/ci-cd.md`: rename `tui-chrome` and `tui-chrome-cli` in the excluded-package list.
-- [ ] Update `claudine/cli/Cargo.toml`: change dependency key from `tui-chrome = { path = "../../biscuit-tui/lib" }` to `biscuit-tui = { path = "../../biscuit-tui/lib" }`.
+- [x] Rename `package.name` from `tui-chrome` to `biscuit-tui` in `biscuit-tui/lib/Cargo.toml`.
+- [x] Rename `package.name` from `tui-chrome-cli` to `biscuit-tui-cli` in `biscuit-tui/cli/Cargo.toml`.
+- [x] Update the in-area dependency key from `tui-chrome = { path = "../lib" }` to `biscuit-tui = { path = "../lib" }` in `biscuit-tui/cli/Cargo.toml`.
+- [x] Update `biscuit-tui/justfile`: change `LIBRARY := "tui-chrome"` to `"biscuit-tui"`, `CLI := "tui-chrome-cli"` to `"biscuit-tui-cli"`, and update all echo/label strings that mention the old names (keep the `question` binary arg unchanged).
+- [x] Update `release-plz.toml`: rename both `name = "tui-chrome"` and `name = "tui-chrome-cli"` entries.
+- [x] Update root `docs/dependencies.md`: rename `tui-chrome` / `tui-chrome-cli` entries and the `_Interactive prompt CLI…_` description.
+- [x] Update root `docs/topics/ci-cd.md`: rename `tui-chrome` and `tui-chrome-cli` in the excluded-package list.
+- [x] Update `claudine/cli/Cargo.toml`: change dependency key from `tui-chrome = { path = "../../biscuit-tui/lib" }` to `biscuit-tui = { path = "../../biscuit-tui/lib" }`.
 
 **Validation checkpoint:**
 
@@ -41,11 +126,11 @@ Must print exactly `biscuit-tui` and `biscuit-tui-cli`.
 
 *Goal: eliminate every `tui_chrome::` reference in the library, CLI, and tests. This phase can be split into library work and CLI work that run in parallel.*
 
-- [ ] Update all `use tui_chrome::…`, qualified `tui_chrome::…` paths, and intra-doc links in `biscuit-tui/lib/src/` (including doctests in `prelude.rs`, `components/*.rs`, `components/input_table/table.rs`, `core/*.rs`, and `helpers/choice_builders.rs`).
-- [ ] Update `use tui_chrome::{…}` in `biscuit-tui/lib/tests/public_api_names.rs`.
-- [ ] Update all `tui_chrome::` references in `biscuit-tui/cli/src/` (`main.rs`, `option_sources.rs`, `choice_normalize.rs`, and every file under `commands/`).
-- [ ] Update `biscuit-tui/cli/tests/choose_cli.rs`, `biscuit-tui/cli/tests/common/pty.rs`, and `biscuit-tui/cli/tests/completions_shell.rs`, including any doc-comment `cargo test -p tui-chrome-cli` flags (`-p biscuit-tui-cli`).
-- [ ] Run a focused search over `biscuit-tui/` (excluding `target/`, completed features, reviews, this spec, and this plan) for `tui_chrome` and `tui-chrome`, and fix any stragglers.
+- [x] Update all `use tui_chrome::…`, qualified `tui_chrome::…` paths, and intra-doc links in `biscuit-tui/lib/src/` (including doctests in `prelude.rs`, `components/*.rs`, `components/input_table/table.rs`, `core/*.rs`, and `helpers/choice_builders.rs`).
+- [x] Update `use tui_chrome::{…}` in `biscuit-tui/lib/tests/public_api_names.rs`.
+- [x] Update all `tui_chrome::` references in `biscuit-tui/cli/src/` (`main.rs`, `option_sources.rs`, `choice_normalize.rs`, and every file under `commands/`).
+- [x] Update `biscuit-tui/cli/tests/choose_cli.rs`, `biscuit-tui/cli/tests/common/pty.rs`, and `biscuit-tui/cli/tests/completions_shell.rs`, including any doc-comment `cargo test -p tui-chrome-cli` flags (`-p biscuit-tui-cli`).
+- [x] Run a focused search over `biscuit-tui/` (excluding `target/`, completed features, reviews, this spec, and this plan) for `tui_chrome` and `tui-chrome`, and fix any stragglers.
 
 **Validation checkpoint:**
 
@@ -60,11 +145,11 @@ Both must pass without unresolved-import errors.
 
 *Goal: make the sole external workspace consumer compile against the new crate name. This phase is independent of Phase 2's documentation work but depends on Phase 1's manifest change.*
 
-- [ ] Update `use tui_chrome::prelude::*;` in `claudine/cli/src/commands/schema_interactive.rs`.
-- [ ] Update the two `use tui_chrome::…` lines, module-doc prose mentions of "tui-chrome", and intra-doc links (`[`tui_chrome::ChooseOne`]`, `[`tui_chrome::InputTable`]`, `[`tui_chrome::run_standalone`]`) in `claudine/cli/src/commands/wrap/selection_ui.rs`.
-- [ ] Update the prose comment mentioning "tui-chrome" at `claudine/cli/tests/level2_schema_prompt_pty.rs:187`.
-- [ ] Update `claudine/cli/README.md`, `claudine/docs/pipeline.md`, `claudine/docs/topics/execution-flow.md`, and `claudine/docs/topics/composition.md` for any `tui-chrome` / `tui_chrome` references.
-- [ ] Update active/unscheduled implementation documents:
+- [x] Update `use tui_chrome::prelude::*;` in `claudine/cli/src/commands/schema_interactive.rs`.
+- [x] Update the two `use tui_chrome::…` lines, module-doc prose mentions of "tui-chrome", and intra-doc links (`[`tui_chrome::ChooseOne`]`, `[`tui_chrome::InputTable`]`, `[`tui_chrome::run_standalone`]`) in `claudine/cli/src/commands/wrap/selection_ui.rs`.
+- [x] Update the prose comment mentioning "tui-chrome" at `claudine/cli/tests/level2_schema_prompt_pty.rs:187`.
+- [x] Update `claudine/cli/README.md`, `claudine/docs/pipeline.md`, `claudine/docs/topics/execution-flow.md`, and `claudine/docs/topics/composition.md` for any `tui-chrome` / `tui_chrome` references.
+- [x] Update active/unscheduled implementation documents:
   - `claudine/features/2026-05-25-prompt-reporting-encapsulation/plan.md`
   - `claudine/features/_unscheduled/2-config-tui-refresh/spec.md`
   - `claudine/features/_unscheduled/4-using-biscuit-tui/integration-ideas.md`
@@ -106,11 +191,11 @@ Must produce no output.
 
 *Goal: confirm the rename is complete and all affected code compiles, tests, and lints.*
 
-- [ ] Run `cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | rg '^(biscuit-tui|biscuit-tui-cli)$'` and confirm exactly the two new names are printed.
-- [ ] Run `sniff repo packages --package-area biscuit-tui --list` and confirm it reports `biscuit-tui-cli, biscuit-tui` (no `tui-chrome*` remnants).
-- [ ] Run the residual-reference search across the whole repository (excluding `target/`, `.git/`, historical records, this spec, and this plan). If it produces output, update the newly matched live file rather than adding another exclusion.
-- [ ] From `biscuit-tui/`, run `just build`, `just test`, `just doctest`, and `just lint`.
-- [ ] From `claudine/`, run `just build`, `just test`, `just doctest`, and `just lint`.
-- [ ] If the repository tracks a root `Cargo.lock`, confirm it contains only `biscuit-tui*` package names and no `tui-chrome*` entries.
+- [x] Run `cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | rg '^(biscuit-tui|biscuit-tui-cli)$'` and confirm exactly the two new names are printed.
+- [x] Run `sniff repo packages --package-area biscuit-tui --list` and confirm it reports `biscuit-tui-cli, biscuit-tui` (no `tui-chrome*` remnants).
+- [x] Run the residual-reference search across the whole repository (excluding `target/`, `.git/`, historical records, this spec, and this plan). If it produces output, update the newly matched live file rather than adding another exclusion.
+- [x] From `biscuit-tui/`, run `just build`, `just test`, `just doctest`, and `just lint`.
+- [x] From `claudine/`, run `just build`, `just test`, `just doctest`, and `just lint`.
+- [x] If the repository tracks a root `Cargo.lock`, confirm it contains only `biscuit-tui*` package names and no `tui-chrome*` entries.
 
 **Validation checkpoint:** All commands above pass and the residual `rg` returns no unexpected matches.
