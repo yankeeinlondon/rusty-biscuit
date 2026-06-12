@@ -2,6 +2,13 @@
 
 ## Recent Dependency Notes
 
+- `biscuit-contract/lib` is a provider-neutral inference contract crate. It
+  depends only on `async-trait` (object-safety for `Arc<dyn
+  InferenceAdapter>`), `serde_json` (JSON Schema + structured payloads), and
+  `thiserror` (error impl). `tokio` is permitted in `[dev-dependencies]` only
+  for `#[tokio::test]`. See
+  [`biscuit-contract/docs/dependencies.md`](./biscuit-contract/docs/dependencies.md)
+  for the full rationale and forbidden-class list.
 - `biscuit-file/lib` uses `url` for HTTP(S) file-reference classification and
   gates `reqwest`, `bytes`, and `tokio` behind the off-by-default `fetch`
   feature for policy-enforced HTTP access.
@@ -14,6 +21,7 @@
 This is a Rust workspace with the following modules:
 
 - `Cargo.toml` - Root workspace configuration
+- `biscuit-contract/lib/Cargo.toml` - Shared provider-neutral inference contract (async-trait, serde_json, thiserror)
 - `biscuit-file/lib/Cargo.toml` - File format utilities (PDF, TOML, YAML)
 - `biscuit-file/cli/Cargo.toml` - File utilities CLI (`bf`)
 - `biscuit-hash/lib/Cargo.toml` - Hashing library (xxHash, BLAKE3, Argon2id)
@@ -59,6 +67,12 @@ This is a Rust workspace with the following modules:
 - `biscuit-browser-harness/Cargo.toml` - Headless browser test harness (Chrome/Chromium)
 
 ## Workspace Packages
+
+- [biscuit-contract](./biscuit-contract) _v0.1.0_
+
+    _Shared provider-neutral contract for one text-inference operation. Defines the object-safe `InferenceAdapter` trait, request/response types, and `InferenceError` categories. Depends only on `async-trait`, `serde_json`, and `thiserror`; see [`biscuit-contract/docs/dependencies.md`](./biscuit-contract/docs/dependencies.md)._
+
+    _Tags: workspace, library, contract, ai, inference_
 
 - [biscuit-file](./biscuit-file) _v0.1.0_
 
