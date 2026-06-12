@@ -37,6 +37,7 @@ pub fn render_terminal_output(
         .with_prose_theme(prose_theme.kebab_name())
         .with_code_theme(code_theme.kebab_name())
         .with_color_mode(color_mode)
+        .with_code_block_mode(cli.code_block.into())
         .with_image_mode(terminal_image_mode_from_env())
         .with_mermaid_mode(if cli.mermaid {
             MermaidMode::Image

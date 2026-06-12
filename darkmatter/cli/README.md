@@ -218,6 +218,11 @@ md README.md --theme dracula
 # Separate prose and code themes
 md README.md --theme nord --code-theme monokai
 
+# Control the code block's light/dark variant (default: inverse)
+md README.md --code-block dark      # always a dark code panel
+md README.md --code-block light     # always a light code panel
+md README.md --code-block same      # match the terminal's mode
+
 # Line numbers in code blocks
 md README.md --line-numbers
 
@@ -226,13 +231,18 @@ md README.md --mermaid
 ```
 
 A theme name (`--theme`, `--code-theme`) is mode-agnostic — the concrete
-light/dark variant is chosen from the detected terminal color mode. Code blocks
-deliberately use the *inverted* mode (a light code panel on a dark page, and
-vice versa) so the code contrasts against the page; prose follows the real mode.
-This applies to **both terminal and HTML** output (`--output html`), so the two
-targets agree. Single-variant themes (`dracula`, `nord`, `monokai`, `vs-dark`)
-have no opposite variant, so they render the same in either mode (no contrast
-lift). See [Code Highlighting](../docs/rendering/code-highlighting.md).
+light/dark variant is chosen from the terminal color mode. By default code blocks
+use the *inverted* mode (`--code-block inverse`): a light code panel on a dark
+page, and vice versa, so the code contrasts against the page; prose follows the
+real mode. This inversion default applies to **both terminal and HTML** output
+(`--output html`), so the two targets agree. `--code-block <inverse|dark|light|same>`
+overrides the variant for **terminal** rendering — `dark`/`light` pin the
+variant, `same` matches the terminal (HTML currently always uses the inverse
+default). The variant is derived from the terminal (the same source as the page),
+so it is consistent regardless of environment color detection.
+Single-variant themes (`dracula`, `nord`, `monokai`, `vs-dark`) have no opposite
+variant, so they render the same in either mode (no contrast lift). See
+[Code Highlighting](../docs/rendering/code-highlighting.md).
 
 ### Verbosity
 

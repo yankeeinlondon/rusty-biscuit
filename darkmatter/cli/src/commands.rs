@@ -361,7 +361,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 schema::run_detect(&files, format, merge)?;
             }
             SchemaTarget::About => {
-                schema::run_about(cli.verbose > 0)?;
+                schema::run_about(cli.verbose > 0, cli.code_block.into())?;
             }
         },
     }

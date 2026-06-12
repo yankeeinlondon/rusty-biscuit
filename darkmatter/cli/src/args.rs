@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
 use darkmatter::layout::PageBackground;
-use darkmatter::markdown::highlighting::ThemePair;
+use darkmatter::markdown::highlighting::{CodeBlockMode, ThemePair};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -576,6 +576,11 @@ pub struct Cli {
     #[arg(long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
     pub code_theme: Option<ThemePair>,
 
+    /// Choose the code block theme variant relative to the page color mode:
+    /// `inverse` (default, dark page -> light panel), `dark`, `light`, or `same`.
+    #[arg(long, value_enum, value_name = "MODE", default_value_t = CodeBlockArg::Inverse, global = true)]
+    pub code_block: CodeBlockArg,
+
     /// List available themes
     #[arg(long)]
     pub list_themes: bool,
@@ -954,6 +959,30 @@ impl From<PageBackgroundArg> for PageBackground {
             PageBackgroundArg::Transparent => PageBackground::Transparent,
             PageBackgroundArg::Subtle => PageBackground::Subtle,
             PageBackgroundArg::Pronounced => PageBackground::Pronounced,
+        }
+    }
+}
+
+/// CLI-usable [`CodeBlockMode`] wrapper.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum CodeBlockArg {
+    /// Opposite variant from the page (default): dark page -> light panel.
+    Inverse,
+    /// Always the dark variant.
+    Dark,
+    /// Always the light variant.
+    Light,
+    /// Same variant as the page.
+    Same,
+}
+
+impl From<CodeBlockArg> for CodeBlockMode {
+    fn from(arg: CodeBlockArg) -> Self {
+        match arg {
+            CodeBlockArg::Inverse => CodeBlockMode::Inverse,
+            CodeBlockArg::Dark => CodeBlockMode::Dark,
+            CodeBlockArg::Light => CodeBlockMode::Light,
+            CodeBlockArg::Same => CodeBlockMode::Same,
         }
     }
 }
@@ -1477,11 +1506,39 @@ mod tests {
     #[test]
     fn schema_about_parses_as_schema_target() {
         let cli = Cli::try_parse_from(["md", "schema", "about"]).unwrap();
-        match cli.command {
+        assert!(matches!(
+            cli.command,
             Some(Command::Schema {
                 target: SchemaTarget::About,
-            }) => {}
-            other => panic!("expected Schema::About, got {other:?}"),
-        }
+            })
+        ));
+        assert_eq!(cli.code_block, CodeBlockArg::Inverse);
+    }
+
+    #[test]
+    fn schema_about_accepts_code_block_flag() {
+        // `--code-block` is a global flag, so it is accepted after `schema about`
+        // and lands on the top-level `Cli`.
+        let cli =
+            Cli::try_parse_from(["md", "schema", "about", "--code-block", "light"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Schema {
+                target: SchemaTarget::About,
+            })
+        ));
+        assert_eq!(cli.code_block, CodeBlockArg::Light);
+    }
+
+    #[test]
+    fn render_code_block_flag_defaults_to_inverse() {
+        let cli = Cli::try_parse_from(["md", "doc.md"]).unwrap();
+        assert_eq!(cli.code_block, CodeBlockArg::Inverse);
+    }
+
+    #[test]
+    fn render_code_block_flag_parses_dark() {
+        let cli = Cli::try_parse_from(["md", "doc.md", "--code-block", "dark"]).unwrap();
+        assert_eq!(cli.code_block, CodeBlockArg::Dark);
     }
 }
