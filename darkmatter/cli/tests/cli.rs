@@ -4865,3 +4865,27 @@ terminal is reasonably wide.\n";
         "blockquote visible width should be capped under max-width: 50% on a 100-col terminal, got max={max_len}. plain:\n{plain}",
     );
 }
+
+#[test]
+fn render_accepts_code_block_flag() {
+    let tmp = md_file("# Title\n\n```rust\nfn main() {}\n```\n");
+    for mode in ["inverse", "dark", "light", "same"] {
+        md_cmd()
+            .args(["--code-block", mode])
+            .arg(tmp.path())
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Title"));
+    }
+}
+
+#[test]
+fn render_rejects_invalid_code_block_value() {
+    let tmp = md_file("# Title\n");
+    md_cmd()
+        .args(["--code-block", "sideways"])
+        .arg(tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value 'sideways'"));
+}
