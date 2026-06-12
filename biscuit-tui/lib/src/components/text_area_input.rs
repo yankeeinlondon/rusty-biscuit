@@ -3,8 +3,8 @@
 //! [`TextAreaInput`] is a zero-sized [`StatefulWidget`] marker. The
 //! mutable edit state, label, theme, and scrollbar/submit-key
 //! configuration all live on [`TextAreaInputState`]. The state wraps
-//! `tui_textarea::TextArea` as a private edit engine — callers never
-//! see `tui_textarea` types.
+//! `ratatui_textarea::TextArea` as a private edit engine — callers never
+//! see `ratatui_textarea` types.
 //!
 //! ## Examples
 //!
@@ -22,7 +22,7 @@
 //!
 //! - The default submit key is `Ctrl-S`. Override with
 //!   [`TextAreaInputState::with_submit_key`].
-//! - [`tui_textarea::TextArea`] treats `Enter` as "insert newline" so
+//! - [`ratatui_textarea::TextArea`] treats `Enter` as "insert newline" so
 //!   this component never maps `Enter` to submission.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -32,7 +32,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
-use tui_textarea::TextArea;
+use ratatui_textarea::TextArea;
 
 use crate::core::{
     ComponentTheme, EventOutcome, HandleEvent, KeyBindings, Label, StandaloneState,
@@ -116,8 +116,8 @@ impl TextAreaInputState {
         } else {
             TextArea::new(owned)
         };
-        textarea.move_cursor(tui_textarea::CursorMove::Bottom);
-        textarea.move_cursor(tui_textarea::CursorMove::End);
+        textarea.move_cursor(ratatui_textarea::CursorMove::Bottom);
+        textarea.move_cursor(ratatui_textarea::CursorMove::End);
         self.inner = textarea;
         self
     }
@@ -158,7 +158,8 @@ impl TextAreaInputState {
     /// Returns the cursor position as `(row, column)` in character
     /// offsets.
     pub fn cursor(&self) -> (usize, usize) {
-        self.inner.cursor()
+        let cursor = self.inner.cursor();
+        (cursor.0, cursor.1)
     }
 
     /// Returns the preferred render width.
@@ -287,7 +288,7 @@ fn draw_body(area: Rect, buf: &mut Buffer, textarea: &TextArea<'static>, show_sc
     Widget::render(textarea, text_area, buf);
 
     if overflow {
-        let (cursor_row, _) = textarea.cursor();
+        let cursor_row = textarea.cursor().0;
         let mut scrollbar_state = ScrollbarState::new(total_lines)
             .viewport_content_length(area.height as usize)
             .position(cursor_row);

@@ -5,10 +5,12 @@ edition = "2024"
 license = "AGPL-3.0-only"
 
 [dependencies]
-ratatui = "0.29"
-crossterm = "0.28"
-tui-input = "0.11"
-tui-textarea = "0.7"
+ratatui = "0.30"
+crossterm = "0.29"
+tui-input = "0.15"
+# Ratatui-org's maintained fork of `tui-textarea` (rhysd's crate caps at
+# ratatui 0.29). API-compatible; imported as `ratatui_textarea`.
+ratatui-textarea = "0.9"
 thiserror = "2"
 unicode-width = "0.2"
 serde_yaml_ng = "0.10"
