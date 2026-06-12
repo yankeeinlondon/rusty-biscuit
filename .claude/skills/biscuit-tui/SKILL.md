@@ -39,7 +39,7 @@ let state = TextInputState::new()
 ```
 
 #### TextAreaInput
-Multi-line editor. Uses `tui_textarea` as private edit engine. Default submit is `Ctrl+S` (not Enter).
+Multi-line editor. Uses `ratatui_textarea` as private edit engine. Default submit is `Ctrl+S` (not Enter).
 
 ```rust
 let state = TextAreaInputState::new(60, 10)
@@ -324,10 +324,10 @@ just cli <args>  # run in dev mode
 
 ## Dependencies
 
-- `ratatui` 0.29 — core TUI framework
-- `crossterm` 0.28 — terminal events
-- `tui-input` 0.11 — single-line edit engine
-- `tui-textarea` 0.7 — multi-line edit engine
+- `ratatui` 0.30 — core TUI framework
+- `crossterm` 0.29 — terminal events
+- `tui-input` 0.15 — single-line edit engine
+- `ratatui-textarea` 0.9 — multi-line edit engine (Ratatui-org fork of `tui-textarea`, which caps at ratatui 0.29)
 - `nucleo-matcher` 0.3 — fuzzy matching
 - `serde_yaml_ng` 0.10 — dictionary parsing
 - `thiserror` 2 — error types

@@ -309,7 +309,7 @@ impl HandleEvent for TextAreaInput {
             return EventOutcome::Submitted;
         }
 
-        // Forward everything else to tui_textarea.
+        // Forward everything else to ratatui_textarea.
         state.clear_validation_error();
         state.inner.input(event);
         EventOutcome::Consumed
