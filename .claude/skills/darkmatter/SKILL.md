@@ -2,7 +2,7 @@
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
 hash: 751ea2392b8b3231-9b0f4dcb07891e29
-last_updated: 2026-06-11
+last_updated: 2026-06-12
 ---
 
 # darkmatter
@@ -181,8 +181,15 @@ the `biscuit-terminal` skill for terminal tree rendering.
   been deleted (tree-cutover Phase 5).
 - `darkmatter::markdown::render_tree::fold_markdown_to_document` is the
   Markdown-to-`Document` bridge every public render path folds through.
-- `YamlBlock` projects to the render tree and uses shared code-block helpers
-  for terminal and browser syntax highlighting.
+- `YamlBlock` is a thin compatibility wrapper around
+  [`CodeBlock::yaml`](darkmatter/lib/src/markdown/code_block.rs); both
+  render through the same shared code-block helpers, so terminal and
+  browser output is byte-for-byte equal for the same payload. New code
+  should use [`CodeBlock`](darkmatter/lib/src/markdown/code_block.rs)
+  directly with `CodeBlock::yaml`, `CodeBlock::rust`, `CodeBlock::json`,
+  `CodeBlock::toml`, `CodeBlock::from_source_file`, or
+  `CodeBlock::new(code, Some("lang"))`; `YamlBlock`'s validation
+  constructors stay for callers that need upfront YAML validation.
 - Code-block themes resolve against the inverted page color mode for contrast
   **by default**; ordinary prose follows the real mode. The code panel's mode is
   derived from the terminal (the same source as the page), not a separate

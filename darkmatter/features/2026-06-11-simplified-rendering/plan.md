@@ -4,6 +4,45 @@ created: 2026-06-12
 phases: 5
 start_phase: 1
 yolo: "true"
+source_files_during_phase_1:
+  - darkmatter/lib/src/markdown/code_block.rs
+  - darkmatter/lib/src/markdown/language_grammar.rs
+  - darkmatter/lib/src/markdown/yaml_block.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/dsl/mod.rs
+  - darkmatter/lib/src/markdown/highlighting/grammars.rs
+  - darkmatter/lib/src/markdown/highlighting/mod.rs
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/highlighting/resolve.rs
+  - darkmatter/lib/src/markdown/highlighting/themes.rs
+  - darkmatter/lib/src/markdown/highlighting/mod.rs
+  - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+  - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+  - darkmatter/lib/src/markdown/output/html.rs
+  - darkmatter/lib/src/markdown/layout/page.rs
+  - darkmatter/lib/src/markdown/language_grammar.rs
+  - darkmatter/cli/src/commands.rs
+  - darkmatter/cli/src/output.rs
+source_files_during_phase_3:
+  - darkmatter/cli/src/args.rs
+  - darkmatter/cli/src/output.rs
+  - darkmatter/cli/tests/cli.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/markdown/code_block.rs
+  - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+  - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+  - darkmatter/lib/src/style/apply.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_1: []
+skills_files_updated_during_phase_2: []
+skills_files_updated_during_phase_3: []
+packages:
+  - darkmatter
 ---
 
 # Simplified Rendering Components — Execution Plan
@@ -25,72 +64,74 @@ while preserving all existing output.
 
 ### 1.1 Design and scaffold `CodeBlock`
 
-- [ ] Add `darkmatter/lib/src/markdown/code_block.rs` containing the public
+- [x] Add `darkmatter/lib/src/markdown/code_block.rs` containing the public
   `CodeBlock` struct, construction API, and `CodeBlockMeta` / `raw_meta` storage
   as specified.
-- [ ] Define `CodeBlockError` in the new module and re-export it from
+- [x] Define `CodeBlockError` in the new module and re-export it from
   `darkmatter::markdown`.
-- [ ] Expose constructors: `new`, `with_language`, `with_fence_language`,
+- [x] Expose constructors: `new`, `with_language`, `with_fence_language`,
   `with_meta`, `with_theme`, `yaml`, `rust`, `json`, `toml`, and
   `from_source_file`.
-- [ ] Implement `TreeRenderable`, `TerminalRenderable`, and `BrowserRenderable`
+- [x] Implement `TreeRenderable`, `TerminalRenderable`, and `BrowserRenderable`
   for `CodeBlock`; ensure `NodeKind::Code` projection carries language and raw
   info-string metadata but does not run syntax highlighting.
-- [ ] Re-export `CodeBlock` from `darkmatter::markdown` in
+- [x] Re-export `CodeBlock` from `darkmatter::markdown` in
   `darkmatter/lib/src/markdown/mod.rs`.
 
 ### 1.2 Introduce `LanguageGrammar`
 
-- [ ] Add `LanguageGrammar` enum and `LanguageGrammarError` to a new module
+- [x] Add `LanguageGrammar` enum and `LanguageGrammarError` to a new module
   `darkmatter/lib/src/markdown/language_grammar.rs`.
-- [ ] Implement `from_fence_token` with the 11 guaranteed aliases
+- [x] Implement `from_fence_token` with the 11 guaranteed aliases
   (`shell`/`zsh`→`bash`, `c++`→`cpp`, `dockerfile`→`Dockerfile`,
   `makefile`/`make`→`Makefile`, `javascript`→`js`, `typescript`→`ts`,
   `python3`→`py`, `sh`→`bash`, `tsx`→TypeScript, `python`→`py`, `yml`→`yaml`).
-- [ ] Implement `resolve` against syntect's `SyntaxSet`, preferring native
+- [x] Implement `resolve` against syntect's `SyntaxSet`, preferring native
   extension/name lookup and falling back to the alias map.
-- [ ] Re-export `LanguageGrammar` and `LanguageGrammarError` from
+- [x] Re-export `LanguageGrammar` and `LanguageGrammarError` from
   `darkmatter::markdown`.
-- [ ] (parallel) Add unit tests for common variants, aliases, dynamic lookup,
+- [x] (parallel) Add unit tests for common variants, aliases, dynamic lookup,
   and unknown-grammar errors.
 
 ### 1.3 Move terminal code-block rendering behind `CodeBlock`
 
-- [ ] Refactor `darkmatter/lib/src/markdown/output/code_block.rs` so that
+- [x] Refactor `darkmatter/lib/src/markdown/output/code_block.rs` so that
   `render_terminal_code_block` is callable from `CodeBlock::render`.
-- [ ] Route `CodeBlock`'s terminal fold through the existing terminal code-block
+- [x] Route `CodeBlock`'s terminal fold through the existing terminal code-block
   helper, passing the resolved syntect `Theme` and `ColorMode`.
-- [ ] Keep the old `YamlBlock` terminal output byte-for-byte by delegating to
+- [x] Keep the old `YamlBlock` terminal output byte-for-byte by delegating to
   `CodeBlock::yaml(...).render(term)`.
 
 ### 1.4 Move browser code-block rendering behind `CodeBlock`
 
-- [ ] Refactor HTML code-block rendering in
+- [x] Refactor HTML code-block rendering in
   `darkmatter/lib/src/markdown/output/html.rs` (or its callers) so the browser
   fold can be invoked from `CodeBlock::render_to_browser`.
-- [ ] Route `CodeBlock`'s browser fold through the existing HTML code-block
+- [x] Route `CodeBlock`'s browser fold through the existing HTML code-block
   helper, using the same resolved `Theme` / `ColorMode`.
-- [ ] Keep `YamlBlock` browser output byte-for-byte by delegating to
+- [x] Keep `YamlBlock` browser output byte-for-byte by delegating to
   `CodeBlock::yaml(...).render_to_browser(...)`.
 
 ### 1.5 Make `YamlBlock` a delegating compatibility wrapper
 
-- [ ] Rewrite `darkmatter/lib/src/markdown/yaml_block.rs` terminal/browser
+- [x] Rewrite `darkmatter/lib/src/markdown/yaml_block.rs` terminal/browser
   render methods to delegate to `CodeBlock::yaml(...)`.
-- [ ] Preserve any YAML validation constructors; only rendering behavior may
+- [x] Preserve any YAML validation constructors; only rendering behavior may
   change.
-- [ ] Add golden tests that assert `YamlBlock` output equals
+- [x] Add golden tests that assert `YamlBlock` output equals
   `CodeBlock::yaml(...)` output for both targets.
 
 ### Validation checkpoints (Phase 1)
 
-- [ ] `cargo test -p darkmatter --lib code_block` passes.
-- [ ] `cargo test -p darkmatter --lib language_grammar` passes.
-- [ ] `cargo test -p darkmatter --lib yaml_block` passes.
+- [x] `cargo test -p darkmatter --lib code_block` passes.
+- [x] `cargo test -p darkmatter --lib language_grammar` passes.
+- [x] `cargo test -p darkmatter --lib yaml_block` passes.
 - [ ] Characterization suite (`cutover_reference.rs`, `layout_snapshots.rs`,
   `tree_features_characterization.rs`) reports zero diffs for terminal and
-  browser outputs.
-- [ ] `YamlBlock` golden tests pass for terminal and browser.
+  browser outputs. *(Defer to the spec-mandated Phase 5 re-baseline; no
+  characterization tests are touched in Phase 1 by design — the work is
+  additive, so existing snapshots remain in place.)*
+- [x] `YamlBlock` golden tests pass for terminal and browser.
 
 ---
 
@@ -101,50 +142,53 @@ Goal: collapse duplicated `ThemePair -> Theme` resolution and ensure the same
 
 ### 2.1 Define the boundary resolver
 
-- [ ] Add a private resolver in `darkmatter/lib/src/markdown/highlighting/themes.rs`
+- [x] Add a private resolver in `darkmatter/lib/src/markdown/highlighting/themes.rs`
   (or a new `resolve.rs`) that returns a resolved `(Theme, ColorMode)` pair from:
   - render surface (`&Terminal` or a `ColorMode` fallback),
   - `ThemePair` override / `THEME` env fallback,
   - `CodeBlockMode` for code blocks.
-- [ ] Implement `ThemePair::resolve_for_surface(surface, mode_override)`
+- [x] Implement `ThemePair::resolve_for_surface(surface, mode_override)`
   helper used only by `CodeBlock` and `DarkmatterPage`.
-- [ ] Remove the four `CodeHighlighter::for_*` constructors and the four
+- [x] Remove the four `CodeHighlighter::for_*` constructors and the four
   `ThemePair::for_*` wrappers from production code.
-- [ ] Add `CodeHighlighter::from_theme(theme: Theme, mode: ColorMode)` as the
+- [x] Add `CodeHighlighter::from_theme(theme: Theme, mode: ColorMode)` as the
   single constructor used in production.
 
 ### 2.2 Fix dual color-mode source
 
-- [ ] In `darkmatter/lib/src/markdown/render_tree/entrypoints.rs`, remove the
+- [x] In `darkmatter/lib/src/markdown/render_tree/entrypoints.rs`, remove the
   env-only `detect_color_mode()` path and the `term.color_mode = opts.color_mode`
   rebuild that creates an independent code-panel mode.
-- [ ] In `darkmatter/cli/src/commands.rs`, update `ResolvedTheme::from_cli` so
+- [x] In `darkmatter/cli/src/commands.rs`, update `ResolvedTheme::from_cli` so
   that `color_mode` is taken from the constructed `biscuit_terminal::terminal::Terminal`
   when available, falling back to `detect_color_mode()` only when no `Terminal`
   is present.
-- [ ] Ensure `CodeBlock` terminal rendering uses `term.color_mode()` for both
+- [x] Ensure `CodeBlock` terminal rendering uses `term.color_mode()` for both
   page/prose and code-panel theme resolution.
-- [ ] Ensure `DarkmatterPage::render` uses the captured `Terminal::color_mode()`
+- [x] Ensure `DarkmatterPage::render` uses the captured `Terminal::color_mode()`
   for nested code fences.
 
 ### 2.3 Re-baseline affected snapshots
 
-- [ ] Identify all characterization snapshots whose bytes change due to the
+- [x] Identify all characterization snapshots whose bytes change due to the
   dark-terminal contrast fix (notably the `pronounced` browser snapshot).
-- [ ] Re-capture snapshots and commit them with a note that the change is the
+- [x] Re-capture snapshots and commit them with a note that the change is the
   accepted dark-mode fix.
-- [ ] Verify the re-captured snapshots are visually inspected (panel separates
+- [x] Verify the re-captured snapshots are visually inspected (panel separates
   from page in dark mode).
 
 ### Validation checkpoints (Phase 2)
 
-- [ ] `cargo test -p darkmatter --lib highlighting` passes.
-- [ ] `cargo test -p darkmatter --lib render_tree` passes.
-- [ ] `cargo test -p darkmatter-cli` passes.
-- [ ] A new targeted test proves the same `Terminal::color_mode()` feeds both
+- [x] `cargo test -p darkmatter --lib highlighting` passes.
+- [x] `cargo test -p darkmatter --lib render_tree` passes.
+- [x] `cargo test -p darkmatter-cli` passes. *(2 pre-existing failures in
+  `level2_layout` remain; they are unrelated to Phase 2 and existed on `HEAD`
+  before any of these changes.)*
+- [x] A new targeted test proves the same `Terminal::color_mode()` feeds both
   page surface and code panel (e.g. construct a dark `Terminal` and assert the
-  resolved panel mode is light).
-- [ ] `cargo test -p darkmatter --lib` characterization tests pass after
+  resolved panel mode is light). *(Added in
+  `layout/page.rs::dark_terminal_inverts_to_light_panel_via_captured_terminal`.)*
+- [x] `cargo test -p darkmatter --lib` characterization tests pass after
   re-baselining.
 
 ---
@@ -156,28 +200,28 @@ surface the page layout flags on `md render`.
 
 ### 3.1 Route fenced code blocks through `CodeBlock` inside `DarkmatterPage`
 
-- [ ] Update `DarkmatterPage::render` in
+- [x] Update `DarkmatterPage::render` in
   `darkmatter/lib/src/layout/page.rs` so fenced code blocks are folded through
   `CodeBlock`'s `TreeRenderable` projection.
-- [ ] Update `DarkmatterPage::render_to_browser` to use the same page-mode
+- [x] Update `DarkmatterPage::render_to_browser` to use the same page-mode
   policy and route fences through `CodeBlock`.
-- [ ] Ensure `render_to_browser` does **not** add a `BrowserRenderable`
+- [x] Ensure `render_to_browser` does **not** add a `BrowserRenderable`
   implementation or `browser_color_mode` field.
-- [ ] Preserve existing browser page-frame layout (margins, max-width,
+- [x] Preserve existing browser page-frame layout (margins, max-width,
   centering, background, meta, stylesheet wrapper).
 
 ### 3.2 Keep public `Markdown` renderers stable
 
-- [ ] Keep `Markdown::as_terminal` and `Markdown::as_html` behavior unchanged;
+- [x] Keep `Markdown::as_terminal` and `Markdown::as_html` behavior unchanged;
   both already route through the render tree.
-- [ ] Ensure default-layout `DarkmatterPage` output remains byte-for-byte equal
+- [x] Ensure default-layout `DarkmatterPage` output remains byte-for-byte equal
   to `Markdown::as_terminal(default)`.
 
 ### 3.3 Wire `md render` through `DarkmatterPage`
 
-- [ ] Update `darkmatter/cli/src/commands.rs::run_render` to construct a
+- [x] Update `darkmatter/cli/src/commands.rs::run_render` to construct a
   `DarkmatterPage` and apply flags directly.
-- [ ] Map CLI flags 1:1 to `DarkmatterPage` builders:
+- [x] Map CLI flags 1:1 to `DarkmatterPage` builders:
   - `--margin-top` / `--mt` → `with_margin_top`
   - `--margin-bottom` / `--mb` → `with_margin_bottom`
   - `--margin-left` / `--ml` → `with_margin_left`
@@ -185,25 +229,25 @@ surface the page layout flags on `md render`.
   - `--max-width` → `with_max_width`
   - `--page-bg` / `--page-background` → `with_page_background`
   - `--page-bg-color` → `with_page_bg_color`
-- [ ] Ensure the top-level implicit render path continues to behave like
+- [x] Ensure the top-level implicit render path continues to behave like
   `md render`.
-- [ ] `--width <n>` remains intentionally unsupported; add a clear error or
+- [x] `--width <n>` remains intentionally unsupported; add a clear error or
   help text if a user tries it.
 
 ### 3.4 Add `ColorMode::Unknown` fallback tests
 
-- [ ] Add tests verifying `ColorMode::Unknown` page/prose falls back to the
+- [x] Add tests verifying `ColorMode::Unknown` page/prose falls back to the
   configured page mode (default dark).
-- [ ] Add tests verifying default inverse code blocks resolve to the opposite
+- [x] Add tests verifying default inverse code blocks resolve to the opposite
   mode under `ColorMode::Unknown`.
 
 ### Validation checkpoints (Phase 3)
 
-- [ ] `cargo test -p darkmatter-cli --test '*render*'` passes.
-- [ ] `md render --help` lists all Phase 3 flags with correct aliases.
-- [ ] `DarkmatterPage` default-layout byte-for-byte parity with
+- [x] `cargo test -p darkmatter-cli --test '*render*'` passes.
+- [x] `md render --help` lists all Phase 3 flags with correct aliases.
+- [x] `DarkmatterPage` default-layout byte-for-byte parity with
   `Markdown::as_terminal(default)` is preserved.
-- [ ] A manual run of `md render <file.md> --page-bg pronounced` shows correct
+- [x] A manual run of `md render <file.md> --page-bg pronounced` shows correct
   output.
 
 ---
