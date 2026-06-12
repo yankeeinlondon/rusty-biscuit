@@ -307,6 +307,23 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
     // 1. Cap signal present with error tag → terminal usage cap.
     if has_cap && has_error_context {
         let status_code = status_code.unwrap_or(429);
+<<<<<<< Updated upstream
+||||||| Stash base
+        let error_name = if is_fatal {
+            "AI_RetryError"
+        } else {
+            "AI_APICallError"
+        }
+        .to_string();
+
+=======
+        let kind = if is_fatal {
+            ProviderLimitKind::RetriesExhausted
+        } else {
+            ProviderLimitKind::RateLimited
+        };
+
+>>>>>>> Stashed changes
         let reset_at = extract_reset_at(haystack);
         let provider_id = record.tags.get("providerID").cloned();
         let model_id = record.tags.get("modelID").cloned();
@@ -318,7 +335,13 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
 
         return Some(LogClassification::ProviderLimit {
             status_code,
+<<<<<<< Updated upstream
             kind: ProviderLimitKind::UsageCap,
+||||||| Stash base
+            error_name,
+=======
+            kind,
+>>>>>>> Stashed changes
             reset_at,
             provider_id,
             model_id,
@@ -790,7 +813,13 @@ mod tests {
                 ..
             } => {
                 assert_eq!(status_code, 429);
+<<<<<<< Updated upstream
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
+||||||| Stash base
+                assert_eq!(error_name, "AI_RetryError");
+=======
+                assert_eq!(kind, ProviderLimitKind::RetriesExhausted);
+>>>>>>> Stashed changes
                 let reset = reset_at.expect("reset_at should be parsed");
                 assert_eq!(
                     reset.format("%Y-%m-%d %H:%M:%S").to_string(),
@@ -987,14 +1016,21 @@ mod tests {
             panic!("rate limit fixture failed to parse");
         };
         match classify(&record) {
+<<<<<<< Updated upstream
             LogClassification::ProviderLimit { kind, reset_at, .. } => {
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
+||||||| Stash base
+            LogClassification::RateLimit { reset_at, .. } => {
+=======
+            LogClassification::ProviderLimit { reset_at, .. } => {
+>>>>>>> Stashed changes
                 let reset = reset_at.expect("reset_at should be parsed from fixture");
                 assert_eq!(
                     reset.format("%Y-%m-%d %H:%M:%S").to_string(),
                     "2026-04-16 04:18:56",
                 );
             }
+<<<<<<< Updated upstream
             other => panic!("expected ProviderLimit, got {other:?}"),
         }
     }
@@ -1156,6 +1192,11 @@ mod tests {
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
             }
             other => panic!("expected ProviderLimit, got {other:?}"),
+||||||| Stash base
+            other => panic!("expected RateLimit, got {other:?}"),
+=======
+            other => panic!("expected ProviderLimit, got {other:?}"),
+>>>>>>> Stashed changes
         }
     }
 
