@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/image_ref.rs
-assertion_line: 114
 expression: out
 ---
 ⤫ ImageRefError: invalid decoding
+┃ 
 ┃ Value: eager
-Accepted values: sync, async, auto.
+┃ 
+┃ Accepted values: sync, async, auto.

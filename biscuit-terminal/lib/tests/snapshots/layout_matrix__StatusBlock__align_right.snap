@@ -5,13 +5,15 @@ expression: block
 VIA_RENDER
                                   ⤫ Shell Expansion Failed
 
+                                  ┃ 
                                   ┃ Missing closing brace in template directive.
-
-                                  Check the template syntax and retry.
+                                  ┃ 
+                                  ┃ Check the template syntax and retry.
 ---
 VIA_TREE_DIRECT
                                   ⤫ Shell Expansion Failed
 
+                                  ┃ 
                                   ┃ Missing closing brace in template directive.
-
-                                  Check the template syntax and retry.
+                                  ┃ 
+                                  ┃ Check the template syntax and retry.

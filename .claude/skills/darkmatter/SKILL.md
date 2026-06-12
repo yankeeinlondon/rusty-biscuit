@@ -127,10 +127,11 @@ See `compose.md` for the full API, interpolation syntax, and transclusion detail
 Darkmatter defines, detects, and evaluates schemas for Markdown frontmatter via **SimplifiedSchema** — a single-line YAML grammar that compiles to Draft 2020-12 JSON Schema. Key surfaces:
 
 - `$schema` frontmatter property (inline, file reference, or root-level union).
-- `md schema validate` and `md schema detect` CLI subcommands.
+- `md schema validate`, `md schema detect`, and `md schema about` CLI subcommands.
 - `DarkmatterSchemas` library API with baseline merging and LRU validator cache.
 - Always-on compose pipeline stage (after `--set`/`--state` and interpolation, before shell expansion) that also **coerces** schema-recognized scalars to their declared types and writes them back (default-on; `$(...)`-pending values are skipped and coerced at post-shell re-validation).
 - `ComposeOptions::with_baseline_schema(...)` for programmatic baseline injection.
+- Typed schema-language descriptor catalog (`schema_type_descriptors()`, `schema_constraint_descriptors()`, `schema_shape_descriptors()`, `inline_object_rule_descriptors()`, `coercion_rule_descriptors()`, `validation_behavior_descriptors()`) — the authoritative source for `md schema about` and the same surface library callers render their own reports from.
 
 See `darkmatter/docs/topics/schema-definition.md` for the full topic documentation.
 

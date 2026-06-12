@@ -261,6 +261,7 @@ pub fn report_system_prompt_empty(
 mod tests {
     use super::*;
     use crate::system_prompt::PreparedSystemPrompt;
+    use biscuit_terminal::discovery::detection::ColorDepth;
     use biscuit_terminal::terminal::Terminal;
     use std::path::PathBuf;
 
@@ -487,7 +488,11 @@ mod tests {
     fn summary_visible_label_is_blue() {
         // The visible label (post-OSC-strip) should carry an ANSI sequence
         // for Tailwind Blue 400 (RGB 96, 165, 250) in 24-bit color mode.
-        let term = Terminal::builder().osc_link_support(true).build();
+        let term = Terminal::builder()
+            .is_tty(true)
+            .color_depth(ColorDepth::TrueColor)
+            .osc_link_support(true)
+            .build();
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path().canonicalize().unwrap();
         let sp = base.join("system-prompt.md");

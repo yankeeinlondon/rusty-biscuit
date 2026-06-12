@@ -29,7 +29,7 @@ The Golden Rules:
 The Golden Exception:
 
 - **sniff** is a host detection library and so in the few cases where we supplement host data using network requests this supplemental data is treated differently
-- supplemental data is ONLY included -- to the terminal or to JSON -- when the `--with-network` CLI switch is used
+- supplemental data is only included -- to the terminal or to JSON -- when the relevant command-local opt-in is used, such as `--refresh-remotes` or `--latest-versions`
 
 ## Example
 

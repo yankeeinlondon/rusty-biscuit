@@ -196,7 +196,7 @@ impl Mermaid {
         if let Some((ref light, ref dark)) = self.custom_theme {
             match mode {
                 ColorMode::Light => light,
-                ColorMode::Dark => dark,
+                ColorMode::Dark | ColorMode::Unknown => dark,
             }
         } else {
             mermaid_theme_for_syntect(self.theme_pair, mode)

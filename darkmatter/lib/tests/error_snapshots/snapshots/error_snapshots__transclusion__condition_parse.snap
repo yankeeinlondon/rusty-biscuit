@@ -3,10 +3,12 @@ source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
 ⤫ TransclusionError: condition parse failed
+┃ 
 ┃ Failed to parse when="a &&& b":
 ┃ 
 ┃ ```md
 ┃       3 │ line 3
 ┃     > 4 │ line 4
 ┃       5 │ line 5
-Error: unexpected token
+┃ 
+┃ Error: unexpected token

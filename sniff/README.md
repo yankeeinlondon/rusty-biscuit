@@ -88,7 +88,7 @@ sniff repo remote origin             # Inspect remote repository
 sniff blast-radius                   # Docs affected by dirty changes
 
 # Scoped enrichment (opt-in network queries)
-sniff repo --latest-versions         # Check registries for updates
+sniff repo structure --latest-versions  # Check registries for updates
 sniff repo git-status --refresh-remotes  # Sync remote tracking data
 
 # JSON output for subcommands

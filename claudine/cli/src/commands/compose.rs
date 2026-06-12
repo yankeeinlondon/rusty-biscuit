@@ -445,7 +445,7 @@ fn run_compose_inner(
     let mut env_overrides: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
     if let Some(ref target) = resolved_target {
-        super::wrap::composition::install_agent_env_for_composition(target, &mut env_overrides);
+        super::wrap::composition::install_agent_env_for_composition(target, shared.yolo, &mut env_overrides);
     }
 
     // Render the execution line the moment the agent is known. Eager
@@ -910,7 +910,7 @@ fn run_inline_compose_inner(
     let mut env_overrides: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
     if let Some(ref target) = resolved_target {
-        super::wrap::composition::install_agent_env_for_composition(target, &mut env_overrides);
+        super::wrap::composition::install_agent_env_for_composition(target, shared.yolo, &mut env_overrides);
     }
 
     // Render the execution line the moment the agent is known — see the

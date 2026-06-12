@@ -684,7 +684,18 @@ impl Writer<'_> {
         for child in children {
             parts.push(self.render(child)?);
         }
-        Ok(parts.join("\n\n"))
+        let mut result = String::new();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                if part.is_empty() || parts[i - 1].is_empty() {
+                    result.push('\n');
+                } else {
+                    result.push_str("\n\n");
+                }
+            }
+            result.push_str(part);
+        }
+        Ok(result)
     }
 
     /// Renders a sequence of children in order with no inserted separator.
@@ -1018,7 +1029,7 @@ impl Writer<'_> {
             }
             NodeKind::InlineCode { value } => {
                 let mut child_effective = effective.clone();
-                child_effective.emphasis.dim = true;
+                child_effective.emphasis.inverse = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
                 let close = style::appearance_close(&open, effective, term);
                 Ok(apply_classes(&format!("{open}{value}{close}"), &node.attrs.classes, effective, term))
@@ -1621,6 +1632,10 @@ impl Writer<'_> {
                 self.opts.context.available_width,
                 (&self.opts.context.color_depth).into(),
                 (&self.opts.context.color_mode).into(),
+            )
+            .with_page_surface(
+                self.opts.context.page_text_color,
+                self.opts.context.page_background_color,
             )
             .with_code_theme_name(self.opts.context.code_theme.clone())
             .with_line_numbers(self.opts.context.line_numbers);
@@ -2654,7 +2669,10 @@ fn emit_table(
 #[cfg(test)]
 mod render_tree_tests {
     use super::*;
+    use renderable::color::TerminalCodeContext;
     use renderable::tree::HeadingDepth;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use crate::terminal::Terminal;
     use crate::utils::escape_codes::strip_escape_codes;
@@ -2668,10 +2686,144 @@ mod render_tree_tests {
     }
 
     #[test]
+    fn render_tree_code_renderer_receives_page_surface() {
+        struct CaptureRenderer {
+            seen: Rc<RefCell<Option<TerminalCodeContext>>>,
+        }
+
+        impl renderable::tree::CodeRenderer for CaptureRenderer {
+            fn render_terminal_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &renderable::tree::NodeAttrs,
+                context: TerminalCodeContext,
+            ) -> Option<String> {
+                *self.seen.borrow_mut() = Some(context);
+                Some("captured".to_string())
+            }
+
+            fn render_browser_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &renderable::tree::NodeAttrs,
+            ) -> Option<renderable::browser::fragment::BrowserFragment<renderable::browser::fragment::Ready>> {
+                None
+            }
+        }
+
+        let seen = Rc::new(RefCell::new(None));
+        let mut opts = opts(RenderStrictness::Warn);
+        opts.context.page_text_color = Some((192, 202, 245));
+        opts.context.page_background_color = Some((26, 27, 38));
+        opts.code_renderer = Some(Rc::new(CaptureRenderer {
+            seen: Rc::clone(&seen),
+        }));
+
+        let node = RenderNode::code(Some("yaml".to_string()), None, "foo: string");
+        let out = render_terminal_node(&node, &opts).expect("render");
+        assert_eq!(out.output, "captured");
+
+        let context = seen.borrow().clone().expect("code renderer context");
+        assert_eq!(context.page_text_color(), Some((192, 202, 245)));
+        assert_eq!(context.page_background_color(), Some((26, 27, 38)));
+    }
+
+    #[test]
+    fn render_tree_code_renderer_receives_color_context_for_both_modes() {
+        struct CaptureRenderer {
+            seen: Rc<RefCell<Vec<TerminalCodeContext>>>,
+        }
+
+        impl renderable::tree::CodeRenderer for CaptureRenderer {
+            fn render_terminal_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &renderable::tree::NodeAttrs,
+                context: TerminalCodeContext,
+            ) -> Option<String> {
+                self.seen.borrow_mut().push(context);
+                Some("captured".to_string())
+            }
+
+            fn render_browser_code(
+                &self,
+                _lang: Option<&str>,
+                _value: &str,
+                _meta: Option<&str>,
+                _attrs: &renderable::tree::NodeAttrs,
+            ) -> Option<renderable::browser::fragment::BrowserFragment<renderable::browser::fragment::Ready>> {
+                None
+            }
+        }
+
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let node = RenderNode::code(Some("yaml".to_string()), None, "foo: string");
+        for mode in [
+            crate::discovery::detection::ColorMode::Dark,
+            crate::discovery::detection::ColorMode::Light,
+        ] {
+            let mut opts = opts(RenderStrictness::Warn);
+            opts.context.color_depth = crate::discovery::detection::ColorDepth::TrueColor;
+            opts.context.color_mode = mode.clone();
+            opts.context.code_theme = Some("one-half".to_string());
+            opts.context.line_numbers = true;
+            opts.code_renderer = Some(Rc::new(CaptureRenderer {
+                seen: Rc::clone(&seen),
+            }));
+
+            let out = render_terminal_node(&node, &opts).expect("render");
+            assert_eq!(out.output, "captured");
+        }
+
+        let contexts = seen.borrow();
+        assert_eq!(contexts.len(), 2);
+        assert_eq!(
+            contexts[0].color_mode(),
+            renderable::color::ColorMode::Dark
+        );
+        assert_eq!(
+            contexts[1].color_mode(),
+            renderable::color::ColorMode::Light
+        );
+        for context in contexts.iter() {
+            assert_eq!(context.color_depth(), renderable::color::ColorDepth::TrueColor);
+            assert_eq!(context.code_theme_name(), Some("one-half"));
+            assert!(context.line_numbers());
+        }
+    }
+
+    #[test]
     fn render_tree_paragraph_renders_text() {
         let node = RenderNode::paragraph(vec![RenderNode::text("hello world")]);
         let out = render(&node);
         assert!(strip_escape_codes(&out.output).contains("hello world"));
+    }
+
+    #[test]
+    fn render_tree_inline_code_uses_reverse_video() {
+        let node = RenderNode::paragraph(vec![
+            RenderNode::text("use "),
+            RenderNode::inline_code("code"),
+            RenderNode::text(" here"),
+        ]);
+        let out = render(&node);
+
+        assert!(
+            out.output.contains("\x1b[7mcode"),
+            "inline code should use reverse video, not dim-only styling: {:?}",
+            out.output,
+        );
+        assert!(
+            strip_escape_codes(&out.output).contains("use code here"),
+            "inline code text should remain visible: {:?}",
+            out.output,
+        );
     }
 
     #[test]
