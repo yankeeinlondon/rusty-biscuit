@@ -255,7 +255,7 @@ fn source_path(markdown: &Markdown, options: &ComposeOptions) -> PathBuf {
 mod tests {
     use super::*;
     use crate::markdown::schemas::{
-        Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType,
+        Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
     };
     use indexmap::IndexMap;
 
@@ -275,7 +275,7 @@ mod tests {
         properties.insert(
             property.into(),
             PropertyDef::Single(PropertyAtom {
-                ty: SimplifiedType::String,
+                ty: TypeExpr::Primitive(SimplifiedType::String),
                 is_array: false,
                 constraints: vec![Constraint::Required],
                 array_constraints: vec![],
@@ -510,7 +510,7 @@ mod tests {
         baseline_props.insert(
             "spec".into(),
             PropertyDef::Single(PropertyAtom {
-                ty: SimplifiedType::String,
+                ty: TypeExpr::Primitive(SimplifiedType::String),
                 is_array: false,
                 constraints: vec![Constraint::Required],
                 array_constraints: vec![],
@@ -692,5 +692,215 @@ mod tests {
         let options = ComposeOptions::new();
         let err = run(&mut md, &options).unwrap_err();
         assert!(err.source().is_none(), "validation failure should have no source");
+    }
+
+    // ── Inline object coercion (Phase 2) ─────────────────────────────────
+
+    #[test]
+    fn inline_object_nested_scalar_coercion() {
+        // `enabled: "true"` against `boolean` and `retries: "3"` against
+        // `number` are coerced through the inline object fragment.
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 config: \"{ enabled: boolean, retries: number }\"\n\
+             config:\n\
+             \x20 enabled: \"true\"\n\
+             \x20 retries: \"3\"\n",
+        );
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        let map = md.frontmatter().as_map();
+        let config = map.get("config").expect("config written back");
+        assert_eq!(config["enabled"], serde_json::json!(true));
+        assert_eq!(config["retries"], serde_json::json!(3));
+    }
+
+    #[test]
+    fn inline_object_mixed_opaque_sibling_still_coerces_recognized_field() {
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 config: \"{ enabled: boolean, metadata: object }\"\n\
+             config:\n\
+             \x20 enabled: \"true\"\n\
+             \x20 metadata:\n\
+             \x20   source: user\n",
+        );
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        let config = &md.frontmatter().as_map()["config"];
+        assert_eq!(config["enabled"], serde_json::json!(true));
+        assert_eq!(config["metadata"], serde_json::json!({ "source": "user" }));
+    }
+
+    #[test]
+    fn inline_object_array_nested_coercion() {
+        // Each array item's nested scalar is coerced independently.
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 authors: \"{ active: boolish, score: numberlike }[]\"\n\
+             authors:\n\
+             \x20 - active: \"true\"\n\
+             \x20   score: \"4.5\"\n\
+             \x20 - active: \"False\"\n\
+             \x20   score: \"-2\"\n",
+        );
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        let authors = &md.frontmatter().as_map()["authors"];
+        assert_eq!(authors[0]["active"], serde_json::json!(true));
+        assert_eq!(authors[0]["score"], serde_json::json!(4.5));
+        assert_eq!(authors[1]["active"], serde_json::json!(false));
+        assert_eq!(authors[1]["score"], serde_json::json!(-2));
+    }
+
+    #[test]
+    fn inline_object_array_mixed_opaque_sibling_still_coerces_recognized_field() {
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 authors: \"{ active: boolean, metadata: object }[]\"\n\
+             authors:\n\
+             \x20 - active: \"true\"\n\
+             \x20   metadata:\n\
+             \x20     role: admin\n\
+             \x20 - active: \"false\"\n\
+             \x20   metadata:\n\
+             \x20     role: reader\n",
+        );
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        let authors = &md.frontmatter().as_map()["authors"];
+        assert_eq!(authors[0]["active"], serde_json::json!(true));
+        assert_eq!(authors[1]["active"], serde_json::json!(false));
+        assert_eq!(authors[0]["metadata"], serde_json::json!({ "role": "admin" }));
+    }
+
+    #[test]
+    fn inline_object_uncoercible_value_left_alone() {
+        // An array nested inside an inline object property that declares
+        // `string` is outside the matrix; coercion must not touch it and
+        // validation still fails.
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 config: \"{ name: string(required) }\"\n\
+             config:\n\
+             \x20 name:\n\
+             \x20   - Ada\n\
+             \x20   - Lovelace\n",
+        );
+        let options = ComposeOptions::new();
+        let err = run(&mut md, &options).unwrap_err();
+        match err {
+            MarkdownError::SchemaValidationFailed { problems, .. } => {
+                assert!(
+                    problems.iter().any(|p| p.path.contains("/name")),
+                    "expected a problem under /config/name, got {problems:?}"
+                );
+            }
+            other => panic!("expected SchemaValidationFailed, got {other:?}"),
+        }
+        // The value is not coerced (array is outside the matrix), so it
+        // survives unchanged for the validator to reject.
+        let config = &md.frontmatter().as_map()["config"];
+        assert_eq!(config["name"], serde_json::json!(["Ada", "Lovelace"]));
+    }
+
+    #[test]
+    fn inline_object_unambiguous_union_coercion() {
+        // `metadata: [inline-object, string]` with a value that satisfies
+        // exactly one arm after coercion. The inline object arm wins and the
+        // nested string coerces to a number; the original value is replaced.
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 metadata:\n\
+             \x20   - \"{ key: string(required), count: number }\"\n\
+             \x20   - string\n\
+             metadata:\n\
+             \x20   key: visits\n\
+             \x20   count: \"42\"\n",
+        );
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        let metadata = &md.frontmatter().as_map()["metadata"];
+        assert_eq!(metadata["key"], serde_json::json!("visits"));
+        assert_eq!(metadata["count"], serde_json::json!(42));
+    }
+
+    #[test]
+    fn inline_object_union_with_opaque_sibling_coerces_recognized_field() {
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 metadata:\n\
+             \x20   - \"{ kind: string(required), enabled: boolean(required), details: object(required) }\"\n\
+             \x20   - string\n\
+             metadata:\n\
+             \x20 kind: config\n\
+             \x20 enabled: \"true\"\n\
+             \x20 details:\n\
+             \x20   source: user\n",
+        );
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        let metadata = &md.frontmatter().as_map()["metadata"];
+        assert_eq!(metadata["enabled"], serde_json::json!(true));
+        assert_eq!(metadata["kind"], serde_json::json!("config"));
+        assert_eq!(metadata["details"], serde_json::json!({ "source": "user" }));
+    }
+
+    #[test]
+    fn inline_object_zero_match_union_coercion() {
+        // An object value that no arm can accept — the inline object arm
+        // needs `{key, count}` and the string arm needs a string. An array
+        // value satisfies neither, so per-arm coercion yields no candidates
+        // and the original value is left untouched; normal validation then
+        // reports the failure.
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 metadata:\n\
+             \x20   - \"{ key: string(required), count: number }\"\n\
+             \x20   - string\n\
+             metadata:\n\
+             \x20 - a\n\
+             \x20 - b\n",
+        );
+        let options = ComposeOptions::new();
+        let err = run(&mut md, &options).unwrap_err();
+        match err {
+            MarkdownError::SchemaValidationFailed { problems, .. } => {
+                assert!(!problems.is_empty(), "expected at least one problem");
+            }
+            other => panic!("expected SchemaValidationFailed, got {other:?}"),
+        }
+        // The original array survives untouched — no coercion happened.
+        assert_eq!(
+            md.frontmatter().as_map()["metadata"],
+            serde_json::json!(["a", "b"])
+        );
+    }
+
+    #[test]
+    fn inline_object_ambiguous_union_coercion_leaves_value_alone() {
+        // `42` (a number) coerces to `"42"` (string) and validates against
+        // both arms after coercion — the number arm accepts `42` directly
+        // and the string arm accepts `"42"`. Per-arm coercion sees two
+        // matching arms, leaves the value untouched (no guessing), and
+        // normal validation runs against the unchanged `42`.
+        let mut md = md_with_schema(
+            "$schema:\n\
+             \x20 count:\n\
+             \x20   - number\n\
+             \x20   - string\n\
+             count: \"42\"\n",
+        );
+        let options = ComposeOptions::new();
+        assert!(run(&mut md, &options).is_ok());
+        // `"42"` was unambiguous against the string arm AND ambiguous with
+        // the number arm (`"42"` coerces to 42, which matches number), so
+        // both arms validate; coercion bails out and the value is left
+        // alone. The string arm still validates the original `"42"`, so
+        // the document is valid.
+        assert_eq!(
+            md.frontmatter().as_map()["count"],
+            serde_json::json!("42")
+        );
     }
 }

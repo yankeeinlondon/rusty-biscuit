@@ -594,10 +594,14 @@ fn code_block_stylesheet(opts: &HtmlOptions) -> renderable::stylesheet::Styleshe
 /// the `migration/terminal_no_color` benchmark group both measured a
 /// TrueColor tree context.
 fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRenderOptions {
-    let mut term = match opts.max_width {
-        Some(width) => Terminal::new_optimistic(u32::from(width)),
-        None => Terminal::default(),
-    };
+    let mut term = Terminal::default();
+    if let Some(width) = opts.max_width {
+        if term.is_tty {
+            term.fixed_width = Some(u32::from(width));
+        } else {
+            term = Terminal::new_optimistic(u32::from(width));
+        }
+    }
     if let Some(depth) = opts.color_depth {
         term.color_depth = darkmatter_color_depth_to_terminal(depth);
     }
@@ -606,7 +610,7 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     // mode rather than the detected/optimistic terminal default. Without this
     // the highlighter always resolved against the terminal's own mode, dropping
     // a caller's `with_color_mode(...)`.
-    term.color_mode = darkmatter_color_mode_to_terminal(opts.color_mode);
+    term.color_mode = opts.color_mode;
 
     // Map legacy image_mode onto the graphics fidelity tier so the tree
     // renderer honors the same opt-in / never / force contract as the legacy
@@ -658,7 +662,7 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     TerminalRenderOptions {
         context,
         strictness: RenderStrictness::Warn,
-        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::for_terminal(&term))),
     }
 }
 
@@ -674,19 +678,6 @@ fn darkmatter_color_depth_to_terminal(depth: ColorDepth) -> TerminalColorDepth {
         ColorDepth::Colors256 => TerminalColorDepth::Enhanced,
         ColorDepth::Colors16 => TerminalColorDepth::Basic,
         ColorDepth::None => TerminalColorDepth::None,
-    }
-}
-
-/// Maps darkmatter's highlighting [`ColorMode`](crate::markdown::highlighting::ColorMode)
-/// onto biscuit-terminal's [`ColorMode`](biscuit_terminal::discovery::detection::ColorMode).
-fn darkmatter_color_mode_to_terminal(
-    mode: crate::markdown::highlighting::ColorMode,
-) -> biscuit_terminal::discovery::detection::ColorMode {
-    use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
-    use crate::markdown::highlighting::ColorMode as DmColorMode;
-    match mode {
-        DmColorMode::Light => TermColorMode::Light,
-        DmColorMode::Dark => TermColorMode::Dark,
     }
 }
 
@@ -716,10 +707,100 @@ fn derive_source(md: &Markdown) -> SourceDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::highlighting::{CodeHighlighter, ThemePair};
+    use syntect::easy::HighlightLines;
+    use syntect::highlighting::Color;
 
     /// Smoke: every entry point renders a small fixture without panicking and
     /// surfaces fold/render diagnostics separately.
     const FIXTURE: &str = "# Heading\n\nA paragraph with **strong** text.\n";
+
+    fn fg_sgr(color: Color) -> String {
+        format!("\x1b[38;2;{};{};{}m", color.r, color.g, color.b)
+    }
+
+    fn bg_sgr(color: Color) -> String {
+        format!("\x1b[48;2;{};{};{}m", color.r, color.g, color.b)
+    }
+
+    fn one_half_yaml_color(
+        mode: crate::markdown::highlighting::ColorMode,
+        line: &str,
+        token: &str,
+    ) -> Color {
+        let highlighter = CodeHighlighter::new(ThemePair::OneHalf, mode);
+        let syntax = highlighter
+            .syntax_set()
+            .find_syntax_by_extension("yaml")
+            .expect("yaml syntax");
+        let mut hl = HighlightLines::new(syntax, highlighter.theme());
+        let token_start = line
+            .find(token)
+            .unwrap_or_else(|| panic!("missing token {token:?} in source line {line:?}"));
+        let mut offset = 0;
+        hl.highlight_line(line, highlighter.syntax_set())
+            .expect("highlight line")
+            .into_iter()
+            .find_map(|(style, text)| {
+                let end = offset + text.len();
+                let matched = (offset..end).contains(&token_start);
+                offset = end;
+                matched.then_some(style.foreground)
+            })
+            .unwrap_or_else(|| panic!("missing token {token:?} in highlighted line {line:?}"))
+    }
+
+    fn one_half_background(mode: crate::markdown::highlighting::ColorMode) -> Color {
+        CodeHighlighter::new(ThemePair::OneHalf, mode)
+            .theme()
+            .settings
+            .background
+            .expect("theme background")
+    }
+
+    fn assert_yaml_colors(output: &str, expected_mode: crate::markdown::highlighting::ColorMode) {
+        let background = one_half_background(expected_mode);
+        let object_key = one_half_yaml_color(expected_mode, "  foo: string", "foo");
+        let string_value = one_half_yaml_color(expected_mode, "  foo: string", "string");
+
+        assert!(
+            output.contains(&bg_sgr(background)),
+            "expected OneHalf {:?} background RGB({},{},{}), raw:\n{output:?}",
+            expected_mode,
+            background.r,
+            background.g,
+            background.b,
+        );
+        assert!(
+            output.contains(&format!("{}foo", fg_sgr(object_key))),
+            "expected OneHalf {:?} YAML key RGB({},{},{}), raw:\n{output:?}",
+            expected_mode,
+            object_key.r,
+            object_key.g,
+            object_key.b,
+        );
+        assert!(
+            output.contains(&format!("{}string", fg_sgr(string_value))),
+            "expected OneHalf {:?} YAML scalar RGB({},{},{}), raw:\n{output:?}",
+            expected_mode,
+            string_value.r,
+            string_value.g,
+            string_value.b,
+        );
+    }
+
+    fn terminal_opts_for_pipeline(
+        mode: crate::markdown::highlighting::ColorMode,
+    ) -> TerminalOptions {
+        TerminalOptions {
+            code_theme: ThemePair::OneHalf,
+            prose_theme: ThemePair::OneHalf,
+            color_mode: mode,
+            color_depth: Some(ColorDepth::TrueColor),
+            max_width: Some(80),
+            ..TerminalOptions::default()
+        }
+    }
 
     #[test]
     fn to_render_document_smoke() {
@@ -980,7 +1061,7 @@ use renderable::tree::{NodeKind, RenderNode};
     /// observable rendered-bytes contract.
     #[test]
     fn render_tree_terminal_color_depth_none_emits_no_color_sgrs() {
-        // Mix prose, inline code (lowers to `<dim>…</dim>`), and a link
+        // Mix prose, inline code (lowers to reverse video), and a link
         // so multiple color-capable paths are exercised in one fixture.
         let md: Markdown =
             "# Heading\n\nText with `code` and [link](https://example.com).\n".into();
@@ -1698,6 +1779,76 @@ use renderable::tree::{NodeKind, RenderNode};
             term_opts.context.terminal.color_mode,
             TermColorMode::Dark
         ));
+    }
+
+    #[test]
+    fn terminal_options_mapping_preserves_code_pipeline_inputs_for_both_modes() {
+        use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
+        use crate::markdown::highlighting::ColorMode as DmColorMode;
+
+        for (dm_mode, term_mode) in [
+            (DmColorMode::Dark, TermColorMode::Dark),
+            (DmColorMode::Light, TermColorMode::Light),
+        ] {
+            let opts = terminal_opts_for_pipeline(dm_mode);
+            let mapped = terminal_options_from_terminal_options(&opts);
+
+            assert_eq!(
+                mapped.context.code_theme.as_deref(),
+                Some("one-half"),
+                "stage TerminalOptions -> TerminalRenderContext dropped the code theme for {dm_mode:?}",
+            );
+            assert_eq!(
+                mapped.context.color_depth,
+                biscuit_terminal::discovery::detection::ColorDepth::TrueColor,
+                "stage TerminalOptions -> TerminalRenderContext dropped truecolor for {dm_mode:?}",
+            );
+            assert!(
+                std::mem::discriminant(&mapped.context.color_mode)
+                    == std::mem::discriminant(&term_mode),
+                "stage TerminalOptions -> TerminalRenderContext mapped color mode incorrectly for {dm_mode:?}: {:?}",
+                mapped.context.color_mode,
+            );
+            assert!(
+                mapped.code_renderer.is_some(),
+                "stage TerminalOptions -> TerminalRenderOptions dropped the code renderer for {dm_mode:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn render_tree_terminal_uses_exact_inverted_code_theme_for_both_modes() {
+        use crate::markdown::highlighting::ColorMode as DmColorMode;
+
+        let md: Markdown = "```yaml\n$schema:\n  foo: string\n```\n".into();
+
+        let dark_output = render_tree_terminal(&md, &terminal_opts_for_pipeline(DmColorMode::Dark))
+            .expect("dark terminal render")
+            .output;
+        assert_yaml_colors(&dark_output, DmColorMode::Light);
+
+        let light_output =
+            render_tree_terminal(&md, &terminal_opts_for_pipeline(DmColorMode::Light))
+                .expect("light terminal render")
+                .output;
+        assert_yaml_colors(&light_output, DmColorMode::Dark);
+    }
+
+    #[test]
+    fn markdown_as_terminal_uses_exact_inverted_code_theme_for_both_modes() {
+        use crate::markdown::highlighting::ColorMode as DmColorMode;
+
+        let md: Markdown = "```yaml\n$schema:\n  foo: string\n```\n".into();
+
+        let dark_output = md
+            .as_terminal(terminal_opts_for_pipeline(DmColorMode::Dark))
+            .expect("dark as_terminal render");
+        assert_yaml_colors(&dark_output, DmColorMode::Light);
+
+        let light_output = md
+            .as_terminal(terminal_opts_for_pipeline(DmColorMode::Light))
+            .expect("light as_terminal render");
+        assert_yaml_colors(&light_output, DmColorMode::Dark);
     }
 
     /// The terminal entry point must thread `TerminalOptions::base_path` into

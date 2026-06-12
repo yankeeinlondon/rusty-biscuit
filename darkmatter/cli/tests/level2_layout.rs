@@ -862,6 +862,38 @@ fn max_bg_luma_on_line(raw: &str, needle: &str) -> Option<f32> {
     None
 }
 
+fn min_fg_luma_on_line(raw: &str, needle: &str) -> Option<f32> {
+    let re = regex_lite_fg();
+    for line in raw.lines().rev() {
+        let plain = biscuit_test_harness::strip_ansi(line);
+        if plain.contains(needle) {
+            let mut best: Option<f32> = None;
+            for (r, g, b) in re(line) {
+                let l = luma(r, g, b);
+                best = Some(best.map_or(l, |m: f32| m.min(l)));
+            }
+            return best;
+        }
+    }
+    None
+}
+
+fn max_fg_luma_on_line(raw: &str, needle: &str) -> Option<f32> {
+    let re = regex_lite_fg();
+    for line in raw.lines().rev() {
+        let plain = biscuit_test_harness::strip_ansi(line);
+        if plain.contains(needle) {
+            let mut best: Option<f32> = None;
+            for (r, g, b) in re(line) {
+                let l = luma(r, g, b);
+                best = Some(best.map_or(l, |m: f32| m.max(l)));
+            }
+            return best;
+        }
+    }
+    None
+}
+
 /// Tiny hand-rolled scan for truecolor background SGRs, handling both the
 /// legacy `\x1b[48;2;R;G;Bm` (semicolon) and the ITU `\x1b[48:2::R:G:Bm`
 /// (colon, with empty colorspace) forms WezTerm emits in `get-text --escapes`.
@@ -881,6 +913,25 @@ fn regex_lite_bg() -> impl Fn(&str) -> Vec<(u32, u32, u32)> {
                 .collect();
             // Background truecolor: leading `48 2` then R G B.
             if nums.len() >= 5 && nums[0] == 48 && nums[1] == 2 {
+                out.push((nums[2], nums[3], nums[4]));
+            }
+        }
+        out
+    }
+}
+
+fn regex_lite_fg() -> impl Fn(&str) -> Vec<(u32, u32, u32)> {
+    |line: &str| {
+        let mut out = Vec::new();
+        for chunk in line.split("\x1b[").skip(1) {
+            let Some(mend) = chunk.find('m') else {
+                continue;
+            };
+            let nums: Vec<u32> = chunk[..mend]
+                .split([';', ':'])
+                .filter_map(|s| s.parse::<u32>().ok())
+                .collect();
+            if nums.len() >= 5 && nums[0] == 38 && nums[1] == 2 {
                 out.push((nums[2], nums[3], nums[4]));
             }
         }
@@ -956,6 +1007,125 @@ fn level2_code_block_inverts_to_light_in_dark_terminal() {
     assert!(
         code_luma > 140.0,
         "code panel should be LIGHT (high luma) in a dark terminal, got luma {code_luma:.0}. \
+         plain:\n{}",
+        frame.plain
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_default_code_block_inverts_background_and_foreground() {
+    let mut captured: Option<CapturedFrame> = None;
+    let mut bg: Option<f32> = None;
+    let mut min_fg: Option<f32> = None;
+    let mut max_fg: Option<f32> = None;
+
+    for _ in 0..3 {
+        let Some((frame, _)) = run_md_env(
+            CODE_DOC,
+            "--max-width 60",
+            &[("COLORFGBG", "15;0")], // bg index 0 => dark terminal
+        ) else {
+            return;
+        };
+
+        bg = max_bg_luma_on_line(&frame.raw, "FooBar");
+        min_fg = min_fg_luma_on_line(&frame.raw, "FooBar");
+        max_fg = max_fg_luma_on_line(&frame.raw, "FooBar");
+        captured = Some(frame);
+        if bg.is_some() && min_fg.is_some() && max_fg.is_some() {
+            break;
+        }
+    }
+
+    let frame = captured.expect("capture should be present");
+    let code_bg = bg.unwrap_or_else(|| {
+        panic!(
+            "no truecolor background found on the default-theme code line. raw:\n{}",
+            frame.raw
+        )
+    });
+    let darkest_fg = min_fg.unwrap_or_else(|| {
+        panic!(
+            "no truecolor foreground found on the default-theme code line. raw:\n{}",
+            frame.raw
+        )
+    });
+    let brightest_fg = max_fg.unwrap_or_else(|| {
+        panic!(
+            "no truecolor foreground found on the default-theme code line. raw:\n{}",
+            frame.raw
+        )
+    });
+
+    assert!(
+        code_bg > 175.0,
+        "default code block should use a light page-inverted background in a dark terminal, got luma {code_bg:.0}. \
+         plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        darkest_fg < 140.0,
+        "default code block should use dark token foregrounds on the light inverted background, got darkest luma {darkest_fg:.0}. \
+         plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        brightest_fg < 190.0,
+        "default code block should not keep bright dark-theme foregrounds on the light inverted background, got brightest luma {brightest_fg:.0}. \
+         plain:\n{}",
+        frame.plain
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_code_block_clears_inherited_dim_before_theme_colors() {
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
+    }
+
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("dim-code.md");
+    fs::write(&file_path, CODE_DOC).unwrap();
+
+    let mut guard = SHARED_HARNESS
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().unwrap();
+
+    let cmd = format!(
+        "printf '\\033[2m'; COLORFGBG='15;0' md {} --max-width 60",
+        file_path.display()
+    );
+
+    let mut captured: Option<CapturedFrame> = None;
+    let mut bg: Option<f32> = None;
+    for _ in 0..3 {
+        run_with_sentinel(harness, "clear");
+        let frame = run_with_sentinel(harness, &cmd);
+        bg = max_bg_luma_on_line(&frame.raw, "FooBar");
+        captured = Some(frame);
+        if bg.is_some() {
+            break;
+        }
+    }
+
+    let frame = captured.expect("capture should be present");
+    let code_bg = bg.unwrap_or_else(|| {
+        panic!(
+            "no truecolor background found on the dim-inherited code line. raw:\n{}",
+            frame.raw
+        )
+    });
+
+    assert!(
+        code_bg > 175.0,
+        "code block must clear inherited dim before applying the page-inverted background, got luma {code_bg:.0}. \
          plain:\n{}",
         frame.plain
     );

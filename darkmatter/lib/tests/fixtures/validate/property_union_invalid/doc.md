@@ -3,6 +3,8 @@ $schema:
   count:
     - number
     - string
-count: true
+count:
+  - a
+  - b
 ---
 body

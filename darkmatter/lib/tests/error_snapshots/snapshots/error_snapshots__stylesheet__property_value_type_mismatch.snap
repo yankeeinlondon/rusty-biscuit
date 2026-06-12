@@ -1,11 +1,12 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/stylesheet.rs
-assertion_line: 59
 expression: out
 ---
 ⤫ StylesheetError: property/value type mismatch
+┃ 
 ┃ Property: font-size
 ┃ Expected: sizing
 ┃ Actual: integer
 ┃ Value: 40
-Use a sizing value (e.g., 16px).
+┃ 
+┃ Use a sizing value (e.g., 16px).

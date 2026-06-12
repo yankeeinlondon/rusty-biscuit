@@ -502,12 +502,13 @@ fn phase2_linked_worktree_paths_and_flags() {
         "linked worktree git_dir differs from the shared common_dir"
     );
     let base = handle.base_repo_root().expect("worktree has a base root");
-    // The base root is the parent of the common (.git) directory — i.e. the
-    // main repository's working directory.
+    // The base root is the main repository's working directory (parent of the
+    // canonicalized common .git directory).
+    let expected_base = std::fs::canonicalize(dir.path()).expect("canonicalize temp dir");
     assert_eq!(
         norm(&base),
-        norm(handle.common_dir().parent().unwrap()),
-        "base_repo_root is the parent of common_dir"
+        norm(&expected_base),
+        "base_repo_root is the main repository's working directory"
     );
 }
 
@@ -1795,6 +1796,7 @@ fn phase3_counts_only_matches_full_request_totals() {
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
             max_remote_branches: None,
+            full_worktree_details: false,
         },
     )
     .unwrap()

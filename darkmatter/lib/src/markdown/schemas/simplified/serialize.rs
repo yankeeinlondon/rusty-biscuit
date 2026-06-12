@@ -6,7 +6,7 @@
 
 use std::fmt::Write;
 
-use super::types::{Constraint, PropertyAtom, SimplifiedType};
+use super::types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
 
 /// Serialise `atom` into a string suitable for re-parsing via
 /// [`grammar::parse_type_expr`].
@@ -14,26 +14,41 @@ use super::types::{Constraint, PropertyAtom, SimplifiedType};
 /// [`grammar::parse_type_expr`]: super::grammar::parse_type_expr
 pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
     let mut out = String::new();
-    out.push_str(atom.ty.as_keyword());
-
-    if !atom.constraints.is_empty() {
-        out.push('(');
-        write_constraints(&mut out, &atom.constraints, atom.ty);
-        out.push(')');
-    } else if matches!(atom.ty, SimplifiedType::Enum) {
-        // The parser rejects bare `enum` without members; if a caller
-        // somehow constructs one, emit an empty paren list so the output is
-        // still self-describing (it will fail to re-parse, which is the
-        // desired round-trip signal).
-        out.push_str("()");
-    }
-
-    if atom.is_array {
-        out.push_str("[]");
-        if !atom.array_constraints.is_empty() {
-            out.push('(');
-            write_constraints(&mut out, &atom.array_constraints, atom.ty);
-            out.push(')');
+    match &atom.ty {
+        TypeExpr::Primitive(ty) => {
+            out.push_str(ty.as_keyword());
+            if !atom.constraints.is_empty() {
+                out.push('(');
+                write_constraints(&mut out, &atom.constraints, *ty);
+                out.push(')');
+            } else if matches!(ty, SimplifiedType::Enum) {
+                // The parser rejects bare `enum` without members; if a caller
+                // somehow constructs one, emit an empty paren list so the output is
+                // still self-describing (it will fail to re-parse, which is the
+                // desired round-trip signal).
+                out.push_str("()");
+            }
+            if atom.is_array {
+                out.push_str("[]");
+                if !atom.array_constraints.is_empty() {
+                    out.push('(');
+                    write_constraints(&mut out, &atom.array_constraints, *ty);
+                    out.push(')');
+                }
+            }
+        }
+        TypeExpr::InlineObject(shape) => {
+            write_inline_object(&mut out, shape, atom.is_array);
+            if atom.is_array && !atom.array_constraints.is_empty() {
+                out.push('(');
+                write_constraints(&mut out, &atom.array_constraints, SimplifiedType::String);
+                out.push(')');
+            }
+            if !atom.is_array && !atom.constraints.is_empty() {
+                out.push('(');
+                write_constraints(&mut out, &atom.constraints, SimplifiedType::String);
+                out.push(')');
+            }
         }
     }
 
@@ -43,6 +58,41 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
     }
 
     out
+}
+
+fn write_inline_object(out: &mut String, shape: &super::types::SchemaShape, is_array: bool) {
+    out.push('{');
+    for (i, (name, def)) in shape.properties.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(name);
+        out.push(':');
+        out.push(' ');
+        // The recursive inline object case: serialize the property's
+        // PropertyAtom and prefix with a single space so the produced
+        // `{ name: <atom> }` form re-parses. Whitespace inside braces is
+        // stripped by the grammar parser (Decision #2).
+        let serialized = serialize_property_atom(def_single_atom(def));
+        out.push_str(&serialized);
+    }
+    out.push('}');
+    if is_array {
+        out.push_str("[]");
+    }
+}
+
+fn def_single_atom(def: &super::types::PropertyDef) -> &PropertyAtom {
+    match def {
+        super::types::PropertyDef::Single(atom) => atom,
+        // Property-level unions are not supported inside inline objects by
+        // this feature. Fall back to using the first arm so serialization
+        // stays total; the output may not round-trip on re-parse, which is
+        // an acceptable signal.
+        super::types::PropertyDef::Union(arms) => arms
+            .first()
+            .expect("property-level union inside an inline object must have at least one arm"),
+    }
 }
 
 fn write_constraints(out: &mut String, constraints: &[Constraint], ty: SimplifiedType) {
@@ -192,7 +242,7 @@ mod tests {
     #[test]
     fn round_trip_required_string() {
         round_trip(PropertyAtom {
-            ty: SimplifiedType::String,
+            ty: TypeExpr::Primitive(SimplifiedType::String),
             is_array: false,
             constraints: vec![Constraint::Required],
             array_constraints: vec![],
@@ -203,7 +253,7 @@ mod tests {
     #[test]
     fn round_trip_string_with_length_bounds() {
         round_trip(PropertyAtom {
-            ty: SimplifiedType::String,
+            ty: TypeExpr::Primitive(SimplifiedType::String),
             is_array: false,
             constraints: vec![Constraint::MinLen(5), Constraint::MaxLen(80)],
             array_constraints: vec![],
@@ -214,7 +264,7 @@ mod tests {
     #[test]
     fn round_trip_array_with_array_constraints() {
         round_trip(PropertyAtom {
-            ty: SimplifiedType::String,
+            ty: TypeExpr::Primitive(SimplifiedType::String),
             is_array: true,
             constraints: vec![Constraint::Pattern("^[a-z]+$".into())],
             array_constraints: vec![
@@ -229,7 +279,7 @@ mod tests {
     #[test]
     fn round_trip_enum_members() {
         round_trip(PropertyAtom {
-            ty: SimplifiedType::Enum,
+            ty: TypeExpr::Primitive(SimplifiedType::Enum),
             is_array: false,
             constraints: vec![Constraint::Members(vec![
                 "red".into(),
@@ -244,7 +294,7 @@ mod tests {
     #[test]
     fn round_trip_enum_with_quoted_member() {
         round_trip(PropertyAtom {
-            ty: SimplifiedType::Enum,
+            ty: TypeExpr::Primitive(SimplifiedType::Enum),
             is_array: false,
             constraints: vec![Constraint::Members(vec![
                 "needs, quoting".into(),
@@ -258,7 +308,7 @@ mod tests {
     #[test]
     fn round_trip_url_with_scheme() {
         round_trip(PropertyAtom {
-            ty: SimplifiedType::Url,
+            ty: TypeExpr::Primitive(SimplifiedType::Url),
             is_array: false,
             constraints: vec![Constraint::Scheme(vec!["https".into(), "http".into()])],
             array_constraints: vec![],
@@ -269,7 +319,7 @@ mod tests {
     #[test]
     fn round_trip_file_with_match() {
         round_trip(PropertyAtom {
-            ty: SimplifiedType::File,
+            ty: TypeExpr::Primitive(SimplifiedType::File),
             is_array: true,
             constraints: vec![Constraint::Match(vec!["*.png".into(), "!_*.png".into()])],
             array_constraints: vec![Constraint::MinItems(1)],
@@ -280,7 +330,7 @@ mod tests {
     #[test]
     fn round_trip_with_description() {
         round_trip(PropertyAtom {
-            ty: SimplifiedType::String,
+            ty: TypeExpr::Primitive(SimplifiedType::String),
             is_array: false,
             constraints: vec![Constraint::Required],
             array_constraints: vec![],
@@ -291,7 +341,7 @@ mod tests {
     #[test]
     fn round_trip_default_string() {
         round_trip(PropertyAtom {
-            ty: SimplifiedType::String,
+            ty: TypeExpr::Primitive(SimplifiedType::String),
             is_array: false,
             constraints: vec![Constraint::Default(serde_json::Value::String(
                 "hello".into(),
@@ -304,7 +354,7 @@ mod tests {
     #[test]
     fn round_trip_default_number() {
         round_trip(PropertyAtom {
-            ty: SimplifiedType::Number,
+            ty: TypeExpr::Primitive(SimplifiedType::Number),
             is_array: false,
             constraints: vec![Constraint::Default(serde_json::json!(3.0))],
             array_constraints: vec![],
@@ -315,7 +365,7 @@ mod tests {
     #[test]
     fn round_trip_default_boolean() {
         round_trip(PropertyAtom {
-            ty: SimplifiedType::Boolean,
+            ty: TypeExpr::Primitive(SimplifiedType::Boolean),
             is_array: false,
             constraints: vec![Constraint::Default(serde_json::Value::Bool(true))],
             array_constraints: vec![],

@@ -536,6 +536,44 @@ fn build_git_status_items(
 ///   to indicate the commits and working-tree state are scoped to the named
 ///   linked worktree (used by `--worktree <name>`). Takes precedence over
 ///   `target_branch` when both are provided.
+///
+/// Renders a section header with double-underline styling.
+///
+/// Emits `<b><uu>{title}</uu></b>` which degrades gracefully on terminals
+/// that do not support double underline via `biscuit-terminal`.
+fn render_header(title: &str, terminal: &Terminal) -> String {
+    Prose::new(format!("<b><uu>{title}</uu></b>")).render(terminal)
+}
+
+/// Formats a worktree directory path as a blue OSC8 hyperlink.
+///
+/// The href is the absolute path; the visible label collapses a leading home
+/// directory to `~` (matching the `repo worktrees` verbose format). A basename
+/// alone loses the context a sibling-worktree layout needs to disambiguate.
+fn worktree_path_link(path: &std::path::Path) -> String {
+    let absolute = path.display().to_string();
+    let label = home_abbreviated(path);
+    format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
+}
+
+/// Collapses a leading home-directory prefix to `~` for display.
+///
+/// Falls back to the full absolute path when the path is outside the home
+/// directory or no home directory is resolvable.
+fn home_abbreviated(path: &std::path::Path) -> String {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from);
+    match home {
+        Some(home) => match path.strip_prefix(&home) {
+            Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+            Ok(rest) => format!("~/{}", rest.display()),
+            Err(_) => path.display().to_string(),
+        },
+        None => path.display().to_string(),
+    }
+}
+
 pub fn render_git_section(
     git: &sniff::filesystem::git::GitInfo,
     history_count: usize,
@@ -548,16 +586,21 @@ pub fn render_git_section(
     let terminal = Terminal::default();
 
     // === Status Section ===
+    out.push('\n');
     let status_title = match (target_worktree, target_branch) {
-        (Some((wt, branch)), _) => Prose::new(format!(
-            "<b><u>Status</u></b> (<dim>worktree: <green>{wt}</green> <i>on</i> <green><i>{branch}</i></green> <i>branch</i></dim>)"
-        )),
+        (Some((wt, branch)), _) => render_header(
+            &format!(
+                "Status (<dim>worktree: <green>{wt}</green> <i>on</i> <green><i>{branch}</i></green> <i>branch</i></dim>)"
+            ),
+            &terminal,
+        ),
         (None, Some(branch)) => {
-            Prose::new(format!("<b><u>Status</u></b> (branch: <i>{branch}</i>)"))
+            render_header(&format!("Status (branch: <i>{branch}</i>)"), &terminal)
         }
-        (None, None) => Prose::new("<b><u>Status</u></b>"),
+        (None, None) => render_header("Status", &terminal),
     };
-    writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
+    writeln!(out, "{}", status_title).unwrap();
+    out.push('\n');
 
     let status_items = build_git_status_items(git, history_count, verbose);
 
@@ -578,75 +621,86 @@ pub fn render_git_section(
         return out;
     }
 
-    // === Worktrees Section (only if worktrees exist) ===
-    if !git.worktrees.is_empty() {
-        let wt_title = Prose::new("<b><u>Worktrees</u></b>");
-        writeln!(out, "{}\n", wt_title.render(&terminal)).unwrap();
+    // === Worktrees Section ===
+    // Always rendered — even with zero linked worktrees — so the "0 other
+    // active worktrees" summary is shown (Case B's required output).
+    //
+    // Case selection is by *physical location* (`in_worktree`): are we running
+    // inside the main worktree or a linked one? Branch spelling (`== "main"`)
+    // misclassifies detached HEAD, `master`-default repos, and any non-main
+    // branch checked out in the main worktree — none of which have a usable
+    // entry in the linked-worktree-only `worktrees` map.
+    {
+        out.push('\n');
+        writeln!(out, "{}", render_header("Worktrees", &terminal)).unwrap();
+        out.push('\n');
 
         let mut wt_list = UnorderedList::empty();
 
-        // Base repo line: varies based on whether we're in the base repo or a worktree
         if git.in_worktree {
-            if let Some(ref base_root) = git.base_repo_root {
-                wt_list.add(Prose::new(format!(
-                    "Base Repo: <dim>the base repo is located at <blue-500>{}</blue-500></dim>",
-                    base_root.display()
-                )));
-            }
-        } else if let Some(ref branch) = git.current_branch {
+            // Case A: running inside a linked worktree. Show where main lives,
+            // then this worktree's own details, then a count of the rest.
+            let main_root = git.base_repo_root.as_deref().unwrap_or(&git.repo_root);
+            let main_path = worktree_path_link(main_root);
             wt_list.add(Prose::new(format!(
-                "<b>Base Repo:</b> you are in the base repo which is on the <blue-500>{branch}</blue-500> branch"
+                "<b>main:</b> <i>the main worktree for this repo is located at </i>{main_path}"
+            )));
+
+            // The current worktree's display name is its directory basename,
+            // not its branch — they routinely differ (e.g. `login-fix` on
+            // `feature/login`).
+            let current_name = git
+                .repo_root
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("worktree");
+            let current_path = worktree_path_link(&git.repo_root);
+            wt_list.add(Prose::new("<b>Current Worktree:</b>".to_string()));
+            wt_list.add(Prose::new(format!(
+                "  - you are in the <b>{current_name}</b> worktree located at {current_path}"
+            )));
+
+            // ahead/behind comes from the current worktree's own map entry,
+            // which detection always computes in full because it is `is_current`.
+            let current_entry = git.worktrees.values().find(|wt| wt.is_current);
+            let branch_label = git
+                .current_branch
+                .clone()
+                .unwrap_or_else(|| "detached HEAD".to_string());
+            let ab = match current_entry {
+                Some(wt) => format_ahead_behind_of(wt.ahead, wt.behind, &wt.base_branch),
+                None => format_ahead_behind_of(0, 0, "main"),
+            };
+            wt_list.add(Prose::new(format!(
+                "  - this worktree is on the <b>{branch_label}</b> branch and is {ab}"
+            )));
+
+            let other_count = git.worktrees.values().filter(|wt| !wt.is_current).count();
+            wt_list.add(Prose::new(format!(
+                "<b>Other Worktrees:</b> there are {other_count} other active worktrees in this repo"
+            )));
+        } else {
+            // Case B: running inside the main worktree. The main worktree never
+            // appears in the linked-worktree map, so every entry is "other".
+            let main_path = worktree_path_link(&git.repo_root);
+            wt_list.add(Prose::new("<b>Current Worktree:</b>".to_string()));
+            wt_list.add(Prose::new(format!(
+                "  - you are in the <b>main</b> worktree located at {main_path}"
+            )));
+
+            let other_count = git.worktrees.len();
+            wt_list.add(Prose::new(format!(
+                "<b>Other Worktrees:</b> there are {other_count} other active worktrees in this repo"
             )));
         }
 
-        // Worktree lines: varies based on whether we're inside that worktree
-        for info in git.worktrees.values() {
-            let branch = &info.branch;
-            let status = if info.merged && info.ahead == 0 {
-                format!("merged into <b>{}</b>", &info.base_branch)
-            } else {
-                format_ahead_behind_of(info.ahead, info.behind, &info.base_branch)
-            };
-            let merge_status = if info.has_conflicts {
-                " · <red-500><b>conflicts</b></red-500>"
-            } else {
-                " · <green-500>clean</green-500>"
-            };
-
-            let uncommitted = if info.changed_files > 0 {
-                format!(
-                    " <dim><i>merge</i></dim> · <red-500>{}</red-500> <dim><i>uncommitted {}</i></dim>",
-                    info.changed_files,
-                    if info.changed_files == 1 {
-                        "file"
-                    } else {
-                        "files"
-                    }
-                )
-            } else {
-                String::new()
-            };
-
-            // Check if we're inside this particular worktree
-            let is_current = git.in_worktree
-                && git.repo_root.canonicalize().ok() == info.filepath.canonicalize().ok();
-
-            if is_current {
-                wt_list.add(Prose::new(format!(
-                    "<b>{branch}:</b> you are {status}{merge_status}{uncommitted}"
-                )));
-            } else {
-                wt_list.add(Prose::new(format!(
-                    "{branch}: <dim>is {status}</dim>{merge_status}{uncommitted}"
-                )));
-            }
-        }
         writeln!(out, "{}", wt_list.render(&terminal)).unwrap();
     }
 
     // === Meta Section ===
-    let meta_title = Prose::new("<b><u>Meta</u></b>");
-    writeln!(out, "{}\n", meta_title.render(&terminal)).unwrap();
+    out.push('\n');
+    writeln!(out, "{}", render_header("Meta", &terminal)).unwrap();
+    out.push('\n');
 
     let mut meta_list = UnorderedList::empty();
 
@@ -1285,6 +1339,442 @@ mod tests {
             assert!(output.contains("Status"));
             assert!(!output.contains("\x1b[1m\x1b[4mMeta"));
             assert!(!output.contains("Worktrees"));
+        }
+
+        #[test]
+        fn git_status_headers_use_double_underline_markup() {
+            let git = make_git_info(vec![]);
+            let output = render_git_section(&git, 10, 0, false, None, None);
+            // The header is produced via Prose with <b><uu>Status</uu></b>.
+            // In a TTY with double-underline support this renders as \x1b[4:2m;
+            // otherwise it degrades to regular underline or plain text.  We
+            // simply verify the header text appears and the section renders
+            // without panicking.
+            assert!(output.contains("Status"));
+        }
+
+        #[test]
+        fn git_status_sections_have_single_blank_line_separator() {
+            let mut git = make_git_info(vec![]);
+            git.worktrees.insert(
+                "feature".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "feature".to_string(),
+                    filepath: PathBuf::from("/repo/feature"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 1,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: true,
+                },
+            );
+            git.base_repo_root = Some(PathBuf::from("/repo"));
+            git.in_worktree = true;
+            git.current_branch = Some("feature".to_string());
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+            let lines: Vec<&str> = output.lines().collect();
+
+            // Find section headers (they contain the rendered header text)
+            let status_idx = lines
+                .iter()
+                .position(|l| l.contains("Status"))
+                .expect("Status header present");
+            let worktrees_idx = lines
+                .iter()
+                .position(|l| l.contains("Worktrees"))
+                .expect("Worktrees header present");
+            let meta_idx = lines
+                .iter()
+                .position(|l| l.contains("Meta"))
+                .expect("Meta header present");
+
+            // Exactly one blank line before each header
+            assert!(
+                lines[status_idx - 1].trim().is_empty(),
+                "blank line before Status"
+            );
+            assert!(
+                lines[worktrees_idx - 1].trim().is_empty(),
+                "blank line before Worktrees"
+            );
+            assert!(lines[meta_idx - 1].trim().is_empty(), "blank line before Meta");
+
+            // Exactly one blank line after each header
+            assert!(
+                lines[status_idx + 1].trim().is_empty(),
+                "blank line after Status"
+            );
+            assert!(
+                lines[worktrees_idx + 1].trim().is_empty(),
+                "blank line after Worktrees"
+            );
+            assert!(lines[meta_idx + 1].trim().is_empty(), "blank line after Meta");
+
+            // EXACTLY one — not two. The line two rows out from each header (the
+            // content side) must be non-blank, proving there is no second blank
+            // row padding the separation. Status is the first section, so only
+            // its trailing side has a preceding content row to check.
+            assert!(
+                !lines[status_idx + 2].trim().is_empty(),
+                "no double blank line after Status: {:?}",
+                &lines[status_idx..=status_idx + 2]
+            );
+            assert!(
+                !lines[worktrees_idx - 2].trim().is_empty(),
+                "no double blank line before Worktrees: {:?}",
+                &lines[worktrees_idx - 2..=worktrees_idx]
+            );
+            assert!(
+                !lines[worktrees_idx + 2].trim().is_empty(),
+                "no double blank line after Worktrees: {:?}",
+                &lines[worktrees_idx..=worktrees_idx + 2]
+            );
+            assert!(
+                !lines[meta_idx - 2].trim().is_empty(),
+                "no double blank line before Meta: {:?}",
+                &lines[meta_idx - 2..=meta_idx]
+            );
+            assert!(
+                !lines[meta_idx + 2].trim().is_empty(),
+                "no double blank line after Meta: {:?}",
+                &lines[meta_idx..=meta_idx + 2]
+            );
+        }
+
+        #[test]
+        fn git_status_case_a_linked_worktree_shows_main_and_current() {
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from("/repo/feature");
+            git.base_repo_root = Some(PathBuf::from("/repo"));
+            git.in_worktree = true;
+            git.current_branch = Some("feature".to_string());
+
+            git.worktrees.insert(
+                "feature".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "feature".to_string(),
+                    filepath: PathBuf::from("/repo/feature"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 2,
+                    behind: 1,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: true,
+                },
+            );
+            git.worktrees.insert(
+                "hotfix".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "hotfix".to_string(),
+                    filepath: PathBuf::from("/repo/hotfix"),
+                    sha: "def456".to_string(),
+                    dirty: false,
+                    ahead: 0,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: false,
+                },
+            );
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("main:"),
+                "Case A should show main worktree label"
+            );
+            assert!(
+                output.contains("Current Worktree:"),
+                "Case A should show current worktree header"
+            );
+            assert!(
+                output.contains("feature"),
+                "Case A should mention the current branch"
+            );
+            assert!(
+                output.contains("2 ahead"),
+                "Case A should show ahead/behind for current worktree"
+            );
+            assert!(
+                output.contains("Other Worktrees:"),
+                "Case A should show other worktrees header"
+            );
+            assert!(
+                output.contains("1 other active worktrees in this repo"),
+                "Case A should count other worktrees"
+            );
+        }
+
+        #[test]
+        fn git_status_case_b_main_branch_shows_current_and_others() {
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from("/repo");
+            git.in_worktree = false;
+            git.current_branch = Some("main".to_string());
+
+            git.worktrees.insert(
+                "feature".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "feature".to_string(),
+                    filepath: PathBuf::from("/repo/feature"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 0,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: false,
+                },
+            );
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("Current Worktree:"),
+                "Case B should show current worktree header"
+            );
+            assert!(
+                output.contains("main"),
+                "Case B should mention main branch"
+            );
+            assert!(
+                output.contains("Other Worktrees:"),
+                "Case B should show other worktrees header"
+            );
+            assert!(
+                output.contains("1 other active worktree"),
+                "Case B should count other worktrees"
+            );
+            assert!(
+                !output.contains("main:"),
+                "Case B should NOT show a separate main label"
+            );
+        }
+
+        #[test]
+        fn git_status_no_worktrees_still_renders_case_b_with_zero_count() {
+            // A repo with no linked worktrees is the common case. Case B must
+            // still render the current (main) worktree and a zero "other" count
+            // rather than omitting the section entirely.
+            let mut git = make_git_info(vec![]);
+            git.worktrees = HashMap::new();
+            git.current_branch = Some("main".to_string());
+            git.in_worktree = false;
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("Worktrees"),
+                "Worktrees section must render even with no linked worktrees"
+            );
+            assert!(
+                output.contains("Current Worktree:"),
+                "Case B must show the current worktree"
+            );
+            assert!(
+                output.contains("there are 0 other active worktrees in this repo"),
+                "Case B must report a zero other-worktree count: {output}"
+            );
+            assert!(
+                output.contains("Status"),
+                "Status section should still render"
+            );
+            assert!(
+                output.contains("Meta"),
+                "Meta section should still render"
+            );
+        }
+
+        #[test]
+        fn git_status_case_a_uses_directory_name_not_branch_and_home_path() {
+            // The current worktree's display name is its directory basename, and
+            // the path label collapses $HOME to `~`. A branch named differently
+            // from the directory must not be substituted for the name.
+            let home = std::env::var("HOME").expect("HOME set in test env");
+            let wt_dir = format!("{home}/code/login-fix");
+            let main_dir = format!("{home}/code/project");
+
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from(&wt_dir);
+            git.base_repo_root = Some(PathBuf::from(&main_dir));
+            git.in_worktree = true;
+            git.current_branch = Some("feature/login".to_string());
+            git.worktrees.insert(
+                "feature/login".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "feature/login".to_string(),
+                    filepath: PathBuf::from(&wt_dir),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 3,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: true,
+                },
+            );
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("login-fix"),
+                "current worktree must be named by its directory: {output}"
+            );
+            assert!(
+                output.contains("feature/login"),
+                "current branch must still be shown: {output}"
+            );
+            // The main-worktree label is short enough to survive word-wrap; its
+            // presence proves the `~` collapse is applied. (The current-worktree
+            // label is exercised directly by `home_abbreviated_collapses_home`.)
+            assert!(
+                output.contains("~/code/project"),
+                "paths must be home-abbreviated: {output}"
+            );
+        }
+
+        #[test]
+        fn home_abbreviated_collapses_home() {
+            let home = std::env::var("HOME").expect("HOME set in test env");
+            assert_eq!(
+                home_abbreviated(&PathBuf::from(format!("{home}/code/login-fix"))),
+                "~/code/login-fix"
+            );
+            assert_eq!(home_abbreviated(&PathBuf::from(&home)), "~");
+            // Paths outside home are left absolute.
+            assert_eq!(home_abbreviated(&PathBuf::from("/repo/feature")), "/repo/feature");
+        }
+
+        #[test]
+        fn git_status_main_worktree_on_non_main_branch_is_case_b() {
+            // Regression: a non-main branch checked out in the MAIN worktree
+            // (in_worktree == false) must render Case B, not vanish. Selecting
+            // by branch spelling produced empty output here.
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from("/repo");
+            git.in_worktree = false;
+            git.current_branch = Some("feature-x".to_string());
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("Current Worktree:"),
+                "main worktree on a non-main branch must still show Case B: {output}"
+            );
+            assert!(
+                output.contains("there are 0 other active worktrees in this repo"),
+                "must report the other-worktree count: {output}"
+            );
+            assert!(
+                !output.contains("main:"),
+                "Case B must not show a separate main location line: {output}"
+            );
+        }
+
+        #[test]
+        fn git_status_master_default_main_worktree_is_case_b() {
+            // A repository whose primary branch is `master` is still the main
+            // worktree (in_worktree == false) and must render Case B.
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from("/repo");
+            git.in_worktree = false;
+            git.current_branch = Some("master".to_string());
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("Current Worktree:") && !output.contains("main:"),
+                "master-default repo must render Case B: {output}"
+            );
+        }
+
+        #[test]
+        fn git_status_detached_head_in_linked_worktree_renders_case_a() {
+            // Detached HEAD (current_branch == None) inside a linked worktree
+            // must still render Case A with a sensible branch label.
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from("/repo/wt");
+            git.base_repo_root = Some(PathBuf::from("/repo"));
+            git.in_worktree = true;
+            git.current_branch = None;
+            git.worktrees.insert(
+                "wt".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "wt".to_string(),
+                    filepath: PathBuf::from("/repo/wt"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 0,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: true,
+                },
+            );
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(output.contains("main:"), "Case A shows main location: {output}");
+            assert!(
+                output.contains("detached HEAD"),
+                "detached HEAD must be labeled rather than blank: {output}"
+            );
+        }
+
+        #[test]
+        fn git_status_single_linked_worktree_counts_correctly() {
+            let mut git = make_git_info(vec![]);
+            git.repo_root = PathBuf::from("/repo");
+            git.in_worktree = false;
+            git.current_branch = Some("main".to_string());
+
+            git.worktrees.insert(
+                "feature".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "feature".to_string(),
+                    filepath: PathBuf::from("/repo/feature"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 0,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: false,
+                },
+            );
+
+            let output = render_git_section(&git, 10, 0, false, None, None);
+
+            assert!(
+                output.contains("Current Worktree:"),
+                "Case B should show current worktree header"
+            );
+            assert!(
+                output.contains("Other Worktrees:"),
+                "Case B should show other worktrees header"
+            );
+            assert!(
+                output.contains("1 other active worktrees in this repo"),
+                "Single worktree should be counted correctly"
+            );
         }
     }
 

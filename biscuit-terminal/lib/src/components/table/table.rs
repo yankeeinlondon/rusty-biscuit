@@ -2516,14 +2516,14 @@ pub(crate) fn apply_vertical_padding(
 
 /// The adaptive default background stripe [`Color`] for a color mode.
 ///
-/// A very subtle tint: a faint warm gray in dark mode, a faint cool gray in
-/// light mode. Each carries a [`BasicColor`] fallback so it degrades on
-/// 16-color terminals.
+/// A subtle tint that stays visible on common dark themes such as Tokyo Night,
+/// plus a soft cool gray in light mode. Each carries a [`BasicColor`] fallback
+/// so it degrades on 16-color terminals.
 pub(crate) fn default_stripe_bg(color_mode: &ColorMode) -> Color {
     match color_mode {
-        ColorMode::Light => Color::Rgb(RgbColor::new(235, 235, 238, BasicColor::White)),
+        ColorMode::Light => Color::Rgb(RgbColor::new(226, 229, 236, BasicColor::White)),
         ColorMode::Dark | ColorMode::Unknown => {
-            Color::Rgb(RgbColor::new(30, 30, 34, BasicColor::Black))
+            Color::Rgb(RgbColor::new(36, 40, 59, BasicColor::Black))
         }
     }
 }
@@ -4319,11 +4319,11 @@ mod tests {
     fn test_stripe_bg_escape_truecolor_modes() {
         assert_eq!(
             stripe_bg_escape(None, &ColorMode::Dark, ColorDepth::TrueColor),
-            Some("\x1b[48;2;30;30;34m".to_string())
+            Some("\x1b[48;2;36;40;59m".to_string())
         );
         assert_eq!(
             stripe_bg_escape(None, &ColorMode::Light, ColorDepth::TrueColor),
-            Some("\x1b[48;2;235;235;238m".to_string())
+            Some("\x1b[48;2;226;229;236m".to_string())
         );
     }
 
@@ -4402,6 +4402,52 @@ mod tests {
             !none.contains("\x1b[40m") && !none.contains("\x1b[48"),
             "no stripe escape on a terminal without color support: {none:?}"
         );
+    }
+
+    #[test]
+    fn tree_rendered_stripe_covers_wrapped_row_lines() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Name").with_max_width(8),
+                TableColumn::new("Notes")
+                    .with_max_width(18)
+                    .with_word_wrap(WordWrap::WrapProse(None, None)),
+            ])
+            .with_data(vec![
+                vec!["row0".into(), "short".into()],
+                vec![
+                    "row1".into(),
+                    "deliberately long text that wraps".into(),
+                ],
+            ])
+            .alternate_background_color();
+
+        let mut term = Terminal::new_optimistic(48);
+        term.color_depth = ColorDepth::TrueColor;
+        term.color_mode = ColorMode::Dark;
+
+        let rendered = table.render(&term);
+        let bg = stripe_bg_escape(None, &ColorMode::Dark, ColorDepth::TrueColor).unwrap();
+        let striped_lines: Vec<&str> = rendered
+            .lines()
+            .filter(|line| {
+                line.contains("row1")
+                    || line.contains("deliberately")
+                    || line.contains("long text")
+                    || line.contains("wraps")
+            })
+            .collect();
+
+        assert!(
+            striped_lines.len() >= 2,
+            "test fixture should produce a wrapped striped row: {rendered:?}"
+        );
+        for line in striped_lines {
+            assert!(
+                line.contains(&bg),
+                "wrapped striped row line should carry the stripe background: {line:?}"
+            );
+        }
     }
 
     #[test]
