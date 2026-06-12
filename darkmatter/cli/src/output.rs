@@ -28,11 +28,19 @@ pub fn render_terminal_output(
     md: &Markdown,
     input_path: Option<&PathBuf>,
     cli: &Cli,
+    term: Terminal,
     prose_theme: ThemePair,
     code_theme: ThemePair,
     color_mode: ColorMode,
 ) -> Result<()> {
-    let term = Terminal::new();
+    // The `Terminal` is now passed in by the caller (`run_render` in
+    // `commands.rs`) so the page surface and the nested code-block panel
+    // resolve against the same source — Phase 2's "single `Terminal` is
+    // the source of truth" invariant. The `color_mode` parameter is kept
+    // for the `DarkmatterPage::with_color_mode` call so the page's
+    // `LayoutContext::from_page` uses it as the fallback for
+    // `ColorMode::Unknown` (matching the layout context's `surface_mode`
+    // resolution).
     let mut page = DarkmatterPage::new(&term)
         .with_prose_theme(prose_theme.kebab_name())
         .with_code_theme(code_theme.kebab_name())
@@ -133,6 +141,11 @@ pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage
     // Page background
     if let Some(bg) = cli.page_bg {
         page = page.with_page_background(bg.into());
+    }
+
+    // Explicit page background color (overrides the computed `PageBackground`).
+    if let Some(color) = cli.page_bg_color {
+        page = page.with_page_bg_color(color);
     }
 
     // Max width
@@ -291,6 +304,7 @@ pub fn page_style_overrides_from_cli(cli: &Cli) -> PageStyleOverrides {
         padding_left: padding_all || px || cli.pl.is_some(),
         max_width: cli.max_width.is_some(),
         background: cli.page_bg.is_some(),
+        background_color: cli.page_bg_color.is_some(),
         alignment: cli.alignment.is_some(),
         align_images: cli.align_images.is_some(),
         align_lists: cli.align_lists.is_some(),

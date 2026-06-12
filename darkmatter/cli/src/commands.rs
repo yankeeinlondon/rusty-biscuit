@@ -7,6 +7,7 @@ use crate::output::{
     open_output_artifact, print_delta, print_toc_tree, render_terminal_output,
 };
 use biscuit_hash::xx_hash;
+use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::cleanup::ListSpacingMode;
 use darkmatter::markdown::compose::ComposeOptions;
@@ -34,10 +35,21 @@ struct ResolvedTheme {
 
 impl ResolvedTheme {
     /// Resolves theme from CLI options, falling back to auto-detection.
-    fn from_cli(cli: &Cli) -> Self {
+    ///
+    /// Phase 2 (centralize theme resolution): the page surface and the
+    /// nested code-block panel must share a single source of truth. The
+    /// `color_mode` is taken from the constructed
+    /// [`biscuit_terminal::terminal::Terminal`] when one is available (the
+    /// CLI's render path constructs one and passes it to the page), and
+    /// only falls back to the env-only `detect_color_mode()` when no
+    /// `Terminal` is present (e.g. a path that only needs the value as a
+    /// parameter, not as a rendering transport).
+    fn from_cli(cli: &Cli, terminal: Option<&Terminal>) -> Self {
         let prose = cli.theme.unwrap_or_else(detect_prose_theme);
         let code = cli.code_theme.unwrap_or_else(|| detect_code_theme(prose));
-        let color_mode = detect_color_mode();
+        let color_mode = terminal
+            .map(Terminal::color_mode)
+            .unwrap_or_else(detect_color_mode);
         Self {
             prose,
             code,
@@ -470,13 +482,29 @@ pub fn run_render(
     let indent_size = indent.unwrap_or(darkmatter::markdown::cleanup::DEFAULT_INDENT);
     md.cleanup_with_indent(indent_size);
 
-    let theme = ResolvedTheme::from_cli(cli);
+    // Construct the rendering `Terminal` once so theme resolution, the
+    // page, and the entry point all share the same `color_mode()`. The
+    // single source of truth is what Phase 2 requires: the page surface
+    // and the nested code-block panel must resolve against the same
+    // `Terminal::color_mode()` (the original dual-source defect came from
+    // letting an env-only detector and a real terminal disagree on the
+    // mode).
     let stdout_is_tty = io::stdout().is_terminal();
+    let term = if stdout_is_tty {
+        Some(Terminal::new())
+    } else {
+        None
+    };
+
+    let theme = ResolvedTheme::from_cli(cli, term.as_ref());
 
     match output {
         OutputFormat::Auto => {
             if stdout_is_tty {
-                render_terminal_output(&md, input, cli, theme.prose, theme.code, theme.color_mode)?;
+                let term = term.expect("tty branch sets a Terminal above");
+                render_terminal_output(
+                    &md, input, cli, term, theme.prose, theme.code, theme.color_mode,
+                )?;
                 if show {
                     open_output_artifact(&markdown_artifact(&md))?;
                 }
@@ -823,7 +851,11 @@ pub fn run_compose(
         }
     }
 
-    let theme = ResolvedTheme::from_cli(cli);
+    // The compose pipeline only consumes `theme.color_mode` for the
+    // browser output path. Constructing a `Terminal` up front would be
+    // wasteful for the markdown / json output paths, so we pass `None`
+    // and let `ResolvedTheme::from_cli` fall back to `detect_color_mode()`.
+    let theme = ResolvedTheme::from_cli(cli, None);
 
     match output {
         OutputFormat::Auto | OutputFormat::Markdown => {
