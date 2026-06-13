@@ -123,7 +123,7 @@ impl DarkmatterPage {
     pub fn new(terminal: &Terminal) -> Self {
         Self {
             terminal_width: clamp_width(terminal.width()),
-            terminal_color_mode: terminal.color_mode.clone(),
+            terminal_color_mode: terminal.color_mode,
             terminal_color_depth: ColorDepth::from(terminal.color_depth),
             page_margin: renderable::layout::Edges::default(),
             page_padding: renderable::layout::Edges::default(),

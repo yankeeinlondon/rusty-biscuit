@@ -82,6 +82,7 @@ struct Frame {
 ///
 /// This is a small fold-local mirror of the `Tag` variants that open a
 /// container; leaf tags never reach the stack.
+#[allow(clippy::large_enum_variant)]
 enum ContainerKind {
     /// The synthetic document root; never closed by an end event.
     Root,

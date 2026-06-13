@@ -19,6 +19,7 @@ use syntect::highlighting::Theme as SyntectTheme;
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
+#[allow(clippy::large_enum_variant)]
 pub enum ColorModeOptions<'a> {
     Terminal(Terminal),
     TerminalRef(&'a Terminal),
