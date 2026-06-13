@@ -1066,6 +1066,7 @@ fn run_provider_wrapper_inner(
             let seed = harness_orch::materialize_passthrough_harness_seed(
                 &source_path,
                 base_prompt.clone(),
+                Some(child_cwd),
             )?;
             let harness_enabled = claudine::harness::has_harness_properties(&seed.frontmatter);
             if harness_enabled {
