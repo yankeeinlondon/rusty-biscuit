@@ -1156,16 +1156,22 @@ mod tests {
         let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
         let bg_code = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
 
-        // Should start with top padding row (bg color + clear + reset + newline)
+        // Should start with the reset SGR (clears inherited attributes) followed
+        // by the top padding row (bg color + clear + reset + newline). The
+        // leading `\x1b[0m` is the inherited-attribute reset the code-block
+        // helper always emits before applying the theme's own background and
+        // foreground.
+        let expected_start = format!("\x1b[0m{}\x1b[K\x1b[0m\n", bg_code);
         assert!(
-            output.starts_with(&format!("{}\x1b[K\x1b[0m\n", bg_code)),
-            "Output should start with top padding row"
+            output.starts_with(&expected_start),
+            "Output should start with top padding row; got: {output:?}"
         );
 
         // Should end with bottom padding row (bg color + clear + reset, no newline)
+        let expected_end = format!("{}\x1b[K\x1b[0m", bg_code);
         assert!(
-            output.ends_with(&format!("{}\x1b[K\x1b[0m", bg_code)),
-            "Output should end with bottom padding row"
+            output.ends_with(&expected_end),
+            "Output should end with bottom padding row; got: {output:?}"
         );
     }
 
@@ -1195,8 +1201,10 @@ mod tests {
         let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
         let bg_code = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
 
-        // After the top padding row and background color set, should have a space for left padding
-        let expected_sequence = format!("{}\x1b[K\x1b[0m\n{} ", bg_code, bg_code);
+        // After the top padding row, the body line begins with a reset SGR
+        // (clears inherited attributes) followed by the theme background
+        // color and one space of left padding before the syntax tokens.
+        let expected_sequence = format!("\x1b[K\x1b[0m\n\x1b[0m{} ", bg_code);
         assert!(
             output.contains(&expected_sequence),
             "Code lines should have 1-character left padding after background color"
