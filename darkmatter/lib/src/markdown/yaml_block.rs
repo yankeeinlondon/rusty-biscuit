@@ -64,7 +64,7 @@ pub enum YamlBlockError {
             New code should construct a CodeBlock directly via \
             `CodeBlock::yaml(payload)`, `CodeBlock::rust(payload)`, \
             `CodeBlock::json(payload)`, `CodeBlock::toml(payload)`, or \
-            `CodeBlock::new(code, Some(language))`. The YAML validation \
+            `CodeBlock::new(code).with_fence_language(language)`. The YAML validation \
             constructors remain on YamlBlock for callers that need upfront \
             YAML validation; if you need them, suppress this warning locally."
 )]

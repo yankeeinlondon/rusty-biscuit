@@ -76,18 +76,25 @@ pub struct CodeBlock {
 }
 
 impl CodeBlock {
-    /// Constructs a [`CodeBlock`] from a raw code string and an optional
-    /// fence language token.
+    /// Constructs a [`CodeBlock`] from a raw code string with no language
+    /// (plain text).
     ///
-    /// The language token is resolved through
-    /// [`LanguageGrammar::from_fence_token`]. Pass `None` for an
-    /// unspecified language (plain text).
-    pub fn new(code: impl Into<String>, language: Option<impl AsRef<str>>) -> Self {
-        let code = code.into();
-        let language = language.map(|lang| LanguageGrammar::from_fence_token(lang));
+    /// Select a language with [`with_fence_language`](Self::with_fence_language)
+    /// or [`with_language`](Self::with_language), or use a typed constructor
+    /// such as [`rust`](Self::rust) / [`yaml`](Self::yaml).
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::code_block::CodeBlock;
+    ///
+    /// let block = CodeBlock::new("fn main() {}").with_fence_language("rust");
+    /// assert_eq!(block.code(), "fn main() {}");
+    /// ```
+    pub fn new(code: impl Into<String>) -> Self {
         Self {
-            code,
-            language,
+            code: code.into(),
+            language: None,
             meta: CodeBlockMeta::default(),
             raw_meta: None,
             theme: None,
@@ -104,8 +111,8 @@ impl CodeBlock {
 
     /// Sets the language from a raw fence-style token, resolved through
     /// [`LanguageGrammar::from_fence_token`].
-    pub fn with_fence_language(mut self, language: impl AsRef<str>) -> Self {
-        self.language = Some(LanguageGrammar::from_fence_token(language));
+    pub fn with_fence_language(mut self, language: impl Into<String>) -> Self {
+        self.language = Some(LanguageGrammar::from_fence_token(language.into()));
         self
     }
 
@@ -134,22 +141,22 @@ impl CodeBlock {
     /// assert_eq!(block.code(), "foo: 1\nbar: 2");
     /// ```
     pub fn yaml(code: impl Into<String>) -> Self {
-        Self::new(code, Some::<String>("yaml".into()))
+        Self::new(code).with_fence_language("yaml")
     }
 
     /// Returns a [`CodeBlock`] for Rust content (language token `"rust"`).
     pub fn rust(code: impl Into<String>) -> Self {
-        Self::new(code, Some::<String>("rust".into()))
+        Self::new(code).with_fence_language("rust")
     }
 
     /// Returns a [`CodeBlock`] for JSON content (language token `"json"`).
     pub fn json(code: impl Into<String>) -> Self {
-        Self::new(code, Some::<String>("json".into()))
+        Self::new(code).with_fence_language("json")
     }
 
     /// Returns a [`CodeBlock`] for TOML content (language token `"toml"`).
     pub fn toml(code: impl Into<String>) -> Self {
-        Self::new(code, Some::<String>("toml".into()))
+        Self::new(code).with_fence_language("toml")
     }
 
     /// Reads a file from disk and wraps its contents in a [`CodeBlock`].
@@ -169,7 +176,7 @@ impl CodeBlock {
             .and_then(|ext| ext.to_str())
             .unwrap_or("")
             .to_string();
-        Ok(Self::new(code, Some(lang_token)))
+        Ok(Self::new(code).with_fence_language(lang_token))
     }
 
     /// Constructs a [`CodeBlock`] from a parsed [`CodeBlockMeta`] and the
@@ -299,10 +306,10 @@ impl TerminalRenderable for CodeBlock {
     fn render(&self, term: &Terminal) -> String {
         let node = <Self as TreeRenderable>::render_tree(self);
         let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn)
-            .with_code_renderer(Rc::new(TerminalCodeRenderer::for_terminal(
-                term,
-                CodeBlockMode::default(),
-            )));
+            .with_code_renderer(Rc::new(
+                TerminalCodeRenderer::for_terminal(term, CodeBlockMode::default())
+                    .with_theme_override(self.theme),
+            ));
         match render_terminal_node(&node, &opts) {
             Ok(rendered) => rendered.output,
             Err(error) => {
@@ -356,7 +363,9 @@ impl BrowserRenderable for CodeBlock {
     fn render_html_fragment(&self) -> BrowserFragment<Ready> {
         let node = <Self as TreeRenderable>::render_tree(self);
         let opts = BrowserRenderOptions {
-            code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+            code_renderer: Some(Rc::new(
+                TerminalCodeRenderer::new().with_theme_override(self.theme),
+            )),
             ..Default::default()
         };
         match render_browser_node(&node, &opts) {
@@ -502,14 +511,14 @@ mod tests {
 
     #[test]
     fn new_stores_code_without_language() {
-        let block = CodeBlock::new("foo: 1", None::<String>);
+        let block = CodeBlock::new("foo: 1");
         assert_eq!(block.code(), "foo: 1");
         assert!(block.language().is_none());
     }
 
     #[test]
-    fn new_with_language_resolves_grammar() {
-        let block = CodeBlock::new("fn main() {}", Some("rust"));
+    fn new_with_fence_language_resolves_grammar() {
+        let block = CodeBlock::new("fn main() {}").with_fence_language("rust");
         assert_eq!(block.code(), "fn main() {}");
         assert!(matches!(block.language(), Some(LanguageGrammar::Rust)));
     }
@@ -546,13 +555,13 @@ mod tests {
 
     #[test]
     fn with_fence_language_resolves_grammar() {
-        let block = CodeBlock::new("fn main() {}", None::<String>).with_fence_language("rust");
+        let block = CodeBlock::new("fn main() {}").with_fence_language("rust");
         assert!(matches!(block.language(), Some(LanguageGrammar::Rust)));
     }
 
     #[test]
     fn with_fence_language_handles_yml_alias() {
-        let block = CodeBlock::new("foo: 1", None::<String>).with_fence_language("yml");
+        let block = CodeBlock::new("foo: 1").with_fence_language("yml");
         assert!(matches!(block.language(), Some(LanguageGrammar::Yaml)));
     }
 
@@ -568,6 +577,43 @@ mod tests {
     fn with_theme_stores_override() {
         let block = CodeBlock::rust("fn main() {}").with_theme(ThemePair::Github);
         assert_eq!(block.theme(), Some(ThemePair::Github));
+    }
+
+    /// review-1 finding 1: `with_theme` must reach the terminal renderer and
+    /// change the resolved output — `github` and `nord` are distinct themes, so
+    /// their highlighted SGR colors must differ. A stored-but-ignored override
+    /// (the original defect) would make these equal.
+    #[test]
+    fn with_theme_changes_terminal_output() {
+        let term = Terminal::new_optimistic(80);
+        let code = "fn demo() -> usize { 42 }";
+        let github =
+            TerminalRenderable::render(&CodeBlock::rust(code).with_theme(ThemePair::Github), &term);
+        let nord =
+            TerminalRenderable::render(&CodeBlock::rust(code).with_theme(ThemePair::Nord), &term);
+        assert_ne!(
+            github, nord,
+            "a CodeBlock theme override must change the resolved terminal output",
+        );
+    }
+
+    /// review-1 finding 1: `with_theme` must also reach the browser renderer and
+    /// change the emitted `<span style="color: …">` syntax colors.
+    #[test]
+    fn with_theme_changes_html_output() {
+        let code = "fn demo() -> usize { 42 }";
+        let github = BrowserRenderable::render_html_fragment(
+            &CodeBlock::rust(code).with_theme(ThemePair::Github),
+        )
+        .render();
+        let nord = BrowserRenderable::render_html_fragment(
+            &CodeBlock::rust(code).with_theme(ThemePair::Nord),
+        )
+        .render();
+        assert_ne!(
+            github, nord,
+            "a CodeBlock theme override must change the resolved HTML output",
+        );
     }
 
     #[test]

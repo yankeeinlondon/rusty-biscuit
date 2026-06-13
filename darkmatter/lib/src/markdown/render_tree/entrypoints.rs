@@ -543,7 +543,14 @@ fn browser_options_from_html_options(opts: &HtmlOptions) -> BrowserRenderOptions
         strictness: RenderStrictness::Warn,
         raw_html: RawHtmlPolicy::Escape,
         page,
-        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        // Carry the caller's resolved `HtmlOptions` (code theme, page color
+        // mode, code-block mode, line numbers) into the code renderer so the
+        // highlighted markup uses the same mode/theme policy as the page frame
+        // and the `.code-block` stylesheet, rather than `HtmlOptions::default()`
+        // (review-1 finding 2).
+        code_renderer: Some(Rc::new(
+            TerminalCodeRenderer::new().with_html_options(opts.clone()),
+        )),
         mermaid_mode,
         ..Default::default()
     }

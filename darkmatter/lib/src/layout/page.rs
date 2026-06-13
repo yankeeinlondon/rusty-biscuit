@@ -995,6 +995,7 @@ impl DarkmatterPage {
             code_theme: self.page_code_theme.unwrap_or(self.options.code_theme),
             prose_theme: self.options.prose_theme,
             color_mode: ctx.render_color_mode,
+            code_block_mode: self.code_block_mode,
             include_line_numbers: self.line_numbers,
             include_styles: true,
             mermaid_mode: self.options.mermaid_mode,
@@ -4235,6 +4236,132 @@ mod tests {
             lum > 0.7,
             "a dark terminal must invert the browser code panel to a light theme \
              regardless of the option mode: panel bg {panel_bg:?} (lum {lum:.3})"
+        );
+    }
+
+    /// Collect every foreground `color: #rrggbb` declared inside the rendered
+    /// `<pre><code …>` code markup (the syntax-highlighted spans), as RGB
+    /// triples. The leading `"` distinguishes a span's foreground `color:` from
+    /// a `background-color:` declaration.
+    fn code_markup_colors(html: &str) -> Vec<(u8, u8, u8)> {
+        let start = html
+            .find("<pre>")
+            .unwrap_or_else(|| panic!("no <pre> in render:\n{html}"));
+        let end = html[start..]
+            .find("</pre>")
+            .map(|i| start + i)
+            .unwrap_or(html.len());
+        let region = &html[start..end];
+        let needle = "\"color: #";
+        let mut out = Vec::new();
+        let mut rest = region;
+        while let Some(idx) = rest.find(needle) {
+            let hex = &rest[idx + needle.len()..];
+            if hex.len() >= 6
+                && let (Ok(r), Ok(g), Ok(b)) = (
+                    u8::from_str_radix(&hex[0..2], 16),
+                    u8::from_str_radix(&hex[2..4], 16),
+                    u8::from_str_radix(&hex[4..6], 16),
+                )
+            {
+                out.push((r, g, b));
+            }
+            rest = &rest[idx + needle.len()..];
+        }
+        out
+    }
+
+    /// review-1 finding 2: the actual code *markup* (the `<span style="color:
+    /// …">` syntax colors), not just the `.code-block` stylesheet background,
+    /// must follow the page's resolved mode. The pre-fix browser hook always
+    /// painted `HtmlOptions::default()`, so a dark page and a light page emitted
+    /// identical highlighted markup even though their panel backgrounds differed
+    /// — markup and stylesheet disagreed. Two pages differing only in terminal
+    /// mode must now produce different highlighted markup.
+    #[test]
+    fn browser_code_markup_theme_follows_page_mode() {
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        let render = |mode: TerminalColorMode| {
+            let mut term = Terminal::new_optimistic(80);
+            term.color_mode = mode;
+            DarkmatterPage::new(&term).render_to_browser(&md).unwrap()
+        };
+        let dark = code_markup_colors(&render(TerminalColorMode::Dark));
+        let light = code_markup_colors(&render(TerminalColorMode::Light));
+        assert!(
+            !dark.is_empty() && !light.is_empty(),
+            "expected highlighted spans on both pages; dark {dark:?}, light {light:?}",
+        );
+        assert_ne!(
+            dark, light,
+            "browser code markup syntax colors must follow the page color mode, \
+             not a fixed default theme",
+        );
+    }
+
+    /// review-1 finding 2 (the regression the pronounced snapshot caught): the
+    /// code markup's foreground colors must be readable on the `.code-block`
+    /// panel background — markup theme and stylesheet background must be the
+    /// same variant. The pre-fix hook painted github (dark text) on a panel
+    /// whose background was the page's resolved (dark) theme, an unreadable
+    /// near-zero-contrast mismatch.
+    #[test]
+    fn browser_code_markup_contrasts_with_panel_background() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Dark; // dark page -> light panel
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        let out = DarkmatterPage::new(&term)
+            .with_page_background(PageBackground::Subtle)
+            .render_to_browser(&md)
+            .unwrap();
+
+        let panel_bg = browser_code_block_bg(&out);
+        let panel_lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+        let colors = code_markup_colors(&out);
+        assert!(!colors.is_empty(), "expected highlighted spans in:\n{out}");
+        // At least one syntax color must clearly contrast with the panel
+        // background; a wrong-variant markup (the bug) puts dark text on a dark
+        // panel, collapsing the contrast toward zero.
+        let max_contrast = colors
+            .iter()
+            .map(|&(r, g, b)| (rel_luminance(r, g, b) - panel_lum).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_contrast > 0.3,
+            "code markup must be readable on its panel background (markup and \
+             stylesheet theme must agree); panel {panel_bg:?} (lum {panel_lum:.3}), \
+             markup colors {colors:?}",
+        );
+    }
+
+    /// review-1 finding 2 (`CodeBlockMode` was a browser no-op behind a TODO): a
+    /// fenced code block in the browser must resolve through the page's
+    /// `CodeBlockMode`. On a dark page, `Inverse` (default) yields a light
+    /// panel while `Same` keeps a dark panel, so both the `.code-block`
+    /// stylesheet background and the markup must change with the mode.
+    #[test]
+    fn browser_code_block_honors_code_block_mode() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Dark;
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        let panel_lum = |mode: CodeBlockMode| {
+            let out = DarkmatterPage::new(&term)
+                .with_page_background(PageBackground::Subtle)
+                .with_code_block_mode(mode)
+                .render_to_browser(&md)
+                .unwrap();
+            let (r, g, b) = browser_code_block_bg(&out);
+            rel_luminance(r, g, b)
+        };
+        let inverse = panel_lum(CodeBlockMode::Inverse);
+        let same = panel_lum(CodeBlockMode::Same);
+        assert!(
+            inverse > 0.6,
+            "Inverse on a dark page must invert to a light panel; lum {inverse:.3}",
+        );
+        assert!(
+            same < 0.4,
+            "Same on a dark page must keep a dark panel; lum {same:.3}",
         );
     }
 
