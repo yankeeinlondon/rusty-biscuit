@@ -7254,7 +7254,7 @@ fn sequence_claude_dry_run_does_not_call_opencode_models() {
 #[cfg(unix)]
 #[test]
 #[serial_test::serial]
-fn compose_sigint_during_prep_exits_130_with_notice() {
+fn slow_compose_sigint_during_prep_exits_130_with_notice() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();

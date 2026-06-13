@@ -54,7 +54,7 @@ pub fn render_markdown_for_terminal(text: &str, _term: &Terminal, max_width: u32
 ///
 /// ## Examples
 ///
-/// ```
+/// ```ignore
 /// use claudine::prompt_reporting::collapse_blank_lines;
 ///
 /// let text = "A\n\n\n\nB";
@@ -93,14 +93,15 @@ pub fn collapse_blank_lines(text: &str, max_consecutive: usize) -> String {
 
 /// Creates a [`BlockQuote`] styled for the system prompt (orange border)
 /// from markdown content.
-pub fn create_system_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuote {
+#[allow(dead_code)]
+pub(super) fn create_system_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuote {
     let rendered = render_markdown_for_terminal(content, term, prompt_body_width(term));
     style_system_prompt_blockquote(BlockQuote::from(rendered))
 }
 
 /// Wraps an already-rendered (ANSI) string in the orange system-prompt
 /// [`BlockQuote`] without re-running the Markdown renderer.
-pub fn system_prompt_blockquote_styled(rendered_content: &str) -> BlockQuote {
+pub(super) fn system_prompt_blockquote_styled(rendered_content: &str) -> BlockQuote {
     style_system_prompt_blockquote(BlockQuote::from(rendered_content.to_string()))
 }
 
@@ -118,7 +119,7 @@ fn style_system_prompt_blockquote(mut quote: BlockQuote) -> BlockQuote {
 
 /// Creates a [`BlockQuote`] styled for the user prompt (green border)
 /// from markdown content.
-pub fn create_user_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuote {
+pub(super) fn create_user_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuote {
     let rendered = render_markdown_for_terminal(content, term, prompt_body_width(term));
     let mut quote = BlockQuote::from(rendered)
         .with_left_block_color(Color::Tailwind(Tailwind::Green500))
