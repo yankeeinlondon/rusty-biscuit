@@ -9,6 +9,10 @@
 //! cargo bench -p darkmatter --bench render_pipeline_steps
 //! ```
 
+// Whitebox: wires the deprecated `TerminalCodeRenderer` adapter directly to
+// benchmark the render-tree code path.
+#![allow(deprecated)]
+
 use std::hint::black_box;
 use std::rc::Rc;
 
