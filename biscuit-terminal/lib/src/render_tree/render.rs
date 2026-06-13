@@ -674,7 +674,48 @@ impl Writer<'_> {
                 Ok(self.render_prose(&markup))
             }
             NodeKind::Html { value, block } => self.render_html(node, value, *block),
+            NodeKind::Disclosure { summary, children, .. } => {
+                self.render_disclosure(summary, children)
+            }
             NodeKind::Unsupported { label } => self.render_unsupported(node, label),
+        }
+    }
+
+    /// Renders a disclosure block: the summary is shown normally and the body is
+    /// rendered as a block quote whose text is dim and italic.
+    fn render_disclosure(
+        &mut self,
+        summary: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<String, RenderError> {
+        let effective = self.inherited.effective().clone();
+        let summary_markup = self.render_inline(summary, &effective)?;
+        let summary_line = self.render_prose(&summary_markup);
+
+        let body = if children.is_empty() {
+            String::new()
+        } else {
+            let dim_italic = Style {
+                emphasis: TextEmphasis {
+                    dim: true,
+                    italic: true,
+                    ..Default::default()
+                },
+                ..Style::default()
+            };
+            let (child_ctx, _) = self.inherited.enter(Some(&dim_italic));
+            let prev = std::mem::replace(&mut self.inherited, child_ctx);
+            let rendered = self.render_blocks(children);
+            self.inherited = prev;
+            let rendered = rendered?;
+            BlockQuote::from(rendered.as_str()).render(&self.opts.context.terminal)
+        };
+
+        match (summary_line.is_empty(), body.is_empty()) {
+            (true, true) => Ok(String::new()),
+            (true, false) => Ok(body),
+            (false, true) => Ok(summary_line),
+            (false, false) => Ok(format!("{summary_line}\n\n{body}")),
         }
     }
 
@@ -1162,6 +1203,7 @@ impl Writer<'_> {
             | NodeKind::TableRow { .. }
             | NodeKind::TableCell { .. }
             | NodeKind::FootnoteDefinition { .. }
+            | NodeKind::Disclosure { .. }
             | NodeKind::Html { .. }
             | NodeKind::Unsupported { .. } => self.render(node),
         }
