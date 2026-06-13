@@ -556,13 +556,112 @@ fn worktree_path_link(path: &std::path::Path, current_worktree: &std::path::Path
     format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
 }
 
+/// Formats a worktree directory path as a blue OSC8 hyperlink whose href is the
+/// full absolute path and whose visible label is an aliased, compact form (see
+/// [`alias_path`]).
+///
+/// Used for the current worktree's own "located at" line, where a label
+/// relative to itself would degenerate to `.` and tell the reader nothing.
+fn worktree_path_link_absolute(path: &std::path::Path) -> String {
+    let absolute = path.display().to_string();
+    let label = alias_path(path);
+    format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
+}
+
+/// Computes a compact display label for an absolute path by offsetting it
+/// against an environment variable or the home directory.
+///
+/// Resolution ladder (first match wins):
+/// 1. The environment variable whose value is the longest path-prefix of
+///    `path` renders as `${VAR}/<rest>`. Ties on prefix length are broken by
+///    the lexicographically-first variable name so output is deterministic.
+/// 2. A path under `$HOME` renders as `~/<rest>`.
+/// 3. Anything else renders as its absolute path.
+///
+/// An env-var offset wins only when it is a strictly longer prefix than
+/// `$HOME`; otherwise the `~` form is preferred, since it reads better for the
+/// home directory itself.
+fn alias_path(path: &Path) -> String {
+    let vars: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    alias_path_with(path, &vars, home.as_deref())
+}
+
+/// Environment variables whose values are absolute paths but denote *transient
+/// shell position* (the current / previous directory) rather than a stable
+/// named root. Offsetting against them yields a label that changes on every
+/// `cd`, so they are skipped. Variables whose values are not absolute paths
+/// (`TERM`, `LANG`, `SHLVL`, ...) are already filtered by the `is_absolute`
+/// check below and need no entry here.
+const POSITIONAL_PATH_VARS: &[&str] = &["PWD", "OLDPWD"];
+
+/// Pure core of [`alias_path`], with the environment supplied explicitly so it
+/// can be tested without mutating global process state.
+fn alias_path_with(
+    path: &Path,
+    vars: &[(std::ffi::OsString, std::ffi::OsString)],
+    home: Option<&Path>,
+) -> String {
+    // "Longest prefix" is measured in path components, not bytes, so a trailing
+    // slash in an env value can't spuriously outrank a real ancestor.
+    let home_components = home.map(|h| h.components().count()).unwrap_or(0);
+
+    let mut best: Option<(String, PathBuf, usize)> = None;
+    for (name, value) in vars {
+        let name = name.to_string_lossy();
+        if POSITIONAL_PATH_VARS.contains(&name.as_ref()) {
+            continue;
+        }
+        let value = PathBuf::from(value);
+        if !value.is_absolute() || !path.starts_with(&value) {
+            continue;
+        }
+        let components = value.components().count();
+        let better = match &best {
+            None => true,
+            Some((best_name, _, best_components)) => {
+                components > *best_components
+                    || (components == *best_components && name.as_ref() < best_name.as_str())
+            }
+        };
+        if better {
+            best = Some((name.into_owned(), value, components));
+        }
+    }
+
+    if let Some((name, value, components)) = best
+        && components > home_components
+        && let Ok(rel) = path.strip_prefix(&value)
+    {
+        return join_alias(&format!("${{{name}}}"), rel);
+    }
+
+    if let Some(home) = home
+        && let Ok(rel) = path.strip_prefix(home)
+    {
+        return join_alias("~", rel);
+    }
+
+    path.display().to_string()
+}
+
+/// Joins an alias prefix (`~` or `${VAR}`) with the remaining relative path,
+/// collapsing to the bare prefix when the path is an exact match.
+fn join_alias(prefix: &str, rel: &Path) -> String {
+    if rel.as_os_str().is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix}/{}", rel.display())
+    }
+}
+
 /// Computes a relative path from `base` to `target`.
 ///
 /// Returns `.` when the two paths are the same, otherwise a sequence of `..`
 /// segments and/or the remaining target components. Falls back to the target's
 /// absolute display when the paths do not share a common prefix.
 fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> String {
-    use std::path::MAIN_SEPARATOR_STR;
+    use std::path::{Component, MAIN_SEPARATOR_STR};
 
     if let Ok(rel) = target.strip_prefix(base) {
         return if rel.as_os_str().is_empty() {
@@ -587,7 +686,16 @@ fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> St
         .take_while(|(a, b)| a == b)
         .count();
 
-    if common == 0 {
+    // When the paths diverge at (or before) the filesystem root — e.g. a
+    // worktree under `/Users/...` next to one under `/Volumes/...` — the only
+    // shared component is the root, and a relative label degenerates into a
+    // long `../` chain back to root. The absolute path is shorter and clearer.
+    let common_is_root_only = common <= 1
+        && base_components
+            .first()
+            .is_some_and(|c| matches!(c, Component::RootDir | Component::Prefix(_)));
+
+    if common == 0 || common_is_root_only {
         return target.display().to_string();
     }
 
@@ -686,7 +794,7 @@ pub fn render_git_section(
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("worktree");
-            let current_path = worktree_path_link(&git.repo_root, &git.repo_root);
+            let current_path = worktree_path_link_absolute(&git.repo_root);
             wt_list.add(Prose::new("<b>Current Worktree:</b>".to_string()));
 
             let mut current_list = UnorderedList::empty();
@@ -720,7 +828,7 @@ pub fn render_git_section(
         } else {
             // Case B: running inside the main worktree. The main worktree never
             // appears in the linked-worktree map, so every entry is "other".
-            let main_path = worktree_path_link(&git.repo_root, &git.repo_root);
+            let main_path = worktree_path_link_absolute(&git.repo_root);
             wt_list.add(Prose::new("<b>Current Worktree:</b>".to_string()));
 
             let mut current_list = UnorderedList::empty();
@@ -1683,14 +1791,17 @@ mod tests {
                 "current branch must still be shown: {output}"
             );
             // Main worktree is a sibling directory, so its visible label is
-            // `../project`. The current worktree label relative to itself is `.`.
+            // `../project`. The current worktree shows its own absolute path —
+            // a label relative to itself (`.`) would tell the reader nothing.
             assert!(
                 output.contains("[../project](file://"),
                 "main worktree label must be relative to the current directory: {output}"
             );
+            // The visible absolute label may word-wrap at the terminal width,
+            // so assert on the OSC8 href, which is emitted intact.
             assert!(
-                output.contains("[.](file://"),
-                "current worktree label must be `.` (relative to itself): {output}"
+                output.contains("(file:///tmp/demo/login-fix)"),
+                "current worktree must link to its absolute path: {output}"
             );
         }
 
@@ -1718,14 +1829,103 @@ mod tests {
                 relative_path_between(&PathBuf::from("/repo"), &PathBuf::from("/repo/feature")),
                 "feature"
             );
-            // Paths that share only the root still produce a relative path.
+            // Paths that share only the filesystem root fall back to the
+            // absolute target — a `../` chain back to root reads worse than the
+            // plain absolute path (e.g. a `/Users/...` worktree next to a
+            // `/Volumes/...` checkout).
             assert_eq!(
                 relative_path_between(
                     &PathBuf::from("/repo/feature"),
                     &PathBuf::from("/other/project")
                 ),
-                "../../other/project"
+                "/other/project"
             );
+        }
+
+        /// Builds an owned env-var list for `alias_path_with` from string pairs.
+        fn env(pairs: &[(&str, &str)]) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+            pairs
+                .iter()
+                .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v)))
+                .collect()
+        }
+
+        #[test]
+        fn alias_path_offsets_against_env_var() {
+            let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
+            let vars = env(&[("CLAUDINE_WT", "/Users/ken/.claudine/worktrees")]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/Users/ken"))),
+                "${CLAUDINE_WT}/rusty-biscuit/sniff"
+            );
+        }
+
+        #[test]
+        fn alias_path_falls_back_to_home_tilde() {
+            let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
+            assert_eq!(
+                alias_path_with(&path, &[], Some(Path::new("/Users/ken"))),
+                "~/.claudine/worktrees/rusty-biscuit/sniff"
+            );
+        }
+
+        #[test]
+        fn alias_path_prefers_tilde_over_shorter_env_offset() {
+            // An env var that is a *shorter* prefix than $HOME must yield to the
+            // `~` form, which reads better for paths inside the home directory.
+            let path = PathBuf::from("/Users/ken/project/src");
+            let vars = env(&[("ROOT", "/Users")]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/Users/ken"))),
+                "~/project/src"
+            );
+        }
+
+        #[test]
+        fn alias_path_picks_longest_prefix_then_name_for_ties() {
+            let path = PathBuf::from("/a/b/c/d");
+            // `DEEP` is the longer prefix and wins over `SHALLOW`.
+            let vars = env(&[("SHALLOW", "/a"), ("DEEP", "/a/b/c")]);
+            assert_eq!(alias_path_with(&path, &vars, None), "${DEEP}/d");
+
+            // Equal-length prefixes tie-break on the lexicographically-first name.
+            let vars = env(&[("ZED", "/a/b"), ("ACE", "/a/b")]);
+            assert_eq!(alias_path_with(&path, &vars, None), "${ACE}/c/d");
+        }
+
+        #[test]
+        fn alias_path_collapses_exact_match_to_bare_prefix() {
+            let path = PathBuf::from("/srv/data");
+            let vars = env(&[("DATA", "/srv/data")]);
+            assert_eq!(alias_path_with(&path, &vars, None), "${DATA}");
+
+            assert_eq!(
+                alias_path_with(Path::new("/Users/ken"), &[], Some(Path::new("/Users/ken"))),
+                "~"
+            );
+        }
+
+        #[test]
+        fn alias_path_skips_positional_shell_vars() {
+            // PWD/OLDPWD often equal (an exact prefix of) the target, but alias
+            // to a transient label — they must be ignored in favor of `~`.
+            let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
+            let vars = env(&[
+                ("OLDPWD", "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff"),
+                ("PWD", "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff"),
+            ]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/Users/ken"))),
+                "~/.claudine/worktrees/rusty-biscuit/sniff"
+            );
+        }
+
+        #[test]
+        fn alias_path_ignores_non_absolute_and_falls_back_to_absolute() {
+            let path = PathBuf::from("/opt/tool/bin");
+            // Relative and empty env values must never match.
+            let vars = env(&[("REL", "opt/tool"), ("EMPTY", "")]);
+            assert_eq!(alias_path_with(&path, &vars, Some(Path::new("/home/other"))), "/opt/tool/bin");
         }
 
         #[test]
