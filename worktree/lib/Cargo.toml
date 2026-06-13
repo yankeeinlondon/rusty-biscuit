@@ -12,5 +12,9 @@ sniff = { path = "../../sniff/lib" }
 thiserror = "2.0"
 which = "8.0"
 
+[features]
+count-git = []
+
 [dev-dependencies]
+serial_test = "3"
 tempfile = "3"
