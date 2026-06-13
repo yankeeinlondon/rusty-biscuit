@@ -478,6 +478,13 @@ fn evaluate_member(base: &Value, name: &str) -> Value {
     current
 }
 
+/// Error-message prefix for an unrecognized function name.
+///
+/// A stable contract: interpolation treats evaluation errors starting with
+/// this prefix as fatal even in non-fail-fast mode, since an unknown symbol can
+/// never resolve and would otherwise leak its literal `{{ … }}` text downstream.
+pub(crate) const UNKNOWN_FUNCTION_PREFIX: &str = "Unknown function:";
+
 fn evaluate_function<L: EvaluationLookup>(
     name: &str,
     args: &[Expr],
@@ -517,8 +524,18 @@ fn evaluate_function<L: EvaluationLookup>(
             {
                 return result;
             }
-            functions::dispatch(other, &evaluated)
-                .unwrap_or_else(|| Err(format!("Unknown function: {name}")))
+            if let Some(result) = functions::dispatch(other, &evaluated) {
+                return result;
+            }
+            // A known filesystem function reaches here only because no document
+            // resolution context was available (e.g. frontmatter interpolation);
+            // keep that recoverable so it doesn't read as an unknown symbol.
+            if functions::is_fs_function(other) {
+                return Err(format!(
+                    "Filesystem function '{name}' requires a document resolution context, which is unavailable here"
+                ));
+            }
+            Err(format!("{UNKNOWN_FUNCTION_PREFIX} {name}"))
         }
     }
 }

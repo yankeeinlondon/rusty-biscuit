@@ -273,6 +273,14 @@ pub(crate) fn interpolate_frontmatter(
         }
     }
 
+    // Keys that transitively depend on a shell-pending value must survive the
+    // fallback pass untouched so the post-shell second pass can resolve them
+    // against expanded values. A direct-ref check is not enough: a key like
+    // `review_path: "@{{area}}/{{review}}"` reaches a shell-pending `dir` only
+    // through `review`, and finalizing it here would bake in an empty `review`.
+    let shell_blocked =
+        transitively_shell_blocked_keys(&templated_keys, &original_values, &shell_pending_keys);
+
     for key in &templated_keys {
         if resolved.contains(key) {
             continue;
@@ -283,14 +291,8 @@ pub(crate) fn interpolate_frontmatter(
             None => continue,
         };
 
-        // Leave keys with shell-pending refs alone; the caller will rerun
-        // interpolation after frontmatter shell expansion has produced
-        // concrete values for those refs.
-        if !shell_pending_keys.is_empty() {
-            let refs = extract_frontmatter_key_refs(original);
-            if refs.iter().any(|r| shell_pending_keys.contains(r)) {
-                continue;
-            }
+        if shell_blocked.contains(key) {
+            continue;
         }
 
         let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone());
@@ -313,6 +315,49 @@ pub(crate) fn interpolate_frontmatter(
         replacements: total_replacements,
         warnings: all_warnings,
     })
+}
+
+/// Computes the templated keys that transitively depend on a shell-pending
+/// (`$(...)`) value.
+///
+/// A key is blocked when it references a shell-pending key directly, or
+/// references another templated key that is itself blocked; the result is the
+/// fixpoint of that relation. Returns an empty set when no keys are
+/// shell-pending (e.g. the post-shell second pass), so the fallback resolution
+/// pass behaves exactly as before for non-deferred runs.
+fn transitively_shell_blocked_keys(
+    templated_keys: &[String],
+    original_values: &HashMap<String, Value>,
+    shell_pending_keys: &HashSet<String>,
+) -> HashSet<String> {
+    let mut blocked: HashSet<String> = HashSet::new();
+    if shell_pending_keys.is_empty() {
+        return blocked;
+    }
+
+    loop {
+        let mut changed = false;
+        for key in templated_keys {
+            if blocked.contains(key) {
+                continue;
+            }
+            let Some(original) = original_values.get(key) else {
+                continue;
+            };
+            let is_blocked = extract_frontmatter_key_refs(original)
+                .iter()
+                .any(|r| shell_pending_keys.contains(r) || blocked.contains(r));
+            if is_blocked {
+                blocked.insert(key.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    blocked
 }
 
 /// Extracts frontmatter-key references from a JSON value tree.
@@ -630,6 +675,23 @@ mod tests {
         }
 
         #[test]
+        fn unknown_function_errors_instead_of_leaking_raw_template() {
+            // Regression: an unknown function (`dir`) used to be demoted to a
+            // warning in non-fail-fast mode, leaving the raw `{{ … }}` text in
+            // `review` to poison the downstream `review_path` file reference.
+            let mut fm = fm_from_json(json!({
+                "spec": "features/x/spec.md",
+                "review": "{{ dir(spec) + '/review.md' }}",
+                "review_path": "@area/{{review}}"
+            }));
+            let result = interpolate_frontmatter(&mut fm, &test_context(), false, false);
+            let Err(err) = result else {
+                panic!("unknown function must abort interpolation");
+            };
+            assert!(err.to_string().contains("Unknown function: dir"));
+        }
+
+        #[test]
         fn fail_fast_returns_error() {
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
@@ -665,6 +727,48 @@ mod tests {
             assert_eq!(fm.as_map().get("pwd"), Some(&json!("$(pwd)")));
             assert_eq!(fm.as_map().get("uname"), Some(&json!("$(uname)")));
             assert_eq!(report.replacements, 0);
+        }
+
+        #[test]
+        fn defer_shell_pending_defers_transitive_dependents() {
+            // Regression: `review_path` reaches the shell-pending `dir` only
+            // through `review`. The fallback pass used to finalize `review_path`
+            // against an empty `review`, yielding "@area/" before shell
+            // expansion ever ran. Both `review` (direct) and `review_path`
+            // (transitive) must stay deferred in the first pass.
+            let mut fm = fm_from_json(json!({
+                "spec": "features/x/spec.md",
+                "iteration": 1,
+                "dir": "$(dirname '{{spec}}')",
+                "review": "{{ dir + '/review-' + iteration + '.md' }}",
+                "review_path": "@area/{{review}}"
+            }));
+
+            interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            assert_eq!(
+                fm.as_map().get("review"),
+                Some(&json!("{{ dir + '/review-' + iteration + '.md' }}"))
+            );
+            assert_eq!(
+                fm.as_map().get("review_path"),
+                Some(&json!("@area/{{review}}"))
+            );
+
+            // Simulate frontmatter shell expansion producing a concrete dir.
+            fm.as_map_mut()
+                .insert("dir".to_string(), json!("features/x"));
+
+            // Second pass resolves the whole chain against the expanded value.
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            assert_eq!(
+                fm.as_map().get("review"),
+                Some(&json!("features/x/review-1.md"))
+            );
+            assert_eq!(
+                fm.as_map().get("review_path"),
+                Some(&json!("@area/features/x/review-1.md"))
+            );
+            assert!(report.replacements >= 2);
         }
 
         #[test]
