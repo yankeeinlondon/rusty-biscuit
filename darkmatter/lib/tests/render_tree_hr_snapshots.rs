@@ -17,6 +17,10 @@
 //! the captured bytes (width, ANSI palette, rule glyph) are reproducible
 //! regardless of the host terminal's detected capabilities.
 
+// Whitebox: these snapshots wire the deprecated `TerminalCodeRenderer` adapter
+// directly to exercise the render-tree code path.
+#![allow(deprecated)]
+
 use std::rc::Rc;
 
 use biscuit_terminal::discovery::detection::ImageSupport;

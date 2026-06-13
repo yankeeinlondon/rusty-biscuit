@@ -52,6 +52,10 @@
 //! right boundary, blank-line rhythm) — properties an in-process ANSI string
 //! cannot verify. See `run_page_in_pane` and the `level2_page_*` tests.
 
+// Whitebox: these tests wire the deprecated `TerminalCodeRenderer` adapter
+// directly to exercise the render-tree code path.
+#![allow(deprecated)]
+
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::render_tree::{
     TerminalRenderContext, TerminalRenderOptions, render_terminal_document,

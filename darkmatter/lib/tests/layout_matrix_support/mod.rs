@@ -4,6 +4,9 @@
 //! architecture. Included by both the `layout_matrix` harness example and the
 //! `layout_matrix` snapshot test so they render through identical code.
 #![allow(dead_code)]
+// Whitebox: wires the deprecated `TerminalCodeRenderer` adapter directly to
+// render through the render-tree code path.
+#![allow(deprecated)]
 
 use std::rc::Rc;
 

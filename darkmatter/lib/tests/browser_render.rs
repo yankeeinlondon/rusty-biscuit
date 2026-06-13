@@ -14,9 +14,13 @@
 //! failure (for CI that provisions one). Point `CHROME` at an explicit
 //! executable to override discovery.
 
+// Whitebox: these tests wire the deprecated `TerminalCodeRenderer` adapter
+// directly to exercise the render-tree code path.
+#![allow(deprecated)]
+
 use biscuit_browser_harness::{BrowserHarness, ChromeHarness, require_browser, wrap_fragment};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
+use darkmatter::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
 use darkmatter::markdown::output::HtmlOptions;
 use darkmatter::markdown::render_tree::{TerminalCodeRenderer, fold_markdown_to_document};
 use darkmatter::markdown::render_tree::svg_sanitizer::sanitize_svg;
@@ -1012,6 +1016,154 @@ async fn browser_list_left_margin_computes() {
     assert!(
         margin_left.ends_with("px") && px(&margin_left) > 0.0,
         "list left-margin must compute to a non-zero px margin; got {margin_left}",
+    );
+    harness.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// Review-2 finding 2: the browser-visible code-block theme/mode is
+// user-observable styling — the `.code-block` panel background and the syntax
+// `<span>` colors must compute to the page-resolved theme/mode in an actual
+// browser. The L1 string-luminance checks in `page.rs` do not exercise the
+// parser/cascade/computed-style path, so these drive
+// `DarkmatterPage::render_to_browser` through a real headless Chromium.
+// ---------------------------------------------------------------------------
+
+/// Parses a `"rgb(r, g, b)"` / `"rgba(r, g, b, a)"` computed color into a
+/// perceptual luminance in `0.0..=1.0`. Returns `None` for any other shape.
+fn rgb_luminance(value: &str) -> Option<f32> {
+    let trimmed = value.trim();
+    let inner = trimmed
+        .strip_prefix("rgb(")
+        .or_else(|| trimmed.strip_prefix("rgba("))?
+        .strip_suffix(')')?;
+    let mut parts = inner.split(',').map(str::trim);
+    let r: f32 = parts.next()?.parse().ok()?;
+    let g: f32 = parts.next()?.parse().ok()?;
+    let b: f32 = parts.next()?.parse().ok()?;
+    Some((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0)
+}
+
+/// Renders a fenced code block through `DarkmatterPage::render_to_browser` with
+/// a captured terminal `mode` (and optional `CodeBlockMode`), loads it in the
+/// browser, and returns the computed `(.code-block background-color, first
+/// .code-block span color)`. The `github` paired theme is pinned so the result
+/// is deterministic across hosts and unaffected by ambient `THEME` env.
+async fn page_code_block_computed_styles(
+    harness: &mut ChromeHarness,
+    mode: ColorMode,
+    code_block_mode: Option<CodeBlockMode>,
+) -> (String, String) {
+    use biscuit_terminal::terminal::Terminal;
+    use darkmatter::layout::DarkmatterPage;
+
+    let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+    let mut term = Terminal::new_optimistic(80);
+    term.color_mode = mode;
+    let mut page = DarkmatterPage::new(&term).with_code_theme("github");
+    if let Some(cbm) = code_block_mode {
+        page = page.with_code_block_mode(cbm);
+    }
+    let html = page.render_to_browser(&md).expect("render_to_browser");
+    let doc = wrap_fragment(&html, "#202020");
+    harness.render_html(&doc).await.expect("render html");
+
+    let bg = harness
+        .computed_style(".code-block", "background-color")
+        .await
+        .expect("computed style query");
+    let color = harness
+        .computed_style(".code-block span", "color")
+        .await
+        .expect("computed style query");
+    (bg, color)
+}
+
+/// Review-2 finding 2: `DarkmatterPage::render_to_browser` must resolve the
+/// code panel's theme variant against the *captured terminal mode* in a real
+/// browser. A dark terminal inverts (default) to a light panel and a light
+/// terminal to a dark panel; both the `.code-block` computed `background-color`
+/// and a representative syntax `<span>`'s computed `color` must follow that
+/// page-resolved mode — not a fixed default theme.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_page_code_block_theme_follows_captured_terminal_mode() {
+    if !require_browser() {
+        return;
+    }
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+
+    let (dark_bg, dark_span) =
+        page_code_block_computed_styles(&mut harness, ColorMode::Dark, None).await;
+    let (light_bg, light_span) =
+        page_code_block_computed_styles(&mut harness, ColorMode::Light, None).await;
+
+    let dark_bg_lum =
+        rgb_luminance(&dark_bg).unwrap_or_else(|| panic!("unparseable dark panel bg {dark_bg:?}"));
+    let light_bg_lum = rgb_luminance(&light_bg)
+        .unwrap_or_else(|| panic!("unparseable light panel bg {light_bg:?}"));
+
+    // Dark page -> inverse -> light panel; light page -> inverse -> dark panel.
+    assert!(
+        dark_bg_lum > 0.6,
+        "a dark terminal must invert to a light code panel; got {dark_bg:?} (lum {dark_bg_lum:.3})",
+    );
+    assert!(
+        light_bg_lum < 0.4,
+        "a light terminal must invert to a dark code panel; got {light_bg:?} (lum {light_bg_lum:.3})",
+    );
+    assert!(
+        (dark_bg_lum - light_bg_lum).abs() > 0.4,
+        "captured-mode panels must be well-separated; dark {dark_bg_lum:.3}, light {light_bg_lum:.3}",
+    );
+
+    // The syntax markup color must follow the page-resolved mode too (the L1
+    // bug: markup painted a fixed default theme while the panel inverted).
+    assert_ne!(
+        dark_span, light_span,
+        "syntax span color must follow the captured terminal mode; dark {dark_span:?} vs light {light_span:?}",
+    );
+    harness.shutdown().await;
+}
+
+/// Review-2 finding 2: `CodeBlockMode::Same` vs `Inverse` must be
+/// browser-observable through `DarkmatterPage::render_to_browser`. On a dark
+/// page, `Inverse` (default) computes a light panel while `Same` keeps a dark
+/// panel, so the `.code-block` computed `background-color` must differ and
+/// `Inverse` must be the lighter of the two.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_page_code_block_mode_same_vs_inverse_computes() {
+    if !require_browser() {
+        return;
+    }
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+
+    let (inverse_bg, _) =
+        page_code_block_computed_styles(&mut harness, ColorMode::Dark, Some(CodeBlockMode::Inverse))
+            .await;
+    let (same_bg, _) =
+        page_code_block_computed_styles(&mut harness, ColorMode::Dark, Some(CodeBlockMode::Same))
+            .await;
+
+    let inverse_lum = rgb_luminance(&inverse_bg)
+        .unwrap_or_else(|| panic!("unparseable inverse panel bg {inverse_bg:?}"));
+    let same_lum =
+        rgb_luminance(&same_bg).unwrap_or_else(|| panic!("unparseable same panel bg {same_bg:?}"));
+
+    assert!(
+        inverse_lum > 0.6,
+        "Inverse on a dark page must compute a light panel; got {inverse_bg:?} (lum {inverse_lum:.3})",
+    );
+    assert!(
+        same_lum < 0.4,
+        "Same on a dark page must compute a dark panel; got {same_bg:?} (lum {same_lum:.3})",
+    );
+    assert_ne!(
+        inverse_bg, same_bg,
+        "Inverse and Same must compute different code-panel backgrounds",
     );
     harness.shutdown().await;
 }
