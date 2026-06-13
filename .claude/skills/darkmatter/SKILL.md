@@ -14,9 +14,23 @@ terminal components, images, Mermaid, and graph rendering are delegated to
 
 ## Start Here
 
+The simplified-rendering model centers on **two public components**:
+
+- `darkmatter::markdown::code_block::CodeBlock` — the atomic renderer for
+  one syntax-highlighted code block. Use it for a single snippet, a fenced
+  block in Markdown (which routes through the same helper), or a direct
+  `CodeBlock::yaml/rust/json/toml/from_source_file` call. It implements
+  `TerminalRenderable` and `BrowserRenderable` directly.
+- `darkmatter::layout::DarkmatterPage` — the page assembler that renders
+  a full Markdown document. It owns page-frame layout (margins, padding,
+  max-width, page background) and delegates nested code blocks to
+  `CodeBlock` so a fence in a `DarkmatterPage` renders byte-for-byte
+  equal to a direct `CodeBlock` call.
+
+Other entry points:
+
 - Use `darkmatter::markdown::Markdown` for document content.
 - Use the compose pipeline for source transformations before rendering.
-- Use `DarkmatterPage` for page-level terminal/browser layout around Markdown.
 - Use `darkmatter::style` for document `style:` frontmatter.
 - Use `biscuit-terminal` components for rich terminal UI outside ordinary
   parsed Markdown rendering.
@@ -181,7 +195,7 @@ the `biscuit-terminal` skill for terminal tree rendering.
   been deleted (tree-cutover Phase 5).
 - `darkmatter::markdown::render_tree::fold_markdown_to_document` is the
   Markdown-to-`Document` bridge every public render path folds through.
-- `YamlBlock` is a thin compatibility wrapper around
+- `YamlBlock` is a deprecated thin compatibility wrapper around
   [`CodeBlock::yaml`](darkmatter/lib/src/markdown/code_block.rs); both
   render through the same shared code-block helpers, so terminal and
   browser output is byte-for-byte equal for the same payload. New code
@@ -189,7 +203,11 @@ the `biscuit-terminal` skill for terminal tree rendering.
   directly with `CodeBlock::yaml`, `CodeBlock::rust`, `CodeBlock::json`,
   `CodeBlock::toml`, `CodeBlock::from_source_file`, or
   `CodeBlock::new(code, Some("lang"))`; `YamlBlock`'s validation
-  constructors stay for callers that need upfront YAML validation.
+  constructors remain (with a deprecation warning) for callers that need
+  upfront YAML validation. The CLI exposes the same surface as
+  `md code-block <file-or-content> --language LANG [--theme THEME] [--title TITLE] [--line-numbering] [--highlight RANGE] --output terminal|html|markdown`,
+  which constructs a `CodeBlock` directly without routing through the
+  Markdown fold.
 - Code-block themes resolve against the inverted page color mode for contrast
   **by default**; ordinary prose follows the real mode. The code panel's mode is
   derived from the terminal (the same source as the page), not a separate

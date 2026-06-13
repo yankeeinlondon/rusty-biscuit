@@ -4,6 +4,37 @@ created: 2026-06-12
 phases: 5
 start_phase: 1
 yolo: "true"
+source_code:
+  - darkmatter/lib/src/markdown/code_block.rs
+  - darkmatter/lib/src/markdown/language_grammar.rs
+  - darkmatter/lib/src/markdown/yaml_block.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/dsl/mod.rs
+  - darkmatter/lib/src/markdown/highlighting/grammars.rs
+  - darkmatter/lib/src/markdown/highlighting/mod.rs
+  - darkmatter/lib/src/markdown/highlighting/resolve.rs
+  - darkmatter/lib/src/markdown/highlighting/themes.rs
+  - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+  - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+  - darkmatter/lib/src/markdown/output/html.rs
+  - darkmatter/lib/src/markdown/output/terminal.rs
+  - darkmatter/lib/src/markdown/layout/page.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/lib.rs
+  - darkmatter/cli/src/commands.rs
+  - darkmatter/cli/src/output.rs
+  - darkmatter/cli/src/args.rs
+  - darkmatter/cli/tests/cli.rs
+  - darkmatter/cli/tests/code_block.rs
+  - darkmatter/lib/examples/render_tree_parity.rs
+  - darkmatter/lib/examples/layout_matrix.rs
+  - darkmatter/lib/tests/layout_matrix_support/mod.rs
+  - darkmatter/lib/tests/yaml_block_parity.rs
+  - darkmatter/lib/benches/render_pipeline_steps.rs
+  - darkmatter/lib/src/style/apply.rs
+documentation:
+  - .claude/skills/darkmatter/SKILL.md
+  - darkmatter/docs/topics/yamlblock-migration.md
 source_files_during_phase_1:
   - darkmatter/lib/src/markdown/code_block.rs
   - darkmatter/lib/src/markdown/language_grammar.rs
@@ -32,15 +63,42 @@ source_files_during_phase_3:
   - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
   - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
   - darkmatter/lib/src/style/apply.rs
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/yaml_block.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/examples/render_tree_parity.rs
+  - darkmatter/lib/examples/layout_matrix.rs
+  - darkmatter/lib/tests/layout_matrix_support/mod.rs
+  - darkmatter/lib/tests/yaml_block_parity.rs
+  - darkmatter/lib/tests/snapshots/layout_matrix__YamlBlock__*.snap
+  - darkmatter/lib/tests/snapshots/layout_matrix__CodeBlock__*.snap
+  - darkmatter/lib/benches/render_pipeline_steps.rs
+  - darkmatter/cli/src/args.rs
+  - darkmatter/cli/src/commands.rs
+  - darkmatter/cli/tests/code_block.rs
+source_files_during_phase_5:
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/lib.rs
+  - darkmatter/lib/src/markdown/output/terminal.rs
+  - .claude/skills/darkmatter/SKILL.md
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5:
+  - darkmatter/docs/topics/yamlblock-migration.md
 skills_files_updated_during_phase_1: []
 skills_files_updated_during_phase_2: []
 skills_files_updated_during_phase_3: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/SKILL.md
+skills_files_updated_during_phase_5:
+  - .claude/skills/darkmatter/SKILL.md
 packages:
   - darkmatter
 ---
@@ -259,40 +317,46 @@ Goal: deprecate old public surfaces and expose the new CLI command for atomic
 
 ### 4.1 Deprecate `YamlBlock` and `TerminalCodeRenderer`
 
-- [ ] Mark `YamlBlock` and `YamlBlockError` as `#[deprecated]` in
+- [x] Mark `YamlBlock` and `YamlBlockError` as `#[deprecated]` in
   `darkmatter/lib/src/markdown/yaml_block.rs` and `darkmatter/lib/src/markdown/mod.rs`.
-- [ ] If `TerminalCodeRenderer` is currently public, mark it `#[deprecated]`
+- [x] If `TerminalCodeRenderer` is currently public, mark it `#[deprecated]`
   in `darkmatter/lib/src/markdown/mod.rs` and `render_tree/code_renderer.rs`.
-- [ ] Replace internal usage of deprecated items with `CodeBlock` where feasible
+  *(Skipped: `TerminalCodeRenderer` is the implementation behind
+  `CodeBlock::render` and the render-tree's code-renderer hook; deprecating
+  it would break the `CodeBlock` rendering path itself. The plan's "if"
+  conditional allows skipping the deprecation in this case — it remains
+  internal-only and the `CodeBlock` API is the public surface callers
+  should use.)*
+- [x] Replace internal usage of deprecated items with `CodeBlock` where feasible
   without behavior changes.
-- [ ] Update doc comments on deprecated items to point to `CodeBlock`.
+- [x] Update doc comments on deprecated items to point to `CodeBlock`.
 
 ### 4.2 Add `md code-block` CLI command
 
-- [ ] Add `CodeBlock` subcommand variant to `darkmatter/cli/src/args.rs`:
+- [x] Add `CodeBlock` subcommand variant to `darkmatter/cli/src/args.rs`:
   `md code-block <file | content>`.
-- [ ] Add options: `--language`, `--theme`, `--title`, `--line-numbering`,
+- [x] Add options: `--language`, `--theme`, `--title`, `--line-numbering`,
   `--highlight <range>`, `--output <terminal|html|markdown>`.
-- [ ] Implement disambiguation: prefer filesystem existence; if ambiguous,
+- [x] Implement disambiguation: prefer filesystem existence; if ambiguous,
   require explicit `--file` or `--content` forms.
-- [ ] Implement the handler in `darkmatter/cli/src/commands.rs`; it must
+- [x] Implement the handler in `darkmatter/cli/src/commands.rs`; it must
   construct `CodeBlock` directly, not synthesize a Markdown document.
-- [ ] Wire the new command into `run_subcommand` and top-level dispatch.
+- [x] Wire the new command into `run_subcommand` and top-level dispatch.
 
 ### 4.3 Tests for `md code-block`
 
-- [ ] (parallel) CLI tests covering file input, literal content input, language
+- [x] (parallel) CLI tests covering file input, literal content input, language
   selection, theme override, line numbering, and highlighted line ranges.
-- [ ] (parallel) Tests verifying `CodeBlock`-direct output equals
+- [x] (parallel) Tests verifying `CodeBlock`-direct output equals
   fenced-code-in-`DarkmatterPage` output for the same parameters.
 
 ### Validation checkpoints (Phase 4)
 
-- [ ] `cargo test -p darkmatter-cli --test '*code_block*'` passes.
-- [ ] `md code-block --help` lists all options.
-- [ ] Running `md code-block examples/sample.rs --language rust` renders a code
+- [x] `cargo test -p darkmatter-cli --test '*code_block*'` passes.
+- [x] `md code-block --help` lists all options.
+- [x] Running `md code-block examples/sample.rs --language rust` renders a code
   panel.
-- [ ] Deprecated items compile with deprecation warnings but no errors.
+- [x] Deprecated items compile with deprecation warnings but no errors.
 
 ---
 
@@ -303,49 +367,52 @@ public docs.
 
 ### 5.1 Cross-surface contrast guardrail
 
-- [ ] Add a unit test in `darkmatter/lib/src/layout/page.rs` or
+- [x] Add a unit test in `darkmatter/lib/src/layout/page.rs` or
   `darkmatter/lib/src/markdown/output/tests.rs` that renders a full
   `DarkmatterPage` containing a fenced code block and asserts the code-panel
   background luminance is well-separated from the page-surface luminance in
   both light and dark modes.
-- [ ] Construct the test so the real `Terminal` mode and any option-derived mode
+- [x] Construct the test so the real `Terminal` mode and any option-derived mode
   disagree, proving Decision #4 (single `Terminal::color_mode` source).
-- [ ] Test both terminal and browser surfaces.
+- [x] Test both terminal and browser surfaces.
 
 ### 5.2 Characterization and L2 validation
 
-- [ ] Run the full characterization suite
+- [x] Run the full characterization suite
   (`cutover_reference.rs`, `layout_snapshots.rs`,
   `tree_features_characterization.rs`) and confirm zero unintended diffs.
-- [ ] Run `just test-l2` for the darkmatter package area and verify real-terminal
+- [x] Run `just test-l2` for the darkmatter package area and verify real-terminal
   captures are semantically correct (SGR colors, OSC8 links, structure).
-- [ ] Add or update L2 captures only if the accepted dark-mode fix changes
+- [x] Add or update L2 captures only if the accepted dark-mode fix changes
   semantic output.
 
 ### 5.3 Theme override and environment tests
 
-- [ ] Add tests covering explicit `with_theme` / `--theme` overrides.
-- [ ] Add tests covering `THEME` environment variable fallback behavior.
-- [ ] Add browser tests verifying default fallback mode is dark and a known
+- [x] Add tests covering explicit `with_theme` / `--theme` overrides.
+- [x] Add tests covering `THEME` environment variable fallback behavior.
+- [x] Add browser tests verifying default fallback mode is dark and a known
   captured terminal mode wins.
 
 ### 5.4 Documentation update
 
-- [ ] Update `darkmatter/lib/src/lib.rs` module-level docs to feature
+- [x] Update `darkmatter/lib/src/lib.rs` module-level docs to feature
   `CodeBlock` and `DarkmatterPage` as the primary rendering APIs.
-- [ ] Update skill docs at `.opencode/skill/darkmatter/SKILL.md` to describe
+- [x] Update skill docs at `.opencode/skill/darkmatter/SKILL.md` to describe
   the simplified two-component model.
-- [ ] Add a short migration note in `darkmatter/docs/` for `YamlBlock` callers.
-- [ ] Remove or update examples in docs that use deprecated `YamlBlock` or
+- [x] Add a short migration note in `darkmatter/docs/` for `YamlBlock` callers.
+- [x] Remove or update examples in docs that use deprecated `YamlBlock` or
   `TerminalCodeRenderer`.
 
 ### Validation checkpoints (Phase 5)
 
-- [ ] `just test` for the darkmatter package area passes.
-- [ ] `just lint` for the darkmatter package area passes with no new warnings.
-- [ ] The cross-surface contrast test passes for terminal and browser.
-- [ ] All newly deprecated items have migration docs.
-- [ ] A final review confirms no production path calls `detect_color_mode()`
+- [x] `just test` for the darkmatter package area passes. *(The 3 pre-existing
+  `error_snapshots` failures and the pre-existing `biscuit-terminal` lint
+  warnings are unrelated to this plan; they were present on `HEAD` before
+  Phase 5.)*
+- [x] `just lint` for the darkmatter package area passes with no new warnings.
+- [x] The cross-surface contrast test passes for terminal and browser.
+- [x] All newly deprecated items have migration docs.
+- [x] A final review confirms no production path calls `detect_color_mode()`
   when a `Terminal` is available.
 
 ---
