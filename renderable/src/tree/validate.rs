@@ -113,6 +113,7 @@ fn is_block(kind: &NodeKind) -> bool {
             | NodeKind::TableRow { .. }
             | NodeKind::TableCell { .. }
             | NodeKind::FootnoteDefinition { .. }
+            | NodeKind::Disclosure { .. }
     )
 }
 
@@ -165,6 +166,7 @@ fn kind_name(kind: &NodeKind) -> &'static str {
         NodeKind::TableRow { .. } => "TableRow",
         NodeKind::TableCell { .. } => "TableCell",
         NodeKind::FootnoteDefinition { .. } => "FootnoteDefinition",
+        NodeKind::Disclosure { .. } => "Disclosure",
         NodeKind::Text { .. } => "Text",
         NodeKind::Emphasis { .. } => "Emphasis",
         NodeKind::Strong { .. } => "Strong",
