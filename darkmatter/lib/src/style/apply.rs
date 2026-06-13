@@ -97,6 +97,7 @@ impl PageStyleOverrides {
             PageComponent::CodeBlocks => self.align_code_blocks,
             PageComponent::Hr => false,
             PageComponent::Hyperlinks => false,
+            PageComponent::Disclosure => false,
         }
     }
 }
@@ -123,6 +124,19 @@ pub struct ListStyleOverrides {
 /// because a CLI flag already claimed it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HrStyleOverrides {
+    pub alignment: bool,
+    pub fill: bool,
+    pub color: bool,
+    pub bg_color: bool,
+}
+
+/// Field-level CLI overrides for disclosure component style
+/// (`style.disclosure.*`).
+///
+/// Each `true` value means the corresponding frontmatter field must be ignored
+/// because a CLI flag already claimed it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DisclosureStyleOverrides {
     pub alignment: bool,
     pub fill: bool,
     pub color: bool,
@@ -674,6 +688,38 @@ pub fn map_hr_alignment(alignment: HrAlignment) -> RuleAlignment {
         HrAlignment::Center => RuleAlignment::Centered,
         HrAlignment::Right => RuleAlignment::Right,
     }
+}
+
+/// Apply parsed disclosure component style (`style.disclosure.*`) onto a
+/// [`DarkmatterPage`] builder.
+///
+/// `overrides` carries the field-level CLI claims; for any field where the
+/// corresponding bool is `true`, the matching frontmatter value is skipped so
+/// the CLI flag stays in effect.
+///
+/// ## Errors
+///
+/// - [`StyleApplyError::ComponentWidthConflict`] when both `width` and
+///   `max-width` appear in the `style.disclosure` bucket.
+/// - [`StyleApplyError::ComponentInvalidCssLength`] when `width` or
+///   `max-width` is a [`Length::Css(_)`] value.
+pub fn apply_disclosure_style(
+    page: DarkmatterPage,
+    style: &StyleFrontmatter,
+    overrides: DisclosureStyleOverrides,
+) -> Result<DarkmatterPage, StyleApplyError> {
+    let Some(disclosure) = style.disclosure.as_ref() else {
+        return Ok(page);
+    };
+
+    apply_common_style(
+        page,
+        "disclosure",
+        PageComponent::Disclosure,
+        &disclosure.common,
+        overrides.alignment,
+        overrides.fill,
+    )
 }
 
 /// Apply one list bucket's [`CommonStyle`] onto `page`.
