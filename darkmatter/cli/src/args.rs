@@ -24,6 +24,17 @@ pub enum OutputFormat {
     Json,
 }
 
+/// Output format for `md code-block`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum CodeBlockOutput {
+    /// Render as ANSI-styled terminal output.
+    Terminal,
+    /// Render as a `<pre><code class="language-…">…</code></pre>` HTML fragment.
+    Html,
+    /// Re-emit as a Markdown fenced code block.
+    Markdown,
+}
+
 /// Cache-staleness handling for remote URL artifacts.
 ///
 /// Mirrors `darkmatter::markdown::compose::RemoteFreshnessMode`. A closed value
@@ -376,6 +387,59 @@ pub enum Command {
         /// Output as JSON instead of a terminal tree
         #[arg(long)]
         json: bool,
+    },
+
+    /// Render a single code block from a file or literal content.
+    ///
+    /// Builds a [`CodeBlock`](darkmatter::markdown::CodeBlock) directly and
+    /// renders it, bypassing the Markdown fold. The `INPUT` positional is
+    /// either a file path or literal content; by default the CLI prefers a
+    /// filesystem match (so a real file path wins) and falls back to literal
+    /// content when the path does not exist. `--file` and `--content` force
+    /// the interpretation when the heuristic would be wrong (e.g. the
+    /// literal content happens to match an existing filename).
+    CodeBlock {
+        /// Source file path or literal code content.
+        #[arg(value_name = "INPUT")]
+        input: String,
+
+        /// Force `INPUT` to be treated as a file path (error if missing).
+        #[arg(long, conflicts_with = "content")]
+        file: bool,
+
+        /// Force `INPUT` to be treated as literal content.
+        #[arg(long, conflicts_with = "file")]
+        content: bool,
+
+        /// Language for the code block (e.g. `rust`, `py`, `yaml`).
+        ///
+        /// Resolved through
+        /// [`LanguageGrammar::from_fence_token`](darkmatter::markdown::LanguageGrammar::from_fence_token);
+        /// aliases such as `yml`→`yaml`, `py`→`python`, `ts`→`typescript` are
+        /// honored. Overrides the extension-derived language for file input.
+        #[arg(long, value_name = "LANG")]
+        language: Option<String>,
+
+        /// Code theme override (kebab-case name).
+        #[arg(long, value_name = "THEME", value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
+        theme: Option<ThemePair>,
+
+        /// Optional title for the code block (printed in the header row).
+        #[arg(long, value_name = "TITLE")]
+        title: Option<String>,
+
+        /// Show line numbers in the code block.
+        #[arg(long)]
+        line_numbering: bool,
+
+        /// Highlighted line ranges, e.g. `1,4-6` (single lines and ranges
+        /// may be mixed).
+        #[arg(long, value_name = "RANGE")]
+        highlight: Option<String>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = CodeBlockOutput::Terminal, value_name = "FORMAT")]
+        output: CodeBlockOutput,
     },
 }
 
