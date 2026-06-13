@@ -57,7 +57,8 @@ A few other quick conversions:
 - `CodeBlock::rust(code)`
 - `CodeBlock::json(code)`
 - `CodeBlock::toml(code)`
-- `CodeBlock::new(code, Some("language"))` — for arbitrary languages
+- `CodeBlock::new(code)` — plain text; add a language with
+  `.with_fence_language("language")`
 - `CodeBlock::with_fence_language(token)` — resolves via
   [`LanguageGrammar::from_fence_token`](../../lib/src/markdown/language_grammar.rs)
   (preserves the `sh` / `shell` / `python` / `py` / `yml` / `yaml` aliases)

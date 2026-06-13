@@ -66,9 +66,10 @@ The inversion is the default, but is configurable per render via the global
 highlighter resolves the theme against (`inverse` → `page_mode.inverted()`).
 The terminal render-tree path threads the mode through `TerminalCodeRenderer`
 and builds the highlighter with `CodeHighlighter::new(theme, resolved_mode)`.
-The HTML/browser path currently always uses the inverse default (its
-`for_code_block_mode` constructor still inverts directly with
-[`ColorMode::inverted()`]).
+The HTML/browser path honors the mode too: it travels on
+`HtmlOptions::code_block_mode` (set from `DarkmatterPage::with_code_block_mode`),
+and `render_browser_code` resolves the panel variant against it through the same
+`ThemePair::resolve_for_surface` boundary the terminal uses.
 
 Theme *selection* uses the resolved (by default inverted) mode; the panel's
 *internal* contrast decisions — the header-pill text color and the
@@ -91,12 +92,18 @@ assert_eq!(ColorMode::Dark.inverted(), ColorMode::Light);
 HTML/browser code blocks invert exactly as the terminal does. The terminal
 detects the live light/dark mode; for HTML the `HtmlOptions::color_mode` is the
 caller-declared page mode. In both cases the *code* theme resolves against the
-inverted mode, so a dark page emits a light code panel and a Markdown ` ```yaml `
-fence renders byte-identically to a `YamlBlock`. (Resolved in
+mode produced by `CodeBlockMode::resolve(page_mode)` (the inverse by default), so
+a dark page emits a light code panel and a Markdown ` ```yaml ` fence renders
+byte-identically to a `YamlBlock`. (Resolved in
 `renderable/fixes/2026-05-22-darkmatter-failures/spec.md`, defect D.)
 
-The `--code-block` override (above) currently applies to **terminal** rendering
-only; HTML always uses the inverse default.
+The browser path renders the highlighted markup from the page's resolved
+`HtmlOptions` — the same options that build the injected `.code-block` panel
+background — so markup and stylesheet always agree on theme and variant
+(review-1 finding 2). The `--code-block` override and
+`DarkmatterPage::with_code_block_mode` therefore apply to **both** terminal and
+browser. A `CodeBlock::with_theme(theme)` / `md code-block --theme` override
+wins over the page/context theme on both surfaces.
 
 ## Where this lives
 
