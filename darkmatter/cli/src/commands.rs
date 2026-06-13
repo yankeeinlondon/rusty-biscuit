@@ -610,8 +610,8 @@ pub fn run_code_block(
         .filter(|s| !s.is_empty())
         .or(inferred_lang_token.as_deref());
     let mut block = match lang_token {
-        Some(lang) => CodeBlock::new(code, Some(lang)),
-        None => CodeBlock::new(code, None::<&str>),
+        Some(lang) => CodeBlock::new(code).with_fence_language(lang),
+        None => CodeBlock::new(code),
     };
 
     // Apply theme override. When set, the block uses a pinned theme instead
