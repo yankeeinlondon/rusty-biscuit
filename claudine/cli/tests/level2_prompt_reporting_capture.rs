@@ -354,7 +354,7 @@ fn level2_prompt_reporting_front_back_truncation_in_tmux() {
 
     let body = numbered_lines(50);
     let fx = Fixture::new(None, &body);
-    let frame = capture_compose_tmux(&fx, 80, 60, &[], &[]);
+    let frame = capture_compose_tmux(&fx, 80, 60, &[]);
     let plain = &frame.plain;
 
     assert!(
@@ -389,7 +389,7 @@ fn level2_prompt_reporting_system_link_osc8_in_wezterm() {
 
     let fx = Fixture::new(Some(SYSTEM_PROMPT_SHORT), USER_PROMPT_SHORT);
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
-    let frame = send_compose(&mut harness, &fx, 100, &[], &[]);
+    let frame = send_compose(&mut harness, &fx, 100, &[]);
 
     assert!(
         frame.raw.contains("\x1b]8;;file://"),
