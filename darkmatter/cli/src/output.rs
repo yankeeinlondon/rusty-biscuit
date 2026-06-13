@@ -8,10 +8,10 @@ use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
 use darkmatter::markdown::block::scan_inline_hr_warnings;
 use darkmatter::style::{
-    BespokeStyleOverrides, ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides,
-    PageStyleOverrides, StyleWarning, StyleWarningKind, apply_bespoke_style, apply_color_style,
-    apply_component_style, apply_hr_style, apply_list_style, apply_page_style, from_frontmatter,
-    into_strict,
+    BespokeStyleOverrides, ComponentStyleOverrides, DisclosureStyleOverrides, HrStyleOverrides,
+    ListStyleOverrides, PageStyleOverrides, StyleWarning, StyleWarningKind, apply_bespoke_style,
+    apply_color_style, apply_component_style, apply_disclosure_style, apply_hr_style,
+    apply_list_style, apply_page_style, from_frontmatter, into_strict,
 };
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -376,6 +376,16 @@ pub fn hr_style_overrides_from_cli(_cli: &Cli) -> HrStyleOverrides {
     HrStyleOverrides::default()
 }
 
+/// Build a [`DisclosureStyleOverrides`] reflecting which disclosure frontmatter
+/// fields the CLI has already claimed.
+///
+/// There are currently no disclosure-specific CLI flags, so this always returns
+/// the default (no overrides). It exists for symmetry with the other override
+/// helpers and to make adding disclosure CLI flags a one-line change.
+pub fn disclosure_style_overrides_from_cli(_cli: &Cli) -> DisclosureStyleOverrides {
+    DisclosureStyleOverrides::default()
+}
+
 /// Build a [`BespokeStyleOverrides`] reflecting which bespoke frontmatter
 /// fields the CLI has already claimed.
 ///
@@ -434,6 +444,10 @@ pub fn apply_style_frontmatter(
 
     let hr_overrides = hr_style_overrides_from_cli(cli);
     let page = apply_hr_style(page, &style, hr_overrides)
+        .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
+
+    let disclosure_overrides = disclosure_style_overrides_from_cli(cli);
+    let page = apply_disclosure_style(page, &style, disclosure_overrides)
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
 
     let page = apply_color_style(page, &style)
@@ -513,9 +527,39 @@ pub fn html_artifact(
     })
 }
 
+pub fn markdown_plus_artifact(
+    md: &Markdown,
+    prose_theme: ThemePair,
+    code_theme: ThemePair,
+    color_mode: ColorMode,
+    cli: &Cli,
+    input_path: Option<&PathBuf>,
+) -> Result<OutputArtifact> {
+    let term = Terminal::new_optimistic(120);
+    let mut page = apply_cli_layout_flags(
+        DarkmatterPage::new(&term)
+            .with_prose_theme(prose_theme.kebab_name())
+            .with_code_theme(code_theme.kebab_name())
+            .with_color_mode(color_mode),
+        cli,
+    );
+
+    page = apply_style_frontmatter(page, md, cli, input_path)?;
+
+    let content = page
+        .render_to_markdown_plus(md)
+        .context("Failed to convert to MarkdownPlus")?;
+
+    Ok(OutputArtifact {
+        content,
+        extension: "md",
+        label: "markdown-plus",
+    })
+}
+
 pub fn json_artifact(md: &Markdown) -> Result<OutputArtifact> {
-    let ast = md.as_ast().context("Failed to generate AST")?;
-    let content = serde_json::to_string_pretty(&ast)?;
+    let document = md.as_document().context("Failed to fold to render tree document")?;
+    let content = serde_json::to_string_pretty(&document)?;
     Ok(OutputArtifact {
         content,
         extension: "json",

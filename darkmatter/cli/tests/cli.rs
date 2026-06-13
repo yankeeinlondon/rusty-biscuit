@@ -174,6 +174,32 @@ fn test_output_html() {
 }
 
 #[test]
+fn test_output_html_alias_browser() {
+    md_cmd()
+        .args(["--output", "browser", "-"])
+        .write_stdin("# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
+}
+
+#[test]
+fn test_output_markdown_plus_renders_disclosure_as_html_details() {
+    let input = "::disclosure Summary\n::details\nBody\n::end-disclosure";
+    md_cmd()
+        .args(["--output", "markdown-plus", "-"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<details>"))
+        .stdout(predicate::str::contains("<summary>"))
+        .stdout(predicate::str::contains("Summary"))
+        .stdout(predicate::str::contains("</summary>"))
+        .stdout(predicate::str::contains("Body"))
+        .stdout(predicate::str::contains("</details>"));
+}
+
+#[test]
 fn test_output_json_alias_ast() {
     md_cmd()
         .args(["--output", "ast", "-"])

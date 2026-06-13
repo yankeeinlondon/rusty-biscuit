@@ -4,7 +4,8 @@ use crate::args::{
 };
 use crate::output::{
     OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_artifact,
-    open_output_artifact, print_delta, print_toc_tree, render_terminal_output,
+    markdown_plus_artifact, open_output_artifact, print_delta, print_toc_tree,
+    render_terminal_output,
 };
 use biscuit_hash::xx_hash;
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
@@ -539,6 +540,10 @@ pub fn run_render(
         }
         OutputFormat::Markdown => {
             emit_or_show_artifact(markdown_artifact(&md), show)?;
+        }
+        OutputFormat::MarkdownPlus => {
+            let artifact = markdown_plus_artifact(&md, theme.prose, theme.code, theme.color_mode, cli, input)?;
+            emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Html => {
             let artifact = html_artifact(&md, theme.prose, theme.code, theme.color_mode, cli, input)?;
@@ -1135,7 +1140,7 @@ pub fn run_compose(
     let theme = ResolvedTheme::from_cli(cli, None);
 
     match output {
-        OutputFormat::Auto | OutputFormat::Markdown => {
+        OutputFormat::Auto | OutputFormat::Markdown | OutputFormat::MarkdownPlus => {
             let content = if include_frontmatter {
                 composed.as_string()
             } else {

@@ -17,7 +17,12 @@ pub enum OutputFormat {
     /// Markdown text output.
     #[value(alias = "text")]
     Markdown,
+    /// Markdown output enhanced with disclosure blocks rendered as HTML
+    /// details/summary elements. Only the browser render target produces these
+    /// elements; on other targets this falls back to plain Markdown.
+    MarkdownPlus,
     /// HTML output.
+    #[value(alias = "browser")]
     Html,
     /// AST JSON output.
     #[value(alias = "ast")]
