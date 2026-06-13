@@ -59,6 +59,7 @@
 
 pub(crate) mod build_context;
 pub(crate) mod block_extension;
+pub(crate) mod disclosure_style;
 pub mod code_renderer;
 // The inline source rewriter backs `fold_markdown_spanned_with_frontmatter`.
 // A few `pub(crate)` helpers on its result types (e.g. `InlineRewrite::

@@ -367,10 +367,10 @@ mod tests {
         let ts = LanguageGrammar::from_fence_token("ts");
         // Native resolution paths may be either a named variant or
         // OtherByExtension; either way they must resolve cleanly.
-        assert!(matches!(rs.resolve(syntax_set()), Ok(_)));
-        assert!(matches!(py.resolve(syntax_set()), Ok(_)));
-        assert!(matches!(js.resolve(syntax_set()), Ok(_)));
-        assert!(matches!(ts.resolve(syntax_set()), Ok(_)));
+        assert!(rs.resolve(syntax_set()).is_ok());
+        assert!(py.resolve(syntax_set()).is_ok());
+        assert!(js.resolve(syntax_set()).is_ok());
+        assert!(ts.resolve(syntax_set()).is_ok());
     }
 
     #[test]

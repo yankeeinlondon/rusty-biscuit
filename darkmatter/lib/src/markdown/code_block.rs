@@ -572,8 +572,10 @@ mod tests {
 
     #[test]
     fn with_meta_replaces_meta() {
-        let mut meta = CodeBlockMeta::default();
-        meta.title = Some("Demo".to_string());
+        let meta = CodeBlockMeta {
+            title: Some("Demo".to_string()),
+            ..Default::default()
+        };
         let block = CodeBlock::rust("fn main() {}").with_meta(meta.clone());
         assert_eq!(block.meta().title, Some("Demo".to_string()));
     }
@@ -924,8 +926,10 @@ mod tests {
     /// header containing the title.
     #[test]
     fn title_reaches_terminal_header() {
-        let mut meta = CodeBlockMeta::default();
-        meta.title = Some("Demo".to_string());
+        let meta = CodeBlockMeta {
+            title: Some("Demo".to_string()),
+            ..Default::default()
+        };
         let block = CodeBlock::rust("fn main() {}").with_meta(meta);
         let out = TerminalRenderable::render(&block, &Terminal::new_optimistic(80));
         let plain = crate::testing::strip_ansi_codes(&out);

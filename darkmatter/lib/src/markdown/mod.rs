@@ -579,6 +579,34 @@ impl Markdown {
         output::as_ast(self)
     }
 
+    /// Folds the markdown document into the canonical renderable [`Document`].
+    ///
+    /// This is the target-agnostic intermediate representation used by the
+    /// terminal, HTML, and Markdown renderers. Serializing the returned
+    /// document to JSON produces a lossless tree that includes darkmatter
+    /// extensions such as disclosure blocks as native [`NodeKind::Disclosure`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    ///
+    /// let md = Markdown::new("# Hello\n\nWorld".to_string());
+    /// let document = md.as_document().unwrap();
+    ///
+    /// let json = serde_json::to_string_pretty(&document).unwrap();
+    /// assert!(json.contains("heading"));
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`MarkdownError::RenderTree`](crate::markdown::MarkdownError::RenderTree)
+    /// when the render tree fold fails (for example, a malformed disclosure
+    /// block).
+    pub fn as_document(&self) -> MarkdownResult<renderable::tree::Document> {
+        Ok(render_tree::entrypoints::to_render_document(self)?.0)
+    }
+
     /// Converts the markdown document to HTML with syntax highlighting.
     ///
     /// Routes through the render-tree browser pipeline
