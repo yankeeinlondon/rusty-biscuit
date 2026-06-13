@@ -22,6 +22,10 @@
 //! cargo run -p darkmatter --example render_tree_parity
 //! ```
 
+// Whitebox: wires the deprecated `TerminalCodeRenderer` adapter directly to
+// render through the render-tree code path.
+#![allow(deprecated)]
+
 use std::rc::Rc;
 
 use biscuit_terminal::components::renderable::TerminalRenderable;
