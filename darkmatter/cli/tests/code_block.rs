@@ -471,12 +471,11 @@ fn code_block_terminal_output_contains_ansi() {
 // =============================================================================
 
 #[test]
-fn code_block_theme_override_is_accepted() {
-    // The --theme flag must be accepted and reach the renderer. The
-    // underlying theme resolution is exercised in the lib-level
-    // `terminal_code_honors_pinned_theme_name` test (paired theme with
-    // a captured Terminal) — this CLI smoke test just guards the flag
-    // wiring and the integration with the darkmatter `CodeBlock` API.
+fn code_block_theme_override_changes_terminal_output() {
+    // review-1 finding 1: `--theme` must actually reach the renderer and
+    // change the resolved terminal output — not be a silent no-op. `github`
+    // and `nord` are distinct themes, so their highlighted SGR colors must
+    // differ for the same source.
     let capture = |theme: &str| {
         let mut cmd = md_cmd();
         cmd.args([
@@ -498,20 +497,24 @@ fn code_block_theme_override_is_accepted() {
         String::from_utf8(nord.get_output().stdout.clone()).unwrap();
     assert!(stdout_github.contains("\x1b["));
     assert!(stdout_nord.contains("\x1b["));
-    // The plain-text body survives the strip, proving the renderer ran
-    // (a no-op would still emit the content but would lack SGRs).
+    // The plain-text body survives the strip, proving the renderer ran.
     let plain_github = strip_ansi(&stdout_github);
     let plain_nord = strip_ansi(&stdout_nord);
     assert!(plain_github.contains("fn demo"));
     assert!(plain_nord.contains("fn demo"));
+    // The whole point of the override: two distinct themes must not collapse
+    // to identical ANSI output. A no-op `--theme` would make these equal.
+    assert_ne!(
+        stdout_github, stdout_nord,
+        "distinct --theme values must produce distinct terminal output",
+    );
 }
 
 #[test]
-fn code_block_theme_override_is_accepted_html() {
-    // The --theme flag's HTML output must include the language class
-    // and emit the code body. Paired themes can resolve to the same
-    // concrete variant under a non-TTY Light page mode, so the smoke
-    // test only asserts the flag is plumbed through.
+fn code_block_theme_override_changes_html_output() {
+    // review-1 finding 1: `--theme` must change the resolved HTML output.
+    // `github` and `nord` paint different syntax colors, so the emitted
+    // `<span style="color: …">` markup must differ for the same source.
     let capture = |theme: &str| {
         let mut cmd = md_cmd();
         cmd.args([
@@ -528,17 +531,24 @@ fn code_block_theme_override_is_accepted_html() {
     };
 
     let github = capture("github");
+    let nord = capture("nord");
     let stdout_github =
         String::from_utf8(github.get_output().stdout.clone()).unwrap();
+    let stdout_nord =
+        String::from_utf8(nord.get_output().stdout.clone()).unwrap();
     assert!(stdout_github.contains("language-rust"));
-    // Tokens are split across `<span>` elements by the syntax
-    // highlighter, so we check for individual tokens rather than the
-    // full contiguous body.
+    assert!(stdout_nord.contains("language-rust"));
+    // Tokens are split across `<span>` elements by the syntax highlighter.
     let plain = strip_html_tags(&stdout_github);
     assert!(plain.contains("fn"));
     assert!(plain.contains("demo"));
     assert!(plain.contains("usize"));
     assert!(plain.contains("42"));
+    // A no-op `--theme` would emit identical markup for both themes.
+    assert_ne!(
+        stdout_github, stdout_nord,
+        "distinct --theme values must produce distinct HTML syntax colors",
+    );
 }
 
 // =============================================================================
