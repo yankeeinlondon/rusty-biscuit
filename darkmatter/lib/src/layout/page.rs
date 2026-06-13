@@ -1608,6 +1608,7 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     fn align_policy(alignment: renderable::layout::Alignment) -> ComponentPolicy {
         let mut policy = ComponentPolicy::default();
@@ -1847,6 +1848,7 @@ mod tests {
     // ---------- Phase 2: render tests ----------
 
     #[test]
+    #[serial]
     fn zero_config_render_ignores_captured_terminal_width() {
         // Construct a DarkmatterPage from a Terminal whose captured width
         // differs from TerminalOptions::default() auto-detection. The page
@@ -4048,5 +4050,447 @@ mod tests {
             "ColorMode::Unknown with the default inverse code block must \
              resolve the panel to a light theme; panel bg {panel_bg:?} (lum {lum:.3})"
         );
+    }
+
+    // ================================================================
+    // Phase 5.1 — cross-surface contrast guardrail
+    //
+    // Locks the contract that fenced code blocks always separate visually
+    // from the page surface, on both terminal and browser targets, in
+    // both light and dark modes — and specifically when the real
+    // `Terminal::color_mode` and the page's `with_color_mode` option
+    // disagree. Decision #4 in the spec: `Terminal` is the source of
+    // truth; the option is the fallback for `Unknown`. The pre-fix
+    // defect pinned the panel against the option mode and the page
+    // surface against the terminal mode, so the two surfaces drifted.
+    // ================================================================
+
+    /// Pull the `.code-block` `background-color` rule out of a `render_to_browser`
+    /// HTML string. Falls back to looking for the rule in any `<style>` block the
+    /// render emits, and panics with a useful message if the rule is absent.
+    /// The value can be either `rgb(R, G, B)` or `#rrggbb`; we accept both.
+    fn browser_code_block_bg(html: &str) -> (u8, u8, u8) {
+        let rule = ".code-block{background-color:";
+        let idx = html
+            .find(rule)
+            .unwrap_or_else(|| panic!("missing {rule:?} in render:\n{html}"));
+        let rest = &html[idx + rule.len()..];
+        let end = rest.find(';').expect("unterminated CSS rule");
+        parse_css_color(&rest[..end])
+    }
+
+    /// Pull the page-wrapper `background-color` out of the
+    /// `<div class="darkmatter-page" style="...">` declaration. A zero (the
+    /// default `PageBackground::Transparent`) skips the rule entirely; the test
+    /// pins a non-zero background so the wrapper rule is always emitted.
+    fn browser_page_wrapper_bg(html: &str) -> (u8, u8, u8) {
+        let marker = "<div class=\"darkmatter-page\" style=\"";
+        let start = html
+            .find(marker)
+            .unwrap_or_else(|| panic!("missing {marker:?} in render:\n{html}"))
+            + marker.len();
+        let rest = &html[start..];
+        let end = rest.find('\"').expect("unterminated style attr");
+        let attrs = &rest[..end];
+        let needle = "background-color:";
+        let idx = attrs
+            .find(needle)
+            .unwrap_or_else(|| panic!("missing page-wrapper background-color in: {attrs}"));
+        let tail = &attrs[idx + needle.len()..];
+        // Trim leading whitespace, take up to the first `;`.
+        let trimmed = tail.trim_start();
+        let end = trimmed.find(';').expect("unterminated CSS declaration");
+        parse_css_color(&trimmed[..end])
+    }
+
+    /// Parse a CSS color value, accepting both `rgb(R, G, B)` and `#rrggbb`.
+    fn parse_css_color(value: &str) -> (u8, u8, u8) {
+        let value = value.trim();
+        if value.starts_with('#') {
+            let hex = &value[1..];
+            assert!(
+                hex.len() == 6,
+                "expected 6-digit hex color, got {value:?}"
+            );
+            let r = u8::from_str_radix(&hex[0..2], 16).expect("red");
+            let g = u8::from_str_radix(&hex[2..4], 16).expect("green");
+            let b = u8::from_str_radix(&hex[4..6], 16).expect("blue");
+            (r, g, b)
+        } else if let Some(stripped) = value.strip_prefix("rgb(") {
+            let inner = stripped.trim_end_matches(')');
+            let mut parts = inner.split(',');
+            let r = parts.next().unwrap().trim().parse::<u8>().unwrap();
+            let g = parts.next().unwrap().trim().parse::<u8>().unwrap();
+            let b = parts.next().unwrap().trim().parse::<u8>().unwrap();
+            (r, g, b)
+        } else {
+            panic!("unrecognized CSS color: {value:?}");
+        }
+    }
+
+    /// Browser mirror of `code_panel_separates_from_page_surface_in_dark_terminal`.
+    /// The `Terminal` reports `Dark`; the page's `with_color_mode` is pinned to
+    /// `Light` (the disagreeing fallback the spec calls out as the Motivating
+    /// Defect's signature). The panel must still invert against the *terminal*
+    /// mode — its background must be light, the page surface dark, and the two
+    /// well-separated in luminance. This is the browser variant of the test
+    /// that catches Decision #4 violations.
+    #[test]
+    fn browser_code_panel_separates_from_page_surface_in_dark_terminal() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Dark;
+
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        let out = DarkmatterPage::new(&term)
+            .with_page_background(PageBackground::Subtle)
+            .with_color_mode(ColorMode::Light)
+            .render_to_browser(&md)
+            .unwrap();
+
+        let page_bg = browser_page_wrapper_bg(&out);
+        let panel_bg = browser_code_block_bg(&out);
+        let page_lum = rel_luminance(page_bg.0, page_bg.1, page_bg.2);
+        let panel_lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+
+        assert!(
+            page_lum < 0.3,
+            "a real dark terminal's page surface must stay dark on the browser; \
+             page bg {page_bg:?} (lum {page_lum:.3})"
+        );
+        assert!(
+            panel_lum > 0.7,
+            "a real dark terminal's panel must invert to a light theme on the browser; \
+             panel bg {panel_bg:?} (lum {panel_lum:.3})"
+        );
+        assert!(
+            (page_lum - panel_lum).abs() > 0.4,
+            "the code panel must visibly separate from the page surface on the browser: \
+             page {page_bg:?} (lum {page_lum:.3}) vs panel {panel_bg:?} (lum {panel_lum:.3})"
+        );
+    }
+
+    /// Browser mirror of `code_panel_separates_from_page_surface_in_light_terminal`:
+    /// `Terminal` reports `Light`, option is `Dark`, and the panel must invert
+    /// against the terminal (so the panel is dark) and stay well-separated from
+    /// the page surface (which is light).
+    #[test]
+    fn browser_code_panel_separates_from_page_surface_in_light_terminal() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Light;
+
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        let out = DarkmatterPage::new(&term)
+            .with_page_background(PageBackground::Subtle)
+            .with_color_mode(ColorMode::Dark)
+            .render_to_browser(&md)
+            .unwrap();
+
+        let page_bg = browser_page_wrapper_bg(&out);
+        let panel_bg = browser_code_block_bg(&out);
+        let page_lum = rel_luminance(page_bg.0, page_bg.1, page_bg.2);
+        let panel_lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+
+        assert!(
+            page_lum > 0.7,
+            "a real light terminal's page surface must stay light on the browser; \
+             page bg {page_bg:?} (lum {page_lum:.3})"
+        );
+        assert!(
+            panel_lum < 0.3,
+            "a real light terminal's panel must invert to a dark theme on the browser; \
+             panel bg {panel_bg:?} (lum {panel_lum:.3})"
+        );
+        assert!(
+            (page_lum - panel_lum).abs() > 0.4,
+            "the code panel must visibly separate from the page surface on the browser: \
+             page {page_bg:?} (lum {page_lum:.3}) vs panel {panel_bg:?} (lum {panel_lum:.3})"
+        );
+    }
+
+    /// The default `Transparent` page background is the `md render` default —
+    /// no page-wrapper background is painted, so the only contrast assertion
+    /// is between the panel and "the terminal". The panel must invert against
+    /// the *terminal* (dark terminal → light panel), not against the option
+    /// (which is `Light` here, the disagreeing fallback).
+    #[test]
+    fn browser_code_panel_inverts_against_terminal_not_option_in_transparent_default() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Dark;
+
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        let out = DarkmatterPage::new(&term)
+            .with_color_mode(ColorMode::Light)
+            .render_to_browser(&md)
+            .unwrap();
+
+        // No painted page surface to compare against; the panel alone must be
+        // light, and the page wrapper must NOT carry a `background-color` rule.
+        assert!(
+            !out.contains("<div class=\"darkmatter-page\""),
+            "default-layout page should not add a wrapper; got: {out}"
+        );
+        let panel_bg = browser_code_block_bg(&out);
+        let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+        assert!(
+            lum > 0.7,
+            "a dark terminal must invert the browser code panel to a light theme \
+             regardless of the option mode: panel bg {panel_bg:?} (lum {lum:.3})"
+        );
+    }
+
+    /// A single test that captures all the cross-surface contrast invariants
+    /// in one pass: dark and light page surfaces, dark and light code panels,
+    /// well-separated luminances — driven by the real `Terminal::color_mode`
+    /// and a disagreeing `with_color_mode` option. This is the test the
+    /// spec calls out as the assertion that catches the Motivating Defect
+    /// (Decision #4).
+    #[test]
+    fn cross_surface_contrast_guardrail_terminal_and_browser() {
+        for (term_mode, option_mode, expected_page_dark) in [
+            (TerminalColorMode::Dark, ColorMode::Light, true),
+            (TerminalColorMode::Light, ColorMode::Dark, false),
+        ] {
+            // ---- terminal surface ----
+            // Use a unique single-token marker in the page body so the page
+            // surface's padding row color and the code panel's color are
+            // both disambiguated. A single identifier (e.g. `panelanchor`)
+            // survives syntax highlighting without being split by SGRs, so
+            // `active_bg_at` finds a contiguous needle.
+            let md: Markdown = "# TitleMarker\n\n```rust\nfn panelanchor() {}\n```\n".into();
+            let mut term = Terminal::new_optimistic(80);
+            term.color_mode = term_mode;
+            let out_term = DarkmatterPage::new(&term)
+                .with_page_background(PageBackground::Subtle)
+                .with_color_mode(option_mode)
+                .render(&md)
+                .unwrap();
+            let page_bg = active_bg_at(&out_term, "TitleMarker");
+            let panel_bg = active_bg_at(&out_term, "panelanchor");
+            let page_lum = rel_luminance(page_bg.0, page_bg.1, page_bg.2);
+            let panel_lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+
+            let (page_band, panel_band) = if expected_page_dark {
+                (0.0..0.3_f32, 0.7..1.0_f32)
+            } else {
+                (0.7..1.0_f32, 0.0..0.3_f32)
+            };
+            assert!(
+                page_band.contains(&page_lum),
+                "[term] page surface must be in {page_band:?}; got {page_bg:?} (lum {page_lum:.3})"
+            );
+            assert!(
+                panel_band.contains(&panel_lum),
+                "[term] code panel must be in {panel_band:?}; got {panel_bg:?} (lum {panel_lum:.3})"
+            );
+            assert!(
+                (page_lum - panel_lum).abs() > 0.4,
+                "[term] panel and page must be well-separated (term={term_mode:?}, opt={option_mode:?}); \
+                 page {page_bg:?} (lum {page_lum:.3}) vs panel {panel_bg:?} (lum {panel_lum:.3})"
+            );
+
+            // ---- browser surface ----
+            let mut term = Terminal::new_optimistic(80);
+            term.color_mode = term_mode;
+            let out_browser = DarkmatterPage::new(&term)
+                .with_page_background(PageBackground::Subtle)
+                .with_color_mode(option_mode)
+                .render_to_browser(&md)
+                .unwrap();
+            let page_bg_b = browser_page_wrapper_bg(&out_browser);
+            let panel_bg_b = browser_code_block_bg(&out_browser);
+            let page_lum_b = rel_luminance(page_bg_b.0, page_bg_b.1, page_bg_b.2);
+            let panel_lum_b = rel_luminance(panel_bg_b.0, panel_bg_b.1, panel_bg_b.2);
+            assert!(
+                page_band.contains(&page_lum_b),
+                "[browser] page surface must be in {page_band:?}; got {page_bg_b:?} (lum {page_lum_b:.3})"
+            );
+            assert!(
+                panel_band.contains(&panel_lum_b),
+                "[browser] code panel must be in {panel_band:?}; got {panel_bg_b:?} (lum {panel_lum_b:.3})"
+            );
+            assert!(
+                (page_lum_b - panel_lum_b).abs() > 0.4,
+                "[browser] panel and page must be well-separated (term={term_mode:?}, opt={option_mode:?}); \
+                 page {page_bg_b:?} (lum {page_lum_b:.3}) vs panel {panel_bg_b:?} (lum {panel_lum_b:.3})"
+            );
+        }
+    }
+
+    // ================================================================
+    // Phase 5.3 — theme override and environment tests
+    //
+    // Explicit `with_code_theme` / `with_page_code_theme` overrides and
+    // the `THEME` environment variable fallback must both reach the
+    // resolved theme at the boundary. On the browser surface the
+    // default-mode fallback must be `Dark`; a known captured terminal
+    // mode wins over that fallback (Decision #5/#6).
+    // ================================================================
+
+    /// An explicit `with_code_theme` override must reach the rendered
+    /// terminal output. Two themes (github and nord) have different
+    /// `Theme::resolve` variants under the same surface — the panel
+    /// background color must differ as a result.
+    #[test]
+    #[serial]
+    fn terminal_code_theme_override_changes_panel_background() {
+        let _no_color = serial_env("NO_COLOR");
+        let _code_theme = serial_env("CODE_THEME");
+        let _theme = serial_env("THEME");
+        unsafe {
+            std::env::remove_var("NO_COLOR");
+            std::env::remove_var("CODE_THEME");
+            std::env::remove_var("THEME");
+        }
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown = "```rust\nfn panelanchor() {}\n```\n".into();
+
+        let out_github = DarkmatterPage::new(&term)
+            .with_code_theme("github")
+            .render(&md)
+            .unwrap();
+        let out_nord = DarkmatterPage::new(&term)
+            .with_code_theme("nord")
+            .render(&md)
+            .unwrap();
+
+        let bg_github = active_bg_at(&out_github, "panelanchor");
+        let bg_nord = active_bg_at(&out_nord, "panelanchor");
+
+        // Pin the test against a code-text path: distinct themes must
+        // produce distinct RGB backgrounds. Equality is acceptable only
+        // if the highlighter resolves both themes to the same variant
+        // (it doesn't under the resolver in Phase 2).
+        assert_ne!(
+            bg_github, bg_nord,
+            "explicit with_code_theme must reach the resolved theme: \
+             github {bg_github:?} vs nord {bg_nord:?}"
+        );
+    }
+
+    /// The `THEME` environment variable must drive the resolved
+    /// `ThemePair` when no caller override is set. Two renders — one
+    /// with `THEME=github` and one with `THEME=nord` — must produce
+    /// distinct panel backgrounds.
+    #[test]
+    #[serial]
+    fn terminal_theme_env_var_drives_resolved_theme() {
+        let _no_color = serial_env("NO_COLOR");
+        let _code_theme = serial_env("CODE_THEME");
+        let _theme = serial_env("THEME");
+        unsafe {
+            std::env::remove_var("NO_COLOR");
+            std::env::remove_var("CODE_THEME");
+        }
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown = "```rust\nfn panelanchor() {}\n```\n".into();
+
+        // Restore the captured `THEME` value (if any) the moment the test
+        // body finishes, before the Drop guards run. Drop ordering is
+        // declaration-reverse, so a non-trivial body can leak the
+        // in-flight `THEME` value to concurrent tests in the same binary.
+        let restore_theme = || {
+            // The Drop guard `_theme` runs after this closure returns, so
+            // we explicitly clear the value here to avoid a window in which
+            // `THEME` is `github` / `nord` while a different test is
+            // running.
+            unsafe { std::env::remove_var("THEME") };
+        };
+
+        unsafe { std::env::set_var("THEME", "github") };
+        let out_github = DarkmatterPage::new(&term).render(&md).unwrap();
+        unsafe { std::env::set_var("THEME", "nord") };
+        let out_nord = DarkmatterPage::new(&term).render(&md).unwrap();
+        restore_theme();
+
+        let bg_github = active_bg_at(&out_github, "panelanchor");
+        let bg_nord = active_bg_at(&out_nord, "panelanchor");
+        assert_ne!(
+            bg_github, bg_nord,
+            "THEME env var must drive the resolved theme: \
+             github {bg_github:?} vs nord {bg_nord:?}"
+        );
+    }
+
+    /// The browser default fallback mode must be dark: an `Unknown`
+    /// terminal mode resolves to a dark page, and the default inverse
+    /// code block resolves to a light panel.
+    #[test]
+    fn browser_default_fallback_mode_is_dark() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Unknown;
+        let page = DarkmatterPage::new(&term);
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        let html = page.render_to_browser(&md).unwrap();
+        // No page wrapper: default layout is transparent, and the test
+        // does not paint a page color.
+        assert!(
+            !html.contains("<div class=\"darkmatter-page\""),
+            "default-layout page should not wrap; got: {html}"
+        );
+        // The .code-block rule must still be present, in a light theme
+        // (dark page => inverse => light panel).
+        let panel_bg = browser_code_block_bg(&html);
+        let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+        assert!(
+            lum > 0.7,
+            "browser default mode must be dark, inverting the code \
+             panel to a light theme: panel {panel_bg:?} (lum {lum:.3})"
+        );
+    }
+
+    /// A known captured `Terminal::color_mode` must win over the dark
+    /// default fallback. A page built from a `Light` terminal still
+    /// renders as light (the unknown-mode fallback to dark only applies
+    /// when the terminal is `Unknown`).
+    #[test]
+    fn browser_captured_light_terminal_wins_over_dark_default() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Light;
+        let page = DarkmatterPage::new(&term);
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        let html = page.render_to_browser(&md).unwrap();
+        let panel_bg = browser_code_block_bg(&html);
+        let lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+        assert!(
+            lum < 0.3,
+            "a known Light terminal must win over the dark default; \
+             the page is light, so the inverse code block is dark: \
+             panel {panel_bg:?} (lum {lum:.3})"
+        );
+    }
+
+    /// Helper that creates an `EnvVarGuard`-style guard with no
+    /// restoration. Used inside the test that follows to scope env
+    /// manipulation to the body. The guard's `Drop` reverts.
+    fn serial_env(key: &'static str) -> ScopedEnv {
+        ScopedEnv::capture(key)
+    }
+
+    /// Same as the `ScopedEnv` defined in `themes.rs` tests, kept here
+    /// so the theme-override tests in this module are self-contained.
+    /// The Drop impl restores the prior value (or removes the var).
+    struct ScopedEnv {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl ScopedEnv {
+        fn capture(key: &'static str) -> Self {
+            Self {
+                key,
+                original: std::env::var(key).ok(),
+            }
+        }
+    }
+
+    impl Drop for ScopedEnv {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.original {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
     }
 }
