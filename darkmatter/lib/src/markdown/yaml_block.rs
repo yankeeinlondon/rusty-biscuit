@@ -990,7 +990,19 @@ mod tests {
     /// delegation wiring broke (or someone reintroduced a private code
     /// path on `YamlBlock`).
     #[test]
+    #[serial]
     fn test_terminal_render_equals_code_block_yaml() {
+        // Both sides render a direct `CodeBlock`, which reads `CODE_THEME` /
+        // `THEME` at render time. Serialize + clear so a concurrent serial test
+        // mutating `CODE_THEME` between the two renders cannot make the surfaces
+        // resolve different default themes.
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe {
+            std::env::remove_var("CODE_THEME");
+            std::env::remove_var("THEME");
+        }
+
         let payload = "foo: 1\nbar: 2\nbaz: 3";
         let yaml_block = YamlBlock::new(payload).unwrap();
         let code_block = CodeBlock::yaml(payload);
@@ -1010,7 +1022,17 @@ mod tests {
     /// Browser parity is the second half of the byte-for-byte
     /// characterization contract.
     #[test]
+    #[serial]
     fn test_browser_render_equals_code_block_yaml() {
+        // See `test_terminal_render_equals_code_block_yaml`: the direct browser
+        // path reads `CODE_THEME` / `THEME` at render time, so isolate env.
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe {
+            std::env::remove_var("CODE_THEME");
+            std::env::remove_var("THEME");
+        }
+
         let payload = "foo: 1\nbar: 2\nbaz: 3";
         let yaml_block = YamlBlock::new(payload).unwrap();
         let code_block = CodeBlock::yaml(payload);
@@ -1029,8 +1051,19 @@ mod tests {
     /// delegation. This is the regression test for a future caller that
     /// might forget to copy layout.
     #[test]
+    #[serial]
     fn test_terminal_render_with_layout_equals_code_block() {
         use biscuit_terminal::utils::layout::{Length, TargetValue};
+
+        // See `test_terminal_render_equals_code_block_yaml`: the direct render
+        // path reads `CODE_THEME` / `THEME` at render time, so isolate env.
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe {
+            std::env::remove_var("CODE_THEME");
+            std::env::remove_var("THEME");
+        }
+
         let payload = "foo: 1\nbar: 2";
 
         let mut yaml_block = YamlBlock::new(payload).unwrap();
