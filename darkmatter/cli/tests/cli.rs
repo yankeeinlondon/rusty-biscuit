@@ -501,6 +501,25 @@ fn test_compose_basic() {
 }
 
 #[test]
+fn test_compose_markdown_plus_renders_disclosure_as_details() {
+    // `md compose --output markdown-plus` must route the composed document
+    // through the MarkdownPlus fold, emitting `<details>`/`<summary>` HTML
+    // rather than preserving the `::disclosure` DSL verbatim.
+    md_cmd()
+        .args(["compose", "--output", "markdown-plus", "-"])
+        .write_stdin(
+            "::disclosure\nLicense *Agreement*\n::details\nKeep your **hands** off.\n::end-disclosure\n",
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<details>"))
+        .stdout(predicate::str::contains("<summary>"))
+        .stdout(predicate::str::contains("</summary>"))
+        .stdout(predicate::str::contains("</details>"))
+        .stdout(predicate::str::contains("::disclosure").not());
+}
+
+#[test]
 fn test_compose_remote_allowed_host_fetches_url() {
     let server = mock_http_server(vec![MockHttpResponse {
         status: 200,

@@ -1140,7 +1140,7 @@ pub fn run_compose(
     let theme = ResolvedTheme::from_cli(cli, None);
 
     match output {
-        OutputFormat::Auto | OutputFormat::Markdown | OutputFormat::MarkdownPlus => {
+        OutputFormat::Auto | OutputFormat::Markdown => {
             let content = if include_frontmatter {
                 composed.as_string()
             } else {
@@ -1158,6 +1158,20 @@ pub fn run_compose(
             } else {
                 println!("{content}");
             }
+        }
+        OutputFormat::MarkdownPlus => {
+            // `markdown-plus` routes the composed document through the
+            // MarkdownPlus fold so disclosure blocks emit `<details>` /
+            // `<summary>` inline HTML rather than the DSL verbatim.
+            let artifact = markdown_plus_artifact(
+                &composed,
+                theme.prose,
+                theme.code,
+                theme.color_mode,
+                cli,
+                input,
+            )?;
+            emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Html => {
             let artifact =
