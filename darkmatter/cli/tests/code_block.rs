@@ -552,65 +552,115 @@ fn code_block_theme_override_changes_html_output() {
 }
 
 // =============================================================================
-//                   PARITY WITH FENCED CODE IN DARKMATTERPAGE
+//                   ENVIRONMENT THEME FALLBACK (no --theme)
 // =============================================================================
 
 #[test]
-fn code_block_direct_terminal_matches_fenced_markdown_fence() {
-    // `md code-block` constructs a `CodeBlock` directly; a Markdown
-    // ```` ```rust ```` fence routes through the same `CodeBlock` helper
-    // via the render tree. For the same code + language + terminal
-    // configuration, the two must produce equivalent bodies.
-    let code = "fn parity() {}\n";
+fn code_block_theme_env_changes_terminal_output_without_flag() {
+    // review-2 finding 1: with no `--theme`, the `THEME` env var must drive the
+    // resolved code theme on the direct `md code-block` terminal surface. The
+    // page path bakes env in at construction, but the page-less direct surface
+    // resolves env in the render hook. `github` and `nord` are distinct themes,
+    // so their highlighted ANSI must differ for the same source.
+    let capture = |theme: &str| {
+        let mut cmd = md_cmd();
+        cmd.env_remove("NO_COLOR")
+            .env_remove("CODE_THEME")
+            .env("THEME", theme)
+            .args(["code-block", "fn demo() -> usize { 42 }", "--language", "rust"]);
+        cmd.assert().success()
+    };
 
-    let direct = md_cmd()
-        .args(["code-block", code, "--language", "rust"])
-        .assert()
-        .success();
-    let direct_stdout =
-        String::from_utf8(direct.get_output().stdout.clone()).unwrap();
-
-    // Render the equivalent fence to HTML so we can compare code bodies
-    // without TTY-only ANSI on a piped assertion.
-    let fence = md_cmd()
-        .args(["--output", "html"])
-        .write_stdin(format!("```rust\n{code}```\n"))
-        .assert()
-        .success();
-    let fence_stdout =
-        String::from_utf8(fence.get_output().stdout.clone()).unwrap();
-
-    // Strip ANSI from the direct terminal output and HTML tags from the
-    // fenced HTML output; both should contain the same code body.
-    let direct_text = strip_ansi(&direct_stdout);
-    let fence_text = strip_html_tags(&fence_stdout);
-    assert!(
-        direct_text.contains("parity"),
-        "direct CodeBlock terminal output must contain the code body: {direct_text:?}"
-    );
-    assert!(
-        fence_stdout.contains("language-rust"),
-        "markdown HTML must contain the language-rust class"
-    );
-    // Both stripped surfaces contain the same `fn parity() {}` body.
-    assert!(
-        direct_text.contains("fn parity() {}"),
-        "direct body mismatch: {direct_text:?}"
-    );
-    assert!(
-        fence_text.contains("fn parity() {}"),
-        "fence body mismatch: {fence_text:?}"
+    let github = String::from_utf8(capture("github").get_output().stdout.clone()).unwrap();
+    let nord = String::from_utf8(capture("nord").get_output().stdout.clone()).unwrap();
+    assert!(github.contains("\x1b[") && nord.contains("\x1b["));
+    assert_ne!(
+        github, nord,
+        "THEME must drive the code-block terminal theme when --theme is absent",
     );
 }
 
 #[test]
+fn code_block_code_theme_env_changes_html_output_without_flag() {
+    // review-2 finding 1: `CODE_THEME` must drive the resolved code theme on the
+    // direct `md code-block` browser surface when `--theme` is absent.
+    let capture = |theme: &str| {
+        let mut cmd = md_cmd();
+        cmd.env_remove("THEME")
+            .env("CODE_THEME", theme)
+            .args([
+                "code-block",
+                "fn demo() -> usize { 42 }",
+                "--language",
+                "rust",
+                "--output",
+                "html",
+            ]);
+        cmd.assert().success()
+    };
+
+    let dracula = String::from_utf8(capture("dracula").get_output().stdout.clone()).unwrap();
+    let github = String::from_utf8(capture("github").get_output().stdout.clone()).unwrap();
+    assert!(dracula.contains("language-rust") && github.contains("language-rust"));
+    assert_ne!(
+        dracula, github,
+        "CODE_THEME must drive the code-block HTML theme when --theme is absent",
+    );
+}
+
+#[test]
+fn code_block_theme_flag_wins_over_theme_env() {
+    // review-2 finding 1: an explicit `--theme` must override `THEME`, so the
+    // resolved output is identical regardless of the env value.
+    let capture = |env_theme: &str| {
+        let mut cmd = md_cmd();
+        cmd.env_remove("NO_COLOR")
+            .env_remove("CODE_THEME")
+            .env("THEME", env_theme)
+            .args([
+                "code-block",
+                "fn demo() -> usize { 42 }",
+                "--language",
+                "rust",
+                "--theme",
+                "nord",
+            ]);
+        cmd.assert().success()
+    };
+
+    let with_github_env =
+        String::from_utf8(capture("github").get_output().stdout.clone()).unwrap();
+    let with_nord_env = String::from_utf8(capture("nord").get_output().stdout.clone()).unwrap();
+    assert_eq!(
+        with_github_env, with_nord_env,
+        "--theme must win over THEME, making the output env-independent",
+    );
+}
+
+// =============================================================================
+//                   PARITY WITH FENCED CODE IN DARKMATTERPAGE
+// =============================================================================
+//
+// Same-surface parity is the oracle here (review-4 finding 2). The strong
+// terminal and browser direct-vs-fenced parity cases — including combined
+// title / line-numbering / highlight / theme metadata — live in-process at the
+// lib level (`darkmatter::markdown::code_block` tests:
+// `fenced_block_with_metadata_and_theme_equals_direct_terminal` /
+// `..._browser`), which is the correct level: terminal parity needs a real
+// `Terminal` target, and the implicit CLI render path only emits markdown (not
+// terminal) on a non-TTY. The CLI test below covers the HTML target
+// end-to-end, comparing the byte-exact `.code-block` fragment rather than mere
+// wrapper/body presence.
+
+#[test]
 fn code_block_html_output_matches_fenced_markdown_fence() {
-    // Both surfaces should produce the same <pre><code class="language-…">…
-    // wrapper because they go through the same `render_html_code_block`
-    // helper. The wrapped code body is split across `<span>` elements, so
-    // the assertion looks for the canonical wrapper and the
-    // canonicalized code body (with HTML tags stripped via a simple
-    // tag-removal helper) to be the same in both outputs.
+    // SAME-SURFACE HTML-to-HTML parity (review-4 finding 2): both surfaces
+    // render the same code to the HTML target through `render_html_code_block`,
+    // so the `.code-block` fragment must be byte-for-byte identical — not merely
+    // both containing the wrapper and body, which cannot catch a real
+    // theme/metadata divergence between the two paths. An explicit `--theme`
+    // pins the theme on both invocations so the comparison is independent of
+    // any ambient `CODE_THEME` / `THEME`.
     let code = "fn a() {}\nfn b() {}\n";
 
     let direct = md_cmd()
@@ -619,6 +669,8 @@ fn code_block_html_output_matches_fenced_markdown_fence() {
             code,
             "--language",
             "rust",
+            "--theme",
+            "one-half",
             "--output",
             "html",
         ])
@@ -628,35 +680,18 @@ fn code_block_html_output_matches_fenced_markdown_fence() {
         String::from_utf8(direct.get_output().stdout.clone()).unwrap();
 
     let fence = md_cmd()
-        .args(["--output", "html"])
+        .args(["--output", "html", "--code-theme", "one-half"])
         .write_stdin(format!("```rust\n{code}```\n"))
         .assert()
         .success();
     let fence_stdout =
         String::from_utf8(fence.get_output().stdout.clone()).unwrap();
 
-    // Both must contain the canonical wrapper for rust fences.
-    let open = "<pre><code class=\"language-rust\">";
-    assert!(
-        direct_stdout.contains(open),
-        "CodeBlock HTML must contain canonical wrapper: {direct_stdout}"
-    );
-    assert!(
-        fence_stdout.contains(open),
-        "Markdown fence HTML must contain canonical wrapper: {fence_stdout}"
-    );
-
-    // Both must contain the code body. Strip HTML tags so token boundaries
-    // (which differ from render to render) don't fail the check.
-    let direct_text = strip_html_tags(&direct_stdout);
-    let fence_text = strip_html_tags(&fence_stdout);
-    assert!(
-        direct_text.contains("fn a() {}"),
-        "CodeBlock HTML must contain the code body; got {direct_text}"
-    );
-    assert!(
-        fence_text.contains("fn a() {}"),
-        "Markdown fence HTML must contain the code body; got {fence_text}"
+    assert_eq!(
+        extract_code_block_fragment(&direct_stdout),
+        extract_code_block_fragment(&fence_stdout),
+        "direct `md code-block` HTML must produce a byte-identical .code-block fragment \
+         to the fenced markdown fence;\n  direct: {direct_stdout}\n  fence: {fence_stdout}"
     );
 }
 
@@ -674,4 +709,23 @@ fn strip_html_tags(s: &str) -> String {
         }
     }
     out
+}
+
+/// Extracts the `.code-block` HTML fragment (optionally preceded by its
+/// `.code-block-title`) so direct-vs-fenced parity can be asserted on the
+/// stable code-panel markup, independent of any surrounding page wrapper or
+/// stylesheet. The code-block `<div>` has no nested `<div>` children (its body
+/// is a `<table>` or `<pre>`), so the first `</div>` after it is its close.
+fn extract_code_block_fragment(html: &str) -> String {
+    let block_marker = "<div class=\"code-block\">";
+    let block_start = html
+        .find(block_marker)
+        .unwrap_or_else(|| panic!("code-block div not found in: {html}"));
+    let title_marker = "<div class=\"code-block-title\">";
+    let start = html[..block_start].rfind(title_marker).unwrap_or(block_start);
+    let close_rel = html[block_start..]
+        .find("</div>")
+        .unwrap_or_else(|| panic!("code-block close not found in: {html}"));
+    let end = block_start + close_rel + "</div>".len();
+    html[start..end].to_string()
 }

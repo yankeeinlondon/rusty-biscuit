@@ -37,6 +37,9 @@ use thiserror::Error;
 use crate::markdown::dsl::{CodeBlockMeta, parse_code_info};
 use crate::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
 use crate::markdown::language_grammar::LanguageGrammar;
+// `TerminalCodeRenderer` is the deprecated render-tree adapter; `CodeBlock` is
+// its sanctioned replacement, so wiring it here is the one legitimate direct use.
+#[allow(deprecated)]
 use crate::markdown::render_tree::TerminalCodeRenderer;
 
 /// Errors that can occur when constructing or working with a [`CodeBlock`].
@@ -303,6 +306,7 @@ impl TerminalRenderable for CodeBlock {
     /// so a [`CodeBlock::yaml(...)]` produces output byte-for-byte equal
     /// to a Markdown ` ```yaml ` fence for the same code, language, and
     /// metadata.
+    #[allow(deprecated)]
     fn render(&self, term: &Terminal) -> String {
         let node = <Self as TreeRenderable>::render_tree(self);
         let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn)
@@ -360,6 +364,7 @@ impl BrowserRenderable for CodeBlock {
     /// [`CodeBlock::yaml(...)]` produces output byte-for-byte equal to a
     /// Markdown ` ```yaml ` fence for the same code, language, and
     /// metadata.
+    #[allow(deprecated)]
     fn render_html_fragment(&self) -> BrowserFragment<Ready> {
         let node = <Self as TreeRenderable>::render_tree(self);
         let opts = BrowserRenderOptions {
@@ -616,6 +621,160 @@ mod tests {
         );
     }
 
+    /// review-2 finding 1: a direct `CodeBlock` with no `with_theme` override
+    /// must honor the `THEME` env var on the terminal surface — the page path
+    /// bakes env into its options at construction, but the direct, page-less
+    /// surface carries no theme name, so the render hook is the boundary that
+    /// must consult env. Two distinct `THEME` values must yield distinct output.
+    #[test]
+    #[serial]
+    fn terminal_honors_theme_env_when_no_override() {
+        let _no_color = EnvVarGuard::capture("NO_COLOR");
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe {
+            std::env::remove_var("NO_COLOR");
+            std::env::remove_var("CODE_THEME");
+        }
+        let term = Terminal::new_optimistic(80);
+        let code = "fn demo() -> usize { 42 }";
+
+        unsafe { std::env::set_var("THEME", "github") };
+        let github = TerminalRenderable::render(&CodeBlock::rust(code), &term);
+        unsafe { std::env::set_var("THEME", "nord") };
+        let nord = TerminalRenderable::render(&CodeBlock::rust(code), &term);
+        unsafe { std::env::remove_var("THEME") };
+
+        assert_ne!(
+            github, nord,
+            "THEME must drive a direct CodeBlock's terminal theme when no with_theme override is set",
+        );
+    }
+
+    /// review-2 finding 1: `CODE_THEME` must also drive a direct `CodeBlock`'s
+    /// terminal theme (it wins over `THEME`, matching the page path's
+    /// `detect_code_theme` precedence).
+    #[test]
+    #[serial]
+    fn terminal_honors_code_theme_env_when_no_override() {
+        let _no_color = EnvVarGuard::capture("NO_COLOR");
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe {
+            std::env::remove_var("NO_COLOR");
+            std::env::remove_var("THEME");
+        }
+        let term = Terminal::new_optimistic(80);
+        let code = "fn demo() -> usize { 42 }";
+
+        unsafe { std::env::set_var("CODE_THEME", "dracula") };
+        let dracula = TerminalRenderable::render(&CodeBlock::rust(code), &term);
+        unsafe { std::env::set_var("CODE_THEME", "github") };
+        let github = TerminalRenderable::render(&CodeBlock::rust(code), &term);
+        unsafe { std::env::remove_var("CODE_THEME") };
+
+        assert_ne!(
+            dracula, github,
+            "CODE_THEME must drive a direct CodeBlock's terminal theme when no with_theme override is set",
+        );
+    }
+
+    /// review-2 finding 1: a `with_theme` override must win over `THEME`, so the
+    /// resolved output is independent of the env value.
+    #[test]
+    #[serial]
+    fn terminal_override_wins_over_theme_env() {
+        let _no_color = EnvVarGuard::capture("NO_COLOR");
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe {
+            std::env::remove_var("NO_COLOR");
+            std::env::remove_var("CODE_THEME");
+        }
+        let term = Terminal::new_optimistic(80);
+        let code = "fn demo() -> usize { 42 }";
+
+        unsafe { std::env::set_var("THEME", "github") };
+        let with_env = TerminalRenderable::render(&CodeBlock::rust(code).with_theme(ThemePair::Nord), &term);
+        unsafe { std::env::set_var("THEME", "nord") };
+        let other_env = TerminalRenderable::render(&CodeBlock::rust(code).with_theme(ThemePair::Nord), &term);
+        unsafe { std::env::remove_var("THEME") };
+
+        assert_eq!(
+            with_env, other_env,
+            "an explicit with_theme override must ignore THEME, so output is env-independent",
+        );
+    }
+
+    /// review-2 finding 1: the browser surface must honor `THEME` for a direct
+    /// `CodeBlock` (no page options carried) when no `with_theme` override is
+    /// set — two distinct `THEME` values must yield distinct HTML.
+    #[test]
+    #[serial]
+    fn browser_honors_theme_env_when_no_override() {
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe { std::env::remove_var("CODE_THEME") };
+        let code = "fn demo() -> usize { 42 }";
+
+        unsafe { std::env::set_var("THEME", "github") };
+        let github = BrowserRenderable::render_html_fragment(&CodeBlock::rust(code)).render();
+        unsafe { std::env::set_var("THEME", "nord") };
+        let nord = BrowserRenderable::render_html_fragment(&CodeBlock::rust(code)).render();
+        unsafe { std::env::remove_var("THEME") };
+
+        assert_ne!(
+            github, nord,
+            "THEME must drive a direct CodeBlock's HTML theme when no with_theme override is set",
+        );
+    }
+
+    /// review-2 finding 1: `CODE_THEME` must drive a direct `CodeBlock`'s HTML
+    /// theme when no `with_theme` override is set.
+    #[test]
+    #[serial]
+    fn browser_honors_code_theme_env_when_no_override() {
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe { std::env::remove_var("THEME") };
+        let code = "fn demo() -> usize { 42 }";
+
+        unsafe { std::env::set_var("CODE_THEME", "dracula") };
+        let dracula = BrowserRenderable::render_html_fragment(&CodeBlock::rust(code)).render();
+        unsafe { std::env::set_var("CODE_THEME", "github") };
+        let github = BrowserRenderable::render_html_fragment(&CodeBlock::rust(code)).render();
+        unsafe { std::env::remove_var("CODE_THEME") };
+
+        assert_ne!(
+            dracula, github,
+            "CODE_THEME must drive a direct CodeBlock's HTML theme when no with_theme override is set",
+        );
+    }
+
+    /// review-2 finding 1: a `with_theme` override must win over `THEME` on the
+    /// browser surface too.
+    #[test]
+    #[serial]
+    fn browser_override_wins_over_theme_env() {
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe { std::env::remove_var("CODE_THEME") };
+        let code = "fn demo() -> usize { 42 }";
+
+        unsafe { std::env::set_var("THEME", "github") };
+        let with_env =
+            BrowserRenderable::render_html_fragment(&CodeBlock::rust(code).with_theme(ThemePair::Nord)).render();
+        unsafe { std::env::set_var("THEME", "nord") };
+        let other_env =
+            BrowserRenderable::render_html_fragment(&CodeBlock::rust(code).with_theme(ThemePair::Nord)).render();
+        unsafe { std::env::remove_var("THEME") };
+
+        assert_eq!(
+            with_env, other_env,
+            "an explicit with_theme override must ignore THEME on the browser surface too",
+        );
+    }
+
     #[test]
     fn from_source_file_reads_and_infers_extension() {
         let mut file = NamedTempFile::new().unwrap();
@@ -824,9 +983,29 @@ mod tests {
     /// Phase 3.1: a fenced ` ```rust ` block in a markdown document must
     /// produce browser output byte-for-byte equal to a direct
     /// `CodeBlock::rust(...).render_html_fragment`.
+    ///
+    /// Strengthened (review-4 finding 2 / gap 1): the prior assertion only
+    /// checked that each output *contained* a `<pre><code class="language-rust">`
+    /// wrapper, which can pass even if the highlighted bodies diverge. We now
+    /// extract the `.code-block` fragment from each surface and assert it is
+    /// byte-for-byte identical.
+    ///
+    /// `#[serial]` + env guards: this case exercises the default-theme routing,
+    /// and the direct browser path reads `CODE_THEME` / `THEME` at render time.
+    /// Without isolation it races the serial tests that set `CODE_THEME`, so the
+    /// two surfaces could resolve different default themes. The metadata/theme
+    /// parity tests below pin an explicit theme and need no such guard.
     #[test]
+    #[serial]
     fn fenced_rust_block_browser_routes_through_code_block() {
         use crate::markdown::Markdown;
+
+        let _code_theme = EnvVarGuard::capture("CODE_THEME");
+        let _theme = EnvVarGuard::capture("THEME");
+        unsafe {
+            std::env::remove_var("CODE_THEME");
+            std::env::remove_var("THEME");
+        }
 
         let code = "fn main() {}\n";
 
@@ -837,19 +1016,118 @@ mod tests {
         let html_options = crate::markdown::output::html::HtmlOptions::default();
         let fenced = md.as_html(html_options).unwrap();
 
-        assert!(
-            fenced.contains("language-rust"),
-            "markdown fence must emit language-rust class; html: {fenced}"
+        assert_eq!(
+            extract_code_block_fragment(&direct),
+            extract_code_block_fragment(&fenced),
+            "fenced rust block must produce a byte-identical .code-block fragment to \
+             CodeBlock::rust(...).render_html_fragment;\n  direct: {direct}\n  fenced: {fenced}"
         );
-        // The direct render's <pre><code class="language-rust"> wrapper must
-        // appear in the markdown-rendered HTML.
-        assert!(
-            direct.contains("<pre><code class=\"language-rust\">"),
-            "direct CodeBlock::rust fragment must contain the pre/code wrapper; got: {direct}"
+    }
+
+    /// Finding 2 / gap 4 (review-4): the spec's parity guarantee
+    /// ("`CodeBlock`-direct output equals fenced-code-in-`DarkmatterPage` output
+    /// for the same code, language, metadata, theme, and surface") was never
+    /// verified for a metadata- and theme-bearing block on the same surface.
+    /// This drives `title` + `line-numbering` + `highlight` + an explicit
+    /// paired-theme override through both the direct `CodeBlock` terminal path
+    /// and the fenced-in-`DarkmatterPage` terminal path on the same `Terminal`,
+    /// and asserts byte-for-byte equality.
+    #[test]
+    fn fenced_block_with_metadata_and_theme_equals_direct_terminal() {
+        use crate::layout::DarkmatterPage;
+        use crate::markdown::Markdown;
+        use crate::markdown::output::terminal::ColorDepth;
+
+        let code = "fn a() {}\nfn b() {}\nfn c() {}\n";
+        // A paired theme so the inverse-mode resolution is observable and the
+        // override genuinely differs from the surface default.
+        let theme = ThemePair::from_str_or_default("one-half");
+        let raw_meta = "title=\"Demo Snippet\" line-numbering=true highlight=2";
+        let meta = CodeBlock::meta_from_fence("rust", Some(raw_meta)).unwrap();
+
+        let term = Terminal::new_optimistic(80);
+
+        // Direct: CodeBlock with metadata + explicit theme override.
+        let block = CodeBlock::rust(code).with_meta(meta).with_theme(theme);
+        let direct = TerminalRenderable::render(&block, &term);
+
+        // Fenced inside a default-layout DarkmatterPage with the same code,
+        // metadata, theme, and terminal. `with_page_code_theme` / `with_color_depth`
+        // do not flip `is_default_layout`, so this stays on the zero-config path
+        // that is byte-for-byte equal to `Markdown::as_terminal`.
+        let md: Markdown = format!("```rust {raw_meta}\n{code}```\n").into();
+        let fenced = DarkmatterPage::new(&term)
+            .with_color_depth(ColorDepth::TrueColor)
+            .with_page_code_theme(theme)
+            .render(&md)
+            .unwrap();
+
+        assert_eq!(
+            direct, fenced,
+            "direct CodeBlock with title/line-numbering/highlight/theme must equal the \
+             fenced block rendered through DarkmatterPage on the same terminal surface"
         );
-        assert!(
-            fenced.contains("<pre><code class=\"language-rust\">"),
-            "markdown fence must contain the same <pre><code class=...> wrapper as CodeBlock::rust; html: {fenced}"
+    }
+
+    /// Finding 2 / gap 4 (review-4): the browser counterpart to
+    /// [`fenced_block_with_metadata_and_theme_equals_direct_terminal`]. Drives
+    /// the same metadata + paired-theme override through the direct `CodeBlock`
+    /// browser path and `DarkmatterPage::render_to_browser`, then compares the
+    /// extracted `.code-block` fragment byte-for-byte (the page wrapper and its
+    /// stylesheet are excluded — only the code-panel markup is the parity
+    /// oracle).
+    #[test]
+    fn fenced_block_with_metadata_and_theme_equals_direct_browser() {
+        use crate::layout::DarkmatterPage;
+        use crate::markdown::Markdown;
+
+        let code = "fn a() {}\nfn b() {}\nfn c() {}\n";
+        let theme = ThemePair::from_str_or_default("one-half");
+        let raw_meta = "title=\"Demo Snippet\" line-numbering=true highlight=2";
+        let meta = CodeBlock::meta_from_fence("rust", Some(raw_meta)).unwrap();
+
+        // Direct: CodeBlock with metadata + explicit theme override.
+        let block = CodeBlock::rust(code).with_meta(meta).with_theme(theme);
+        let direct = BrowserRenderable::render_html_fragment(&block).render();
+
+        // Fenced through DarkmatterPage::render_to_browser. The page resolves
+        // its browser mode from the captured `Terminal` (new_optimistic =>
+        // Dark), matching the direct path's HtmlOptions::default() Dark mode, so
+        // the inverse-resolved paired theme lands on the same variant.
+        let md: Markdown = format!("```rust {raw_meta}\n{code}```\n").into();
+        let term = Terminal::new_optimistic(80);
+        let page_html = DarkmatterPage::new(&term)
+            .with_page_code_theme(theme)
+            .render_to_browser(&md)
+            .unwrap();
+
+        assert_eq!(
+            extract_code_block_fragment(&direct),
+            extract_code_block_fragment(&page_html),
+            "direct CodeBlock browser fragment must equal the fenced-in-DarkmatterPage \
+             .code-block fragment;\n  direct: {direct}\n  page: {page_html}"
         );
+    }
+
+    /// Extracts the `.code-block` HTML fragment (optionally preceded by its
+    /// `.code-block-title`) so direct-vs-fenced parity can be asserted on the
+    /// stable code-panel markup, independent of any surrounding page wrapper or
+    /// stylesheet. The code-block `<div>` has no nested `<div>` children (its
+    /// body is a `<table>` or `<pre>`), so the first `</div>` after it is its
+    /// close.
+    fn extract_code_block_fragment(html: &str) -> String {
+        let block_marker = "<div class=\"code-block\">";
+        let block_start = html
+            .find(block_marker)
+            .unwrap_or_else(|| panic!("code-block div not found in: {html}"));
+        let title_marker = "<div class=\"code-block-title\">";
+        let start = html[..block_start]
+            .rfind(title_marker)
+            .unwrap_or(block_start);
+        let close_rel = html[block_start..]
+            .find("</div>")
+            .unwrap_or_else(|| panic!("code-block close not found in: {html}"));
+        let end = block_start + close_rel + "</div>".len();
+        html[start..end].to_string()
     }
 }

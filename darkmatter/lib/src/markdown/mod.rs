@@ -70,6 +70,7 @@ pub use reference::{
     ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
     ReferenceSet, TransclusionRef,
 };
+#[allow(deprecated)]
 pub use render_tree::TerminalCodeRenderer;
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};

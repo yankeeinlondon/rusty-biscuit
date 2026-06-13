@@ -21,6 +21,11 @@
 //! and the parity benches reach them. [`to_render_document`] and the
 //! `*_with_context` internal entry points stay `pub(crate)`: they expose the
 //! raw fold / context boundary used only inside the crate.
+//!
+//! As the internal adapter boundary, these entry points wire the deprecated
+//! [`TerminalCodeRenderer`](super::code_renderer::TerminalCodeRenderer) directly;
+//! the module-level `allow` keeps that intentional internal use warning-free.
+#![allow(deprecated)]
 
 use std::collections::HashMap;
 use std::rc::Rc;

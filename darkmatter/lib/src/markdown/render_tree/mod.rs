@@ -75,6 +75,7 @@ pub mod source;
 mod structural_gate;
 pub mod svg_sanitizer;
 
+#[allow(deprecated)]
 pub use code_renderer::TerminalCodeRenderer;
 pub use fold::{
     fold_markdown_spanned_with_frontmatter, fold_markdown_to_document,

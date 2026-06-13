@@ -5,6 +5,15 @@
 //! node. [`TerminalCodeRenderer`] wires darkmatter's syntax-highlighted
 //! code-block path into that hook so render-tree output matches the bespoke
 //! [`YamlBlock`](crate::markdown::YamlBlock) (and Markdown code fence) renderer.
+//!
+//! [`TerminalCodeRenderer`] is the render-tree `CodeRenderer` adapter, not a
+//! public rendering surface. It is `#[deprecated]` for direct callers
+//! (spec.md:620-624, Phase 4): render code with
+//! [`CodeBlock`](crate::markdown::code_block::CodeBlock) and Markdown documents
+//! with [`DarkmatterPage`](crate::layout::DarkmatterPage). The crate's own
+//! render paths and whitebox tests wire it directly and suppress the warning
+//! locally; this module-level `allow` covers the adapter's own impls and tests.
+#![allow(deprecated)]
 
 use biscuit_terminal::components::mermaid::MermaidDiagram;
 use biscuit_terminal::terminal::Terminal;
@@ -34,6 +43,22 @@ use crate::markdown::{
 /// The terminal hook produces only the `{header}\n{body}` string; it does not
 /// apply layout. The render-tree renderer applies node layout (margins,
 /// alignment, word-wrap) separately, so applying it here would double it.
+///
+/// ## Deprecation
+///
+/// This adapter is render-tree plumbing, not a public rendering surface
+/// (spec.md:620-624). Render code blocks with
+/// [`CodeBlock`](crate::markdown::code_block::CodeBlock) and Markdown documents
+/// with [`DarkmatterPage`](crate::layout::DarkmatterPage); neither requires a
+/// caller to construct or know about `TerminalCodeRenderer`.
+#[deprecated(
+    since = "0.0.0",
+    note = "TerminalCodeRenderer is an internal render-tree adapter, not a public \
+            rendering surface. Render code with CodeBlock (e.g. CodeBlock::rust(code), \
+            CodeBlock::yaml(code), or CodeBlock::new(code).with_fence_language(lang)) and \
+            Markdown documents with DarkmatterPage. If you genuinely need the raw \
+            CodeRenderer hook, suppress this warning locally."
+)]
 #[derive(Debug, Default, Clone)]
 pub struct TerminalCodeRenderer {
     terminal: Option<Terminal>,
@@ -136,6 +161,28 @@ fn build_code_meta(lang: &str, meta: Option<&str>) -> CodeBlockMeta {
     })
 }
 
+/// Env-derived code theme for the *direct*, page-less render surfaces
+/// (`CodeBlock` / `md code-block`).
+///
+/// Mirrors the page path's `detect_code_theme(detect_prose_theme())`
+/// precedence — `CODE_THEME` wins over `THEME` — but returns `None` when
+/// neither names a valid theme, so the caller's surface default stands
+/// (terminal `OneHalf`, browser `github`). The page path bakes this same
+/// env resolution into its options at construction
+/// ([`TerminalOptions::default`](crate::markdown::output::terminal::TerminalOptions));
+/// the direct path carries no such options, so this hook is the boundary
+/// that must honor it (review-2 finding 1).
+fn code_theme_from_env() -> Option<ThemePair> {
+    std::env::var("CODE_THEME")
+        .ok()
+        .and_then(|name| ThemePair::try_from(name.trim()).ok())
+        .or_else(|| {
+            std::env::var("THEME")
+                .ok()
+                .and_then(|name| ThemePair::try_from(name.trim()).ok())
+        })
+}
+
 impl CodeRenderer for TerminalCodeRenderer {
     fn render_terminal_code(
         &self,
@@ -167,12 +214,20 @@ impl CodeRenderer for TerminalCodeRenderer {
             .as_ref()
             .map(Terminal::color_mode)
             .unwrap_or_else(|| context.color_mode().into());
-        // A `CodeBlock::with_theme(...)` / `md code-block --theme` override wins
-        // over the context-supplied theme name; otherwise the context's pinned
-        // theme name resolves, falling back to OneHalf (review-1 finding 1).
+        // Theme resolution chain (spec: CodeBlock.theme -> page code_theme ->
+        // env/default): an explicit `CodeBlock::with_theme(...)` /
+        // `md code-block --theme` override wins; then the page-supplied theme
+        // name (the page bakes `CODE_THEME` / `THEME` into it at construction);
+        // then — for the direct, page-less `CodeBlock` / `md code-block`
+        // surface, where the context carries no theme name — the
+        // `CODE_THEME` / `THEME` env fallback; finally the `OneHalf` default.
+        // Without the env leg, `THEME=github md code-block …` resolved as
+        // `OneHalf` because the direct path pins no context theme name
+        // (review-2 finding 1).
         let code_theme = self
             .theme_override
             .or_else(|| context.code_theme_name().map(ThemePair::from_str_or_default))
+            .or_else(code_theme_from_env)
             .unwrap_or(ThemePair::OneHalf);
         let surface = self
             .terminal
@@ -279,6 +334,19 @@ impl CodeRenderer for TerminalCodeRenderer {
         // and falls back to the default; a `CodeBlock::with_theme(...)` override
         // wins over the carried theme.
         let mut options = self.html_options.clone().unwrap_or_default();
+        // Theme resolution chain (spec: CodeBlock.theme -> page code_theme ->
+        // env/default). When page options are carried, `options.code_theme` is
+        // already the page-resolved theme (the page bakes `CODE_THEME` /
+        // `THEME` in at construction). On the direct, page-less surface no
+        // options are carried, so honor the `CODE_THEME` / `THEME` env fallback
+        // before the `HtmlOptions` default — otherwise a `THEME=github` direct
+        // `CodeBlock` HTML render resolved as the default theme (review-2
+        // finding 1). An explicit `with_theme` override still wins.
+        if self.html_options.is_none()
+            && let Some(env_theme) = code_theme_from_env()
+        {
+            options.code_theme = env_theme;
+        }
         if let Some(theme) = self.theme_override {
             options.code_theme = theme;
         }
