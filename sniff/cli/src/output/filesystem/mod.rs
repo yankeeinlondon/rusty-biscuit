@@ -335,8 +335,8 @@ fn format_commit_line(
             first_line.to_string()
         };
         format!(
-            "[{}] <dim>{}</dim> {}<blue><b>{}</b></blue>{}{}",
-            sha_display, truncated, date_prefix, date_str, refs_part, user_part,
+            "[{}] <dim>{}</dim> <i>at</i> <blue><b>{}</b></blue> {}<blue><b>{}</b></blue>{}{}",
+            sha_display, truncated, time_str, date_prefix, date_str, refs_part, user_part,
         )
     }
 }
@@ -1846,6 +1846,34 @@ mod tests {
             assert!(
                 output.contains("1 other active worktrees in this repo"),
                 "Single worktree should be counted correctly"
+            );
+        }
+
+        #[test]
+        fn merge_commit_line_includes_time_segment() {
+            // Merge subjects do not parse as conventional commits, so they take
+            // the non-conventional branch of `format_commit_line`. That branch
+            // must still render the `at <time>` segment.
+            let commit = CommitInfo {
+                sha: "3e2ca7f1234567".to_string(),
+                message: "Merge branch 'claudine'".to_string(),
+                author: "Test User".to_string(),
+                timestamp: Utc::now(),
+                remotes: None,
+                refs: vec![],
+            };
+
+            let line = format_commit_line(&commit, 0, None);
+
+            // Derive the expected time string the same way the formatter does to
+            // avoid timezone/relative-day flakiness across machines.
+            let (_, time_str, _) = format_commit_datetime(&commit.timestamp);
+
+            assert!(line.contains("<i>at</i>"), "missing `at` segment: {line}");
+            assert!(line.contains(&time_str), "missing time string: {line}");
+            assert!(
+                line.contains("Merge branch 'claudine'"),
+                "missing merge subject: {line}"
             );
         }
     }
