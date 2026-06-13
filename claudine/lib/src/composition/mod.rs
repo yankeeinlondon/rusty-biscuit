@@ -56,7 +56,8 @@ pub use loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition}
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
 pub use prepare::{
-    PrepareOptions, parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
+    PrepareOptions, bind_agent_workspace, parse_selection_hints_from_frontmatter, prepare_direct,
+    prepare_inline,
 };
 pub use resolve::{resolve_composition_source, validate_file_permissions};
 pub use schema_validation::{

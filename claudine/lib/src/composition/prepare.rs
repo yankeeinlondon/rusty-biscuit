@@ -25,6 +25,27 @@ fn map_compose_error(source_path: &std::path::Path, err: MarkdownError) -> Compo
     }
 }
 
+/// Bind the agent's workspace onto compose options: the source file (for
+/// `::file` transclusion and diagnostic spans) and, when known, the directory
+/// the dispatched agent will run in.
+///
+/// Without `shell_cwd`, Darkmatter defaults `::shell` execution to the source
+/// file's parent directory — wrong for `@`-resolved prompts that physically
+/// live under `~/.claudine/prompts/` but reason about the repo the agent runs
+/// in. Pinning the working directory keeps compose-time shell and the agent on
+/// the same root.
+pub fn bind_agent_workspace(
+    opts: ComposeOptions,
+    source_path: &Path,
+    shell_cwd: Option<&Path>,
+) -> ComposeOptions {
+    let opts = opts.with_source_file(source_path);
+    match shell_cwd {
+        Some(cwd) => opts.with_shell_working_directory(cwd),
+        None => opts,
+    }
+}
+
 /// Options for composition preparation.
 #[derive(Debug, Default, Clone)]
 pub struct PrepareOptions {
@@ -46,6 +67,15 @@ pub struct PrepareOptions {
     /// (`find_git_root_from_path`) preserves the original behavior for
     /// library-only callers and tests.
     pub source_repo_root: Option<PathBuf>,
+    /// Directory the dispatched agent will run in.
+    ///
+    /// When `Some`, `::shell` directives execute here instead of the prompt
+    /// file's parent, keeping compose-time shell expansion and the agent on
+    /// one working directory. CLI callers populate this from
+    /// `CompositionPrepContext::launch_workspace.child_cwd`. `None` (the
+    /// default) preserves Darkmatter's source-relative fallback for
+    /// library-only callers and tests.
+    pub shell_working_directory: Option<PathBuf>,
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -82,9 +112,12 @@ pub fn prepare_direct(
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
-    let mut compose_opts = ComposeOptions::new_with_context(ctx)
-        .with_source_file(&source.resolved_path)
-        .with_perf(options.perf_enabled);
+    let mut compose_opts = bind_agent_workspace(
+        ComposeOptions::new_with_context(ctx),
+        &source.resolved_path,
+        options.shell_working_directory.as_deref(),
+    )
+    .with_perf(options.perf_enabled);
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -175,9 +208,12 @@ pub fn prepare_inline(
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
-    let mut compose_opts = ComposeOptions::new_with_context(ctx)
-        .with_source_file(&source.resolved_path)
-        .with_perf(options.perf_enabled);
+    let mut compose_opts = bind_agent_workspace(
+        ComposeOptions::new_with_context(ctx),
+        &source.resolved_path,
+        options.shell_working_directory.as_deref(),
+    )
+    .with_perf(options.perf_enabled);
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
@@ -874,6 +910,93 @@ mod tests {
         };
         assert_eq!(mode, CompositionMode::ChainedDocument);
         assert_eq!(provided_overrides, vec!["spec".to_string()]);
+    }
+
+    /// Regression: a `@`-resolved prompt physically lives outside the repo
+    /// it reasons about (e.g. `~/.claudine/prompts/commit.md`). With
+    /// `shell_working_directory` set, `::shell` directives must run there,
+    /// not next to the template file — otherwise `sniff repo packages` and
+    /// friends execute in the wrong repo.
+    #[test]
+    fn direct_composition_runs_shell_in_configured_working_directory() {
+        let source_dir = TempDir::new().unwrap();
+        let work_dir = TempDir::new().unwrap();
+        let source = make_source(&source_dir, &[("title", json!("T"))], "::shell pwd\n");
+
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("pwd".to_string());
+        let options = PrepareOptions {
+            pre_approved_commands: Some(approved),
+            shell_working_directory: Some(work_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+
+        let prepared = prepare_direct(&source, options).unwrap();
+        // `pwd` reports the physical path, so compare against canonicalized
+        // temp dirs (macOS routes `/var` through a `/private` symlink).
+        let work_canon = std::fs::canonicalize(work_dir.path()).unwrap();
+        let source_canon = std::fs::canonicalize(source_dir.path()).unwrap();
+        assert!(
+            prepared.prompt.contains(work_canon.to_str().unwrap()),
+            "expected shell to run in work_dir; got: {}",
+            prepared.prompt
+        );
+        assert!(
+            !prepared.prompt.contains(source_canon.to_str().unwrap()),
+            "shell must not run in the prompt's parent dir; got: {}",
+            prepared.prompt
+        );
+    }
+
+    /// Documents the library default: with no `shell_working_directory`,
+    /// Darkmatter's source-relative fallback runs `::shell` in the prompt
+    /// file's parent directory.
+    #[test]
+    fn direct_composition_without_working_directory_runs_in_source_parent() {
+        let source_dir = TempDir::new().unwrap();
+        let source = make_source(&source_dir, &[("title", json!("T"))], "::shell pwd\n");
+
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("pwd".to_string());
+        let options = PrepareOptions {
+            pre_approved_commands: Some(approved),
+            ..Default::default()
+        };
+
+        let prepared = prepare_direct(&source, options).unwrap();
+        let source_canon = std::fs::canonicalize(source_dir.path()).unwrap();
+        assert!(
+            prepared.prompt.contains(source_canon.to_str().unwrap()),
+            "expected shell to fall back to the source parent; got: {}",
+            prepared.prompt
+        );
+    }
+
+    #[test]
+    fn inline_composition_runs_shell_in_configured_working_directory() {
+        let source_dir = TempDir::new().unwrap();
+        let work_dir = TempDir::new().unwrap();
+        let source = make_source(
+            &source_dir,
+            &[("prompt", json!("Working dir is:\n\n::shell pwd\n"))],
+            "Old content",
+        );
+
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("pwd".to_string());
+        let options = PrepareOptions {
+            pre_approved_commands: Some(approved),
+            shell_working_directory: Some(work_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+
+        let prepared = prepare_inline(&source, options).unwrap();
+        let work_canon = std::fs::canonicalize(work_dir.path()).unwrap();
+        assert!(
+            prepared.prompt.contains(work_canon.to_str().unwrap()),
+            "expected inline shell to run in work_dir; got: {}",
+            prepared.prompt
+        );
     }
 
     #[test]
