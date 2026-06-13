@@ -563,6 +563,9 @@ fn run_compose_inner(
                         env_overrides: env_overrides.clone(),
                         perf_enabled: shared.perf,
                         source_repo_root: prep_context.source_repo_root.clone(),
+                        shell_working_directory: Some(
+                            prep_context.launch_workspace.child_cwd.clone(),
+                        ),
                     },
                 )?
             };
@@ -670,6 +673,7 @@ fn run_compose_inner(
                 env_overrides: env_overrides.clone(),
                 perf_enabled: shared.perf,
                 source_repo_root: prep_context.source_repo_root.clone(),
+                shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
             },
         )?
     };
@@ -1035,6 +1039,9 @@ fn run_inline_compose_inner(
                         env_overrides: env_overrides.clone(),
                         perf_enabled: shared.perf,
                         source_repo_root: prep_context.source_repo_root.clone(),
+                        shell_working_directory: Some(
+                            prep_context.launch_workspace.child_cwd.clone(),
+                        ),
                     },
                 )?
             };
@@ -1141,6 +1148,7 @@ fn run_inline_compose_inner(
                 env_overrides: env_overrides.clone(),
                 perf_enabled: shared.perf,
                 source_repo_root: prep_context.source_repo_root.clone(),
+                shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
             },
         )?
     };

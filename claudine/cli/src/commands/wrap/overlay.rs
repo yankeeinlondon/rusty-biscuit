@@ -30,12 +30,16 @@ pub(crate) fn frontmatter_map_to_value(frontmatter: &darkmatter::markdown::Front
 pub(crate) fn materialize_passthrough_harness_seed(
     source_path: &Path,
     prompt: String,
+    shell_cwd: Option<&Path>,
 ) -> Result<super::harness_orch::MaterializedHarnessPrompt> {
     let source_text = fs::read_to_string(source_path)
         .map_err(|e| eyre!("failed to read '{}': {e}", source_path.display()))?;
     let source_markdown: darkmatter::markdown::Markdown = source_text.into();
-    let options =
-        darkmatter::markdown::compose::ComposeOptions::new().with_source_file(source_path);
+    let options = claudine::composition::bind_agent_workspace(
+        darkmatter::markdown::compose::ComposeOptions::new(),
+        source_path,
+        shell_cwd,
+    );
     let (composed, _report) = source_markdown.compose_with(options)?;
 
     Ok(super::harness_orch::MaterializedHarnessPrompt {
