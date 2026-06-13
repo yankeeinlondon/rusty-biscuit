@@ -44,7 +44,7 @@ use renderable::tree::{
 use renderable::tree::{NodeKind, RenderNode};
 
 use super::code_renderer::TerminalCodeRenderer;
-use super::pipeline::{PipelineRenderResult, PipelineResult};
+use super::pipeline::PipelineResult;
 use crate::markdown::Markdown;
 use crate::markdown::inline::HorizontalRuleAttrs;
 use crate::markdown::output::{ColorDepth, HtmlOptions, TerminalOptions};
@@ -60,9 +60,11 @@ use crate::markdown::output::{ColorDepth, HtmlOptions, TerminalOptions};
 /// ## Returns
 ///
 /// The folded [`Document`] and any non-fatal fold-phase [`Diagnostic`]s
-/// (unsupported variants, lossy conversions, malformed structure).
-#[must_use]
-pub(crate) fn to_render_document(md: &Markdown) -> (Document, Vec<Diagnostic>) {
+/// (unsupported variants, lossy conversions, malformed structure), or a fatal
+/// [`MarkdownError`] raised by the block-extension processor.
+pub(crate) fn to_render_document(
+    md: &Markdown,
+) -> crate::markdown::MarkdownResult<(Document, Vec<Diagnostic>)> {
     let empty_policies = HashMap::new();
     let ctx = super::build_context::TreeBuildContext {
         component_policies: &empty_policies,
@@ -86,12 +88,12 @@ pub(crate) fn to_render_document(md: &Markdown) -> (Document, Vec<Diagnostic>) {
 ///
 /// ## Returns
 ///
-/// The folded [`Document`] and any non-fatal fold-phase [`Diagnostic`]s.
-#[must_use]
+/// The folded [`Document`] and any non-fatal fold-phase [`Diagnostic`]s, or a
+/// fatal [`MarkdownError`] raised by the block-extension processor.
 pub(crate) fn to_render_document_with_context(
     md: &Markdown,
     ctx: &super::build_context::TreeBuildContext,
-) -> (Document, Vec<Diagnostic>) {
+) -> crate::markdown::MarkdownResult<(Document, Vec<Diagnostic>)> {
     let source = derive_source(md);
     super::fold::fold_markdown_spanned_with_context(source, md, ctx)
 }
@@ -272,7 +274,7 @@ pub(crate) fn render_tree_html_with_context(
     options: &HtmlOptions,
     build_ctx: &super::build_context::TreeBuildContext,
 ) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
-    let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx);
+    let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx)?;
     // Fatal browser-path preflight over the same folded tree the renderer
     // consumes: a malformed code-block directive is a hard error, not a silent
     // degrade. Runs on the single fold — no second traversal of the source.
@@ -343,7 +345,7 @@ pub(crate) fn validate_code_directives(root: &RenderNode) -> Result<(), crate::m
 pub fn render_tree_terminal(
     md: &Markdown,
     options: &TerminalOptions,
-) -> PipelineRenderResult<String> {
+) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
     let empty_policies = HashMap::new();
     let hr_defaults_owned = resolve_hr_defaults(md, &options.hr_defaults);
     let build_ctx = super::build_context::TreeBuildContext {
@@ -377,8 +379,8 @@ pub(crate) fn render_tree_terminal_with_context(
     md: &Markdown,
     options: &TerminalOptions,
     build_ctx: &super::build_context::TreeBuildContext,
-) -> PipelineRenderResult<String> {
-    let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx);
+) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
+    let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx)?;
     let mut term_opts = terminal_options_from_terminal_options(options);
     term_opts.context.image_placeholder = ImagePlaceholder::Block;
     let rendered = render_terminal_document(&doc, &term_opts)?;
@@ -423,14 +425,16 @@ pub(crate) fn render_tree_terminal_with_context(
 ///
 /// ## Errors
 ///
-/// Propagates any fatal [`RenderError`] from [`render_terminal_document`].
+/// Returns any fatal fold-time [`MarkdownError`], including [`RenderError`]
+/// from [`render_terminal_document`] converted to
+/// [`MarkdownError::RenderTree`](crate::markdown::MarkdownError::RenderTree).
 pub(crate) fn render_page_terminal_document(
     doc: &Document,
     fold_diagnostics: Vec<Diagnostic>,
     options: &TerminalOptions,
     content_width: u16,
     optimistic_capabilities: bool,
-) -> PipelineRenderResult<String> {
+) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
     // Select the capability profile via the adapter's optimistic/ambient base,
     // then pin the content width independently on top.
     let mut capability_options = options.clone();
@@ -444,7 +448,8 @@ pub(crate) fn render_page_terminal_document(
     term_opts.context.width = width;
     term_opts.context.available_width = width;
     term_opts.context.image_placeholder = ImagePlaceholder::Block;
-    let rendered = render_terminal_document(doc, &term_opts)?;
+    let rendered = render_terminal_document(doc, &term_opts)
+        .map_err(crate::markdown::MarkdownError::RenderTree)?;
     Ok(PipelineResult::new(
         rendered.output,
         fold_diagnostics,
@@ -461,8 +466,34 @@ pub(crate) fn render_page_terminal_document(
 ///
 /// Propagates any fatal [`RenderError`] from
 /// [`render_markdown_document`].
-pub fn render_tree_markdown(md: &Markdown) -> PipelineRenderResult<String> {
+pub fn render_tree_markdown(md: &Markdown) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
     render_tree_markdown_dialect(md, MarkdownDialect::Markdown)
+}
+
+/// Renders a [`Markdown`] to MarkdownPlus via the render-tree pipeline,
+/// using the provided construction-time context so component policy and
+/// disclosure inline styles are preserved.
+///
+/// ## Errors
+///
+/// Propagates any fatal [`RenderError`] from
+/// [`render_markdown_document`].
+pub(crate) fn render_tree_markdown_plus_with_context(
+    md: &Markdown,
+    ctx: &super::build_context::TreeBuildContext,
+) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
+    let (doc, fold_diagnostics) = to_render_document_with_context(md, ctx)?;
+    let opts = MarkdownRenderOptions {
+        dialect: MarkdownDialect::MarkdownPlus,
+        strictness: RenderStrictness::Warn,
+        style: None,
+    };
+    let rendered = render_markdown_document(&doc, &opts)?;
+    Ok(PipelineResult::new(
+        rendered.output,
+        fold_diagnostics,
+        rendered.diagnostics,
+    ))
 }
 
 /// Renders a [`Markdown`] to either standard Markdown or MarkdownPlus via the
@@ -475,8 +506,8 @@ pub fn render_tree_markdown(md: &Markdown) -> PipelineRenderResult<String> {
 pub fn render_tree_markdown_dialect(
     md: &Markdown,
     dialect: MarkdownDialect,
-) -> PipelineRenderResult<String> {
-    let (doc, fold_diagnostics) = to_render_document(md);
+) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
+    let (doc, fold_diagnostics) = to_render_document(md)?;
     let opts = MarkdownRenderOptions {
         dialect,
         strictness: RenderStrictness::Warn,
@@ -847,7 +878,7 @@ mod tests {
     #[test]
     fn to_render_document_smoke() {
         let md: Markdown = FIXTURE.into();
-        let (doc, diags) = to_render_document(&md);
+        let (doc, diags) = to_render_document(&md).expect("fold must succeed");
         assert!(diags.is_empty(), "smoke fixture must fold cleanly");
         assert!(!doc.root.children().is_empty(), "fold produced no nodes");
     }
@@ -901,7 +932,7 @@ mod tests {
         // File-backed: must surface as `SourceDescriptor::File`.
         let md: Markdown = Markdown::from("Body paragraph.\n")
             .with_source(ComposeSource::File(PathBuf::from("docs/example.md")));
-        let (doc, _diags) = to_render_document(&md);
+        let (doc, _diags) = to_render_document(&md).expect("fold must succeed");
         assert_eq!(
             doc.sources.resolve(SourceId(0)),
             Some(&SourceDescriptor::File {
@@ -912,7 +943,7 @@ mod tests {
 
         // No source: stays virtual.
         let md: Markdown = "Body paragraph.\n".into();
-        let (doc, _diags) = to_render_document(&md);
+        let (doc, _diags) = to_render_document(&md).expect("fold must succeed");
         assert_eq!(
             doc.sources.resolve(SourceId(0)),
             Some(&SourceDescriptor::Virtual {
@@ -926,7 +957,7 @@ mod tests {
     fn frontmatter_attaches_via_entry_point() {
         let raw = "---\ntitle: Smoke\n---\n\nBody paragraph.\n";
         let md: Markdown = raw.into();
-        let (doc, _diags) = to_render_document(&md);
+        let (doc, _diags) = to_render_document(&md).expect("fold must succeed");
         let fm = doc
             .metadata
             .frontmatter
@@ -965,7 +996,7 @@ mod tests {
         }
 
         let md: Markdown = "plain ==highlighted== after\n".into();
-        let (doc, diags) = to_render_document(&md);
+        let (doc, diags) = to_render_document(&md).expect("fold must succeed");
         assert!(
             diags.is_empty(),
             "mark fixture must fold cleanly: {diags:?}"
@@ -990,7 +1021,7 @@ mod tests {
         }
 
         let md: Markdown = "normal \u{2304}dimmed\u{2304} after\n".into();
-        let (doc, diags) = to_render_document(&md);
+        let (doc, diags) = to_render_document(&md).expect("fold must succeed");
         assert!(diags.is_empty(), "dim fixture must fold cleanly: {diags:?}");
         assert!(
             has_dim(&doc.root),
@@ -1018,7 +1049,7 @@ use renderable::tree::{NodeKind, RenderNode};
         }
 
         let md: Markdown = "--- { style: waves }\n".into();
-        let (doc, _diags) = to_render_document(&md);
+        let (doc, _diags) = to_render_document(&md).expect("fold must succeed");
         let hr = find_hr(&doc.root).expect("HR-attribute paragraph must fold to a ThematicBreak");
         assert_eq!(
             hr.attrs.thematic_break_ref().and_then(|h| h.kind),

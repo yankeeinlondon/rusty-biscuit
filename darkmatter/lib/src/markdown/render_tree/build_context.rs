@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use renderable::layout::{Layout, TargetValue};
+use renderable::layout::{Alignment, Layout, TargetValue, Width};
 use renderable::style::{PaintColor, PerMode, Style};
 use renderable::tree::{HrAlignment, HrKind, HrWeight, NodeKind, RenderNode};
 
@@ -195,6 +195,11 @@ pub(crate) fn apply_node_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
         apply_lone_image_layout(node, ctx);
     }
 
+    // Disclosure blocks merge inline opener style over component policy.
+    if matches!(node.kind, NodeKind::Disclosure { .. }) {
+        apply_disclosure_policy(node, ctx);
+    }
+
     // List-item typed text_layout (replaces the old `darkmatter.li` hint).
     if matches!(node.kind, NodeKind::ListItem { .. }) {
         apply_list_item_text_layout(node, ctx);
@@ -221,6 +226,7 @@ fn component_for(kind: &NodeKind) -> Option<PageComponent> {
         NodeKind::ListItem { .. } => Some(PageComponent::Li),
         NodeKind::Image { .. } => Some(PageComponent::Images),
         NodeKind::ThematicBreak => Some(PageComponent::Hr),
+        NodeKind::Disclosure { .. } => Some(PageComponent::Disclosure),
         _ => None,
     }
 }
@@ -254,6 +260,51 @@ fn apply_component_color(
     let mut style = node.attrs.style().unwrap_or_default();
     set_style_colors(&mut style, fg.as_ref(), bg.as_ref());
     node.attrs.set_style(&style);
+}
+
+/// Merges inline disclosure style hints over the `style.disclosure` component
+/// policy. Inline opener parameters win; frontmatter fills defaults.
+fn apply_disclosure_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
+    let inline = match &node.kind {
+        NodeKind::Disclosure { style, .. } => style.as_deref().cloned(),
+        _ => return,
+    };
+
+    let policy = ctx.component_policies.get(&PageComponent::Disclosure);
+    let mut layout = policy.map(|p| p.layout.clone()).unwrap_or_default();
+
+    if let Some(hints) = inline.as_ref()
+        && let Some(il) = hints.layout.as_ref()
+    {
+        if il.width != Width::default() {
+            layout.width = il.width.clone();
+        }
+        if il.max_width.is_some() {
+            layout.max_width = il.max_width.clone();
+        }
+        if il.alignment != Alignment::default() {
+            layout.alignment = il.alignment;
+        }
+    }
+
+    if layout != Layout::default() {
+        node.attrs.set_layout(&layout);
+    }
+
+    let fg = inline
+        .as_ref()
+        .and_then(|h| h.color)
+        .or_else(|| ctx.component_color(PageComponent::Disclosure));
+    let bg = inline
+        .as_ref()
+        .and_then(|h| h.bg_color)
+        .or_else(|| ctx.component_bg_color(PageComponent::Disclosure));
+
+    if fg.is_some() || bg.is_some() {
+        let mut style = node.attrs.style().unwrap_or_default();
+        set_style_colors(&mut style, fg.as_ref(), bg.as_ref());
+        node.attrs.set_style(&style);
+    }
 }
 
 /// Attaches typed link policy: colors, text-layout hints, and structured
@@ -745,7 +796,8 @@ mod structural_tests {
         let source = renderable::tree::SourceDescriptor::Virtual {
             name: "test".into(),
         };
-        let (doc, diags) = super::super::fold::fold_markdown_spanned_with_context(source, &md, ctx);
+        let (doc, diags) = super::super::fold::fold_markdown_spanned_with_context(source, &md, ctx)
+            .expect("context-aware fold must succeed");
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         doc
     }

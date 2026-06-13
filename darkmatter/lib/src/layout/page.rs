@@ -129,7 +129,7 @@ impl DarkmatterPage {
     pub fn new(terminal: &Terminal) -> Self {
         Self {
             terminal_width: clamp_width(terminal.width()),
-            terminal_color_mode: terminal.color_mode.clone(),
+            terminal_color_mode: terminal.color_mode,
             terminal_color_depth: ColorDepth::from(terminal.color_depth),
             page_margin: renderable::layout::Edges::default(),
             page_padding: renderable::layout::Edges::default(),
@@ -877,7 +877,7 @@ impl DarkmatterPage {
             let (doc, fold_diagnostics) =
                 crate::markdown::render_tree::entrypoints::to_render_document_with_context(
                     md, &build_ctx,
-                );
+                )?;
 
             let paints = self.paints_construction_color(&doc);
             // Honor the captured terminal's color depth only when this page
@@ -1042,6 +1042,54 @@ impl DarkmatterPage {
         }
 
         Ok(wrap_browser_html(&body, &ctx, self))
+    }
+
+    /// Render the given markdown document to MarkdownPlus through the page
+    /// layout.
+    ///
+    /// MarkdownPlus emits standard Markdown for most constructs but renders
+    /// disclosure blocks as HTML `<details>` / `<summary>` elements so they
+    /// remain interactive in Markdown-friendly viewers.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`PageRenderError::Render`] when the underlying render-tree
+    /// MarkdownPlus renderer fails.
+    pub fn render_to_markdown_plus(&self, md: &Markdown) -> Result<String, PageRenderError> {
+        let html_options = HtmlOptions {
+            code_theme: self.page_code_theme.unwrap_or(self.options.code_theme),
+            prose_theme: self.options.prose_theme,
+            color_mode: self.options.color_mode,
+            code_block_mode: self.code_block_mode,
+            include_line_numbers: self.line_numbers,
+            include_styles: false,
+            mermaid_mode: self.options.mermaid_mode,
+            hr_css_variables: std::collections::HashMap::new(),
+            hr_defaults: self.hr_defaults(),
+            hyperlink_style: self.hyperlink_style.clone(),
+            local_hyperlink_style: self.local_hyperlink_style.clone(),
+            local_image_style: self.local_image_style.clone(),
+        };
+
+        let hr_defaults_owned = crate::markdown::render_tree::entrypoints::resolve_hr_defaults(
+            md,
+            &html_options.hr_defaults,
+        );
+        let build_ctx = crate::markdown::render_tree::build_context::TreeBuildContext {
+            component_policies: &self.component_policies,
+            page_color: self.page_color,
+            page_bg_color: self.page_bg_color,
+            hyperlink_style: self.hyperlink_style.as_ref(),
+            local_hyperlink_style: self.local_hyperlink_style.as_ref(),
+            local_image_style: self.local_image_style.as_ref(),
+            hr_defaults: hr_defaults_owned.as_ref(),
+        };
+
+        crate::markdown::render_tree::entrypoints::render_tree_markdown_plus_with_context(
+            md, &build_ctx,
+        )
+        .map(|r| r.output)
+        .map_err(|e| PageRenderError::Render(e.to_string()))
     }
 
     // ---------- ComponentPolicy merging ----------
@@ -1843,7 +1891,7 @@ mod tests {
     fn captures_terminal_color_mode() {
         let page = page();
         // Optimistic terminal default color_mode value is exposed.
-        let _mode = page.terminal_color_mode().clone();
+        let _mode = *page.terminal_color_mode();
     }
 
     // ---------- Phase 2: render tests ----------
@@ -4107,8 +4155,7 @@ mod tests {
     /// Parse a CSS color value, accepting both `rgb(R, G, B)` and `#rrggbb`.
     fn parse_css_color(value: &str) -> (u8, u8, u8) {
         let value = value.trim();
-        if value.starts_with('#') {
-            let hex = &value[1..];
+        if let Some(hex) = value.strip_prefix('#') {
             assert!(
                 hex.len() == 6,
                 "expected 6-digit hex color, got {value:?}"
