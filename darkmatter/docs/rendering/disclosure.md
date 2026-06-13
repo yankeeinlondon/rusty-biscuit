@@ -1,63 +1,123 @@
 # Disclosure Blocks
 
-The Darkmatter DSL provides a more ergonomic way to express the desire for a "disclosure block" (e.g., a small text block that when clicked on opens up a much larger text area ... aka, it _discloses_ it).
+Darkmatter provides render-time disclosure blocks using the `::disclosure` / `::details` / `::end-disclosure` directive triple. The summary region is rendered as a clickable heading; the body region is hidden until the summary is activated.
 
-## Markdown Syntax
+## Syntax
 
-To create a disclosure block in Darkmatter Markdown you would create something like:
+A disclosure block has three required directives:
 
 ```md
-::disclosure
-License Agreement
+::disclosure Optional summary text
 ::details
-Keep your dirty hands off my stuff. You have the right to leave immediately.
+Body content — any block-level Markdown, including nested disclosure blocks.
 ::end-disclosure
 ```
 
-## Lifecycle
+- `::disclosure` opens the block. The remainder of the line is the summary. It must contain only phrasing content — no paragraph breaks, hard line breaks, or block-level elements.
+- `::details` separates the summary from the body.
+- `::end-disclosure` closes the block.
 
-During the [_compose lifecycle_](../darkmatter-compose-pipeline.md) this will remain untouched because Markdown provides no way to render a disclosure unless you resort to using inline-HTML and relying on the Markdown viewer supporting this.
+Each directive must appear at the start of a line and be followed by ASCII whitespace or end-of-line. Near-miss text such as `::disclosurex` is treated as literal prose.
 
-Instead this feature is activated during the [_rendering pipeline_](../darkmatter-rendering-pipeline.md) where it can target any of the following targets:
+## Render Targets
 
-- `markdown`
+Disclosure blocks are recognized during the render-tree fold and lowered differently for each target:
 
-    - when we specify the target to be "markdown" we will convert the disclosure to an inline HTML section
-    - this makes the markdown less ergonomic to edit going forward
-    - however, it does allow Markdown renderers who support inline HTML like this to operate.
+| Target | Output |
+|---|---|
+| `markdown` | DSL emitted verbatim: `::disclosure`, `::details`, `::end-disclosure`. |
+| `markdown-plus` | Summary and body rendered to Markdown, then wrapped in `<details><summary>…</summary>…</details>`. |
+| `html` / `browser` | Native HTML `<details>` / `<summary>` elements; no JavaScript. |
+| `terminal` | Summary rendered normally; body rendered as a block quote with dim and italic text. |
+| `json` / `ast` | Native `NodeKind::Disclosure` node in the render tree. |
 
-- `html`
+Use `--output markdown-plus` to render disclosures as inline HTML while keeping the rest of the document as Markdown. Use `--output html` for full HTML output.
 
-    - leverage the HTML `details` and `summary` elements which are supported in all modern browser
-    - no JS is needed
+## Transclusion Integration
 
-> Note: 
->
-> - if the rendering pipeline is `terminal` then it will leave the content unchanged
-> - if the rendering pipeline is `ast` then it will render the incoming markdown with the `markdown` output first (creating some inline HTML) and then convert that into an AST
+`::file` and `::code` transclusion can wrap imported content in a disclosure block with the `disclosure` option:
 
-It's worth noting that if you run (assuming that `README.md` has a disclosure in it):
-
-```sh
-# implicit render
-md README.md
-# explicit render
-md render README.md
+```md
+::file ./long-section.md disclosure="License Agreement"
+::code ./demo.rs disclosure=true
 ```
 
-- the disclosure will be rendered for the **terminal** as a default so there will be no mutation of the Darkmatter DSL
-- the CLI does offer an alternate render path for the terminal though which is:
-    - `--render-disclosure`
-    - this will only have an _alternate effect_ when targeting the terminal or AST (other targets just ignore the switch)
-    - when this flag is used while targeting the terminal we will:
-        - render the title section as bold faced text and yellow
-        - render the detailed text section as a block quote where the vertical bar is the same yellow color
-- the [`style`](./style.md) property can also specify the alternative render style:
+- `disclosure="Summary text"` wraps the transcluded content in a `::disclosure` block with the given summary.
+- `disclosure=true` (or an empty summary) uses the default summary `"Details"`.
 
-    ```yaml
-    style:
-        disclosure: alternate
-    ```
-- the [`style`](./style.md) property also provides a few additional stylistic controls which can be used:
-    - `indent` _allows the detailed section to be indented by a certain number of characters_
-    - `color` _allows the vertical-bar color which is used to be changed from the default yellow
+The transclusion stage emits the DSL triple; no inline HTML is produced at compose time. See [Block Transclusion](../transclusion/block-transclusion.md) and [Code Transclusion](../transclusion/code-transclusion.md).
+
+## Inline Style Parameters
+
+The `::disclosure` opener accepts whitespace-separated `key=value` style tokens before the summary text:
+
+```md
+::disclosure max-width=60ch color=red-500 License Agreement
+::details
+Keep your hands off.
+::end-disclosure
+```
+
+Recognized keys mirror the `style.disclosure.*` bucket:
+
+| Key | Value |
+|---|---|
+| `width` | `Nch` or `N%` |
+| `max-width` | `Nch` or `N%` (snake-case `max_width` also accepted) |
+| `alignment` | `left`, `center`, or `right` |
+| `color` | Tailwind, hex, or web named color |
+| `bg-color` | Tailwind, hex, or web named color (snake-case `bg_color` also accepted) |
+
+Tokens that are not recognized style pairs become part of the summary. An invalid value (for example, `max-width=not-a-length`) is treated as summary text rather than raising an error.
+
+## Style Frontmatter
+
+The `style.disclosure.*` bucket configures disclosure blocks document-wide:
+
+```yaml
+---
+style:
+    disclosure:
+        max-width: 60ch
+        alignment: center
+        color: red-500
+---
+```
+
+Supported keys are the same five `CommonStyle` mutations used by other component buckets:
+
+| Key | Value |
+|---|---|
+| `width` | `Nch` or `N%` |
+| `max-width` | `Nch` or `N%` |
+| `alignment` | `left`, `center`, or `right` |
+| `color` | Tailwind, hex, or web named color |
+| `bg-color` | Tailwind, hex, or web named color |
+
+Multi-word keys use kebab-case (`max-width`, `bg-color`). Snake-case aliases (`max_width`, `bg_color`) parse but emit a `Deprecated` warning; `--strict-style` rejects them.
+
+### Precedence
+
+Style values resolve from most specific to least specific:
+
+1. Inline `key=value` tokens on the `::disclosure` opener.
+2. `style.disclosure.*` frontmatter.
+3. Page-level `style.page.alignment` broadcast and any future disclosure CLI flags.
+4. Built-in default.
+
+### Constraints
+
+- `width` and `max-width` are mutually exclusive within the same bucket. Setting both raises a style error before rendering.
+- `Length::Css` values such as `10px` are rejected for terminal targets.
+
+## Errors
+
+Malformed disclosures raise `MarkdownError::MalformedDisclosure { reason, range }`:
+
+- Missing `::details` or `::end-disclosure`.
+- `::details` without a matching closer.
+- Empty summary region.
+- Hard line break in the summary region.
+- Any block-level element in the summary region.
+
+The summary region is parsed as phrasing content only; a paragraph break or list inside the summary is treated as a structural error.

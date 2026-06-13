@@ -1,8 +1,8 @@
 ---
 name: darkmatter
-description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 751ea2392b8b3231-0413807bd200ea3a
-last_updated: 2026-06-12
+description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
+hash: 87f17662fa397abe-42fad25e44d4a604
+last_updated: 2026-06-13
 ---
 
 # darkmatter
@@ -166,6 +166,48 @@ links are preserved and not fetched.
   for host allowlist enforcement.
 
 See `darkmatter/docs/topics/remote-url-references.md` for public guidance.
+
+## Disclosure Blocks
+
+Darkmatter supports render-time disclosure blocks using the `::disclosure` / `::details` / `::end-disclosure` directive triple. The syntax is a block-level extension; directives must appear at line boundaries and be followed by ASCII whitespace or end-of-line.
+
+```md
+::disclosure License *Agreement*
+::details
+Keep your **hands** off.
+::end-disclosure
+```
+
+- The summary region (between `::disclosure` and `::details`) is phrasing-only: no paragraph breaks, hard line breaks, or block-level elements.
+- The body region (between `::details` and `::end-disclosure`) is full block-level Markdown and may contain nested disclosures.
+- `::file` and `::code` transclusion can wrap content in a disclosure block with `disclosure="Summary text"` or `disclosure=true` (default summary is `"Details"`).
+
+Render-tree representation: `renderable::tree::NodeKind::Disclosure { summary, children, layout, style }`, where `summary` and `children` are slices of `RenderNode` and `style` carries inline opener hints. Target behavior:
+
+| Target | Behavior |
+|--------|----------|
+| Terminal | Summary rendered normally; body rendered as a block quote with dim and italic text. |
+| Markdown (dialect) | DSL emitted verbatim: `::disclosure`, `::details`, `::end-disclosure`. |
+| MarkdownPlus | Summary and body rendered to Markdown, then wrapped in `<details><summary>…</summary>…</details>`. |
+| Browser | Summary and body rendered to HTML, then wrapped in native `<details>`/`<summary>` elements; no JavaScript. |
+| JSON | Serialized natively through `Markdown::as_document()` as `NodeKind::Disclosure`. |
+
+### Styling
+
+Disclosures honor `style.disclosure.*` frontmatter using the same `CommonStyle` shape as tables and block-quotes (`width`, `max-width`, `alignment`, `color`, `bg-color`). Kebab-case keys are canonical; snake-case aliases (`max_width`, `bg_color`) emit a `Deprecated` warning and `--strict-style` rejects them. `width` and `max-width` are mutually exclusive.
+
+Inline opener style tokens take precedence over frontmatter:
+
+```md
+::disclosure max-width=60ch color=red-500 License Agreement
+::details
+Keep your **hands** off.
+::end-disclosure
+```
+
+Recognized inline keys are `width`, `max-width`/`max_width`, `alignment`, `color`, `bg-color`/`bg_color`. Unrecognized or invalid tokens become part of the summary text.
+
+Malformed disclosures raise `MarkdownError::MalformedDisclosure { reason, range }`.
 
 ## Progressive Disclosure
 

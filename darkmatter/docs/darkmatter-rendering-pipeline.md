@@ -88,6 +88,9 @@ event loop, `MarkProcessor`, `RuleProcessor`) have been **deleted**.
   is a fatal `MarkdownError::InvalidLineRange` via the `validate_code_directives`
   preflight the HTML entry points run over the folded tree. Mermaid fences route
   through `biscuit-terminal` (terminal) / darkmatter's `Mermaid` (HTML).
+- Disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`) are
+  recognized by the block-extension processor and folded to `NodeKind::Disclosure`
+  so every target can render them natively. See [Disclosure Blocks](./rendering/disclosure.md).
 - Code highlighting resolves the mode-agnostic `ThemePair` (`code_theme`) to a
   concrete light/dark theme via `color_mode`. Both the HTML and terminal paths
   invert the code theme for page contrast (`ColorMode::inverted()`), so a dark
