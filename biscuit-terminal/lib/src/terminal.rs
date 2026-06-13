@@ -277,7 +277,7 @@ impl From<&Terminal> for Terminal {
             osc_link_support: value.osc_link_support,
             is_tty: value.is_tty,
             color_depth: value.color_depth,
-            color_mode: value.color_mode.clone(),
+            color_mode: value.color_mode,
             text_color: value.text_color,
             background_color: value.background_color,
             os: value.os,
@@ -512,7 +512,7 @@ impl Terminal {
     /// }
     /// ```
     pub fn color_mode(&self) -> ColorMode {
-        self.color_mode.clone()
+        self.color_mode
     }
 
     /// Render content to the terminal with default layout.

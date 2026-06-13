@@ -169,7 +169,7 @@ impl TerminalRenderContext {
         Self {
             width,
             color_depth: term.color_depth,
-            color_mode: term.color_mode.clone(),
+            color_mode: term.color_mode,
             page_text_color: term.text_color.map(|c| (c.r, c.g, c.b)),
             page_background_color: term.background_color.map(|c| (c.r, c.g, c.b)),
             hyperlinks: term.osc_link_support,
