@@ -218,18 +218,3 @@ fn collect_text(nodes: &[renderable::tree::RenderNode], out: &mut String) {
 }
 
 use renderable::tree::NodeKind;
-
-#[test]
-fn debug_nested_fixture_events() {
-    use darkmatter::markdown::Markdown;
-    let md = Markdown::new(
-        "::disclosure\nOuter\n::details\nOuter body.\n\n::disclosure\nInner\n::details\nInner body.\n::end-disclosure\n\n::end-disclosure\n".to_string(),
-    );
-    match md.as_document() {
-        Ok(doc) => {
-            println!("OK");
-            println!("{}", serde_json::to_string_pretty(&doc).unwrap());
-        }
-        Err(e) => println!("ERR: {e:?}"),
-    }
-}
