@@ -2821,3 +2821,73 @@ fn level2_style_images_truncation_does_not_bleed_color_in_terminal() {
         frame.raw
     );
 }
+
+// =============================================================================
+//   DISCLOSURE BLOCKS (2026-06-12-disclosure review-1 finding #4)
+// =============================================================================
+//
+// The terminal disclosure target renders the summary normally and the body as a
+// block quote whose text is dim + italic. Level 1 (`darkmatter/lib/tests/
+// disclosure_render_targets.rs`) asserts the in-process SGR bytes; this Level 2
+// test confirms the summary text, the body text, the `│` quote glyph, and the
+// dim/italic styling all survive rendering through the real terminal harness.
+
+/// True when any SGR sequence in `raw` carries the numeric attribute `param`
+/// (e.g. `2` = dim, `3` = italic). Robust to WezTerm re-emitting attributes in
+/// combined (`\x1b[2;3m`) or ITU colon form, where a literal `\x1b[3m` substring
+/// search would miss a merged run.
+fn raw_sgr_has_attr(raw: &str, param: u32) -> bool {
+    for chunk in raw.split("\x1b[").skip(1) {
+        let Some(mend) = chunk.find('m') else {
+            continue;
+        };
+        if chunk[..mend]
+            .split([';', ':'])
+            .filter_map(|s| s.parse::<u32>().ok())
+            .any(|n| n == param)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_disclosure_body_renders_as_dim_italic_block_quote() {
+    let body = "::disclosure\nLicense_sentinel Agreement\n::details\nKeep_sentinel your hands off.\n::end-disclosure\n";
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    // Summary is rendered normally (no quote glyph on its line); body text is
+    // present and carried inside a block quote (`│` prefix).
+    assert!(
+        frame.plain.contains("License_sentinel"),
+        "expected disclosure summary text in capture. plain:\n{}",
+        frame.plain
+    );
+    let body_line = frame
+        .plain
+        .lines()
+        .find(|l| l.contains("Keep_sentinel"))
+        .unwrap_or_else(|| panic!("disclosure body line missing. plain:\n{}", frame.plain));
+    assert!(
+        body_line.contains('│'),
+        "disclosure body must render as a block quote (│ prefix), got: {body_line:?}"
+    );
+
+    // The disclosed body is the only styled content in this minimal document, so
+    // a dim (SGR 2) and italic (SGR 3) attribute in the raw capture proves the
+    // body styling reached the real terminal.
+    assert!(
+        raw_sgr_has_attr(&frame.raw, 3),
+        "expected italic (SGR 3) on the disclosed body. raw:\n{}",
+        frame.raw
+    );
+    assert!(
+        raw_sgr_has_attr(&frame.raw, 2),
+        "expected dim (SGR 2) on the disclosed body. raw:\n{}",
+        frame.raw
+    );
+}

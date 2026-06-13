@@ -708,7 +708,12 @@ impl Writer<'_> {
             let rendered = self.render_blocks(children);
             self.inherited = prev;
             let rendered = rendered?;
-            BlockQuote::from(rendered.as_str()).render(&self.opts.context.terminal)
+            // The inherited context above only restores dim/italic for nested
+            // inline spans; plain body text is painted at the block level (as
+            // `render_styled` does), so paint the appearance onto every line
+            // before wrapping it as a block quote.
+            let styled = style::apply_style(&rendered, &dim_italic, &self.opts.context.terminal);
+            BlockQuote::from(styled.as_str()).render(&self.opts.context.terminal)
         };
 
         match (summary_line.is_empty(), body.is_empty()) {
