@@ -529,6 +529,9 @@ pub fn apply_color_style(
     if let Some(block_quote) = style.block_quote.as_ref() {
         page = apply_common_color(page, PageComponent::BlockQuotes, &block_quote.common);
     }
+    if let Some(disclosure) = style.disclosure.as_ref() {
+        page = apply_common_color(page, PageComponent::Disclosure, &disclosure.common);
+    }
     if let Some(hyperlinks) = style.hyperlinks.as_ref() {
         page = apply_common_color(page, PageComponent::Hyperlinks, &hyperlinks.common);
     }
@@ -1012,6 +1015,17 @@ mod tests {
         let policy = page.component_policy(PageComponent::Tables).unwrap();
         let bg = policy.bg_color.as_ref().unwrap();
         assert_ne!(bg.opacity, renderable::style::Opacity::OPAQUE, "component bg-color opacity must survive lowering");
+    }
+
+    #[test]
+    fn apply_lowers_disclosure_color_to_policy() {
+        use renderable::color::{Color, Tailwind};
+        let page = apply_for_test("disclosure:\n  color: red-500\n  bg-color: blue-500\n");
+        let policy = page.component_policy(PageComponent::Disclosure).unwrap();
+        let color = policy.color.as_ref().expect("disclosure color must reach policy");
+        assert_eq!(color.color, Color::Tailwind(Tailwind::Red500));
+        let bg = policy.bg_color.as_ref().expect("disclosure bg-color must reach policy");
+        assert_eq!(bg.color, Color::Tailwind(Tailwind::Blue500));
     }
 
     #[test]
