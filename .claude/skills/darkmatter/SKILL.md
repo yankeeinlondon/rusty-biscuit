@@ -1,7 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 751ea2392b8b3231-9b0f4dcb07891e29
+hash: 751ea2392b8b3231-0413807bd200ea3a
 last_updated: 2026-06-12
 ---
 
@@ -214,8 +214,12 @@ the `biscuit-terminal` skill for terminal tree rendering.
   env-only detector. The inversion is configurable via the `CodeBlockMode` enum
   (`inverse` (default) / `dark` / `light` / `same`) — exposed as the global
   `md --code-block <...>` flag and `DarkmatterPage::with_code_block_mode(...)`.
-  Override currently applies to terminal rendering; HTML always inverts. See
-  `darkmatter/docs/rendering/code-highlighting.md`.
+  `CodeBlockMode` is honored on **both** terminal and browser: the browser code
+  path resolves through `HtmlOptions::code_block_mode`, and the injected
+  `.code-block` stylesheet background is computed against the same mode so
+  markup and stylesheet agree. A direct `CodeBlock::with_theme(theme)` /
+  `md code-block --theme` override wins over the page/context theme on both
+  surfaces. See `darkmatter/docs/rendering/code-highlighting.md`.
 - Horizontal rules: canonical styling is `style.hr.*` with `apply_hr_style`;
   top-level `hr:` and inline `{ style: ... }` remain deprecated aliases.
 - The darkmatter cutover is complete: deprecated `PageMargin`, `PagePadding`,
