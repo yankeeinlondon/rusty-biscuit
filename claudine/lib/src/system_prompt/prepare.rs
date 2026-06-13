@@ -26,6 +26,7 @@ fn compose_prompt_markdown(
     source: &SystemPromptSource,
     raw_text: &str,
     shared_ctx: Option<&ComposeContext>,
+    shell_cwd: Option<&std::path::Path>,
 ) -> Result<String, crate::error::ClaudineError> {
     let md: Markdown = raw_text.into();
 
@@ -57,10 +58,14 @@ fn compose_prompt_markdown(
             ComposeContext::capture_for_content(&base_dir, raw_text)
         }
     };
-    let mut options = ComposeOptions::new_with_context(ctx);
-    if let Some(path) = source_path(source) {
-        options = options.with_source_file(path);
-    }
+    let options = match source_path(source) {
+        Some(path) => crate::composition::bind_agent_workspace(
+            ComposeOptions::new_with_context(ctx),
+            path,
+            shell_cwd,
+        ),
+        None => ComposeOptions::new_with_context(ctx),
+    };
 
     let (composed, _report) = md.compose_with(options)?;
 
@@ -133,9 +138,10 @@ fn prepare_system_prompt_with_ctx(
     source: SystemPromptSource,
     raw_text: &str,
     shared_ctx: Option<&ComposeContext>,
+    shell_cwd: Option<&std::path::Path>,
 ) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
     let mode = mode_for_source(&source);
-    let composed_markdown = compose_prompt_markdown(&source, raw_text, shared_ctx)?;
+    let composed_markdown = compose_prompt_markdown(&source, raw_text, shared_ctx, shell_cwd)?;
     if composed_markdown.trim().is_empty() {
         return Ok(ResolvedSystemPrompt::Disabled { source });
     }
@@ -153,9 +159,10 @@ fn prepare_system_prompt_with_ctx(
 fn prepare_non_interactive_appendix_from(
     candidates: Vec<(SystemPromptSource, String)>,
     shared_ctx: Option<&ComposeContext>,
+    shell_cwd: Option<&std::path::Path>,
 ) -> Result<PreparedNonInteractiveAppendix, crate::error::ClaudineError> {
     for (source, raw_text) in candidates {
-        let composed_markdown = compose_prompt_markdown(&source, &raw_text, shared_ctx)?;
+        let composed_markdown = compose_prompt_markdown(&source, &raw_text, shared_ctx, shell_cwd)?;
         let normalized = composed_markdown.trim().to_string();
         if normalized.is_empty() {
             continue;
@@ -179,7 +186,10 @@ pub fn prepare_system_prompt(
     raw_text: &str,
 ) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
     let mode = mode_for_source(&source);
-    let composed_markdown = compose_prompt_markdown(&source, raw_text, None)?;
+    // No launch context here, so shell directives fall back to Darkmatter's
+    // source-relative default. The session-aware path supplies a working
+    // directory via `resolve_and_prepare_for_session`.
+    let composed_markdown = compose_prompt_markdown(&source, raw_text, None, None)?;
 
     // Empty-body check
     if composed_markdown.trim().is_empty() {
@@ -238,9 +248,14 @@ pub fn resolve_and_prepare_for_session(
         context,
     );
 
+    // Pin `::shell` execution to the agent's launch repo root so directives
+    // in a system-prompt template run where the agent does, not next to the
+    // template file on disk.
+    let shell_cwd = context.repo_root.as_deref();
+
     let effective = match primary {
         Some((source, raw_text)) => {
-            prepare_system_prompt_with_ctx(source, &raw_text, Some(&shared_ctx))?
+            prepare_system_prompt_with_ctx(source, &raw_text, Some(&shared_ctx), shell_cwd)?
         }
         None => ResolvedSystemPrompt::None,
     };
@@ -252,6 +267,7 @@ pub fn resolve_and_prepare_for_session(
     let appendix = prepare_non_interactive_appendix_from(
         appendix_candidates.unwrap_or_default(),
         Some(&shared_ctx),
+        shell_cwd,
     )?;
 
     Ok(match effective {

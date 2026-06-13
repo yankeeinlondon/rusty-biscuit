@@ -425,6 +425,7 @@ pub(crate) fn execute_sequence(
         &resolved_targets,
         &user_set_overrides,
         source_repo_root.as_deref(),
+        &prep_context.launch_workspace.child_cwd,
         shared,
         effective_fail_fast,
         inline_mode,
@@ -886,6 +887,7 @@ fn run_phase_1c_with_schema(
     resolved_targets: &[Option<claudine::composition::ResolvedExecutionTarget>],
     user_set_overrides: &Option<serde_json::Value>,
     source_repo_root: Option<&std::path::Path>,
+    child_cwd: &std::path::Path,
     shared: &SharedComposeArgs,
     effective_fail_fast: bool,
     inline_mode: bool,
@@ -905,6 +907,7 @@ fn run_phase_1c_with_schema(
             resolved_targets,
             &overrides,
             source_repo_root,
+            child_cwd,
             shared,
             effective_fail_fast,
             inline_mode,
@@ -1019,6 +1022,7 @@ fn run_phase_1c_attempt(
     resolved_targets: &[Option<claudine::composition::ResolvedExecutionTarget>],
     user_set_overrides: &Option<serde_json::Value>,
     source_repo_root: Option<&std::path::Path>,
+    child_cwd: &std::path::Path,
     shared: &SharedComposeArgs,
     effective_fail_fast: bool,
     inline_mode: bool,
@@ -1127,6 +1131,7 @@ fn run_phase_1c_attempt(
             env_overrides: env_overrides.clone(),
             perf_enabled: shared.perf,
             source_repo_root: source_repo_root.map(std::path::Path::to_path_buf),
+            shell_working_directory: Some(child_cwd.to_path_buf()),
         };
 
         // Inline steps prepare via `prepare_inline_with_schema` so the

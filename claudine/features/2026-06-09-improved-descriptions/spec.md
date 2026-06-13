@@ -1,8 +1,13 @@
-# Catalog Drift Control & Runtime-Accessible Descriptions
+---
+created: 2026-06-09
+reviewed: true
+status: ready for planning and implementation
+area:
+  - darkmatter
+  - claudine-cli
+---
 
-**Date:** 2026-06-09
-**Status:** Design approved, pending spec review
-**Area:** `darkmatter` (descriptor catalogs, expression engine, effects) + `claudine-cli` (context reports)
+# Catalog Drift Control & Runtime-Accessible Descriptions
 
 ## Problem
 
@@ -52,6 +57,9 @@ messages cannot draw on the same descriptions/examples the docs use.
    with content **anchored to observable behavior** rather than trusted prose.
 2. Make descriptions/examples **runtime-accessible** so error messages improve —
    specifically "did-you-mean" suggestions with a verified example.
+3. Preserve the current `claudine context` reporting contract: reports render
+   from Darkmatter's typed catalogs, stay documentation-only for side effects,
+   and remain within the existing 140-column layout contract.
 
 ## Non-Goals
 
@@ -59,6 +67,10 @@ messages cannot draw on the same descriptions/examples the docs use.
 - Verifying description *wording* (examples anchor behavior, not phrasing).
 - Enumerating a Rust type's public method surface at compile time (impossible;
   the effects orphan gap is handled by a reviewed allow-list, not enforcement).
+- Adding a string-dispatched side-effect execution surface.
+- Changing expression evaluation semantics. Any promoted semantics catalog must
+  describe the current parser/evaluator behavior unless a separate spec
+  intentionally changes that behavior.
 
 ## Decisions (locked during brainstorming)
 
@@ -89,9 +101,17 @@ pub trait Described {
 }
 ```
 
+**Design note:** `Described` is a read-only display/search contract, not a
+replacement for subsystem-specific descriptor types. It intentionally exposes
+only the fields shared by every catalog. Existing fields such as
+`ContextVariableDescriptor::subsection`, `ContextVariableDescriptor::display_type`,
+and `EffectDescriptor::safety` remain on their concrete types and keep driving
+their specialized reports.
+
 ### `Example` — uniform example data
 
 ```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Example {
     pub invocation: &'static str,  // "upper(\"hi\")"  ·  "ctx.cpu_cores"  ·  "ensure_file(\"a.md\")"
     pub result:     &'static str,  // "\"HI\""          ·  "8"              ·  "absolute path"
@@ -102,6 +122,16 @@ Both fields are `&'static str` so descriptors remain `const`. `Example` is
 **display/error data only**. Whether and how it executes belongs to the
 subsystem (Section 2); that separation is what keeps this module free of the
 three runtimes.
+
+Examples use the same textual rendering that the relevant user-facing surface
+uses:
+
+- Expression examples compare against Darkmatter expression output rendering,
+  not `Debug` formatting.
+- Context examples compare only for shape/type consistency unless the value is a
+  fixed literal.
+- Effect examples are descriptive display examples unless explicitly paired with
+  a sandbox execution assertion.
 
 ### Accessor — one API over any catalog
 
@@ -114,10 +144,19 @@ pub fn suggest<'a, T: Described>(catalog: &'a [T], key: &str, max: usize) -> Vec
 - `suggest` — fuzzy nearest-match ranked by edit distance, matching on the
   **name portion** of a key (strips `(…)` so `uper` finds `upper(x)`).
 
+Tie-breaking is deterministic: lower edit distance first, then lower catalog
+`order`, then lexical `key`. `max == 0` returns an empty list.
+
 ### Fuzzy matching
 
 A ~30-line **in-crate Levenshtein** implementation rather than adding `strsim`,
 respecting the monorepo's dependency discipline; the need is trivial.
+
+Suggestion matching normalizes only the lookup token, not the public display
+key: trim whitespace, strip a leading `ctx.` for context-variable suggestions,
+and strip the parenthesized argument list from callable signatures. It does not
+case-fold or rewrite separators; current symbols are already lower snake_case
+and preserving that keeps suggestions predictable.
 
 ### Error-snippet formatter
 
@@ -125,9 +164,11 @@ respecting the monorepo's dependency discipline; the need is trivial.
 pub fn describe_for_error(d: &dyn Described) -> String; // plain text, no ANSI
 ```
 
-Renders `signature → description → e.g. example` as plain text. The library
-error layer stays style-free; the CLI re-styles. Identical wording across every
-surface (errors, `context` reports, narrative doc) flows from this one place.
+Renders `key → description → e.g. example` as plain text. The library error
+layer stays style-free; the CLI re-styles. Identical wording across every
+diagnostic surface flows from this one formatter. The `context` reports still
+own their table layout and may render concrete descriptor fields that are not
+part of `Described`.
 
 ---
 
@@ -170,6 +211,10 @@ The cleanest case.
   `.md` plus a known file) and their examples reference those fixtures. Any fs
   function not cheaply pinnable to a fixture is marked **display-only** (example
   shown, not executed) — an explicit, visible opt-out, never a silent gap.
+- Date-relative functions such as `is_today` remain executable by using fixed
+  non-relative examples where possible (for example, invalid-date or strict
+  parser cases). If a function's only useful example depends on wall-clock time,
+  mark it display-only and document the reason beside the descriptor.
 
 ### Side effects — anchor: sandbox engine (reuse existing)
 
@@ -177,8 +222,15 @@ The cleanest case.
   `EffectEngine` and cannot be const strings) — they are the executable side.
   Each descriptor's new `example` is the display/error side. The existing
   `verb_signature_set_equals_descriptor_signature_set` keeps verb↔descriptor
-  paired; add a check that every descriptor carries an example and that its
-  `result` text is consistent with the verb's return kind.
+  paired; add a check that every descriptor carries an example.
+- **Reader note:** the draft originally asked tests to prove that an effect
+  example's `result` text is "consistent with the verb's return kind." The
+  current `EffectDescriptor` surface has no typed return-kind field, and
+  inferring one from English descriptions would create the same prose drift this
+  feature is trying to remove. This spec therefore chooses the simpler contract:
+  every effect descriptor must have a display example, and sandbox execution
+  continues to prove method reachability. If typed effect return metadata is
+  added later, a return-shape assertion can be added then.
 - **Orphan-method allow-list** (`drift.md` step 3): an explicit
   `const INTENTIONALLY_UNCATALOGUED: &[&str]` naming `EffectEngine` methods
   deliberately outside the capability surface. **Honest caveat:** Rust cannot
@@ -198,8 +250,10 @@ variable used with `|| fallback` keeps working untouched.
 ## Section 3 — Promoted expression-semantics catalogs
 
 The literal arrays in `context.rs` (precedence, truthiness, mode table, null
-propagation) become typed Darkmatter catalogs, rendered by the CLI (Layer 1) and
-anchored to the real lexer/evaluator (Layer 2).
+propagation, unary/comparison/arithmetic summaries, and variable-access
+summaries) become typed Darkmatter catalogs, rendered by the CLI (Layer 1) and
+anchored to the real lexer/evaluator (Layer 2) wherever the behavior is
+executable.
 
 ### New catalogs in `expression/semantics.rs`
 
@@ -218,7 +272,10 @@ pub struct OperatorDescriptor {
 Plus `TRUTHINESS_DESCRIPTORS` (value-kind → falsy/truthy + example),
 `MODE_DESCRIPTORS` (`||`/`&&` meaning per parse mode), and
 `NULL_PROPAGATION_DESCRIPTORS` (rule + example such as `ctx.missing.x → null`).
-All four `impl Described`, flowing through the same accessor and renderer.
+Add descriptor catalogs for unary operator rules, comparison rules, arithmetic
+rules, and variable-access rules so `context.rs` no longer owns any parallel
+semantics prose arrays. All semantics descriptor types `impl Described`, flowing
+through the same accessor and renderer where the shape fits.
 
 ### Layer-2 anchor — the parser
 
@@ -250,7 +307,9 @@ them. Starting with assert-equal contains that risk.
 ### CLI
 
 `render_expressions_precedence`, `_truthiness`, `_mode`, `_null_propagation`
-switch from literal arrays to catalog iteration, mirroring the function table.
+and the remaining semantics sections switch from literal arrays to catalog
+iteration, mirroring the function table. The CLI may keep presentation helpers
+and section order locally; it must not keep independent semantic rows.
 
 ---
 
@@ -277,9 +336,15 @@ The accessor is built once; how much each surface honestly gains differs.
 
 - Unknown `ctx.*` stays silent-null at evaluation time (null propagation
   preserved). The did-you-mean surfaces as a **compose-time lint/diagnostic**
-  that scans `{{ }}` and `when=""` for `ctx.<name>` references absent from the
-  catalog and warns with the nearest match. Opt-in (warning stream), never a
-  hard failure.
+  that scans parsed interpolation and condition expressions for `ctx.<name>`
+  references absent from the catalog and warns with the nearest match. It must
+  not use a regex-only scan as the authoritative implementation because quoted
+  strings and code fences can contain `ctx.` text that is not an expression.
+- The diagnostic is warning-only and never changes evaluation. It should be
+  enabled on normal composition preparation paths and suppressible anywhere
+  Claudine already suppresses non-fatal warnings (`--silent` or equivalent).
+  Tests must prove `{{ "ctx.toady" }}` does not warn while `{{ ctx.toady }}`
+  does.
 
 ### Side effects — least runtime reach (stated honestly)
 
@@ -290,6 +355,13 @@ The accessor is built once; how much each surface honestly gains differs.
   runtime error-gain is promised for effects.
 
 All three use the shared `describe_for_error` formatter (Section 1).
+
+### Error formatting contract
+
+Darkmatter library errors remain plain text and carry no terminal styling.
+Claudine may restyle the appended suggestion text with `biscuit-terminal`
+components when rendering to stderr, but pipeable data and JSON-like outputs
+must not receive ANSI escapes.
 
 ---
 
@@ -303,6 +375,11 @@ generated from `EXPRESSION_FUNCTION_DESCRIPTORS` and pinned by a `cfg(test)`
 recipe (`just darkmatter regen-expr-doc`) or hidden CLI flag regenerates it.
 **This is the most cuttable component** — drop it without affecting the rest if
 coupling a prose doc to a test is unwanted.
+
+If kept, generation must be limited to clearly marked generated regions. Manual
+explanatory prose outside those regions remains hand-authored, and the test
+should compare only the generated region so normal documentation edits do not
+turn into brittle test maintenance.
 
 ### Recast drift-layer model
 
@@ -325,12 +402,13 @@ fs-function display-only examples are unexecuted by design.
 - `context/catalog.rs`, `expression/catalog.rs`, `effects/catalog.rs` — add
   `example`, `impl Described`, new anchor tests.
 - `expression/semantics.rs` *(new)* — operator/truthiness/mode/null-propagation
-  catalogs.
+  catalogs plus unary/comparison/arithmetic/variable-access semantics catalogs.
 - `expression/parser.rs` — expose precedence as `pub(crate) const` for
   assert-equal.
 - `claudine/cli/src/commands/context.rs` + `context_render.rs` — render
   semantics from catalogs; add Example column to reports.
-- Error paths: `expression/mod.rs` (evaluate); a compose-time lint for ctx typos.
+- Error paths: `expression/mod.rs` (evaluate); a parsed compose-time diagnostic
+  for ctx typos.
 
 ### Implementation phasing
 
@@ -341,7 +419,7 @@ the build green:
    Levenshtein, formatter. Pure, fully unit-tested, no consumers yet.
 2. **Adopt + anchor the three catalogs** — `impl Described`, add examples, add
    the three executable-anchor harnesses (context type-parity, expression
-   example-eval, effects example consistency + orphan allow-list).
+   example-eval, effects example presence + orphan allow-list).
 3. **Promote semantics** — new `semantics.rs` catalogs + assert-equal anchor +
    CLI rendering.
 4. **Error enrichment** — wire `evaluate` unknown/arity, the ctx-typo lint, the
@@ -352,9 +430,49 @@ the build green:
 
 ## Open questions for spec review
 
-- **Narrative-doc parity (Phase 5):** keep or cut?
-- **Parser anchor:** confirm starting with assert-equal (realization 1) rather
-  than full rewire.
+### Narrative-doc parity (Phase 5): keep or cut?
+
+The spec can ship without Phase 5 because runtime-accessible descriptor data and
+CLI diagnostics do not depend on generated prose docs.
+
+| Option | Pros | Cons |
+|--------|------|------|
+| Keep generated regions in `darkmatter-expressions.md` | Closes the fourth manual surface; gives maintainers one command to refresh tables. | Adds a doc-generation workflow and a brittle failure mode if generated-region markers drift. |
+| Cut Phase 5 entirely | Keeps the feature focused on runtime/catalog behavior; no new doc tooling. | Narrative docs can still drift from catalogs. |
+| Add snapshot-only docs tests | Detects drift without introducing a generator. | Produces failures that still require manual table repair. |
+
+**Recommendation:** keep Phase 5 only as generated regions with a `just`
+regeneration recipe. That preserves the drift-control goal while keeping manual
+docs editable.
+
+### Parser anchor: assert-equal first or full rewire?
+
+| Option | Pros | Cons |
+|--------|------|------|
+| Assert-equal first | Low-risk, shippable, proves the catalog matches parser precedence. | Two copies still exist, even though tests keep them equal. |
+| Full rewire | One literal source for precedence. | Higher parser risk; descriptor display concerns can leak into evaluator internals if not kept clean. |
+| Hybrid: private operator table feeds parser and descriptors | One internal semantic table while keeping display descriptors separate. | More refactor work than assert-equal; still needs careful API boundaries. |
+
+**Recommendation:** start with assert-equal. Escalate to the hybrid approach if
+future operator changes make the duplication painful. Avoid feeding the parser
+directly from display descriptors unless the descriptor type is deliberately
+split into semantic data plus display data.
+
+### Where should the ctx-typo diagnostic live?
+
+The draft called it a compose-time lint but did not define ownership. This is a
+real design choice because Darkmatter owns parsing/evaluation, while Claudine
+owns warning presentation.
+
+| Option | Pros | Cons |
+|--------|------|------|
+| Darkmatter prepare diagnostics, rendered by Claudine | Parser-aware, reusable by any caller, avoids regex false positives. | Requires a small public diagnostic type/API. |
+| Claudine-only scan before execution | Fast to implement in the CLI. | Risks duplicating parser behavior and warning on non-expression text. |
+| Evaluator warning side channel | Tied to actual runtime lookup. | Harder to keep silent-null semantics clean and may miss short-circuited branches. |
+
+**Recommendation:** implement this in Darkmatter's composition preparation as a
+non-fatal diagnostic list and let Claudine render it. That keeps parsing
+authority in Darkmatter and styling policy in Claudine.
 
 ## Success criteria
 
@@ -366,6 +484,7 @@ the build green:
   semantics catalogs are parser-anchored (assert-equal) and CLI-rendered.
 - Effects: every descriptor carries an example; orphan allow-list documented.
 - `evaluate` unknown-function and arity errors show did-you-mean + verified
-  example; the ctx-typo compose-time lint warns with nearest match.
+  example; the parsed ctx-typo compose-time diagnostic warns with nearest match
+  without changing silent-null evaluation semantics.
 - `drift.md` and the three topic docs updated to reflect the closed gaps.
 - Build green at every phase boundary.

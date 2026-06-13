@@ -4,7 +4,7 @@
 //! prediction* of the live (non-dry-run) path: every state's dry-run cell,
 //! its live TTY pre-prompt, and its no-TTY abort body must agree. Those three
 //! surfaces live in two crates (`claudine` for the no-TTY abort body in
-//! [`super::error`]; `claudine-cli` for the dry-run renderer and the TTY
+//! `super::error`; `claudine-cli` for the dry-run renderer and the TTY
 //! pre-prompt), so the only way to keep them from drifting is a single source
 //! of truth. That source is here.
 //!
