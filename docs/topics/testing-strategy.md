@@ -105,6 +105,8 @@ We use [`cargo-crap`](https://github.com/minikin/cargo-crap) to measure an overa
 Each "package area" in this monorepo will determine what functionality is core to their performance profile and articulate it
 in a document located at `{package-area}/docs/performance-testing.md`.
 
+- For example, see the [`worktree` package's performance testing contract](../../worktree/docs/performance-testing.md).
+
 - this document will combine prose (in body) and structured data (in the Frontmatter)
 - the body of the document should document what areas are seen as the core blocks/components/groups of functionality that should be performance tested
     - each core block should be an H2 heading in the document
