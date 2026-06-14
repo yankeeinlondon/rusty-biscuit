@@ -181,11 +181,9 @@ pub async fn fetch(
         return Err(FetchError::UnsupportedScheme(scheme.to_string()));
     }
 
-    let host = url
-        .host_str()
-        .ok_or_else(|| FetchError::PolicyDenied {
-            host: url.to_string(),
-        })?;
+    let host = url.host_str().ok_or_else(|| FetchError::PolicyDenied {
+        host: url.to_string(),
+    })?;
 
     if !policy.is_allowed(host) {
         return Err(FetchError::PolicyDenied {
@@ -255,11 +253,9 @@ pub async fn post(
         return Err(FetchError::UnsupportedScheme(scheme.to_string()));
     }
 
-    let host = url
-        .host_str()
-        .ok_or_else(|| FetchError::PolicyDenied {
-            host: url.to_string(),
-        })?;
+    let host = url.host_str().ok_or_else(|| FetchError::PolicyDenied {
+        host: url.to_string(),
+    })?;
 
     if !policy.is_allowed(host) {
         return Err(FetchError::PolicyDenied {
