@@ -1,6 +1,8 @@
 ---
-status: draft - ready for review
-reviewed: false
+status: ready for planning and implementation
+reviewed: true
+sub-spec: true
+depends-on: reaper/features/2026-06-03-inference-trait/spec.md
 ---
 
 # Unchained AI Inference Adapter
@@ -19,16 +21,17 @@ Where the Claudine adapter routes inference through an agentic CLI session, this
 adapter talks to a model provider's completion API directly. It maps the
 provider-neutral `InferenceProfile` onto `unchained-ai`'s richer
 `ModelCapability` vocabulary, resolves a concrete `ProviderModel`, and runs a
-completion (prose) or schema-constrained extraction (structured) through a
-`rig-core` client.
+completion through a `rig-core` client. Structured requests use the same
+single-turn completion path with JSON-only instructions, JSON parsing, and
+adapter-side schema validation.
 
 > **Reader note:** `unchained-ai`'s `Prompt::execute()` is currently a stub that
 > returns *"LLM execution not yet implemented"*. The provider registry, model
 > enums, rich model metadata, and `rig-core` client adaptors all exist, but no
 > working completion call does. This specification's scope therefore **includes
-> building the real direct-LLM execution path** — a reusable completion/extraction
-> surface in `unchained-ai/lib` — and then mapping the contract onto it from the
-> thin `unchained-ai/contract` crate.
+> building the real direct-LLM execution path** — a reusable completion and
+> structured-output surface in `unchained-ai/lib` — and then mapping the
+> contract onto it from the thin `unchained-ai/contract` crate.
 
 ## Scope
 
@@ -41,7 +44,11 @@ In scope:
   current `Prompt::execute()` stub (or provides an equivalent reusable function
   that `Prompt::execute()` can delegate to).
 - Mapping `InferenceProfile` (priority + reasoning effort) onto `ModelCapability`
-  and a concrete, configured `ProviderModel`.
+  and a concrete, runnable `ProviderModel`.
+- A reusable `ModelCapability` stack resolver in `unchained-ai/lib`. The enum
+  exists today, but the repo does not currently expose an ordered-stack
+  resolver that can select a runnable `ProviderModel` from the user's configured
+  providers.
 - Prose and structured output, with adapter-side JSON Schema validation as the
   contract requires.
 - Mapping `unchained-ai`/`rig-core` failures onto the stable
@@ -61,8 +68,9 @@ Out of scope:
 
 - Provide direct-LLM inference as a drop-in `Arc<dyn InferenceAdapter>` for
   deterministic consumers.
-- Build a reusable, single-turn completion/extraction surface in `unchained-ai`
-  that fills the `Prompt::execute()` gap and is consumable beyond this adapter.
+- Build a reusable, single-turn completion and structured-output surface in
+  `unchained-ai` that fills the `Prompt::execute()` gap and is consumable beyond
+  this adapter.
 - Translate the provider-neutral profile into `unchained-ai`'s
   `ModelCapability`/`ProviderModel` model, honoring it as a best-effort
   preference.
@@ -99,7 +107,7 @@ unchained-ai/
       lib.rs
       adapter.rs       # UnchainedInferenceAdapter + InferenceAdapter impl
       profile.rs       # InferenceProfile -> ModelCapability -> ProviderModel
-      structured.rs    # schema-constrained extraction + JSON Schema validation
+      structured.rs    # JSON parsing + JSON Schema validation
       error.rs         # ProviderError / rig errors -> InferenceError
 ```
 
@@ -107,8 +115,10 @@ New execution surface in `unchained-ai/lib` (exact module name per local style):
 
 ```text
 unchained-ai/lib/src/
-  execution/           # NEW: single-turn rig-core completion + extraction
+  execution/           # NEW: single-turn rig-core completion + JSON parsing
     mod.rs
+  models/
+    selection.rs       # NEW: ModelCapability ordered-stack resolver
 ```
 
 - Crate and package name: `unchained-ai-contract`, imported as
@@ -141,7 +151,7 @@ such as the Z.ai / ZenMux `client_adaptors`).
 
 ## Execution Surface (unchained-ai/lib)
 
-Build a single-turn completion/extraction function reusable by both
+Build a single-turn completion and structured-output function reusable by both
 `Prompt::execute()` and this adapter. Conceptually:
 
 ```rust
@@ -150,7 +160,7 @@ pub struct CompletionRequest {
     pub model: ProviderModel,
     pub system_prompt: Option<String>,
     pub prompt: String,
-    pub schema: Option<serde_json::Value>, // JSON Schema => structured extraction
+    pub schema: Option<serde_json::Value>, // JSON Schema => JSON-only completion
     pub parameters: ResolvedParameters,     // temperature, etc.
 }
 
@@ -166,22 +176,31 @@ pub async fn complete(request: CompletionRequest)
 - **Prose completion.** Build a `rig-core` `CompletionModel` for
   `ProviderModel::model_id()` and run a single completion with the system prompt
   and user prompt; return the text.
-- **Structured extraction.** When a schema is present, prefer `rig-core`'s
-  structured/extractor path for models whose metadata reports
-  `has_capability("structured_output")`; otherwise fall back to a
-  prompt-and-parse strategy (instruct the model to emit a single JSON value
-  matching the schema). Return the raw JSON value; **schema validation is the
-  caller's responsibility** (the contract adapter), keeping the lib surface
-  validation-engine-free.
+- **Structured completion.** When a schema is present, v1 uses a uniform
+  prompt-and-parse strategy: combine the adapter-owned system instruction, the
+  caller prompt, and the schema into a request that asks for one JSON value and
+  no prose. Parse the model text into a `serde_json::Value` and return that raw
+  value. **Schema validation is the caller's responsibility** (the contract
+  adapter), keeping the lib surface validation-engine-free. Native
+  `rig-core` extractor/JSON-mode support may be added later as an internal
+  optimization after the exact API and catalog signals are verified; it is not
+  required for this v1 adapter.
 - **Parameters.** Apply generation parameters from
   `ProviderModel::metadata().default_parameters` (`temperature`, `top_p`, …) as
   a starting point, overridden by the resolved profile (see
   [Profile Mapping](#profile-mapping)).
-- Wiring `Prompt::execute()` to delegate to this surface is in scope so the stub
-  no longer returns a fatal "not yet implemented".
+- **Synchronous `Prompt` bridge.** `Prompt::execute()` and
+  `execute_readonly()` are synchronous `Runnable` methods today, while provider
+  calls are async. Add a small blocking bridge in `unchained-ai/lib` (for
+  example `complete_blocking`) that runs the async `complete` path on a
+  dedicated current-thread runtime or worker thread. It must not call
+  `Handle::block_on` from inside an already-running async runtime, because that
+  can panic or stall the caller. `Prompt` rewiring must delegate through that
+  bridge instead of open-coding runtime behavior.
 
-This keeps `rig-core` and provider knowledge in `unchained-ai/lib`, where the
-clients already live, and leaves `unchained-ai/contract` thin.
+This keeps `rig-core`, runtime bridging, and provider knowledge in
+`unchained-ai/lib`, where the clients already live, and leaves
+`unchained-ai/contract` thin.
 
 ## Adapter Construction
 
@@ -203,7 +222,7 @@ impl UnchainedInferenceAdapter {
 ## Profile Mapping
 
 `InferenceProfile` is a best-effort preference. Translate it into
-`unchained-ai`'s vocabulary, then resolve to a configured concrete model.
+`unchained-ai`'s vocabulary, then resolve to a runnable concrete model.
 
 1. **Priority + reasoning → `ModelCapability`.** Combine the two contract
    dimensions into one capability tier:
@@ -221,24 +240,37 @@ impl UnchainedInferenceAdapter {
    `SmartUltrathink`). When no thinking variant exists for a tier, drop to the
    nearest available variant — approximation, not failure.
 
-2. **`ModelCapability` → `ProviderModel`.** `ModelCapability` tiers are ordered
-   stacks (first match wins). Resolve to the first model in the stack **whose
-   provider is configured** — i.e. the provider's `config().env_vars` are
-   present in the environment. This makes the adapter pick a usable model based
-   on the credentials the user actually has, rather than a fixed default.
+2. **`ModelCapability` → `ProviderModel`.** Add an ordered-stack resolver in
+   `unchained-ai/lib` and use it from the adapter. The resolver owns the
+   canonical stack for each `ModelCapability` and chooses the first model whose
+   provider is runnable. A provider is runnable when `Provider::is_local()` is
+   true, or at least one of `Provider::config().env_vars` is present and
+   non-empty in the injected environment view. For local providers such as
+   Ollama, selection may succeed without credentials; connection failure is
+   reported later as `Unavailable`.
+
+   The resolver must accept an injected environment/configuration view so L1
+   tests do not mutate process-global environment variables. The same resolver
+   should be reusable by `Prompt::execute()` so adapter routing and native
+   `Prompt` routing do not drift.
 
 3. **Reasoning parameters.** For the chosen model, translate `ReasoningEffort`
    into the provider's reasoning control where metadata/`supported_parameters`
    indicate one (e.g. an Anthropic thinking budget or an OpenAI reasoning-effort
    parameter). Where none exists, the effort influences only model-variant
-   choice. This is provider-specific and best-effort in v1.
+   choice. This is provider-specific and best-effort in v1. If the metadata
+   does not expose a known reasoning parameter, omit the parameter rather than
+   inventing provider-specific request fields.
 
 4. **Model override.** `with_model` pins the `ProviderModel` directly; only
    reasoning/parameters are then profile-driven.
 
-If no model in the resolved stack has a configured provider, return
-`InferenceErrorKind::Unavailable` (nothing runnable), or `Unauthorized` if a
-model was selectable but its credentials were rejected.
+If no model in the resolved stack has a runnable provider, return
+`InferenceErrorKind::Unavailable` (nothing runnable). If an explicit
+`with_model` target is selected but credentials are missing or empty, return
+`Unauthorized` because the caller requested a concrete provider/model that
+cannot be authenticated. If credentials are present but rejected by the provider,
+also return `Unauthorized`.
 
 ## Structured Output
 
@@ -246,9 +278,10 @@ model was selectable but its credentials were rejected.
 
 1. **Validate the schema** before any provider call; an invalid schema is
    `InvalidRequest`.
-2. **Execute** via the lib execution surface's structured path: native
-   structured/extractor support where the model reports it, prompt-and-parse
-   otherwise.
+2. **Execute** via the lib execution surface's prompt-and-parse structured path.
+   The adapter must pass the schema as data/instructions for JSON-only output;
+   it must not rely on model metadata such as `structured_output` as the only
+   correctness guard.
 3. **Validate** the returned JSON value against the schema using the adapter's
    bundled JSON Schema engine.
 4. On success return `InferenceData::Structured(value)`. Invalid JSON, schema
@@ -280,8 +313,9 @@ observability contract. Metadata is diagnostic only.
 |-----------|------|
 | Malformed schema, empty prompt, unparseable model override | `InvalidRequest` |
 | Requested capability/modality unsupported by every resolvable model | `Unsupported` |
-| No model in the stack has configured credentials | `Unavailable` |
-| `ProviderError::MissingApiKey` / auth rejected (401/403) | `Unauthorized` |
+| No model in the capability stack has a runnable provider | `Unavailable` |
+| Explicit model selected but credentials are missing/empty | `Unauthorized` |
+| Auth rejected by provider (401/403) | `Unauthorized` |
 | Provider returns 429 / rate limit | `RateLimited` (+ `retry_after` from headers when present) |
 | Provider 5xx / overload / network unreachable | `Unavailable` (+ `retry_after` if known) |
 | Request deadline exceeded (provider/transport reported) | `Timeout` |
@@ -309,6 +343,10 @@ Follow the repository testing tiers (`.claude/skills/rust-testing`).
 - Object-safety: store and call through `Arc<dyn InferenceAdapter>`.
 - The execution surface must accept an injected client/transport seam so its
   logic is testable without real providers.
+- Capability resolution tests must use an injected environment view and include
+  at least one credential-backed provider and one local-provider case.
+- `Prompt::execute()` / `execute_readonly()` tests must prove the synchronous
+  bridge calls the same execution surface and does not require a real provider.
 
 **`real_` tier (gated, opt-in):**
 
@@ -336,30 +374,25 @@ composition root.
 
 ## Open Questions
 
-- **Reasoning parameter coverage.** Which providers/models in the catalog expose
-  a usable reasoning/thinking parameter via metadata, and which only reflect
-  effort through model-variant choice? The mapping must degrade gracefully where
-  no control exists.
-- **Structured extraction mechanism.** Confirm the exact `rig-core` v0.31
-  structured-output/extractor API to use for the native path, versus
-  prompt-and-parse fallback, and which catalog models truthfully report
-  `structured_output`.
-- **`Prompt::execute()` coupling.** Should `Prompt::execute()` delegate to the
-  new execution surface in this same effort, or should the surface ship first
-  and `Prompt` rewiring follow? Default proposal: build the surface and rewire
-  `Prompt::execute()` to delegate, removing the fatal stub.
+None. The review resolves the original implementation gaps normatively:
+`unchained-ai/lib` must add the missing `ModelCapability` stack resolver,
+structured output uses prompt-and-parse plus adapter-side validation in v1, and
+`Prompt::execute()` delegates in this same effort through a documented
+synchronous bridge over the async execution surface.
 
 ## Success Criteria
 
 - `unchained-ai/contract` is a workspace library crate with standard area
   `justfile` coverage and updated dependency docs and skills.
-- `unchained-ai/lib` gains a working single-turn `rig-core` completion/extraction
-  surface; `Prompt::execute()` no longer returns "not yet implemented".
+- `unchained-ai/lib` gains a working single-turn `rig-core` completion and
+  structured-output surface; `Prompt::execute()` and `execute_readonly()` no
+  longer return "not yet implemented" and use the same model-resolution and
+  execution path as the adapter.
 - `UnchainedInferenceAdapter` implements `InferenceAdapter`, is object-safe, and
   is injectable as `Arc<dyn InferenceAdapter>`.
 - A prose and a structured request both succeed end-to-end against a fake
   completion seam in L1 tests, with structured output validated against a JSON
   Schema engine owned by this crate.
-- `InferenceProfile` translates into `ModelCapability`/`ProviderModel`, error
-  categories and metadata behave as specified, and `biscuit-contract` is
-  unchanged.
+- `InferenceProfile` translates into `ModelCapability`/`ProviderModel` through
+  the reusable stack resolver, error categories and metadata behave as
+  specified, and `biscuit-contract` is unchanged.
