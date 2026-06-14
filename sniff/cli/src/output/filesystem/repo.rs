@@ -703,24 +703,24 @@ pub fn render_filesystem_section(
             }
         }
 
-        let status = git
-            .status
-            .as_ref()
-            .expect("repo git-status renderer always receives status");
-        let dirty = if status.is_dirty { "dirty" } else { "clean" };
-        writeln!(
-            out,
-            "  Status: {} ({} staged, {} unstaged, {} untracked)",
-            dirty, status.staged_count, status.unstaged_count, status.untracked_count
-        )
-        .unwrap();
+        // Identity-only `GitInfo` has no computed status; skip the status line
+        // entirely rather than printing a misleading "clean" or panicking.
+        if let Some(status) = git.status.as_ref() {
+            let dirty = if status.is_dirty { "dirty" } else { "clean" };
+            writeln!(
+                out,
+                "  Status: {} ({} staged, {} unstaged, {} untracked)",
+                dirty, status.staged_count, status.unstaged_count, status.untracked_count
+            )
+            .unwrap();
 
-        // Show is_behind status (deep mode only)
-        if let Some(ref behind) = status.is_behind {
-            match behind {
-                BehindStatus::NotBehind => writeln!(out, "  Behind: no").unwrap(),
-                BehindStatus::Behind(remotes) => {
-                    writeln!(out, "  Behind: {}", remotes.join(", ")).unwrap();
+            // Show is_behind status (deep mode only)
+            if let Some(ref behind) = status.is_behind {
+                match behind {
+                    BehindStatus::NotBehind => writeln!(out, "  Behind: no").unwrap(),
+                    BehindStatus::Behind(remotes) => {
+                        writeln!(out, "  Behind: {}", remotes.join(", ")).unwrap();
+                    }
                 }
             }
         }
@@ -750,7 +750,10 @@ pub fn render_filesystem_section(
         }
 
         // Show dirty file details at verbose level 1+
-        if verbose > 0 && !status.dirty.is_empty() {
+        if verbose > 0
+            && let Some(status) = git.status.as_ref()
+            && !status.dirty.is_empty()
+        {
             writeln!(out, "  Dirty files:").unwrap();
             for dirty_file in &status.dirty {
                 writeln!(out, "    - {}", dirty_file.filepath.display()).unwrap();
@@ -768,7 +771,10 @@ pub fn render_filesystem_section(
         }
 
         // Show untracked files at verbose level 1+
-        if verbose > 0 && !status.untracked.is_empty() {
+        if verbose > 0
+            && let Some(status) = git.status.as_ref()
+            && !status.untracked.is_empty()
+        {
             writeln!(out, "  Untracked files:").unwrap();
             let show_count = 5.min(status.untracked.len());
             for untracked in status.untracked.iter().take(show_count) {

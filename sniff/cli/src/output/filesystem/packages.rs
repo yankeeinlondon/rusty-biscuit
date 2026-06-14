@@ -138,11 +138,12 @@ pub(crate) fn dirty_package_names(result: &sniff::SniffResult) -> Vec<String> {
         None => return vec![],
     };
 
-    // Collect all dirty file paths (relative to repo root)
-    let status = git
-        .status
-        .as_ref()
-        .expect("dirty package rendering always receives status");
+    // Collect all dirty file paths (relative to repo root). Identity-only
+    // `GitInfo` has no computed status, so there are no dirty packages to name.
+    let status = match git.status.as_ref() {
+        Some(s) => s,
+        None => return vec![],
+    };
     let dirty_paths: Vec<&str> = status
         .dirty
         .iter()

@@ -863,12 +863,9 @@ pub fn render_git_section(
             // Verbose: nested list with current branch + other branches
             let mut local_list = UnorderedList::empty();
 
-            let dirty = if git
-                .status
-                .as_ref()
-                .expect("git status renderer always receives status")
-                .is_dirty
-            {
+            // Identity-only `GitInfo` carries no status; render no dirty marker
+            // rather than asserting cleanliness (or panicking) on absent status.
+            let dirty = if git.status.as_ref().is_some_and(|s| s.is_dirty) {
                 "<red>+</red>"
             } else {
                 ""
@@ -1185,10 +1182,9 @@ pub(crate) fn current_package_area_is_dirty(
 
     let area_prefix = if area == "root" { "" } else { area };
 
-    let status = git
-        .status
-        .as_ref()
-        .expect("package-area dirty check always receives status");
+    // Without computed status (identity-only request) dirtiness is
+    // indeterminate, so return `None` like the other missing-data early exits.
+    let status = git.status.as_ref()?;
     let has_dirty = status
         .dirty
         .iter()
@@ -1263,10 +1259,9 @@ pub(crate) fn package_area_source_code_change_count(
 
     let area_prefix = if area == "root" { "" } else { area };
 
-    let status = git
-        .status
-        .as_ref()
-        .expect("package-area change count always receives status");
+    // Without computed status (identity-only request) the change count is
+    // indeterminate, so return `None` like the other missing-data early exits.
+    let status = git.status.as_ref()?;
 
     let count = status
         .dirty
@@ -1405,7 +1400,7 @@ mod tests {
             org: None,
             repo: None,
             current_branch: Some("main".to_string()),
-            head_id: Some("1234567890abcdef".to_string()),
+            head_id: None,
             branches: vec![],
             in_worktree: false,
             base_repo_root: None,
@@ -2569,6 +2564,56 @@ mod tests {
                 filesystem: Some(filesystem),
                 performance: None,
             }
+        }
+
+        /// Build a `SniffResult` whose `GitInfo` is identity-only: `status`
+        /// is `None` (as produced by `GitRequest::identity()`), mirroring a
+        /// valid library state the CLI helpers must tolerate without panicking.
+        fn build_identity_only_result(repo: RepoInfo) -> SniffResult {
+            let mut git = make_git_info(vec![]);
+            git.repo_root = repo.root.clone();
+            git.status = None;
+            git.head_id = Some("1234567890abcdef".to_string());
+            let filesystem = FilesystemInfo {
+                repo: Some(repo),
+                git: Some(git),
+                ..Default::default()
+            };
+            SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: Some(filesystem),
+                performance: None,
+            }
+        }
+
+        #[test]
+        fn identity_only_git_info_yields_indeterminate_not_panic() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages);
+            let result = build_identity_only_result(repo);
+            let area_dir = PathBuf::from("/repo/area-a/alpha");
+
+            // Selection helpers report "indeterminate" (None / empty) rather
+            // than silently claiming clean — and never panic on absent status.
+            assert_eq!(
+                current_package_area_is_dirty(&result, Some(&area_dir)),
+                None
+            );
+            assert_eq!(
+                package_area_source_code_change_count(&result, Some(&area_dir)),
+                None
+            );
+
+            let fs = result.filesystem.as_ref().unwrap();
+            let git = fs.git.as_ref().unwrap();
+            assert!(super::packages::dirty_package_names(&result).is_empty());
+
+            // Status-oriented renderers must produce output without panicking.
+            let _ = render_git_section(git, 10, 1, false, None, None);
+            let _ = super::repo::render_filesystem_section(fs, 1, Some(&git.repo_root), false);
         }
 
         #[test]
