@@ -5,6 +5,8 @@
 //! potentially secret-bearing: it is logged through `tracing` only and never
 //! placed in [`InferenceError::message`].
 
+use std::time::Duration;
+
 use biscuit_contract::inference::{InferenceError, InferenceErrorKind};
 use unchained_ai::rigging::providers::provider_errors::ProviderError;
 
@@ -53,6 +55,20 @@ pub(crate) fn classify_provider_error(
         ProviderError::RateLimitExceeded { provider } => {
             tracing::warn!(provider, "provider rate limit exceeded");
             inference_error(InferenceErrorKind::RateLimited, "provider rate-limited the request")
+        }
+        ProviderError::Unsupported { provider, ref reason } => {
+            tracing::warn!(provider, reason, "provider reported the operation as unsupported");
+            inference_error(
+                InferenceErrorKind::Unsupported,
+                format!("provider {provider} does not support the requested operation"),
+            )
+        }
+        ProviderError::StructuredParse { ref reason } => {
+            tracing::debug!(reason, "structured response could not be parsed");
+            inference_error(
+                InferenceErrorKind::InvalidResponse,
+                "provider did not return a single JSON value for a structured request",
+            )
         }
         ProviderError::Timeout { provider } => inference_error(
             InferenceErrorKind::Timeout,
@@ -121,7 +137,8 @@ pub(crate) fn classify_provider_error(
 }
 
 fn classify_http_error(error: &impl std::fmt::Display) -> InferenceError {
-    let haystack = error.to_string().to_ascii_lowercase();
+    let rendered = error.to_string();
+    let haystack = rendered.to_ascii_lowercase();
 
     if haystack.contains("timeout") || haystack.contains("timed out") {
         return inference_error(InferenceErrorKind::Timeout, "provider request timed out");
@@ -132,9 +149,12 @@ fn classify_http_error(error: &impl std::fmt::Display) -> InferenceError {
         || haystack.contains("unreachable")
     {
         tracing::warn!(error = %error, "provider network request failed");
-        return inference_error(
-            InferenceErrorKind::Unavailable,
-            "provider is temporarily unavailable",
+        return with_optional_retry_after(
+            inference_error(
+                InferenceErrorKind::Unavailable,
+                "provider is temporarily unavailable",
+            ),
+            &haystack,
         );
     }
 
@@ -151,7 +171,10 @@ fn classify_execution_failed(provider: String, reason: &str) -> InferenceError {
         || haystack.contains("throttl")
         || haystack.contains("quota")
     {
-        return inference_error(InferenceErrorKind::RateLimited, "provider rate-limited the request");
+        return with_optional_retry_after(
+            inference_error(InferenceErrorKind::RateLimited, "provider rate-limited the request"),
+            &haystack,
+        );
     }
 
     if haystack.contains("unauthor")
@@ -179,14 +202,53 @@ fn classify_execution_failed(provider: String, reason: &str) -> InferenceError {
         || haystack.contains("504")
         || haystack.contains("internal server error")
     {
-        return inference_error(
-            InferenceErrorKind::Unavailable,
-            "provider is temporarily unavailable",
+        return with_optional_retry_after(
+            inference_error(
+                InferenceErrorKind::Unavailable,
+                "provider is temporarily unavailable",
+            ),
+            &haystack,
         );
     }
 
     tracing::warn!(provider, reason, "provider execution failed");
     inference_error(InferenceErrorKind::Provider, "provider request failed")
+}
+
+/// Attaches a `retry_after` hint to `error` when `haystack` (already
+/// lowercased) carries a provider-supplied retry delay in whole seconds.
+///
+/// The execution layer flattens provider responses to opaque strings, so the
+/// only place a `Retry-After` header survives is the rendered error text.
+/// Recognized forms: `retry-after: 30`, `retry after 30`, and `try again in 30
+/// seconds`. A missing or unparseable hint leaves the error unchanged.
+fn with_optional_retry_after(error: InferenceError, haystack: &str) -> InferenceError {
+    match parse_retry_after_seconds(haystack) {
+        Some(seconds) => error.with_retry_after(Duration::from_secs(seconds)),
+        None => error,
+    }
+}
+
+fn parse_retry_after_seconds(haystack: &str) -> Option<u64> {
+    const MARKERS: &[&str] = &["retry-after", "retry after", "try again in"];
+
+    for marker in MARKERS {
+        if let Some(index) = haystack.find(marker) {
+            let tail = &haystack[index + marker.len()..];
+            // Skip separators (`:`, whitespace) and take the leading run of
+            // digits as the delay in seconds.
+            let digits: String = tail
+                .trim_start_matches([':', ' ', '\t'])
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            if let Ok(seconds) = digits.parse::<u64>() {
+                return Some(seconds);
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -343,5 +405,67 @@ mod tests {
             true,
         );
         assert_eq!(err.kind, InferenceErrorKind::InvalidRequest);
+    }
+
+    #[test]
+    fn unsupported_operation_is_unsupported() {
+        let err = classify_provider_error(
+            ProviderError::Unsupported {
+                provider: "HuggingFace".to_string(),
+                reason: "text completion is not supported".to_string(),
+            },
+            true,
+        );
+        assert_eq!(err.kind, InferenceErrorKind::Unsupported);
+    }
+
+    #[test]
+    fn structured_parse_failure_is_invalid_response() {
+        let err = classify_provider_error(
+            ProviderError::StructuredParse {
+                reason: "output was not a single JSON value".to_string(),
+            },
+            true,
+        );
+        assert_eq!(err.kind, InferenceErrorKind::InvalidResponse);
+    }
+
+    #[test]
+    fn rate_limit_text_with_retry_after_populates_duration() {
+        let err = classify_provider_error(
+            ProviderError::ExecutionFailed {
+                provider: "openai".to_string(),
+                reason: "429 Too Many Requests; Retry-After: 30".to_string(),
+            },
+            true,
+        );
+        assert_eq!(err.kind, InferenceErrorKind::RateLimited);
+        assert_eq!(err.retry_after, Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn unavailable_text_with_try_again_populates_retry_after() {
+        let err = classify_provider_error(
+            ProviderError::ExecutionFailed {
+                provider: "anthropic".to_string(),
+                reason: "503 overloaded, try again in 12 seconds".to_string(),
+            },
+            true,
+        );
+        assert_eq!(err.kind, InferenceErrorKind::Unavailable);
+        assert_eq!(err.retry_after, Some(Duration::from_secs(12)));
+    }
+
+    #[test]
+    fn rate_limit_without_retry_hint_leaves_retry_after_unset() {
+        let err = classify_provider_error(
+            ProviderError::ExecutionFailed {
+                provider: "openai".to_string(),
+                reason: "quota exceeded for this billing period".to_string(),
+            },
+            true,
+        );
+        assert_eq!(err.kind, InferenceErrorKind::RateLimited);
+        assert_eq!(err.retry_after, None);
     }
 }

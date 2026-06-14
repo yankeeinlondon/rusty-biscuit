@@ -43,9 +43,16 @@ const REAL_PROVIDERS: &[Provider] = &[
 ];
 
 /// Whether the real tier is enabled at all (the opt-in env gate).
-fn real_enabled() -> bool {
+///
+/// `test_name` is only used to make the skip line unambiguous in cargo output,
+/// where a skipped real test otherwise prints the same `... ok` as one that
+/// genuinely exercised a provider.
+fn real_enabled(test_name: &str) -> bool {
     if std::env::var("UNCHAINED_AI_CONTRACT_REAL").as_deref() != Ok("1") {
-        eprintln!("skipping real_ provider tests (set UNCHAINED_AI_CONTRACT_REAL=1 to run)");
+        eprintln!(
+            "SKIP[real-provider] {test_name}: NO PROVIDER EXERCISED \
+(set UNCHAINED_AI_CONTRACT_REAL=1 to enable the real tier)"
+        );
         return false;
     }
     true
@@ -108,13 +115,16 @@ fn default_model_for(provider: Provider) -> ProviderModel {
 
 #[tokio::test]
 async fn real_prose_request_completes_end_to_end() {
-    if !real_enabled() {
+    if !real_enabled("real_prose_request_completes_end_to_end") {
         return;
     }
 
     let providers = authenticated_providers();
     if providers.is_empty() {
-        eprintln!("no provider credentials found; skipping real prose test");
+        eprintln!(
+            "SKIP[real-provider] real_prose_request_completes_end_to_end: \
+NO PROVIDER EXERCISED (UNCHAINED_AI_CONTRACT_REAL=1 set, but no provider credentials present)"
+        );
         return;
     }
 
@@ -148,13 +158,16 @@ async fn real_prose_request_completes_end_to_end() {
 
 #[tokio::test]
 async fn real_structured_request_validates_against_schema() {
-    if !real_enabled() {
+    if !real_enabled("real_structured_request_validates_against_schema") {
         return;
     }
 
     let providers = authenticated_providers();
     if providers.is_empty() {
-        eprintln!("no provider credentials found; skipping real structured test");
+        eprintln!(
+            "SKIP[real-provider] real_structured_request_validates_against_schema: \
+NO PROVIDER EXERCISED (UNCHAINED_AI_CONTRACT_REAL=1 set, but no provider credentials present)"
+        );
         return;
     }
 

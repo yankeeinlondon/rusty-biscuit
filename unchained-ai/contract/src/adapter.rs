@@ -107,15 +107,18 @@ impl InferenceAdapter for UnchainedInferenceAdapter {
 
         let explicit_model = self.pinned_model.is_some();
 
-        // Validate the schema up front and augment the prompt for structured
-        // requests; an invalid schema fails before any backend is invoked.
-        let validator = match &request.output {
-            InferenceOutput::Structured { schema } => Some(structured::compile_schema(schema)?),
-            InferenceOutput::Prose => None,
-        };
-        let prompt = match &request.output {
-            InferenceOutput::Structured { schema } => structured::augment_prompt(&request.prompt, schema),
-            InferenceOutput::Prose => request.prompt.clone(),
+        // Validate the schema up front so an invalid schema fails as
+        // `InvalidRequest` before any backend is invoked. The schema is then
+        // handed to the shared `unchained-ai` structured execution surface,
+        // which owns prompt augmentation and JSON extraction; this adapter only
+        // re-validates the extracted value against the same schema below. This
+        // keeps the adapter and the native `Prompt` structured path on one
+        // surface rather than two drifting copies.
+        let (validator, schema) = match &request.output {
+            InferenceOutput::Structured { schema } => {
+                (Some(structured::compile_schema(schema)?), Some(schema.clone()))
+            }
+            InferenceOutput::Prose => (None, None),
         };
 
         let model = if let Some(pinned) = &self.pinned_model {
@@ -144,8 +147,8 @@ impl InferenceAdapter for UnchainedInferenceAdapter {
         let completion_request = CompletionRequest {
             model,
             system_prompt: None,
-            prompt,
-            schema: None,
+            prompt: request.prompt.clone(),
+            schema,
             parameters: Some(parameters),
         };
 
@@ -161,25 +164,11 @@ impl InferenceAdapter for UnchainedInferenceAdapter {
             agent: None,
         };
 
-        match (&request.output,
-            output) {
+        match (&request.output, output) {
             (InferenceOutput::Prose, CompletionOutput::Text(text)) => Ok(InferenceResponse {
                 data: InferenceData::Prose(text),
                 metadata,
             }),
-            (InferenceOutput::Prose, CompletionOutput::Structured(_)) => Err(inference_error(
-                InferenceErrorKind::InvalidResponse,
-                "expected prose but received structured output",
-            )),
-            (InferenceOutput::Structured { .. }, CompletionOutput::Text(text)) => {
-                let value = structured::extract_json(&text)?;
-                let validator = validator.expect("validator compiled for structured request");
-                structured::validate_instance(&validator, &value)?;
-                Ok(InferenceResponse {
-                    data: InferenceData::Structured(value),
-                    metadata,
-                })
-            }
             (InferenceOutput::Structured { .. }, CompletionOutput::Structured(value)) => {
                 let validator = validator.expect("validator compiled for structured request");
                 structured::validate_instance(&validator, &value)?;
@@ -187,6 +176,17 @@ impl InferenceAdapter for UnchainedInferenceAdapter {
                     data: InferenceData::Structured(value),
                     metadata,
                 })
+            }
+            // The execution surface returns `Structured` exactly when a schema
+            // was supplied and `Text` otherwise, so request shape and response
+            // variant always agree. A mismatch means the surface broke that
+            // contract; report it rather than silently coercing.
+            (InferenceOutput::Prose, CompletionOutput::Structured(_))
+            | (InferenceOutput::Structured { .. }, CompletionOutput::Text(_)) => {
+                Err(inference_error(
+                    InferenceErrorKind::InvalidResponse,
+                    "execution surface returned a response variant that did not match the request",
+                ))
             }
         }
     }
@@ -202,10 +202,82 @@ mod tests {
     use unchained_ai::models::selection::HashMapEnvView;
     use unchained_ai::rigging::providers::models::openai::ProviderModelOpenAi;
 
+    use unchained_ai::execution::BackendRequest;
+    use unchained_ai::rigging::providers::models::anthropic::ProviderModelAnthropic;
+    use unchained_ai::rigging::providers::provider_errors::ProviderError;
+
     fn fake_backend_factory(
         backend: Arc<dyn CompletionBackend>,
     ) -> Arc<BackendFactory> {
         Arc::new(move |_model: &ProviderModel| Ok(backend.clone()))
+    }
+
+    /// Backend that records the [`BackendRequest`] it receives and replies with
+    /// a fixed body, so tests can assert what the adapter actually handed to the
+    /// shared execution surface.
+    #[derive(Clone, Default)]
+    struct RecordingBackend {
+        last: Arc<std::sync::Mutex<Option<BackendRequest>>>,
+        reply: String,
+    }
+
+    impl RecordingBackend {
+        fn new(reply: impl Into<String>) -> Self {
+            Self {
+                last: Arc::new(std::sync::Mutex::new(None)),
+                reply: reply.into(),
+            }
+        }
+
+        fn recorded(&self) -> BackendRequest {
+            self.last.lock().unwrap().clone().expect("request recorded")
+        }
+    }
+
+    #[async_trait]
+    impl CompletionBackend for RecordingBackend {
+        async fn complete_text(&self, request: BackendRequest) -> Result<String, ProviderError> {
+            *self.last.lock().unwrap() = Some(request);
+            Ok(self.reply.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn structured_request_flows_through_lib_structured_path() {
+        // A structured request must let the shared execution surface augment the
+        // prompt (rather than the adapter pre-augmenting and passing schema:
+        // None). Proven by the lib's schema instruction appearing in the prompt
+        // the backend received.
+        let backend = Arc::new(RecordingBackend::new(r#"{"answer": 42}"#));
+        let adapter = UnchainedInferenceAdapter::new()
+            .with_model(ProviderModel::Anthropic(
+                ProviderModelAnthropic::Claude__Sonnet__4__5__20250929,
+            ))
+            .with_backend_factory(fake_backend_factory(backend.clone()));
+        let request = InferenceRequest {
+            prompt: "What is the answer?".to_string(),
+            output: InferenceOutput::Structured {
+                schema: serde_json::json!({
+                    "type": "object",
+                    "properties": { "answer": { "type": "integer" } },
+                    "required": ["answer"]
+                }),
+            },
+            profile: InferenceProfile::default(),
+        };
+
+        let response = adapter.infer(request).await.expect("structured should succeed");
+
+        let recorded = backend.recorded();
+        assert!(
+            recorded.user_prompt.contains("conforms to the following schema"),
+            "expected the lib structured augmentation in the prompt, got: {}",
+            recorded.user_prompt
+        );
+        match response.data {
+            InferenceData::Structured(value) => assert_eq!(value["answer"], 42),
+            InferenceData::Prose(_) => panic!("expected structured data"),
+        }
     }
 
     fn test_adapter(backend: Arc<dyn CompletionBackend>) -> UnchainedInferenceAdapter {

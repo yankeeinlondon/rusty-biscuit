@@ -122,6 +122,60 @@ mod tests {
     use super::*;
     use unchained_ai::models::selection::HashMapEnvView;
     use unchained_ai::rigging::providers::Provider;
+    use unchained_ai::rigging::providers::models::{
+        anthropic::ProviderModelAnthropic, openai::ProviderModelOpenAi,
+    };
+
+    /// The spec-mandated behavior matrix: every `InferencePriority` ×
+    /// `ReasoningEffort` pair maps to a fixed `ModelCapability` and, under an
+    /// environment where both OpenAI and Anthropic credentials are present,
+    /// resolves to a fixed first-choice `ProviderModel`. Both axes are pinned so
+    /// a silent change to either the capability mapping or a resolver stack's
+    /// head surfaces here.
+    #[test]
+    fn priority_reasoning_matrix_resolves_expected_capability_and_model() {
+        use InferencePriority::{Balanced, Cost, Latency, Quality};
+        use ReasoningEffort::{High, Low, Medium, None};
+
+        let openai = |m| ProviderModel::OpenAi(m);
+        let anthropic = |m| ProviderModel::Anthropic(m);
+
+        let matrix: [(InferencePriority, ReasoningEffort, ModelCapability, ProviderModel); 16] = [
+            (Cost, None, ModelCapability::NormalCheap, openai(ProviderModelOpenAi::Gpt__3_5__Turbo)),
+            (Cost, Low, ModelCapability::NormalThinkingCheap, openai(ProviderModelOpenAi::O3__Mini)),
+            (Cost, Medium, ModelCapability::NormalThinkingCheap, openai(ProviderModelOpenAi::O3__Mini)),
+            (Cost, High, ModelCapability::NormalCheapUltrathink, openai(ProviderModelOpenAi::O3__Mini)),
+            (Latency, None, ModelCapability::Fast, openai(ProviderModelOpenAi::Gpt__5_2)),
+            (Latency, Low, ModelCapability::Fast, openai(ProviderModelOpenAi::Gpt__5_2)),
+            (Latency, Medium, ModelCapability::Fast, openai(ProviderModelOpenAi::Gpt__5_2)),
+            (Latency, High, ModelCapability::Fast, openai(ProviderModelOpenAi::Gpt__5_2)),
+            (Quality, None, ModelCapability::Smart, anthropic(ProviderModelAnthropic::Claude__Opus__4__5__20251101)),
+            (Quality, Low, ModelCapability::SmartCheapThink, openai(ProviderModelOpenAi::O3__Mini)),
+            (Quality, Medium, ModelCapability::SmartThink, openai(ProviderModelOpenAi::O3)),
+            (Quality, High, ModelCapability::SmartUltrathink, openai(ProviderModelOpenAi::O3)),
+            (Balanced, None, ModelCapability::Normal, anthropic(ProviderModelAnthropic::Claude__Sonnet__4__5__20250929)),
+            (Balanced, Low, ModelCapability::NormalThinking, openai(ProviderModelOpenAi::O3__Mini)),
+            (Balanced, Medium, ModelCapability::NormalThinking, openai(ProviderModelOpenAi::O3__Mini)),
+            (Balanced, High, ModelCapability::NormalUltrathink, openai(ProviderModelOpenAi::O3)),
+        ];
+
+        let env = HashMapEnvView::new([
+            ("OPENAI_API_KEY", "sk-test"),
+            ("ANTHROPIC_API_KEY", "sk-test"),
+        ]);
+
+        for (priority, reasoning, expected_capability, expected_model) in matrix {
+            let profile = InferenceProfile { priority, reasoning };
+            assert_eq!(
+                profile_to_capability(profile),
+                expected_capability,
+                "capability for {priority:?}/{reasoning:?}"
+            );
+            let model = resolve_profile_model(profile, &env)
+                .unwrap_or_else(|err| panic!("{priority:?}/{reasoning:?} resolves: {err}"));
+            assert_eq!(model, expected_model, "model for {priority:?}/{reasoning:?}");
+        }
+    }
 
     #[test]
     fn cost_without_reasoning_maps_to_normal_cheap() {
