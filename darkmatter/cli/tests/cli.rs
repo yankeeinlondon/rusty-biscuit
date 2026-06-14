@@ -201,12 +201,17 @@ fn test_output_markdown_plus_renders_disclosure_as_html_details() {
 
 #[test]
 fn test_output_json_alias_ast() {
+    // `--output ast` serializes the render-tree `Document` (`md.as_document()`),
+    // whose node discriminant is `kind` (not `type`); `root` is the top-level
+    // document node.
     md_cmd()
         .args(["--output", "ast", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"type\""));
+        .stdout(predicate::str::contains("\"root\""))
+        .stdout(predicate::str::contains("\"kind\""))
+        .stdout(predicate::str::contains("\"heading\""));
 }
 
 #[test]

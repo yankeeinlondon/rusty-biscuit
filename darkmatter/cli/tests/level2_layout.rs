@@ -1179,31 +1179,16 @@ fn level2_code_block_clears_inherited_dim_before_theme_colors() {
     );
 }
 
-/// #0 mirror — In a light terminal the code panel must invert to a *dark* theme.
-#[test]
-#[serial(level2_terminal)]
-fn level2_code_block_inverts_to_dark_in_light_terminal() {
-    let Some((frame, _)) = run_md_env(
-        CODE_DOC,
-        "--code-theme github --max-width 60",
-        &[("COLORFGBG", "0;15")], // bg index 15 => light terminal
-    ) else {
-        return;
-    };
-
-    let code_luma = max_bg_luma_on_line(&frame.raw, "rust").unwrap_or_else(|| {
-        panic!(
-            "no truecolor background found on the code line. raw:\n{}",
-            frame.raw
-        )
-    });
-    assert!(
-        code_luma < 120.0,
-        "code panel should be DARK (low luma) in a light terminal, got luma {code_luma:.0}. \
-         plain:\n{}",
-        frame.plain
-    );
-}
+// #0 mirror — "light terminal -> dark code panel" is not asserted here. This
+// WezTerm harness cannot stage a light terminal: it answers the OSC-11
+// background query (dark), which the single-source color-mode resolver treats
+// as authoritative, so `COLORFGBG` can no longer force a light page. The
+// inversion in this direction is covered where a light surface is real:
+//   - level2_schema_about_light_terminal_uses_dark_code_theme (L2, tmux: OSC-11
+//     unanswered, so COLORFGBG=0;15 is honored)
+//   - i7_code_block_inverts_theme_against_light_terminal (L1, sets the terminal
+//     color mode directly)
+//   - html_code_block_inverts_for_light_page (HTML)
 
 /// #1/#2 — With left+right margins the code panel must stay within the content
 /// rectangle: no rendered line exceeds the content width, and the right-margin
@@ -2514,13 +2499,20 @@ fn level2_style_page_code_theme_changes_terminal_rendering() {
 /// to `dracula` and CLI passing `--code-theme nord`, the rendered output must
 /// use the nord theme — its panel background and at least one of its signature
 /// syntax foregrounds — and must not use the dracula panel background.
+///
+/// Pins `--code-block dark` so each pair resolves to its own (distinct) dark
+/// theme. Under the default `inverse` mode on a dark terminal both nord and
+/// dracula would resolve to their light theme — and they share the same one
+/// (OneHalfLight) — collapsing the panel backgrounds and erasing the
+/// discriminator this test relies on.
 #[test]
 #[serial(level2_terminal)]
 fn level2_cli_code_theme_overrides_style_page_code_theme() {
     let doc_with_fm = "---\nstyle:\n  page:\n    code:\n      theme: dracula\n---\n\n\
         ```rust\nfn _cli_override_marker() { let x = 1; }\n```\n";
 
-    let Some((with_fm, _)) = run_md(doc_with_fm, "--code-theme nord --max-width 60") else {
+    let Some((with_fm, _)) = run_md(doc_with_fm, "--code-theme nord --code-block dark --max-width 60")
+    else {
         return;
     };
 

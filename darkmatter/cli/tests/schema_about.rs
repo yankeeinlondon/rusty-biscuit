@@ -10,18 +10,26 @@ fn md_cmd() -> assert_cmd::Command {
 
 #[test]
 fn schema_about_prints_simplified_schema_reference() {
-    md_cmd()
-        .args(["schema", "about"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("SimplifiedSchema"))
-        .stdout(predicate::str::contains("Schema Shapes"))
-        .stdout(predicate::str::contains("Type System"))
-        .stdout(predicate::str::contains("Constraint Vocabulary"))
-        .stdout(predicate::str::contains("use --verbose to see additional details"))
-        .stdout(predicate::str::contains("Nested Objects").not())
-        .stdout(predicate::str::contains("Compose-time Coercion").not())
-        .stdout(predicate::str::contains("Validation Notes").not());
+    let output = md_cmd().args(["schema", "about"]).output().expect("run md schema about");
+    assert!(output.status.success(), "schema about should succeed");
+    // Strip ANSI: the `--verbose` hint styles the flag token inline, so the
+    // phrase is only contiguous after color codes are removed.
+    let stdout = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+    for needle in [
+        "SimplifiedSchema",
+        "Schema Shapes",
+        "Type System",
+        "Constraint Vocabulary",
+        "use --verbose to see additional details",
+    ] {
+        assert!(stdout.contains(needle), "schema about missing `{needle}`");
+    }
+    for absent in ["Nested Objects", "Compose-time Coercion", "Validation Notes"] {
+        assert!(
+            !stdout.contains(absent),
+            "schema about should not show `{absent}` without --verbose"
+        );
+    }
 }
 
 #[test]
@@ -92,8 +100,9 @@ fn schema_about_is_documentation_only() {
     assert!(output_a.status.success(), "first invocation should succeed");
     assert!(output_b.status.success(), "second invocation should succeed");
 
-    let a = String::from_utf8_lossy(&output_a.stdout);
-    let b = String::from_utf8_lossy(&output_b.stdout);
+    // Strip ANSI: the `--verbose` hint styles the flag token inline.
+    let a = strip_ansi_codes(&String::from_utf8_lossy(&output_a.stdout));
+    let b = strip_ansi_codes(&String::from_utf8_lossy(&output_b.stdout));
     for needle in [
         "SimplifiedSchema",
         "Type System",
