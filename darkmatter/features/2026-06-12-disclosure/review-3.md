@@ -1,14 +1,46 @@
 ---
-ready: false
+ready: true
 agent: codex
 model: ""
 ---
 
 # Review: Disclosure Blocks
 
+## Resolution
+
+Both findings are addressed.
+
+1. **Dim + italic body** — already fixed in commit `367a85041`. The Level 1 test
+   `terminal_target_renders_summary_and_dim_italic_body` and the Level 2
+   `level2_disclosure_body_renders_as_dim_italic_block_quote` both pass.
+
+2. **Disclosure layout/color style** — the renderer was never the problem: the
+   generic terminal `render()` path already reads `node.attrs.layout`/`style` and
+   applies width, max-width, alignment, and color around any node, disclosures
+   included. The real defect was upstream in the fold:
+   `split_disclosure_directives` (`darkmatter/lib/src/markdown/render_tree/fold.rs`)
+   split the opener at the bare `::disclosure` keyword, stranding inline
+   `key=value` style tokens in a following text event where they were mistaken
+   for summary content (`parse_disclosure_opener_style` saw an empty tail, so the
+   node's `style` was `None`). The fix keeps the remainder of the opener line
+   attached to the directive event so the existing opener handler parses the
+   inline style. Frontmatter `style.disclosure.*` already lowered and rendered
+   correctly through the CLI's `apply_disclosure_style` + `apply_color_style`
+   sequence.
+
+   New regression coverage:
+   - Level 1 (`darkmatter/lib/tests/disclosure_render_targets.rs`):
+     `inline_opener_style_is_parsed_off_the_summary` (parse),
+     `terminal_target_honors_inline_opener_style` (terminal color + alignment +
+     max-width wrap), and `terminal_target_honors_frontmatter_disclosure_style`
+     (frontmatter color + max-width wrap).
+   - Level 2 (`darkmatter/cli/tests/level2_layout.rs`):
+     `level2_disclosure_honors_inline_opener_color_and_width` (real-terminal
+     truecolor + width wrapping).
+
 ## Findings
 
-### High: Terminal disclosure body still does not emit the required dim + italic styling
+### High (RESOLVED): Terminal disclosure body still does not emit the required dim + italic styling
 
 The spec requires terminal disclosure output to render the body as a block quote whose text is dim and italic. The current terminal renderer builds a dim+italic style in `biscuit-terminal/lib/src/render_tree/render.rs:698`, but the focused Level 1 test still fails: `darkmatter/lib/tests/disclosure_render_targets.rs:121` expects SGR 2 and `:122` expects SGR 3, and the actual output is only:
 
@@ -28,7 +60,7 @@ cargo test -p darkmatter --test disclosure_render_targets --color=never
 
 Verification level present: Level 1 failing. The requirement is also user-observable terminal styling, so Level 2 is the right production-confidence tier after the raw-output bug is fixed. A Level 2 test exists in `darkmatter/cli/tests/level2_layout.rs:2857`, but production readiness cannot be claimed while the direct render-target regression test fails.
 
-### High: Terminal disclosure layout/color style is parsed but not rendered
+### High (RESOLVED): Terminal disclosure layout/color style is parsed but not rendered
 
 The spec requires `style.disclosure.width`, `style.disclosure.max-width`, `style.disclosure.alignment`, `style.disclosure.color`, and `style.disclosure.bg-color` to parse, lower through `ComponentPolicy`, and render visibly where supported; it also explicitly requires terminal layout overrides to be honored. The implementation merges frontmatter and opener-level disclosure style into the disclosure node attributes in `darkmatter/lib/src/markdown/render_tree/build_context.rs:267`, setting layout at `:290` and colors at `:303`.
 
@@ -45,4 +77,7 @@ Verification level present: mostly Level 1 parser/apply coverage. The tests prov
 
 ## Production Readiness
 
-Not ready for production. The terminal target still fails a required render-target test, and disclosure-specific terminal style policy is not wired into rendering.
+Ready for production. The terminal target emits the required dim + italic body
+styling, and disclosure-specific layout/color style — both inline opener tokens
+and `style.disclosure.*` frontmatter — parses and renders, covered by new Level 1
+render-output regressions and a Level 2 real-terminal capture.
