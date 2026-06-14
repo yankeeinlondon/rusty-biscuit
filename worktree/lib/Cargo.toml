@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 
+[lib]
+name = "worktree"
+path = "src/lib.rs"
+# Disable the default bench harness so `cargo bench` only runs Criterion targets.
+bench = false
+
 [dependencies]
 dirs = "6"
 serde = { version = "1.0", features = ["derive"] }
@@ -18,3 +24,8 @@ count-git = []
 [dev-dependencies]
 serial_test = "3"
 tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "list_status"
+harness = false

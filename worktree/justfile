@@ -115,9 +115,17 @@ doctest *args="":
     @just _doctest {{ LIBRARY }} {{ args }}
     @just _doctest {{ CLI }} {{ args }}
 
-# Not applicable: worktree has no Criterion benches yet.
-bench:
-    @echo "bench: not applicable for worktree (no Criterion targets yet)"
+# Criterion benches for worktree gather performance.
+bench *args="":
+    @just _bench {{ LIBRARY }} {{ args }}
+
+# Save the current bench run as this host's baseline (run before a change).
+bench-save *args="":
+    @just _bench_save {{ LIBRARY }} {{ args }}
+
+# Compare the current bench run against this host's saved baseline.
+bench-compare *args="":
+    @just _bench_compare {{ LIBRARY }} {{ args }}
 
 # Not applicable: worktree has no cargo-fuzz targets.
 fuzz:
