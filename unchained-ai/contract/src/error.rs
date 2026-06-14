@@ -195,12 +195,20 @@ fn classify_execution_failed(provider: String, reason: &str) -> InferenceError {
         return inference_error(InferenceErrorKind::Timeout, "provider request timed out");
     }
 
+    // Local providers (e.g. Ollama) resolve without credentials, so a profile
+    // request can target a provider with nothing listening. The rig backend
+    // flattens that transport failure into this opaque reason string, so the
+    // network wording must classify here as well as in `classify_http_error`.
     if haystack.contains("overload")
         || haystack.contains("unavailable")
         || haystack.contains("502")
         || haystack.contains("503")
         || haystack.contains("504")
         || haystack.contains("internal server error")
+        || haystack.contains("connect")
+        || haystack.contains("dns")
+        || haystack.contains("network")
+        || haystack.contains("unreachable")
     {
         return with_optional_retry_after(
             inference_error(
@@ -368,6 +376,32 @@ mod tests {
                 reason: "503 Service Unavailable".to_string(),
             },
             true,
+        );
+        assert_eq!(err.kind, InferenceErrorKind::Unavailable);
+    }
+
+    #[test]
+    fn execution_failed_with_connection_refused_text_is_unavailable() {
+        let err = classify_provider_error(
+            ProviderError::ExecutionFailed {
+                provider: "LLM".to_string(),
+                reason: "error sending request: tcp connect error: connection refused (os error 61)"
+                    .to_string(),
+            },
+            false,
+        );
+        assert_eq!(err.kind, InferenceErrorKind::Unavailable);
+    }
+
+    #[test]
+    fn execution_failed_with_dns_failure_text_is_unavailable() {
+        let err = classify_provider_error(
+            ProviderError::ExecutionFailed {
+                provider: "LLM".to_string(),
+                reason: "dns error: failed to lookup address information: nodename nor servname provided"
+                    .to_string(),
+            },
+            false,
         );
         assert_eq!(err.kind, InferenceErrorKind::Unavailable);
     }
