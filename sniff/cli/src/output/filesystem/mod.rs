@@ -335,8 +335,8 @@ fn format_commit_line(
             first_line.to_string()
         };
         format!(
-            "[{}] <dim>{}</dim> {}<blue><b>{}</b></blue>{}{}",
-            sha_display, truncated, date_prefix, date_str, refs_part, user_part,
+            "[{}] <dim>{}</dim> <i>at</i> <blue><b>{}</b></blue> {}<blue><b>{}</b></blue>{}{}",
+            sha_display, truncated, time_str, date_prefix, date_str, refs_part, user_part,
         )
     }
 }
@@ -547,30 +547,170 @@ fn render_header(title: &str, terminal: &Terminal) -> String {
 
 /// Formats a worktree directory path as a blue OSC8 hyperlink.
 ///
-/// The href is the absolute path; the visible label collapses a leading home
-/// directory to `~` (matching the `repo worktrees` verbose format). A basename
-/// alone loses the context a sibling-worktree layout needs to disambiguate.
-fn worktree_path_link(path: &std::path::Path) -> String {
+/// The href is the absolute path; the visible label is computed relative to
+/// the current worktree directory so sibling or parent layouts read as `..`,
+/// `../project`, or `.` instead of a home-abbreviated absolute path.
+fn worktree_path_link(path: &std::path::Path, current_worktree: &std::path::Path) -> String {
     let absolute = path.display().to_string();
-    let label = home_abbreviated(path);
+    let label = relative_path_between(current_worktree, path);
     format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
 }
 
-/// Collapses a leading home-directory prefix to `~` for display.
+/// Formats a worktree directory path as a blue OSC8 hyperlink whose href is the
+/// full absolute path and whose visible label is an aliased, compact form (see
+/// [`alias_path`]).
 ///
-/// Falls back to the full absolute path when the path is outside the home
-/// directory or no home directory is resolvable.
-fn home_abbreviated(path: &std::path::Path) -> String {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(std::path::PathBuf::from);
-    match home {
-        Some(home) => match path.strip_prefix(&home) {
-            Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
-            Ok(rest) => format!("~/{}", rest.display()),
-            Err(_) => path.display().to_string(),
-        },
-        None => path.display().to_string(),
+/// Used for the current worktree's own "located at" line, where a label
+/// relative to itself would degenerate to `.` and tell the reader nothing.
+fn worktree_path_link_absolute(path: &std::path::Path) -> String {
+    let absolute = path.display().to_string();
+    let label = alias_path(path);
+    format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
+}
+
+/// Computes a compact display label for an absolute path by offsetting it
+/// against an environment variable or the home directory.
+///
+/// Resolution ladder (first match wins):
+/// 1. The environment variable whose value is the longest path-prefix of
+///    `path` renders as `${VAR}/<rest>`. Ties on prefix length are broken by
+///    the lexicographically-first variable name so output is deterministic.
+/// 2. A path under `$HOME` renders as `~/<rest>`.
+/// 3. Anything else renders as its absolute path.
+///
+/// An env-var offset wins only when it is a strictly longer prefix than
+/// `$HOME`; otherwise the `~` form is preferred, since it reads better for the
+/// home directory itself.
+fn alias_path(path: &Path) -> String {
+    let vars: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    alias_path_with(path, &vars, home.as_deref())
+}
+
+/// Environment variables whose values are absolute paths but denote *transient
+/// shell position* (the current / previous directory) rather than a stable
+/// named root. Offsetting against them yields a label that changes on every
+/// `cd`, so they are skipped. Variables whose values are not absolute paths
+/// (`TERM`, `LANG`, `SHLVL`, ...) are already filtered by the `is_absolute`
+/// check below and need no entry here.
+const POSITIONAL_PATH_VARS: &[&str] = &["PWD", "OLDPWD"];
+
+/// Pure core of [`alias_path`], with the environment supplied explicitly so it
+/// can be tested without mutating global process state.
+fn alias_path_with(
+    path: &Path,
+    vars: &[(std::ffi::OsString, std::ffi::OsString)],
+    home: Option<&Path>,
+) -> String {
+    // "Longest prefix" is measured in path components, not bytes, so a trailing
+    // slash in an env value can't spuriously outrank a real ancestor.
+    let home_components = home.map(|h| h.components().count()).unwrap_or(0);
+
+    let mut best: Option<(String, PathBuf, usize)> = None;
+    for (name, value) in vars {
+        let name = name.to_string_lossy();
+        if POSITIONAL_PATH_VARS.contains(&name.as_ref()) {
+            continue;
+        }
+        let value = PathBuf::from(value);
+        if !value.is_absolute() || !path.starts_with(&value) {
+            continue;
+        }
+        let components = value.components().count();
+        let better = match &best {
+            None => true,
+            Some((best_name, _, best_components)) => {
+                components > *best_components
+                    || (components == *best_components && name.as_ref() < best_name.as_str())
+            }
+        };
+        if better {
+            best = Some((name.into_owned(), value, components));
+        }
+    }
+
+    if let Some((name, value, components)) = best
+        && components > home_components
+        && let Ok(rel) = path.strip_prefix(&value)
+    {
+        return join_alias(&format!("${{{name}}}"), rel);
+    }
+
+    if let Some(home) = home
+        && let Ok(rel) = path.strip_prefix(home)
+    {
+        return join_alias("~", rel);
+    }
+
+    path.display().to_string()
+}
+
+/// Joins an alias prefix (`~` or `${VAR}`) with the remaining relative path,
+/// collapsing to the bare prefix when the path is an exact match.
+fn join_alias(prefix: &str, rel: &Path) -> String {
+    if rel.as_os_str().is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix}/{}", rel.display())
+    }
+}
+
+/// Computes a relative path from `base` to `target`.
+///
+/// Returns `.` when the two paths are the same, otherwise a sequence of `..`
+/// segments and/or the remaining target components. Falls back to the target's
+/// absolute display when the paths do not share a common prefix.
+fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> String {
+    use std::path::{Component, MAIN_SEPARATOR_STR};
+
+    if let Ok(rel) = target.strip_prefix(base) {
+        return if rel.as_os_str().is_empty() {
+            ".".to_string()
+        } else {
+            rel.display().to_string()
+        };
+    }
+
+    if let Ok(rel) = base.strip_prefix(target) {
+        let ups = rel.components().count();
+        return std::iter::repeat_n("..", ups)
+            .collect::<Vec<_>>()
+            .join(MAIN_SEPARATOR_STR);
+    }
+
+    let base_components: Vec<_> = base.components().collect();
+    let target_components: Vec<_> = target.components().collect();
+    let common = base_components
+        .iter()
+        .zip(target_components.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    // When the paths diverge at (or before) the filesystem root — e.g. a
+    // worktree under `/Users/...` next to one under `/Volumes/...` — the only
+    // shared component is the root, and a relative label degenerates into a
+    // long `../` chain back to root. The absolute path is shorter and clearer.
+    let common_is_root_only = common <= 1
+        && base_components
+            .first()
+            .is_some_and(|c| matches!(c, Component::RootDir | Component::Prefix(_)));
+
+    if common == 0 || common_is_root_only {
+        return target.display().to_string();
+    }
+
+    let ups = base_components.len().saturating_sub(common);
+    let mut parts: Vec<String> = std::iter::repeat_n("..".to_string(), ups).collect();
+    parts.extend(
+        target_components[common..]
+            .iter()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned()),
+    );
+
+    if parts.is_empty() {
+        ".".to_string()
+    } else {
+        parts.join(MAIN_SEPARATOR_STR)
     }
 }
 
@@ -641,7 +781,7 @@ pub fn render_git_section(
             // Case A: running inside a linked worktree. Show where main lives,
             // then this worktree's own details, then a count of the rest.
             let main_root = git.base_repo_root.as_deref().unwrap_or(&git.repo_root);
-            let main_path = worktree_path_link(main_root);
+            let main_path = worktree_path_link(main_root, &git.repo_root);
             wt_list.add(Prose::new(format!(
                 "<b>main:</b> <i>the main worktree for this repo is located at </i>{main_path}"
             )));
@@ -654,10 +794,12 @@ pub fn render_git_section(
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("worktree");
-            let current_path = worktree_path_link(&git.repo_root);
+            let current_path = worktree_path_link_absolute(&git.repo_root);
             wt_list.add(Prose::new("<b>Current Worktree:</b>".to_string()));
-            wt_list.add(Prose::new(format!(
-                "  - you are in the <b>{current_name}</b> worktree located at {current_path}"
+
+            let mut current_list = UnorderedList::empty();
+            current_list.add(Prose::new(format!(
+                "you are in the <b>{current_name}</b> worktree located at {current_path}"
             )));
 
             // ahead/behind comes from the current worktree's own map entry,
@@ -671,27 +813,37 @@ pub fn render_git_section(
                 Some(wt) => format_ahead_behind_of(wt.ahead, wt.behind, &wt.base_branch),
                 None => format_ahead_behind_of(0, 0, "main"),
             };
-            wt_list.add(Prose::new(format!(
-                "  - this worktree is on the <b>{branch_label}</b> branch and is {ab}"
+            current_list.add(Prose::new(format!(
+                "this worktree is on the <b>{branch_label}</b> branch and is {ab}"
             )));
+            wt_list.add(current_list);
 
             let other_count = git.worktrees.values().filter(|wt| !wt.is_current).count();
-            wt_list.add(Prose::new(format!(
-                "<b>Other Worktrees:</b> there are {other_count} other active worktrees in this repo"
+            wt_list.add(Prose::new("<b>Other Worktrees:</b>".to_string()));
+            let mut other_list = UnorderedList::empty();
+            other_list.add(Prose::new(format!(
+                "there are {other_count} other active worktrees in this repo"
             )));
+            wt_list.add(other_list);
         } else {
             // Case B: running inside the main worktree. The main worktree never
             // appears in the linked-worktree map, so every entry is "other".
-            let main_path = worktree_path_link(&git.repo_root);
+            let main_path = worktree_path_link_absolute(&git.repo_root);
             wt_list.add(Prose::new("<b>Current Worktree:</b>".to_string()));
-            wt_list.add(Prose::new(format!(
-                "  - you are in the <b>main</b> worktree located at {main_path}"
+
+            let mut current_list = UnorderedList::empty();
+            current_list.add(Prose::new(format!(
+                "you are in the <b>main</b> worktree located at {main_path}"
             )));
+            wt_list.add(current_list);
 
             let other_count = git.worktrees.len();
-            wt_list.add(Prose::new(format!(
-                "<b>Other Worktrees:</b> there are {other_count} other active worktrees in this repo"
+            wt_list.add(Prose::new("<b>Other Worktrees:</b>".to_string()));
+            let mut other_list = UnorderedList::empty();
+            other_list.add(Prose::new(format!(
+                "there are {other_count} other active worktrees in this repo"
             )));
+            wt_list.add(other_list);
         }
 
         writeln!(out, "{}", wt_list.render(&terminal)).unwrap();
@@ -1402,7 +1554,10 @@ mod tests {
                 lines[worktrees_idx - 1].trim().is_empty(),
                 "blank line before Worktrees"
             );
-            assert!(lines[meta_idx - 1].trim().is_empty(), "blank line before Meta");
+            assert!(
+                lines[meta_idx - 1].trim().is_empty(),
+                "blank line before Meta"
+            );
 
             // Exactly one blank line after each header
             assert!(
@@ -1413,7 +1568,10 @@ mod tests {
                 lines[worktrees_idx + 1].trim().is_empty(),
                 "blank line after Worktrees"
             );
-            assert!(lines[meta_idx + 1].trim().is_empty(), "blank line after Meta");
+            assert!(
+                lines[meta_idx + 1].trim().is_empty(),
+                "blank line after Meta"
+            );
 
             // EXACTLY one — not two. The line two rows out from each header (the
             // content side) must be non-blank, proving there is no second blank
@@ -1545,10 +1703,7 @@ mod tests {
                 output.contains("Current Worktree:"),
                 "Case B should show current worktree header"
             );
-            assert!(
-                output.contains("main"),
-                "Case B should mention main branch"
-            );
+            assert!(output.contains("main"), "Case B should mention main branch");
             assert!(
                 output.contains("Other Worktrees:"),
                 "Case B should show other worktrees header"
@@ -1591,31 +1746,28 @@ mod tests {
                 output.contains("Status"),
                 "Status section should still render"
             );
-            assert!(
-                output.contains("Meta"),
-                "Meta section should still render"
-            );
+            assert!(output.contains("Meta"), "Meta section should still render");
         }
 
         #[test]
-        fn git_status_case_a_uses_directory_name_not_branch_and_home_path() {
+        fn git_status_case_a_uses_directory_name_and_relative_path() {
             // The current worktree's display name is its directory basename, and
-            // the path label collapses $HOME to `~`. A branch named differently
-            // from the directory must not be substituted for the name.
-            let home = std::env::var("HOME").expect("HOME set in test env");
-            let wt_dir = format!("{home}/code/login-fix");
-            let main_dir = format!("{home}/code/project");
+            // the path label is relative to the current worktree directory. A
+            // branch named differently from the directory must not be substituted
+            // for the name.
+            let wt_dir = "/tmp/demo/login-fix";
+            let main_dir = "/tmp/demo/project";
 
             let mut git = make_git_info(vec![]);
-            git.repo_root = PathBuf::from(&wt_dir);
-            git.base_repo_root = Some(PathBuf::from(&main_dir));
+            git.repo_root = PathBuf::from(wt_dir);
+            git.base_repo_root = Some(PathBuf::from(main_dir));
             git.in_worktree = true;
             git.current_branch = Some("feature/login".to_string());
             git.worktrees.insert(
                 "feature/login".to_string(),
                 sniff::filesystem::git::WorktreeInfo {
                     branch: "feature/login".to_string(),
-                    filepath: PathBuf::from(&wt_dir),
+                    filepath: PathBuf::from(wt_dir),
                     sha: "abc123".to_string(),
                     dirty: false,
                     ahead: 3,
@@ -1638,25 +1790,142 @@ mod tests {
                 output.contains("feature/login"),
                 "current branch must still be shown: {output}"
             );
-            // The main-worktree label is short enough to survive word-wrap; its
-            // presence proves the `~` collapse is applied. (The current-worktree
-            // label is exercised directly by `home_abbreviated_collapses_home`.)
+            // Main worktree is a sibling directory, so its visible label is
+            // `../project`. The current worktree shows its own absolute path —
+            // a label relative to itself (`.`) would tell the reader nothing.
             assert!(
-                output.contains("~/code/project"),
-                "paths must be home-abbreviated: {output}"
+                output.contains("[../project](file://"),
+                "main worktree label must be relative to the current directory: {output}"
+            );
+            // The visible absolute label may word-wrap at the terminal width,
+            // so assert on the OSC8 href, which is emitted intact.
+            assert!(
+                output.contains("(file:///tmp/demo/login-fix)"),
+                "current worktree must link to its absolute path: {output}"
             );
         }
 
         #[test]
-        fn home_abbreviated_collapses_home() {
-            let home = std::env::var("HOME").expect("HOME set in test env");
+        fn relative_path_between_labels_worktree_paths() {
             assert_eq!(
-                home_abbreviated(&PathBuf::from(format!("{home}/code/login-fix"))),
-                "~/code/login-fix"
+                relative_path_between(
+                    &PathBuf::from("/tmp/demo/login-fix"),
+                    &PathBuf::from("/tmp/demo/project")
+                ),
+                "../project"
             );
-            assert_eq!(home_abbreviated(&PathBuf::from(&home)), "~");
-            // Paths outside home are left absolute.
-            assert_eq!(home_abbreviated(&PathBuf::from("/repo/feature")), "/repo/feature");
+            assert_eq!(
+                relative_path_between(
+                    &PathBuf::from("/tmp/demo/login-fix"),
+                    &PathBuf::from("/tmp/demo/login-fix")
+                ),
+                "."
+            );
+            assert_eq!(
+                relative_path_between(&PathBuf::from("/repo/feature"), &PathBuf::from("/repo")),
+                ".."
+            );
+            assert_eq!(
+                relative_path_between(&PathBuf::from("/repo"), &PathBuf::from("/repo/feature")),
+                "feature"
+            );
+            // Paths that share only the filesystem root fall back to the
+            // absolute target — a `../` chain back to root reads worse than the
+            // plain absolute path (e.g. a `/Users/...` worktree next to a
+            // `/Volumes/...` checkout).
+            assert_eq!(
+                relative_path_between(
+                    &PathBuf::from("/repo/feature"),
+                    &PathBuf::from("/other/project")
+                ),
+                "/other/project"
+            );
+        }
+
+        /// Builds an owned env-var list for `alias_path_with` from string pairs.
+        fn env(pairs: &[(&str, &str)]) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+            pairs
+                .iter()
+                .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v)))
+                .collect()
+        }
+
+        #[test]
+        fn alias_path_offsets_against_env_var() {
+            let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
+            let vars = env(&[("CLAUDINE_WT", "/Users/ken/.claudine/worktrees")]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/Users/ken"))),
+                "${CLAUDINE_WT}/rusty-biscuit/sniff"
+            );
+        }
+
+        #[test]
+        fn alias_path_falls_back_to_home_tilde() {
+            let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
+            assert_eq!(
+                alias_path_with(&path, &[], Some(Path::new("/Users/ken"))),
+                "~/.claudine/worktrees/rusty-biscuit/sniff"
+            );
+        }
+
+        #[test]
+        fn alias_path_prefers_tilde_over_shorter_env_offset() {
+            // An env var that is a *shorter* prefix than $HOME must yield to the
+            // `~` form, which reads better for paths inside the home directory.
+            let path = PathBuf::from("/Users/ken/project/src");
+            let vars = env(&[("ROOT", "/Users")]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/Users/ken"))),
+                "~/project/src"
+            );
+        }
+
+        #[test]
+        fn alias_path_picks_longest_prefix_then_name_for_ties() {
+            let path = PathBuf::from("/a/b/c/d");
+            // `DEEP` is the longer prefix and wins over `SHALLOW`.
+            let vars = env(&[("SHALLOW", "/a"), ("DEEP", "/a/b/c")]);
+            assert_eq!(alias_path_with(&path, &vars, None), "${DEEP}/d");
+
+            // Equal-length prefixes tie-break on the lexicographically-first name.
+            let vars = env(&[("ZED", "/a/b"), ("ACE", "/a/b")]);
+            assert_eq!(alias_path_with(&path, &vars, None), "${ACE}/c/d");
+        }
+
+        #[test]
+        fn alias_path_collapses_exact_match_to_bare_prefix() {
+            let path = PathBuf::from("/srv/data");
+            let vars = env(&[("DATA", "/srv/data")]);
+            assert_eq!(alias_path_with(&path, &vars, None), "${DATA}");
+
+            assert_eq!(
+                alias_path_with(Path::new("/Users/ken"), &[], Some(Path::new("/Users/ken"))),
+                "~"
+            );
+        }
+
+        #[test]
+        fn alias_path_skips_positional_shell_vars() {
+            // PWD/OLDPWD often equal (an exact prefix of) the target, but alias
+            // to a transient label — they must be ignored in favor of `~`.
+            let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
+            let vars = env(&[
+                ("OLDPWD", "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff"),
+                ("PWD", "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff"),
+            ]);
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/Users/ken"))),
+                "~/.claudine/worktrees/rusty-biscuit/sniff"
+            );
+        }
+
+        #[test]
+        fn alias_path_ignores_non_absolute_and_falls_back_to_absolute() {
+            let path = PathBuf::from("/opt/tool/bin");
+            // Relative and empty env values must never match.
+            let vars = env(&[("REL", "opt/tool"), ("EMPTY", "")]);
+            assert_eq!(alias_path_with(&path, &vars, Some(Path::new("/home/other"))), "/opt/tool/bin");
         }
 
         #[test]
@@ -1730,7 +1999,10 @@ mod tests {
 
             let output = render_git_section(&git, 10, 0, false, None, None);
 
-            assert!(output.contains("main:"), "Case A shows main location: {output}");
+            assert!(
+                output.contains("main:"),
+                "Case A shows main location: {output}"
+            );
             assert!(
                 output.contains("detached HEAD"),
                 "detached HEAD must be labeled rather than blank: {output}"
@@ -1774,6 +2046,34 @@ mod tests {
             assert!(
                 output.contains("1 other active worktrees in this repo"),
                 "Single worktree should be counted correctly"
+            );
+        }
+
+        #[test]
+        fn merge_commit_line_includes_time_segment() {
+            // Merge subjects do not parse as conventional commits, so they take
+            // the non-conventional branch of `format_commit_line`. That branch
+            // must still render the `at <time>` segment.
+            let commit = CommitInfo {
+                sha: "3e2ca7f1234567".to_string(),
+                message: "Merge branch 'claudine'".to_string(),
+                author: "Test User".to_string(),
+                timestamp: Utc::now(),
+                remotes: None,
+                refs: vec![],
+            };
+
+            let line = format_commit_line(&commit, 0, None);
+
+            // Derive the expected time string the same way the formatter does to
+            // avoid timezone/relative-day flakiness across machines.
+            let (_, time_str, _) = format_commit_datetime(&commit.timestamp);
+
+            assert!(line.contains("<i>at</i>"), "missing `at` segment: {line}");
+            assert!(line.contains(&time_str), "missing time string: {line}");
+            assert!(
+                line.contains("Merge branch 'claudine'"),
+                "missing merge subject: {line}"
             );
         }
     }

@@ -9,6 +9,10 @@ scope: "{{ctx.current_package_area == 'root' ? 'package' : 'package area' }}"
     - you must use the '{{ area }}' agent skill
 - always prefer US English (en-US) over other English variants when creating symbol names or writing documentation
 - the host computer is on the {{ctx.os}} operating system; consider this when running shell commands
+::block when="area == 'biscuit-tui'"
+- use the 'tui' and 'biscuit-tui' skills
+- use the 'cli' skills too when working with 'biscuit-tui-cli'
+::end-block
 
 ## Best Practices
 

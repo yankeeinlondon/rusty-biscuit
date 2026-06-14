@@ -9,7 +9,7 @@
 //! ## Examples
 //!
 //! ```
-//! use tui_chrome::prelude::*;
+//! use biscuit_tui::prelude::*;
 //!
 //! let state = BooleanSwitchState::new()
 //!     .with_label(Label::new("Enabled", LabelPosition::Above))

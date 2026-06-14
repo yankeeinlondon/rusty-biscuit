@@ -90,7 +90,7 @@ When there are no changes at all, the section shows `No changes` in dim text.
 
 Always rendered, even when the repository has no linked worktrees (Case B then reports a zero count). The layout depends on the **physical location** of the running process — whether it is inside the main worktree or a linked worktree — not on the spelling of the current branch. This keeps the output correct for detached HEAD, repositories whose primary branch is `master`, and any non-main branch checked out in the main worktree.
 
-Worktree paths render as blue OSC8 hyperlinks (href = absolute path) with a home-abbreviated label (a leading home directory collapses to `~`). The current worktree is named by its **directory basename**, which can differ from its branch (e.g. a `login-fix` worktree on branch `feature/login`).
+Worktree paths render as blue OSC8 hyperlinks (href = absolute path) with a **relative label** computed from the current worktree directory (e.g. `..`, `../project`, or `.`). The current worktree is named by its **directory basename**, which can differ from its branch (e.g. a `login-fix` worktree on branch `feature/login`).
 
 #### Case A — Running inside a linked worktree
 

@@ -1,8 +1,8 @@
 ---
 name: tui
 description: Expert knowledge for building and designing terminal user interfaces (TUIs) covering design systems (layout paradigms, color palettes, keyboard navigation, data visualization), framework-agnostic best practices, real-world app pattern analysis, Ratatui (Rust) with immediate-mode rendering and constraint-based layouts, and Bubble Tea (Go) with Elm architecture and Charm.sh ecosystem
-last_updated: 2025-12-24T12:00:00Z
-hash: 984cf841655dd773
+last_updated: 2026-06-12T00:00:00Z
+hash: 810c199bc4f401c8-8a242c9a19bad932
 ---
 
 # Terminal User Interface Development
@@ -124,6 +124,7 @@ See [Bubble Tea Architecture](./bubble-tea-architecture.md) for commands, async,
 
 ### Ratatui Core
 
+- [Ratatui Best Practices](./ratatui-best-practices.md) -- production app structure: the four concerns, message/update split, terminal lifecycle, draw-once-per-tick, durable state, resize, caching, and a readiness checklist
 - [Layout System](./layout-system.md) -- constraints, nested layouts, responsive design, ratatui-macros
 - [Widgets](./widgets.md) -- Paragraph, List, Table, Block, Gauge, Tabs, Canvas, custom Widget trait
 - [Styling](./styling.md) -- colors (named/indexed/RGB), modifiers, themes, Stylize trait

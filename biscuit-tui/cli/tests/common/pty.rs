@@ -1,4 +1,4 @@
-//! Shared PTY helpers for `tui-chrome-cli` integration tests.
+//! Shared PTY helpers for `biscuit-tui-cli` integration tests.
 //!
 //! Any test that spawns `question` with `--height` (Inline-viewport mode)
 //! MUST call [`answer_cursor_position_request`] before sending input;

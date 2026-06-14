@@ -132,15 +132,15 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, library, visualization_
 
-- [tui-chrome](./biscuit-tui/lib) _v0.1.0_
+- [biscuit-tui](./biscuit-tui/lib) _v0.1.0_
 
     _TUI input components (text input, toggle, choice, text area, grid) built on Ratatui. Embeddable widgets and a standalone runner._
 
     _Tags: workspace, library, tui, inputs_
 
-- [tui-chrome-cli](./biscuit-tui/cli) _v0.1.0_
+- [biscuit-tui-cli](./biscuit-tui/cli) _v0.1.0_
 
-    _Interactive prompt CLI (`question`) exposing tui-chrome components as subcommands with raw/json/null output modes._
+    _Interactive prompt CLI (`question`) exposing biscuit-tui components as subcommands with raw/json/null output modes._
 
     _Tags: workspace, cli, tui, inputs_
 

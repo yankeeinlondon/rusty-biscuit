@@ -5147,6 +5147,42 @@ fn test_git_status_from_linked_worktree_renders_case_a() {
         stdout.contains("1 other active worktrees in this repo"),
         "exactly one other linked worktree (even-wt): {stdout}"
     );
+    // The main worktree is the parent directory, so its visible label is
+    // relative (`..`) rather than an absolute or home-abbreviated path.
+    assert!(
+        stdout.contains("[..](file://") || stdout.contains("located at .."),
+        "main worktree path label is relative to the current worktree: {stdout}"
+    );
+
+    // Verify proper nested list layout: headings are top-level bullets and
+    // details are indented child bullets, not literal "  - " prefixes.
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(
+        lines.iter().any(|l| l.starts_with("- Current Worktree:")),
+        "Current Worktree heading is a top-level bullet: {stdout}"
+    );
+    assert!(
+        lines.iter().any(|l| l.starts_with("  - you are in the")),
+        "current worktree details are nested bullets: {stdout}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("  - this worktree is on the")),
+        "ahead/behind detail is a nested bullet: {stdout}"
+    );
+    assert!(
+        lines.iter().any(|l| l.starts_with("- Other Worktrees:")),
+        "Other Worktrees heading is a top-level bullet: {stdout}"
+    );
+    assert!(
+        lines.iter().any(|l| l.starts_with("  - there are")),
+        "other worktree count is a nested bullet: {stdout}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.starts_with("-   -")),
+        "no double-bulleted literal prefixes: {stdout}"
+    );
 }
 
 /// Case B: from the main worktree, the report shows the current (main) worktree
@@ -5178,6 +5214,29 @@ fn test_git_status_from_main_worktree_renders_case_b() {
     assert!(
         !stdout.contains("main:"),
         "Case B omits the separate main location line: {stdout}"
+    );
+
+    // Verify proper nested list layout for Case B.
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(
+        lines.iter().any(|l| l.starts_with("- Current Worktree:")),
+        "Current Worktree heading is a top-level bullet: {stdout}"
+    );
+    assert!(
+        lines.iter().any(|l| l.starts_with("  - you are in the")),
+        "current worktree details are nested bullets: {stdout}"
+    );
+    assert!(
+        lines.iter().any(|l| l.starts_with("- Other Worktrees:")),
+        "Other Worktrees heading is a top-level bullet: {stdout}"
+    );
+    assert!(
+        lines.iter().any(|l| l.starts_with("  - there are")),
+        "other worktree count is a nested bullet: {stdout}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.starts_with("-   -")),
+        "no double-bulleted literal prefixes: {stdout}"
     );
 }
 

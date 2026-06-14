@@ -1,4 +1,4 @@
-//! Shared core types for tui-chrome components.
+//! Shared core types for biscuit-tui components.
 //!
 //! This module centralises the small set of cross-cutting primitives
 //! every component relies on:

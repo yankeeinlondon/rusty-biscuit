@@ -28,7 +28,7 @@ When using the library, you configure the component via `TextAreaInputState`.
 ### Basic Multi-line Input
 
 ```rust
-use tui_chrome::prelude::*;
+use biscuit_tui::prelude::*;
 
 let state = TextAreaInputState::new(60, 5)
     .with_value(&["Initial line"]);
@@ -40,7 +40,7 @@ let content: String = state.value();
 ### Advanced Configuration with Label and Scrollbar
 
 ```rust
-use tui_chrome::prelude::*;
+use biscuit_tui::prelude::*;
 
 let state = TextAreaInputState::new(80, 15)
     .with_label(Label::new("Comments", LabelPosition::Above))

@@ -1,4 +1,6 @@
 words = [
+    "Alibaba",
+    "Anomalyco",
     "AAPL",
     "AOS",
     "Astro",
@@ -157,3 +159,4 @@ words = [
     "worktrees",
     "zmdi",
 ]
+ignore_paths = ["biscuit-tui/docs/style-guide/style-guide.yaml"]
