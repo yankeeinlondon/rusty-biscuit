@@ -206,7 +206,7 @@ fn resolve_parameters(request: &CompletionRequest) -> ResolvedParameters {
 fn build_user_prompt(request: &CompletionRequest) -> String {
     match &request.schema {
         Some(schema) => format!(
-            "{}\n\nRespond with a single JSON object that conforms to the following schema. Do not include any prose, markdown formatting, or explanatory text outside the JSON object.\n\n{}",
+            "{}\n\nRespond with a single JSON value that conforms to the following schema. Do not include any prose, markdown formatting, or explanatory text outside the JSON value.\n\n{}",
             request.prompt,
             serde_json::to_string_pretty(schema).unwrap_or_default()
         ),
@@ -852,6 +852,66 @@ mod tests {
             }
             _ => panic!("expected structured output"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_complete_structured_returns_array_value() {
+        let backend = FakeCompletionBackend::new(r#"["a", "b", "c"]"#);
+        let schema = serde_json::json!({
+            "type": "array",
+            "items": { "type": "string" }
+        });
+        let request = CompletionRequest {
+            model: ProviderModel::OpenAi(ProviderModelOpenAi::O3),
+            system_prompt: None,
+            prompt: "List three letters.".to_string(),
+            schema: Some(schema),
+            parameters: None,
+        };
+
+        let result = complete(&backend, request).await.unwrap();
+        match result {
+            CompletionOutput::Structured(value) => {
+                assert_eq!(value, serde_json::json!(["a", "b", "c"]));
+            }
+            _ => panic!("expected structured output"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_complete_structured_returns_scalar_value() {
+        let backend = FakeCompletionBackend::new("42");
+        let schema = serde_json::json!({ "type": "integer" });
+        let request = CompletionRequest {
+            model: ProviderModel::OpenAi(ProviderModelOpenAi::O3),
+            system_prompt: None,
+            prompt: "What is the answer?".to_string(),
+            schema: Some(schema),
+            parameters: None,
+        };
+
+        let result = complete(&backend, request).await.unwrap();
+        match result {
+            CompletionOutput::Structured(value) => {
+                assert_eq!(value, serde_json::json!(42));
+            }
+            _ => panic!("expected structured output"),
+        }
+    }
+
+    #[test]
+    fn build_user_prompt_does_not_narrow_schema_to_object() {
+        let request = CompletionRequest {
+            model: ProviderModel::OpenAi(ProviderModelOpenAi::O3),
+            system_prompt: None,
+            prompt: "List letters.".to_string(),
+            schema: Some(serde_json::json!({ "type": "array" })),
+            parameters: None,
+        };
+
+        let prompt = build_user_prompt(&request);
+        assert!(prompt.contains("single JSON value"));
+        assert!(!prompt.contains("JSON object"));
     }
 
     #[tokio::test]
