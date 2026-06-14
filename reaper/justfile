@@ -1,0 +1,165 @@
+set dotenv-load
+set positional-arguments
+
+# set allow-duplicate-recipes
+
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+import "../just/spec.just"
+import "../just/flow.just"
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if command -v md &> /dev/null; then
+        md just.md
+    fi
+
+    echo
+    echo -e "{{ BOLD }}Reaper ({{ RESET }}Library & CLI{{ BOLD }}){{ RESET }}"
+    echo "======================================================================================"
+    echo ""
+    just --list | grep -v 'default'
+    echo
+
+# Build the library and CLI
+build *args="":
+    @just _build reaper "Reaper Library" {{ args }}
+    @just _build reaper-cli "reaper CLI" {{ args }}
+
+# Install the CLI
+install *args="":
+    @just _build biscuit-terminal "biscuit-terminal Library" --release {{ args }}
+    @just _build darkmatter "Darkmatter Library" --release {{ args }}
+    @just build --release
+    @just _install "./cli" "reaper" {{ args }}
+
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity reaper
+    @just _sanity reaper-cli
+
+# test just the CLI in reaper
+test-cli *args="":
+    @just _test reaper-cli {{ args }}
+
+# test just the reaper Library
+test-library *args="":
+    @just _test reaper {{ args }}
+
+# Test both library and CLI.
+test *args="":
+    @just _test reaper {{ args }}
+    @just _test reaper-cli {{ args }}
+
+# not applicable: reaper emits terminal/CLI output, not HTML
+test-browser:
+    @echo "test-browser: not applicable for reaper"
+
+# not applicable: reaper has no real-resource integration tier
+test-real:
+    @echo "test-real: not applicable for reaper"
+
+# Lint both the library and CLI
+lint:
+    @just _lint reaper
+    @just _lint reaper-cli
+
+# Criterion benches for the runtime hot paths.
+bench *args="":
+    @just _bench reaper {{ args }}
+
+# Per-package LCOV coverage for the library and CLI.
+coverage *args="":
+    @just _coverage reaper {{ args }}
+    @just _coverage reaper-cli {{ args }}
+
+# Doctests for the library and CLI.
+doctest *args="":
+    @just _doctest reaper {{ args }}
+    @just _doctest reaper-cli {{ args }}
+
+# not applicable: reaper has no cargo-fuzz targets (Phase 5 scope)
+fuzz:
+    @echo "fuzz: not applicable for reaper (planned Phase 5)"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
+
+# Lint (and fix) both the library and CLI
+lint-fix:
+    @just _lint reaper || just _fix_lint reaper
+    @just _lint reaper-cli || just _fix_lint reaper-cli
+
+# Validate the source code without doing a full build
+check:
+    @cargo check -p reaper -p reaper-cli
+
+# Run the latest debug build of the reaper CLI
+cli *args="":
+    @cargo run -p reaper-cli {{ args }}
+
+git-conflict:
+    #!/usr/bin/env bash
+    base=$(git merge-base HEAD main)
+    echo "=== commits on each side ==="
+    git log --oneline --left-right --graph HEAD...main
+
+    echo
+    echo "=== files changed on both sides ==="
+    comm -12 \
+    <(git diff --name-only $base..HEAD | sort) \
+    <(git diff --name-only $base..main | sort)
+
+    echo
+    echo "=== dry-run merge preview ==="
+    git merge-tree $base HEAD main
+
+readme:
+    _readme_files reaper
+
+# the directory structure of both CLI and Library
+structure:
+    @echo
+    @echo "{{ BOLD }}{{ GREEN }}reaper CLI{{ RESET }}"
+    @echo
+    @just _structure cli/src
+    @echo
+    @echo "{{ BOLD }}{{ GREEN }}reaper Library{{ RESET }}"
+    @echo
+    @just _structure lib/src
+    @echo
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} {{ DIM }} >/dev/null || true

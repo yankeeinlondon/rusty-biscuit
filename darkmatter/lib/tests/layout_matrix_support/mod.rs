@@ -1,9 +1,12 @@
 //! Shared support for darkmatter's layout visual-test matrix.
 //!
-//! Scoped to `YamlBlock`, the one darkmatter component on the render-tree
+//! Scoped to `CodeBlock::yaml`, the one darkmatter component on the render-tree
 //! architecture. Included by both the `layout_matrix` harness example and the
 //! `layout_matrix` snapshot test so they render through identical code.
 #![allow(dead_code)]
+// Whitebox: wires the deprecated `TerminalCodeRenderer` adapter directly to
+// render through the render-tree code path.
+#![allow(deprecated)]
 
 use std::rc::Rc;
 
@@ -11,7 +14,8 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::prelude::strip_escape_codes;
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use biscuit_terminal::terminal::Terminal;
-use darkmatter::markdown::{TerminalCodeRenderer, YamlBlock};
+use darkmatter::markdown::CodeBlock;
+use darkmatter::markdown::render_tree::TerminalCodeRenderer;
 use renderable::layout::{Alignment, Layout, Length, Edges, TargetValue, WordWrap};
 use renderable::tree::{RenderNode, RenderStrictness};
 
@@ -200,15 +204,15 @@ fn render_tree_string(node: &RenderNode, width: u32) -> String {
     }
 }
 
-/// The darkmatter components on the render-tree architecture (`YamlBlock`).
+/// The darkmatter components on the render-tree architecture (`CodeBlock::yaml`).
 pub fn component_cases() -> Vec<ComponentCase> {
     vec![ComponentCase {
-        name: "YamlBlock",
+        name: "CodeBlock",
         render: Box::new(|s| {
-            let block =
-                YamlBlock::new("name: rusty-biscuit\nversion: 0.1.0\ntags:\n  - cli\n  - terminal")
-                    .expect("sample YAML is valid")
-                    .with_layout(s.layout.clone());
+            let block = CodeBlock::yaml(
+                "name: rusty-biscuit\nversion: 0.1.0\ntags:\n  - cli\n  - terminal",
+            )
+            .with_layout(s.layout.clone());
             let term = Terminal::new_optimistic(s.width);
             let bespoke = block.render(&term);
             let tree = block

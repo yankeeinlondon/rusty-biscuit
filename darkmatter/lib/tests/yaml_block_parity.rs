@@ -5,6 +5,7 @@
 //! tree validates cleanly, that plain tree rendering preserves the YAML body,
 //! that an optional `CodeRenderer` hook is consulted, and that Markdown output
 //! preserves the YAML fence.
+#![allow(deprecated)]
 
 use std::rc::Rc;
 

@@ -34,6 +34,10 @@ md render README.md --output html --show
 
 # Override list indentation
 md render README.md --indent 2
+
+# Choose how code blocks pick their light/dark variant
+md render README.md --code-block dark    # always a dark code panel
+md render README.md --code-block same    # match the terminal's mode
 ```
 
 ### Arguments
@@ -51,7 +55,17 @@ md render README.md --indent 2
 These are top-level flags (not render-specific) but affect `render` behavior:
 
 - `--theme <NAME>`: prose theme
-- `--code-theme <NAME>`: code theme override
+- `--code-theme <NAME>`: code theme override (selects *which* theme pair, e.g. `dracula`)
+- `--code-block <inverse|dark|light|same>`: selects *which variant* of the code
+  theme a code block uses relative to the page color mode (default `inverse`):
+    - `inverse` (default): the opposite variant from the terminal, so the code
+      panel contrasts with the page (a dark terminal gets a light panel, and a
+      light terminal gets a dark panel).
+    - `dark`: always the dark variant.
+    - `light`: always the light variant.
+    - `same`: match the terminal's own mode.
+  The panel's light/dark choice is derived from the terminal (the same source as
+  the page), so it stays consistent regardless of environment color detection.
 - `--line-numbers`: include code line numbers in terminal rendering
 - `--mermaid`: render mermaid diagrams as images in terminal mode when supported
 

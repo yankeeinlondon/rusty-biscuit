@@ -90,8 +90,8 @@ docs_created_during_phase_9: []
 skills_files_updated_during_phase9:
   - .opencode/skill/biscuit-tui/SKILL.md
 packages:
-  - tui-chrome
-  - tui-chrome-cli
+  - biscuit-tui
+  - biscuit-tui-cli
 ---
 
 # Choose Components Improvements Execution Plan
@@ -124,7 +124,7 @@ Goal: confirm the current implementation shape, command surface, and tests befor
 
 Validation checkpoint:
 
-- `cargo test -p tui-chrome -p tui-chrome-cli` either passes or failures are recorded as pre-existing.
+- `cargo test -p biscuit-tui -p biscuit-tui-cli` either passes or failures are recorded as pre-existing.
 - A short implementation note lists any existing tests that will need expectation updates.
 
 Parallelizable:
@@ -134,11 +134,11 @@ Parallelizable:
 ### Phase 1 Implementation Notes
 
 **Package names confirmed:**
-- Library: `tui-chrome` (manifest at `biscuit-tui/lib/Cargo.toml`)
-- CLI: `tui-chrome-cli` (manifest at `biscuit-tui/cli/Cargo.toml`)
+- Library: `biscuit-tui` (manifest at `biscuit-tui/lib/Cargo.toml`)
+- CLI: `biscuit-tui-cli` (manifest at `biscuit-tui/cli/Cargo.toml`)
 
 **Test baseline:**
-All tests pass for both packages (`cargo test -p tui-chrome -p tui-chrome-cli` — zero failures). No pre-existing failures to record.
+All tests pass for both packages (`cargo test -p biscuit-tui -p biscuit-tui-cli` — zero failures). No pre-existing failures to record.
 
 **Current `ChooseOne` behavior:**
 - `Enter`: Auto-selects the hovered option if none explicitly selected (fallback submit), then returns `Submitted`.
@@ -203,7 +203,7 @@ Dependencies: Phase 1.
 
 Validation checkpoint:
 
-- `cargo test -p tui-chrome --lib` compiles.
+- `cargo test -p biscuit-tui --lib` compiles.
 - Public builders can be used in a minimal unit test without rendering.
 - `FrameChromeConfig::default().padding == Padding::uniform(1)`.
 
@@ -438,9 +438,9 @@ Dependencies: Phases 3 through 8.
 5. Update `.claude/skills/` only if the component architecture or workflow guidance changed materially.
 6. Run formatting and linting:
    - `cargo fmt --all`
-   - `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings`
+   - `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings`
 7. Run focused tests:
-   - `cargo test -p tui-chrome -p tui-chrome-cli`
+   - `cargo test -p biscuit-tui -p biscuit-tui-cli`
 8. Run area validation if available:
    - `just --justfile biscuit-tui/justfile test`
    - `just --justfile biscuit-tui/justfile lint`
@@ -453,7 +453,7 @@ Dependencies: Phases 3 through 8.
 
 Validation checkpoint:
 
-- Formatting, clippy, and tests pass for `tui-chrome` and `tui-chrome-cli`.
+- Formatting, clippy, and tests pass for `biscuit-tui` and `biscuit-tui-cli`.
 - Docs no longer claim `ChooseOne` Esc exits `1`.
 - Docs no longer present `--options` as the primary option source unless it is retained as a compatibility alias.
 - Public behavior changes are reflected in examples and exit code tables.
@@ -473,7 +473,7 @@ Parallelizable:
 
 ## Risk Controls
 
-- Keep filesystem and parsing errors in `tui-chrome-cli`; do not introduce CLI dependencies into `tui-chrome`.
+- Keep filesystem and parsing errors in `biscuit-tui-cli`; do not introduce CLI dependencies into `biscuit-tui`.
 - Keep terminal capability detection conservative; unknown terminals should use standard Unicode glyphs and dark-background-safe colors.
 - Avoid full-screen snapshot tests where narrow buffer assertions cover the behavior.
 - Preserve first-wins library hotkey behavior to keep embedded apps from panicking.

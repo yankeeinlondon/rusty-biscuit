@@ -51,9 +51,9 @@ pub mod warning;
 mod coverage_tests;
 
 pub use apply::{
-    apply_color_style, apply_component_style, apply_hr_style, apply_list_style, apply_page_style,
-    ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides, PageStyleOverrides,
-    StyleApplyError,
+    apply_color_style, apply_component_style, apply_disclosure_style, apply_hr_style,
+    apply_list_style, apply_page_style, ComponentStyleOverrides, DisclosureStyleOverrides,
+    HrStyleOverrides, ListStyleOverrides, PageStyleOverrides, StyleApplyError,
 };
 pub use bespoke::{
     apply_bespoke_style, BespokeStyleOverrides, MetaTag, PageMeta, PageStylesheet,

@@ -10,8 +10,8 @@ docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase4: []
 packages:
-  - tui-chrome
-  - tui-chrome-cli
+  - biscuit-tui
+  - biscuit-tui-cli
 ---
 # Review-3 Fix Plan
 
@@ -160,8 +160,8 @@ return EventOutcome::Cancelled;
 Run after all phases are complete:
 
 ```bash
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
-cargo test -p tui-chrome -p tui-chrome-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui -p biscuit-tui-cli
 ```
 
 Fix any warnings or failures before marking the feature as ready.

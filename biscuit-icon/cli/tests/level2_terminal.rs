@@ -69,7 +69,7 @@ fn level2_unicode_glyph_renders_in_terminal() {
     harness.settle();
 
     // "grinning" matches the built-in Emoji::Happy icon.
-    let frame = run_icon(harness, "icons grinning");
+    let frame = run_icon(harness, "show grinning --list");
     assert!(
         frame.plain.contains('\u{1F600}'),
         "expected Unicode grinning face in visible output; got:\n{}",
@@ -98,7 +98,7 @@ fn level2_nerd_font_glyph_renders_with_flag() {
     harness.settle();
 
     // DevOps::Github maps to "uil:github" and defines a Nerd Font glyph.
-    let frame = run_icon(harness, "--nerd icons github");
+    let frame = run_icon(harness, "--nerd show github --list");
     assert!(
         frame.plain.contains('\u{f09b}'),
         "expected Nerd Font github glyph in visible output; got:\n{}",
@@ -127,7 +127,7 @@ fn level2_text_fallback_shows_identifier() {
     harness.settle();
 
     // Os::Apple has no glyph, so it must fall back to its Iconify id.
-    let frame = run_icon(harness, "icons apple");
+    let frame = run_icon(harness, "show os:apple");
     assert!(
         frame.plain.contains("ic:baseline-apple"),
         "expected icon identifier as text fallback; got:\n{}",
@@ -181,7 +181,7 @@ fn level2_image_protocol_fallback_renders_graphics() {
     let baseline_png = baseline_result.unwrap();
 
     let cmd = format!(
-        "HOME='{}' PATH='{}' icon icons test:red-witness\n",
+        "HOME='{}' PATH='{}' icon show test:red-witness\n",
         home.path().display(),
         path_with_icon_bin(),
     );
@@ -285,7 +285,7 @@ fn level2_listing_includes_multiple_names() {
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
 
-    let frame = run_icon(harness, "icons arrow");
+    let frame = run_icon(harness, "show arrow --list");
     assert!(
         frame.plain.contains("mdi:arrow-left-circle"),
         "expected arrow-left-circle in listing; got:\n{}",
@@ -294,6 +294,29 @@ fn level2_listing_includes_multiple_names() {
     assert!(
         frame.plain.contains("mdi:arrow-right-circle"),
         "expected arrow-right-circle in listing; got:\n{}",
+        frame.plain
+    );
+}
+
+// ------------------------------------------------------------------
+// Phase 4: show command in a real terminal
+// ------------------------------------------------------------------
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_show_grinning_renders_unicode_glyph() {
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+    harness.send_text(b"clear\n").expect("clear failed");
+    harness.settle();
+
+    let frame = run_icon(harness, "show grinning --list");
+    assert!(
+        frame.plain.contains('\u{1F600}'),
+        "expected Unicode grinning face from show command; got:\n{}",
         frame.plain
     );
 }
@@ -322,6 +345,10 @@ fn seed_sets(
                 license_title: None,
                 license_url: None,
                 total: *total,
+                author_name: None,
+                author_url: None,
+                tags: None,
+                category: None,
             })
             .unwrap();
     }
@@ -744,7 +771,7 @@ fn level2_styled_error_emits_sgr_red() {
 
     // An extra colon is rejected by the identifier parser and rendered as a
     // Prose-styled error.
-    let frame = run_icon(harness, "icons mdi:home:extra");
+    let frame = run_icon(harness, "show mdi:home:extra");
     assert!(
         frame.raw.contains("\x1b[31m") || frame.raw.contains("\x1b[91m"),
         "expected SGR red in styled error output; raw:\n{}",

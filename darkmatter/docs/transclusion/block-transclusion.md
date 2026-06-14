@@ -100,11 +100,16 @@ The syntax we've covered so far for block file transclusion is just `::file <fil
 
 3. `disclosure`
 
-    If you want to add the child document as part of a progressive disclosure section of the document then should assign `disclosure` to the summary text you want to show and the transcluded document will then be hidden by default but clicking on the summary text will make the transcluded content visible.
+    If you want to add the child document as part of a progressive disclosure section of the document then assign `disclosure` to the summary text you want to show and the transcluded document will then be hidden by default but clicking on the summary text will make the transcluded content visible.
 
-    > Note: this capability leverages the `<details><summary>summary text<summary>...</details>` HTML functionality. This means it works perfectly when you're output format is HTML and for the Markdown content it's also using inline HTML to represent this feature so it's support will depend on the _reader_ software you're using.
-    >
-    > Note: when outputting to the terminal (e.g., with escape codes and formatting), the progressive disclosure feature is stripped out and the full text is displayed as there's no way to get this to work in the terminal.
+    ```md
+    ::file ./long-section.md disclosure="License Agreement"
+    ::file ./short-section.md disclosure=true
+    ```
+
+    - `disclosure="Summary text"` wraps the transcluded content in a `::disclosure` block with the given summary.
+    - `disclosure=true` (or an empty summary) uses the default summary `"Details"`.
+    - The transclusion stage emits the render-time DSL (`::disclosure`, `::details`, `::end-disclosure`), not inline HTML. The disclosure is expanded to the appropriate target during rendering. See [Disclosure Blocks](../rendering/disclosure.md) for target behavior and styling.
 
 4. `exclude`
 

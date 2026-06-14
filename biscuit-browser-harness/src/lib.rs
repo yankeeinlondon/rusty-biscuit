@@ -100,6 +100,22 @@ pub trait BrowserHarness: Send {
     /// Returns [`BrowserError::Command`] on CDP failure.
     async fn screenshot(&mut self, selector: Option<&str>) -> Result<Vec<u8>, BrowserError>;
 
+    /// Evaluate `script` in a freshly-navigated page and return its result
+    /// as a `String`. The script must evaluate to a string value; wrap object
+    /// results in `JSON.stringify` (or join the fields yourself).
+    ///
+    /// Unlike [`computed_style`](BrowserHarness::computed_style) — which opens a
+    /// fresh page per call and so cannot observe state mutated by an earlier
+    /// call — `evaluate` performs all interaction (querying, clicking,
+    /// re-reading) inside a single page, so DOM toggles such as
+    /// `<summary>.click()` are observable in the same evaluation.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`BrowserError::Command`] on CDP failure or when the result is
+    /// not a string.
+    async fn evaluate(&mut self, script: &str) -> Result<String, BrowserError>;
+
     /// Gracefully tear the browser session down, awaiting full process exit.
     ///
     /// [`Drop`] is best-effort and cannot `await`, so it leaves the spawned
@@ -389,6 +405,17 @@ impl BrowserHarness for ChromeHarness {
             .into_value()
             .map_err(|e| BrowserError::Command(e.to_string()))?;
         Ok(value.trim().to_string())
+    }
+
+    async fn evaluate(&mut self, script: &str) -> Result<String, BrowserError> {
+        let page = self.page().await?;
+        let value: String = page
+            .evaluate(script)
+            .await
+            .map_err(|e| BrowserError::Command(e.to_string()))?
+            .into_value()
+            .map_err(|e| BrowserError::Command(e.to_string()))?;
+        Ok(value)
     }
 
     async fn screenshot(&mut self, selector: Option<&str>) -> Result<Vec<u8>, BrowserError> {

@@ -21,7 +21,7 @@ The design makes PTY-driven shell completion and keyboard-protocol tests a produ
 Running those gates currently fails:
 
 ```text
-RUN_PTY_TESTS=1 cargo test -p tui-chrome-cli --test keyboard_protocol -- --nocapture
+RUN_PTY_TESTS=1 cargo test -p biscuit-tui-cli --test keyboard_protocol -- --nocapture
 ```
 
 Result: 0 passed, 4 failed.
@@ -37,7 +37,7 @@ Evidence:
 Shell completion verification also fails:
 
 ```text
-RUN_SHELL_TESTS=1 cargo test -p tui-chrome-cli --test completions_shell -- --nocapture
+RUN_SHELL_TESTS=1 cargo test -p biscuit-tui-cli --test completions_shell -- --nocapture
 ```
 
 Result: 0 passed, 7 failed.
@@ -84,14 +84,14 @@ Recommendation: require exactly one character after `CTRL+`, `ALT+`, or `OPT+`, 
 Passed:
 
 ```text
-cargo test -p tui-chrome -p tui-chrome-cli
+cargo test -p biscuit-tui -p biscuit-tui-cli
 ```
 
 Failed gated verification:
 
 ```text
-RUN_PTY_TESTS=1 cargo test -p tui-chrome-cli --test keyboard_protocol -- --nocapture
-RUN_SHELL_TESTS=1 cargo test -p tui-chrome-cli --test completions_shell -- --nocapture
+RUN_PTY_TESTS=1 cargo test -p biscuit-tui-cli --test keyboard_protocol -- --nocapture
+RUN_SHELL_TESTS=1 cargo test -p biscuit-tui-cli --test completions_shell -- --nocapture
 ```
 
 The default test command is not enough to satisfy this feature's design gates because those PTY tests return early unless their environment variables are set.

@@ -11,8 +11,8 @@ model: ""
 The implementation is broadly complete and the focused default verification is green:
 
 ```text
-cargo test -p tui-chrome -p tui-chrome-cli
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui -p biscuit-tui-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
 ```
 
 Both commands pass. The prior review items around unsupported `--file` extensions, markdown frontmatter robustness, TOML docs, duplicate hotkey handling, shell completions, and PTY keyboard protocol coverage appear addressed.
@@ -53,4 +53,4 @@ Recommendation: add an early `Ctrl+C` branch in `ChooseOne::handle_event` before
 
 ## Production Readiness
 
-Not ready yet. The CLI behavior is in good shape, but `tui-chrome` is also a reusable library, and the component-level `Ctrl+C` contract from the design is not implemented or tested. Fixing that should be small and low-risk.
+Not ready yet. The CLI behavior is in good shape, but `biscuit-tui` is also a reusable library, and the component-level `Ctrl+C` contract from the design is not implemented or tested. Fixing that should be small and low-risk.

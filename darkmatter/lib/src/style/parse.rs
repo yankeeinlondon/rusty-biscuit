@@ -19,7 +19,7 @@ use crate::style::warning::{StyleWarning, StyleWarningKind};
 /// `sub_spec` is `<=` this constant are considered wired and stay silent.
 ///
 /// Advance this constant whenever a future sub-spec wires its keys.
-pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 7;
+pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 8;
 
 /// Parse a `serde_json::Value` representing the value at the `style:` key.
 ///
@@ -1177,6 +1177,64 @@ mod tests {
                 path,
                 inactive
             );
+        }
+    }
+
+    #[test]
+    fn into_strict_passes_clean_disclosure_style() {
+        let parsed = from_json_value(
+            &json!({
+                "disclosure": {
+                    "width": "40ch",
+                    "max-width": "50%",
+                    "alignment": "left",
+                    "color": "red-500",
+                    "bg-color": "blue-500"
+                }
+            }),
+        )
+        .unwrap();
+        let s = into_strict(parsed).unwrap();
+        assert!(s.disclosure.is_some());
+    }
+
+    #[test]
+    fn into_strict_fails_on_unknown_disclosure_key() {
+        let parsed = from_json_value(&json!({"disclosure": {"unknown_key": "x"}})).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert_eq!(warnings.len(), 1);
+                assert_eq!(warnings[0].path, "style.disclosure.unknown_key");
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn into_strict_fails_on_disclosure_snake_case_aliases() {
+        let parsed = from_json_value(
+            &json!({
+                "disclosure": {
+                    "max_width": "50%",
+                    "bg_color": "blue-500"
+                }
+            }),
+        )
+        .unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert!(
+                    warnings.iter().any(|w| w.path == "style.disclosure.max_width"),
+                    "expected style.disclosure.max_width deprecation, got {:?}",
+                    warnings
+                );
+                assert!(
+                    warnings.iter().any(|w| w.path == "style.disclosure.bg_color"),
+                    "expected style.disclosure.bg_color deprecation, got {:?}",
+                    warnings
+                );
+            }
+            other => panic!("expected Strict error, got {:?}", other),
         }
     }
 }
