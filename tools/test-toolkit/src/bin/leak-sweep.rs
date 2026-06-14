@@ -110,10 +110,13 @@ fn main() {
     let before = live_pids(&mut sys);
 
     let (program, args) = cli.command.split_first().expect("clap requires a command");
-    let status = Command::new(program).args(args).status().unwrap_or_else(|err| {
-        eprintln!("leak-sweep: failed to launch {program:?}: {err}");
-        std::process::exit(127);
-    });
+    let status = Command::new(program)
+        .args(args)
+        .status()
+        .unwrap_or_else(|err| {
+            eprintln!("leak-sweep: failed to launch {program:?}: {err}");
+            std::process::exit(127);
+        });
 
     if cli.settle_ms > 0 {
         sleep(Duration::from_millis(cli.settle_ms));
@@ -121,7 +124,11 @@ fn main() {
 
     // `everything()` is required so `exe()`/`cmd()` are populated — the default
     // refresh kind leaves argv empty on macOS, which would defeat attribution.
-    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::everything());
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::everything(),
+    );
     let mut leaks: Vec<String> = sys
         .processes()
         .iter()
