@@ -13,7 +13,7 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
     - **Tables:** Richly formatted tables with dynamic sizing and business logic; renders to both HTML and Terminal
     - **Inline TOC:** Render an inline table of contents linking to the various sections of a page
     - **YouTube Embeddings (future):** Embed a YouTube video player for sharable YouTube video references
-    - **Disclosure Blocks (future):** Show only a heading initially, but click to expand to full prose.
+    - **Disclosure Blocks:** Show only a summary line initially, but click to expand to full prose.
     - **Popovers (future):**
     - **Columnar Support (future):** Provides first class primitives for using columns to better utilize horizontal design space
 - **Composition**
@@ -216,7 +216,7 @@ For each of these rendering features there are detailed documents which will des
     - A disclosure block has some overlap in UI design with a popover but enough distinctions to be it's own thing
     - People familiar with the HTML `<detail>` and `<summary>` tags will already have a good idea what this looks like because "disclosure blocks" are now natively supported in modern browsers by these tags.
     - Because Markdown is a _superset_ of HTML, you could just use these tags in any Markdown document as inner-HTML blocks but doing that is awkward and doesn't meet the "notational velocity" vibe of Markdown authoring
-    - More detail on how **disclosure blocks** are made available via **Darkmatter**'s DSL can be found in the [disclosure](../docs/disclosure.md) document.
+    - More detail on how **disclosure blocks** are made available via **Darkmatter**'s DSL can be found in the [disclosure](../docs/rendering/disclosure.md) document.
 
 - **List Expansion:**
 

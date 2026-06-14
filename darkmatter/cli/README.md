@@ -2,7 +2,7 @@
 
 Binary: `md`
 
-A themed markdown renderer for terminal and browser workflows with markdown, HTML, and AST JSON output modes.
+A themed markdown renderer for terminal and browser workflows with markdown, markdown-plus, HTML, and AST JSON output modes.
 
 ## Installation
 
@@ -36,13 +36,16 @@ Use a single `--output <OUTPUT>` switch for render format selection:
 
 - `auto` (default): render ANSI terminal output on TTY, markdown text on non-TTY
 - `markdown` (alias: `text`)
-- `html`
+- `markdown-plus`: markdown with disclosure blocks emitted as inline HTML `<details>`/`<summary>`
+- `html` (alias: `browser`)
 - `json` (alias: `ast`)
 
 ```bash
 md README.md --output markdown
 md README.md --output text
+md README.md --output markdown-plus
 md README.md --output html > output.html
+md README.md --output browser > output.html
 md README.md --output json
 md README.md --output ast
 ```
