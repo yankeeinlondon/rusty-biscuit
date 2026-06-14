@@ -54,8 +54,8 @@ Recommendation: in horizontal mode, compute visible logical rows as `body_rows /
 Ran:
 
 ```bash
-cargo test -p tui-chrome horizontal_multi_row_badges_do_not_overwrite_next_row_options -- --nocapture
-cargo test -p tui-chrome -p tui-chrome-cli
+cargo test -p biscuit-tui horizontal_multi_row_badges_do_not_overwrite_next_row_options -- --nocapture
+cargo test -p biscuit-tui -p biscuit-tui-cli
 ```
 
 Both passed. The remaining issues are contract/coverage gaps: existing tests primarily exercise lower-level helpers or intentionally pin behavior that conflicts with the spec.

@@ -4,8 +4,8 @@
 
 The `biscuit-tui` package area contains two workspace packages:
 
-- `tui-chrome` at `biscuit-tui/lib`
-- `tui-chrome-cli` at `biscuit-tui/cli`, binary `question`
+- `biscuit-tui` at `biscuit-tui/lib`
+- `biscuit-tui-cli` at `biscuit-tui/cli`, binary `question`
 
 The requested `.claude/skills/biscuit-tui/SKILL.md` file is not present, so this plan follows the repo instructions plus the local Rust/TUI/testing conventions. The root `justfile` does not cover `biscuit-tui`; use `biscuit-tui/justfile` or direct package-scoped `cargo` commands.
 
@@ -102,18 +102,18 @@ just -f biscuit-tui/justfile lint
 Focused commands while iterating:
 
 ```bash
-cargo test -p tui-chrome-cli choose_one
-cargo test -p tui-chrome-cli choose_many
-cargo test -p tui-chrome-cli --test choose_cli
-cargo test -p tui-chrome typing_letter_opens_filter
-cargo test -p tui-chrome select_all
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui-cli choose_one
+cargo test -p biscuit-tui-cli choose_many
+cargo test -p biscuit-tui-cli --test choose_cli
+cargo test -p biscuit-tui typing_letter_opens_filter
+cargo test -p biscuit-tui select_all
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
 ```
 
 Optional local PTY smoke tests:
 
 ```bash
-QUESTION_INTERACTIVE_PTY=1 cargo test -p tui-chrome-cli --test choose_cli
+QUESTION_INTERACTIVE_PTY=1 cargo test -p biscuit-tui-cli --test choose_cli
 ```
 
 ## Phase Count
