@@ -24,8 +24,9 @@ pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError>
     let table = build_status_table(statuses, &terminal);
     eprintln!("\n{}", table.render(&terminal));
 
-    // Early image-support / width gating. Graph data is only gathered when the
-    // terminal can actually render images and any explicit character width fits.
+    // Detect image support from the real stderr TTY + env. Width and verbose
+    // gating live inside `gather_extras` so the same decision is exercised by
+    // tests with a forced terminal width.
     let stderr_is_tty = std::io::stderr().is_terminal();
     let image_support = if stderr_is_tty {
         detect_image_support_from_env()
@@ -33,43 +34,15 @@ pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError>
         ImageSupport::None
     };
     let parsed_width = width_spec.and_then(|s| parse_width_spec(s).ok());
-    let needs_graph = image_support != ImageSupport::None
-        && match parsed_width {
-            Some(ImageWidth::Characters(_)) => terminal.width() >= MIN_GRAPH_TERMINAL_WIDTH,
-            _ => true,
-        };
 
-    let current = statuses.iter().find(|s| s.entry.is_current);
-    let needs_verbose = verbose && current.is_some_and(|c| !c.entry.is_main);
-    let current_branch = current
-        .and_then(|c| c.entry.branch.as_deref())
-        .unwrap_or("HEAD");
-
-    // Gather data once according to the image/verbose case table.
-    let mut current_branch_data: Option<git_graph::BranchGraphData> = None;
-    let mut base_graph_data: Option<git_graph::BaseGraphData> = None;
-
-    if needs_graph {
-        if let Some(current) = current {
-            if current.entry.is_main {
-                let branch_names: Vec<String> = statuses
-                    .iter()
-                    .filter_map(|s| s.entry.branch.clone())
-                    .collect();
-                base_graph_data =
-                    git_graph::gather_base_graph(&list.default_branch, &branch_names);
-            } else {
-                current_branch_data = git_graph::gather_branch(
-                    &list.default_branch,
-                    current_branch,
-                    needs_verbose,
-                );
-            }
-        }
-    } else if needs_verbose {
-        current_branch_data =
-            git_graph::gather_branch(&list.default_branch, current_branch, true);
-    }
+    let (needs_graph, needs_verbose, current_branch_data, base_graph_data) = gather_extras(
+        &list.default_branch,
+        statuses,
+        &terminal,
+        image_support,
+        &parsed_width,
+        verbose,
+    );
 
     // Generate graph instructions and render when image support is present.
     if needs_graph {
@@ -106,6 +79,101 @@ pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError>
     }
 
     Ok(())
+}
+
+/// Decide whether graph/verbose data is needed for this run and gather it.
+///
+/// `gather_data` performs the actual git work; this wrapper owns the image
+/// support + width gating so the decision is exercisable from tests with a
+/// forced terminal width. The real stderr-TTY and env detection stays in
+/// `run` and is passed in here.
+fn gather_extras(
+    default_branch: &str,
+    statuses: &[WorktreeStatus],
+    terminal: &Terminal,
+    image_support: ImageSupport,
+    parsed_width: &Option<ImageWidth>,
+    verbose: bool,
+) -> (
+    bool,
+    bool,
+    Option<git_graph::BranchGraphData>,
+    Option<git_graph::BaseGraphData>,
+) {
+    let needs_graph = graph_eligible(image_support, parsed_width, terminal.width());
+    let current = statuses.iter().find(|s| s.entry.is_current);
+    let needs_verbose = verbose && current.is_some_and(|c| !c.entry.is_main);
+
+    let (current_branch_data, base_graph_data) =
+        gather_data(default_branch, statuses, needs_graph, needs_verbose);
+
+    (
+        needs_graph,
+        needs_verbose,
+        current_branch_data,
+        base_graph_data,
+    )
+}
+
+/// Whether graph data may render on this terminal.
+///
+/// Character widths and the default (no `--width`) case both require
+/// `terminal_width >= MIN_GRAPH_TERMINAL_WIDTH`. On a narrower terminal the
+/// later `fits` check discards a character-width result, so gathering it
+/// would pay the `git_graph` subprocess cost for nothing. Percentage and fill
+/// widths stay eligible whenever image support is present.
+fn graph_eligible(
+    image_support: ImageSupport,
+    parsed_width: &Option<ImageWidth>,
+    terminal_width: u32,
+) -> bool {
+    image_support != ImageSupport::None
+        && match parsed_width {
+            Some(ImageWidth::Percent(_)) | Some(ImageWidth::Fill) => true,
+            _ => terminal_width >= MIN_GRAPH_TERMINAL_WIDTH,
+        }
+}
+
+/// Gather graph and verbose data in a single orchestration pass.
+///
+/// This is the sole boundary at which [`git_graph::gather_branch`] and
+/// [`git_graph::gather_base_graph`] are invoked during a `wt list` run. Both
+/// graph and verbose rendering consume the result; neither issues its own git
+/// calls. When both graph and verbose data are needed for the current branch,
+/// [`git_graph::gather_branch`] is called exactly once — the single
+/// `merge-base` it resolves is shared across both surfaces.
+fn gather_data(
+    default_branch: &str,
+    statuses: &[WorktreeStatus],
+    needs_graph: bool,
+    needs_verbose: bool,
+) -> (Option<git_graph::BranchGraphData>, Option<git_graph::BaseGraphData>) {
+    let current = statuses.iter().find(|s| s.entry.is_current);
+    let current_branch = current
+        .and_then(|c| c.entry.branch.as_deref())
+        .unwrap_or("HEAD");
+
+    if needs_graph {
+        if let Some(current) = current {
+            if current.entry.is_main {
+                let branch_names: Vec<String> = statuses
+                    .iter()
+                    .filter_map(|s| s.entry.branch.clone())
+                    .collect();
+                let base = git_graph::gather_base_graph(default_branch, &branch_names);
+                return (None, base);
+            } else {
+                let branch =
+                    git_graph::gather_branch(default_branch, current_branch, needs_verbose);
+                return (branch, None);
+            }
+        }
+    } else if needs_verbose {
+        let branch = git_graph::gather_branch(default_branch, current_branch, true);
+        return (branch, None);
+    }
+
+    (None, None)
 }
 
 fn graph_instructions(
@@ -341,8 +409,11 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use biscuit_terminal::components::terminal_image::ImageWidth;
+    use biscuit_terminal::discovery::detection::ImageSupport;
+    use biscuit_terminal::terminal::Terminal;
     use worktree::git::recorder;
-    use worktree::worktree::list_worktrees;
+    use worktree::worktree::{DirtyStatus, WorktreeEntry, WorktreeStatus, list_worktrees};
 
     fn run_git(repo: &Path, args: &[&str]) {
         let status = Command::new("git")
@@ -388,6 +459,26 @@ mod tests {
         fs::write(path.join("file.txt"), "1\n").unwrap();
         run_git(path, &["add", "."]);
         run_git(path, &["commit", "-m", "commit 1"]);
+
+        dir
+    }
+
+    /// Create a temp repo with `main` (2 commits) and `feature-a` (1 commit
+    /// since divergence), checked out on `main`. Used by `gather_data` tests
+    /// that need real branch data without the overhead of linked worktrees.
+    fn temp_repo_with_feature_branch() -> tempfile::TempDir {
+        let dir = temp_repo();
+        let path = dir.path();
+
+        fs::write(path.join("file.txt"), "2\n").unwrap();
+        run_git(path, &["add", "."]);
+        run_git(path, &["commit", "-m", "commit 2"]);
+
+        run_git(path, &["checkout", "-b", "feature-a"]);
+        fs::write(path.join("a.txt"), "a\n").unwrap();
+        run_git(path, &["add", "."]);
+        run_git(path, &["commit", "-m", "feature a"]);
+        run_git(path, &["checkout", "main"]);
 
         dir
     }
@@ -450,6 +541,201 @@ mod tests {
         assert_eq!(
             graph_calls, 0,
             "expected zero graph-path git calls when image support is unavailable, got {calls:?}"
+        );
+    }
+
+    /// Regression guard for the narrow image-terminal gating decision. A
+    /// character width or the default (no `--width`) case must be gated by
+    /// `MIN_GRAPH_TERMINAL_WIDTH`; percentage and fill widths stay eligible
+    /// regardless of width, and no image support is never eligible.
+    #[test]
+    fn graph_eligible_gates_default_and_character_widths_on_terminal_width() {
+        let narrow = super::MIN_GRAPH_TERMINAL_WIDTH - 1;
+        let wide = super::MIN_GRAPH_TERMINAL_WIDTH;
+
+        // No image support -> never eligible, regardless of width.
+        assert!(!super::graph_eligible(ImageSupport::None, &None, wide));
+
+        // Image support + percentage / fill -> eligible even on narrow terminals.
+        assert!(super::graph_eligible(
+            ImageSupport::Kitty,
+            &Some(ImageWidth::Percent(0.5)),
+            narrow
+        ));
+        assert!(super::graph_eligible(
+            ImageSupport::Kitty,
+            &Some(ImageWidth::Fill),
+            narrow
+        ));
+
+        // Image support + explicit character width -> gated by the minimum.
+        assert!(!super::graph_eligible(
+            ImageSupport::Kitty,
+            &Some(ImageWidth::Characters(60)),
+            narrow
+        ));
+        assert!(super::graph_eligible(
+            ImageSupport::Kitty,
+            &Some(ImageWidth::Characters(60)),
+            wide
+        ));
+
+        // Image support + default (no `--width`) -> gated by the minimum. This
+        // is the review-5 gap: a narrow image-capable terminal with the default
+        // width must not gather graph data only to discard it later.
+        assert!(!super::graph_eligible(ImageSupport::Kitty, &None, narrow));
+        assert!(super::graph_eligible(ImageSupport::Kitty, &None, wide));
+    }
+
+    /// Recorder-backed regression for the narrow image-terminal case: on an
+    /// image-capable terminal below `MIN_GRAPH_TERMINAL_WIDTH` with the
+    /// default width, `gather_extras` must issue zero graph-only git calls.
+    /// Without the early skip, `gather_data` would run `merge-base` / `log`
+    /// only for the later `fits` check to discard the result.
+    #[test]
+    #[serial_test::serial]
+    fn narrow_image_terminal_skips_graph_gather() {
+        let repo = temp_repo();
+        let _dir = DirGuard::enter(repo.path());
+
+        // Resolve the real worktree set outside the recorder window so only the
+        // gather path is observed.
+        let list = list_worktrees().expect("list_worktrees should succeed");
+
+        // 40 columns is below MIN_GRAPH_TERMINAL_WIDTH; image support is forced
+        // on, so the only thing that can suppress the gather is the width gate.
+        let narrow = Terminal::builder().width(40).build();
+
+        recorder::start_recording();
+        let (needs_graph, _needs_verbose, current, base) = super::gather_extras(
+            &list.default_branch,
+            &list.statuses,
+            &narrow,
+            ImageSupport::Kitty,
+            &None,
+            false,
+        );
+        let calls = recorder::finish_recording();
+
+        assert!(
+            !needs_graph,
+            "narrow image terminal with default width should not gather graph data"
+        );
+        assert!(current.is_none() && base.is_none());
+
+        let graph_calls = recorder::count_matching(&calls, |args| {
+            matches!(
+                args.first().map(String::as_str),
+                Some("merge-base") | Some("log")
+            )
+        });
+        assert_eq!(
+            graph_calls, 0,
+            "expected zero graph-path git calls on a narrow image terminal, got {calls:?}"
+        );
+    }
+
+    /// Regression guard for R6/R9: when the image-capable graph path and
+    /// verbose are both needed for the current feature branch, the
+    /// orchestration must issue exactly one `merge-base` call — shared across
+    /// graph and verbose surfaces.
+    ///
+    /// This tests the `gather_data` orchestration boundary directly.
+    /// `gather_data` is the sole function from which `gather_branch` is
+    /// invoked during `run()`, so a future regression that calls
+    /// `gather_branch` twice would have to bypass this boundary. The test uses
+    /// a crafted `statuses` Vec to simulate a non-main current worktree without
+    /// needing linked worktrees in the fixture.
+    #[test]
+    #[serial_test::serial]
+    fn gather_data_shares_one_merge_base_for_graph_and_verbose() {
+        let repo = temp_repo_with_feature_branch();
+        let _guard = DirGuard::enter(repo.path());
+
+        let statuses = vec![
+            WorktreeStatus {
+                entry: WorktreeEntry {
+                    path: PathBuf::from("/fake/main"),
+                    branch: Some("main".to_string()),
+                    is_main: true,
+                    is_current: false,
+                },
+                is_clean: true,
+                dirty: DirtyStatus::Clean,
+                ahead: 0,
+                behind: 0,
+            },
+            WorktreeStatus {
+                entry: WorktreeEntry {
+                    path: PathBuf::from("/fake/feature-a"),
+                    branch: Some("feature-a".to_string()),
+                    is_main: false,
+                    is_current: true,
+                },
+                is_clean: true,
+                dirty: DirtyStatus::Clean,
+                ahead: 1,
+                behind: 0,
+            },
+        ];
+
+        recorder::start_recording();
+        let (current_branch_data, base_graph_data) =
+            super::gather_data("main", &statuses, true, true);
+        let calls = recorder::finish_recording();
+
+        let merge_base_count = recorder::count_matching(&calls, |args| {
+            args.first().map(String::as_str) == Some("merge-base")
+        });
+        assert_eq!(
+            merge_base_count, 1,
+            "expected exactly one merge-base for graph+verbose gather, got {calls:?}"
+        );
+
+        let short_sha_count = recorder::count_matching(&calls, |args| {
+            args.len() >= 2 && args[0] == "rev-parse" && args[1] == "--short"
+        });
+        assert_eq!(
+            short_sha_count, 0,
+            "expected zero rev-parse --short calls, got {calls:?}"
+        );
+
+        assert!(
+            current_branch_data.is_some(),
+            "current branch data should be gathered for a feature branch"
+        );
+        assert!(
+            base_graph_data.is_none(),
+            "base graph should not be gathered for a feature branch"
+        );
+    }
+
+    /// Complement to the graph+verbose test: when neither graph nor verbose is
+    /// needed, `gather_data` must issue zero graph/verbose git calls. This
+    /// confirms the orchestration boundary gates correctly on the `needs_*`
+    /// flags.
+    #[test]
+    #[serial_test::serial]
+    fn gather_data_skips_git_calls_when_nothing_needed() {
+        let repo = temp_repo();
+        let _guard = DirGuard::enter(repo.path());
+
+        recorder::start_recording();
+        let (current, base) = super::gather_data("main", &[], false, false);
+        let calls = recorder::finish_recording();
+
+        assert!(current.is_none());
+        assert!(base.is_none());
+
+        let graph_calls = recorder::count_matching(&calls, |args| {
+            matches!(
+                args.first().map(String::as_str),
+                Some("merge-base") | Some("log")
+            )
+        });
+        assert_eq!(
+            graph_calls, 0,
+            "expected zero git calls when neither graph nor verbose is needed, got {calls:?}"
         );
     }
 

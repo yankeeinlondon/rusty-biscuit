@@ -9,12 +9,22 @@ pub struct CommitDetail {
     pub refs: String,
 }
 
-/// A commit identifier carrying both the full SHA (for identity) and git's
-/// abbreviated SHA (for display), gathered in a single log query.
+/// A commit identifier carrying both the full SHA (for identity and branch
+/// placement) and a Rust-derived display ID (for Mermaid commit labels).
 #[derive(Debug, Clone)]
 pub struct CommitId {
+    /// Full 40-character SHA, used for equality comparisons.
     pub full: String,
+    /// Display ID derived in-process via [`display_sha`], not from git `%h`.
     pub display: String,
+}
+
+/// Render a full SHA as a fixed-width display ID for graph commit labels.
+///
+/// Branch placement must never use this — compare full SHAs instead, since
+/// git's `%h` abbreviation length is repository-dependent.
+fn display_sha(full: &str) -> &str {
+    &full[..7.min(full.len())]
 }
 
 /// Per-branch data gathered once and consumed by both graph and verbose paths.
@@ -297,7 +307,7 @@ fn ancestor_commits(tip: &str, max: usize) -> Vec<CommitId> {
 
 fn query_commits(target: &str, exclude: Option<&str>, max: usize) -> Vec<CommitId> {
     let max_str = max.to_string();
-    const FORMAT_ARG: &str = "--format=%H%x1f%h";
+    const FORMAT_ARG: &str = "--format=%H";
     let mut args = vec![
         "log",
         FORMAT_ARG,
@@ -316,11 +326,10 @@ fn query_commits(target: &str, exclude: Option<&str>, max: usize) -> Vec<CommitI
         Ok(output) if !output.is_empty() => output
             .lines()
             .filter(|l| !l.is_empty())
-            .filter_map(|line| {
-                let mut parts = line.splitn(2, '\x1f');
-                let full = parts.next()?.to_string();
-                let display = parts.next()?.to_string();
-                Some(CommitId { full, display })
+            .map(|line| {
+                let full = line.to_string();
+                let display = display_sha(&full).to_string();
+                CommitId { full, display }
             })
             .collect(),
         _ => vec![],
@@ -641,7 +650,7 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn worktree_graph_matches_direct_git_output() {
+    fn worktree_graph_uses_in_process_display_ids() {
         let repo = temp_repo_with_branches();
         let _guard = DirGuard::enter(repo.path());
 
@@ -650,9 +659,13 @@ mod tests {
         let merge_base = git_command(&["merge-base", DEFAULT_BRANCH, branch])
             .expect("merge-base should exist");
 
+        // Build expected output from full SHAs (%H), deriving display IDs the
+        // same way the production code does: truncating to 7 chars in-process
+        // via display_sha. This asserts the in-process display contract rather
+        // than git's repository-dependent %h abbreviation.
         let context = git_command(&[
             "log",
-            "--format=%h",
+            "--format=%H",
             "--max-count",
             "2",
             "--reverse",
@@ -663,7 +676,7 @@ mod tests {
 
         let branch_commits = git_command(&[
             "log",
-            "--format=%h",
+            "--format=%H",
             "--max-count",
             "5",
             "--reverse",
@@ -676,7 +689,7 @@ mod tests {
 
         let main_after = git_command(&[
             "log",
-            "--format=%h",
+            "--format=%H",
             "--max-count",
             "5",
             "--reverse",
@@ -689,7 +702,7 @@ mod tests {
 
         let mut expected = vec!["gitGraph".to_string()];
         for sha in context.lines().filter(|l| !l.is_empty()) {
-            expected.push(format!("    commit id: \"{sha}\""));
+            expected.push(format!("    commit id: \"{}\"", display_sha(sha)));
         }
         expected.push(format!("    branch {branch}"));
         expected.push(format!("    checkout {branch}"));
@@ -697,12 +710,12 @@ mod tests {
             expected.push("    commit id: \"HEAD\"".to_string());
         } else {
             for sha in branch_commits.lines().filter(|l| !l.is_empty()) {
-                expected.push(format!("    commit id: \"{sha}\""));
+                expected.push(format!("    commit id: \"{}\"", display_sha(sha)));
             }
         }
         expected.push(format!("    checkout {DEFAULT_BRANCH}"));
         for sha in main_after.lines().filter(|l| !l.is_empty()) {
-            expected.push(format!("    commit id: \"{sha}\""));
+            expected.push(format!("    commit id: \"{}\"", display_sha(sha)));
         }
 
         let data = gather_branch(DEFAULT_BRANCH, branch, false).expect("gather should succeed");
@@ -711,7 +724,7 @@ mod tests {
         assert_eq!(
             actual,
             expected.join("\n"),
-            "worktree_graph output must match direct git log --format=%h output"
+            "worktree_graph output must match the in-process display_sha contract (7-char truncation of %H)"
         );
     }
 
