@@ -64,6 +64,7 @@ members = [
     "claudine/remote-signal/core",
     "claudine/remote-signal/daemon",
     "claudine/remote-signal/client",
+    "visualizer/src-tauri",
 ]
 exclude = ["schematic/schema"]
 
