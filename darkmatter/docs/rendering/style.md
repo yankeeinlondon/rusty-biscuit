@@ -1372,7 +1372,9 @@ The `page.code` theme (`--code-theme`, `code_theme`) is a mode-agnostic
 deliberately resolve against the *inverted* color mode so the panel contrasts
 against the page (light code on a dark page, and vice versa); prose, tables, and
 the page background follow the real mode. This holds for **both terminal and
-HTML** output, so the targets agree. Single-variant themes
-(`dracula`/`nord`/`monokai`/`vs-dark`) ignore the mode by design.
+HTML** output, so the targets agree. Every `ThemePair` resolves to a distinct
+light and dark variant, so this inversion applies to all of them — the
+`dracula`/`nord`/`monokai`/`vs-dark` pairs simply borrow a generic light theme
+for their light variant.
 
 See [Code Highlighting](./code-highlighting.md) for the full model.

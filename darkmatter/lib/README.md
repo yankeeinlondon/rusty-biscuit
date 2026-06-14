@@ -709,10 +709,14 @@ Themes come in light/dark pairs with automatic mode detection:
 | `Gruvbox` | Gruvbox Light | Gruvbox Dark |
 | `Solarized` | Solarized Light | Solarized Dark |
 | `Base16Ocean` | Base16 Ocean Light | Base16 Ocean Dark |
-| `Nord` | Nord | Nord |
-| `Dracula` | Dracula | Dracula |
-| `Monokai` | Monokai | Monokai |
-| `VisualStudioDark` | VS Dark | VS Dark |
+| `Nord` | One Half Light | Nord |
+| `Dracula` | One Half Light | Dracula |
+| `Monokai` | One Half Light | Monokai Extended |
+| `VisualStudioDark` | GitHub Light | VS Dark |
+
+Every pair resolves to a distinct light and dark variant. The bottom four have
+no native light theme of their own, so they borrow a generic light companion for
+their light variant.
 
 ### Color Mode Detection
 

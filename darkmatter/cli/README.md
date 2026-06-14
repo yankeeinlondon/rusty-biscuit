@@ -243,8 +243,10 @@ overrides the variant for **terminal** rendering — `dark`/`light` pin the
 variant, `same` matches the terminal (HTML currently always uses the inverse
 default). The variant is derived from the terminal (the same source as the page),
 so it is consistent regardless of environment color detection.
-Single-variant themes (`dracula`, `nord`, `monokai`, `vs-dark`) have no opposite
-variant, so they render the same in either mode (no contrast lift). See
+Every theme has a distinct light and dark variant, so the inversion applies to
+all of them; the `dracula`/`nord`/`monokai`/`vs-dark` pairs have no native light
+theme and borrow a generic one (One Half Light / GitHub Light) for their light
+variant, so they still contrast across modes. See
 [Code Highlighting](../docs/rendering/code-highlighting.md).
 
 ### Verbosity
