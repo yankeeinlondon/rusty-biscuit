@@ -21,7 +21,7 @@ darkmatter = { path = "../../darkmatter/lib" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tui-chrome = { path = "../../biscuit-tui/lib" }
+biscuit-tui = { path = "../../biscuit-tui/lib" }
 
 [dev-dependencies]
 assert_cmd = "2"

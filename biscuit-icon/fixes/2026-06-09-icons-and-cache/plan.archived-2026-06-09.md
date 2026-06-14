@@ -121,7 +121,7 @@ command, and the supporting SQLite v2→v3 migration + Iconify metadata parsing.
   to `Icons` in `main.rs`.
 - **CLI command bodies** in `cli/src/commands.rs`; `set_info_from_collection`
   maps the client struct into `SetInfo`.
-- **Picker**: `tui-chrome` crate (`biscuit-tui/lib`) exposes `ChooseManyState` +
+- **Picker**: `biscuit-tui` crate (`biscuit-tui/lib`) exposes `ChooseManyState` +
   `run_standalone`. Abort (Esc) → `io::ErrorKind::ConnectionAborted`; Ctrl-C →
   `io::ErrorKind::Interrupted`; zero selection (not `required`) → `Ok(vec![])`.
   Requires a TTY.
@@ -271,7 +271,7 @@ mutually-exclusive format flags are rejected. Bodies are stubbed/minimal here
 and filled in Phases 4–5. **Phase 3 gates Phases 4 and 5.**
 
 - [x] **3.1** Add CLI dependencies in `cli/Cargo.toml`:
-  `tui-chrome = { path = "../../biscuit-tui/lib" }` and
+  `biscuit-tui = { path = "../../biscuit-tui/lib" }` and
   `darkmatter = { path = "../../darkmatter/lib" }`. Update
   `biscuit-icon/docs/dependencies.md` (and root `docs/dependencies.md` if it
   enumerates per-crate deps) per the Drift rule.
@@ -354,7 +354,7 @@ Goal: full `show` behavior per spec §`show`, §Multiple icons, §Inexact Matche
 - [x] **4.7** `<id>` with `:` that does **not** resolve → error
   `"icon does not exist"` + suggestion list (names matching the substring after
   `:`), exit `1` (spec §Inexact Matches bullet 2).
-- [x] **4.8** Picker integration (`tui-chrome` `ChooseManyState` +
+- [x] **4.8** Picker integration (`biscuit-tui` `ChooseManyState` +
   `run_standalone`): options are the matched ids (label = id). On result:
   - `Ok(picked)` with `len == 1` → render that single icon.
   - `Ok(picked)` with `len ≥ 2` → render as a table (same as 4.3).
@@ -450,7 +450,7 @@ whole package area builds/lints/tests clean.
   frontmatter with `md hash <file>` (per the skill-hash rule). Mirror to the
   global `~/.claude/skills/biscuit-icon/` copy if the workflow requires it.
 - [x] **6.4** Update `biscuit-icon/docs/dependencies.md` for the new
-  `tui-chrome` + `darkmatter` CLI deps (and `cache.md`'s schema section for
+  `biscuit-tui` + `darkmatter` CLI deps (and `cache.md`'s schema section for
   `user_version = 3`).
 - [x] **6.5** Run the full gate from the package area:
   `just build`, `just test`, `just test-l2`, `just lint`, `just doctest`.

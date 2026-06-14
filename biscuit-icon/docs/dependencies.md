@@ -27,7 +27,7 @@ Notable crates used by the `biscuit-icon` library and the `icon` CLI, and why.
 | `darkmatter` (path) | Markdown-to-terminal rendering for the `--code-block` format flag. |
 | `tokio` | Async runtime. |
 | `tracing` / `tracing-subscriber` | `--debug` / `RUST_LOG` diagnostics on stderr; `--verbose` drives user-facing output only. |
-| `tui-chrome` (path) | Interactive picker (`choose_many`) for the `--pick` flag and inexact-match TTY flows. |
+| `biscuit-tui` (path) | Interactive picker (`choose_many`) for the `--pick` flag and inexact-match TTY flows. |
 
 ## Cargo features
 
