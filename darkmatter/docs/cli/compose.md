@@ -6,7 +6,7 @@ It is used for document assembly workflows like:
 
 - interpolation (`{{ ... }}`)
 - replacement transforms
-- transclusion (`::file`, `::code`, and related directives)
+- transclusion (`::file`, `::code`, `::toc-linking`, `::file-links`, and related directives)
 - **link resolve** (converts relative links to absolute paths before transclusion)
 - **link normalization** (converts absolute paths back to portable forms in the final document)
 
@@ -206,4 +206,4 @@ md compose doc.md \
 
 ## Issues
 
-- The compose transform report (warnings from the library compose pipeline) is still discarded in CLI output; only reference validation issues are surfaced.
+_(none known)_

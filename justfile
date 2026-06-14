@@ -15,7 +15,7 @@ import "./just/spec.just"
 
 # List of areas in this monorepo
 
-areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab"
+areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract"
 BOLD := '\033[1m'
 DIM := '\033[2m'
 ITALIC := '\033[3m'
@@ -40,103 +40,14 @@ default:
 modules:
     @cargo modules structure
 
-# run tests (all areas, or specific areas: just test claudine darkmatter)
+# Run Level-1 tests for all Cargo workspace packages. Optional selectors may
+# name packages or package-area paths: `just test claudine darkmatter`.
 test *args="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    failed_areas=()
-    passed_areas=()
-    current_area=""
+    @just _test_workspace {{ args }}
 
-    print_summary() {
-        echo ""
-        echo "================================================"
-        echo "Test Summary"
-        echo "================================================"
-        echo -e "{{ GREEN }}Passed{{ RESET }} (${#passed_areas[@]}): ${passed_areas[*]:-(none)}"
-        if [[ ${#failed_areas[@]} -gt 0 ]]; then
-            echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): ${failed_areas[*]}"
-        else
-            echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): (none)"
-        fi
-        echo "================================================"
-        echo ""
-    }
-
-    # `just`/`cargo`/`nextest` trap SIGINT and exit *normally* with a non-zero
-    # code instead of dying by the signal, so bash never auto-aborts on Ctrl-C:
-    # the `if (cd ... && just test)` swallows the 130 like an ordinary failure
-    # and the loop runs on to the next area. Trap it ourselves so Ctrl-C stops
-    # the whole run and still prints the partial summary.
-    on_interrupt() {
-        trap - INT                  # a second Ctrl-C hard-kills
-        echo
-        echo "Interrupted (Ctrl-C)${current_area:+ while testing ${current_area}} -- aborting remaining areas."
-        print_summary
-        exit 130
-    }
-    trap on_interrupt INT
-
-    if [[ -z "{{ args }}" ]]; then
-        echo ""
-        echo "Running tests for all areas..."
-        echo "------------------------------------------------"
-        echo ""
-        for area in {{ areas }}; do
-            if [ -f "$area/justfile" ]; then
-                if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "test"; then
-                    echo
-                    echo "Testing $area..."
-                    current_area="$area"
-                    if (cd "./$area" && just test); then
-                        passed_areas+=("$area")
-                    else
-                        failed_areas+=("$area")
-                        just _message "Tests failed in $area"
-                    fi
-                    current_area=""
-                else
-                    echo "- no test command for the area **$area**" >&2
-                fi
-            else
-                echo "- no justfile for the area **$area**" >&2
-            fi
-        done
-    else
-        IFS=', ' read -ra areas <<< "{{ args }}"
-        echo ""
-        echo "Running tests for: ${areas[*]}"
-        echo "------------------------------------------------"
-        echo ""
-        for area in "${areas[@]}"; do
-            if [ -d "$area" ] && [ -f "$area/justfile" ]; then
-                if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "test"; then
-                    echo
-                    echo "Testing $area..."
-                    current_area="$area"
-                    if (cd "./$area" && just test); then
-                        passed_areas+=("$area")
-                    else
-                        failed_areas+=("$area")
-                        just _message "Tests failed in $area"
-                    fi
-                    current_area=""
-                else
-                    echo "Error: area '$area' has no test recipe" >&2
-                    failed_areas+=("$area (no test recipe)")
-                fi
-            else
-                echo "Error: area '$area' not found or has no justfile" >&2
-                failed_areas+=("$area (not found / no justfile)")
-            fi
-        done
-    fi
-
-    print_summary
-
-    if [[ ${#failed_areas[@]} -gt 0 ]]; then
-        exit 1
-    fi
+# Verify that every package-area test recipe preserves Ctrl+C as exit 130.
+check-test-interrupts:
+    @just _check_test_interrupts
 
 # run the test suite, then sweep for child processes that outlived it
 #

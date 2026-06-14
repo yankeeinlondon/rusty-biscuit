@@ -1,0 +1,7 @@
+---
+source: darkmatter/lib/tests/cutover_reference.rs
+expression: "render_terminal(&md, 80)"
+---
+[48;2;245;245;245m[1m# Hello[0m[48;2;245;245;245m                                                                         [0m
+[48;2;245;245;245m[48;2;245;245;245m                                                                                [0m
+[48;2;245;245;245mSome prose.[48;2;245;245;245m                                                                     [0m

@@ -8,7 +8,7 @@
 //! parsing.
 
 use heck::{ToKebabCase, ToLowerCamelCase, ToSnakeCase, ToTitleCase, ToUpperCamelCase};
-use tui_chrome::{ChoiceOption, HotkeySpec};
+use biscuit_tui::{ChoiceOption, HotkeySpec};
 
 use crate::option_sources::RawOption;
 

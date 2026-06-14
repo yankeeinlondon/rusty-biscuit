@@ -8,7 +8,9 @@ use crate::adapter::{
     AdapterCacheStatus, AdapterConfig, AdapterError, AdapterMetadata, AdapterResult,
     ExternalDiagnosticAdapter, external_diagnostic, map_category,
 };
-use crate::shared::{CodeRange, DiagnosticCategory, DiagnosticConfidence, DiagnosticSeverity, ProgrammingLanguage};
+use crate::shared::{
+    CodeRange, DiagnosticCategory, DiagnosticConfidence, DiagnosticSeverity, ProgrammingLanguage,
+};
 
 /// Adapter for the Oxlint JavaScript/TypeScript linter.
 ///
@@ -41,11 +43,7 @@ impl OxlintAdapter {
     /// 1. Explicit `tool_path` in config
     /// 2. Project-local `node_modules/.bin/oxlint`
     /// 3. `oxlint` on `PATH`
-    fn discover_tool_path(
-        &self,
-        project_root: &Path,
-        config: &AdapterConfig,
-    ) -> Option<PathBuf> {
+    fn discover_tool_path(&self, project_root: &Path, config: &AdapterConfig) -> Option<PathBuf> {
         // 1. Explicit path
         if let Some(path) = &config.tool_path
             && path.exists()
@@ -54,7 +52,10 @@ impl OxlintAdapter {
         }
 
         // 2. Project-local node_modules
-        let local_oxlint = project_root.join("node_modules").join(".bin").join("oxlint");
+        let local_oxlint = project_root
+            .join("node_modules")
+            .join(".bin")
+            .join("oxlint");
         if local_oxlint.exists() {
             return Some(local_oxlint);
         }
@@ -64,9 +65,7 @@ impl OxlintAdapter {
     }
 
     /// Returns the tool version by running `oxlint --version`.
-    fn get_version(&mut self,
-        tool_path: &Path,
-    ) -> Option<String> {
+    fn get_version(&mut self, tool_path: &Path) -> Option<String> {
         if let Some(v) = &self.cached_version {
             return Some(v.clone());
         }
@@ -78,9 +77,7 @@ impl OxlintAdapter {
             .output()
             .ok()?;
 
-        let version = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_string();
+        let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         if version.is_empty() {
             return None;
@@ -91,21 +88,13 @@ impl OxlintAdapter {
     }
 
     /// Discovers Oxlint configuration files.
-    fn discover_config_files(
-        &self,
-        project_root: &Path,
-        config: &AdapterConfig,
-    ) -> Vec<PathBuf> {
+    fn discover_config_files(&self, project_root: &Path, config: &AdapterConfig) -> Vec<PathBuf> {
         let mut configs = Vec::new();
 
         if let Some(path) = &config.config_path {
             configs.push(path.clone());
         } else {
-            let candidates = [
-                ".oxlintrc.json",
-                ".oxlintrc",
-                "oxlint.json",
-            ];
+            let candidates = [".oxlintrc.json", ".oxlintrc", "oxlint.json"];
             for candidate in &candidates {
                 let path = project_root.join(candidate);
                 if path.exists() {
@@ -126,9 +115,7 @@ impl OxlintAdapter {
         config: &AdapterConfig,
     ) -> Result<OxlintJsonOutput, AdapterError> {
         let mut cmd = Command::new(tool_path);
-        cmd.arg("--format")
-            .arg("json")
-            .current_dir(project_root);
+        cmd.arg("--format").arg("json").current_dir(project_root);
 
         // Add config if available
         let config_files = self.discover_config_files(project_root, config);
@@ -164,8 +151,8 @@ impl OxlintAdapter {
 
         // Oxlint may exit with non-zero when diagnostics are found
         // We still want to parse the output
-        let json: OxlintJsonOutput = serde_json::from_str(&stdout)
-            .map_err(|e| AdapterError::ParseFailed {
+        let json: OxlintJsonOutput =
+            serde_json::from_str(&stdout).map_err(|e| AdapterError::ParseFailed {
                 message: format!("Failed to parse oxlint JSON: {e}"),
             })?;
 
@@ -205,7 +192,10 @@ impl ExternalDiagnosticAdapter for OxlintAdapter {
     ) -> Result<AdapterResult, AdapterError> {
         let start = Instant::now();
 
-        if !matches!(language, ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript) {
+        if !matches!(
+            language,
+            ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript
+        ) {
             return Err(AdapterError::UnsupportedLanguage {
                 language,
                 adapter: self.name().to_string(),
@@ -246,10 +236,7 @@ impl ExternalDiagnosticAdapter for OxlintAdapter {
 
         let oxlint_output = self.run_oxlint(&tool_path, files, project_root, config)?;
 
-        let diagnostics = normalize_oxlint_diagnostics(&oxlint_output,
-            files,
-            language,
-        );
+        let diagnostics = normalize_oxlint_diagnostics(&oxlint_output, files, language);
 
         let fixes_available = oxlint_output
             .messages
@@ -382,12 +369,7 @@ fn normalize_oxlint_diagnostics(
         let file_path = message
             .file_path
             .as_ref()
-            .and_then(|fp| {
-                input_files
-                    .iter()
-                    .find(|f| f.ends_with(fp))
-                    .cloned()
-            })
+            .and_then(|fp| input_files.iter().find(|f| f.ends_with(fp)).cloned())
             .or_else(|| input_files.first().cloned());
 
         if file_path.is_none() {

@@ -18,6 +18,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::tree::ComponentHints;
 use crate::tree::Severity;
 use crate::tree::node::{NodeKind, RenderNode};
 use crate::tree::source::SourceSpan;
@@ -327,10 +328,7 @@ fn check_node(
     }
 
     // A list marker policy is a List-only hint.
-    if node
-        .attrs
-        .get_hint(crate::tree::HintNamespace::LIST, "marker_policy")
-        .is_some()
+    if node.attrs.list_marker_policy != crate::tree::ListMarkerPolicy::default()
         && !matches!(node.kind, NodeKind::List { .. })
     {
         report.findings.push(error(
@@ -342,15 +340,44 @@ fn check_node(
         ));
     }
 
-    // Task hints are a ListItem-only hint.
-    if node.attrs.task_hints().is_some() && !matches!(node.kind, NodeKind::ListItem { .. }) {
-        report.findings.push(error(
-            format!(
-                "task hints are permitted only on a ListItem node, found on {}",
-                kind_name(&node.kind),
-            ),
-            span.clone(),
-        ));
+    // Per-component hints are matched to a specific node kind. Validation reads
+    // the typed `component` field directly — no `data`-bag round-trip — and a
+    // hint carried on the wrong kind is malformed typed IR. The table-title
+    // rule below adds its own message for the title slice of `Table` hints.
+    if let Some(component) = node.attrs.component.as_deref() {
+        let mismatch: Option<(&str, &str)> = match component {
+            ComponentHints::List(_) if !matches!(node.kind, NodeKind::List { .. }) => {
+                Some(("list render hints", "List"))
+            }
+            ComponentHints::Code(_) if !matches!(node.kind, NodeKind::Code { .. }) => {
+                Some(("code render hints", "Code"))
+            }
+            ComponentHints::Progress(_) if !matches!(node.kind, NodeKind::Paragraph { .. }) => {
+                Some(("progress hints", "Paragraph"))
+            }
+            ComponentHints::Columns(_) if !matches!(node.kind, NodeKind::BlockQuote { .. }) => {
+                Some(("column hints", "BlockQuote"))
+            }
+            ComponentHints::Task(_) if !matches!(node.kind, NodeKind::ListItem { .. }) => {
+                Some(("task hints", "ListItem"))
+            }
+            ComponentHints::Table(_) if !matches!(node.kind, NodeKind::Table { .. }) => {
+                Some(("table hints", "Table"))
+            }
+            ComponentHints::TableCell(_) if !matches!(node.kind, NodeKind::TableCell { .. }) => {
+                Some(("table cell hints", "TableCell"))
+            }
+            _ => None,
+        };
+        if let Some((what, required_kind)) = mismatch {
+            report.findings.push(error(
+                format!(
+                    "{what} are permitted only on a {required_kind} node, found on {}",
+                    kind_name(&node.kind),
+                ),
+                span.clone(),
+            ));
+        }
     }
 
     // A table title/caption is a Table-only hint.
@@ -364,113 +391,90 @@ fn check_node(
         ));
     }
 
-    // Typed render hints with a known key but a malformed token or value are
-    // rejected, so a serialized-and-reloaded tree cannot silently lose hint
-    // intent by falling back to a default.
-    check_hints(node, &span, report);
+    // First-class presentation now lives in typed `NodeAttrs` fields, so a
+    // `renderable.`-namespaced key in `data` is a stale hint that no accessor
+    // reads. Reject it rather than let it silently drop intent. Other
+    // namespaces (`darkmatter.*`, etc.) are package-local extensions and pass.
+    for key in node.attrs.data.keys() {
+        if key.starts_with("renderable.") {
+            report.findings.push(error(
+                format!(
+                    "stale renderable-owned hint key in data: {key}; first-class attrs are typed fields"
+                ),
+                span.clone(),
+            ));
+        }
+    }
+
+    // Width-dependent text intent is supported only on link, image, and
+    // list-item nodes; the renderers resolve it against those kinds.
+    if node.attrs.text_layout_ref().is_some()
+        && !matches!(
+            node.kind,
+            NodeKind::Link { .. } | NodeKind::Image { .. } | NodeKind::ListItem { .. }
+        )
+    {
+        report.findings.push(error(
+            format!(
+                "text-layout hints are permitted only on Link, Image, or ListItem nodes, found on {}",
+                kind_name(&node.kind),
+            ),
+            span.clone(),
+        ));
+    }
+
+    // Thematic-break styling is supported only on a ThematicBreak node; the
+    // terminal and browser renderers read it only when folding that kind.
+    if node.attrs.thematic_break_ref().is_some()
+        && !matches!(node.kind, NodeKind::ThematicBreak)
+    {
+        report.findings.push(error(
+            format!(
+                "thematic-break attributes are permitted only on a ThematicBreak node, found on {}",
+                kind_name(&node.kind),
+            ),
+            span.clone(),
+        ));
+    }
+
+    // Kind-specific browser sub-groups: a link group belongs only on a Link
+    // node, an image group only on an Image node. The remaining browser fields
+    // (inline_style, data/aria attrs) apply to any node, and the validated name
+    // newtypes already guarantee safe attribute names at construction.
+    if let Some(browser) = node.attrs.browser_ref() {
+        if browser.link.is_some() && !matches!(node.kind, NodeKind::Link { .. }) {
+            report.findings.push(error(
+                format!(
+                    "link browser attributes are permitted only on a Link node, found on {}",
+                    kind_name(&node.kind),
+                ),
+                span.clone(),
+            ));
+        }
+        if browser.image.is_some() && !matches!(node.kind, NodeKind::Image { .. }) {
+            report.findings.push(error(
+                format!(
+                    "image browser attributes are permitted only on an Image node, found on {}",
+                    kind_name(&node.kind),
+                ),
+                span.clone(),
+            ));
+        }
+    }
 
     // Layout attributes are permitted only on block-level nodes.
     if let Some(layout) = node.attrs.layout() {
         if is_inline_kind(&node.kind) {
-            report.findings.push(ValidationFinding {
-                severity: Severity::Warning,
-                message: "layout attributes are permitted only on block-level nodes".into(),
-                span: span.clone(),
-            });
+            report.findings.push(error(
+                "layout attributes are permitted only on block-level nodes",
+                span.clone(),
+            ));
         }
 
         if let Err(err) = layout.validate() {
             report
                 .findings
                 .push(error(format!("invalid layout: {err}"), span));
-        }
-    }
-}
-
-/// Validates typed render hints whose key is present but whose serialized
-/// token or value is malformed.
-///
-/// The hint accessors deliberately fall back to a default for unrecognized
-/// tokens so a renderer never panics. That makes a malformed hint *invisible*
-/// once a tree is serialized and reloaded, which weakens the render tree as a
-/// typed IR. This check restores a hard signal: a known hint key carrying an
-/// invalid token or wrong value type becomes an error-severity finding.
-fn check_hints(node: &RenderNode, span: &Option<SourceSpan>, report: &mut ValidationReport) {
-    use crate::tree::{HintNamespace, ListMarkerPolicy, SequenceJoin, TaskState};
-
-    // Sequence-join token must be a recognized join policy.
-    if let Some(value) = node.attrs.get_hint(HintNamespace::LAYOUT, "sequence_join") {
-        let valid = value
-            .as_str()
-            .is_some_and(|token| SequenceJoin::from_token(token).is_some());
-        if !valid {
-            report.findings.push(error(
-                format!("invalid sequence-join hint value: {value}"),
-                span.clone(),
-            ));
-        }
-    }
-
-    // List marker policy token must be a recognized policy.
-    if let Some(value) = node.attrs.get_hint(HintNamespace::LIST, "marker_policy") {
-        let valid = value
-            .as_str()
-            .is_some_and(|token| ListMarkerPolicy::from_token(token).is_some());
-        if !valid {
-            report.findings.push(error(
-                format!("invalid list marker policy hint value: {value}"),
-                span.clone(),
-            ));
-        }
-    }
-
-    // Task-state token must be a recognized state.
-    if let Some(value) = node.attrs.get_hint(HintNamespace::WIDGET_TASK, "state") {
-        let valid = value
-            .as_str()
-            .is_some_and(|token| TaskState::from_token(token).is_some());
-        if !valid {
-            report.findings.push(error(
-                format!("invalid task state hint value: {value}"),
-                span.clone(),
-            ));
-        }
-    }
-
-    // The two-column `left_width_kind` must be `fixed` or `percent`, and the
-    // paired `left_width` value must match the kind's expected JSON type.
-    if let Some(kind) = node
-        .attrs
-        .get_hint(HintNamespace::WIDGET_COLUMNS, "left_width_kind")
-    {
-        let width = node
-            .attrs
-            .get_hint(HintNamespace::WIDGET_COLUMNS, "left_width");
-        match kind.as_str() {
-            Some("fixed") => {
-                if let Some(width) = width
-                    && u32::try_from(width.as_u64().unwrap_or(u64::MAX)).is_err()
-                {
-                    report.findings.push(error(
-                        format!("invalid columns left_width for 'fixed' kind: {width}"),
-                        span.clone(),
-                    ));
-                }
-            }
-            Some("percent") => {
-                if let Some(width) = width
-                    && width.as_f64().is_none()
-                {
-                    report.findings.push(error(
-                        format!("invalid columns left_width for 'percent' kind: {width}"),
-                        span.clone(),
-                    ));
-                }
-            }
-            _ => report.findings.push(error(
-                format!("invalid columns left_width_kind hint value: {kind}"),
-                span.clone(),
-            )),
         }
     }
 }
@@ -683,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_on_inline_node_is_a_warning() {
+    fn layout_on_inline_node_is_an_error() {
         use crate::layout::Layout;
 
         let mut text = RenderNode::text("hello");
@@ -692,17 +696,16 @@ mod tests {
 
         let report = validate(&root, ValidationMode::Full);
         assert!(
-            !report.has_errors(),
-            "layout on an inline Text node must be a warning, not an error"
+            report.has_errors(),
+            "layout on an inline Text node must be an error: Layout is block-only"
         );
         assert!(
             report
-                .findings
-                .iter()
-                .any(|f| f.severity == Severity::Warning && f.message.contains("block-level")),
-            "should contain a warning about block-level"
+                .errors()
+                .any(|f| f.message.contains("block-level")),
+            "should contain an error about block-level"
         );
-        assert!(ensure_valid(&root).is_ok());
+        assert!(ensure_valid(&root).is_err());
     }
 
     #[test]
@@ -878,115 +881,208 @@ mod tests {
         assert!(ensure_valid(&root).is_ok());
     }
 
-    // ── Malformed typed-hint validation ────────────────────────────────────
+    // ── Typed ComponentHints kind-placement ───────────────────────────────
 
     #[test]
-    fn invalid_sequence_join_token_is_an_error() {
-        use crate::tree::HintNamespace;
-        let mut root = RenderNode::root(vec![RenderNode::text("x")]);
-        root.attrs.set_hint(
-            HintNamespace::LAYOUT,
-            "sequence_join",
-            serde_json::json!("bogus"),
-        );
+    fn list_hints_on_non_list_is_an_error() {
+        use crate::tree::ListRenderHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_list_hints(&ListRenderHints {
+            bullet: Some("* ".into()),
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![para]);
         let report = validate(&root, ValidationMode::Full);
         assert!(
             report
                 .errors()
-                .any(|f| f.message.contains("invalid sequence-join hint value"))
+                .any(|f| f.message.contains("list render hints are permitted only"))
         );
     }
 
     #[test]
-    fn invalid_list_marker_policy_token_is_an_error() {
-        use crate::tree::HintNamespace;
-        let mut list = RenderNode::list(false, None, vec![RenderNode::list_item(None, vec![])]);
-        list.attrs.set_hint(
-            HintNamespace::LIST,
-            "marker_policy",
-            serde_json::json!("bogus"),
-        );
-        let root = RenderNode::root(vec![list]);
-        let report = validate(&root, ValidationMode::Full);
-        assert!(
-            report
-                .errors()
-                .any(|f| f.message.contains("invalid list marker policy hint value"))
-        );
-    }
-
-    #[test]
-    fn invalid_task_state_token_is_an_error() {
-        use crate::tree::HintNamespace;
-        let mut item = RenderNode::list_item(Some(false), vec![]);
-        item.attrs.set_hint(
-            HintNamespace::WIDGET_TASK,
-            "state",
-            serde_json::json!("bogus"),
-        );
+    fn code_hints_on_non_code_is_an_error() {
+        use crate::tree::CodeRenderHints;
+        let mut item = RenderNode::list_item(None, vec![]);
+        item.attrs.set_code_hints(&CodeRenderHints {
+            header_row: true,
+            ..Default::default()
+        });
         let root = RenderNode::root(vec![RenderNode::list(false, None, vec![item])]);
         let report = validate(&root, ValidationMode::Full);
         assert!(
             report
                 .errors()
-                .any(|f| f.message.contains("invalid task state hint value"))
+                .any(|f| f.message.contains("code render hints are permitted only"))
         );
     }
 
     #[test]
-    fn wrong_type_task_state_hint_is_an_error() {
-        use crate::tree::HintNamespace;
-        let mut item = RenderNode::list_item(Some(false), vec![]);
-        item.attrs
-            .set_hint(HintNamespace::WIDGET_TASK, "state", serde_json::json!(42));
-        let root = RenderNode::root(vec![RenderNode::list(false, None, vec![item])]);
-        let report = validate(&root, ValidationMode::Full);
-        assert!(
-            report
-                .errors()
-                .any(|f| f.message.contains("invalid task state hint value"))
-        );
+    fn code_hints_on_code_is_valid() {
+        use crate::tree::CodeRenderHints;
+        let mut code = RenderNode::code(Some("rust".into()), None, "let x = 1;");
+        code.attrs.set_code_hints(&CodeRenderHints {
+            header_row: true,
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![code]);
+        assert!(ensure_valid(&root).is_ok());
     }
 
     #[test]
-    fn invalid_columns_left_width_kind_is_an_error() {
-        use crate::tree::HintNamespace;
-        let mut bq = RenderNode::block_quote(vec![]);
-        bq.attrs.set_hint(
-            HintNamespace::WIDGET_COLUMNS,
-            "left_width_kind",
-            serde_json::json!("bogus"),
-        );
+    fn progress_hints_on_non_paragraph_is_an_error() {
+        use crate::tree::ProgressHints;
+        let mut bq = RenderNode::block_quote(vec![RenderNode::text("x")]);
+        bq.attrs.set_progress_hints(&ProgressHints::default());
         let root = RenderNode::root(vec![bq]);
         let report = validate(&root, ValidationMode::Full);
         assert!(
             report
                 .errors()
-                .any(|f| f.message.contains("invalid columns left_width_kind"))
+                .any(|f| f.message.contains("progress hints are permitted only"))
         );
     }
 
     #[test]
-    fn invalid_columns_left_width_value_is_an_error() {
-        use crate::tree::HintNamespace;
-        let mut bq = RenderNode::block_quote(vec![]);
-        bq.attrs.set_hint(
-            HintNamespace::WIDGET_COLUMNS,
-            "left_width_kind",
-            serde_json::json!("fixed"),
-        );
-        bq.attrs.set_hint(
-            HintNamespace::WIDGET_COLUMNS,
-            "left_width",
-            serde_json::json!("not-a-number"),
-        );
-        let root = RenderNode::root(vec![bq]);
+    fn progress_hints_on_paragraph_is_valid() {
+        use crate::tree::ProgressHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("50%")]);
+        para.attrs.set_progress_hints(&ProgressHints::default());
+        let root = RenderNode::root(vec![para]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    #[test]
+    fn columns_hints_on_non_block_quote_is_an_error() {
+        use crate::tree::ColumnsHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_columns_hints(&ColumnsHints::default());
+        let root = RenderNode::root(vec![para]);
         let report = validate(&root, ValidationMode::Full);
         assert!(
             report
                 .errors()
-                .any(|f| f.message.contains("invalid columns left_width for 'fixed'"))
+                .any(|f| f.message.contains("column hints are permitted only"))
         );
+    }
+
+    #[test]
+    fn columns_hints_on_block_quote_is_valid() {
+        use crate::tree::ColumnsHints;
+        let mut bq = RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
+            "left",
+        )])]);
+        bq.attrs.set_columns_hints(&ColumnsHints::default());
+        let root = RenderNode::root(vec![bq]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    #[test]
+    fn table_column_hints_on_non_table_is_an_error() {
+        use crate::tree::TableColumnHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_table_column_hints(
+            0,
+            &TableColumnHints {
+                min_width: Some(4),
+                ..Default::default()
+            },
+        );
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("table hints are permitted only")),
+            "table column hints on a non-Table node must be an error",
+        );
+    }
+
+    #[test]
+    fn table_terminal_hints_on_non_table_is_an_error() {
+        use crate::tree::TableTerminalHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_table_terminal_hints(&TableTerminalHints {
+            alternate_background: true,
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("table hints are permitted only")),
+            "table terminal hints on a non-Table node must be an error",
+        );
+    }
+
+    #[test]
+    fn table_cell_hints_on_non_cell_is_an_error() {
+        use crate::tree::TableCellHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_table_cell_hints(&TableCellHints {
+            kind: "integer".into(),
+            raw_value: serde_json::json!(1),
+            alignment: "right".into(),
+            vertical_alignment: "top".into(),
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("table cell hints are permitted only"))
+        );
+    }
+
+    #[test]
+    fn table_cell_hints_on_cell_is_valid() {
+        use crate::tree::TableCellHints;
+        let mut cell = RenderNode::table_cell(vec![RenderNode::text("42")]);
+        cell.attrs.set_table_cell_hints(&TableCellHints {
+            kind: "integer".into(),
+            raw_value: serde_json::json!(42),
+            alignment: "right".into(),
+            vertical_alignment: "top".into(),
+        });
+        let root = RenderNode::root(vec![RenderNode::table(
+            vec![ColumnAlign::Right],
+            vec![RenderNode::table_row(vec![cell])],
+        )]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    // ── Stale renderable-owned data keys ───────────────────────────────────
+
+    #[test]
+    fn stale_renderable_hint_key_in_data_is_an_error() {
+        // First-class hints are typed fields now; a `renderable.`-namespaced
+        // key in `data` is stale and no accessor reads it.
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs
+            .data
+            .insert("renderable.layout.layout".into(), serde_json::json!({}));
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("renderable.")),
+            "a stale renderable.* data key must be an error"
+        );
+    }
+
+    #[test]
+    fn extension_namespace_key_in_data_is_allowed() {
+        // Non-`renderable.` namespaces are opaque package-local extensions and
+        // pass; only `renderable.*` keys are rejected as stale.
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs
+            .data
+            .insert("myapp.custom.kind".into(), serde_json::json!("solid"));
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(report.is_empty(), "extension-namespace keys must pass");
     }
 
     #[test]
@@ -1001,6 +1097,153 @@ mod tests {
             .set_list_marker_policy(ListMarkerPolicy::TreeConnectors);
         let mut root = RenderNode::root(vec![list]);
         root.attrs.set_sequence_join(SequenceJoin::None);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    // ── Typed text-layout placement ───────────────────────────────────────
+
+    #[test]
+    fn text_layout_on_paragraph_is_an_error() {
+        use crate::tree::TextLayoutHints;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_text_layout(&TextLayoutHints::default());
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("text-layout hints are permitted only")),
+            "text-layout hints on a Paragraph must be an error",
+        );
+    }
+
+    #[test]
+    fn text_layout_on_link_image_and_list_item_is_valid() {
+        use crate::tree::TextLayoutHints;
+
+        let mut link = RenderNode::link("u", None, vec![RenderNode::text("l")]);
+        link.attrs.set_text_layout(&TextLayoutHints::default());
+        let mut image = RenderNode::image("u", None, "alt");
+        image.attrs.set_text_layout(&TextLayoutHints::default());
+        let mut item = RenderNode::list_item(None, vec![]);
+        item.attrs.set_text_layout(&TextLayoutHints::default());
+
+        let root = RenderNode::root(vec![
+            RenderNode::paragraph(vec![link, image]),
+            RenderNode::list(false, None, vec![item]),
+        ]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    // ── Typed thematic-break placement ────────────────────────────────────
+
+    #[test]
+    fn thematic_break_attrs_on_paragraph_is_an_error() {
+        use crate::tree::{HrKind, ThematicBreakAttrs};
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_thematic_break(&ThematicBreakAttrs {
+            kind: Some(HrKind::Waves),
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("thematic-break attributes are permitted only")),
+            "thematic-break attributes on a Paragraph must be an error",
+        );
+    }
+
+    #[test]
+    fn thematic_break_attrs_on_thematic_break_is_valid() {
+        use crate::tree::{HrKind, HrWeight, ThematicBreakAttrs};
+        let mut hr = RenderNode::thematic_break();
+        hr.attrs.set_thematic_break(&ThematicBreakAttrs {
+            kind: Some(HrKind::Waves),
+            weight: Some(HrWeight::Thick),
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![hr]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    // ── Typed browser-attribute placement ─────────────────────────────────
+
+    #[test]
+    fn link_browser_attrs_on_non_link_is_an_error() {
+        use crate::tree::{BrowserAttrs, LinkBrowserAttrs, LinkTarget};
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_browser(&BrowserAttrs {
+            link: Some(LinkBrowserAttrs {
+                target: Some(LinkTarget::Blank),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("link browser attributes are permitted only")),
+        );
+    }
+
+    #[test]
+    fn image_browser_attrs_on_non_image_is_an_error() {
+        use crate::tree::{BrowserAttrs, ImageBrowserAttrs, ImageLoading};
+        let mut link = RenderNode::link("u", None, vec![RenderNode::text("l")]);
+        link.attrs.set_browser(&BrowserAttrs {
+            image: Some(ImageBrowserAttrs {
+                loading: Some(ImageLoading::Lazy),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![RenderNode::paragraph(vec![link])]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("image browser attributes are permitted only")),
+        );
+    }
+
+    #[test]
+    fn browser_attrs_match_their_node_kind() {
+        use crate::tree::{
+            BrowserAttrs, DataAttrName, ImageBrowserAttrs, ImageLoading, LinkBrowserAttrs,
+            LinkTarget,
+        };
+
+        let mut link = RenderNode::link("u", None, vec![RenderNode::text("l")]);
+        link.attrs.set_browser(&BrowserAttrs {
+            link: Some(LinkBrowserAttrs {
+                target: Some(LinkTarget::Blank),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let mut image = RenderNode::image("u", None, "alt");
+        image.attrs.set_browser(&BrowserAttrs {
+            image: Some(ImageBrowserAttrs {
+                loading: Some(ImageLoading::Lazy),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        // The generic fields (inline_style, data/aria attrs) are valid anywhere.
+        let mut para = RenderNode::paragraph(vec![link, image]);
+        para.attrs.set_browser(&BrowserAttrs {
+            data_attrs: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert(DataAttrName::new("prompt").unwrap(), "x".into());
+                m
+            },
+            ..Default::default()
+        });
+        let root = RenderNode::root(vec![para]);
         assert!(ensure_valid(&root).is_ok());
     }
 

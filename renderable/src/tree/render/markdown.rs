@@ -215,17 +215,17 @@ impl Writer<'_> {
                 // A projected `Progress` widget carries `ProgressHints`. Plain
                 // Markdown renders the paragraph fallback text; MarkdownPlus
                 // emits the same semantic progress HTML as the browser.
-                match node.attrs.progress_hints() {
+                match node.attrs.progress_hints_ref() {
                     Some(hints) if self.opts.dialect == MarkdownDialect::MarkdownPlus => {
                         let text = self.render_inline(children)?;
-                        Ok(progress_html(&hints, &text))
+                        Ok(progress_html(hints, &text))
                     }
                     _ => self.render_inline(children),
                 }
             }
             NodeKind::BlockQuote { children } => {
-                if let Some(hints) = node.attrs.columns_hints() {
-                    self.render_columns(children, &hints)
+                if let Some(hints) = node.attrs.columns_hints_ref() {
+                    self.render_columns(children, hints)
                 } else {
                     let inner = self.render_blocks(children)?;
                     Ok(prefix_lines(&inner, "> "))
@@ -262,7 +262,7 @@ impl Writer<'_> {
                 // A table title/caption is emitted as escaped plain text on
                 // its own line before the table, separated by a blank line.
                 // An empty or whitespace-only title is ignored.
-                match node.attrs.table_title() {
+                match node.attrs.table_title_ref() {
                     Some(title) if !title.trim().is_empty() => {
                         Ok(format!("{}\n\n{table}", escape_text(title.trim())))
                     }
@@ -364,7 +364,18 @@ impl Writer<'_> {
         for child in children {
             parts.push(self.render(child)?);
         }
-        Ok(parts.join("\n\n"))
+        let mut result = String::new();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                if part.is_empty() || parts[i - 1].is_empty() {
+                    result.push('\n');
+                } else {
+                    result.push_str("\n\n");
+                }
+            }
+            result.push_str(part);
+        }
+        Ok(result)
     }
 
     /// Renders a sequence of children in order with no inserted separator.
@@ -567,9 +578,9 @@ impl Writer<'_> {
         let classes = &node.attrs.classes;
         let style_css = node
             .attrs
-            .style()
+            .style_ref()
             .filter(|style| !style.is_empty())
-            .and_then(|style| markdown_plus_style_css(&style));
+            .and_then(markdown_plus_style_css);
 
         match self.opts.dialect {
             MarkdownDialect::MarkdownPlus => {
@@ -662,13 +673,14 @@ impl Writer<'_> {
     /// whitespace cannot truncate or break the destination.
     fn link_target(&self, url: &str, title: &Option<String>) -> String {
         if self.table_cell_depth > 0 {
+            // A cell destination faces both concerns: CommonMark bare-destination
+            // safety (escape `(`, `)`, `\` — matching standalone Prose) and GFM
+            // row safety (`|` → `\|`, newline → `<br>`). The title keeps the
+            // GFM-only escaping it already had.
+            let dest = escape_cell_link_destination(url);
             return match title {
-                Some(title) => format!(
-                    "{} \"{}\"",
-                    escape_table_cell_text(url),
-                    escape_table_cell_text(title)
-                ),
-                None => escape_table_cell_text(url),
+                Some(title) => format!("{dest} \"{}\"", escape_table_cell_text(title)),
+                None => dest,
             };
         }
         let dest = escape_markdown_destination(url);
@@ -749,6 +761,31 @@ fn escape_table_cell_text(text: &str) -> String {
         .replace('\n', "<br>")
 }
 
+/// Escapes a link/image destination for placement inside a GFM table cell.
+///
+/// Combines the two concerns a cell destination faces: CommonMark bare-
+/// destination safety (a literal `(`, `)`, or `\` is backslash-escaped, matching
+/// standalone Prose via [`escape_markdown_destination`]) and GFM row safety (a
+/// literal `|` becomes `\|`, a newline becomes `<br>`). An ordinary destination
+/// is therefore byte-identical to a standalone Prose link while a pipe or
+/// newline can never split the pipe-delimited row.
+fn escape_cell_link_destination(url: &str) -> String {
+    let mut out = String::with_capacity(url.len());
+    for c in url.chars() {
+        match c {
+            '\\' | '(' | ')' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '|' => out.push_str("\\|"),
+            '\n' => out.push_str("<br>"),
+            '\r' => {}
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// HTML-escapes `<`, `>`, and `&` for text placed inside the body of a
 /// MarkdownPlus inline-HTML element, so literal markup stays inert.
 ///
@@ -766,28 +803,32 @@ fn escape_inline_html_body(text: &str) -> String {
 /// to one inline CSS declaration string: foreground color, background color,
 /// and the underline variant. Returns `None` when none of those layers is set.
 ///
-/// Colors lower to the `rgb(r, g, b)` form (or `inherit` when the color has no
-/// fixed RGB value). `dim`, `blink`, and `inverse` have no MarkdownPlus CSS
-/// form here and are omitted, so a span carrying only those degrades to inner
-/// text.
+/// Colors share the browser's [`paint_to_css_color`](super::shared) lowering:
+/// an opaque RGB color is `rgb(r, g, b)`, alpha lowers to `rgba(...)`, the
+/// `transparent` / `currentColor` / `inherit` keywords pass through, and the
+/// terminal default / reset colors emit no declaration. `dim`, `blink`, and
+/// `inverse` have no MarkdownPlus CSS form here and are omitted, so a span
+/// carrying only those degrades to inner text.
 fn markdown_plus_style_css(style: &crate::style::Style) -> Option<String> {
     use crate::color::ColorMode;
     use crate::target::RenderTarget;
 
     let resolve = |tv: &crate::layout::TargetValue<
-        crate::style::PerMode<crate::color::Color>,
+        crate::style::PerMode<crate::style::PaintColor>,
     >|
-     -> Option<crate::color::Color> {
+     -> Option<String> {
         tv.resolve(RenderTarget::MarkdownPlus)
             .map(|per_mode| *per_mode.resolve(ColorMode::Dark))
+            .and_then(super::shared::paint_to_css_color)
+            .map(|css| css.to_string())
     };
 
     let mut decls: Vec<String> = Vec::new();
     if let Some(color) = style.color.as_ref().and_then(&resolve) {
-        decls.push(format!("color: {}", rgb_css(color)));
+        decls.push(format!("color: {color}"));
     }
     if let Some(bg) = style.background.as_ref().and_then(&resolve) {
-        decls.push(format!("background-color: {}", rgb_css(bg)));
+        decls.push(format!("background-color: {bg}"));
     }
     if let Some(underline) = style.emphasis.underline {
         decls.push(underline.css_declaration().to_string());
@@ -796,15 +837,6 @@ fn markdown_plus_style_css(style: &crate::style::Style) -> Option<String> {
         None
     } else {
         Some(decls.join("; "))
-    }
-}
-
-/// A CSS color string for a [`Color`](crate::color::Color): `rgb(r, g, b)`, or
-/// `inherit` when the color has no fixed RGB value.
-fn rgb_css(color: crate::color::Color) -> String {
-    match color.to_rgb() {
-        Some((r, g, b)) => format!("rgb({r}, {g}, {b})"),
-        None => "inherit".to_string(),
     }
 }
 
@@ -1023,6 +1055,58 @@ mod tests {
         assert_eq!(render(&link).output, "[here](https://example.com \"Site\")");
         let image = RenderNode::image("img.png", None, "alt text");
         assert_eq!(render(&image).output, "![alt text](img.png)");
+    }
+
+    #[test]
+    fn browser_only_attrs_are_dropped_in_both_markdown_dialects() {
+        // Browser-only typed attributes (link target/rel/download, image
+        // loading/decoding, data-*, inline_style) have no portable Markdown
+        // spelling and no MarkdownPlus HTML form on links/images, so both
+        // dialects emit the plain `[text](url)` / `![alt](url)` form,
+        // byte-identical to the same nodes without browser attrs.
+        let mut link =
+            RenderNode::link("https://example.com", None, vec![RenderNode::text("here")]);
+        let mut image = RenderNode::image("img.png", None, "alt");
+        let mut browser = crate::tree::BrowserAttrs {
+            link: Some(crate::tree::LinkBrowserAttrs {
+                target: Some(crate::tree::LinkTarget::Blank),
+                rel: vec![crate::tree::LinkRelation::NoOpener],
+                download: Some("f.txt".into()),
+            }),
+            inline_style: Some(crate::stylesheet::CssStyle::new().add(
+                crate::stylesheet::CssColorProp::Color,
+                crate::stylesheet::CssColor::rgb(1, 2, 3),
+            )),
+            ..Default::default()
+        };
+        browser.data_attrs.insert(
+            crate::tree::DataAttrName::new("prompt").unwrap(),
+            "x".into(),
+        );
+        link.attrs.set_browser(&browser);
+
+        let image_browser = crate::tree::BrowserAttrs {
+            image: Some(crate::tree::ImageBrowserAttrs {
+                loading: Some(crate::tree::ImageLoading::Lazy),
+                decoding: Some(crate::tree::ImageDecoding::Async),
+            }),
+            ..Default::default()
+        };
+        image.attrs.set_browser(&image_browser);
+
+        for dialect in [MarkdownDialect::Markdown, MarkdownDialect::MarkdownPlus] {
+            let o = opts(dialect, RenderStrictness::Warn);
+            assert_eq!(
+                render_with(&link, &o).output,
+                "[here](https://example.com)",
+                "dialect {dialect:?}"
+            );
+            assert_eq!(
+                render_with(&image, &o).output,
+                "![alt](img.png)",
+                "dialect {dialect:?}"
+            );
+        }
     }
 
     #[test]
@@ -1395,13 +1479,13 @@ mod tests {
 
     #[test]
     fn markdown_body_is_unchanged_when_layout_is_present() {
-        use crate::layout::{Layout, Length, Margin};
+        use crate::layout::{Layout, Length, Edges};
 
         let plain = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("hi")])]);
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
         para.attrs.set_layout(&Layout {
-            margin: Margin::all(Length::ch(4)),
+            margin: Edges::all(Length::ch(4)),
             ..Layout::default()
         });
         let with_layout = RenderNode::root(vec![para]);
@@ -2090,6 +2174,28 @@ mod tests {
         )
         .output;
         assert_eq!(out, "<span style=\"color: rgb(128, 0, 0)\">x</span>");
+    }
+
+    #[test]
+    fn markdown_plus_lowers_foreground_alpha_to_rgba() {
+        use crate::color::{BasicColor, Color, RgbColor};
+        use crate::layout::TargetValue;
+        use crate::style::{Opacity, PaintColor, PerMode, Style};
+        let paint = PaintColor::new(Color::Rgb(RgbColor::new(255, 0, 0, BasicColor::Red)))
+            .with_opacity(Opacity::from_percent(50).unwrap());
+        let span = styled_span(
+            Style {
+                color: Some(TargetValue::universal(PerMode::universal(paint))),
+                ..Default::default()
+            },
+            vec![RenderNode::text("x")],
+        );
+        let out = render_with(
+            &span,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert!(out.contains("color: rgba(255, 0, 0,"), "{out}");
     }
 
     #[test]

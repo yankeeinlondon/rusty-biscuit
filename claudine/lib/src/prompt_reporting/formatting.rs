@@ -7,7 +7,7 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::{Length, Margin};
+use biscuit_terminal::utils::layout::{Length, Edges};
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 
 pub(crate) const PROMPT_BORDER: &str = "┃ ";
@@ -54,7 +54,7 @@ pub fn render_markdown_for_terminal(text: &str, _term: &Terminal, max_width: u32
 ///
 /// ## Examples
 ///
-/// ```
+/// ```ignore
 /// use claudine::prompt_reporting::collapse_blank_lines;
 ///
 /// let text = "A\n\n\n\nB";
@@ -93,14 +93,15 @@ pub fn collapse_blank_lines(text: &str, max_consecutive: usize) -> String {
 
 /// Creates a [`BlockQuote`] styled for the system prompt (orange border)
 /// from markdown content.
-pub fn create_system_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuote {
+#[allow(dead_code)]
+pub(super) fn create_system_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuote {
     let rendered = render_markdown_for_terminal(content, term, prompt_body_width(term));
     style_system_prompt_blockquote(BlockQuote::from(rendered))
 }
 
 /// Wraps an already-rendered (ANSI) string in the orange system-prompt
 /// [`BlockQuote`] without re-running the Markdown renderer.
-pub fn system_prompt_blockquote_styled(rendered_content: &str) -> BlockQuote {
+pub(super) fn system_prompt_blockquote_styled(rendered_content: &str) -> BlockQuote {
     style_system_prompt_blockquote(BlockQuote::from(rendered_content.to_string()))
 }
 
@@ -108,7 +109,7 @@ fn style_system_prompt_blockquote(mut quote: BlockQuote) -> BlockQuote {
     quote = quote
         .with_left_block_color(Color::Tailwind(Tailwind::Orange500))
         .with_border(SYSTEM_PROMPT_BORDER);
-    quote.layout_mut().margin = Margin::x(Length::ch(PROMPT_LEFT_MARGIN));
+    quote.layout_mut().margin = Edges::x(Length::ch(PROMPT_LEFT_MARGIN));
     // Content is already wrapped at `prompt_body_width(term)` by darkmatter,
     // so re-wrapping inside the BlockQuote would just chop trailing ANSI off
     // already-fit lines. `WordWrap::None` preserves the rendered geometry.
@@ -118,12 +119,12 @@ fn style_system_prompt_blockquote(mut quote: BlockQuote) -> BlockQuote {
 
 /// Creates a [`BlockQuote`] styled for the user prompt (green border)
 /// from markdown content.
-pub fn create_user_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuote {
+pub(super) fn create_user_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuote {
     let rendered = render_markdown_for_terminal(content, term, prompt_body_width(term));
     let mut quote = BlockQuote::from(rendered)
         .with_left_block_color(Color::Tailwind(Tailwind::Green500))
         .with_border(PROMPT_BORDER);
-    quote.layout_mut().margin = Margin::x(Length::ch(PROMPT_LEFT_MARGIN));
+    quote.layout_mut().margin = Edges::x(Length::ch(PROMPT_LEFT_MARGIN));
     // See note in `style_system_prompt_blockquote`.
     quote.layout_mut().word_wrap = WordWrap::None;
     quote

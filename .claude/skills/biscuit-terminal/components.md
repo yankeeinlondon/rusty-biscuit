@@ -140,6 +140,7 @@ Key features:
 - Data via `with_data(vec![vec!["cell".into()]])` or `add_row()` (`&mut self`, returns `()`)
 - Extra cells beyond defined columns are rendered as additional columns
 - Alignment defaults come from `ColumnType` (text left, numeric right); wrapping is resolved per cell/column strategy
+- `TableCellContent::StyledProse(Box<Prose>)` (`Prose::new(...).into()`) embeds capability-aware inline styling, links, and emphasis in a cell. The tree path projects Prose's semantic inline nodes; the terminal bespoke path resolves each cell to `Text(prose.render(term))` once before width planning. The table owns cell geometry — Prose's own `Layout` is not applied.
 
 ## Lists (OrderedList, UnorderedList)
 
@@ -177,6 +178,16 @@ use biscuit_terminal::components::progress::Progress;
 File/directory tree rendering with Nerd Font icons and gitignore-aware dimming. Used by `bt dir`.
 
 Supports optional file metrics: file sizes, estimated LLM token counts, modification timestamps (absolute and relative).
+
+New builder APIs for selective tree rendering:
+
+- `.extension_filter([...])` / `.document_extensions()` — case-insensitive extension allowlist
+- `.included_paths([...])` — exact relative-path allowlist
+- `.with_dimmed_root_prefix(prefix)` — dimmed prefix before the root directory name
+- `.with_root_display_name(name)` — override the highlighted target directory name
+- `.with_root_icon(icon)` — `RootIconKind::Directory` or `RootIconKind::Repository`
+
+These are used by the `::file-links` compose directive to render bounded document trees.
 
 ## InlineContent
 

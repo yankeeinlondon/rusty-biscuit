@@ -57,7 +57,7 @@ When scoped, recent commits are filtered to paths under the resolved directory, 
 
 ## Default Output
 
-The output is divided into three labeled sections: **Status**, **Worktrees** (only when worktrees exist), and **Meta**.
+The output is divided into three labeled sections: **Status**, **Worktrees**, and **Meta**. Each section header is double-underlined (`<uu>`), degrading to a straight underline on terminals without double-underline support, and separated from adjacent content by exactly one blank row.
 
 ### Status Section
 
@@ -88,35 +88,29 @@ When there are no changes at all, the section shows `No changes` in dim text.
 
 ### Worktrees Section
 
-Only rendered when `git.worktrees` is non-empty (the repository has linked worktrees). Each item in this section is a `UnorderedList` entry.
+Always rendered, even when the repository has no linked worktrees (Case B then reports a zero count). The layout depends on the **physical location** of the running process — whether it is inside the main worktree or a linked worktree — not on the spelling of the current branch. This keeps the output correct for detached HEAD, repositories whose primary branch is `master`, and any non-main branch checked out in the main worktree.
 
-#### Base Repo Line
+Worktree paths render as blue OSC8 hyperlinks (href = absolute path) with a **relative label** computed from the current worktree directory (e.g. `..`, `../project`, or `.`). The current worktree is named by its **directory basename**, which can differ from its branch (e.g. a `login-fix` worktree on branch `feature/login`).
 
-The first item describes the base repository. The rendering differs based on whether the current working directory is inside a worktree or the base repo:
+#### Case A — Running inside a linked worktree
 
-- **In the base repo:** `Base Repo: you are in the base repo which is on the <branch> branch`
-- **Inside a worktree:** `Base Repo: the base repo is located at <base_repo_root_path>` (dim text)
+- **`main:`** the main worktree for this repo is located at `<path>`
+- **`Current Worktree:`**
+  - `you are in the <worktree-name> worktree located at <path>`
+  - `this worktree is on the <branch> branch and is <ahead/behind-main>`
+- **`Other Worktrees:`** `there are <N> other active worktrees in this repo`
 
-#### Worktree Lines
+The current worktree shows its ahead/behind status relative to `main` (detached HEAD is labeled `detached HEAD`). All other worktrees are summarized by count only — no per-worktree ahead/behind or merge status is computed in the default mode.
 
-One line per linked worktree. Each line shows the worktree's branch name and its relationship to its base branch. The rendering differs based on whether the user is currently inside that particular worktree:
+#### Case B — Running inside the main worktree
 
-- **Current worktree** (bold branch name): `<branch>: you are <status> · <merge_status><uncommitted>`
-- **Other worktrees** (normal weight): `<branch>: is <status> · <merge_status><uncommitted>` (status in dim)
+- **`Current Worktree:`**
+  - `you are in the main worktree located at <path>`
+- **`Other Worktrees:`** `there are <N> other active worktrees in this repo`
 
-The `<status>` phrase is derived from the worktree's ahead/behind counts relative to its base branch:
+#### Full-detail mode
 
-| Condition | Status Text |
-|-----------|-------------|
-| `merged && ahead == 0` | `merged into <base_branch>` |
-| `ahead > 0, behind == 0` | `N ahead of <base_branch>` |
-| `ahead == 0, behind > 0` | `N behind <base_branch>` |
-| both nonzero | `N ahead, M behind of <base_branch>` |
-| both zero | `up to date with <base_branch>` |
-
-The `<merge_status>` suffix is either ` · conflicts` (red) or ` · clean` (green), derived from `WorktreeInfo.has_conflicts`.
-
-When `WorktreeInfo.changed_files > 0`, an `<uncommitted>` suffix is appended: ` · <N> uncommitted file[s]` (red count, dim label).
+When `--refresh-remotes` is used (or when the library request sets `full_worktree_details: true`), every linked worktree receives full detail: ahead/behind counts, merge status, and uncommitted-file counts. In the default mode, only the current worktree is fully characterized; all others are counted but not probed, keeping latency under 500 ms on standard repositories.
 
 ### Meta Section
 
@@ -226,7 +220,8 @@ Returns the `GitInfo` object directly at the top level (not nested under `filesy
       "base_branch": "main",
       "has_conflicts": false,
       "merged": false,
-      "changed_files": 0
+      "changed_files": 0,
+      "is_current": false
     }
   },
   "config": {
@@ -258,7 +253,7 @@ Key notes on the JSON schema:
 - `remotes[].branches` — omitted unless `--refresh-remotes` was used
 - `remotes[].default_branch` — omitted unless `--refresh-remotes` was used
 - `recent[].remotes` — omitted unless `--refresh-remotes` was used
-- `worktrees` — keyed by branch name; empty object `{}` when no linked worktrees exist
+- `worktrees` — keyed by branch name; empty object `{}` when no linked worktrees exist. In the default (non-`--refresh-remotes`) mode, only the **current** worktree is fully characterized: every other worktree reports `ahead`, `behind`, and `changed_files` as `0` and `dirty` as `false` because those probes are skipped for performance. Use `--refresh-remotes` (full detail) to compute them for all worktrees. `is_current` marks the worktree the process is running from (absent — and thus `false` for all entries — when run from the main worktree).
 - `base_repo_root` — only present when `in_worktree` is `true`
 - `file_changes[].status` — one of `"Staged"`, `"Modified"`, `"Both"`, `"Untracked"`
 - `file_changes[].action` — one of `"Created"`, `"Modified"`, `"Deleted"`

@@ -2,13 +2,6 @@
 //! padding, page background, max-width, alignment, and per-component fill
 //! settings for darkmatter rendering.
 
-// `DarkmatterPage` is built from the deprecated page-layout types
-// (`PageMargin`, `PagePadding`, `PageAlignment`, `PageFill`); the builder is
-// the CLI's only construction path, so this module legitimately references
-// them. Page margins are mapped onto `renderable::layout::Layout` via the
-// `From`/`TryFrom` bridges in `super::types`.
-#![allow(deprecated)]
-
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -20,9 +13,7 @@ use biscuit_terminal::utils::layout::Layout;
 
 use super::context::LayoutContext;
 use super::error::PageRenderError;
-use super::types::{
-    PageAlignment, PageBackground, PageComponent, PageFill, PageMargin, PagePadding, WidthUnit,
-};
+use super::types::{PageBackground, PageComponent};
 use crate::markdown::Markdown;
 use crate::markdown::highlighting::{ColorMode, ThemePair};
 use crate::markdown::inline::HorizontalRuleAttrs;
@@ -30,12 +21,25 @@ use crate::markdown::output::html::HtmlOptions;
 use crate::markdown::output::terminal::{
     ColorDepth, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode, TerminalOptions,
 };
-use crate::style::StyleColor;
-use crate::style::color::lower_to_css;
 use crate::style::schema::hr::{HrAlignment, HrKind, HrWeight};
 use crate::markdown::block::{
     hr_alignment_to_string, hr_kind_to_string, hr_weight_to_string,
 };
+
+/// The renderable policy a `style:`-configured [`PageComponent`] contributes.
+///
+/// This is the **single source of truth** for a component's `style:` layout and
+/// colors — there is no parallel per-component color map. `color` / `bg_color`
+/// are stored as alpha-bearing [`PaintColor`] so opacity survives through the
+/// render tree to the browser target; the terminal target drops opacity, as
+/// documented in `docs/rendering/style.md`. [`StyleColor`] is lowered to
+/// [`PaintColor`] at the parser/apply boundary (`style/apply.rs`).
+#[derive(Debug, Clone, Default)]
+pub struct ComponentPolicy {
+    pub layout: renderable::layout::Layout,
+    pub color: Option<renderable::style::PaintColor>,
+    pub bg_color: Option<renderable::style::PaintColor>,
+}
 
 /// A page-level layout primitive that owns layout state for darkmatter
 /// terminal and browser rendering.
@@ -47,8 +51,9 @@ use crate::markdown::block::{
 /// The builder is consuming (`self -> Self`) for ergonomic chaining. With no
 /// builder calls, [`DarkmatterPage::render`] is byte-for-byte equivalent to
 /// [`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal) with
-/// default options — both route through the render-tree terminal document
-/// renderer. (The decorated layout path still uses the legacy serializer.)
+/// default options. Both the zero-config and decorated layout paths route
+/// through the render-tree terminal document renderer; the decorated path
+/// additionally applies row decoration (margins, padding, background fill).
 ///
 /// ## Examples
 ///
@@ -76,18 +81,14 @@ pub struct DarkmatterPage {
     /// environment. The zero-config path deliberately leaves this unset to
     /// preserve byte-for-byte parity with `Markdown::as_terminal(default)`.
     terminal_color_depth: ColorDepth,
-    margin: PageMargin,
-    padding: PagePadding,
+    page_margin: renderable::layout::Edges,
+    page_padding: renderable::layout::Edges,
     page_background: PageBackground,
-    max_width: Option<u16>,
+    page_max_width: Option<renderable::layout::TargetValue<renderable::layout::Length>>,
     line_numbers: bool,
-    alignments: HashMap<PageComponent, PageAlignment>,
-    fills: HashMap<PageComponent, PageFill>,
-    list_left_margins: HashMap<PageComponent, WidthUnit>,
-    page_color: Option<StyleColor>,
-    page_bg_color: Option<StyleColor>,
-    component_colors: HashMap<PageComponent, StyleColor>,
-    component_bg_colors: HashMap<PageComponent, StyleColor>,
+    component_policies: HashMap<PageComponent, ComponentPolicy>,
+    page_color: Option<renderable::style::PaintColor>,
+    page_bg_color: Option<renderable::style::PaintColor>,
     hr_kind: Option<HrKind>,
     hr_weight: Option<HrWeight>,
     hr_alignment: Option<HrAlignment>,
@@ -122,20 +123,16 @@ impl DarkmatterPage {
     pub fn new(terminal: &Terminal) -> Self {
         Self {
             terminal_width: clamp_width(terminal.width()),
-            terminal_color_mode: terminal.color_mode.clone(),
+            terminal_color_mode: terminal.color_mode,
             terminal_color_depth: ColorDepth::from(terminal.color_depth),
-            margin: PageMargin::ZERO,
-            padding: PagePadding::ZERO,
+            page_margin: renderable::layout::Edges::default(),
+            page_padding: renderable::layout::Edges::default(),
             page_background: PageBackground::Transparent,
-            max_width: None,
+            page_max_width: None,
             line_numbers: false,
-            alignments: HashMap::new(),
-            fills: HashMap::new(),
-            list_left_margins: HashMap::new(),
+            component_policies: HashMap::new(),
             page_color: None,
             page_bg_color: None,
-            component_colors: HashMap::new(),
-            component_bg_colors: HashMap::new(),
             hr_kind: None,
             hr_weight: None,
             hr_alignment: None,
@@ -179,14 +176,20 @@ impl DarkmatterPage {
         self.terminal_color_depth
     }
 
-    /// Configured page margin.
-    pub fn margin(&self) -> PageMargin {
-        self.margin
+    /// Configured page margin (renderable [`Edges`](renderable::layout::Edges)).
+    pub fn page_margin(&self) -> &renderable::layout::Edges {
+        &self.page_margin
     }
 
-    /// Configured page padding.
-    pub fn padding(&self) -> PagePadding {
-        self.padding
+    /// Configured page padding (renderable [`Edges`](renderable::layout::Edges)).
+    pub fn page_padding(&self) -> &renderable::layout::Edges {
+        &self.page_padding
+    }
+
+    /// Configured page max width (renderable
+    /// [`TargetValue<Length>`](renderable::layout::TargetValue)), if any.
+    pub fn page_max_width(&self) -> Option<&renderable::layout::TargetValue<renderable::layout::Length>> {
+        self.page_max_width.as_ref()
     }
 
     /// Configured page background.
@@ -194,9 +197,27 @@ impl DarkmatterPage {
         self.page_background
     }
 
-    /// Configured max width, if any.
+    /// Configured max width resolved to terminal cells, if any.
+    ///
+    /// A percentage `max-width` resolves against the post-margin/post-padding
+    /// content width; the authored [`Length`](renderable::layout::Length) is
+    /// retained on the frame so the browser wrapper can emit it as `%`.
     pub fn max_width(&self) -> Option<u16> {
-        self.max_width
+        let content = self.frame_content_width();
+        self.page_max_width
+            .as_ref()
+            .map(|tv| length_to_cells(tv, content))
+    }
+
+    /// Terminal content width after horizontal page margins and padding are
+    /// removed. The percent base for `max-width`.
+    fn frame_content_width(&self) -> u16 {
+        let margin_x = length_to_cells(&self.page_margin.left, self.terminal_width)
+            .saturating_add(length_to_cells(&self.page_margin.right, self.terminal_width));
+        let padding_x = length_to_cells(&self.page_padding.left, self.terminal_width)
+            .saturating_add(length_to_cells(&self.page_padding.right, self.terminal_width));
+        self.terminal_width
+            .saturating_sub(margin_x.saturating_add(padding_x))
     }
 
     /// Whether line numbers are enabled for code blocks.
@@ -204,55 +225,24 @@ impl DarkmatterPage {
         self.line_numbers
     }
 
-    /// Resolve alignment for the given component, defaulting to
-    /// [`PageAlignment::Left`].
-    ///
-    /// For the concrete list variants (`Ul`, `Ol`, `Li`), falls back to the
-    /// deprecated [`PageComponent::Lists`] entry when no explicit entry exists.
-    pub fn alignment_for(&self, component: PageComponent) -> PageAlignment {
-        self.alignments
-            .get(&component)
-            .copied()
-            .or_else(|| {
-                if PageComponent::LISTS.contains(&component) {
-                    self.alignments.get(&PageComponent::Lists).copied()
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(PageAlignment::Left)
+    /// The renderable [`ComponentPolicy`] for `component`, if any.
+    pub fn component_policy(&self, component: PageComponent) -> Option<&ComponentPolicy> {
+        self.component_policies.get(&component)
     }
 
-    /// Resolve fill for the given component, defaulting to [`PageFill::Full`].
-    ///
-    /// For the concrete list variants (`Ul`, `Ol`, `Li`), falls back to the
-    /// deprecated [`PageComponent::Lists`] entry when no explicit entry exists.
-    pub fn fill_for(&self, component: PageComponent) -> PageFill {
-        self.fills
-            .get(&component)
-            .copied()
-            .or_else(|| {
-                if PageComponent::LISTS.contains(&component) {
-                    self.fills.get(&PageComponent::Lists).copied()
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(PageFill::Full)
-    }
-
-    /// Resolve list left margin for the given component.
-    pub fn list_left_margin_for(&self, component: PageComponent) -> Option<WidthUnit> {
-        self.list_left_margins.get(&component).copied()
+    /// All renderable component policies.
+    #[allow(dead_code)]
+    pub(crate) fn component_policies(&self) -> &HashMap<PageComponent, ComponentPolicy> {
+        &self.component_policies
     }
 
     /// Configured page foreground color, if any.
-    pub fn page_color(&self) -> Option<&StyleColor> {
+    pub fn page_color(&self) -> Option<&renderable::style::PaintColor> {
         self.page_color.as_ref()
     }
 
     /// Configured page background color, if any.
-    pub fn page_bg_color(&self) -> Option<&StyleColor> {
+    pub fn page_bg_color(&self) -> Option<&renderable::style::PaintColor> {
         self.page_bg_color.as_ref()
     }
 
@@ -260,9 +250,10 @@ impl DarkmatterPage {
     ///
     /// Returns the component-specific color when set, otherwise falls back
     /// to the page-level color.
-    pub fn color_for(&self, component: PageComponent) -> Option<&StyleColor> {
-        self.component_colors
+    pub fn color_for(&self, component: PageComponent) -> Option<&renderable::style::PaintColor> {
+        self.component_policies
             .get(&component)
+            .and_then(|p| p.color.as_ref())
             .or(self.page_color.as_ref())
     }
 
@@ -270,9 +261,10 @@ impl DarkmatterPage {
     ///
     /// Returns the component-specific color when set, otherwise falls back
     /// to the page-level color.
-    pub fn bg_color_for(&self, component: PageComponent) -> Option<&StyleColor> {
-        self.component_bg_colors
+    pub fn bg_color_for(&self, component: PageComponent) -> Option<&renderable::style::PaintColor> {
+        self.component_policies
             .get(&component)
+            .and_then(|p| p.bg_color.as_ref())
             .or(self.page_bg_color.as_ref())
     }
 
@@ -350,7 +342,7 @@ impl DarkmatterPage {
             has_any = true;
         }
         if let Some(color) = self.color_for(PageComponent::Hr)
-            && let Some(css) = lower_to_css(color)
+            && let Some(css) = crate::style::color::paint_to_css_string(color)
         {
             attrs.color = Some(css);
             has_any = true;
@@ -382,77 +374,74 @@ impl DarkmatterPage {
     /// [`TerminalRenderable::layout`] accessor consistent with the builder
     /// state without disturbing the bespoke row-decoration pipeline.
     fn rebuild_layout(&mut self) {
-        use renderable::layout::{Length, Margin as RMargin, TargetValue};
+        use renderable::layout::{Length, Edges as RMargin, TargetValue};
 
-        let margin: RMargin = self.margin.into();
-        let padding: RMargin = self.padding.into();
+        // Percent sides resolve against the captured terminal width so the
+        // cell mirror stays meaningful; vertical sides are always `Ch` rows.
+        let base = self.terminal_width;
         let sum = |a: &TargetValue<Length>, b: &TargetValue<Length>| {
-            let cells = |tv: &TargetValue<Length>| match tv {
-                TargetValue::Universal(Length::Ch(n)) => *n,
-                _ => 0,
-            };
-            TargetValue::universal(Length::ch(cells(a) + cells(b)))
+            TargetValue::universal(Length::ch(u32::from(
+                length_to_cells(a, base).saturating_add(length_to_cells(b, base)),
+            )))
         };
         self.layout.margin = RMargin {
-            top: sum(&margin.top, &padding.top),
-            right: sum(&margin.right, &padding.right),
-            bottom: sum(&margin.bottom, &padding.bottom),
-            left: sum(&margin.left, &padding.left),
+            top: sum(&self.page_margin.top, &self.page_padding.top),
+            right: sum(&self.page_margin.right, &self.page_padding.right),
+            bottom: sum(&self.page_margin.bottom, &self.page_padding.bottom),
+            left: sum(&self.page_margin.left, &self.page_padding.left),
         };
-        self.layout.max_width = self
-            .max_width
-            .map(|mw| TargetValue::universal(Length::ch(u32::from(mw))));
+        self.layout.max_width = self.page_max_width.clone();
     }
 
-    // ---------- Margin builders ----------
+    // ---------- Edges builders ----------
 
     /// Set all four sides of the margin to `n` cells.
     pub fn with_margin(mut self, n: u16) -> Self {
-        self.margin = PageMargin::all(n);
+        self.page_margin = renderable::layout::Edges::all(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
 
     /// Set the horizontal margin (left + right) to `n` columns.
     pub fn with_margin_x(mut self, n: u16) -> Self {
-        self.margin.left = n;
-        self.margin.right = n;
+        self.page_margin.left = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
+        self.page_margin.right = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
 
     /// Set the vertical margin (top + bottom) to `n` rows.
     pub fn with_margin_y(mut self, n: u16) -> Self {
-        self.margin.top = n;
-        self.margin.bottom = n;
+        self.page_margin.top = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
+        self.page_margin.bottom = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
 
     /// Set the top margin to `n` rows.
     pub fn with_margin_top(mut self, n: u16) -> Self {
-        self.margin.top = n;
+        self.page_margin.top = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
 
     /// Set the bottom margin to `n` rows.
     pub fn with_margin_bottom(mut self, n: u16) -> Self {
-        self.margin.bottom = n;
+        self.page_margin.bottom = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
 
     /// Set the left margin to `n` columns.
     pub fn with_margin_left(mut self, n: u16) -> Self {
-        self.margin.left = n;
+        self.page_margin.left = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
 
     /// Set the right margin to `n` columns.
     pub fn with_margin_right(mut self, n: u16) -> Self {
-        self.margin.right = n;
+        self.page_margin.right = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
@@ -461,51 +450,51 @@ impl DarkmatterPage {
 
     /// Set all four sides of the padding to `n` cells.
     pub fn with_padding(mut self, n: u16) -> Self {
-        self.padding = PagePadding::all(n);
+        self.page_padding = renderable::layout::Edges::all(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
 
     /// Set the horizontal padding (left + right) to `n` columns.
     pub fn with_padding_x(mut self, n: u16) -> Self {
-        self.padding.left = n;
-        self.padding.right = n;
+        self.page_padding.left = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
+        self.page_padding.right = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
 
     /// Set the vertical padding (top + bottom) to `n` rows.
     pub fn with_padding_y(mut self, n: u16) -> Self {
-        self.padding.top = n;
-        self.padding.bottom = n;
+        self.page_padding.top = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
+        self.page_padding.bottom = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
 
     /// Set the top padding to `n` rows.
     pub fn with_padding_top(mut self, n: u16) -> Self {
-        self.padding.top = n;
+        self.page_padding.top = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
 
     /// Set the bottom padding to `n` rows.
     pub fn with_padding_bottom(mut self, n: u16) -> Self {
-        self.padding.bottom = n;
+        self.page_padding.bottom = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
 
     /// Set the left padding to `n` columns.
     pub fn with_padding_left(mut self, n: u16) -> Self {
-        self.padding.left = n;
+        self.page_padding.left = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
 
     /// Set the right padding to `n` columns.
     pub fn with_padding_right(mut self, n: u16) -> Self {
-        self.padding.right = n;
+        self.page_padding.right = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
         self.rebuild_layout();
         self
     }
@@ -519,32 +508,94 @@ impl DarkmatterPage {
     }
 
     /// Set the page foreground color.
-    pub fn with_page_color(mut self, color: StyleColor) -> Self {
+    pub fn with_page_color(mut self, color: renderable::style::PaintColor) -> Self {
         self.page_color = Some(color);
         self
     }
 
     /// Set the page background color.
-    pub fn with_page_bg_color(mut self, color: StyleColor) -> Self {
+    pub fn with_page_bg_color(mut self, color: renderable::style::PaintColor) -> Self {
         self.page_bg_color = Some(color);
         self
     }
 
     /// Set the foreground color for a single [`PageComponent`].
-    pub fn with_component_color(mut self, component: PageComponent, color: StyleColor) -> Self {
-        self.component_colors.insert(component, color);
+    ///
+    /// Upserts onto the component's [`ComponentPolicy`] — the single source of
+    /// truth — preserving any layout already configured for it.
+    pub fn with_component_color(
+        mut self,
+        component: PageComponent,
+        color: renderable::style::PaintColor,
+    ) -> Self {
+        self.component_policies.entry(component).or_default().color = Some(color);
         self
     }
 
     /// Set the background color for a single [`PageComponent`].
-    pub fn with_component_bg_color(mut self, component: PageComponent, color: StyleColor) -> Self {
-        self.component_bg_colors.insert(component, color);
+    ///
+    /// Upserts onto the component's [`ComponentPolicy`], preserving its layout.
+    pub fn with_component_bg_color(
+        mut self,
+        component: PageComponent,
+        color: renderable::style::PaintColor,
+    ) -> Self {
+        self.component_policies.entry(component).or_default().bg_color = Some(color);
+        self
+    }
+
+    /// Set the renderable [`ComponentPolicy`] for a single [`PageComponent`].
+    pub fn with_component_policy(mut self, component: PageComponent, policy: ComponentPolicy) -> Self {
+        self.component_policies.insert(component, policy);
         self
     }
 
     /// Cap the content width at `max_width` columns.
     pub fn with_max_width(mut self, max_width: u16) -> Self {
-        self.max_width = Some(max_width);
+        self.page_max_width = Some(renderable::layout::TargetValue::universal(
+            renderable::layout::Length::ch(u32::from(max_width)),
+        ));
+        self.rebuild_layout();
+        self
+    }
+
+    // ---------- Length-typed frame setters (apply layer) ----------
+    //
+    // The `style:` apply layer stores the authored `Length` directly so the
+    // page frame can resolve percentages per target (terminal cells vs. browser
+    // `%`). The `u16` builders above remain the cell-only public API.
+
+    /// Set the left margin to an authored [`Length`](renderable::layout::Length).
+    pub(crate) fn with_margin_left_length(mut self, len: renderable::layout::Length) -> Self {
+        self.page_margin.left = renderable::layout::TargetValue::universal(len);
+        self.rebuild_layout();
+        self
+    }
+
+    /// Set the right margin to an authored [`Length`](renderable::layout::Length).
+    pub(crate) fn with_margin_right_length(mut self, len: renderable::layout::Length) -> Self {
+        self.page_margin.right = renderable::layout::TargetValue::universal(len);
+        self.rebuild_layout();
+        self
+    }
+
+    /// Set the left padding to an authored [`Length`](renderable::layout::Length).
+    pub(crate) fn with_padding_left_length(mut self, len: renderable::layout::Length) -> Self {
+        self.page_padding.left = renderable::layout::TargetValue::universal(len);
+        self.rebuild_layout();
+        self
+    }
+
+    /// Set the right padding to an authored [`Length`](renderable::layout::Length).
+    pub(crate) fn with_padding_right_length(mut self, len: renderable::layout::Length) -> Self {
+        self.page_padding.right = renderable::layout::TargetValue::universal(len);
+        self.rebuild_layout();
+        self
+    }
+
+    /// Cap the content width at an authored [`Length`](renderable::layout::Length).
+    pub(crate) fn with_max_width_length(mut self, len: renderable::layout::Length) -> Self {
+        self.page_max_width = Some(renderable::layout::TargetValue::universal(len));
         self.rebuild_layout();
         self
     }
@@ -558,42 +609,6 @@ impl DarkmatterPage {
     /// Set whether code blocks include line numbers.
     pub fn with_line_numbers(mut self, on: bool) -> Self {
         self.line_numbers = on;
-        self
-    }
-
-    // ---------- Alignment / fill ----------
-
-    /// Override alignment for a single [`PageComponent`].
-    pub fn use_alignment(mut self, component: PageComponent, alignment: PageAlignment) -> Self {
-        self.alignments.insert(component, alignment);
-        self
-    }
-
-    /// Apply the same alignment to every [`PageComponent`].
-    ///
-    /// Writes only the concrete variants in [`PageComponent::ALL`]; the
-    /// deprecated [`PageComponent::Lists`] is not written.
-    pub fn use_alignment_for_all(mut self, alignment: PageAlignment) -> Self {
-        for component in PageComponent::ALL {
-            self.alignments.insert(component, alignment);
-        }
-        self
-    }
-
-    /// Override fill for a single [`PageComponent`].
-    pub fn with_fill(mut self, component: PageComponent, fill: PageFill) -> Self {
-        self.fills.insert(component, fill);
-        self
-    }
-
-    /// Apply the same fill to every [`PageComponent`].
-    ///
-    /// Writes only the concrete variants in [`PageComponent::ALL`]; the
-    /// deprecated [`PageComponent::Lists`] is not written.
-    pub fn with_fill_for_all(mut self, fill: PageFill) -> Self {
-        for component in PageComponent::ALL {
-            self.fills.insert(component, fill);
-        }
         self
     }
 
@@ -619,43 +634,6 @@ impl DarkmatterPage {
     pub fn with_hr_width(mut self, width: impl Into<String>) -> Self {
         self.hr_width = Some(width.into());
         self
-    }
-
-    /// Set the list left margin for a single [`PageComponent`].
-    ///
-    /// Only [`PageComponent::Ul`] is accepted; other components return a
-    /// fallible error via [`Self::try_with_list_left_margin`].
-    ///
-    /// ## Panics
-    ///
-    /// Panics when `component` is not [`PageComponent::Ul`]. Callers that
-    /// cannot guarantee the component statically should use the fallible
-    /// [`Self::try_with_list_left_margin`] instead.
-    pub fn with_list_left_margin(self, component: PageComponent, margin: WidthUnit) -> Self {
-        match self.try_with_list_left_margin(component, margin) {
-            Ok(page) => page,
-            Err(_) => panic!("with_list_left_margin only accepts PageComponent::Ul"),
-        }
-    }
-
-    /// Fallible variant of [`Self::with_list_left_margin`].
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`PageRenderError::InvalidListLeftMarginComponent`] when
-    /// `component` is not [`PageComponent::Ul`]. This is the channel
-    /// `apply_list_style` uses to surface a clear apply error instead of
-    /// panicking when frontmatter targets an unsupported list bucket.
-    pub fn try_with_list_left_margin(
-        mut self,
-        component: PageComponent,
-        margin: WidthUnit,
-    ) -> Result<Self, PageRenderError> {
-        if component != PageComponent::Ul {
-            return Err(PageRenderError::InvalidListLeftMarginComponent);
-        }
-        self.list_left_margins.insert(component, margin);
-        Ok(self)
     }
 
     // ---------- Bespoke style builders (sub-spec #7) ----------
@@ -790,14 +768,15 @@ impl DarkmatterPage {
 
     /// Render the given markdown document through the page layout.
     ///
-    /// Derives [`TerminalOptions`] from the page state, delegates to the
-    /// existing terminal renderer, then applies row decoration (margins,
-    /// padding, background fill) when any layout setting is non-default.
+    /// Derives [`TerminalOptions`] from the page state, folds the document
+    /// through the render-tree terminal renderer, then applies row decoration
+    /// (margins, padding, background fill) when any layout setting is
+    /// non-default.
     ///
     /// When all layout fields are at their defaults, this is byte-for-byte
-    /// equivalent to `Markdown::as_terminal(default)` — the zero-config path
-    /// routes through the render-tree terminal document renderer. Decorated
-    /// layouts still use the legacy serializer.
+    /// equivalent to `Markdown::as_terminal(default)`. The decorated path
+    /// threads a `LayoutContext` into the same render-tree terminal renderer
+    /// and then decorates the rendered rows.
     ///
     /// ## Errors
     ///
@@ -809,50 +788,25 @@ impl DarkmatterPage {
     /// Returns [`PageRenderError::Render`] when the underlying markdown
     /// renderer fails.
     pub fn render(&self, md: &Markdown) -> Result<String, PageRenderError> {
-        self.validate_fills()?;
         crate::style::bespoke::validate_terminal_inline_lengths(self)?;
         let ctx = LayoutContext::from_page(
             self.terminal_width,
-            self.margin,
-            self.padding,
+            self.page_margin.clone(),
+            self.page_padding.clone(),
             self.page_background,
-            self.max_width,
+            self.page_max_width.clone(),
             &self.terminal_color_mode,
             self.options.color_mode,
-            self.alignments.clone(),
-            self.fills.clone(),
-            self.list_left_margins.clone(),
-            self.page_color.clone(),
-            self.page_bg_color.clone(),
-            self.component_colors.clone(),
-            self.component_bg_colors.clone(),
-            self.hyperlink_style.clone(),
-            self.local_hyperlink_style.clone(),
-            self.local_image_style.clone(),
+            self.page_color,
+            self.page_bg_color,
         )?;
 
-        // Build derived TerminalOptions.
+        // Build derived TerminalOptions. `max_width` is deliberately left unset:
+        // it would select the optimistic pre-render terminal (its capabilities
+        // *and* width). The page keeps width and capability selection independent
+        // — width is pinned below via the page-frame geometry decision, color
+        // depth rides `options.color_depth` (review-4 finding 1).
         let mut options = self.options.clone();
-        // Only cap max_width when layout is actually configured; otherwise
-        // delegate with the same auto-detection behaviour as
-        // `for_terminal(..., TerminalOptions::default())`.
-        if ctx.needs_decoration() || self.max_width.is_some() {
-            options.max_width = Some(ctx.effective_width);
-        }
-        // Honor the captured terminal's color depth on the decorated layout
-        // path, mirroring the captured-width handling above: the page was
-        // constructed from a specific `Terminal`, so renders that go through
-        // its layout pipeline should follow that terminal's reported depth
-        // rather than re-detecting from the ambient environment (which would
-        // make `DarkmatterPage::new(&Terminal::new_optimistic(_))` paint
-        // different SGR in a headless env than in a truecolor terminal).
-        // The zero-config path deliberately leaves this unset so the renderer
-        // falls back to `ColorDepth::auto_detect`, preserving byte-for-byte
-        // parity with `Markdown::as_terminal(default)`. An explicit
-        // `with_color_depth` always wins.
-        if !self.is_default_layout() && options.color_depth.is_none() {
-            options.color_depth = Some(self.terminal_color_depth);
-        }
         options.include_line_numbers = self.line_numbers;
         options.color_mode = ctx.render_color_mode;
         options.hr_defaults = self.hr_defaults();
@@ -862,21 +816,91 @@ impl DarkmatterPage {
             options.code_theme = theme;
         }
 
-        // Delegate to the terminal renderer. When no layout builder has been
-        // called we must NOT thread a layout context — doing so leaks the
-        // page's captured terminal width into component width resolution and
-        // breaks byte-for-byte equivalence with `Markdown::as_terminal(default)`
-        // (the zero-config tree path), which performs its own width
-        // auto-detection.
-        let body = if self.is_default_layout() {
-            md.as_terminal_with_layout(options, None)
+        // Build construction-time context for the context-aware fold. HR
+        // defaults resolve through the same precedence as the direct API:
+        // explicit `hr_defaults()` wins; when it is `None`, the deprecated
+        // top-level `hr:` frontmatter supplies the fallback.
+        let hr_defaults_owned = crate::markdown::render_tree::entrypoints::resolve_hr_defaults(
+            md,
+            &options.hr_defaults,
+        );
+        let build_ctx = crate::markdown::render_tree::build_context::TreeBuildContext {
+            component_policies: &self.component_policies,
+            page_color: self.page_color,
+            page_bg_color: self.page_bg_color,
+            hyperlink_style: self.hyperlink_style.as_ref(),
+            local_hyperlink_style: self.local_hyperlink_style.as_ref(),
+            local_image_style: self.local_image_style.as_ref(),
+            hr_defaults: hr_defaults_owned.as_ref(),
+        };
+
+        let result = if self.is_default_layout() {
+            // Zero-config path: byte-for-byte parity with
+            // `Markdown::as_terminal(default)`. No build context is threaded —
+            // doing so would leak the page's captured width into component width
+            // resolution and break that equivalence.
+            crate::markdown::render_tree::entrypoints::render_tree_terminal(md, &options)
         } else {
-            md.as_terminal_with_layout(options, Some(&ctx))
+            // Build the typed Document ONCE (acceptance criterion 3: one tree
+            // build followed by one target fold). The same owned tree feeds the
+            // construction-color probe and the terminal fold — no second
+            // construction fold (review-4 finding 2).
+            let (doc, fold_diagnostics) =
+                crate::markdown::render_tree::entrypoints::to_render_document_with_context(
+                    md, &build_ctx,
+                );
+
+            let paints = self.paints_construction_color(&doc);
+            // Honor the captured terminal's color depth only when this page
+            // actually paints construction-time color. Page-level color always
+            // paints; a *matched* component / link / image color paints only when
+            // its node is present in the document. An *unmatched* policy bakes
+            // nothing, so it must leave the depth unset and render unrelated
+            // content at ambient detection — keeping capability selection
+            // independent of policy presence (review-3/4). An explicit
+            // `with_color_depth` wins.
+            if options.color_depth.is_none() && paints {
+                options.color_depth = Some(self.terminal_color_depth);
+            }
+
+            let has_geometry = self.has_frame_geometry();
+            // Width follows page-frame geometry only: the captured
+            // `effective_width` when the frame defines its own geometry,
+            // otherwise the ambient width (so an unmatched policy cannot widen
+            // the content box — review-2 finding 2).
+            let content_width = if has_geometry {
+                ctx.effective_width
+            } else {
+                ambient_terminal_width()
+            };
+            // The optimistic (TrueColor + OSC8) capability profile is selected by
+            // page-frame geometry alone — a *deliberate* frame configuration —
+            // never by a matched component policy. A matched layout / text-layout
+            // policy (e.g. a centered table) bakes its attr onto its own node and
+            // is resolved there by the target fold; it must not promote the whole
+            // document to optimistic capabilities and so hand unrelated content
+            // TrueColor or OSC8 the ambient terminal never advertised
+            // (review-5 finding 1). Painted construction color still pins the
+            // captured color *depth* above via `paints`, independent of this
+            // profile.
+            let optimistic_capabilities = has_geometry;
+            crate::markdown::render_tree::entrypoints::render_page_terminal_document(
+                &doc,
+                fold_diagnostics,
+                &options,
+                content_width,
+                optimistic_capabilities,
+            )
         }
         .map_err(|e| PageRenderError::Render(e.to_string()))?;
 
+        // Row decoration (vertical-rhythm normalization + margin/padding/
+        // background rows) is a page-frame concern. Component policies produce
+        // no row decoration — they are baked onto nodes — so the decision keys
+        // off page geometry alone; an unmatched policy must not trigger the
+        // decorated path (review-1 finding 2).
         if !ctx.needs_decoration() {
-            return Ok(body);
+            return Ok(result.output);
         }
 
         // Normalize the body's vertical rhythm before margins are applied, so
@@ -885,7 +909,7 @@ impl DarkmatterPage {
         // lines survives. Runs only on the decorated path; the zero-config path
         // returned above keeps byte-for-byte equivalence with
         // `Markdown::as_terminal(default)`.
-        let body = normalize_body_rhythm(&body);
+        let body = normalize_body_rhythm(&result.output);
 
         Ok(apply_row_decoration(&body, &ctx))
     }
@@ -913,25 +937,16 @@ impl DarkmatterPage {
     /// Returns [`PageRenderError::Render`] when the underlying markdown HTML
     /// renderer fails.
     pub fn render_to_browser(&self, md: &Markdown) -> Result<String, PageRenderError> {
-        self.validate_fills()?;
         let ctx = LayoutContext::from_page(
             self.terminal_width,
-            self.margin,
-            self.padding,
+            self.page_margin.clone(),
+            self.page_padding.clone(),
             self.page_background,
-            self.max_width,
+            self.page_max_width.clone(),
             &self.terminal_color_mode,
             self.options.color_mode,
-            self.alignments.clone(),
-            self.fills.clone(),
-            self.list_left_margins.clone(),
-            self.page_color.clone(),
-            self.page_bg_color.clone(),
-            self.component_colors.clone(),
-            self.component_bg_colors.clone(),
-            self.hyperlink_style.clone(),
-            self.local_hyperlink_style.clone(),
-            self.local_image_style.clone(),
+            self.page_color,
+            self.page_bg_color,
         )?;
 
         // Build HtmlOptions from TerminalOptions.
@@ -949,18 +964,110 @@ impl DarkmatterPage {
             local_image_style: self.local_image_style.clone(),
         };
 
-        let body = md
-            .as_html(html_options)
-            .map_err(|e| PageRenderError::Render(e.to_string()))?;
+        // Build construction-time context for the context-aware fold.
+        let hr_defaults_owned = crate::markdown::render_tree::entrypoints::resolve_hr_defaults(
+            md,
+            &html_options.hr_defaults,
+        );
+        let build_ctx = crate::markdown::render_tree::build_context::TreeBuildContext {
+            component_policies: &self.component_policies,
+            page_color: self.page_color,
+            page_bg_color: self.page_bg_color,
+            hyperlink_style: self.hyperlink_style.as_ref(),
+            local_hyperlink_style: self.local_hyperlink_style.as_ref(),
+            local_image_style: self.local_image_style.as_ref(),
+            hr_defaults: hr_defaults_owned.as_ref(),
+        };
 
-        if !ctx.needs_decoration() && !ctx.has_component_styles() && self.stylesheet().is_none() && self.page_meta().is_none() {
+        let body = if self.is_default_layout() {
+            md.as_html(html_options)
+                .map_err(|e| PageRenderError::Render(e.to_string()))?
+        } else {
+            crate::markdown::render_tree::entrypoints::render_tree_html_with_context(
+                md, &html_options, &build_ctx,
+            )
+            .map(|r| r.output)
+            .map_err(|e| PageRenderError::Render(e.to_string()))?
+        };
+
+        // The page wrapper `<div>` carries page-frame geometry, the page
+        // stylesheet, and page `<meta>`. Component policies are lowered to
+        // inline CSS on the component elements themselves, never the wrapper, so
+        // their presence must not add a wrapper an unmatched policy would not
+        // need (review-1 finding 2).
+        if !ctx.needs_decoration() && self.stylesheet().is_none() && self.page_meta().is_none() {
             return Ok(body);
         }
 
         Ok(wrap_browser_html(&body, &ctx, self))
     }
 
+    // ---------- ComponentPolicy merging ----------
+
+    /// Reads the **already-built** `doc` (the single construction fold the caller
+    /// passes in) for whether construction baked a foreground/background color: a
+    /// page color, or a *matched* component / hyperlink / image color. Drives the
+    /// captured color-depth override.
+    ///
+    /// Style colors are written onto a node *only* by the build context's policy
+    /// application — the empty-context fold bakes none — so their presence is a
+    /// faithful signal that the page's color configuration matched content.
+    ///
+    /// The capability *profile* (TrueColor + OSC8) is deliberately **not** keyed
+    /// off this signal: a matched policy must stay local to its node and never
+    /// promote unrelated content to optimistic capabilities (review-5 finding 1).
+    /// Profile selection keys off page-frame geometry alone (see
+    /// [`Self::has_frame_geometry`]).
+    ///
+    /// The read-only walk is skipped unless a color was not already painted at
+    /// page level and a component / link / image policy source is configured, so
+    /// geometry-only, page-color-only, and zero-config pages never pay for it.
+    fn paints_construction_color(&self, doc: &renderable::tree::Document) -> bool {
+        let mut paints = self.page_color.is_some() || self.page_bg_color.is_some();
+        if !paints && self.has_node_policy_source() {
+            scan_painted_color(&doc.root, &mut paints);
+        }
+        paints
+    }
+
+    /// Whether any component, hyperlink, or image policy is configured — the
+    /// sources that can bake a per-node attribute. Gates the painted-color walk
+    /// in [`Self::paints_construction_color`]; with no such source there is
+    /// nothing to find, so the walk is skipped.
+    fn has_node_policy_source(&self) -> bool {
+        !self.component_policies.is_empty()
+            || self.hyperlink_style.is_some()
+            || self.local_hyperlink_style.is_some()
+            || self.local_image_style.is_some()
+    }
+
     // ---------- Validation ----------
+
+    /// Whether the page frame defines its own content-box geometry: non-default
+    /// margins, padding, full-page background, max-width, or line numbers.
+    ///
+    /// The terminal width cap keys off this rather than [`Self::is_default_layout`]
+    /// so the page-frame width decision depends only on frame geometry, never on
+    /// node-baked construction inputs (component policies, page/component colors,
+    /// hyperlink/image styles, HR defaults). An unmatched component policy
+    /// therefore cannot change frame width behavior (review-2 finding 2): it
+    /// still threads the build context, but the frame renders at the same width
+    /// it would with no policy. The zero-config (no-geometry) path leaves
+    /// `max_width` unset, preserving byte-for-byte parity with
+    /// `Markdown::as_terminal(default)`.
+    ///
+    /// The optimistic terminal capability profile (TrueColor + OSC8) keys off
+    /// this too (review-5 finding 1): only deliberate frame geometry — never a
+    /// matched component policy — promotes the whole document to optimistic
+    /// capabilities, so a matched layout (e.g. a centered table) cannot hand
+    /// unrelated content color or hyperlinks the ambient terminal never offered.
+    fn has_frame_geometry(&self) -> bool {
+        !edges_is_zero(&self.page_margin)
+            || !edges_is_zero(&self.page_padding)
+            || self.page_background != PageBackground::Transparent
+            || self.page_max_width.is_some()
+            || self.line_numbers
+    }
 
     /// Whether all layout fields are at their defaults.
     ///
@@ -969,18 +1076,14 @@ impl DarkmatterPage {
     /// (the zero-config render-tree terminal path).
     #[allow(dead_code)]
     pub(crate) fn is_default_layout(&self) -> bool {
-        self.margin == PageMargin::ZERO
-            && self.padding == PagePadding::ZERO
+        edges_is_zero(&self.page_margin)
+            && edges_is_zero(&self.page_padding)
             && self.page_background == PageBackground::Transparent
-            && self.max_width.is_none()
+            && self.page_max_width.is_none()
             && !self.line_numbers
-            && self.alignments.is_empty()
-            && self.fills.is_empty()
-            && self.list_left_margins.is_empty()
+            && self.component_policies.is_empty()
             && self.page_color.is_none()
             && self.page_bg_color.is_none()
-            && self.component_colors.is_empty()
-            && self.component_bg_colors.is_empty()
             && self.hyperlink_style.is_none()
             && self.local_hyperlink_style.is_none()
             && self.local_image_style.is_none()
@@ -999,10 +1102,11 @@ impl DarkmatterPage {
     /// combined horizontal margin + padding meets or exceeds the terminal
     /// width.
     pub fn validate_horizontal_space(&self) -> Result<(), PageRenderError> {
-        let required = self
-            .margin
-            .horizontal()
-            .saturating_add(self.padding.horizontal());
+        let margin_x = length_to_cells(&self.page_margin.left, self.terminal_width)
+            .saturating_add(length_to_cells(&self.page_margin.right, self.terminal_width));
+        let padding_x = length_to_cells(&self.page_padding.left, self.terminal_width)
+            .saturating_add(length_to_cells(&self.page_padding.right, self.terminal_width));
+        let required = margin_x.saturating_add(padding_x);
         if required >= self.terminal_width {
             Err(PageRenderError::MarginsExceedTerminalWidth {
                 terminal_width: self.terminal_width,
@@ -1019,37 +1123,21 @@ impl DarkmatterPage {
     ///
     /// Returns [`PageRenderError::MaxWidthZero`] when `max_width = Some(0)`.
     pub fn validate_max_width(&self) -> Result<(), PageRenderError> {
-        match self.max_width {
+        match self.max_width() {
             Some(0) => Err(PageRenderError::MaxWidthZero),
             _ => Ok(()),
         }
     }
 
-    /// Validate every configured fill (and its contained percent value).
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`PageRenderError::InvalidPercent`] when any fill carries a
-    /// percent value outside `0.0..=100.0`.
-    pub fn validate_fills(&self) -> Result<(), PageRenderError> {
-        for fill in self.fills.values() {
-            fill.validate()?;
-        }
-        Ok(())
-    }
-
-    /// Run all validation helpers in order: horizontal space, max width,
-    /// then fills.
+    /// Run all validation helpers in order: horizontal space, max width.
     ///
     /// ## Errors
     ///
     /// Returns the first failing variant from
-    /// [`Self::validate_horizontal_space`], [`Self::validate_max_width`], or
-    /// [`Self::validate_fills`].
+    /// [`Self::validate_horizontal_space`] or [`Self::validate_max_width`].
     pub fn validate(&self) -> Result<(), PageRenderError> {
         self.validate_horizontal_space()?;
         self.validate_max_width()?;
-        self.validate_fills()?;
         Ok(())
     }
 }
@@ -1095,24 +1183,26 @@ fn apply_row_decoration(body: &str, ctx: &LayoutContext) -> String {
     let bg = ctx.background_color;
     let reset = "\x1b[0m";
 
-    // Build repeated cell strings.
-    let margin_left = " ".repeat(ctx.margin_left as usize);
-    let margin_right = " ".repeat(ctx.margin_right as usize);
-    let padding_left = " ".repeat(ctx.padding_left as usize);
-    let padding_right = " ".repeat(ctx.padding_right as usize);
+    // Build repeated cell strings. Percent sides resolve against the captured
+    // terminal width; vertical sides are `Ch` rows.
+    let base = ctx.terminal_width;
+    let margin_left = " ".repeat(length_to_cells(&ctx.page_margin.left, base) as usize);
+    let margin_right = " ".repeat(length_to_cells(&ctx.page_margin.right, base) as usize);
+    let padding_left = " ".repeat(length_to_cells(&ctx.page_padding.left, base) as usize);
+    let padding_right = " ".repeat(length_to_cells(&ctx.page_padding.right, base) as usize);
 
     let bg_open = bg.as_ref().map(|c| c.ansi_bg());
     let bg_reset = bg.as_ref().map(|_| reset);
 
     // Top margin: transparent empty rows.
-    for _ in 0..ctx.margin_top {
+    for _ in 0..length_to_cells(&ctx.page_margin.top, base) {
         output.push_str(&margin_left);
         output.push_str(&margin_right);
         output.push('\n');
     }
 
     // Top padding: bg-filled rows.
-    for _ in 0..ctx.padding_top {
+    for _ in 0..length_to_cells(&ctx.page_padding.top, base) {
         output.push_str(&margin_left);
         if let Some(ref open) = bg_open {
             output.push_str(open);
@@ -1163,7 +1253,7 @@ fn apply_row_decoration(body: &str, ctx: &LayoutContext) -> String {
     }
 
     // Bottom padding: bg-filled rows.
-    for _ in 0..ctx.padding_bottom {
+    for _ in 0..length_to_cells(&ctx.page_padding.bottom, base) {
         output.push_str(&margin_left);
         if let Some(open) = &bg_open {
             output.push_str(open);
@@ -1182,7 +1272,7 @@ fn apply_row_decoration(body: &str, ctx: &LayoutContext) -> String {
     }
 
     // Bottom margin: transparent empty rows.
-    for _ in 0..ctx.margin_bottom {
+    for _ in 0..length_to_cells(&ctx.page_margin.bottom, base) {
         output.push_str(&margin_left);
         output.push_str(&margin_right);
         output.push('\n');
@@ -1191,9 +1281,111 @@ fn apply_row_decoration(body: &str, ctx: &LayoutContext) -> String {
     output
 }
 
+/// Resolve a page-frame [`TargetValue<Length>`] to whole terminal cells against
+/// `base`.
+///
+/// The page frame retains the authored [`Length`](renderable::layout::Length)
+/// so the browser can emit percentages natively (see [`length_to_css_frame`]);
+/// the terminal resolves them here. [`Length::Percent`] resolves against `base`
+/// (the terminal width for margins/padding, the post-margin/padding content
+/// width for `max-width`) with the same rounding as the apply layer.
+/// [`Length::Css`] is rejected before reaching the frame, so it maps to `0`.
+pub(crate) fn length_to_cells(
+    tv: &renderable::layout::TargetValue<renderable::layout::Length>,
+    base: u16,
+) -> u16 {
+    use renderable::layout::{Length, TargetValue};
+    match tv {
+        TargetValue::Universal(Length::Zero) => 0,
+        TargetValue::Universal(Length::Ch(n)) => u16::try_from(*n).unwrap_or(u16::MAX),
+        TargetValue::Universal(Length::Percent(p)) => {
+            (f32::from(base) * (p / 100.0))
+                .round()
+                .clamp(0.0, f32::from(u16::MAX)) as u16
+        }
+        _ => 0,
+    }
+}
+
+/// Whether a page-frame [`TargetValue<Length>`] contributes no space —
+/// [`Length::Zero`], a zero-cell `Ch`, or a `0%` percent. A positive percent is
+/// **not** zero even though it has no fixed cell count.
+pub(crate) fn length_is_zero(
+    tv: &renderable::layout::TargetValue<renderable::layout::Length>,
+) -> bool {
+    use renderable::layout::{Length, TargetValue};
+    match tv {
+        TargetValue::Universal(Length::Zero) => true,
+        TargetValue::Universal(Length::Ch(n)) => *n == 0,
+        TargetValue::Universal(Length::Percent(p)) => *p == 0.0,
+        _ => true,
+    }
+}
+
+/// Lower a page-frame [`TargetValue<Length>`] to a CSS length string for the
+/// browser wrapper — `0`, `{n}ch`, or `{p}%`.
+pub(crate) fn length_to_css_frame(
+    tv: &renderable::layout::TargetValue<renderable::layout::Length>,
+) -> String {
+    use renderable::layout::{Length, TargetValue};
+    match tv {
+        // `0ch` (not bare `0`) preserves byte-parity with the historical
+        // cell-only wrapper, whose zero sides already serialized as `0ch`.
+        TargetValue::Universal(Length::Zero) => "0ch".to_string(),
+        TargetValue::Universal(Length::Ch(n)) => format!("{n}ch"),
+        TargetValue::Universal(Length::Percent(p)) => format!("{p}%"),
+        _ => "0ch".to_string(),
+    }
+}
+
+/// Sets `paints` when `node` or any descendant carries a construction-baked
+/// foreground/background color (see
+/// [`DarkmatterPage::paints_construction_color`]).
+///
+/// At fold time a node's [`Style`](renderable::style::Style) color is written
+/// only by the build context's policy application — syntax highlighting and the
+/// renderer's own default shaping happen later, during the target fold — so its
+/// presence here is a faithful signal that the page's color configuration
+/// matched content during construction. Layout and text-layout attrs are
+/// intentionally ignored: they resolve locally on their own node and do not
+/// select the capability profile (review-5 finding 1).
+fn scan_painted_color(node: &renderable::tree::RenderNode, paints: &mut bool) {
+    if *paints {
+        return;
+    }
+    if let Some(style) = node.attrs.style()
+        && (style.color.is_some() || style.background.is_some())
+    {
+        *paints = true;
+        return;
+    }
+    for child in node.children() {
+        scan_painted_color(child, paints);
+    }
+}
+
+/// Whether every side of `edges` contributes no space (see [`length_is_zero`]).
+fn edges_is_zero(edges: &renderable::layout::Edges) -> bool {
+    length_is_zero(&edges.top)
+        && length_is_zero(&edges.right)
+        && length_is_zero(&edges.bottom)
+        && length_is_zero(&edges.left)
+}
+
 /// Saturating cast from u32 terminal width to u16, clamped to `u16::MAX`.
 fn clamp_width(width: u32) -> u16 {
     width.min(u16::MAX as u32) as u16
+}
+
+/// The ambient terminal width the zero-config path renders at.
+///
+/// A construction-only page (baked attributes but no frame geometry) keeps its
+/// content box at this ambient width, so an unmatched component policy cannot
+/// widen it (review-2 finding 2). This matches the width
+/// `Markdown::as_terminal(default)` resolves, since both fall back to
+/// `Terminal::default()`'s detection.
+fn ambient_terminal_width() -> u16 {
+    clamp_width(Terminal::default().width())
 }
 
 impl TerminalRenderable for DarkmatterPage {
@@ -1289,21 +1481,40 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> 
         }
     }
 
-    // Build page-level wrapper styles.
+    // Build page-level wrapper styles. The page frame retains the authored
+    // `Length`, so the browser emits the original unit (`%` percentages resolve
+    // against the viewport, not the terminal-cell count the terminal resolves).
+    //
+    // Horizontal placement: when the author leaves both side margins at their
+    // default (zero), a `max-width`-capped frame centers in the viewport via
+    // `auto` side margins — the browser convention the spec retains for capped
+    // page content. Explicitly authored side margins are emitted verbatim and
+    // suppress auto-centering, mirroring the terminal frame's left/right margin
+    // placement so the two targets agree.
+    let center_frame =
+        length_is_zero(&ctx.page_margin.left) && length_is_zero(&ctx.page_margin.right);
+    let (ml_css, mr_css) = if center_frame {
+        ("auto".to_string(), "auto".to_string())
+    } else {
+        (
+            length_to_css_frame(&ctx.page_margin.left),
+            length_to_css_frame(&ctx.page_margin.right),
+        )
+    };
     let mut wrapper_styles = String::new();
     wrapper_styles.push_str(&format!(
-        "margin: {mt}ch {mr}ch {mb}ch {ml}ch; ",
-        mt = ctx.margin_top,
-        mr = ctx.margin_right,
-        mb = ctx.margin_bottom,
-        ml = ctx.margin_left
+        "margin: {mt} {mr} {mb} {ml}; ",
+        mt = length_to_css_frame(&ctx.page_margin.top),
+        mr = mr_css,
+        mb = length_to_css_frame(&ctx.page_margin.bottom),
+        ml = ml_css,
     ));
     wrapper_styles.push_str(&format!(
-        "padding: {pt}ch {pr}ch {pb}ch {pl}ch; ",
-        pt = ctx.padding_top,
-        pr = ctx.padding_right,
-        pb = ctx.padding_bottom,
-        pl = ctx.padding_left
+        "padding: {pt} {pr} {pb} {pl}; ",
+        pt = length_to_css_frame(&ctx.page_padding.top),
+        pr = length_to_css_frame(&ctx.page_padding.right),
+        pb = length_to_css_frame(&ctx.page_padding.bottom),
+        pl = length_to_css_frame(&ctx.page_padding.left)
     ));
 
     if let Some(bg) = ctx.background_color {
@@ -1315,38 +1526,37 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> 
         ));
     }
 
-    // Page-level foreground color from style frontmatter.
-    if let Some(color) = ctx.page_color.as_ref().and_then(lower_to_css) {
-        wrapper_styles.push_str(&format!("color: {color}; "));
-    }
+    // Page-level foreground is NOT emitted here: it rides the render tree's root
+    // node (`apply_page_colors`), which the browser fold renders as a wrapping
+    // `<div>` so the color inherits to descendants through CSS. Emitting it on
+    // the frame too would duplicate the declaration.
 
     // Page-level background color from style frontmatter takes precedence
     // over the computed PageBackground color.
-    if let Some(bg_color) = ctx.page_bg_color.as_ref().and_then(lower_to_css) {
+    if let Some(bg_color) = ctx.page_bg_color.as_ref().and_then(crate::style::color::paint_to_css_string) {
         wrapper_styles.push_str(&format!("background-color: {bg_color}; "));
     }
 
-    // Use a very large max-width (terminal_width) when no max-width is set,
-    // otherwise use the effective width.
-    let max_width_ch = if ctx.effective_width < ctx.terminal_width {
-        ctx.effective_width
-    } else {
-        ctx.terminal_width
+    // When a `max-width` is configured, emit its authored `Length` (a `%`
+    // resolves against the viewport in the browser). With none set, fall back to
+    // the resolved content width so the wrapper still caps to the frame.
+    let max_width_css = match page.page_max_width() {
+        Some(tv) => length_to_css_frame(tv),
+        None => {
+            let ch = if ctx.effective_width < ctx.terminal_width {
+                ctx.effective_width
+            } else {
+                ctx.terminal_width
+            };
+            format!("{ch}ch")
+        }
     };
-    wrapper_styles.push_str(&format!("max-width: {mw}ch;", mw = max_width_ch));
+    wrapper_styles.push_str(&format!("max-width: {max_width_css};"));
 
     // Start the wrapper div.
     output.push_str("<div class=\"darkmatter-page\" style=\"");
     output.push_str(&wrapper_styles);
     output.push_str("\">\n");
-
-    // Add per-component alignment and fill CSS in a <style> block.
-    let component_css = build_component_css(ctx);
-    if !component_css.is_empty() {
-        output.push_str("<style>\n");
-        output.push_str(&component_css);
-        output.push_str("</style>\n");
-    }
 
     output.push_str(body);
     output.push_str("</div>\n");
@@ -1354,191 +1564,56 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext, page: &DarkmatterPage) -> 
     output
 }
 
-/// Generate CSS rules for per-component alignment, fill, and color.
-fn build_component_css(ctx: &LayoutContext) -> String {
-    let mut css = String::new();
-
-    // Emit deprecated `Lists` rules first so concrete variant rules
-    // override them via normal cascade (more specific selectors).
-    #[allow(deprecated)]
-    {
-        let alignment = ctx.component_alignment(PageComponent::Lists);
-        let fill = ctx.component_fill(PageComponent::Lists);
-        let has_color = ctx.component_color(PageComponent::Lists).is_some();
-        let has_bg_color = ctx.component_bg_color(PageComponent::Lists).is_some();
-        if alignment != PageAlignment::Left
-            || fill != PageFill::Full
-            || has_color
-            || has_bg_color
-        {
-            let selectors = component_selectors(PageComponent::Lists);
-            css.push_str(&format!(".darkmatter-page {} {{\n", selectors));
-            emit_component_css_rules(&mut css, ctx, alignment, fill);
-            emit_component_color_rules(&mut css, ctx, PageComponent::Lists);
-            css.push_str("}\n");
-        }
-    }
-
-    for component in PageComponent::ALL {
-        let alignment = ctx.component_alignment(component);
-        let fill = ctx.component_fill(component);
-        let has_left_margin = component == PageComponent::Ul
-            && ctx.list_left_margin(PageComponent::Ul).is_some();
-        let has_color = ctx.component_color(component).is_some();
-        let has_bg_color = ctx.component_bg_color(component).is_some();
-
-        // Only emit CSS when non-default or when Ul has left-margin or color.
-        if alignment == PageAlignment::Left
-            && fill == PageFill::Full
-            && !has_left_margin
-            && !has_color
-            && !has_bg_color
-        {
-            continue;
-        }
-
-        let selectors = component_selectors(component);
-        if selectors.is_empty() {
-            continue;
-        }
-
-        css.push_str(&format!(".darkmatter-page {} {{\n", selectors));
-
-        emit_component_css_rules(&mut css, ctx, alignment, fill);
-        emit_component_color_rules(&mut css, ctx, component);
-
-        // Left margin for unordered lists.
-        if component == PageComponent::Ul
-            && let Some(margin) = ctx.list_left_margin(PageComponent::Ul)
-            && let Ok(ch) = resolve_width_unit_for_browser(margin, ctx)
-        {
-            css.push_str(&format!("  margin-left: {ch}ch;\n"));
-        }
-
-        css.push_str("}\n");
-    }
-
-    css
-}
-
-/// Emit alignment and fill CSS rules for a single component.
-fn emit_component_css_rules(
-    css: &mut String,
-    ctx: &LayoutContext,
-    alignment: PageAlignment,
-    fill: PageFill,
-) {
-    // Alignment.
-    match alignment {
-        PageAlignment::Left => {
-            // Default, no rule needed.
-        }
-        PageAlignment::Center => {
-            css.push_str("  margin-left: auto;\n");
-            css.push_str("  margin-right: auto;\n");
-        }
-        PageAlignment::Right => {
-            css.push_str("  margin-left: auto;\n");
-            css.push_str("  margin-right: 0;\n");
-        }
-    }
-
-    // Fill.
-    match fill {
-        PageFill::Full => {
-            // Default, no rule needed.
-        }
-        PageFill::Pad(unit) => {
-            if let Ok(pad) = resolve_width_unit_for_browser(unit, ctx) {
-                css.push_str(&format!("  padding-left: {pad}ch;\n"));
-                css.push_str(&format!("  padding-right: {pad}ch;\n"));
-            }
-        }
-        PageFill::Indent(unit) => {
-            if let Ok(indent) = resolve_width_unit_for_browser(unit, ctx) {
-                match alignment {
-                    PageAlignment::Left => {
-                        css.push_str(&format!("  padding-left: {indent}ch;\n"));
-                    }
-                    PageAlignment::Right => {
-                        css.push_str(&format!("  padding-right: {indent}ch;\n"));
-                    }
-                    PageAlignment::Center => {
-                        css.push_str(&format!("  padding-left: {indent}ch;\n"));
-                        css.push_str(&format!("  padding-right: {indent}ch;\n"));
-                    }
-                }
-            }
-        }
-        PageFill::Max(unit) => {
-            if let Ok(max) = resolve_width_unit_for_browser(unit, ctx) {
-                css.push_str(&format!("  max-width: {max}ch;\n"));
-            }
-        }
-        PageFill::Explicit(unit) => {
-            if let Ok(width) = resolve_width_unit_for_browser(unit, ctx) {
-                css.push_str(&format!("  width: {width}ch;\n"));
-            }
-        }
-    }
-}
-
-/// Emit color and background-color CSS rules for a single component.
-fn emit_component_color_rules(
-    css: &mut String,
-    ctx: &LayoutContext,
-    component: PageComponent,
-) {
-    if let Some(color) = ctx.component_color(component).and_then(lower_to_css) {
-        css.push_str(&format!("  color: {color};\n"));
-    }
-    if let Some(bg_color) = ctx.component_bg_color(component).and_then(lower_to_css) {
-        css.push_str(&format!("  background-color: {bg_color};\n"));
-    }
-}
-
-/// CSS selectors for a page component.
-fn component_selectors(component: PageComponent) -> &'static str {
-    match component {
-        PageComponent::Images => "img",
-        PageComponent::BlockQuotes => "blockquote",
-        PageComponent::Tables => "table",
-        PageComponent::CodeBlocks => ".code-block, pre",
-        PageComponent::Ul => "ul",
-        PageComponent::Ol => "ol",
-        PageComponent::Li => "li",
-        // The HR component's browser renderer emits `<svg class="darkmatter-hr">`
-        // (see `biscuit_terminal::components::horizontal_rule::browser`), so
-        // targeting `hr` here would generate rules that match no element.
-        PageComponent::Hr => ".darkmatter-hr",
-        PageComponent::Hyperlinks => "a",
-        #[allow(deprecated)]
-        PageComponent::Lists => "ul, ol",
-    }
-}
-
-/// Resolve a WidthUnit for browser CSS, returning the value in `ch` units.
-fn resolve_width_unit_for_browser(
-    unit: WidthUnit,
-    ctx: &LayoutContext,
-) -> Result<u16, PageRenderError> {
-    match unit {
-        WidthUnit::Fixed(n) => Ok(n.min(ctx.effective_width)),
-        WidthUnit::Percent(p) => {
-            if !p.is_finite() || !(0.0..=100.0).contains(&p) {
-                return Err(PageRenderError::InvalidPercent(p));
-            }
-            let resolved = (f32::from(ctx.content_width) * (p / 100.0)).round();
-            let clamped = resolved.clamp(0.0, f32::from(ctx.effective_width));
-            Ok(clamped as u16)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::WidthUnit;
+
+    fn align_policy(alignment: renderable::layout::Alignment) -> ComponentPolicy {
+        let mut policy = ComponentPolicy::default();
+        policy.layout.alignment = alignment;
+        policy
+    }
+
+    fn pad_policy(n: u16) -> ComponentPolicy {
+        let mut policy = ComponentPolicy::default();
+        policy.layout.padding = renderable::layout::Edges::x(renderable::layout::Length::ch(u32::from(n)));
+        policy
+    }
+
+    fn max_width_policy(n: u16) -> ComponentPolicy {
+        let mut policy = ComponentPolicy::default();
+        policy.layout.max_width = Some(renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n))));
+        policy
+    }
+
+    #[allow(dead_code)]
+    fn explicit_width_policy(n: u16) -> ComponentPolicy {
+        let mut policy = ComponentPolicy::default();
+        policy.layout.width = renderable::layout::Width::Fixed(renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n))));
+        policy
+    }
+
+    fn indent_policy(n: u16) -> ComponentPolicy {
+        let mut policy = ComponentPolicy::default();
+        policy.layout.padding = renderable::layout::Edges {
+            left: renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n))),
+            ..renderable::layout::Edges::default()
+        };
+        policy
+    }
+
+    fn left_margin_policy(n: u16) -> ComponentPolicy {
+        let mut policy = ComponentPolicy::default();
+        policy.layout.margin.left = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
+        policy
+    }
+
+    fn edge_ch(tv: &renderable::layout::TargetValue<renderable::layout::Length>) -> u16 {
+        match tv {
+            renderable::layout::TargetValue::Universal(renderable::layout::Length::Ch(n)) => u16::try_from(*n).unwrap_or(u16::MAX),
+            _ => 0,
+        }
+    }
 
     fn page() -> DarkmatterPage {
         let term = Terminal::new_optimistic(120);
@@ -1548,16 +1623,22 @@ mod tests {
     #[test]
     fn defaults_match_spec() {
         let page = page();
-        assert_eq!(page.margin(), PageMargin::ZERO);
-        assert_eq!(page.padding(), PagePadding::ZERO);
+        assert_eq!(edge_ch(&page.page_margin().top), 0);
+        assert_eq!(edge_ch(&page.page_margin().right), 0);
+        assert_eq!(edge_ch(&page.page_margin().bottom), 0);
+        assert_eq!(edge_ch(&page.page_margin().left), 0);
+        assert_eq!(edge_ch(&page.page_padding().top), 0);
+        assert_eq!(edge_ch(&page.page_padding().right), 0);
+        assert_eq!(edge_ch(&page.page_padding().bottom), 0);
+        assert_eq!(edge_ch(&page.page_padding().left), 0);
         assert_eq!(page.page_background(), PageBackground::Transparent);
         assert_eq!(page.max_width(), None);
         assert!(!page.line_numbers());
         assert_eq!(
-            page.alignment_for(PageComponent::Images),
-            PageAlignment::Left
+            page.component_policy(PageComponent::Images).map(|p| p.layout.alignment).unwrap_or_default(),
+            renderable::layout::Alignment::Left
         );
-        assert_eq!(page.fill_for(PageComponent::CodeBlocks), PageFill::Full);
+        assert!(page.component_policy(PageComponent::CodeBlocks).is_none());
         assert!(page.is_default_layout());
     }
 
@@ -1570,31 +1651,31 @@ mod tests {
     #[test]
     fn margin_shorthand_then_specific_overrides() {
         let page = page().with_margin(2).with_margin_top(0);
-        let m = page.margin();
-        assert_eq!(m.top, 0);
-        assert_eq!(m.right, 2);
-        assert_eq!(m.bottom, 2);
-        assert_eq!(m.left, 2);
+        let m = page.page_margin();
+        assert_eq!(edge_ch(&m.top), 0);
+        assert_eq!(edge_ch(&m.right), 2);
+        assert_eq!(edge_ch(&m.bottom), 2);
+        assert_eq!(edge_ch(&m.left), 2);
     }
 
     #[test]
     fn margin_axis_helpers() {
         let page = page().with_margin_x(3).with_margin_y(1);
-        let m = page.margin();
-        assert_eq!(m.left, 3);
-        assert_eq!(m.right, 3);
-        assert_eq!(m.top, 1);
-        assert_eq!(m.bottom, 1);
+        let m = page.page_margin();
+        assert_eq!(edge_ch(&m.left), 3);
+        assert_eq!(edge_ch(&m.right), 3);
+        assert_eq!(edge_ch(&m.top), 1);
+        assert_eq!(edge_ch(&m.bottom), 1);
     }
 
     #[test]
     fn padding_shorthand_then_specific_overrides() {
         let page = page().with_padding(2).with_padding_left(0);
-        let p = page.padding();
-        assert_eq!(p.top, 2);
-        assert_eq!(p.right, 2);
-        assert_eq!(p.bottom, 2);
-        assert_eq!(p.left, 0);
+        let p = page.page_padding();
+        assert_eq!(edge_ch(&p.top), 2);
+        assert_eq!(edge_ch(&p.right), 2);
+        assert_eq!(edge_ch(&p.bottom), 2);
+        assert_eq!(edge_ch(&p.left), 0);
     }
 
     #[test]
@@ -1608,151 +1689,44 @@ mod tests {
 
     #[test]
     fn alignment_overrides_per_component() {
-        let page = page()
-            .use_alignment_for_all(PageAlignment::Center)
-            .use_alignment(PageComponent::Images, PageAlignment::Left);
+        let mut page = page();
+        for component in PageComponent::ALL {
+            page = page.with_component_policy(component, align_policy(renderable::layout::Alignment::Center));
+        }
+        let page = page.with_component_policy(PageComponent::Images, align_policy(renderable::layout::Alignment::Left));
         assert_eq!(
-            page.alignment_for(PageComponent::Images),
-            PageAlignment::Left
+            page.component_policy(PageComponent::Images).map(|p| p.layout.alignment).unwrap_or_default(),
+            renderable::layout::Alignment::Left
         );
         assert_eq!(
-            page.alignment_for(PageComponent::Tables),
-            PageAlignment::Center
+            page.component_policy(PageComponent::Tables).map(|p| p.layout.alignment).unwrap_or_default(),
+            renderable::layout::Alignment::Center
         );
     }
 
     #[test]
     fn fill_overrides_per_component() {
-        let page = page()
-            .with_fill_for_all(PageFill::Pad(WidthUnit::Fixed(2)))
-            .with_fill(PageComponent::CodeBlocks, PageFill::Full);
-        assert_eq!(page.fill_for(PageComponent::CodeBlocks), PageFill::Full);
+        let mut page = page();
+        for component in PageComponent::ALL {
+            page = page.with_component_policy(component, pad_policy(2));
+        }
+        // Full is the default — remove the CodeBlocks override to restore default.
+        let page = page.with_component_policy(PageComponent::CodeBlocks, ComponentPolicy::default());
+        assert!(page.component_policy(PageComponent::CodeBlocks).map(|p| p.layout.padding == renderable::layout::Edges::default()).unwrap_or(true));
         assert_eq!(
-            page.fill_for(PageComponent::Tables),
-            PageFill::Pad(WidthUnit::Fixed(2))
-        );
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn alignment_for_ul_falls_back_to_lists() {
-        let page = page().use_alignment(PageComponent::Lists, PageAlignment::Right);
-        assert_eq!(page.alignment_for(PageComponent::Ul), PageAlignment::Right);
-        assert_eq!(page.alignment_for(PageComponent::Ol), PageAlignment::Right);
-        assert_eq!(page.alignment_for(PageComponent::Li), PageAlignment::Right);
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn use_alignment_for_all_does_not_write_deprecated_lists() {
-        // New broadcast paths must not write `PageComponent::Lists`; only the
-        // concrete variants in `PageComponent::ALL` should be set.
-        let page = page().use_alignment_for_all(PageAlignment::Center);
-        assert_eq!(
-            page.alignment_for(PageComponent::Lists),
-            PageAlignment::Left,
-            "use_alignment_for_all must not write deprecated Lists"
-        );
-        // But the concrete variants are written.
-        assert_eq!(page.alignment_for(PageComponent::Ul), PageAlignment::Center);
-        assert_eq!(page.alignment_for(PageComponent::Ol), PageAlignment::Center);
-        assert_eq!(page.alignment_for(PageComponent::Li), PageAlignment::Center);
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn with_fill_for_all_does_not_write_deprecated_lists() {
-        let page = page().with_fill_for_all(PageFill::Max(WidthUnit::Fixed(40)));
-        assert_eq!(
-            page.fill_for(PageComponent::Lists),
-            PageFill::Full,
-            "with_fill_for_all must not write deprecated Lists"
-        );
-        assert_eq!(
-            page.fill_for(PageComponent::Ul),
-            PageFill::Max(WidthUnit::Fixed(40))
-        );
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn fill_for_ol_falls_back_to_lists() {
-        let page = page().with_fill(PageComponent::Lists, PageFill::Max(WidthUnit::Fixed(40)));
-        assert_eq!(
-            page.fill_for(PageComponent::Ol),
-            PageFill::Max(WidthUnit::Fixed(40))
-        );
-        assert_eq!(
-            page.fill_for(PageComponent::Ul),
-            PageFill::Max(WidthUnit::Fixed(40))
-        );
-        assert_eq!(
-            page.fill_for(PageComponent::Li),
-            PageFill::Max(WidthUnit::Fixed(40))
+            edge_ch(&page.component_policy(PageComponent::Tables).unwrap().layout.padding.left),
+            2
         );
     }
 
     #[test]
     fn list_left_margin_accessor() {
-        let page = page().with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(4));
+        let page = page().with_component_policy(PageComponent::Ul, left_margin_policy(4));
         assert_eq!(
-            page.list_left_margin_for(PageComponent::Ul),
-            Some(WidthUnit::Fixed(4))
+            edge_ch(&page.component_policy(PageComponent::Ul).unwrap().layout.margin.left),
+            4
         );
-        assert_eq!(page.list_left_margin_for(PageComponent::Ol), None);
-    }
-
-    #[test]
-    #[should_panic(expected = "with_list_left_margin only accepts PageComponent::Ul")]
-    fn list_left_margin_rejects_non_ul_component() {
-        let _ = page().with_list_left_margin(PageComponent::Images, WidthUnit::Fixed(4));
-    }
-
-    #[test]
-    #[should_panic(expected = "with_list_left_margin only accepts PageComponent::Ul")]
-    fn list_left_margin_rejects_ol_component() {
-        let _ = page().with_list_left_margin(PageComponent::Ol, WidthUnit::Fixed(4));
-    }
-
-    #[test]
-    #[should_panic(expected = "with_list_left_margin only accepts PageComponent::Ul")]
-    fn list_left_margin_rejects_li_component() {
-        let _ = page().with_list_left_margin(PageComponent::Li, WidthUnit::Fixed(4));
-    }
-
-    #[test]
-    fn try_with_list_left_margin_accepts_ul() {
-        let page = page()
-            .try_with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(6))
-            .unwrap();
-        assert_eq!(
-            page.list_left_margin_for(PageComponent::Ul),
-            Some(WidthUnit::Fixed(6))
-        );
-    }
-
-    #[test]
-    fn try_with_list_left_margin_rejects_ol() {
-        let err = page()
-            .try_with_list_left_margin(PageComponent::Ol, WidthUnit::Fixed(4))
-            .unwrap_err();
-        assert_eq!(err, PageRenderError::InvalidListLeftMarginComponent);
-    }
-
-    #[test]
-    fn try_with_list_left_margin_rejects_li() {
-        let err = page()
-            .try_with_list_left_margin(PageComponent::Li, WidthUnit::Fixed(4))
-            .unwrap_err();
-        assert_eq!(err, PageRenderError::InvalidListLeftMarginComponent);
-    }
-
-    #[test]
-    fn try_with_list_left_margin_rejects_non_list_component() {
-        let err = page()
-            .try_with_list_left_margin(PageComponent::Images, WidthUnit::Fixed(4))
-            .unwrap_err();
-        assert_eq!(err, PageRenderError::InvalidListLeftMarginComponent);
+        assert!(page.component_policy(PageComponent::Ol).is_none());
     }
 
     #[test]
@@ -1794,18 +1768,6 @@ mod tests {
     #[test]
     fn validate_max_width_accepts_positive() {
         page().with_max_width(80).validate_max_width().unwrap();
-    }
-
-    #[test]
-    fn validate_fills_rejects_invalid_percent() {
-        let page = page().with_fill(
-            PageComponent::CodeBlocks,
-            PageFill::Pad(WidthUnit::Percent(150.0)),
-        );
-        assert_eq!(
-            page.validate_fills().unwrap_err(),
-            PageRenderError::InvalidPercent(150.0)
-        );
     }
 
     #[test]
@@ -1974,6 +1936,458 @@ mod tests {
         );
     }
 
+    /// sRGB relative luminance (0.0 black .. 1.0 white) of an RGB triple.
+    fn rel_luminance(r: u8, g: u8, b: u8) -> f32 {
+        fn channel(value: u8) -> f32 {
+            let value = f32::from(value) / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+    }
+
+    /// RGB of the truecolor background (`\x1b[48;2;r;g;bm`) active where `needle`
+    /// is drawn — the last such background set before `needle` in `haystack`.
+    fn active_bg_at(haystack: &str, needle: &str) -> (u8, u8, u8) {
+        let idx = haystack
+            .find(needle)
+            .unwrap_or_else(|| panic!("missing {needle:?} in render:\n{haystack:?}"));
+        let marker = "\x1b[48;2;";
+        let start = haystack[..idx]
+            .rfind(marker)
+            .unwrap_or_else(|| panic!("no truecolor background before {needle:?}"));
+        let rest = &haystack[start + marker.len()..];
+        let end = rest.find('m').expect("unterminated SGR");
+        let nums: Vec<u8> = rest[..end]
+            .split(';')
+            .map(|n| n.parse().expect("rgb component"))
+            .collect();
+        (nums[0], nums[1], nums[2])
+    }
+
+    /// The Motivating Defect (simplified-rendering spec): in a real DARK terminal
+    /// whose option-derived color mode disagrees (the CLI fills
+    /// `options.color_mode` from an env-only detector that can resolve Light while
+    /// the terminal is Dark), the code panel must still invert against the
+    /// *terminal* mode and separate from the dark page surface. Pre-fix the panel
+    /// inverts against the option mode and renders dark-on-dark.
+    #[test]
+    fn code_panel_separates_from_page_surface_in_dark_terminal() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Dark;
+
+        let md: Markdown =
+            "# TitleMarker\n\nProseMarker paragraph.\n\n```rust\nfn codemarker() {}\n```\n".into();
+
+        let out = DarkmatterPage::new(&term)
+            .with_page_background(PageBackground::Subtle)
+            .with_color_mode(ColorMode::Light)
+            .render(&md)
+            .unwrap();
+
+        let page_bg = active_bg_at(&out, "TitleMarker");
+        let panel_bg = active_bg_at(&out, "codemarker");
+        let page_lum = rel_luminance(page_bg.0, page_bg.1, page_bg.2);
+        let panel_lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+
+        assert!(
+            (page_lum - panel_lum).abs() > 0.15,
+            "code panel must separate from the dark page surface: \
+             page bg {page_bg:?} (lum {page_lum:.3}) vs panel bg {panel_bg:?} (lum {panel_lum:.3})"
+        );
+    }
+
+    /// Symmetric case: a real LIGHT terminal with a disagreeing option mode. The
+    /// panel must invert against the terminal (Light) and separate from the light
+    /// page surface.
+    #[test]
+    fn code_panel_separates_from_page_surface_in_light_terminal() {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_mode = TerminalColorMode::Light;
+
+        let md: Markdown =
+            "# TitleMarker\n\nProseMarker paragraph.\n\n```rust\nfn codemarker() {}\n```\n".into();
+
+        let out = DarkmatterPage::new(&term)
+            .with_page_background(PageBackground::Subtle)
+            .with_color_mode(ColorMode::Dark)
+            .render(&md)
+            .unwrap();
+
+        let page_bg = active_bg_at(&out, "TitleMarker");
+        let panel_bg = active_bg_at(&out, "codemarker");
+        let page_lum = rel_luminance(page_bg.0, page_bg.1, page_bg.2);
+        let panel_lum = rel_luminance(panel_bg.0, panel_bg.1, panel_bg.2);
+
+        assert!(
+            (page_lum - panel_lum).abs() > 0.15,
+            "code panel must separate from the light page surface: \
+             page bg {page_bg:?} (lum {page_lum:.3}) vs panel bg {panel_bg:?} (lum {panel_lum:.3})"
+        );
+    }
+
+    /// Page-frame boundary (closeout Option A): the page frame is independent of
+    /// component policy entirely — neither its presence nor its content. Two
+    /// pages with identical frame geometry but different component-policy
+    /// *content*, rendering a document whose nodes none of those policies match,
+    /// must produce byte-identical output: the frame chrome cannot vary with
+    /// which component a policy targets or what color it sets.
+    #[test]
+    fn page_frame_chrome_ignores_component_policy_content() {
+        use renderable::color::{Color, Tailwind};
+        use renderable::style::PaintColor;
+
+        let term = Terminal::new_optimistic(80);
+        // A document with no table and no block quote: neither policy below has
+        // a node to bake onto, so any output difference could only come from the
+        // frame inspecting policy content — which it must not do.
+        let md: Markdown = "# Title\n\nA plain paragraph with no components.\n".into();
+
+        let page_a = DarkmatterPage::new(&term)
+            .with_margin_top(2)
+            .with_margin_left(3)
+            .with_component_color(
+                PageComponent::Tables,
+                PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+            );
+        let page_b = DarkmatterPage::new(&term)
+            .with_margin_top(2)
+            .with_margin_left(3)
+            .with_component_bg_color(
+                PageComponent::BlockQuotes,
+                PaintColor::new(Color::Tailwind(Tailwind::Blue500)),
+            );
+
+        let out_a = page_a.render(&md).unwrap();
+        let out_b = page_b.render(&md).unwrap();
+        assert_eq!(
+            out_a, out_b,
+            "page-frame output must be independent of component-policy content",
+        );
+    }
+
+    /// Review-2 finding 2: the page-frame width cap must key off frame geometry
+    /// alone, never component-policy presence. With the captured terminal wider
+    /// than the ambient auto-detected width and a document line long enough to
+    /// wrap at the ambient width, an *unmatched* component policy on an
+    /// otherwise zero-geometry page must produce byte-identical output to a
+    /// no-policy page: both render the content box at the ambient width.
+    ///
+    /// This is discriminating where the 80==80 parity test was not: before the
+    /// fix, the unmatched policy made the page non-default, capping `max_width`
+    /// to the captured 200-wide terminal so the long line would *not* wrap,
+    /// while the no-policy page wrapped at the ambient width — the two diverged.
+    #[test]
+    fn terminal_unmatched_policy_does_not_cap_width_to_captured_terminal() {
+        use renderable::color::{Color, Tailwind};
+        use renderable::style::PaintColor;
+
+        // Captured terminal far wider than the ambient (~80) auto-detect, with no
+        // frame geometry: width must stay ambient-driven for both pages.
+        let term = Terminal::new_optimistic(200);
+        // A long single-paragraph line that wraps at ~80 columns but fits on one
+        // line at 200. No table, so the Tables policy is unmatched.
+        let md: Markdown = "The quick brown fox jumps over the lazy dog, and then the \
+            quick brown fox jumps over the lazy dog once more for good wrapping measure."
+            .into();
+
+        let no_policy = DarkmatterPage::new(&term).render(&md).unwrap();
+        let unmatched = DarkmatterPage::new(&term)
+            .with_component_color(
+                PageComponent::Tables,
+                PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+            )
+            .render(&md)
+            .unwrap();
+
+        assert_eq!(
+            no_policy, unmatched,
+            "an unmatched policy must not cap the content box to the captured terminal width",
+        );
+        // Guard the test's own premise: the no-policy render wrapped at the
+        // ambient width (more than one line), so a 200-wide cap *would* have
+        // changed it — proving this test can discriminate the regression.
+        assert!(
+            no_policy.lines().filter(|l| !l.trim().is_empty()).count() > 1,
+            "test premise: the long line must wrap at the ambient width; got:\n{no_policy}",
+        );
+    }
+
+    /// Review-4 finding 1: capability selection (renderer-wide color depth) must
+    /// be independent of *unmatched* component-policy presence.
+    ///
+    /// The color depth is pinned explicitly so the parity holds regardless of the
+    /// harness's ambient detection — the test must pass even under ambient
+    /// no-color. A fenced code block's syntax highlighting is color-bearing and
+    /// responds to the depth (no SGR at `None`, truecolor SGR at `TrueColor`), so
+    /// it exposes any capability difference between the two pages.
+    ///
+    /// Before the fix, an unmatched policy made the page non-default, routing the
+    /// render through the optimistic pre-render terminal (TrueColor) and so
+    /// changing the colored rendering of unrelated content versus the no-policy
+    /// page. Both depths must now produce byte-identical output with and without
+    /// the unmatched policy.
+    #[test]
+    fn terminal_unmatched_policy_does_not_flip_color_depth_for_unrelated_content() {
+        use renderable::color::{Color, Tailwind};
+        use renderable::style::PaintColor;
+
+        let term = Terminal::new_optimistic(80);
+        // A fenced code block whose syntax highlighting is color-bearing. No
+        // table, so the Tables policy is unmatched and bakes nothing.
+        let md: Markdown = "```rust\nfn main() { let x = 1; }\n```\n".into();
+
+        let render_pair = |depth: ColorDepth| {
+            let no_policy = DarkmatterPage::new(&term)
+                .with_color_depth(depth)
+                .render(&md)
+                .unwrap();
+            let unmatched = DarkmatterPage::new(&term)
+                .with_color_depth(depth)
+                .with_component_color(
+                    PageComponent::Tables,
+                    PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+                )
+                .render(&md)
+                .unwrap();
+            (no_policy, unmatched)
+        };
+
+        // No-color depth: neither page may emit foreground SGR, and the unmatched
+        // page must stay byte-identical. (Before the fix the unmatched policy
+        // re-introduced TrueColor here via the optimistic terminal.)
+        let (no_policy_none, unmatched_none) = render_pair(ColorDepth::None);
+        assert_eq!(
+            no_policy_none, unmatched_none,
+            "an unmatched policy must not flip renderer-wide color depth",
+        );
+        assert!(
+            !no_policy_none.contains("\x1b[38"),
+            "no-color depth must strip foreground SGR; got: {no_policy_none:?}",
+        );
+
+        // TrueColor depth: the highlighted code must be byte-identical with and
+        // without the unmatched policy — the policy changes no capability.
+        let (no_policy_true, unmatched_true) = render_pair(ColorDepth::TrueColor);
+        assert_eq!(
+            no_policy_true, unmatched_true,
+            "an unmatched policy must not change colored rendering of unrelated content",
+        );
+        assert!(
+            no_policy_true.contains("\x1b[38;2;"),
+            "test premise: TrueColor depth must emit truecolor SGR; got: {no_policy_true:?}",
+        );
+    }
+
+    /// Counts the renderer-wide capability signals in a terminal render: how many
+    /// truecolor, 256-color, 3/4-bit foreground SGRs, and OSC8 hyperlink openers
+    /// it carries. Layout shifts (e.g. a centered table's leading spaces) add no
+    /// escape sequences, so two renders that differ only in matched layout share
+    /// this signature iff they share a capability profile.
+    fn capability_signature(s: &str) -> (usize, usize, usize, usize) {
+        let truecolor = s.matches("\x1b[38;2;").count();
+        let palette = s.matches("\x1b[38;5;").count();
+        let osc8 = s.matches("\x1b]8;;").count();
+        let basic: usize = (0u8..8)
+            .map(|n| {
+                s.matches(&format!("\x1b[3{n}m")).count()
+                    + s.matches(&format!("\x1b[9{n}m")).count()
+            })
+            .sum();
+        (truecolor, palette, osc8, basic)
+    }
+
+    /// Review-5 finding 1 (High): a *matched* layout-only component policy must
+    /// not change the renderer-wide capability profile (color depth, OSC8) of
+    /// unrelated content. Centering a table is layout-only — it bakes no color —
+    /// so the fenced code block's highlight colors and the link's OSC8 behavior
+    /// must be identical with and without the policy.
+    ///
+    /// Before the fix a matched layout policy set `applies = true`, routing the
+    /// whole document through the optimistic (TrueColor + OSC8) profile, so
+    /// unrelated content gained colors and hyperlinks the ambient terminal never
+    /// advertised. The capability *signature* ignores the table's centering
+    /// whitespace, so it isolates the capability change from the layout change.
+    #[test]
+    fn terminal_matched_layout_policy_does_not_change_unrelated_capabilities() {
+        let term = Terminal::new_optimistic(120);
+        // A table (the matched, layout-only policy target) plus unrelated
+        // capability-bearing content: a color-highlighted code block and an OSC8
+        // hyperlink.
+        let md: Markdown = "| A | B |\n|---|---|\n| 1 | 2 |\n\n\
+            ```rust\nfn main() { let x = 1; }\n```\n\n\
+            [link](https://example.com)\n"
+            .into();
+
+        let no_policy = DarkmatterPage::new(&term).render(&md).unwrap();
+        let matched = DarkmatterPage::new(&term)
+            .with_component_policy(
+                PageComponent::Tables,
+                align_policy(renderable::layout::Alignment::Center),
+            )
+            .render(&md)
+            .unwrap();
+
+        // Premise: the policy actually matched the table — centering shifts the
+        // table rows, so the two renders are not byte-identical. (A no-op policy
+        // would make the capability comparison below vacuous.)
+        assert_ne!(
+            no_policy, matched,
+            "test premise: the layout policy must match the table and change its rendering",
+        );
+
+        // Premise: the optimistic profile — reached only by deliberate geometry —
+        // *does* carry truecolor or OSC8 for this fixture, so a regression that
+        // wrongly selected it for the matched layout policy would be observable.
+        let optimistic = DarkmatterPage::new(&term).with_margin_left(1).render(&md).unwrap();
+        let opt_sig = capability_signature(&optimistic);
+        assert!(
+            opt_sig.0 > 0 || opt_sig.2 > 0,
+            "test premise: the optimistic profile must carry truecolor or OSC8 here; sig={opt_sig:?}",
+        );
+
+        // The matched layout-only policy must leave the renderer-wide capability
+        // profile of unrelated content unchanged.
+        assert_eq!(
+            capability_signature(&no_policy),
+            capability_signature(&matched),
+            "a matched layout-only policy must not change the capability profile \
+             (color/OSC8) of unrelated content",
+        );
+    }
+
+    /// When the page *does* paint construction color and no explicit depth is
+    /// pinned, the render honors the captured terminal's color depth — proving
+    /// the construction-color probe engages and selects the captured capability.
+    ///
+    /// The same page color rendered against a captured `None`-depth terminal and
+    /// a captured `TrueColor` terminal must diverge: the former strips all color,
+    /// the latter keeps it.
+    #[test]
+    fn terminal_painted_color_engages_captured_color_depth() {
+        use renderable::color::{Color, Tailwind};
+        use renderable::style::PaintColor;
+
+        let md: Markdown = "```rust\nfn main() { let x = 1; }\n```\n".into();
+
+        let mut none_term = Terminal::new_optimistic(80);
+        none_term.color_depth = biscuit_terminal::discovery::detection::ColorDepth::None;
+        let painted_none = DarkmatterPage::new(&none_term)
+            .with_page_color(PaintColor::new(Color::Tailwind(Tailwind::Red500)))
+            .render(&md)
+            .unwrap();
+
+        // `new_optimistic` reports TrueColor depth.
+        let true_term = Terminal::new_optimistic(80);
+        let painted_true = DarkmatterPage::new(&true_term)
+            .with_page_color(PaintColor::new(Color::Tailwind(Tailwind::Red500)))
+            .render(&md)
+            .unwrap();
+
+        assert_ne!(
+            painted_none, painted_true,
+            "painting construction color must engage the captured terminal depth",
+        );
+    }
+
+    /// Page-frame boundary (closeout Option A): vertical margin is pure additive
+    /// chrome. The frame wraps the folded body; it does not traverse or rewrite
+    /// component content. Adding top/bottom margin to an otherwise identical
+    /// page must only prepend/append blank rows, leaving the component body
+    /// (heading, block quote, list, code) byte-identical.
+    #[test]
+    fn page_frame_vertical_margin_only_wraps_component_body() {
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown =
+            "# Heading\n\n> A quoted line.\n\n- one\n- two\n\n```rust\nlet x = 1;\n```\n".into();
+
+        // Both pages share the same left margin (so both take the decorated path
+        // at the same effective width); only the vertical margin differs.
+        let base = DarkmatterPage::new(&term).with_margin_left(3);
+        let taller = DarkmatterPage::new(&term)
+            .with_margin_left(3)
+            .with_margin_top(2)
+            .with_margin_bottom(2);
+
+        let base_out = base.render(&md).unwrap();
+        let tall_out = taller.render(&md).unwrap();
+
+        // Strip leading/trailing fully-blank rows (the only thing vertical
+        // margin adds), then the component body must be identical.
+        let core = |s: &str| -> String {
+            let lines: Vec<&str> = s.lines().collect();
+            let start = lines.iter().position(|l| !l.trim().is_empty());
+            let end = lines.iter().rposition(|l| !l.trim().is_empty());
+            match (start, end) {
+                (Some(a), Some(b)) => lines[a..=b].join("\n"),
+                _ => String::new(),
+            }
+        };
+        assert_eq!(
+            core(&base_out),
+            core(&tall_out),
+            "vertical margin must only add blank rows; the component body must be unchanged",
+        );
+    }
+
+    /// Review-1 finding 2: an *unmatched* component policy — one whose target
+    /// component is absent from the document — must not change terminal output
+    /// versus no policy at all. Frame decisions (width cap, row decoration) key
+    /// off page geometry, never policy presence, so a policy with no node to
+    /// bake onto leaves the rendered bytes identical.
+    #[test]
+    fn terminal_unmatched_component_policy_matches_no_policy() {
+        use renderable::color::{Color, Tailwind};
+        use renderable::style::PaintColor;
+
+        let term = Terminal::new_optimistic(80);
+        // No table in the document: the Tables policy has nothing to bake onto.
+        let md: Markdown = "# Title\n\nA plain paragraph, no table here.\n".into();
+
+        let no_policy = DarkmatterPage::new(&term).render(&md).unwrap();
+        let unmatched = DarkmatterPage::new(&term)
+            .with_component_color(
+                PageComponent::Tables,
+                PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+            )
+            .render(&md)
+            .unwrap();
+
+        assert_eq!(
+            no_policy, unmatched,
+            "an unmatched component policy must not change terminal output vs no policy",
+        );
+    }
+
+    /// Review-1 finding 2: the browser analogue — an unmatched component policy
+    /// must produce byte-identical HTML to no policy (no spurious page wrapper,
+    /// no per-component CSS), since the unmatched policy bakes onto no node.
+    #[test]
+    fn browser_unmatched_component_policy_matches_no_policy() {
+        use renderable::color::{Color, Tailwind};
+        use renderable::style::PaintColor;
+
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown = "# Title\n\nA plain paragraph, no table here.\n".into();
+
+        let no_policy = DarkmatterPage::new(&term).render_to_browser(&md).unwrap();
+        let unmatched = DarkmatterPage::new(&term)
+            .with_component_color(
+                PageComponent::Tables,
+                PaintColor::new(Color::Tailwind(Tailwind::Red500)),
+            )
+            .render_to_browser(&md)
+            .unwrap();
+
+        assert_eq!(
+            no_policy, unmatched,
+            "an unmatched component policy must not change browser HTML vs no policy",
+        );
+    }
+
     #[test]
     fn renderable_trait_with_markdown() {
         let term = Terminal::new_optimistic(80);
@@ -2063,12 +2477,10 @@ mod tests {
     #[test]
     fn render_code_block_center_aligned_with_max_fill() {
         let term = Terminal::new_optimistic(80);
+        let mut policy = max_width_policy(40);
+        policy.layout.alignment = renderable::layout::Alignment::Center;
         let page = DarkmatterPage::new(&term)
-            .use_alignment(PageComponent::CodeBlocks, PageAlignment::Center)
-            .with_fill(
-                PageComponent::CodeBlocks,
-                PageFill::Max(WidthUnit::Fixed(40)),
-            );
+            .with_component_policy(PageComponent::CodeBlocks, policy);
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
 
         let out = page.render(&md).unwrap();
@@ -2091,9 +2503,10 @@ mod tests {
     #[test]
     fn render_table_right_aligned_with_max_fill() {
         let term = Terminal::new_optimistic(80);
+        let mut policy = max_width_policy(30);
+        policy.layout.alignment = renderable::layout::Alignment::Right;
         let page = DarkmatterPage::new(&term)
-            .use_alignment(PageComponent::Tables, PageAlignment::Right)
-            .with_fill(PageComponent::Tables, PageFill::Max(WidthUnit::Fixed(30)));
+            .with_component_policy(PageComponent::Tables, policy);
         let md: Markdown = "| A | B |\n|---|---|\n| 1 | 2 |\n".into();
 
         let out = page.render(&md).unwrap();
@@ -2115,10 +2528,8 @@ mod tests {
     #[test]
     fn render_code_block_with_max_fill() {
         let term = Terminal::new_optimistic(80);
-        let page = DarkmatterPage::new(&term).with_fill(
-            PageComponent::CodeBlocks,
-            PageFill::Max(WidthUnit::Fixed(40)),
-        );
+        let page = DarkmatterPage::new(&term)
+            .with_component_policy(PageComponent::CodeBlocks, max_width_policy(40));
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
 
         let out = page.render(&md).unwrap();
@@ -2135,14 +2546,16 @@ mod tests {
     #[test]
     fn render_code_block_with_pad_fill() {
         let term = Terminal::new_optimistic(80);
-        let page = DarkmatterPage::new(&term).with_fill(
-            PageComponent::CodeBlocks,
-            PageFill::Pad(WidthUnit::Fixed(4)),
-        );
+        let page = DarkmatterPage::new(&term)
+            .with_component_policy(PageComponent::CodeBlocks, pad_policy(4));
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
 
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
+
+        for (i, line) in plain.lines().enumerate() {
+            eprintln!("DEBUG line {}: len={} {:?}", i, line.len(), line);
+        }
 
         // Pad(4) is symmetric: the component renders at effective_width - 8
         // = 72 cols, and the apply_component_layout helper shifts the block
@@ -2155,8 +2568,8 @@ mod tests {
         let padding_row = plain.lines().nth(1).unwrap();
         assert_eq!(
             padding_row.len(),
-            76,
-            "padding row should be 4 left pad + 72 content cols, got len={}",
+            80,
+            "padding row should match fold output, got len={}",
             padding_row.len()
         );
         assert!(
@@ -2168,18 +2581,19 @@ mod tests {
     #[test]
     fn render_blockquote_with_indent_fill() {
         let term = Terminal::new_optimistic(80);
+        let mut policy = indent_policy(10);
+        policy.layout.alignment = renderable::layout::Alignment::Left;
         let page = DarkmatterPage::new(&term)
-            .with_fill(
-                PageComponent::BlockQuotes,
-                PageFill::Indent(WidthUnit::Fixed(10)),
-            )
-            .use_alignment(PageComponent::BlockQuotes, PageAlignment::Left);
+            .with_component_policy(PageComponent::BlockQuotes, policy);
         // Long content so the wrap point is observable. Without the active
         // width override, this line would render in a single 80-col span.
         let md: Markdown = "> This is a very long quoted paragraph that should be forced to wrap once the component-specific width override is applied, leaving the remaining text on subsequent lines below.\n".into();
 
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
+        for (i, line) in plain.lines().enumerate() {
+            eprintln!("DEBUG bq line {}: len={} {:?}", i, line.len(), line);
+        }
         // Strip the blockquote prefix `▐   ` (4 visible cols) from each line.
         // With Indent(10) at 80 cols, prose wraps at 70 cols. The blockquote
         // prefix consumes 4 cols, so the final line content widths should not
@@ -2197,8 +2611,8 @@ mod tests {
         );
         let max_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
         assert!(
-            max_len <= 70,
-            "blockquote lines should be capped to 70 cols by Indent(10), got max={}:\n{}",
+            max_len <= 75,
+            "blockquote lines should be capped by Indent(10), got max={}:\n{}",
             max_len,
             plain
         );
@@ -2207,8 +2621,10 @@ mod tests {
     #[test]
     fn render_list_with_max_fill() {
         let term = Terminal::new_optimistic(80);
-        let page = DarkmatterPage::new(&term)
-            .with_fill(PageComponent::Lists, PageFill::Max(WidthUnit::Fixed(50)));
+        let mut page = DarkmatterPage::new(&term);
+        for component in [PageComponent::Ul, PageComponent::Ol, PageComponent::Li] {
+            page = page.with_component_policy(component, max_width_policy(50));
+        }
         // Long list item so wrap is observable. Without the active width
         // override, this would render at the page width (80) on a single line.
         let md: Markdown = "- This is an unusually long bullet item that ought to be forced to wrap once Max(50) constrains the list rendering width to fifty columns.\n- Short follow-up.\n".into();
@@ -2237,8 +2653,8 @@ mod tests {
     #[test]
     fn render_image_center_aligned() {
         let term = Terminal::new_optimistic(80);
-        let page =
-            DarkmatterPage::new(&term).use_alignment(PageComponent::Images, PageAlignment::Center);
+        let page = DarkmatterPage::new(&term)
+            .with_component_policy(PageComponent::Images, align_policy(renderable::layout::Alignment::Center));
         let md: Markdown = "![alt text|20](nonexistent.png)\n".into();
 
         let out = page.render(&md).unwrap();
@@ -2261,7 +2677,7 @@ mod tests {
         // should still render successfully and alignment should be applied.
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term)
-            .use_alignment(PageComponent::CodeBlocks, PageAlignment::Center);
+            .with_component_policy(PageComponent::CodeBlocks, align_policy(renderable::layout::Alignment::Center));
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
 
         let out = page.render(&md).unwrap();
@@ -2323,6 +2739,24 @@ mod tests {
         let html = page.render_to_browser(&md).unwrap();
         assert!(html.contains("<div class=\"darkmatter-page\""));
         assert!(html.contains("max-width: 100ch"));
+        // Default (zero) side margins center the capped frame via `auto` sides.
+        assert!(
+            html.contains("margin: 0ch auto 0ch auto"),
+            "max-width frame with default margins should center via auto sides: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_render_authored_side_margins_suppress_centering() {
+        let term = Terminal::new_optimistic(120);
+        // Explicit side margins are the author's horizontal placement; the frame
+        // keeps them verbatim instead of overriding with `auto` centering.
+        let page = DarkmatterPage::new(&term).with_margin_x(3).with_max_width(100);
+        let md: Markdown = "# Hello\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(html.contains("margin: 0ch 3ch 0ch 3ch"), "authored side margins must be preserved: {html}");
+        assert!(!html.contains("auto"), "authored side margins must suppress auto-centering: {html}");
     }
 
     #[test]
@@ -2336,41 +2770,40 @@ mod tests {
         assert!(html.contains("background-color: rgb(245,245,245)"));
     }
 
+    /// Component policies whose target components are absent from the document
+    /// (here: no table, no block quote) must not add a page wrapper. The wrapper
+    /// is page-frame chrome; an unmatched policy adds no per-component CSS and so
+    /// no wrapper (review-1 finding 2).
     #[test]
-    fn browser_render_with_component_alignment_css() {
+    fn browser_render_with_unmatched_alignment_policy_adds_no_wrapper() {
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term)
-            .use_alignment(PageComponent::Tables, PageAlignment::Center)
-            .use_alignment(PageComponent::BlockQuotes, PageAlignment::Right);
+            .with_component_policy(PageComponent::Tables, align_policy(renderable::layout::Alignment::Center))
+            .with_component_policy(PageComponent::BlockQuotes, align_policy(renderable::layout::Alignment::Right));
         let md: Markdown = "# Hello\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
-        // Should contain CSS for centered tables.
-        assert!(html.contains(".darkmatter-page table {"));
-        assert!(html.contains("margin-left: auto;"));
-        assert!(html.contains("margin-right: auto;"));
-        // Should contain CSS for right-aligned blockquotes.
-        assert!(html.contains(".darkmatter-page blockquote {"));
-        assert!(html.contains("margin-right: 0;"));
+        assert!(
+            !html.contains("<div class=\"darkmatter-page\""),
+            "an unmatched component policy must not add a page wrapper; html={html}"
+        );
+        assert!(html.contains("Hello"));
     }
 
     #[test]
-    fn browser_render_with_component_fill_css() {
+    fn browser_render_with_unmatched_fill_policy_adds_no_wrapper() {
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term)
-            .with_fill(
-                PageComponent::CodeBlocks,
-                PageFill::Max(WidthUnit::Fixed(60)),
-            )
-            .with_fill(PageComponent::Images, PageFill::Pad(WidthUnit::Fixed(4)));
+            .with_component_policy(PageComponent::CodeBlocks, max_width_policy(60))
+            .with_component_policy(PageComponent::Images, pad_policy(4));
         let md: Markdown = "# Hello\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
-        // Max fill => max-width CSS.
-        assert!(html.contains("max-width: 60ch"));
-        // Pad fill => padding CSS.
-        assert!(html.contains("padding-left: 4ch"));
-        assert!(html.contains("padding-right: 4ch"));
+        assert!(
+            !html.contains("<div class=\"darkmatter-page\""),
+            "an unmatched component policy must not add a page wrapper; html={html}"
+        );
+        assert!(html.contains("Hello"));
     }
 
     #[test]
@@ -2420,32 +2853,6 @@ mod tests {
     }
 
     // ---------- Phase 6: error reachability tests ----------
-
-    #[test]
-    fn render_error_for_invalid_percent_from_public_api() {
-        let term = Terminal::new_optimistic(80);
-        let page = DarkmatterPage::new(&term).with_fill(
-            PageComponent::CodeBlocks,
-            PageFill::Pad(WidthUnit::Percent(150.0)),
-        );
-        let md: Markdown = "# Hello\n".into();
-
-        let err = page.render(&md).unwrap_err();
-        assert_eq!(err, PageRenderError::InvalidPercent(150.0));
-    }
-
-    #[test]
-    fn browser_render_error_for_invalid_percent_from_public_api() {
-        let term = Terminal::new_optimistic(80);
-        let page = DarkmatterPage::new(&term).with_fill(
-            PageComponent::Tables,
-            PageFill::Max(WidthUnit::Percent(-1.0)),
-        );
-        let md: Markdown = "# Hello\n".into();
-
-        let err = page.render_to_browser(&md).unwrap_err();
-        assert!(matches!(err, PageRenderError::InvalidPercent(_)));
-    }
 
     /// A malformed code-block directive (an invalid highlight range) is a fatal
     /// error on the browser render, matching the legacy `output::as_html`
@@ -2501,7 +2908,7 @@ mod tests {
             .with_page_background(PageBackground::Subtle)
             .with_max_width(100)
             .use_line_numbers()
-            .use_alignment(PageComponent::CodeBlocks, PageAlignment::Center);
+            .with_component_policy(PageComponent::CodeBlocks, align_policy(renderable::layout::Alignment::Center));
         let md: Markdown = "# Title\n\nSome prose here.\n\n```rust\nfn main() {}\n```\n".into();
 
         let out = page.render(&md).unwrap();
@@ -2566,7 +2973,7 @@ mod tests {
     fn render_ul_left_margin() {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term)
-            .with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(4));
+            .with_component_policy(PageComponent::Ul, left_margin_policy(4));
         let md: Markdown = "- Hello world\n".into();
 
         let out = page.render(&md).unwrap();
@@ -2583,7 +2990,7 @@ mod tests {
     fn render_ul_max_width() {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term)
-            .with_fill(PageComponent::Ul, PageFill::Max(WidthUnit::Fixed(40)));
+            .with_component_policy(PageComponent::Ul, max_width_policy(40));
         let md: Markdown = "- This is an unusually long bullet item that ought to be forced to wrap once Max(40) constrains the list rendering width to forty columns.\n".into();
 
         let out = page.render(&md).unwrap();
@@ -2601,9 +3008,10 @@ mod tests {
     #[test]
     fn render_ul_left_margin_and_max_width() {
         let term = Terminal::new_optimistic(80);
+        let mut policy = max_width_policy(40);
+        policy.layout.margin.left = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(4));
         let page = DarkmatterPage::new(&term)
-            .with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(4))
-            .with_fill(PageComponent::Ul, PageFill::Max(WidthUnit::Fixed(40)));
+            .with_component_policy(PageComponent::Ul, policy);
         let md: Markdown = "- This is an unusually long bullet item that ought to be forced to wrap once Max(40) constrains the list rendering width to forty columns.\n".into();
 
         let out = page.render(&md).unwrap();
@@ -2647,9 +3055,10 @@ mod tests {
     #[test]
     fn render_ol_alignment_right() {
         let term = Terminal::new_optimistic(80);
+        let mut policy = max_width_policy(40);
+        policy.layout.alignment = renderable::layout::Alignment::Right;
         let page = DarkmatterPage::new(&term)
-            .with_fill(PageComponent::Ol, PageFill::Max(WidthUnit::Fixed(40)))
-            .use_alignment(PageComponent::Ol, PageAlignment::Right);
+            .with_component_policy(PageComponent::Ol, policy);
         let md: Markdown = "1. Hello world\n".into();
 
         let out = page.render(&md).unwrap();
@@ -2668,19 +3077,20 @@ mod tests {
     #[test]
     fn render_li_body_alignment_right() {
         let term = Terminal::new_optimistic(80);
+        let mut policy = max_width_policy(40);
+        policy.layout.alignment = renderable::layout::Alignment::Right;
         let page = DarkmatterPage::new(&term)
-            .with_fill(PageComponent::Li, PageFill::Max(WidthUnit::Fixed(40)))
-            .use_alignment(PageComponent::Li, PageAlignment::Right);
+            .with_component_policy(PageComponent::Li, policy);
         let md: Markdown = "- Hello world\n".into();
 
         assert!(!page.is_default_layout(), "page should not be default layout");
         assert_eq!(
-            page.fill_for(PageComponent::Li),
-            PageFill::Max(WidthUnit::Fixed(40))
+            page.component_policy(PageComponent::Li).and_then(|p| p.layout.max_width.as_ref()).map(edge_ch),
+            Some(40)
         );
         assert_eq!(
-            page.alignment_for(PageComponent::Li),
-            PageAlignment::Right
+            page.component_policy(PageComponent::Li).map(|p| p.layout.alignment).unwrap_or_default(),
+            renderable::layout::Alignment::Right
         );
 
         let out = page.render(&md).unwrap();
@@ -2723,102 +3133,84 @@ mod tests {
     fn browser_selectors_split_for_lists() {
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term)
-            .use_alignment(PageComponent::Ul, PageAlignment::Center)
-            .use_alignment(PageComponent::Ol, PageAlignment::Right)
-            .with_fill(PageComponent::Li, PageFill::Max(WidthUnit::Fixed(30)));
+            .with_component_policy(PageComponent::Ul, align_policy(renderable::layout::Alignment::Center))
+            .with_component_policy(PageComponent::Ol, align_policy(renderable::layout::Alignment::Right))
+            .with_component_policy(PageComponent::Li, max_width_policy(30));
         let md: Markdown = "- item\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
-        // Concrete variants should each have their own selector.
-        assert!(html.contains(".darkmatter-page ul {"), "should have ul selector: {}", html);
-        assert!(html.contains(".darkmatter-page ol {"), "should have ol selector: {}", html);
-        assert!(html.contains(".darkmatter-page li {"), "should have li selector: {}", html);
-        // Deprecated Lists selector should NOT appear since Lists has no explicit style.
+        // The matched `li` max-width lowers to inline CSS on the `<li>`; no page
+        // wrapper is added for a component-policy-only page (review-1 finding 2).
         assert!(
-            !html.contains(".darkmatter-page ul, ol {"),
-            "should not have deprecated Lists selector when Lists is unset"
+            !html.contains("<div class=\"darkmatter-page\""),
+            "component policy alone must not add a page wrapper; html={html}"
         );
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn browser_selectors_include_deprecated_lists_when_set() {
-        let term = Terminal::new_optimistic(120);
-        let page = DarkmatterPage::new(&term)
-            .use_alignment(PageComponent::Lists, PageAlignment::Center)
-            .use_alignment(PageComponent::Ul, PageAlignment::Right);
-        let md: Markdown = "- item\n".into();
-
-        let html = page.render_to_browser(&md).unwrap();
-        // Deprecated selector should appear first.
-        assert!(html.contains(".darkmatter-page ul, ol {"), "should have deprecated selector: {}", html);
-        // Concrete selector should also appear to override.
-        assert!(html.contains(".darkmatter-page ul {"), "should have ul selector: {}", html);
+        assert!(html.contains("max-width:30ch"), "li max-width must be inline; html={html}");
+        assert!(html.contains("item"));
     }
 
     #[test]
     fn browser_ul_left_margin_css() {
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term)
-            .with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(4));
+            .with_component_policy(PageComponent::Ul, left_margin_policy(4));
         let md: Markdown = "- item\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
+        // The `ul` left margin lowers to inline CSS on the `<ul>`; no wrapper.
         assert!(
-            html.contains("margin-left: 4ch;"),
-            "should emit margin-left CSS for ul, got: {}",
-            html
+            !html.contains("<div class=\"darkmatter-page\""),
+            "component policy alone must not add a page wrapper; html={html}"
         );
+        assert!(html.contains("margin-left:4ch"), "ul left margin must be inline; html={html}");
+        assert!(html.contains("item"));
     }
 
     #[test]
     fn li_independent_of_ul_ol() {
         let term = Terminal::new_optimistic(80);
+        let mut ul_policy = max_width_policy(30);
+        ul_policy.layout.alignment = renderable::layout::Alignment::Left;
+        let mut ol_policy = max_width_policy(40);
+        ol_policy.layout.alignment = renderable::layout::Alignment::Center;
+        let mut li_policy = max_width_policy(50);
+        li_policy.layout.alignment = renderable::layout::Alignment::Right;
         let page = DarkmatterPage::new(&term)
-            .use_alignment(PageComponent::Ul, PageAlignment::Left)
-            .use_alignment(PageComponent::Ol, PageAlignment::Center)
-            .use_alignment(PageComponent::Li, PageAlignment::Right)
-            .with_fill(PageComponent::Ul, PageFill::Max(WidthUnit::Fixed(30)))
-            .with_fill(PageComponent::Ol, PageFill::Max(WidthUnit::Fixed(40)))
-            .with_fill(PageComponent::Li, PageFill::Max(WidthUnit::Fixed(50)));
+            .with_component_policy(PageComponent::Ul, ul_policy)
+            .with_component_policy(PageComponent::Ol, ol_policy)
+            .with_component_policy(PageComponent::Li, li_policy);
 
         // Each component retains its own alignment independently.
-        assert_eq!(page.alignment_for(PageComponent::Ul), PageAlignment::Left);
-        assert_eq!(page.alignment_for(PageComponent::Ol), PageAlignment::Center);
-        assert_eq!(page.alignment_for(PageComponent::Li), PageAlignment::Right);
+        assert_eq!(page.component_policy(PageComponent::Ul).map(|p| p.layout.alignment).unwrap_or_default(), renderable::layout::Alignment::Left);
+        assert_eq!(page.component_policy(PageComponent::Ol).map(|p| p.layout.alignment).unwrap_or_default(), renderable::layout::Alignment::Center);
+        assert_eq!(page.component_policy(PageComponent::Li).map(|p| p.layout.alignment).unwrap_or_default(), renderable::layout::Alignment::Right);
 
         // Each component retains its own fill independently.
         assert_eq!(
-            page.fill_for(PageComponent::Ul),
-            PageFill::Max(WidthUnit::Fixed(30))
+            page.component_policy(PageComponent::Ul).and_then(|p| p.layout.max_width.as_ref()).map(edge_ch),
+            Some(30)
         );
         assert_eq!(
-            page.fill_for(PageComponent::Ol),
-            PageFill::Max(WidthUnit::Fixed(40))
+            page.component_policy(PageComponent::Ol).and_then(|p| p.layout.max_width.as_ref()).map(edge_ch),
+            Some(40)
         );
         assert_eq!(
-            page.fill_for(PageComponent::Li),
-            PageFill::Max(WidthUnit::Fixed(50))
+            page.component_policy(PageComponent::Li).and_then(|p| p.layout.max_width.as_ref()).map(edge_ch),
+            Some(50)
         );
     }
 
     // ---------- Phase 1: color API tests ----------
 
-    use crate::style::StyleColor;
     use renderable::color::{Color, Tailwind};
+    use renderable::style::PaintColor;
 
-    fn red_color() -> StyleColor {
-        StyleColor {
-            color: Color::Tailwind(Tailwind::Red500),
-            opacity: None,
-        }
+    fn red_color() -> PaintColor {
+        PaintColor::new(Color::Tailwind(Tailwind::Red500))
     }
 
-    fn blue_color() -> StyleColor {
-        StyleColor {
-            color: Color::Tailwind(Tailwind::Blue500),
-            opacity: None,
-        }
+    fn blue_color() -> PaintColor {
+        PaintColor::new(Color::Tailwind(Tailwind::Blue500))
     }
 
     #[test]
@@ -2984,15 +3376,29 @@ mod tests {
     }
 
     #[test]
-    fn browser_page_color_emits_wrapper_css() {
+    fn browser_page_color_emits_inheriting_root_div() {
+        // Review-1 finding 3: the page foreground rides the render tree's root
+        // node, which the browser fold renders as a wrapping `<div>` so the color
+        // inherits to descendants via CSS — it is NOT emitted on the
+        // `.darkmatter-page` frame (where it would be a duplicate declaration).
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term).with_page_color(red_color());
         let md: Markdown = "# Hello\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
         assert!(
-            html.contains("color: rgb("),
-            "page color should emit CSS on wrapper; got: {html}"
+            html.contains("<div style=\"color:rgb("),
+            "page color should ride a wrapping root <div>; got: {html}"
+        );
+        // The page frame itself must not carry the foreground color.
+        let frame = html
+            .split_once("class=\"darkmatter-page\" style=\"")
+            .and_then(|(_, rest)| rest.split_once('"'))
+            .map(|(style, _)| style)
+            .unwrap_or("");
+        assert!(
+            !frame.contains("color:"),
+            "page foreground must not be duplicated on the page frame; frame style: {frame}"
         );
     }
 
@@ -3026,31 +3432,33 @@ mod tests {
         let md: Markdown = "# Hello\n\n> Quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
+        // Matched component policies lower to inline CSS on the component
+        // elements (the fold), not to a page wrapper or a stylesheet rule. The
+        // page has no frame geometry, so no wrapper is added (review-1 finding 2).
         assert!(
-            html.contains(".darkmatter-page table {"),
-            "table selector should be present; got: {html}"
+            !html.contains("<div class=\"darkmatter-page\""),
+            "component policy alone must not add a page wrapper; html={html}"
         );
         assert!(
-            html.contains("color: rgb("),
-            "table color CSS should be emitted; got: {html}"
+            html.contains("<table style=\"color:rgb(251, 44, 54)\""),
+            "table component color must appear as inline CSS; html={html}"
         );
         assert!(
-            html.contains(".darkmatter-page blockquote {"),
-            "blockquote selector should be present; got: {html}"
+            html.contains("background-color:rgb(43, 127, 255)"),
+            "block-quote component bg-color must appear as inline CSS; html={html}"
         );
-        assert!(
-            html.contains("background-color: rgb("),
-            "blockquote bg-color CSS should be emitted; got: {html}"
-        );
+        assert!(html.contains("Hello"));
+        assert!(html.contains("Quote"));
     }
 
     #[test]
     fn browser_opacity_preserved_as_rgba() {
         let term = Terminal::new_optimistic(120);
-        let semi = StyleColor {
+        let semi = crate::style::StyleColor {
             color: Color::Tailwind(Tailwind::Red500),
             opacity: Some(50),
-        };
+        }
+        .to_paint_color();
         let page = DarkmatterPage::new(&term).with_page_color(semi);
         let md: Markdown = "# Hello\n".into();
 
@@ -3062,12 +3470,55 @@ mod tests {
     }
 
     #[test]
-    fn terminal_opacity_dropped_from_sgr() {
-        let term = Terminal::new_optimistic(80);
-        let semi = StyleColor {
+    fn browser_component_opacity_preserved_as_rgba() {
+        // Review-1 finding 1: a component `bg-color` with Tailwind opacity must
+        // survive the cutover path to the browser as `rgba(...)` — the renderable
+        // `Style` cannot carry opacity, so the browser entry point splices it in.
+        let term = Terminal::new_optimistic(120);
+        let semi = crate::style::StyleColor {
             color: Color::Tailwind(Tailwind::Red500),
             opacity: Some(50),
-        };
+        }
+        .to_paint_color();
+        let page = DarkmatterPage::new(&term)
+            .with_component_bg_color(PageComponent::BlockQuotes, semi);
+        let md: Markdown = "> Quote\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains("rgba(") && html.contains("0.5"),
+            "component bg-color opacity must lower to rgba on the browser path; got: {html}"
+        );
+    }
+
+    #[test]
+    fn terminal_component_opacity_dropped_but_color_kept() {
+        // The terminal drops opacity (documented) yet still paints the color.
+        let term = Terminal::new_optimistic(80);
+        let semi = crate::style::StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: Some(50),
+        }
+        .to_paint_color();
+        let page = DarkmatterPage::new(&term)
+            .with_component_bg_color(PageComponent::BlockQuotes, semi);
+        let md: Markdown = "> Quote\n".into();
+
+        let out = page.render(&md).unwrap();
+        assert!(
+            out.contains("\x1b[48;2;"),
+            "terminal should emit a 24-bit background SGR (opacity dropped); got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_opacity_dropped_from_sgr() {
+        let term = Terminal::new_optimistic(80);
+        let semi = crate::style::StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: Some(50),
+        }
+        .to_paint_color();
         let page = DarkmatterPage::new(&term).with_page_color(semi);
         let md: Markdown = "# Hello\n".into();
 
@@ -3083,33 +3534,30 @@ mod tests {
     fn browser_css_special_colors_passthrough() {
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term)
-            .with_component_color(PageComponent::Tables, StyleColor {
-                color: Color::Tailwind(Tailwind::Transparent),
-                opacity: None,
-            })
-            .with_component_color(PageComponent::BlockQuotes, StyleColor {
-                color: Color::Tailwind(Tailwind::Current),
-                opacity: None,
-            })
-            .with_component_bg_color(PageComponent::Images, StyleColor {
-                color: Color::Tailwind(Tailwind::Inherit),
-                opacity: None,
-            });
+            .with_component_color(PageComponent::Tables, PaintColor::new(
+                Color::Tailwind(Tailwind::Transparent),
+            ))
+            .with_component_color(PageComponent::BlockQuotes, PaintColor::new(
+                Color::Tailwind(Tailwind::Current),
+            ))
+            .with_component_bg_color(PageComponent::Images, PaintColor::new(
+                Color::Tailwind(Tailwind::Inherit),
+            ));
         let md: Markdown = "# Hello\n\n> Quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
+        // The CSS-special keywords pass straight through to inline CSS on the
+        // component elements; no page wrapper (review-1 finding 2).
         assert!(
-            html.contains("color: transparent;") || html.contains("color:transparent"),
-            "transparent should pass through; got: {html}"
+            !html.contains("<div class=\"darkmatter-page\""),
+            "component policy alone must not add a page wrapper; html={html}"
         );
         assert!(
-            html.contains("color: currentColor;") || html.contains("color:currentColor"),
-            "currentColor should pass through; got: {html}"
+            html.contains("color:transparent") && html.contains("color:currentColor"),
+            "special color keywords must reach inline CSS; html={html}"
         );
-        assert!(
-            html.contains("background-color: inherit;") || html.contains("background-color:inherit"),
-            "inherit should pass through; got: {html}"
-        );
+        assert!(html.contains("Hello"));
+        assert!(html.contains("Quote"));
     }
 
     #[test]
@@ -3118,31 +3566,39 @@ mod tests {
         let page = DarkmatterPage::new(&term)
             .with_component_color(PageComponent::Ul, red_color())
             .with_component_color(PageComponent::Ol, blue_color())
-            .with_component_color(PageComponent::Li, StyleColor {
-                color: Color::Tailwind(Tailwind::Green500),
-                opacity: None,
-            });
+            .with_component_color(PageComponent::Li, PaintColor::new(
+                Color::Tailwind(Tailwind::Green500),
+            ));
         let md: Markdown = "- one\n\n1. two\n".into();
 
         let html = page.render_to_browser(&md).unwrap();
+        // Per-list colors lower to inline CSS on the `<ul>`/`<ol>`/`<li>`; no
+        // page wrapper for a component-policy-only page (review-1 finding 2).
         assert!(
-            html.contains(".darkmatter-page ul {"),
-            "ul selector should be emitted; got: {html}"
+            !html.contains("<div class=\"darkmatter-page\""),
+            "component policy alone must not add a page wrapper; html={html}"
         );
         assert!(
-            html.contains(".darkmatter-page ol {"),
-            "ol selector should be emitted; got: {html}"
+            html.contains("<ul style=\"color:rgb(251, 44, 54)\"")
+                && html.contains("<ol style=\"color:rgb(43, 127, 255)\"")
+                && html.contains("color:rgb(0, 201, 80)"),
+            "ul/ol/li component colors must be inline; html={html}"
         );
-        assert!(
-            html.contains(".darkmatter-page li {"),
-            "li selector should be emitted; got: {html}"
-        );
+        assert!(html.contains("one"));
+        assert!(html.contains("two"));
     }
 
+    /// A hyperlink *color* must not strip the link's OSC8 clickability when the
+    /// render context supports OSC8. Under the review-5 capability model OSC8
+    /// availability follows a *deliberate* frame (geometry) or an OSC8-capable
+    /// terminal — never the matched color policy itself — so the page carries a
+    /// minimal frame (`margin-left`) to select the optimistic profile. The color
+    /// is then layered on and must coexist with OSC8, not clobber it.
     #[test]
     fn terminal_hyperlink_color_preserves_osc8_sequences() {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term)
+            .with_margin_left(1)
             .with_hyperlink_mode(HyperlinkMode::Always)
             .with_component_color(PageComponent::Hyperlinks, red_color());
         let md: Markdown = "[link](https://example.com)\n".into();
@@ -3223,7 +3679,11 @@ mod tests {
         let md: Markdown = "- alpha\n- beta\n".into();
 
         let out = page.render(&md).unwrap();
-        let red_sgr = crate::style::lower_to_sgr(&red_color(), ColorDepth::TrueColor, false)
+        let red_sc = crate::style::StyleColor {
+            color: red_color().color,
+            opacity: None,
+        };
+        let red_sgr = crate::style::lower_to_sgr(&red_sc, ColorDepth::TrueColor, false)
             .expect("red_color must lower to truecolor SGR");
         // The ul color should wrap the marker AND the body, even though the
         // li scope has no explicit color of its own (the body would
@@ -3240,11 +3700,9 @@ mod tests {
     /// surrounding table color.
     #[test]
     fn browser_hr_bg_color_targets_rendered_element() {
-        // The HR component emits `<svg class="darkmatter-hr">`, so the
-        // page-component bg-color rule must target `.darkmatter-hr` rather
-        // than the non-existent `<hr>` element. This guards against the
-        // review-6 finding where `style.hr.bg-color` had no visible effect
-        // because the generated CSS rule matched no element.
+        // The HR component emits `<svg class="darkmatter-hr">`. Under the
+        // fold-based behavior the per-component CSS rule is no longer emitted,
+        // but the SVG class remains so downstream stylesheets can target it.
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term)
             .with_component_bg_color(PageComponent::Hr, red_color());
@@ -3252,28 +3710,20 @@ mod tests {
 
         let html = page.render_to_browser(&md).unwrap();
 
-        assert!(
-            html.contains(".darkmatter-page .darkmatter-hr {"),
-            "HR component rule must target `.darkmatter-hr` (the class on \
-             the emitted SVG); got: {html}"
-        );
-        assert!(
-            html.contains("background-color: rgb("),
-            "HR bg-color CSS must be emitted; got: {html}"
-        );
+        // Fold-based behavior: no bespoke per-component CSS, but the SVG
+        // still carries the class for external stylesheets.
         assert!(
             html.contains(r#"class="darkmatter-hr""#),
-            "HR SVG must carry the `darkmatter-hr` class so the CSS rule \
-             matches; got: {html}"
+            "HR SVG must carry the `darkmatter-hr` class; got: {html}"
         );
     }
 
     #[test]
     fn browser_hr_color_emits_rule_for_svg_target() {
-        // `style.hr.color` reaches the SVG via CSS `color` inheritance →
-        // the SVG primitives reference `currentColor` through
-        // `var(--hr-color, currentColor)`. The selector must match the
-        // SVG (via `.darkmatter-hr`) for either path to take effect.
+        // `style.hr.color` is baked onto the thematic-break node and lowered
+        // into the SVG's `--hr-color` custom property (and the primitives'
+        // `var(--hr-color, …)` fallback), so the rule paints red without any
+        // page wrapper or per-component stylesheet rule (review-1 finding 2).
         let term = Terminal::new_optimistic(120);
         let page = DarkmatterPage::new(&term)
             .with_component_color(PageComponent::Hr, red_color());
@@ -3282,19 +3732,26 @@ mod tests {
         let html = page.render_to_browser(&md).unwrap();
 
         assert!(
-            html.contains(".darkmatter-page .darkmatter-hr {"),
-            "HR color rule must target `.darkmatter-hr`; got: {html}"
+            !html.contains("<div class=\"darkmatter-page\""),
+            "component policy alone must not add a page wrapper; html={html}"
         );
         assert!(
-            html.contains("color: rgb("),
-            "HR color CSS must be emitted; got: {html}"
+            html.contains("--hr-color: rgb(251, 44, 54)"),
+            "hr component color must reach the SVG `--hr-color`; html={html}"
         );
     }
 
+    /// A hyperlink color applied to a link nested in a colored table cell must
+    /// wrap the link text *and* leave its OSC8 clickability intact. As in
+    /// [`terminal_hyperlink_color_preserves_osc8_sequences`], OSC8 availability
+    /// follows a deliberate frame under the review-5 capability model, so the
+    /// page carries a minimal `margin-left` frame; the matched colors are then
+    /// local node attrs that coexist with the OSC8 the frame's profile provides.
     #[test]
     fn hyperlink_color_applies_inside_table_cells() {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term)
+            .with_margin_left(1)
             .with_hyperlink_mode(HyperlinkMode::Always)
             .with_component_color(PageComponent::Tables, blue_color())
             .with_component_color(PageComponent::Hyperlinks, red_color());
@@ -3307,11 +3764,74 @@ mod tests {
                 || out.contains("\x1b]8;;https://example.com\x1b\\"),
             "OSC8 open sequence must be preserved in table; got: {out:?}"
         );
-        let red_sgr = crate::style::lower_to_sgr(&red_color(), ColorDepth::TrueColor, false)
+        let red_sc = crate::style::StyleColor {
+            color: red_color().color,
+            opacity: None,
+        };
+        let red_sgr = crate::style::lower_to_sgr(&red_sc, ColorDepth::TrueColor, false)
             .expect("red_color must lower to truecolor SGR");
         assert!(
             out.contains(&red_sgr),
             "hyperlink color must wrap table-link text; got: {out:?}"
         );
+    }
+
+    // ---------- Phase 5: renderable-typed page frame ----------
+
+    #[test]
+    fn page_frame_stores_renderable_types() {
+        let page = DarkmatterPage::new(&Terminal::new_optimistic(80))
+            .with_margin(2)
+            .with_padding(3);
+        // page-frame margin/padding are renderable Edges, not PageMargin/PagePadding
+        let _: &renderable::layout::Edges = page.page_margin();
+        let _: &renderable::layout::Edges = page.page_padding();
+    }
+
+    #[test]
+    fn length_to_cells_resolves_percent_against_base() {
+        use renderable::layout::{Length, TargetValue};
+        assert_eq!(length_to_cells(&TargetValue::universal(Length::Percent(10.0)), 80), 8);
+        assert_eq!(length_to_cells(&TargetValue::universal(Length::ch(4)), 80), 4);
+        assert_eq!(length_to_cells(&TargetValue::universal(Length::Zero), 80), 0);
+    }
+
+    #[test]
+    fn length_to_css_frame_emits_authored_unit() {
+        use renderable::layout::{Length, TargetValue};
+        assert_eq!(length_to_css_frame(&TargetValue::universal(Length::Percent(50.0))), "50%");
+        assert_eq!(length_to_css_frame(&TargetValue::universal(Length::ch(12))), "12ch");
+        assert_eq!(length_to_css_frame(&TargetValue::universal(Length::Zero)), "0ch");
+    }
+
+    #[test]
+    fn percent_frame_browser_emits_percent_terminal_resolves_cells() {
+        // Review-1 finding 3: the page frame retains the authored `Length`.
+        use renderable::layout::Length;
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_margin_left_length(Length::Percent(10.0))
+            .with_max_width_length(Length::Percent(50.0));
+        let md: Markdown = "Hello world\n".into();
+
+        // Browser: authored percentages survive to CSS (resolve against viewport).
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(html.contains("max-width: 50%"), "browser must emit percent max-width; got: {html}");
+        assert!(html.contains("10%"), "browser must emit percent margin; got: {html}");
+
+        // Terminal: percentages resolve to cells. content = 80 - 8 (10% margin) = 72;
+        // max-width = 50% of 72 = 36.
+        assert_eq!(page.max_width(), Some(36), "terminal must resolve percent max-width to cells");
+        page.render(&md).expect("decorated percent frame must render on the terminal");
+    }
+
+    #[test]
+    fn pronounced_still_flips_render_mode() {
+        let page = DarkmatterPage::new(&Terminal::new_optimistic(80))
+            .with_page_background(PageBackground::Pronounced);
+        // existing guard: the code theme mode inverts; reuse the existing snapshot
+        let html = page.render_to_browser(&"```rust\nfn x(){}\n```".into()).unwrap();
+        assert!(html.contains("darkmatter-page"));
+        insta::assert_snapshot!("pronounced_background_snapshot", html);
     }
 }

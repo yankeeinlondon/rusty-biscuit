@@ -34,7 +34,7 @@
 
 use super::EffectiveSchema;
 use super::simplified::{
-    Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType,
+    Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
 };
 
 /// Completion data derived from a single property.
@@ -124,26 +124,35 @@ fn suggestion_from_def(property: &str, def: &PropertyDef) -> Option<CompletionSu
 
 fn first_completable_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
     match def {
-        PropertyDef::Single(atom) => is_completable(atom.ty).then_some(atom),
-        PropertyDef::Union(atoms) => atoms.iter().find(|a| is_completable(a.ty)),
+        PropertyDef::Single(atom) => is_completable(&atom.ty).then_some(atom),
+        PropertyDef::Union(atoms) => atoms.iter().find(|a| is_completable(&a.ty)),
     }
 }
 
-fn is_completable(ty: SimplifiedType) -> bool {
-    matches!(
-        ty,
-        SimplifiedType::File
-            | SimplifiedType::Enum
-            | SimplifiedType::Url
-            | SimplifiedType::Email
-            | SimplifiedType::Date
-            | SimplifiedType::DateTime
-            | SimplifiedType::Time
-    )
+fn is_completable(ty: &TypeExpr) -> bool {
+    match ty {
+        TypeExpr::Primitive(p) => matches!(
+            *p,
+            SimplifiedType::File
+                | SimplifiedType::Enum
+                | SimplifiedType::Url
+                | SimplifiedType::Email
+                | SimplifiedType::Date
+                | SimplifiedType::DateTime
+                | SimplifiedType::Time
+        ),
+        // Inline objects don't have a single completable value at the
+        // property level — they describe a typed shape.
+        TypeExpr::InlineObject(_) => false,
+    }
 }
 
 fn kind_for_atom(atom: &PropertyAtom) -> Option<CompletionKind> {
-    match atom.ty {
+    let ty = match &atom.ty {
+        TypeExpr::Primitive(ty) => *ty,
+        TypeExpr::InlineObject(_) => return None,
+    };
+    match ty {
         SimplifiedType::File => Some(CompletionKind::File {
             patterns: atom
                 .constraints

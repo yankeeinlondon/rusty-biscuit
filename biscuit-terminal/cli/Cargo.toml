@@ -11,7 +11,7 @@ name = "bt"
 path = "src/main.rs"
 
 [dependencies]
-biscuit-terminal = { path = "../lib", features = ["clap"] }
+biscuit-terminal = { path = "../lib", features = ["clap", "image"] }
 renderable = { path = "../../renderable" }
 clap = { version = "4.5", features = ["derive", "unstable-ext"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }

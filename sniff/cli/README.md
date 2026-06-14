@@ -245,7 +245,7 @@ actually report the extra data:
 sniff repo git-status --refresh-remotes
 
 # Query registries for latest dependency versions
-sniff repo --latest-versions -v
+sniff repo structure --latest-versions -v
 
 # Combine both on the aggregate filesystem report
 sniff filesystem --refresh-remotes --latest-versions
@@ -257,7 +257,7 @@ sniff filesystem --refresh-remotes --latest-versions
 - Commit synchronization status across remotes
 - Detection of whether local branch is behind remote
 
-- `sniff repo --latest-versions` and `sniff filesystem --latest-versions` add:
+- `sniff repo structure --latest-versions` and `sniff filesystem --latest-versions` add:
 
 - Latest version information for dependencies from package registries
 - Package-level update summaries in text output
@@ -881,7 +881,7 @@ sniff language -v
 sniff repo git-status --refresh-remotes
 
 # Inspect dependencies with latest versions
-sniff repo --latest-versions --json | jq '.packages[].dependencies'
+sniff repo structure --latest-versions --json | jq '.packages[].dependencies'
 
 # Recent commits and changes
 sniff repo recent-commits 1w

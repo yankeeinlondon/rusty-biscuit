@@ -383,21 +383,31 @@ mod tests {
 
     #[test]
     fn test_skip_hardware_returns_none() {
-        let config = SniffConfig::new().skip_hardware();
+        // Skip filesystem + network too (not asserted here) to avoid a monorepo scan.
+        let config = SniffConfig::new()
+            .skip_hardware()
+            .skip_filesystem()
+            .skip_network();
         let result = detect_with_config(config).unwrap();
         assert!(result.hardware.is_none());
     }
 
     #[test]
     fn test_skip_network_returns_none() {
-        let config = SniffConfig::new().skip_network();
+        let config = SniffConfig::new()
+            .skip_network()
+            .skip_filesystem()
+            .skip_hardware();
         let result = detect_with_config(config).unwrap();
         assert!(result.network.is_none());
     }
 
     #[test]
     fn test_skip_filesystem_returns_none() {
-        let config = SniffConfig::new().skip_filesystem();
+        let config = SniffConfig::new()
+            .skip_filesystem()
+            .skip_network()
+            .skip_hardware();
         let result = detect_with_config(config).unwrap();
         assert!(result.filesystem.is_none());
     }
@@ -416,8 +426,13 @@ mod tests {
 
     #[test]
     fn test_detect_with_base_dir() {
-        let config = SniffConfig::new().base_dir(PathBuf::from("."));
-        let result = detect_with_config(config).unwrap();
+        // Filesystem only: skip os/hardware/network, which this test does not assert.
+        let plan = DetectionPlan::new()
+            .base_dir(PathBuf::from("."))
+            .without_os()
+            .without_hardware()
+            .without_network();
+        let result = detect_with_plan(plan).unwrap();
         assert!(result.filesystem.is_some());
     }
 
@@ -425,7 +440,8 @@ mod tests {
     // Bug: When using --filesystem flag, OS section was still displayed
     #[test]
     fn test_skip_os_returns_none() {
-        let config = SniffConfig::new().skip_os();
+        // Skip filesystem too (not asserted here) to avoid a monorepo scan.
+        let config = SniffConfig::new().skip_os().skip_filesystem();
         let result = detect_with_config(config).unwrap();
         assert!(result.os.is_none(), "OS should be None when skip_os is set");
     }

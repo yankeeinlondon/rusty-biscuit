@@ -302,6 +302,8 @@ The Darkmatter Library uses the following libraries from this monorepo to achiev
     - File reference lookups (`FileReference` struct)
         - provides relative and absolute path resolution, magic multipath resolution, and even glob finding resolution strategies
     - Conversion of common config and frontmatter formats (JSON, JSON5, YAML, TOML)
+- [`sniff`](../../sniff/README.md)
+    - Runtime context capture for the compose pipeline — OS, hardware, git repo structure, monorepo package discovery, document inventory, and file-change tracking
 
 > **Note:** each of these libraries above has an **Agent Skill** by the same name you can use to gain deep insights into these libraries.
 
@@ -753,4 +755,4 @@ For command-line usage, see the [darkmatter-cli](../cli/) package which provides
 - **biscuit-hash**: Content hashing (xxHash) for TOC, delta, and mermaid caching
 - **serde**: Frontmatter serialization
 - **chrono**: Date/time handling for expression validators (reused; no new dependency added)
-- **sniff**: System detection for timezone-aware date validators (reused; no new dependency added)
+- **sniff**: System detection for runtime context capture — timezone info, OS/hardware detection, git repo structure, monorepo package discovery, document inventory, and file-change tracking

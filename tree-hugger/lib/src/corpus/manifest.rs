@@ -119,7 +119,11 @@ pub struct CorpusItem {
 
 impl CorpusItem {
     /// Creates a new corpus item.
-    pub fn new(name: impl Into<String>, source: impl Into<String>, language: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        source: impl Into<String>,
+        language: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             source: source.into(),
@@ -202,8 +206,13 @@ impl OracleConfig {
     }
 
     /// Adds a rule mapping.
-    pub fn with_rule_mapping(mut self, oracle_rule: impl Into<String>, our_rule: impl Into<String>) -> Self {
-        self.rule_mapping.insert(oracle_rule.into(), our_rule.into());
+    pub fn with_rule_mapping(
+        mut self,
+        oracle_rule: impl Into<String>,
+        our_rule: impl Into<String>,
+    ) -> Self {
+        self.rule_mapping
+            .insert(oracle_rule.into(), our_rule.into());
         self
     }
 }

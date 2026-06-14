@@ -191,7 +191,7 @@ Wrapper behavior:
 - Validates provider binary availability before spawn (with provider docs URL in errors).
 - Filters sensitive env vars whose names contain `API_KEY` or `TOKEN` unless explicitly included.
 - Reports removed env variable names to stderr (names only, sorted/unique).
-- Injects `AGENT`, `YOLO`, `INTERACTIVE`, `AGENT_PARAMS`, `CLAUDINE_SESSION_ID`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
+- Injects `AGENT`, `YOLO`, `INTERACTIVE`, `AGENT_PARAMS`, `CLAUDINE_SESSION_ID`, `CLAUDINE_PID`, and, when resolvable in monorepos, `PACKAGE_AREA` and `PACKAGE`.
 - `claudine handle` records wrapper-provided `PACKAGE_AREA` / `PACKAGE` values into event logs so they can be used in reporting filters.
 - `--mcp` resolves repo defaults if `<repo>/.claudine/mcp.json` exists, otherwise user defaults; `--use` appends explicit IDs or aliases and also enables MCP mode.
 - Non-interactive Codex, Gemini, and OpenCode runs also strip catalog-resolvable `#tags` from the prompt and activate the matching servers.
@@ -221,7 +221,7 @@ Setter values are parsed as JSON5 first and fall back to strings. Inline setters
 
 Shared composition flags include provider selectors (`--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`), `--exclude <provider>`, `-i` / `--interactive`, `-m` / `--model`, `-s` / `--system-prompt`, `-t` / `--timeout`, `--dry-run`, `-q` / `--quiet`, and `--silent`. The file reference supports `@` magic paths, repo-relative, monorepo-package-relative, and absolute paths via `biscuit-file::FileReference`.
 
-Provider selection follows a TTY/non-TTY split. In **TTY mode** with no explicit flag, an interactive `tui-chrome` picker is always shown. In **non-TTY mode**, resolution follows a strict chain: explicit flag → singular frontmatter `agent` → list-valued frontmatter `agent` (first installed match) → configured `favorite_agent` → structured hard error. The old "single installed" auto-selection shortcut has been removed.
+Provider selection follows a TTY/non-TTY split. In **TTY mode** with no explicit flag, an interactive `biscuit-tui` picker is always shown. In **non-TTY mode**, resolution follows a strict chain: explicit flag → singular frontmatter `agent` → list-valued frontmatter `agent` (first installed match) → configured `favorite_agent` → structured hard error. The old "single installed" auto-selection shortcut has been removed.
 
 Model resolution is independent of TTY mode: CLI `--model` → provider-specific env var (`CODEX_MODEL`, `CLAUDE_MODEL`, etc.) → generic `MODEL` env → frontmatter `model` → provider default. OpenCode requires a model in non-interactive mode and fails hard if none is resolved.
 

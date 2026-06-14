@@ -8,7 +8,7 @@
 //! ## Examples
 //!
 //! ```
-//! use tui_chrome::helpers::choice_builders::choose_one_from_csv;
+//! use biscuit_tui::helpers::choice_builders::choose_one_from_csv;
 //!
 //! let input = choose_one_from_csv("colour", "Pick a colour", "Red, Green , Blue");
 //! assert_eq!(input.options.len(), 3);

@@ -98,6 +98,8 @@ pub enum ReferenceSyntax {
     DirectiveCode,
     /// `::toc-linking path` directive.
     DirectiveTocLinking,
+    /// `::file-links` directive.
+    DirectiveFileLinks,
     /// `prologue: path` frontmatter reference.
     FrontmatterPrologue,
     /// `epilogue: path` frontmatter reference.
@@ -548,6 +550,8 @@ pub enum TransclusionRefKind {
     Url,
     /// `::toc-linking` directive.
     TocLinking,
+    /// `::file-links` directive.
+    FileLinks,
     /// Frontmatter `prologue` reference.
     Prologue,
     /// Frontmatter `epilogue` reference.

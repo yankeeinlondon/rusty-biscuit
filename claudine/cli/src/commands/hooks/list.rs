@@ -5,7 +5,7 @@ use color_eyre::eyre::Result;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::utils::layout::{Length, Margin, TargetValue};
+use biscuit_terminal::utils::layout::{Length, Edges, TargetValue};
 use claudine::actions::{HookAction, ReportFormat};
 use claudine::config::AgentConfigurator;
 use claudine::config::claudine_config::ClaudineConfig;
@@ -401,7 +401,7 @@ pub(super) fn run_provider_detail(
         .with_columns(columns)
         .prefer_cursor_alignment()
         .alternate_background_color();
-    table.layout_mut().margin = Margin::x(Length::ch(1));
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 
     for (event, actions) in &event_rows {
         let support_level = provider.event_support_level(event);
@@ -479,7 +479,7 @@ pub(super) fn run_provider_detail(
             .with_columns(desc_columns)
             .prefer_cursor_alignment()
             .alternate_background_color();
-        desc_table.layout_mut().margin = Margin::x(Length::ch(1));
+        desc_table.layout_mut().margin = Edges::x(Length::ch(1));
 
         for event in enabled_events {
             let is_unsupported = !provider.supports_event_via_hook(event);
@@ -521,7 +521,7 @@ pub(super) fn run_simple(
         TableColumn::new(bold("Installed")),
         TableColumn::new(bold("Subscribed Hooks")),
     ]);
-    table.layout_mut().margin = Margin::x(Length::ch(1));
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 
     let mut has_sync_issues = false;
     let mut has_unsupported_issues = false;
@@ -656,7 +656,7 @@ pub(super) fn run_verbose(
     }
 
     let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
-    table.layout_mut().margin = Margin::x(Length::ch(1));
+    table.layout_mut().margin = Edges::x(Length::ch(1));
 
     for provider in ALL_PROVIDERS {
         let installed = clients.is_installed(provider.sniff_ai_cli());

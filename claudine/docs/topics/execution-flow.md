@@ -272,7 +272,7 @@ Constructs a `CompositionExecutionRequest` with `mode: ChainedDocument`, the pre
 5. Resolves execution target:
 
     - **If `resolved_target` is pre-set** (from sequence): uses it directly
-    - **TTY mode**: explicit `--provider` flag wins unconditionally; otherwise shows interactive picker via `tui-chrome::ChooseOne`
+    - **TTY mode**: explicit `--provider` flag wins unconditionally; otherwise shows interactive picker via `biscuit-tui::ChooseOne`
     - **Non-TTY mode**: `resolve_target_non_tty_with_catalog()` applies strict chain: explicit flag → frontmatter `agent` (single or first-installed-from-list) → config favorite → hard error
 
 6. Resolves model: CLI `--model` → provider-specific env vars → generic `MODEL` → frontmatter `model` (validated against catalog) → provider default. When the frontmatter `model` hint is the only source, the selected provider's catalog is refreshed via `refresh_provider_blocking(provider)` before validation; CLI/env model wins skip the refresh entirely.
@@ -633,7 +633,7 @@ failing step so the user can fix the entire sequence in one edit pass.
 **Phase 1c: Review or validate:**
 
 - **If failures exist**: returns `SequenceSelectionFailed` aggregate error
-- **TTY + no explicit provider**: shows review screen via `tui-chrome::InputTable` where user can edit per-step provider and model; `Ctrl+S` confirms, `Esc` aborts
+- **TTY + no explicit provider**: shows review screen via `biscuit-tui::InputTable` where user can edit per-step provider and model; `Ctrl+S` confirms, `Esc` aborts
 - **Non-TTY**: converts drafts directly to `ResolvedExecutionTarget` array
 
 **Affected by:**
@@ -711,7 +711,7 @@ Provider selection behaves differently in **TTY** (interactive terminal) and **n
 
 When stdout is a terminal and no explicit `--<provider>` flag is given:
 
-1. **Interactive picker** — a `tui-chrome` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
+1. **Interactive picker** — a `biscuit-tui` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
 
 ### Non-TTY Mode
 

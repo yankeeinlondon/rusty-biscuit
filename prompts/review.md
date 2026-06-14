@@ -26,7 +26,7 @@ spec_path: "@{{area}}/{{dir}}/{{file}}"
 - Use the '{{area}}' agent skill when reviewing
 - This review is focused on the '{{area}}' package area which has the following packages:
 
-    ::shell sniff repo packages --package-area "{{ctx.current_package_area}}" --md
+    ::shell sniff repo packages --package-area "{{ctx.area}}" --md
 
 You will review the **implementation**'s fidelity to the specification file:
 

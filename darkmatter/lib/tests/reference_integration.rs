@@ -532,6 +532,40 @@ fn validate_same_doc_fragment_with_interpolated_heading() {
     );
 }
 
+#[test]
+fn validate_file_links_skips_local_path_validation() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "::file-links docs/*.md\n\n::file-links --dir reports --depth 0\n",
+            ),
+            ("docs/readme.md", "# Readme\n"),
+            ("reports/q1.md", "# Q1\n"),
+        ],
+    );
+
+    let md = load_md(&dir, "root.md");
+    let options = ReferenceValidationOptions::default();
+    let report = md.validate_references(options).unwrap();
+
+    assert!(
+        report.is_valid(),
+        "file-links references should not trigger local-path validation errors, got issues: {:?}",
+        report.issues
+    );
+    assert_eq!(
+        report.references_scanned, 2,
+        "both file-links directives should be recorded as references"
+    );
+    assert_eq!(
+        report.references_valid, 2,
+        "both file-links references should be counted as valid"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  Graph-aware Phase 2 API tests (rec #9)
 // ═══════════════════════════════════════════════════════════════════

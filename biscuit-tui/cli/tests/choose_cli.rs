@@ -780,7 +780,7 @@ fn choose_many_one_explicit_plus_three_plain_passes() {
 // behind `QUESTION_INTERACTIVE_PTY=1` to keep headless CI green by
 // default; run them locally with:
 //
-//     QUESTION_INTERACTIVE_PTY=1 cargo test -p tui-chrome-cli --test choose_cli
+//     QUESTION_INTERACTIVE_PTY=1 cargo test -p biscuit-tui-cli --test choose_cli
 //
 // The test harness asserts exit codes, not rendered output, because
 // we only care that Esc / Ctrl+C / Ctrl+A are routed through the new

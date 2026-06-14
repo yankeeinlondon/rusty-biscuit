@@ -242,3 +242,88 @@ hero:   "file(match('*.png', '*.jpg'))"
 "#;
     assert_snapshot!(convert_yaml(yaml));
 }
+
+// ── Inline object literals (Phase 2) ─────────────────────────────────────
+
+#[test]
+fn snapshot_inline_object_bare() {
+    let yaml = r#"
+config: "{ host: string(required), port: number(default(8080)) }"
+"#;
+    assert_snapshot!(convert_yaml(yaml));
+}
+
+#[test]
+fn snapshot_inline_object_array() {
+    let yaml = r#"
+entries: "{ foo: string(required), bar: string }[]"
+"#;
+    assert_snapshot!(convert_yaml(yaml));
+}
+
+#[test]
+fn snapshot_inline_object_required_value() {
+    let yaml = r#"
+config_required: "{ host: string }(required)"
+"#;
+    assert_snapshot!(convert_yaml(yaml));
+}
+
+#[test]
+fn snapshot_inline_object_constrained_array() {
+    let yaml = r#"
+replicas: "{ host: string }[](min(1); required)"
+"#;
+    assert_snapshot!(convert_yaml(yaml));
+}
+
+#[test]
+fn snapshot_inline_object_nested() {
+    let yaml = r#"
+database: "{
+    primary: { host: string(required), port: number(default(5432)) },
+    replicas: { host: string, port: number }[]
+}"
+"#;
+    assert_snapshot!(convert_yaml(yaml));
+}
+
+#[test]
+fn snapshot_inline_object_multi_line() {
+    let yaml = r#"
+endpoints: "{
+    url: url(scheme(https); required),
+    method: enum(GET, POST, PUT, DELETE; required),
+    timeout: number(default(30))
+}[]"
+"#;
+    assert_snapshot!(convert_yaml(yaml));
+}
+
+#[test]
+fn snapshot_inline_object_as_union_arm() {
+    let yaml = r#"
+payload:
+  - "{ type: enum(foo; required), foo_id: string(required) }"
+  - "{ type: enum(bar; required), bar_count: number(required) }"
+"#;
+    assert_snapshot!(convert_yaml(yaml));
+}
+
+#[test]
+fn snapshot_inline_object_mixed_with_string_fallback() {
+    let yaml = r#"
+metadata:
+  - "{ key: string(required), value: string(required) }[]"
+  - "string"
+"#;
+    assert_snapshot!(convert_yaml(yaml));
+}
+
+#[test]
+fn snapshot_inline_object_empty() {
+    let yaml = r#"
+empty: "{}"
+"#;
+    assert_snapshot!(convert_yaml(yaml));
+}

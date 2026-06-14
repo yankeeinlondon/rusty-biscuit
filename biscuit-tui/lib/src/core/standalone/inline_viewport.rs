@@ -17,7 +17,11 @@ use super::*;
 pub(super) fn finalize_inline_viewport<B: Backend>(
     terminal: &mut Terminal<B>,
     chrome: &FrameChromeConfig,
-) -> io::Result<()> {
+) -> io::Result<()>
+where
+    // ratatui 0.30: wrap the backend's associated error via `io::Error::other`.
+    B::Error: Send + Sync + 'static,
+{
     let area = terminal.get_frame().area();
     if chrome.show_on_exit {
         // Park cursor on a fresh row immediately below the rendered
@@ -34,7 +38,8 @@ pub(super) fn finalize_inline_viewport<B: Backend>(
         terminal.draw(|f| {
             let area = f.area();
             f.render_widget(Clear, area);
-        })?;
+        })
+        .map_err(io::Error::other)?;
         execute!(io::stdout(), MoveTo(area.x, area.y))?;
     }
     Ok(())
@@ -160,11 +165,14 @@ fn draw_with_chrome<C, S, B>(
 where
     C: StatefulWidget<State = S>,
     B: Backend,
+    // ratatui 0.30: wrap the backend's associated error via `io::Error::other`.
+    B::Error: Send + Sync + 'static,
 {
     let (effective_chrome, needs_overlay) = prepare_chrome_for_hint(chrome, help_hint);
     let overlay_hint = if needs_overlay { help_hint } else { None };
     terminal.draw(|f| {
         render_frame(f, component, state, &effective_chrome, overlay_hint);
-    })?;
+    })
+    .map_err(io::Error::other)?;
     Ok(())
 }

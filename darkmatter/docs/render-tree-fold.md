@@ -1,9 +1,11 @@
-# Render-Tree Fold (Experimental / Internal)
+# Render-Tree Fold (Production)
 
-> **Status:** experimental, internal. The render-tree fold does **not** change
-> any public darkmatter behavior. The existing `as_html` / `for_terminal`
-> renderers and the [rendering pipeline](./darkmatter-rendering-pipeline.md)
-> are unchanged. Nothing in this document is part of darkmatter's stable API.
+> **Status:** production. The render-tree fold is darkmatter's **only** Markdown
+> rendering path. `Markdown::as_html` / `as_terminal` and
+> `DarkmatterPage::render` / `render_to_browser` build a complete
+> `renderable::tree::Document` and run one target fold over it; the legacy
+> event-stream HTML/terminal serializers have been deleted. See the
+> [rendering pipeline](./darkmatter-rendering-pipeline.md).
 
 ## What it is
 
@@ -34,16 +36,28 @@ block quotes, lists, code blocks, thematic breaks, tables, inline emphasis /
 strong / strikethrough, links, images, and inline code — plus footnotes,
 grouped raw-HTML blocks, and native superscript / subscript.
 
-## Deferred work
+## Complete-tree construction
 
-Two darkmatter inline conveniences are **intentionally deferred** to a
-follow-up feature:
+The bare `fold_markdown_to_document` produces a structural tree. Production
+rendering goes through darkmatter's **context-aware** fold entry points
+(`render_tree::build_context`, carrying a `TreeBuildContext` policy view), which
+bake the full typed render input onto the nodes during construction:
 
-- `==mark==` and dim inline styles.
-- Horizontal rules with attribute blocks.
+- component policy (table, block quote, ordered/unordered list, list item, code,
+  image, link, thematic break) applied as each container node closes;
+- page-inheriting foreground attached to the root and propagated via
+  `InheritedStyle` — page color is never copied onto component nodes;
+- `StyleColor` lowered to alpha-bearing `renderable::style::PaintColor` at the
+  parser/apply boundary;
+- exact / max text layout attached to link/image/list nodes (without replacing
+  children or alt text);
+- structured link/image metadata parsed once into typed `NodeAttrs::browser`
+  attrs (classes, target, `data-*`, validated inline CSS over frontmatter
+  defaults);
+- HR defaults / inline precedence resolved during construction.
 
-Both are produced by darkmatter's `InlineStyleProcessor` / `RuleProcessor` —
-iterator adapters that discard source byte offsets. Folding them without
-losing each node's `SourceLocation` needs a separate design decision; see the
-`inventory` module documentation for the full rationale. Frontmatter wiring is
-likewise deferred.
+The empty/default context keeps the unstyled path cheap. Each target then runs
+**one fold** over the complete tree — there is no post-fold decoration pass.
+`==mark==` / dim inline styles, horizontal rules with attribute blocks, and
+frontmatter are all wired (frontmatter is attached to `Document` metadata above
+the fold).

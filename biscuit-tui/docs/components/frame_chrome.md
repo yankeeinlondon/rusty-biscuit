@@ -81,8 +81,8 @@ Note: a `FrameChromeConfig` built from `Default::default()` is **not** empty —
 ### 1. Wrapping a Component with a Border
 
 ```rust
-use tui_chrome::prelude::*;
-use tui_chrome::core::{BorderStyle, FrameChrome, FrameChromeConfig, Margin};
+use biscuit_tui::prelude::*;
+use biscuit_tui::core::{BorderStyle, FrameChrome, FrameChromeConfig, Margin};
 
 let config = FrameChromeConfig {
     border: BorderStyle::Rounded,

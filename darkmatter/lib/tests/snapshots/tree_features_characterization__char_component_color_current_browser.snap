@@ -1,0 +1,5 @@
+---
+source: darkmatter/lib/tests/tree_features_characterization.rs
+expression: render_browser_body(&md)
+---
+<blockquote style="color:currentColor"><p>A quoted paragraph.</p></blockquote>

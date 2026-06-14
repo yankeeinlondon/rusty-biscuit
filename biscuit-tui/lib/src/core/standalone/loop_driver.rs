@@ -36,6 +36,10 @@ where
     C: Clone + StatefulWidget<State = S> + HandleEvent,
     S: StandaloneState,
     B: Backend,
+    // ratatui 0.30 gave `Backend` an associated `Error` type (already
+    // bounded by `core::error::Error`); `Send + Sync + 'static` lets
+    // `io::Error::other` wrap a draw failure from any backend.
+    B::Error: Send + Sync + 'static,
     F: FnMut() -> io::Result<Event>,
 {
     drive_event_loop_with_hint(terminal, component, state, read_event, None)
@@ -54,6 +58,10 @@ where
     C: Clone + StatefulWidget<State = S> + HandleEvent,
     S: StandaloneState,
     B: Backend,
+    // ratatui 0.30 gave `Backend` an associated `Error` type (already
+    // bounded by `core::error::Error`); `Send + Sync + 'static` lets
+    // `io::Error::other` wrap a draw failure from any backend.
+    B::Error: Send + Sync + 'static,
     F: FnMut() -> io::Result<Event>,
 {
     let mut needs_redraw = true;
@@ -74,7 +82,8 @@ where
                     );
                     f.buffer_mut().set_line(area.x, y, &hint_line, area.width);
                 }
-            })?;
+            })
+            .map_err(io::Error::other)?;
             needs_redraw = false;
         }
 
@@ -130,6 +139,10 @@ where
     C: Clone + StatefulWidget<State = S> + HandleEvent,
     S: StandaloneState,
     B: Backend,
+    // ratatui 0.30 gave `Backend` an associated `Error` type (already
+    // bounded by `core::error::Error`); `Send + Sync + 'static` lets
+    // `io::Error::other` wrap a draw failure from any backend.
+    B::Error: Send + Sync + 'static,
     F: FnMut() -> io::Result<Event>,
 {
     let (effective_chrome, needs_overlay) = prepare_chrome_for_hint(chrome, help_hint);
@@ -139,7 +152,8 @@ where
         if needs_redraw {
             terminal.draw(|f| {
                 render_frame(f, component.clone(), state, &effective_chrome, overlay_hint);
-            })?;
+            })
+            .map_err(io::Error::other)?;
             needs_redraw = false;
         }
 

@@ -60,6 +60,10 @@ pub struct TerminalRenderContext {
     pub color_depth: ColorDepth,
     /// The terminal light/dark mode.
     pub color_mode: ColorMode,
+    /// The detected terminal foreground/text color, when available.
+    pub page_text_color: Option<(u8, u8, u8)>,
+    /// The detected terminal background color, when available.
+    pub page_background_color: Option<(u8, u8, u8)>,
     /// Whether the terminal renders OSC8 hyperlinks.
     pub hyperlinks: bool,
     /// The terminal image-protocol support level.
@@ -165,7 +169,9 @@ impl TerminalRenderContext {
         Self {
             width,
             color_depth: term.color_depth,
-            color_mode: term.color_mode.clone(),
+            color_mode: term.color_mode,
+            page_text_color: term.text_color.map(|c| (c.r, c.g, c.b)),
+            page_background_color: term.background_color.map(|c| (c.r, c.g, c.b)),
             hyperlinks: term.osc_link_support,
             image_support: term.image_support.clone(),
             supports_unicode: term.supports_unicode,
@@ -265,13 +271,13 @@ impl TerminalRenderContext {
     ///
     /// ```
     /// use biscuit_terminal::render_tree::TerminalRenderContext;
-    /// use renderable::layout::{Layout, Length, Margin};
+    /// use renderable::layout::{Layout, Length, Edges};
     ///
     /// let ctx = TerminalRenderContext::fallback();
     /// assert!(ctx.active_layout.is_none());
     ///
     /// let layout = Layout {
-    ///     margin: Margin::y(Length::ch(1)),
+    ///     margin: Edges::y(Length::ch(1)),
     ///     ..Layout::default()
     /// };
     /// let with_layout = ctx.with_layout(Some(layout.clone()));
@@ -451,11 +457,11 @@ mod tests {
 
     #[test]
     fn for_child_preserves_layout() {
-        use renderable::layout::{Layout, Length, Margin};
+        use renderable::layout::{Layout, Length, Edges};
 
         let ctx = TerminalRenderContext::fallback();
         let layout = Layout {
-            margin: Margin::y(Length::ch(2)),
+            margin: Edges::y(Length::ch(2)),
             ..Layout::default()
         };
         let with_layout = ctx.with_layout(Some(layout.clone()));
@@ -492,11 +498,11 @@ mod tests {
 
     #[test]
     fn with_layout_sets_layout() {
-        use renderable::layout::{Layout, Length, Margin};
+        use renderable::layout::{Layout, Length, Edges};
 
         let ctx = TerminalRenderContext::fallback();
         let layout = Layout {
-            margin: Margin::x(Length::ch(3)),
+            margin: Edges::x(Length::ch(3)),
             ..Layout::default()
         };
         let with_layout = ctx.with_layout(Some(layout.clone()));
@@ -506,15 +512,15 @@ mod tests {
 
     #[test]
     fn with_layout_replaces_existing_layout() {
-        use renderable::layout::{Layout, Length, Margin};
+        use renderable::layout::{Layout, Length, Edges};
 
         let ctx = TerminalRenderContext::fallback();
         let layout1 = Layout {
-            margin: Margin::y(Length::ch(1)),
+            margin: Edges::y(Length::ch(1)),
             ..Layout::default()
         };
         let layout2 = Layout {
-            margin: Margin::y(Length::ch(5)),
+            margin: Edges::y(Length::ch(5)),
             ..Layout::default()
         };
 
@@ -526,12 +532,12 @@ mod tests {
 
     #[test]
     fn with_layout_preserves_width_and_indent() {
-        use renderable::layout::{Layout, Length, Margin};
+        use renderable::layout::{Layout, Length, Edges};
 
         let ctx = TerminalRenderContext::fallback();
         let indented = ctx.for_child(5, 3);
         let layout = Layout {
-            margin: Margin::y(Length::ch(1)),
+            margin: Edges::y(Length::ch(1)),
             ..Layout::default()
         };
         let with_layout = indented.with_layout(Some(layout));

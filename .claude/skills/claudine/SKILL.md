@@ -1,14 +1,15 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Roo), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-05-26
+last_updated: 2026-06-12
+hash: bbb32528c11dc53d-4c89128042eaa742
 ---
 
 ## Overview
 
 Claudine is a universal event handler, shared-resource linker, MCP catalog manager, and composition harness for agentic CLIs. It normalizes **16 lifecycle events** across **8 providers** (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, and Roo Code) into a single configuration model, fires **6 action types** — TTS, sound effects, logging, shell commands, reports, and blocking calls — when those events fire, synchronizes skills/commands/agents/scripts between providers, manages a provider-agnostic MCP catalog plus provider-specific import/sync/runtime behavior, and provides three Markdown composition commands (`compose`, `inline-compose`, `sequence`) that flow through the same wrapper-grade execution pipeline as the provider wrappers.
 
-The package follows the monorepo `lib` + `cli` split: library crate `claudine`, CLI crate `claudine-cli` (binary `claudine`).
+The package follows the monorepo `lib` + `cli` split: library crate `claudine`, CLI crate `claudine-cli` (binary `claudine`). A third sub-crate, `claudine-contract` (`claudine/contract`), implements `biscuit_contract::inference::InferenceAdapter` by running a provider as a single non-interactive, **tool-free, filesystem-isolated** session and returning its final assistant text — letting deterministic consumers (Reaper, Darkmatter) delegate to an agentic CLI via `Arc<dyn InferenceAdapter>` without depending on `claudine` directly. It depends on `claudine` (lib) but **not** `claudine-cli`. v1 enables Claude and Codex; other providers are reported `Unsupported`. See `claudine/contract/README.md` for the provider support matrix and security posture, and the `biscuit-contract` skill for the contract itself.
 
 **Where to look next:**
 
@@ -94,8 +95,10 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
 | `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|sync]` | Reporting and sync for Claudine JSONL logs |
 | `claudine completions <shell>` | Generate shell completions |
-| `claudine context [--values\|--expressions\|--side-effects]` | Show Darkmatter runtime context, expression engine, and side effects |
+| `claudine context [--values\|--expressions\|--side-effects]` | Show Darkmatter context variables, expression engine, and side-effect capabilities |
 | `claudine` *(no subcommand)* | Render rich grouped help |
+
+**Context command:** `claudine context` renders from Darkmatter's public typed descriptor catalogs, not from parsed Markdown. The default report shows every context variable grouped by category with `Property` (`ctx.NAME`), `Type`, and `Description` columns. `--values` replaces `Description` with live captured values (nulls shown, not dropped). `--expressions` shows the expression-language overview plus the complete function catalog grouped by category. `--side-effects` shows the capability catalog with `Capability`, `Description`, and `Safety` columns; it is documentation-only and does not invoke, probe, or check availability of any capability. All reports share a 140ch-inclusive width contract, inverse-styled inline code, and `UnorderedList` bullet formatting.
 
 **Wrapper & composition notes:**
 

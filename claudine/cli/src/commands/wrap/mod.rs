@@ -706,6 +706,7 @@ fn run_provider_wrapper_inner(
         repo_requested,
         needs_mcp_shadow_home,
         launch_workspace,
+        false,
     )?;
 
     if !silent_requested && !quiet_requested {
@@ -1065,6 +1066,7 @@ fn run_provider_wrapper_inner(
             let seed = harness_orch::materialize_passthrough_harness_seed(
                 &source_path,
                 base_prompt.clone(),
+                Some(child_cwd),
             )?;
             let harness_enabled = claudine::harness::has_harness_properties(&seed.frontmatter);
             if harness_enabled {
@@ -1319,6 +1321,7 @@ fn run_provider_wrapper_inner(
             detail_requested,
             &summary_details.lock().unwrap().clone(),
             Some(&section_stream),
+            stream_result.agent_pid,
         );
 
         let stderr_text = summary.stderr_text.clone();
@@ -1505,6 +1508,7 @@ mod tests {
             }),
             warnings: Vec::new(),
             shadow_home_path: None,
+            perf_substages: Vec::new(),
         };
 
         let rendered = crate::output::package_name_display(&env_plan).unwrap();
@@ -1528,6 +1532,7 @@ mod tests {
             }),
             warnings: Vec::new(),
             shadow_home_path: None,
+            perf_substages: Vec::new(),
         };
 
         assert!(crate::output::package_name_display(&env_plan).is_none());

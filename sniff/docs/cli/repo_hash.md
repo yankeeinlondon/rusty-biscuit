@@ -16,7 +16,7 @@ Looks up a single commit by SHA and displays its metadata and changed files. Use
 sniff repo hash <SHA>
 ```
 
-The `<SHA>` argument is resolved via `git2::Repository::revparse_single()`, which accepts:
+The `<SHA>` argument is resolved via gix `rev_parse_single()`, which accepts:
 
 - `HEAD` — the current commit
 - Short hash — any unambiguous abbreviated SHA (e.g., `a1b2c3d`)

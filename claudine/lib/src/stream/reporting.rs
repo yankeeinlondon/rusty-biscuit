@@ -17,16 +17,26 @@ pub fn summary_to_event_meta(
     protocol: StreamProtocol,
     env: &EnvironmentContext,
 ) -> EventMeta {
-    summary_to_event_meta_with_context(summary, protocol, env, None)
+    summary_to_event_meta_with_context(summary, protocol, env, None, None)
 }
 
 /// Convert a `StreamExecutionSummary` into an `EventMeta` with optional
 /// composition context merged into `extra`.
+///
+/// `agent_pid` carries the immediate child PID captured by the wrapper
+/// after a successful spawn. Pass `None` for failed-spawn paths or paths
+/// that never spawn a provider child. The typed `EventMeta.agent_pid`
+/// field is the authoritative location; this builder also mirrors both
+/// `claudine_pid` (read from `env`) and `agent_pid` into `extra` so
+/// templates and expressions can resolve them alongside the existing
+/// stringly-typed wrapper context keys.
+#[allow(clippy::too_many_arguments)]
 pub fn summary_to_event_meta_with_context(
     summary: &StreamExecutionSummary,
     protocol: StreamProtocol,
     env: &EnvironmentContext,
     context_extra: Option<&HashMap<String, Value>>,
+    agent_pid: Option<u32>,
 ) -> EventMeta {
     let mut extra = HashMap::new();
 
@@ -134,6 +144,23 @@ pub fn summary_to_event_meta_with_context(
         extra.insert("badges".into(), value);
     }
 
+    // Mirror `claudine_pid` (read from the wrapper-supplied environment)
+    // and `agent_pid` into `extra` so templates and expressions can
+    // resolve them alongside the existing composition/extra keys. The
+    // typed `EnvironmentContext.claudine_pid` and `EventMeta.agent_pid`
+    // fields remain authoritative for JSONL and SQL ingest; these
+    // mirrors exist only for template/expression bridging.
+    if let Some(pid) = env.claudine_pid {
+        extra.entry("claudine_pid".to_string()).or_insert(Value::Number(
+            serde_json::Number::from(pid),
+        ));
+    }
+    if let Some(pid) = agent_pid {
+        extra.entry("agent_pid".to_string()).or_insert(Value::Number(
+            serde_json::Number::from(pid),
+        ));
+    }
+
     EventMeta {
         provider: summary.provider,
         event: AgenticEvent::SessionEnd,
@@ -150,6 +177,7 @@ pub fn summary_to_event_meta_with_context(
         notification_message: None,
         extra,
         env: env.clone(),
+        agent_pid,
     }
 }
 
@@ -211,6 +239,7 @@ pub fn semantic_event_to_event_meta(
         agent_type: None,
         notification_type: parts.notification_type,
         notification_message: parts.notification_message,
+        agent_pid: None,
         extra,
         env: env.clone(),
     }
@@ -626,6 +655,7 @@ mod tests {
             StreamProtocol::StreamJson,
             &env,
             Some(&context),
+            None,
         );
 
         assert_eq!(meta.event, AgenticEvent::SessionEnd);
@@ -652,8 +682,13 @@ mod tests {
         let env = make_test_env();
 
         let meta_plain = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &env);
-        let meta_none =
-            summary_to_event_meta_with_context(&summary, StreamProtocol::StreamJson, &env, None);
+        let meta_none = summary_to_event_meta_with_context(
+            &summary,
+            StreamProtocol::StreamJson,
+            &env,
+            None,
+            None,
+        );
 
         assert_eq!(meta_plain.extra.len(), meta_none.extra.len());
         assert!(!meta_none.extra.contains_key("composition_file_ref"));

@@ -58,7 +58,7 @@
 //! (`inline_extension` + `block_extension`, see `fold`) now folds these with
 //! offset preservation. The legacy `RuleProcessor` iterator adapter has been
 //! deleted; `==mark==`/dim lower to `Extended` nodes and HR-attribute
-//! paragraphs to `ThematicBreak` with `darkmatter.hr.*` hints.
+//! paragraphs to `ThematicBreak` with typed `ThematicBreakAttrs`.
 //!
 //! Note: `darkmatter` extracts YAML frontmatter itself (see
 //! `markdown::frontmatter`) *before* handing content to `pulldown-cmark`, so

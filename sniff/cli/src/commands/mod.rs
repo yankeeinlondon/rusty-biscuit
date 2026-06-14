@@ -21,10 +21,7 @@ use std::fmt::Write as FmtWrite;
 mod remote;
 mod repo;
 
-use remote::{
-    commit_url_from_repo, handle_pr_command, handle_remote_url, handle_shorthand,
-    resolve_origin_or_first_remote, resolve_remote_name,
-};
+use remote::{handle_pr_command, handle_remote_url, handle_shorthand};
 use repo::{
     RepoPackageAreasArgs, RepoPackagesArgs, handle_file_list_command, handle_repo_package_areas,
     handle_repo_packages,
@@ -189,12 +186,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
             let docs_filter = cmd.docs_filter();
 
-            let repo = git2::Repository::discover(&base)
-                .map_err(|e| format!("Not a git repository: {}", e))?;
-            let repo_root = repo
-                .workdir()
-                .ok_or("Bare repository not supported")?
-                .to_path_buf();
+            let repo_root = sniff::filesystem::repo_root(&base)?.ok_or("Not a git repository")?;
 
             let has_area_filter = !docs_filter.package_area.is_empty();
             let has_pkg_filter = !docs_filter.package.is_empty();
@@ -411,12 +403,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 output::print_json_value(json_val, perf.build_report().as_ref());
             } else {
                 // Extract document paths and render
-                let repo = git2::Repository::discover(&base)
-                    .map_err(|e| format!("Not a git repository: {}", e))?;
-                let repo_root = repo
-                    .workdir()
-                    .ok_or("Bare repository not supported")?
-                    .to_path_buf();
+                let repo_root =
+                    sniff::filesystem::repo_root(&base)?.ok_or("Not a git repository")?;
 
                 let doc_paths: Vec<std::path::PathBuf> = matched_docs
                     .iter()
@@ -483,9 +471,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         let dir = base_dir
                             .as_deref()
                             .unwrap_or_else(|| std::path::Path::new("."));
-                        let repo = git2::Repository::discover(dir)
-                            .map_err(|_| "No git repository found — provide a REMOTE argument or run from inside a git repo".to_string())?;
-                        resolve_origin_or_first_remote(&repo).ok_or(
+                        sniff::filesystem::preferred_remote_url(dir)?.ok_or(
                             "No git remotes found for this repository — provide a REMOTE argument",
                         )?
                     }
@@ -497,13 +483,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     return handle_shorthand(&remote, cli.json, cli.plain, cli.verbose, &perf)
                         .await;
                 } else {
-                    let url =
-                        resolve_remote_name(&remote, base_dir.as_deref()).ok_or_else(|| {
-                            format!(
-                                "Could not find remote '{}' in the current repository",
-                                remote
-                            )
-                        })?;
+                    let dir = base_dir
+                        .as_deref()
+                        .unwrap_or_else(|| std::path::Path::new("."));
+                    let url = sniff::filesystem::remote_url(dir, &remote)?.ok_or_else(|| {
+                        format!(
+                            "Could not find remote '{}' in the current repository",
+                            remote
+                        )
+                    })?;
                     return handle_remote_url(&url, cli.json, cli.plain, cli.verbose, &perf).await;
                 }
             }
@@ -524,11 +512,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
-                let repo = git2::Repository::discover(dir)
-                    .map_err(|e| format!("Not a git repository: {}", e))?;
-                let commit = sniff::filesystem::get_commit_by_sha(&repo, sha)
+                if sniff::filesystem::repo_root(dir)?.is_none() {
+                    return Err(format!("Not a git repository: {}", dir.display()).into());
+                }
+                let commit = sniff::filesystem::commit_by_sha_at(dir, sha)?
                     .ok_or_else(|| format!("Commit not found: {}", sha))?;
-                let files = sniff::filesystem::get_commit_files(&repo, &commit.sha);
+                let files = sniff::filesystem::commit_files_at(dir, &commit.sha)?;
 
                 if cli.json {
                     let json = serde_json::json!({
@@ -540,7 +529,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     });
                     output::print_json_value(json, perf.build_report().as_ref());
                 } else {
-                    let commit_url = commit_url_from_repo(&repo, &commit.sha);
+                    let commit_url = sniff::filesystem::commit_browser_url(dir, &commit.sha)?;
                     output::emit_text(
                         &output::render_hash_section(
                             &commit,
@@ -639,28 +628,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
-                let repo = match git2::Repository::discover(dir) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        if cli.json {
-                            let json = serde_json::json!({ "root": "" });
-                            output::print_json_value(json, perf.build_report().as_ref());
-                            std::process::exit(1);
-                        }
-                        return Err(format!("Not a git repository: {}", e).into());
-                    }
-                };
-                let Some(workdir) = repo.workdir() else {
+                let Some(workdir) = sniff::filesystem::repo_root(dir)? else {
                     if cli.json {
                         let json = serde_json::json!({ "root": "" });
                         output::print_json_value(json, perf.build_report().as_ref());
                         std::process::exit(1);
                     }
-                    perf.emit_stderr(None);
-                    std::process::exit(1);
+                    return Err(format!("Not a git repository: {}", dir.display()).into());
                 };
-                // git2's workdir() yields a trailing separator; collecting
-                // components drops it so downstream consumers get a clean path.
+                // Normalize by collecting components so the rendered path has no
+                // trailing separator, matching the prior output contract.
                 let workdir: std::path::PathBuf = workdir.components().collect();
                 if cli.json {
                     let json = serde_json::json!({
@@ -677,9 +654,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
-                let repo = git2::Repository::discover(dir)
-                    .map_err(|e| format!("Not a git repository: {}", e))?;
-                let conflicted = sniff::filesystem::git::detect_merge_conflicts(&repo);
+                if sniff::filesystem::repo_root(dir)?.is_none() {
+                    return Err(format!("Not a git repository: {}", dir.display()).into());
+                }
+                let conflicted = sniff::filesystem::merge_conflicts_at(dir)?;
                 let has_conflict = !conflicted.is_empty();
                 // Verbose conflict listing goes to stderr in BOTH json and
                 // text modes — it's diagnostic, not part of the contract
@@ -750,9 +728,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return handle_no_results(*no_error, on_error, cli.plain, &perf);
             }
-            crate::args::RepoAction::Worktrees {
-                md, list, csv, ..
-            } => {
+            crate::args::RepoAction::Worktrees { md, list: _, csv, .. } => {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
@@ -764,42 +740,63 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if cli.json {
                     let json = output::repo_json::worktrees_value(&entries);
                     output::print_json_value(json, perf.build_report().as_ref());
+                } else if cli.verbose > 0 {
+                    // Verbose composes with the selected format rather than
+                    // overriding it: every entry gains a "(on <branch> branch,
+                    // located at <path>)" suffix while the format's structure
+                    // (csv single line, md bullet, plain list) is preserved.
+                    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                    let terminal = biscuit_terminal::terminal::Terminal::default();
+                    let render = |markup: &str| {
+                        biscuit_terminal::components::prose::Prose::new(markup).render(&terminal)
+                    };
+                    let bodies: Vec<(bool, String)> = entries
+                        .iter()
+                        .map(|entry| {
+                            let branch_text = if entry.is_detached {
+                                "detached HEAD".to_string()
+                            } else {
+                                entry.branch.clone().unwrap_or_else(|| "unknown".to_string())
+                            };
+                            let display_path = match home {
+                                Some(ref home) => match entry.path.strip_prefix(home) {
+                                    Ok(stripped) => format!("~/{}", stripped.display()),
+                                    Err(_) => entry.path.display().to_string(),
+                                },
+                                None => entry.path.display().to_string(),
+                            };
+                            let absolute_path = entry.path.display().to_string();
+                            let body = format!(
+                                "<b>{}</b> (on <green>{branch_text}</green> branch, located at <a href=\"{absolute_path}\">{display_path}</a>)",
+                                entry.name
+                            );
+                            (entry.is_current, body)
+                        })
+                        .collect();
+                    let rendered = if *csv {
+                        bodies
+                            .iter()
+                            .map(|(_, body)| render(body))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                            + "\n"
+                    } else {
+                        bodies
+                            .iter()
+                            .map(|(is_current, body)| {
+                                let marker = if *is_current { "* " } else { "" };
+                                let prefix =
+                                    if *md { format!("- {marker}") } else { marker.to_string() };
+                                render(&format!("{prefix}{body}"))
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                            + "\n"
+                    };
+                    output::emit_text(&rendered, cli.plain);
                 } else if *csv {
                     let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
                     println!("{}", names.join(", "));
-                } else if cli.verbose > 0 {
-                    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-                    let terminal = biscuit_terminal::terminal::Terminal::default();
-                    let mut lines = Vec::new();
-                    for entry in &entries {
-                        let marker = if entry.is_current { "* " } else { "  " };
-                        let branch_text = if entry.is_detached {
-                            "detached HEAD".to_string()
-                        } else {
-                            entry
-                                .branch
-                                .clone()
-                                .unwrap_or_else(|| "unknown".to_string())
-                        };
-                        let display_path = if let Some(ref home) = home {
-                            if let Ok(stripped) = entry.path.strip_prefix(home) {
-                                format!("~/{}", stripped.display())
-                            } else {
-                                entry.path.display().to_string()
-                            }
-                        } else {
-                            entry.path.display().to_string()
-                        };
-                        let absolute_path = entry.path.display().to_string();
-                        let markup = format!(
-                            "{marker}<b>{}</b> (on <green>{}</green> branch, located at <a href=\"{}\">{}</a>)",
-                            entry.name, branch_text, absolute_path, display_path
-                        );
-                        let prose = biscuit_terminal::components::prose::Prose::new(&markup);
-                        lines.push(prose.render(&terminal));
-                    }
-                    let rendered = lines.join("\n") + "\n";
-                    output::emit_text(&rendered, cli.plain);
                 } else if *md {
                     let mut out = String::new();
                     for entry in &entries {
@@ -807,17 +804,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         writeln!(out, "- {}{}", marker, entry.name).unwrap();
                     }
                     output::emit_text(&out, cli.plain);
-                } else if *list {
-                    let mut out = String::new();
-                    for entry in &entries {
-                        let marker = if entry.is_current { "* " } else { "" };
-                        writeln!(out, "{}{}", marker, entry.name).unwrap();
-                    }
-                    output::emit_text(&out, cli.plain);
                 } else {
                     let mut out = String::new();
                     for entry in &entries {
-                        let marker = if entry.is_current { "* " } else { "  " };
+                        let marker = if entry.is_current { "* " } else { "" };
                         writeln!(out, "{}{}", marker, entry.name).unwrap();
                     }
                     output::emit_text(&out, cli.plain);
@@ -927,14 +917,37 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         )
     );
 
+    // Change-oriented repo subcommands map staged/unstaged/dirty files to
+    // packages (or list changed files). They need per-file change stats but
+    // never worktree enumeration or commit history. `full()` would enable
+    // `include_worktrees`, whose `get_worktrees` fan-out opens every linked
+    // worktree and runs a full status scan + merge simulation per worktree —
+    // seconds on a checkout with many worktrees, for data these actions discard.
+    let changes_only_repo_action = matches!(
+        &repo_action,
+        Some(
+            crate::args::RepoAction::StagedPackages { .. }
+                | crate::args::RepoAction::StagedPackageAreas { .. }
+                | crate::args::RepoAction::UnstagedPackages { .. }
+                | crate::args::RepoAction::UnstagedPackageAreas { .. }
+                | crate::args::RepoAction::DirtyPackages { .. }
+                | crate::args::RepoAction::DirtyPackageAreas { .. }
+                | crate::args::RepoAction::StagedSourceCode(_)
+                | crate::args::RepoAction::UnstagedSourceCode(_)
+                | crate::args::RepoAction::DirtySourceCode(_)
+                | crate::args::RepoAction::DirtyFiles(_)
+                | crate::args::RepoAction::IsCurrentPackageAreaDirty
+                | crate::args::RepoAction::PackageAreaHasSourceCodeChanges
+        )
+    );
+
     // Build git request based on deep/commit_count flags
-    let git_request = if refresh_remotes_enabled {
-        GitRequest::deep().commit_count(history_count)
-    } else if lightweight_repo_action {
-        GitRequest::summary()
-    } else {
-        GitRequest::full().commit_count(history_count)
-    };
+    let git_request = select_git_request(
+        refresh_remotes_enabled,
+        lightweight_repo_action,
+        changes_only_repo_action,
+        history_count,
+    );
 
     // Build a targeted DetectionPlan based on the output filter
     let plan = match output_filter {
@@ -997,6 +1010,37 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .without_docs()
                         .without_formatting(),
                 ),
+            Some(crate::args::RepoAction::GitStatus {
+                package,
+                package_area,
+                ..
+            }) => {
+                // `git-status` renders only the git section (Status, Worktrees,
+                // Meta). Repo language scanning, docs, formatting, and the file
+                // inventory are never displayed, yet `RepoRequest::full()` alone
+                // costs 10-50x a structure scan — the dominant fixed cost that
+                // kept the command above the 500ms target. Drop all of it.
+                //
+                // Repo *structure* is still required to resolve a
+                // `--package`/`--package-area` scope to a path; in that case
+                // keep the cheap `structure()` scan only.
+                let needs_packages = package.is_some() || package_area.is_some();
+                let fs = FilesystemRequest::new()
+                    .git(git_request.clone())
+                    .without_docs()
+                    .without_formatting()
+                    .without_file_inventory();
+                let fs = if needs_packages {
+                    fs.repo(RepoRequest::structure())
+                } else {
+                    fs.without_repo()
+                };
+                DetectionPlan::new()
+                    .without_os()
+                    .without_hardware()
+                    .without_network()
+                    .filesystem(fs)
+            }
             _ => DetectionPlan::new()
                 .without_os()
                 .without_hardware()
@@ -1075,9 +1119,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let dir = base_dir
             .as_deref()
             .unwrap_or_else(|| std::path::Path::new("."));
-        if let Ok(repo) = git2::Repository::discover(dir) {
+        {
             let scoped_commits =
-                sniff::filesystem::get_commits_for_path(&repo, path_prefix, history_count);
+                sniff::filesystem::commits_for_path_at(dir, path_prefix, history_count)?;
             if let Some(ref mut git) = filesystem.git {
                 git.recent = scoped_commits;
 
@@ -1150,10 +1194,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let dir = base_dir
                 .as_deref()
                 .unwrap_or_else(|| std::path::Path::new("."));
-            if let Ok(repo) = git2::Repository::discover(dir) {
-                git.recent =
-                    sniff::filesystem::get_commits_for_branch(&repo, &branch_name, history_count);
-            }
+            git.recent =
+                sniff::filesystem::commits_for_branch_at(dir, &branch_name, history_count)?;
 
             // Working-tree state belongs to the currently checked-out branch,
             // not the one being inspected — clear it so the output doesn't
@@ -1805,6 +1847,29 @@ fn detect_programs_for_filter(filter: OutputFilter) -> ProgramsInfo {
 /// Determine if a repo action produces machine-readable/pipable text output.
 ///
 /// Scriptable commands emit perf to stderr so stdout stays clean for pipelines.
+/// Select the [`GitRequest`] detail level for a repo subcommand.
+///
+/// `changes_only` actions map file changes to packages but render no worktrees,
+/// branches, or commit history, so they take `summary` + file changes — never
+/// `full`, whose `include_worktrees` triggers the per-worktree status/merge
+/// fan-out that costs seconds on a checkout with many linked worktrees.
+fn select_git_request(
+    refresh_remotes: bool,
+    lightweight: bool,
+    changes_only: bool,
+    history_count: usize,
+) -> GitRequest {
+    if refresh_remotes {
+        GitRequest::deep().commit_count(history_count)
+    } else if lightweight {
+        GitRequest::summary()
+    } else if changes_only {
+        GitRequest::summary().include_file_changes(true)
+    } else {
+        GitRequest::full().commit_count(history_count)
+    }
+}
+
 fn is_scriptable_repo_action(action: Option<&crate::args::RepoAction>) -> bool {
     use crate::args::RepoAction;
     match action {
@@ -1823,6 +1888,33 @@ fn is_scriptable_repo_action(action: Option<&crate::args::RepoAction>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changes_only_actions_skip_worktree_enumeration() {
+        // Mapping staged/unstaged/dirty files to packages must never enable
+        // `include_worktrees` — that is the per-worktree status/merge fan-out
+        // that made `staged-packages` take seconds on a many-worktree checkout.
+        let req = select_git_request(false, false, true, 10);
+        assert!(
+            !req.include_worktrees,
+            "change-only actions must not enumerate worktrees"
+        );
+        assert!(
+            req.include_file_changes,
+            "change-only actions still need per-file change stats"
+        );
+        assert_eq!(
+            req.commit_count, 0,
+            "change-only actions need no commit history"
+        );
+    }
+
+    #[test]
+    fn full_repo_action_keeps_worktrees() {
+        // The default repo summary still renders the worktree table.
+        let req = select_git_request(false, false, false, 10);
+        assert!(req.include_worktrees);
+    }
 
     #[test]
     fn completions_help_detection() {

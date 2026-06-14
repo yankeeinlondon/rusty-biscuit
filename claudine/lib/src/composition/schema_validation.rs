@@ -36,7 +36,7 @@
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaShape,
-    SimplifiedSchema, SimplifiedType, ValidationProblem, ValidationProblemKind,
+    SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem, ValidationProblemKind,
 };
 
 use super::error::{
@@ -641,8 +641,8 @@ fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
 /// Returns `None` when the atom describes a shape that cannot be
 /// collected via a single TUI widget (e.g. `object`, `any`).
 fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
-    match atom.ty {
-        SimplifiedType::Enum => {
+    match &atom.ty {
+        TypeExpr::Primitive(SimplifiedType::Enum) => {
             let members: Vec<String> = atom
                 .constraints
                 .iter()
@@ -660,52 +660,57 @@ fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
                 Some(InteractiveShape::EnumOne { members })
             }
         }
-        SimplifiedType::Boolean | SimplifiedType::Boolish => Some(InteractiveShape::Boolean),
-        SimplifiedType::Number | SimplifiedType::NumberLike => {
+        TypeExpr::Primitive(SimplifiedType::Boolean | SimplifiedType::Boolish) => {
+            Some(InteractiveShape::Boolean)
+        }
+        TypeExpr::Primitive(SimplifiedType::Number | SimplifiedType::NumberLike) => {
             let integer = atom
                 .constraints
                 .iter()
                 .any(|c| matches!(c, Constraint::Integer));
             Some(InteractiveShape::Number { integer })
         }
-        SimplifiedType::String => Some(InteractiveShape::Text {
+        TypeExpr::Primitive(SimplifiedType::String) => Some(InteractiveShape::Text {
             format: TextFormat::Plain,
         }),
-        SimplifiedType::Date => Some(InteractiveShape::Text {
+        TypeExpr::Primitive(SimplifiedType::Date) => Some(InteractiveShape::Text {
             format: TextFormat::Date,
         }),
-        SimplifiedType::DateTime => Some(InteractiveShape::Text {
+        TypeExpr::Primitive(SimplifiedType::DateTime) => Some(InteractiveShape::Text {
             format: TextFormat::DateTime,
         }),
-        SimplifiedType::Time => Some(InteractiveShape::Text {
+        TypeExpr::Primitive(SimplifiedType::Time) => Some(InteractiveShape::Text {
             format: TextFormat::Time,
         }),
-        SimplifiedType::Url => Some(InteractiveShape::Text {
+        TypeExpr::Primitive(SimplifiedType::Url) => Some(InteractiveShape::Text {
             format: TextFormat::Url,
         }),
-        SimplifiedType::Email => Some(InteractiveShape::Text {
+        TypeExpr::Primitive(SimplifiedType::Email) => Some(InteractiveShape::Text {
             format: TextFormat::Email,
         }),
-        SimplifiedType::File => Some(InteractiveShape::Text {
+        TypeExpr::Primitive(SimplifiedType::File) => Some(InteractiveShape::Text {
             format: TextFormat::File,
         }),
-        SimplifiedType::Object | SimplifiedType::Any => None,
+        TypeExpr::Primitive(SimplifiedType::Object | SimplifiedType::Any)
+        | TypeExpr::InlineObject(_) => None,
     }
 }
 
 fn type_label_for_atom(atom: &PropertyAtom) -> String {
     let suffix = if atom.is_array { "[]" } else { "" };
-    if matches!(atom.ty, SimplifiedType::Enum) {
-        let members = atom.constraints.iter().find_map(|c| match c {
-            Constraint::Members(m) => Some(m.join("|")),
-            _ => None,
-        });
-        match members {
-            Some(m) => format!("enum({m}){suffix}"),
-            None => format!("enum(){suffix}"),
+    match &atom.ty {
+        TypeExpr::Primitive(SimplifiedType::Enum) => {
+            let members = atom.constraints.iter().find_map(|c| match c {
+                Constraint::Members(m) => Some(m.join("|")),
+                _ => None,
+            });
+            match members {
+                Some(m) => format!("enum({m}){suffix}"),
+                None => format!("enum(){suffix}"),
+            }
         }
-    } else {
-        format!("{base}{suffix}", base = atom.ty.as_keyword())
+        TypeExpr::Primitive(ty) => format!("{base}{suffix}", base = ty.as_keyword()),
+        TypeExpr::InlineObject(_) => format!("object{suffix}"),
     }
 }
 

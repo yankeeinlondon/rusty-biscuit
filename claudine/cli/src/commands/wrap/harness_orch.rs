@@ -254,8 +254,9 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
 pub(crate) fn materialize_passthrough_harness_seed(
     source_path: &Path,
     prompt: String,
+    shell_cwd: Option<&Path>,
 ) -> Result<MaterializedHarnessPrompt> {
-    super::overlay::materialize_passthrough_harness_seed(source_path, prompt)
+    super::overlay::materialize_passthrough_harness_seed(source_path, prompt, shell_cwd)
 }
 
 pub(crate) fn find_wrapper_harness_source(
@@ -282,6 +283,7 @@ pub(crate) fn find_wrapper_harness_source(
 pub(crate) fn materialize_harness_prompt(
     state: &HarnessPromptState,
     _repo_root: Option<&Path>,
+    child_cwd: &Path,
 ) -> Result<MaterializedHarnessPrompt> {
     let source_text = fs::read_to_string(&state.source_path)
         .map_err(|e| eyre!("failed to read '{}': {e}", state.source_path.display()))?;
@@ -293,8 +295,11 @@ pub(crate) fn materialize_harness_prompt(
 
     let (mut prompt, frontmatter, env_overrides, inline_closure_plan) = match state.mode {
         HarnessPromptMode::Passthrough => {
-            let options = darkmatter::markdown::compose::ComposeOptions::new()
-                .with_source_file(&state.source_path);
+            let options = claudine::composition::bind_agent_workspace(
+                darkmatter::markdown::compose::ComposeOptions::new(),
+                &state.source_path,
+                Some(child_cwd),
+            );
             let (composed, _report) = effective_markdown.compose_with(options)?;
             let prompt = state.base_prompt.clone().ok_or_else(|| {
                 eyre!(
@@ -310,8 +315,11 @@ pub(crate) fn materialize_harness_prompt(
             )
         }
         HarnessPromptMode::Compose => {
-            let options = darkmatter::markdown::compose::ComposeOptions::new()
-                .with_source_file(&state.source_path);
+            let options = claudine::composition::bind_agent_workspace(
+                darkmatter::markdown::compose::ComposeOptions::new(),
+                &state.source_path,
+                Some(child_cwd),
+            );
             let (composed, _report) = effective_markdown.compose_with(options)?;
             let body = composed.content().to_string();
 
@@ -558,6 +566,7 @@ pub(crate) fn execute_harness_attempt(
         let api_duration_ms = stream_result.data.duration_ms;
         let perf = Some(stream_result.telemetry.into_agent_perf(api_duration_ms));
         let termination = stream_result.termination;
+        let captured_agent_pid = stream_result.agent_pid;
         let mut summary = stream_result.data;
         if let Some(codex_output) = structured_codex_output {
             codex_output.apply_to_summary(&mut summary);
@@ -596,6 +605,7 @@ pub(crate) fn execute_harness_attempt(
             detail_requested,
             &summary_details.lock().unwrap().clone(),
             Some(&section_stream),
+            captured_agent_pid,
         );
 
         let effective_response = {
@@ -767,7 +777,7 @@ pub(crate) fn run_harness_loop(
                 attempt,
                 source_path = %prompt_state.source_path.display(),
             )
-            .in_scope(|| materialize_harness_prompt(prompt_state, repo_root))
+            .in_scope(|| materialize_harness_prompt(prompt_state, repo_root, child_cwd))
             .map_err(|e| guard.emit_blocked_or_err(e))?
         };
         let resolve_ctx = harness_context.resolve_context();

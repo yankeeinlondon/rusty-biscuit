@@ -49,8 +49,9 @@ helpers in the `tools/test-toolkit` crate.
 Every curated package area in the root `justfile` `areas` variable exposes the
 same 12 recipes. Recipes that don't apply to a particular area are explicit
 no-ops with a one-line `echo` explaining why; they intentionally do not error
-so that the root orchestrators (`just test`, `just lint`, etc.) keep iterating
-across areas.
+so that area-based root orchestrators such as `just lint` keep iterating.
+Root `just test` instead discovers every Cargo workspace package, continues
+after package failures, and reports all failed packages at the end.
 
 | Recipe         | Purpose |
 | -------------- | ------- |

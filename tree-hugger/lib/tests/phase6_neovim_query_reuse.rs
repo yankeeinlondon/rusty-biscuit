@@ -3,17 +3,18 @@
 //! Tests for query provenance, nvim-treesitter inventory, predicate
 //! compatibility, and upstream drift detection.
 
-use tree_hugger::queries::{
-    compatibility::{
-        find_hook_predicates, find_unsupported_predicates, CompatibilityRegistry,
-        CompatibilityStatus,
-    },
-    drift::{check_all_drift, check_query_drift, summarize_drift, DriftItem},
-    inventory::{suite_for_kind, NvimQuerySuite, QueryInventory},
-    provenance::{all_query_provenance, query_provenance, TranslationStatus},
-    GrammarRef, QueryKind, query_for,
-};
 use tree_hugger::ProgrammingLanguage;
+use tree_hugger::queries::{
+    GrammarRef, QueryKind,
+    compatibility::{
+        CompatibilityRegistry, CompatibilityStatus, find_hook_predicates,
+        find_unsupported_predicates,
+    },
+    drift::{DriftItem, check_all_drift, check_query_drift, summarize_drift},
+    inventory::{NvimQuerySuite, QueryInventory, suite_for_kind},
+    provenance::{TranslationStatus, all_query_provenance, query_provenance},
+    query_for,
+};
 
 // =============================================================================
 // Query Compilation with Provenance
@@ -40,10 +41,7 @@ fn all_queries_compile_with_provenance() {
             QueryKind::Comments,
         ] {
             let query = query_for(grammar_ref, kind);
-            assert!(
-                query.is_ok(),
-                "{language} {kind} query should compile"
-            );
+            assert!(query.is_ok(), "{language} {kind} query should compile");
 
             // Provenance should exist for locals (vendored) and overlays
             if let Some(prov) = query_provenance(language, kind) {
@@ -72,9 +70,21 @@ fn capture_parity_for_rust() {
         .expect("locals should be present");
 
     // Key locals captures that Tree Hugger reuses
-    assert!(locals.iter().any(|c| c.name == "local.definition.function" && c.reused));
-    assert!(locals.iter().any(|c| c.name == "local.definition.type" && c.reused));
-    assert!(locals.iter().any(|c| c.name == "local.reference" && c.reused));
+    assert!(
+        locals
+            .iter()
+            .any(|c| c.name == "local.definition.function" && c.reused)
+    );
+    assert!(
+        locals
+            .iter()
+            .any(|c| c.name == "local.definition.type" && c.reused)
+    );
+    assert!(
+        locals
+            .iter()
+            .any(|c| c.name == "local.reference" && c.reused)
+    );
     assert!(locals.iter().any(|c| c.name == "local.scope" && c.reused));
 
     // Highlights captures are inventoried but not reused
@@ -95,12 +105,20 @@ fn capture_parity_for_javascript() {
     let locals = js
         .suite_captures(NvimQuerySuite::Locals)
         .expect("locals should be present");
-    assert!(locals.iter().any(|c| c.name == "local.definition" && c.reused));
+    assert!(
+        locals
+            .iter()
+            .any(|c| c.name == "local.definition" && c.reused)
+    );
 
     let highlights = js
         .suite_captures(NvimQuerySuite::Highlights)
         .expect("highlights should be present");
-    assert!(highlights.iter().any(|c| c.name == "function.call" && !c.reused));
+    assert!(
+        highlights
+            .iter()
+            .any(|c| c.name == "function.call" && !c.reused)
+    );
 }
 
 #[test]
@@ -113,7 +131,11 @@ fn capture_parity_for_typescript() {
     let locals = ts
         .suite_captures(NvimQuerySuite::Locals)
         .expect("locals should be present");
-    assert!(locals.iter().any(|c| c.name == "local.definition.interface" && c.reused));
+    assert!(
+        locals
+            .iter()
+            .any(|c| c.name == "local.definition.interface" && c.reused)
+    );
 }
 
 #[test]
@@ -126,7 +148,11 @@ fn capture_parity_for_python() {
     let locals = py
         .suite_captures(NvimQuerySuite::Locals)
         .expect("locals should be present");
-    assert!(locals.iter().any(|c| c.name == "local.definition" && c.reused));
+    assert!(
+        locals
+            .iter()
+            .any(|c| c.name == "local.definition" && c.reused)
+    );
 }
 
 #[test]
@@ -223,12 +249,17 @@ fn provenance_fields_are_populated() {
 #[test]
 fn native_predicates_are_supported() {
     let registry = CompatibilityRegistry::new();
-    let native = ["eq", "match", "lua-match", "any-of", "contains", "any-contains"];
+    let native = [
+        "eq",
+        "match",
+        "lua-match",
+        "any-of",
+        "contains",
+        "any-contains",
+    ];
 
     for name in native {
-        let entry = registry
-            .get(name)
-            .expect("{name} should be registered");
+        let entry = registry.get(name).expect("{name} should be registered");
         assert_eq!(
             entry.status,
             CompatibilityStatus::Native,
@@ -281,11 +312,7 @@ fn simple_query_has_no_issues() {
 /// When the upstream revision matches, drift should not be actionable.
 #[test]
 fn no_actionable_drift_when_revision_matches() {
-    let report = check_query_drift(
-        ProgrammingLanguage::Rust,
-        QueryKind::Locals,
-        Some("0.10.4"),
-    );
+    let report = check_query_drift(ProgrammingLanguage::Rust, QueryKind::Locals, Some("0.10.4"));
     assert!(report.is_some());
     assert!(!report.unwrap().actionable);
 }
@@ -293,28 +320,22 @@ fn no_actionable_drift_when_revision_matches() {
 /// When the upstream revision differs, drift should be actionable.
 #[test]
 fn actionable_drift_when_revision_differs() {
-    let report = check_query_drift(
-        ProgrammingLanguage::Rust,
-        QueryKind::Locals,
-        Some("0.11.0"),
-    );
+    let report = check_query_drift(ProgrammingLanguage::Rust, QueryKind::Locals, Some("0.11.0"));
     assert!(report.is_some());
     let report = report.unwrap();
     assert!(report.actionable);
-    assert!(report
-        .items
-        .iter()
-        .any(|i| matches!(i, DriftItem::NewerUpstreamRevision { .. })));
+    assert!(
+        report
+            .items
+            .iter()
+            .any(|i| matches!(i, DriftItem::NewerUpstreamRevision { .. }))
+    );
 }
 
 /// Original (non-vendored) queries should not produce drift reports.
 #[test]
 fn original_queries_have_no_drift() {
-    let report = check_query_drift(
-        ProgrammingLanguage::Rust,
-        QueryKind::Lint,
-        Some("0.11.0"),
-    );
+    let report = check_query_drift(ProgrammingLanguage::Rust, QueryKind::Lint, Some("0.11.0"));
     assert!(report.is_none());
 }
 
@@ -368,8 +389,7 @@ fn full_query_audit_workflow() {
     let kind = QueryKind::Locals;
 
     // 1. Provenance check
-    let prov = query_provenance(language, kind)
-        .expect("rust locals should have provenance");
+    let prov = query_provenance(language, kind).expect("rust locals should have provenance");
     assert_eq!(prov.source_project, "nvim-treesitter");
 
     // 2. Compatibility check on the query text
@@ -384,18 +404,36 @@ fn full_query_audit_workflow() {
     // 3. Drift check
     let drift = check_query_drift(language, kind, Some(&prov.upstream_revision));
     assert!(drift.is_some());
-    assert!(!drift.unwrap().actionable, "same revision should not be actionable");
+    assert!(
+        !drift.unwrap().actionable,
+        "same revision should not be actionable"
+    );
 }
 
 /// Audit all vendored queries for unsupported predicates.
 #[test]
 fn no_unsupported_predicates_in_vendored_queries() {
     let vendored_queries = [
-        (ProgrammingLanguage::Rust, include_str!("../queries/vendor/rust/locals.scm")),
-        (ProgrammingLanguage::JavaScript, include_str!("../queries/vendor/javascript/locals.scm")),
-        (ProgrammingLanguage::TypeScript, include_str!("../queries/vendor/typescript/locals.scm")),
-        (ProgrammingLanguage::Go, include_str!("../queries/vendor/go/locals.scm")),
-        (ProgrammingLanguage::Python, include_str!("../queries/vendor/python/locals.scm")),
+        (
+            ProgrammingLanguage::Rust,
+            include_str!("../queries/vendor/rust/locals.scm"),
+        ),
+        (
+            ProgrammingLanguage::JavaScript,
+            include_str!("../queries/vendor/javascript/locals.scm"),
+        ),
+        (
+            ProgrammingLanguage::TypeScript,
+            include_str!("../queries/vendor/typescript/locals.scm"),
+        ),
+        (
+            ProgrammingLanguage::Go,
+            include_str!("../queries/vendor/go/locals.scm"),
+        ),
+        (
+            ProgrammingLanguage::Python,
+            include_str!("../queries/vendor/python/locals.scm"),
+        ),
     ];
 
     for (language, query_text) in vendored_queries {
@@ -411,9 +449,18 @@ fn no_unsupported_predicates_in_vendored_queries() {
 #[test]
 fn no_unsupported_predicates_in_overlay_queries() {
     let overlay_queries = [
-        (ProgrammingLanguage::Rust, include_str!("../queries/rust/lint.scm")),
-        (ProgrammingLanguage::JavaScript, include_str!("../queries/javascript/lint.scm")),
-        (ProgrammingLanguage::TypeScript, include_str!("../queries/typescript/lint.scm")),
+        (
+            ProgrammingLanguage::Rust,
+            include_str!("../queries/rust/lint.scm"),
+        ),
+        (
+            ProgrammingLanguage::JavaScript,
+            include_str!("../queries/javascript/lint.scm"),
+        ),
+        (
+            ProgrammingLanguage::TypeScript,
+            include_str!("../queries/typescript/lint.scm"),
+        ),
     ];
 
     for (language, query_text) in overlay_queries {

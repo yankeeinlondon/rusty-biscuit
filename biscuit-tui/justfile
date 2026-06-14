@@ -16,8 +16,8 @@ ITALIC := '\033[3m'
 RESET := '\033[0m'
 RED := '\033[31m'
 
-LIBRARY := "tui-chrome"
-CLI := "tui-chrome-cli"
+LIBRARY := "biscuit-tui"
+CLI := "biscuit-tui-cli"
 CLI_PATH := "./cli"
 
 default:
@@ -27,15 +27,15 @@ default:
     if command -v md &> /dev/null; then
         md just.md
     fi
-    echo "tui-chrome Library & CLI (binary: question)"
+    echo "biscuit-tui Library & CLI (binary: question)"
     echo "==========================================="
     echo
     just --list | grep -v 'default'
 
 # build library and CLI
 build *args="":
-    @just _build {{LIBRARY}} "tui-chrome Library" {{args}}
-    @just _build {{CLI}} "tui-chrome CLI" {{args}}
+    @just _build {{LIBRARY}} "biscuit-tui Library" {{args}}
+    @just _build {{CLI}} "biscuit-tui CLI" {{args}}
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
 
@@ -126,7 +126,7 @@ test-pty:
 # install CLI binary
 install *args="":
     @just build --release
-    @just _install "{{CLI_PATH}}" "tui-chrome" "question" {{args}}
+    @just _install "{{CLI_PATH}}" "biscuit-tui" "question" {{args}}
 
 # Validate the source code without doing a full build
 check:
@@ -134,7 +134,7 @@ check:
 
 # build and show the docs for the library code
 docs:
-    @echo "Build and then show latest docs for the tui-chrome library code"
+    @echo "Build and then show latest docs for the biscuit-tui library code"
     @echo ""
     @cargo doc -p {{LIBRARY}} --open
 
