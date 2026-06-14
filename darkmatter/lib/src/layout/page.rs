@@ -3053,6 +3053,31 @@ mod tests {
         );
     }
 
+    /// A malformed disclosure block raises `MarkdownError::MalformedDisclosure`
+    /// during the fold (`run_sub_fold` propagates the block-extension error), so
+    /// unlike a malformed code directive — which only the browser preflight
+    /// catches — it fails the terminal `render` path too. The
+    /// `MarkdownError -> PageRenderError::Render` mapping must carry the
+    /// malformed-disclosure reason through page rendering (review-5 finding #4).
+    #[test]
+    fn render_errors_on_malformed_disclosure() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term);
+        // Empty summary region between `::disclosure` and `::details`.
+        let md: Markdown = "::disclosure\n::details\nbody\n::end-disclosure\n".into();
+
+        let err = page
+            .render(&md)
+            .expect_err("malformed disclosure must fail the page render");
+        let PageRenderError::Render(msg) = err else {
+            panic!("malformed disclosure must map to PageRenderError::Render; got {err:?}");
+        };
+        assert!(
+            msg.contains("Malformed disclosure"),
+            "error must carry the malformed-disclosure reason; got {msg:?}"
+        );
+    }
+
     // ---------- Phase 6: pronounced background test ----------
 
     #[test]

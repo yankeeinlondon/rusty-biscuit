@@ -276,11 +276,18 @@ fn apply_disclosure_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
     if let Some(hints) = inline.as_ref()
         && let Some(il) = hints.layout.as_ref()
     {
+        // `width` and `max-width` are mutually exclusive (see the disclosure
+        // styling spec). A higher-priority inline choice clears the lower-priority
+        // frontmatter value of the *other* property; keeping both would let a
+        // stale frontmatter cap clamp an instance `width`, or a stale fixed width
+        // survive an instance `max-width`.
         if il.width != Width::default() {
             layout.width = il.width.clone();
+            layout.max_width = None;
         }
         if il.max_width.is_some() {
             layout.max_width = il.max_width.clone();
+            layout.width = Width::default();
         }
         if il.alignment != Alignment::default() {
             layout.alignment = il.alignment;
@@ -854,6 +861,81 @@ mod structural_tests {
         assert_eq!(
             table.attrs.layout_ref().unwrap().alignment,
             renderable::layout::Alignment::Center
+        );
+    }
+
+    // ── disclosure layout precedence ───────────────────────────────────────
+
+    /// Inline `width` and frontmatter `max-width` are a mutually exclusive
+    /// layout choice across precedence layers, not just within one bucket. An
+    /// instance `width=60ch` must clear the lower-priority frontmatter
+    /// `max-width: 24ch`, otherwise the stale cap clamps the instance width on
+    /// both terminal and browser.
+    #[test]
+    fn context_fold_inline_width_clears_frontmatter_max_width() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+
+        let mut policies = empty_policies();
+        policies.insert(
+            PageComponent::Disclosure,
+            ComponentPolicy {
+                layout: Layout {
+                    max_width: Some(TargetValue::universal(Length::Ch(24))),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        let ctx = ctx_for(&policies);
+        let doc = fold_test(
+            "::disclosure width=60ch Summary\n::details\nBody.\n::end-disclosure\n",
+            &ctx,
+        );
+        let disclosure = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Disclosure { .. }))
+            .expect("disclosure node");
+        let layout = disclosure.attrs.layout_ref().expect("layout is set");
+        assert_eq!(
+            layout.width,
+            Width::Fixed(TargetValue::universal(Length::Ch(60))),
+            "inline width must win"
+        );
+        assert!(
+            layout.max_width.is_none(),
+            "frontmatter max-width must be cleared by inline width: {:?}",
+            layout.max_width
+        );
+    }
+
+    /// The symmetric case: an instance `max-width` must reset a lower-priority
+    /// frontmatter fixed `width` back to `Auto` before applying the cap.
+    #[test]
+    fn context_fold_inline_max_width_clears_frontmatter_width() {
+        use renderable::layout::{Layout, Length, TargetValue, Width};
+
+        let mut policies = empty_policies();
+        policies.insert(
+            PageComponent::Disclosure,
+            ComponentPolicy {
+                layout: Layout {
+                    width: Width::Fixed(TargetValue::universal(Length::Ch(60))),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        let ctx = ctx_for(&policies);
+        let doc = fold_test(
+            "::disclosure max-width=24ch Summary\n::details\nBody.\n::end-disclosure\n",
+            &ctx,
+        );
+        let disclosure = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Disclosure { .. }))
+            .expect("disclosure node");
+        let layout = disclosure.attrs.layout_ref().expect("layout is set");
+        assert_eq!(layout.width, Width::Auto, "inline max-width must reset width to Auto");
+        assert_eq!(
+            layout.max_width,
+            Some(TargetValue::universal(Length::Ch(24))),
+            "inline max-width must win"
         );
     }
 

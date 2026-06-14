@@ -1307,11 +1307,20 @@ mod tests {
 
     // ----- apply_component_style -----
 
-    use crate::style::schema::{BlockQuoteStyle, CommonStyle, ImageStyle, TableStyle};
+    use crate::style::schema::{
+        BlockQuoteStyle, CommonStyle, DisclosureStyle, ImageStyle, TableStyle,
+    };
 
     fn style_with_table(common: CommonStyle) -> StyleFrontmatter {
         StyleFrontmatter {
             table: Some(TableStyle { common }),
+            ..StyleFrontmatter::default()
+        }
+    }
+
+    fn style_with_disclosure(common: CommonStyle) -> StyleFrontmatter {
+        StyleFrontmatter {
+            disclosure: Some(DisclosureStyle { common }),
             ..StyleFrontmatter::default()
         }
     }
@@ -1464,6 +1473,27 @@ mod tests {
         assert!(
             msg.contains("`style.block-quote.width`"),
             "expected kebab-case bucket in message, got: {msg}"
+        );
+    }
+
+    /// The `disclosure` bucket delegates to the same `apply_common_style` helper
+    /// as `table`/`block-quote`, but the spec calls out the `width` + `max-width`
+    /// conflict explicitly, so assert it directly for `disclosure` rather than
+    /// relying on helper reuse (review-5 finding #3).
+    #[test]
+    fn disclosure_width_and_max_width_together_rejected() {
+        let style = style_with_disclosure(CommonStyle {
+            width: Some(Length::Ch(40)),
+            max_width: Some(Length::Percent(50.0)),
+            ..CommonStyle::default()
+        });
+        let err = apply_disclosure_style(page(80), &style, DisclosureStyleOverrides::default())
+            .unwrap_err();
+        assert_eq!(
+            err,
+            StyleApplyError::ComponentWidthConflict {
+                bucket: "disclosure"
+            }
         );
     }
 
