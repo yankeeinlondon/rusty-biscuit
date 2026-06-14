@@ -51,7 +51,11 @@ impl MetricValue {
         match self {
             MetricValue::Duration(d) => {
                 let (num, unit) = split_unit(&fmt_duration(*d));
-                let unit = if unicode { unit } else { unit.replace('µ', "u") };
+                let unit = if unicode {
+                    unit
+                } else {
+                    unit.replace('µ', "u")
+                };
                 (num, unit)
             }
             MetricValue::Bytes(b) => split_unit(&fmt_bytes(*b)),
@@ -264,12 +268,36 @@ impl MetricsTree {
         let glyphs = Glyphs::for_terminal(unicode);
 
         let mut rows = Vec::new();
-        collect_rows(&self.root, String::new(), String::new(), true, unicode, &glyphs, &mut rows);
+        collect_rows(
+            &self.root,
+            String::new(),
+            String::new(),
+            true,
+            unicode,
+            &glyphs,
+            &mut rows,
+        );
 
-        let raw_label_w = rows.iter().map(|r| r.label.chars().count()).max().unwrap_or(0);
-        let num_w = rows.iter().map(|r| r.num.chars().count()).max().unwrap_or(0);
-        let unit_w = rows.iter().map(|r| r.unit.chars().count()).max().unwrap_or(0);
-        let share_w = rows.iter().map(|r| r.share.chars().count()).max().unwrap_or(0);
+        let raw_label_w = rows
+            .iter()
+            .map(|r| r.label.chars().count())
+            .max()
+            .unwrap_or(0);
+        let num_w = rows
+            .iter()
+            .map(|r| r.num.chars().count())
+            .max()
+            .unwrap_or(0);
+        let unit_w = rows
+            .iter()
+            .map(|r| r.unit.chars().count())
+            .max()
+            .unwrap_or(0);
+        let share_w = rows
+            .iter()
+            .map(|r| r.share.chars().count())
+            .max()
+            .unwrap_or(0);
 
         // The right-hand columns are fixed: two-space gap, value (mantissa +
         // unit), two-space gap, share, then the widest row decoration (calls /
@@ -652,15 +680,27 @@ mod tests {
             .lines()
             .find(|l| l.contains("shell ·"))
             .expect("long row present");
-        assert!(long_row.contains('…'), "long label should be truncated:\n{long_row}");
-        assert!(long_row.contains("80.0ms"), "long row value wrapped away:\n{long_row}");
+        assert!(
+            long_row.contains('…'),
+            "long label should be truncated:\n{long_row}"
+        );
+        assert!(
+            long_row.contains("80.0ms"),
+            "long row value wrapped away:\n{long_row}"
+        );
     }
 
     #[test]
     fn renders_box_drawing_connectors() {
         let plain = strip_ansi(&MetricsTree::new(sample_tree()).render_optimistic(Some(80)));
-        assert!(plain.contains("├─ parse"), "missing tee connector:\n{plain}");
-        assert!(plain.contains("└─ render"), "missing elbow connector:\n{plain}");
+        assert!(
+            plain.contains("├─ parse"),
+            "missing tee connector:\n{plain}"
+        );
+        assert!(
+            plain.contains("└─ render"),
+            "missing elbow connector:\n{plain}"
+        );
         // The nested leaf sits one level deeper, under the elbow's blank gutter.
         assert!(
             plain.contains("   └─ layout"),
@@ -678,7 +718,10 @@ mod tests {
             .filter_map(|l| l.find("ms").or_else(|| l.find("µs")).map(|idx| (l, idx)))
             .map(|(l, idx)| l[..idx].chars().count())
             .collect();
-        assert!(unit_columns.len() >= 2, "expected multiple value rows:\n{plain}");
+        assert!(
+            unit_columns.len() >= 2,
+            "expected multiple value rows:\n{plain}"
+        );
         assert!(
             unit_columns.iter().all(|c| *c == unit_columns[0]),
             "value units are not column-aligned: {unit_columns:?}\n{plain}"
@@ -692,7 +735,10 @@ mod tests {
         assert!(root.contains("100%"), "root must read 100%; got: {root:?}");
         // The 45µs leaf is well under 1% of 100ms.
         let parse = plain.lines().find(|l| l.contains("parse")).unwrap();
-        assert!(parse.contains("<1%"), "sub-percent share must read <1%; got: {parse:?}");
+        assert!(
+            parse.contains("<1%"),
+            "sub-percent share must read <1%; got: {parse:?}"
+        );
     }
 
     #[test]
@@ -718,7 +764,11 @@ mod tests {
         let plain = strip_ansi(&MetricsTree::new(root).render_optimistic(Some(80)));
         let hot = plain.lines().find(|l| l.contains("▇ HOT")).unwrap();
         assert!(hot.contains("hot stage"), "marker on wrong row: {hot:?}");
-        assert_eq!(plain.matches("▇ HOT").count(), 1, "exactly one marker:\n{plain}");
+        assert_eq!(
+            plain.matches("▇ HOT").count(),
+            1,
+            "exactly one marker:\n{plain}"
+        );
     }
 
     #[test]
@@ -756,7 +806,10 @@ mod tests {
         let once = plain.lines().find(|l| l.contains("once")).unwrap();
         let thrice = plain.lines().find(|l| l.contains("thrice")).unwrap();
         assert!(!once.contains('×'), "calls == 1 must not render: {once:?}");
-        assert!(thrice.contains("×3"), "calls > 1 must render ×N: {thrice:?}");
+        assert!(
+            thrice.contains("×3"),
+            "calls > 1 must render ×N: {thrice:?}"
+        );
     }
 
     #[test]
@@ -772,7 +825,10 @@ mod tests {
         );
         let plain = strip_ansi(&MetricsTree::new(root).render_optimistic(Some(80)));
         let skipped = plain.lines().find(|l| l.contains("skipped")).unwrap();
-        assert!(skipped.contains('—'), "placeholder must render em dash: {skipped:?}");
+        assert!(
+            skipped.contains('—'),
+            "placeholder must render em dash: {skipped:?}"
+        );
         assert!(skipped.contains("(dry run)"), "note missing: {skipped:?}");
     }
 
@@ -789,8 +845,14 @@ mod tests {
             )],
         );
         let plain = strip_ansi(&MetricsTree::new(root).render_optimistic(Some(80)));
-        assert!(plain.contains("2.0MB"), "byte total mis-formatted:\n{plain}");
-        assert!(plain.contains("512B"), "small byte value mis-formatted:\n{plain}");
+        assert!(
+            plain.contains("2.0MB"),
+            "byte total mis-formatted:\n{plain}"
+        );
+        assert!(
+            plain.contains("512B"),
+            "small byte value mis-formatted:\n{plain}"
+        );
     }
 
     #[test]
@@ -800,7 +862,10 @@ mod tests {
                 .with_notes(vec!["partial metrics".to_string()])
                 .render_optimistic(Some(80)),
         );
-        assert!(plain.contains("partial metrics"), "trailing note missing:\n{plain}");
+        assert!(
+            plain.contains("partial metrics"),
+            "trailing note missing:\n{plain}"
+        );
     }
 
     #[test]
@@ -823,7 +888,10 @@ mod tests {
             "no-color render must not emit color SGR: {rendered:?}"
         );
         // The structure still renders — Unicode connectors stay, color drops.
-        assert!(rendered.contains("├─"), "connectors lost under NO_COLOR:\n{rendered}");
+        assert!(
+            rendered.contains("├─"),
+            "connectors lost under NO_COLOR:\n{rendered}"
+        );
     }
 
     #[test]
@@ -850,16 +918,34 @@ mod tests {
             ],
         );
         let plain = strip_ansi(&MetricsTree::new(root).render(&term));
-        assert!(!plain.contains('├'), "box-drawing must fold to ASCII:\n{plain}");
-        assert!(!plain.contains('│'), "box-drawing must fold to ASCII:\n{plain}");
-        assert!(!plain.contains('▇'), "highlight glyph must fold to ASCII:\n{plain}");
-        assert!(!plain.contains('×'), "times sign must fold to ASCII:\n{plain}");
-        assert!(!plain.contains('µ'), "micro sign must fold to ASCII:\n{plain}");
+        assert!(
+            !plain.contains('├'),
+            "box-drawing must fold to ASCII:\n{plain}"
+        );
+        assert!(
+            !plain.contains('│'),
+            "box-drawing must fold to ASCII:\n{plain}"
+        );
+        assert!(
+            !plain.contains('▇'),
+            "highlight glyph must fold to ASCII:\n{plain}"
+        );
+        assert!(
+            !plain.contains('×'),
+            "times sign must fold to ASCII:\n{plain}"
+        );
+        assert!(
+            !plain.contains('µ'),
+            "micro sign must fold to ASCII:\n{plain}"
+        );
         assert!(!plain.contains('—'), "em dash must fold to ASCII:\n{plain}");
         assert!(plain.contains("+- "), "ASCII connector missing:\n{plain}");
         assert!(plain.contains("# HOT"), "ASCII marker missing:\n{plain}");
         assert!(plain.contains("x2"), "ASCII calls missing:\n{plain}");
-        assert!(plain.contains("900.0us"), "ASCII duration unit missing:\n{plain}");
+        assert!(
+            plain.contains("900.0us"),
+            "ASCII duration unit missing:\n{plain}"
+        );
     }
 
     #[test]
@@ -1009,7 +1095,10 @@ mod tests {
             .lines()
             .filter_map(|l| l.find("ms").map(|idx| l[..idx].chars().count()))
             .collect();
-        assert!(unit_columns.len() >= 2, "expected multiple ms rows:\n{plain}");
+        assert!(
+            unit_columns.len() >= 2,
+            "expected multiple ms rows:\n{plain}"
+        );
         assert!(
             unit_columns.iter().all(|c| *c == unit_columns[0]),
             "nested red+dim hot unit broke column alignment: {unit_columns:?}\n{plain}"

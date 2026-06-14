@@ -1157,7 +1157,7 @@ mod tests {
 
     #[test]
     fn ordered_list_render_tree_node_carries_layout_when_margins_set() {
-        use crate::utils::layout::{Length, Edges};
+        use crate::utils::layout::{Edges, Length};
         let mut list = OrderedList::new(vec!["First", "Second"]);
         list.layout_mut().margin = Edges::x(Length::ch(2));
         let node = list.render_tree_node().unwrap();
@@ -1166,7 +1166,7 @@ mod tests {
 
     #[test]
     fn unordered_list_render_tree_node_carries_layout_when_margins_set() {
-        use crate::utils::layout::{Length, Edges};
+        use crate::utils::layout::{Edges, Length};
         let mut list = UnorderedList::new(vec!["Apple", "Banana"]);
         list.layout_mut().margin = Edges::x(Length::ch(2));
         let node = list.render_tree_node().unwrap();
@@ -1217,7 +1217,10 @@ mod tests {
             !paragraph_contains_code(&node),
             "a block-level Code node must not nest inside a Paragraph"
         );
-        assert!(has_code(&node), "expected a block-level Code node in the tree");
+        assert!(
+            has_code(&node),
+            "expected a block-level Code node in the tree"
+        );
     }
 
     #[test]
@@ -1237,6 +1240,9 @@ mod tests {
             !paragraph_contains_code(&node),
             "a block-level Code node must not nest inside a Paragraph"
         );
-        assert!(has_code(&node), "expected a block-level Code node in the tree");
+        assert!(
+            has_code(&node),
+            "expected a block-level Code node in the tree"
+        );
     }
 }

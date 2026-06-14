@@ -99,10 +99,7 @@ fn level2_prose_osc8_link_renders() {
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
 
-    send_bt_command(
-        harness,
-        "prose \"<a href=https://example.com>link</a>\"",
-    );
+    send_bt_command(harness, "prose \"<a href=https://example.com>link</a>\"");
 
     let frame = harness.capture().expect("capture failed");
     assert_osc8_link_present(&frame, "https://example.com", "link");
@@ -149,8 +146,8 @@ fn level2_prose_emits_sgr_in_kitty() {
 
     // `KittyHarness::new()` passes `--keep-focus` so the spawned OS
     // window never steals focus from the developer's session.
-    let mut guard = SHARED_KITTY
-        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let mut guard =
+        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -189,16 +186,13 @@ fn level2_prose_osc8_link_renders_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY
-        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let mut guard =
+        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
 
-    send_bt_command(
-        harness,
-        "prose \"<a href=https://example.com>link</a>\"",
-    );
+    send_bt_command(harness, "prose \"<a href=https://example.com>link</a>\"");
 
     let frame = harness.capture().expect("capture failed");
     assert_osc8_link_present(&frame, "https://example.com", "link");
@@ -464,8 +458,8 @@ fn level2_prose_rich_styling_emits_sgr_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY
-        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let mut guard =
+        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -585,8 +579,8 @@ fn level2_prose_code_block_restores_parent_style_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY
-        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let mut guard =
+        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -690,8 +684,8 @@ fn level2_prose_inverse_emits_sgr_in_kitty() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY
-        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let mut guard =
+        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();

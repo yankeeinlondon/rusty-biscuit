@@ -147,8 +147,8 @@ fn assert_renders_in_kitty(case: &DiagramCase) {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY
-        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let mut guard =
+        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     // Reset the pane so prior tests' rendered output cannot leak into
     // this run's capture window.
@@ -434,8 +434,8 @@ fn level2_diagram_width_kitty_apc_columns() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY
-        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let mut guard =
+        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -517,8 +517,8 @@ fn level2_inverse_flag_changes_background_in_capture() {
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut guard = SHARED_KITTY
-        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let mut guard =
+        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
 
     // Default render. Clear so the prior test's APC payload cannot leak
@@ -576,8 +576,8 @@ fn level2_inverse_flag_changes_background_in_capture() {
 fn level2_diagram_fallback_when_no_image_protocol() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX
-        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard =
+        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();

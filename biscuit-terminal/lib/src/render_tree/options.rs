@@ -457,7 +457,7 @@ mod tests {
 
     #[test]
     fn for_child_preserves_layout() {
-        use renderable::layout::{Layout, Length, Edges};
+        use renderable::layout::{Edges, Layout, Length};
 
         let ctx = TerminalRenderContext::fallback();
         let layout = Layout {
@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn with_layout_sets_layout() {
-        use renderable::layout::{Layout, Length, Edges};
+        use renderable::layout::{Edges, Layout, Length};
 
         let ctx = TerminalRenderContext::fallback();
         let layout = Layout {
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn with_layout_replaces_existing_layout() {
-        use renderable::layout::{Layout, Length, Edges};
+        use renderable::layout::{Edges, Layout, Length};
 
         let ctx = TerminalRenderContext::fallback();
         let layout1 = Layout {
@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     fn with_layout_preserves_width_and_indent() {
-        use renderable::layout::{Layout, Length, Edges};
+        use renderable::layout::{Edges, Layout, Length};
 
         let ctx = TerminalRenderContext::fallback();
         let indented = ctx.for_child(5, 3);

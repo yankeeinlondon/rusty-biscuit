@@ -267,16 +267,16 @@ fn apply_sgr_fg_red(params: &str, active: &mut bool) {
                 "38" => {
                     match groups.get(k + 1).copied() {
                         Some("2") => {
-                            *active = match (groups.get(k + 2), groups.get(k + 3), groups.get(k + 4))
-                            {
-                                (Some(r), Some(g), Some(b)) => {
-                                    match (r.parse::<u8>(), g.parse::<u8>(), b.parse::<u8>()) {
-                                        (Ok(r), Ok(g), Ok(b)) => is_red_rgb(r, g, b),
-                                        _ => false,
+                            *active =
+                                match (groups.get(k + 2), groups.get(k + 3), groups.get(k + 4)) {
+                                    (Some(r), Some(g), Some(b)) => {
+                                        match (r.parse::<u8>(), g.parse::<u8>(), b.parse::<u8>()) {
+                                            (Ok(r), Ok(g), Ok(b)) => is_red_rgb(r, g, b),
+                                            _ => false,
+                                        }
                                     }
-                                }
-                                _ => false,
-                            };
+                                    _ => false,
+                                };
                             k += 4; // 2;r;g;b
                         }
                         Some("5") => {
@@ -657,7 +657,9 @@ fn assert_prose_cell_styled<H: TerminalHarness>(harness: &mut H) {
     assert_fg_red_contained(&row, "Alice");
     // Geometry: the box borders and both cell texts survive to the plain cells.
     assert!(
-        frame.plain.contains('│') && frame.plain.contains("active") && frame.plain.contains("Alice"),
+        frame.plain.contains('│')
+            && frame.plain.contains("active")
+            && frame.plain.contains("Alice"),
         "expected bordered, visible Prose-cell content.\nplain:\n{}",
         frame.plain,
     );
@@ -858,7 +860,11 @@ fn data_row_cells(line: &str) -> Vec<&str> {
 /// slack.
 fn left_or_right_aligned(segment: &str) -> Option<&'static str> {
     let lead = segment.chars().take_while(|c| c.is_whitespace()).count();
-    let trail = segment.chars().rev().take_while(|c| c.is_whitespace()).count();
+    let trail = segment
+        .chars()
+        .rev()
+        .take_while(|c| c.is_whitespace())
+        .count();
     match lead.cmp(&trail) {
         std::cmp::Ordering::Less => Some("left"),
         std::cmp::Ordering::Greater => Some("right"),
@@ -987,7 +993,9 @@ fn level2_prose_cells_in_tmux() {
         "bt table --columns \"Status,Owner\" --prose-row \"<b>active</b>,<red>Alice</red>\"",
     );
     assert!(
-        frame.plain.contains('│') && frame.plain.contains("active") && frame.plain.contains("Alice"),
+        frame.plain.contains('│')
+            && frame.plain.contains("active")
+            && frame.plain.contains("Alice"),
         "expected bordered, visible Prose-cell content in tmux.\nplain:\n{}",
         frame.plain,
     );
@@ -1080,10 +1088,7 @@ mod bold_containment {
         // WezTerm brackets its SGR with the charset-designation escape `ESC ( B`;
         // its single final byte `B` must be consumed, not read as a bold cell
         // bleeding past the content.
-        assert!(accepts(
-            "│ \x1b(B\x1b[0;1mAlice\x1b(B\x1b[0m │",
-            "Alice"
-        ));
+        assert!(accepts("│ \x1b(B\x1b[0;1mAlice\x1b(B\x1b[0m │", "Alice"));
     }
 
     #[test]
@@ -1091,10 +1096,7 @@ mod bold_containment {
         // Bold + red maroon in ITU colon form on the content, reset before the
         // border. A `0` color channel must not be read as a bold-off, and the
         // `38:2:…` channels must not be read as bold.
-        assert!(accepts(
-            "│ \x1b[1;38:2::128:0:0mAlice\x1b[0m   │",
-            "Alice"
-        ));
+        assert!(accepts("│ \x1b[1;38:2::128:0:0mAlice\x1b[0m   │", "Alice"));
     }
 
     #[test]
@@ -1177,8 +1179,14 @@ mod dim_containment {
         // A `38;2;…` (and ITU `38:2:…`) truecolor SGR carries a `2` selector
         // that must not be misread as the dim attribute. The content here is
         // colored truecolor but NOT dim, so it must be rejected.
-        assert!(!accepts("│ \x1b[38;2;128;0;0minactive\x1b[0m  │", "inactive"));
-        assert!(!accepts("│ \x1b[38:2::128:0:0minactive\x1b[0m  │", "inactive"));
+        assert!(!accepts(
+            "│ \x1b[38;2;128;0;0minactive\x1b[0m  │",
+            "inactive"
+        ));
+        assert!(!accepts(
+            "│ \x1b[38:2::128:0:0minactive\x1b[0m  │",
+            "inactive"
+        ));
     }
 
     #[test]
@@ -1384,10 +1392,7 @@ mod link_containment {
     #[test]
     fn rejects_link_bleeding_into_padding_and_border() {
         // No close after the label: the link runs through the padding and border.
-        assert!(!accepts(
-            "│ \x1b]8;;https://example.com\x07go    │",
-            "go"
-        ));
+        assert!(!accepts("│ \x1b]8;;https://example.com\x07go    │", "go"));
     }
 
     #[test]

@@ -531,7 +531,11 @@ fn failure_renders_identically_to_error() {
 
     let failure_json = serde_json::to_string(&failure_tree).unwrap();
     assert!(
-        failure_tree.attrs.classes.iter().any(|c| c == "status-block--error"),
+        failure_tree
+            .attrs
+            .classes
+            .iter()
+            .any(|c| c == "status-block--error"),
         "Failure must map to error severity class: {failure_json}"
     );
 
@@ -604,10 +608,7 @@ fn body_plus_hint_renders_hint_inside_block_quote_for_markdown() {
         md.contains("> Body text"),
         "body must be in block quote: {md:?}"
     );
-    let hint_lines: Vec<&str> = md
-        .lines()
-        .filter(|l| l.contains("Fix this hint"))
-        .collect();
+    let hint_lines: Vec<&str> = md.lines().filter(|l| l.contains("Fix this hint")).collect();
     assert!(
         !hint_lines.is_empty(),
         "hint must appear in markdown: {md:?}"
@@ -633,12 +634,8 @@ fn body_plus_hint_renders_hint_inside_block_quote_for_browser() {
         .hint("Fix this hint");
     let html = BrowserRenderable::render_html_fragment(&block).render();
     let bq_open = html.find("<blockquote").expect("blockquote opening tag");
-    let hint_pos = html
-        .find("status-block__hint")
-        .expect("hint class in HTML");
-    let bq_close = html
-        .find("</blockquote>")
-        .expect("blockquote closing tag");
+    let hint_pos = html.find("status-block__hint").expect("hint class in HTML");
+    let bq_close = html.find("</blockquote>").expect("blockquote closing tag");
     assert!(
         bq_open < hint_pos && hint_pos < bq_close,
         "hint class must be inside blockquote: {html:?}"
@@ -695,7 +692,11 @@ fn multiple_body_items_keep_blank_line_separation_in_block_quote() {
     let block = StatusBlock::new(StatusState::Info)
         .body(vec![Prose::new("first item"), Prose::new("second item")]);
     let bq = body_block_quote_children(&block);
-    assert_eq!(bq.len(), 2, "expected leading blank + single body paragraph");
+    assert_eq!(
+        bq.len(),
+        2,
+        "expected leading blank + single body paragraph"
+    );
     let body_text = match &bq[1].kind {
         NodeKind::Paragraph { children } => match &children.first().unwrap().kind {
             NodeKind::Text { value } => value.clone(),
@@ -726,11 +727,13 @@ fn body_plus_hint_block_quote_has_structural_blank_separator_before_hint() {
         "body-plus-hint block quote must have exactly four children (blank, body, blank, hint)"
     );
 
-    let is_blank_paragraph = |node: &RenderNode| matches!(&node.kind,
-        NodeKind::Paragraph { children }
-            if children.is_empty() || children.iter()
-                .all(|c| matches!(&c.kind, NodeKind::Text { value } if value.is_empty()))
-    );
+    let is_blank_paragraph = |node: &RenderNode| {
+        matches!(&node.kind,
+            NodeKind::Paragraph { children }
+                if children.is_empty() || children.iter()
+                    .all(|c| matches!(&c.kind, NodeKind::Text { value } if value.is_empty()))
+        )
+    };
     assert!(
         is_blank_paragraph(&bq[0]),
         "first child must be the leading blank paragraph"
@@ -748,12 +751,18 @@ fn body_plus_hint_block_quote_has_structural_blank_separator_before_hint() {
     );
     let hint_node = &bq[3];
     assert!(
-        hint_node.attrs.classes.iter().any(|c| c == "status-block__hint"),
+        hint_node
+            .attrs
+            .classes
+            .iter()
+            .any(|c| c == "status-block__hint"),
         "fourth child must carry the status-block__hint class"
     );
     if let NodeKind::Paragraph { children } = &hint_node.kind {
         assert!(
-            children.iter().any(|c| matches!(c.kind, NodeKind::Emphasis { .. })),
+            children
+                .iter()
+                .any(|c| matches!(c.kind, NodeKind::Emphasis { .. })),
             "hint paragraph must contain an Emphasis child"
         );
     } else {
@@ -767,9 +776,7 @@ fn body_plus_hint_block_quote_has_structural_blank_separator_before_hint() {
     let em_closes: Vec<_> = html.match_indices("</em>").collect();
     let bq_open = html.find("<blockquote").expect("blockquote opening");
     let bq_close = html.find("</blockquote>").expect("blockquote closing");
-    let hint_pos = html
-        .find("status-block__hint")
-        .expect("hint class in HTML");
+    let hint_pos = html.find("status-block__hint").expect("hint class in HTML");
     assert!(
         bq_open < hint_pos && hint_pos < bq_close,
         "hint class must live inside the blockquote: {html:?}"
@@ -889,7 +896,8 @@ fn markdown_does_not_leak_custom_border_prefix_with_body_and_hint() {
     );
     assert!(md.contains("> Body text"));
     assert!(
-        md.lines().any(|l| l.contains("Hint text") && l.starts_with('>')),
+        md.lines()
+            .any(|l| l.contains("Hint text") && l.starts_with('>')),
         "hint must be inside block quote in Markdown: {md:?}"
     );
 }
@@ -902,12 +910,8 @@ fn browser_preserves_hint_class_and_italic_inside_body_block_quote() {
     let html = BrowserRenderable::render_html_fragment(&block).render();
     assert!(html.contains("status-block__hint"));
     let bq_open = html.find("<blockquote").expect("blockquote");
-    let hint_pos = html
-        .find("status-block__hint")
-        .expect("hint class");
-    let bq_close = html
-        .find("</blockquote>")
-        .expect("blockquote close");
+    let hint_pos = html.find("status-block__hint").expect("hint class");
+    let bq_close = html.find("</blockquote>").expect("blockquote close");
     assert!(
         bq_open < hint_pos && hint_pos < bq_close,
         "hint class must be inside blockquote: {html:?}"
@@ -923,7 +927,9 @@ fn browser_preserves_hint_class_and_italic_inside_body_block_quote() {
         .expect("hint node in block quote");
     if let NodeKind::Paragraph { children } = &hint_node.kind {
         assert!(
-            children.iter().any(|c| matches!(c.kind, NodeKind::Emphasis { .. })),
+            children
+                .iter()
+                .any(|c| matches!(c.kind, NodeKind::Emphasis { .. })),
             "hint paragraph must contain an Emphasis child: {hint_node:#?}"
         );
     } else {

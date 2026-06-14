@@ -13,10 +13,10 @@
 //! required terminal is absent the test prints `skipping: requires <X>`
 //! to stderr and returns immediately. No `#[ignore]` markers are used.
 
+use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::TerminalHarness;
 use serial_test::serial;
 use test_toolkit::{Level, require_level};
 
@@ -35,12 +35,12 @@ const HINT_NEEDLE: &str = "endpoint";
 
 /// Sends a `bt status-block` command with body and hint, waits for
 /// the prompt to return, and captures the settled frame.
-fn capture_status_block<H: TerminalHarness>(harness: &mut H) -> biscuit_test_harness::CapturedFrame {
+fn capture_status_block<H: TerminalHarness>(
+    harness: &mut H,
+) -> biscuit_test_harness::CapturedFrame {
     harness
         .send_command_with_env(
-            &format!(
-                "bt status-block --severity error --hint \"{HINT_TEXT}\" \"{BODY_TEXT}\""
-            ),
+            &format!("bt status-block --severity error --hint \"{HINT_TEXT}\" \"{BODY_TEXT}\""),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -53,8 +53,8 @@ fn capture_status_block<H: TerminalHarness>(harness: &mut H) -> biscuit_test_har
 fn level2_status_block_body_hint_layout_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX
-        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard =
+        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
@@ -80,10 +80,7 @@ fn level2_status_block_body_hint_layout_in_tmux() {
         "hint text must appear inside block-quote border in tmux plain capture.\nplain:\n{plain}"
     );
 
-    let all_quoted: Vec<&str> = plain
-        .lines()
-        .filter(|l| l.contains(BORDER_GLYPH))
-        .collect();
+    let all_quoted: Vec<&str> = plain.lines().filter(|l| l.contains(BORDER_GLYPH)).collect();
     let blank_idx = all_quoted
         .iter()
         .position(|l| !l.contains(BODY_NEEDLE) && !l.contains(HINT_NEEDLE))

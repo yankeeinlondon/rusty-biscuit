@@ -3864,10 +3864,19 @@ fn test_table_typed_currency_column_formats_value() {
         ])
         .output()
         .expect("Failed to execute command");
-    assert!(output.status.success(), "typed currency column should succeed");
+    assert!(
+        output.status.success(),
+        "typed currency column should succeed"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("$9.99"), "currency value formatted: {stdout}");
-    assert!(stdout.contains("Amount"), "literal header is preserved: {stdout}");
+    assert!(
+        stdout.contains("$9.99"),
+        "currency value formatted: {stdout}"
+    );
+    assert!(
+        stdout.contains("Amount"),
+        "literal header is preserved: {stdout}"
+    );
 }
 
 #[test]
@@ -3915,7 +3924,10 @@ fn test_table_literal_colon_header_is_preserved() {
         stdout.contains("Time: Value"),
         "the literal colon-bearing header is preserved verbatim: {stdout}"
     );
-    assert!(stdout.contains("12:00"), "the colon-bearing cell renders: {stdout}");
+    assert!(
+        stdout.contains("12:00"),
+        "the colon-bearing cell renders: {stdout}"
+    );
 }
 
 #[test]

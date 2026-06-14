@@ -24,7 +24,7 @@ use crate::{
     terminal::Terminal,
     utils::{
         color::Color,
-        layout::{Layout, Length, Edges, TargetValue},
+        layout::{Edges, Layout, Length, TargetValue},
         wrap_policy::WordWrap,
     },
 };
@@ -273,21 +273,16 @@ impl StatusBlock {
             let body_text = self.body_plain_text();
             let mut block_children: Vec<RenderNode> = Vec::new();
 
-            block_children.push(RenderNode::paragraph(vec![RenderNode::text(
-                String::new(),
-            )]));
+            block_children.push(RenderNode::paragraph(vec![RenderNode::text(String::new())]));
             block_children.push(RenderNode::paragraph(vec![RenderNode::text(body_text)]));
 
             if let Some(hint_text) = self.non_blank_hint() {
-                block_children.push(RenderNode::paragraph(vec![RenderNode::text(
-                    String::new(),
-                )]));
+                block_children.push(RenderNode::paragraph(vec![RenderNode::text(String::new())]));
 
                 let hint = Self::prose_plain_text(hint_text);
 
-                let mut hint_node = RenderNode::paragraph(vec![RenderNode::emphasis(vec![
-                    RenderNode::text(hint),
-                ])]);
+                let mut hint_node =
+                    RenderNode::paragraph(vec![RenderNode::emphasis(vec![RenderNode::text(hint)])]);
                 hint_node.attrs.classes = vec!["status-block__hint".into()];
                 block_children.push(hint_node);
             }

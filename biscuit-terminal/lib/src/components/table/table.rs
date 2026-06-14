@@ -1914,9 +1914,7 @@ fn degrade_code_nodes(nodes: Vec<RenderNode>) -> Vec<RenderNode> {
     nodes
         .into_iter()
         .map(|node| match &node.kind {
-            renderable::tree::NodeKind::Code { value, .. } => {
-                RenderNode::text(value.clone())
-            }
+            renderable::tree::NodeKind::Code { value, .. } => RenderNode::text(value.clone()),
             _ => node,
         })
         .collect()
@@ -4415,10 +4413,7 @@ mod tests {
             ])
             .with_data(vec![
                 vec!["row0".into(), "short".into()],
-                vec![
-                    "row1".into(),
-                    "deliberately long text that wraps".into(),
-                ],
+                vec!["row1".into(), "deliberately long text that wraps".into()],
             ])
             .alternate_background_color();
 
@@ -5397,7 +5392,7 @@ mod tests {
 
     #[test]
     fn table_render_tree_node_carries_layout_when_margins_set() {
-        use renderable::layout::{Length, Edges};
+        use renderable::layout::{Edges, Length};
         let mut table = Table::new()
             .with_columns(vec![TableColumn::new("Name")])
             .with_data(vec![vec!["Alice".into()]]);

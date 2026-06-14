@@ -235,7 +235,11 @@ fn fenced_code_in_prose_degrades_to_text() {
             _ => None,
         })
         .expect("Prose::to_render_nodes must contain a fenced Code node");
-    assert_eq!(code.0.as_deref(), Some("rust"), "fence language is captured");
+    assert_eq!(
+        code.0.as_deref(),
+        Some("rust"),
+        "fence language is captured"
+    );
     assert!(
         code.1.contains("fn main()"),
         "code body present before degradation: {:?}",
@@ -257,7 +261,9 @@ fn fenced_code_in_prose_degrades_to_text() {
     let NodeKind::TableCell { children } = &cell.kind else {
         panic!("expected TableCell");
     };
-    let has_code = children.iter().any(|c| matches!(c.kind, NodeKind::Code { .. }));
+    let has_code = children
+        .iter()
+        .any(|c| matches!(c.kind, NodeKind::Code { .. }));
     assert!(
         !has_code,
         "fenced code block must be degraded to Text, not remain as Code"
@@ -388,11 +394,17 @@ fn multiline_styled_cell_does_not_bleed_into_borders() {
         let stripped = strip_ansi(line);
         if stripped.contains("line one") || stripped.contains("line two") {
             assert!(
-                stripped.starts_with('│') || stripped.starts_with('┌') || stripped.starts_with('└') || stripped.starts_with('├'),
+                stripped.starts_with('│')
+                    || stripped.starts_with('┌')
+                    || stripped.starts_with('└')
+                    || stripped.starts_with('├'),
                 "border must be present: {stripped:?}"
             );
             assert!(
-                stripped.ends_with('│') || stripped.ends_with('┐') || stripped.ends_with('┘') || stripped.ends_with('┤'),
+                stripped.ends_with('│')
+                    || stripped.ends_with('┐')
+                    || stripped.ends_with('┘')
+                    || stripped.ends_with('┤'),
                 "right border must be present: {stripped:?}"
             );
         }
@@ -571,10 +583,7 @@ fn browser_preserves_link_in_td() {
         html.contains(r#"href="https://example.com""#),
         "link href preserved: {html}"
     );
-    assert!(
-        html.contains(">click<"),
-        "link text preserved: {html}"
-    );
+    assert!(html.contains(">click<"), "link text preserved: {html}");
 }
 
 // ---------------------------------------------------------------------------
@@ -612,9 +621,7 @@ fn markdown_preserves_links() {
 fn markdown_pipe_in_prose_does_not_corrupt_gfm() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
-        .with_data(vec![vec![TableCellContent::from(Prose::new(
-            "left|right",
-        ))]]);
+        .with_data(vec![vec![TableCellContent::from(Prose::new("left|right"))]]);
     let md = table.render_markdown();
     assert!(
         md.contains("left\\|right"),
@@ -737,7 +744,10 @@ fn existing_text_cells_still_work() {
 fn existing_typed_cells_still_format_correctly() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Price")])
-        .with_data(vec![vec![TableCellContent::Currency(Currency::USD, 1234.56)]]);
+        .with_data(vec![vec![TableCellContent::Currency(
+            Currency::USD,
+            1234.56,
+        )]]);
     let node = table.render_tree_node().expect("tree node");
     let plain = strip_ansi(&render_tree_node(&node, 80));
     assert!(plain.contains("$1,234.56"));

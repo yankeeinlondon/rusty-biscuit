@@ -61,9 +61,8 @@ impl TreeRenderable for Prose {
     /// embedding shape returned by [`Prose::to_render_nodes`] unchanged for
     /// containers.
     fn render_tree(&self) -> RenderNode {
-        let blocks = crate::render_tree::projection::fold_prose_nodes_into_blocks(
-            self.to_render_nodes(),
-        );
+        let blocks =
+            crate::render_tree::projection::fold_prose_nodes_into_blocks(self.to_render_nodes());
 
         let mut root = RenderNode::root(blocks);
         if self.layout != Layout::default() {

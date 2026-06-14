@@ -84,34 +84,19 @@ mod tests {
     #[test]
     fn test_underline_variants_block() {
         let prose = Prose::new("<double-underline>double</double-underline>");
-        assert_eq!(
-            prose.render_optimistic(None),
-            "\x1b[4:2mdouble\x1b[0m"
-        );
+        assert_eq!(prose.render_optimistic(None), "\x1b[4:2mdouble\x1b[0m");
 
         let prose = Prose::new("<uu>double</uu>");
-        assert_eq!(
-            prose.render_optimistic(None),
-            "\x1b[4:2mdouble\x1b[0m"
-        );
+        assert_eq!(prose.render_optimistic(None), "\x1b[4:2mdouble\x1b[0m");
 
         let prose = Prose::new("<curly-underline>curly</curly-underline>");
-        assert_eq!(
-            prose.render_optimistic(None),
-            "\x1b[4:3mcurly\x1b[0m"
-        );
+        assert_eq!(prose.render_optimistic(None), "\x1b[4:3mcurly\x1b[0m");
 
         let prose = Prose::new("<dotted-underline>dotted</dotted-underline>");
-        assert_eq!(
-            prose.render_optimistic(None),
-            "\x1b[4:4mdotted\x1b[0m"
-        );
+        assert_eq!(prose.render_optimistic(None), "\x1b[4:4mdotted\x1b[0m");
 
         let prose = Prose::new("<dashed-underline>dashed</dashed-underline>");
-        assert_eq!(
-            prose.render_optimistic(None),
-            "\x1b[4:5mdashed\x1b[0m"
-        );
+        assert_eq!(prose.render_optimistic(None), "\x1b[4:5mdashed\x1b[0m");
     }
 
     #[test]
@@ -184,10 +169,7 @@ mod tests {
     #[test]
     fn test_bright_color_block() {
         let prose = Prose::new("<bright-red>bright error</bright-red>");
-        assert_eq!(
-            prose.render_optimistic(None),
-            "\x1b[91mbright error\x1b[0m"
-        );
+        assert_eq!(prose.render_optimistic(None), "\x1b[91mbright error\x1b[0m");
 
         let prose = Prose::new("<bright-cyan>info</bright-cyan>");
         assert_eq!(prose.render_optimistic(None), "\x1b[96minfo\x1b[0m");
@@ -228,14 +210,26 @@ mod tests {
         };
 
         let truecolor = render_at(ColorDepth::TrueColor);
-        assert!(truecolor.contains("\x1b[38;2;128;128;128m"), "got: {truecolor:?}");
+        assert!(
+            truecolor.contains("\x1b[38;2;128;128;128m"),
+            "got: {truecolor:?}"
+        );
 
         let enhanced = render_at(ColorDepth::Enhanced);
-        assert!(enhanced.contains("\x1b[38;5;"), "256-color expected; got: {enhanced:?}");
-        assert!(!enhanced.contains("38;2;"), "must not stay truecolor; got: {enhanced:?}");
+        assert!(
+            enhanced.contains("\x1b[38;5;"),
+            "256-color expected; got: {enhanced:?}"
+        );
+        assert!(
+            !enhanced.contains("38;2;"),
+            "must not stay truecolor; got: {enhanced:?}"
+        );
 
         let basic = render_at(ColorDepth::Basic);
-        assert!(!basic.contains("38;2;") && !basic.contains("38;5;"), "got: {basic:?}");
+        assert!(
+            !basic.contains("38;2;") && !basic.contains("38;5;"),
+            "got: {basic:?}"
+        );
 
         let none = render_at(ColorDepth::None);
         assert!(

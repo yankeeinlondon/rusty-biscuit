@@ -121,18 +121,12 @@ fn terminal_named_background_color() {
 
 #[test]
 fn terminal_rgb_foreground_color() {
-    assert_eq!(
-        term("<rgb 1,2,3>c</rgb>"),
-        "\x1b[38;2;1;2;3mc\x1b[0m"
-    );
+    assert_eq!(term("<rgb 1,2,3>c</rgb>"), "\x1b[38;2;1;2;3mc\x1b[0m");
 }
 
 #[test]
 fn terminal_rgb_background_color() {
-    assert_eq!(
-        term("<bg-rgb 1,2,3>c</bg-rgb>"),
-        "\x1b[48;2;1;2;3mc\x1b[0m"
-    );
+    assert_eq!(term("<bg-rgb 1,2,3>c</bg-rgb>"), "\x1b[48;2;1;2;3mc\x1b[0m");
 }
 
 // ── Terminal: underline variants ──────────────────────────────────────────
@@ -186,10 +180,7 @@ fn terminal_double_underline_degrades_to_straight() {
             colored: false,
         })
         .build();
-    assert_eq!(
-        term_caps("<uu>x</uu>", &terminal),
-        "\x1b[4mx\x1b[0m"
-    );
+    assert_eq!(term_caps("<uu>x</uu>", &terminal), "\x1b[4mx\x1b[0m");
 }
 
 #[test]
@@ -319,10 +310,7 @@ fn terminal_escaped_angle_brackets_are_literal() {
 
 #[test]
 fn terminal_code_fence_is_dim_and_indented() {
-    assert_eq!(
-        term("```\ncode\n```"),
-        "\x1b[2m    code\x1b[0m"
-    );
+    assert_eq!(term("```\ncode\n```"), "\x1b[2m    code\x1b[0m");
 }
 
 #[test]
@@ -362,7 +350,10 @@ fn terminal_word_wrap_breaks_long_line() {
         Prose::new("one two three four five").with_word_wrap(WordWrap::WrapProse(None, None));
     // At width 10, "one two" (7) fits, "three" (5) fits on its own line,
     // and "four five" (9) fits on the last line.
-    assert_eq!(prose.render_optimistic(Some(10)), "one two\nthree\nfour five");
+    assert_eq!(
+        prose.render_optimistic(Some(10)),
+        "one two\nthree\nfour five"
+    );
 }
 
 // ── Browser ──────────────────────────────────────────────────────────────
@@ -420,9 +411,8 @@ fn browser_href_is_attribute_escaped() {
 #[test]
 fn browser_code_block_body_is_escaped() {
     assert!(
-        html("```\n</code-block><red>x</red>\n```").contains(
-            "<pre><code>&lt;/code-block&gt;&lt;red&gt;x&lt;/red&gt;</code></pre>"
-        ),
+        html("```\n</code-block><red>x</red>\n```")
+            .contains("<pre><code>&lt;/code-block&gt;&lt;red&gt;x&lt;/red&gt;</code></pre>"),
         "got: {}",
         html("```\n</code-block><red>x</red>\n```")
     );

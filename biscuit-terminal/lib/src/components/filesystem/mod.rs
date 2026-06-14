@@ -677,9 +677,7 @@ impl FileSystem {
     /// # Ok::<(), biscuit_terminal::prelude::FileSystemError>(())
     /// ```
     pub fn document_extensions(self) -> Self {
-        self.extension_filter(
-            ["md", "txt", "doc", "docx", "xls", "xlsx", "pdf"],
-        )
+        self.extension_filter(["md", "txt", "doc", "docx", "xls", "xlsx", "pdf"])
     }
 
     /// Restricts scanned files to an exact set of paths relative to the root.
@@ -1462,8 +1460,8 @@ impl FileSystem {
             // or included-path). When active, non-matching files are skipped
             // and directories are pruned unless they have surviving children.
             let has_substring_filter = !self.filter_patterns.is_empty();
-            let matches_substring = has_substring_filter
-                && self.filter_patterns.iter().any(|p| file_name.contains(p));
+            let matches_substring =
+                has_substring_filter && self.filter_patterns.iter().any(|p| file_name.contains(p));
             let has_file_filters = self.has_file_filters();
 
             if is_dir {
@@ -1508,11 +1506,7 @@ impl FileSystem {
                 });
             } else {
                 // Skip non-matching files when any filter is active
-                if !self.file_passes_all_filters(
-                    &file_name,
-                    &rel_file_path,
-                    matches_substring,
-                ) {
+                if !self.file_passes_all_filters(&file_name, &rel_file_path, matches_substring) {
                     continue;
                 }
 
@@ -3136,8 +3130,7 @@ impl FileSystem {
             ])
         } else {
             // Default root header: icon + name with paragraph-level bold blue.
-            let mut para =
-                RenderNode::paragraph(vec![icon_span, RenderNode::text(" "), name_node]);
+            let mut para = RenderNode::paragraph(vec![icon_span, RenderNode::text(" "), name_node]);
             para.attrs.set_style(&bold_blue_style);
             para
         };
@@ -4608,7 +4601,7 @@ mod tests {
 
     #[test]
     fn test_filesystem_builder_layout() {
-        use crate::utils::layout::{Layout, Length, Edges, TargetValue};
+        use crate::utils::layout::{Edges, Layout, Length, TargetValue};
 
         let custom_layout = Layout {
             margin: Edges {
@@ -7794,7 +7787,9 @@ mod tests {
             "keep.md should not be ignored",
         );
         assert!(
-            find_node(tree, "debug.log").expect("debug.log").is_ignored(),
+            find_node(tree, "debug.log")
+                .expect("debug.log")
+                .is_ignored(),
             "debug.log should be ignored by *.log",
         );
         assert!(
@@ -7953,8 +7948,16 @@ mod tests {
                 is_symlink: false,
                 metrics: None,
             };
-            assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::ext::PDF, "{name}");
-            assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::PDF, "{name}");
+            assert_eq!(
+                fs.get_icon(&node, 0, Some(true)),
+                icons::nerd::ext::PDF,
+                "{name}"
+            );
+            assert_eq!(
+                fs.get_icon(&node, 0, Some(false)),
+                icons::unicode::file::PDF,
+                "{name}"
+            );
         }
     }
 
@@ -7968,8 +7971,16 @@ mod tests {
                 is_symlink: false,
                 metrics: None,
             };
-            assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::ext::WORD, ".{ext}");
-            assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::WORD, ".{ext}");
+            assert_eq!(
+                fs.get_icon(&node, 0, Some(true)),
+                icons::nerd::ext::WORD,
+                ".{ext}"
+            );
+            assert_eq!(
+                fs.get_icon(&node, 0, Some(false)),
+                icons::unicode::file::WORD,
+                ".{ext}"
+            );
         }
     }
 
@@ -7983,8 +7994,16 @@ mod tests {
                 is_symlink: false,
                 metrics: None,
             };
-            assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::ext::EXCEL, ".{ext}");
-            assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::EXCEL, ".{ext}");
+            assert_eq!(
+                fs.get_icon(&node, 0, Some(true)),
+                icons::nerd::ext::EXCEL,
+                ".{ext}"
+            );
+            assert_eq!(
+                fs.get_icon(&node, 0, Some(false)),
+                icons::unicode::file::EXCEL,
+                ".{ext}"
+            );
         }
     }
 
@@ -7998,8 +8017,16 @@ mod tests {
                 is_symlink: false,
                 metrics: None,
             };
-            assert_eq!(fs.get_icon(&node, 0, Some(true)), icons::nerd::ext::TEXT, ".{ext}");
-            assert_eq!(fs.get_icon(&node, 0, Some(false)), icons::unicode::file::TEXT, ".{ext}");
+            assert_eq!(
+                fs.get_icon(&node, 0, Some(true)),
+                icons::nerd::ext::TEXT,
+                ".{ext}"
+            );
+            assert_eq!(
+                fs.get_icon(&node, 0, Some(false)),
+                icons::unicode::file::TEXT,
+                ".{ext}"
+            );
         }
     }
 
@@ -8042,7 +8069,10 @@ mod tests {
     fn test_document_extensions_builder() {
         let fs = FileSystem::default().document_extensions();
         for ext in ["md", "txt", "doc", "docx", "xls", "xlsx", "pdf"] {
-            assert!(fs.extension_allowlist.contains(ext), "expected '{ext}' in allowlist");
+            assert!(
+                fs.extension_allowlist.contains(ext),
+                "expected '{ext}' in allowlist"
+            );
         }
         assert_eq!(fs.extension_allowlist.len(), 7);
     }
@@ -8056,7 +8086,10 @@ mod tests {
         std::fs::write(root.join("c.png"), "x").unwrap();
         std::fs::write(root.join("d.rs"), "x").unwrap();
 
-        let mut fs = FileSystem::new(root).unwrap().document_extensions().show_root(false);
+        let mut fs = FileSystem::new(root)
+            .unwrap()
+            .document_extensions()
+            .show_root(false);
         fs.ensure_tree_built();
         let tree = fs.tree().unwrap();
         let names: Vec<&str> = tree.iter().map(|n| n.name()).collect();
@@ -8074,7 +8107,10 @@ mod tests {
         std::fs::write(root.join("mixed.TxT"), "x").unwrap();
         std::fs::write(root.join("lower.docx"), "x").unwrap();
 
-        let mut fs = FileSystem::new(root).unwrap().document_extensions().show_root(false);
+        let mut fs = FileSystem::new(root)
+            .unwrap()
+            .document_extensions()
+            .show_root(false);
         fs.ensure_tree_built();
         let tree = fs.tree().unwrap();
         let names: Vec<&str> = tree.iter().map(|n| n.name()).collect();
@@ -8095,13 +8131,22 @@ mod tests {
         std::fs::create_dir(root.join("docs")).unwrap();
         std::fs::write(root.join("docs/readme.md"), "x").unwrap();
 
-        let mut fs = FileSystem::new(root).unwrap().document_extensions().show_root(false);
+        let mut fs = FileSystem::new(root)
+            .unwrap()
+            .document_extensions()
+            .show_root(false);
         fs.ensure_tree_built();
         let tree = fs.tree().unwrap();
         let names: Vec<&str> = tree.iter().map(|n| n.name()).collect();
         // 'src' must be pruned (no matching descendants), 'docs' must survive
-        assert!(!names.contains(&"src"), "empty ancestor 'src' should be pruned");
-        assert!(names.contains(&"docs"), "'docs' has matching descendants and must survive");
+        assert!(
+            !names.contains(&"src"),
+            "empty ancestor 'src' should be pruned"
+        );
+        assert!(
+            names.contains(&"docs"),
+            "'docs' has matching descendants and must survive"
+        );
     }
 
     #[test]
@@ -8125,10 +8170,8 @@ mod tests {
     #[test]
     fn test_included_paths_builder() {
         use std::path::PathBuf;
-        let fs = FileSystem::default().included_paths([
-            PathBuf::from("docs/a.md"),
-            PathBuf::from("docs/b.txt"),
-        ]);
+        let fs = FileSystem::default()
+            .included_paths([PathBuf::from("docs/a.md"), PathBuf::from("docs/b.txt")]);
         assert!(fs.included_paths.contains(&PathBuf::from("docs/a.md")));
         assert!(fs.included_paths.contains(&PathBuf::from("docs/b.txt")));
     }
@@ -8137,12 +8180,16 @@ mod tests {
     fn test_included_paths_rejects_unsafe() {
         use std::path::PathBuf;
         let fs = FileSystem::default().included_paths([
-            PathBuf::from("safe.md"),            // ok
-            PathBuf::from("../escape.md"),        // rejected (ParentDir)
-            PathBuf::from("/absolute.md"),        // rejected (absolute)
+            PathBuf::from("safe.md"),      // ok
+            PathBuf::from("../escape.md"), // rejected (ParentDir)
+            PathBuf::from("/absolute.md"), // rejected (absolute)
         ]);
         assert!(fs.included_paths.contains(&PathBuf::from("safe.md")));
-        assert_eq!(fs.included_paths.len(), 1, "only the safe path should survive");
+        assert_eq!(
+            fs.included_paths.len(),
+            1,
+            "only the safe path should survive"
+        );
     }
 
     #[test]
@@ -8202,10 +8249,7 @@ mod tests {
         // allows md/txt — so only a.md survives (both filters must pass).
         let mut fs = FileSystem::new(root)
             .unwrap()
-            .included_paths([
-                PathBuf::from("d/a.md"),
-                PathBuf::from("d/c.png"),
-            ])
+            .included_paths([PathBuf::from("d/a.md"), PathBuf::from("d/c.png")])
             .extension_filter(["md", "txt"])
             .show_root(false);
         fs.ensure_tree_built();

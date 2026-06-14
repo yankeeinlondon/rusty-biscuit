@@ -740,13 +740,19 @@ fn apply_sgr_params(params: &str, state: &mut SgrState) {
             49 => state.bg.clear(),
             38 => {
                 let span = extended_color_span(&tokens[i..]);
-                state.fg = tokens[i..i + span].iter().map(ToString::to_string).collect();
+                state.fg = tokens[i..i + span]
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect();
                 i += span;
                 continue;
             }
             48 => {
                 let span = extended_color_span(&tokens[i..]);
-                state.bg = tokens[i..i + span].iter().map(ToString::to_string).collect();
+                state.bg = tokens[i..i + span]
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect();
                 i += span;
                 continue;
             }

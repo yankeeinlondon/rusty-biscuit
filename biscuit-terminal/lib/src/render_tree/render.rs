@@ -32,13 +32,13 @@
 
 use renderable::color::TerminalCodeContext;
 use renderable::style::{Style, TextEmphasis};
+#[cfg(feature = "image")]
+use renderable::tree::TerminalMermaidMode;
 use renderable::tree::{
     ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HrAlignment, HrKind,
     HrWeight, InheritedStyle, NodeKind, ProgressHints, RenderError, RenderNode, RenderStrictness,
     Rendered, Severity, TableColumnHints, TableTerminalHints, TextLayoutHints, TextOverflow,
 };
-#[cfg(feature = "image")]
-use renderable::tree::TerminalMermaidMode;
 use renderable::tree::{ValidationError, ValidationMode, validate};
 
 use crate::components::block_quote::BlockQuote;
@@ -47,8 +47,6 @@ use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyl
 use crate::components::mermaid::MermaidDiagram;
 use crate::components::prose::Prose;
 use crate::components::renderable::TerminalRenderable;
-use crate::components::terminal_image::TerminalImage;
-use crate::discovery::detection::ImageSupport;
 use crate::components::table::cell::pad_cell;
 use crate::components::table::table::{
     BG_RESET, FG_RESET, apply_vertical_padding, build_border, stripe_bg_escape, stripe_fg_escape,
@@ -57,7 +55,9 @@ use crate::components::table::table::{
 use crate::components::table::{
     ColumnType, Conditional, Table, TableCellContent, TableColumn, TableWidthPlan, VerticalAlign,
 };
+use crate::components::terminal_image::TerminalImage;
 use crate::discovery::detection::ColorDepth;
+use crate::discovery::detection::ImageSupport;
 use crate::utils::block_constraint::{
     split_lines, split_trailing_escapes, visible_width, wrap_lines,
 };
@@ -177,8 +177,7 @@ fn render_svg_string(svg: &str, term: &crate::terminal::Terminal) -> std::io::Re
 
     let mut file = tempfile::Builder::new().suffix(".svg").tempfile()?;
     file.write_all(svg.as_bytes())?;
-    let img = TerminalImage::new(file.path())
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let img = TerminalImage::new(file.path()).map_err(|e| std::io::Error::other(e.to_string()))?;
     Ok(img.render(term))
 }
 
@@ -403,9 +402,10 @@ impl Writer<'_> {
             renderable::layout::Width::Fixed(tv) => {
                 resolve_cells(tv, available).min(auto_cap).max(1)
             }
-            renderable::layout::Width::FitContent => {
-                self.measure_fit_content(node, auto_cap)?.min(auto_cap).max(1)
-            }
+            renderable::layout::Width::FitContent => self
+                .measure_fit_content(node, auto_cap)?
+                .min(auto_cap)
+                .max(1),
         };
 
         // Apply max_width cap if declared. The resolved cap further narrows
@@ -973,19 +973,21 @@ impl Writer<'_> {
     ) -> Result<String, RenderError> {
         let term = &self.opts.context.terminal;
         match &node.kind {
-            NodeKind::Text { value } => Ok(apply_classes(
-                value,
-                &node.attrs.classes,
-                effective,
-                term,
-            )),
+            NodeKind::Text { value } => {
+                Ok(apply_classes(value, &node.attrs.classes, effective, term))
+            }
             NodeKind::Emphasis { children } => {
                 let inner = self.render_inline(children, effective)?;
                 let mut child_effective = effective.clone();
                 child_effective.emphasis.italic = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
                 let close = style::appearance_close(&open, effective, term);
-                Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
+                Ok(apply_classes(
+                    &format!("{open}{inner}{close}"),
+                    &node.attrs.classes,
+                    effective,
+                    term,
+                ))
             }
             NodeKind::Strong { children } => {
                 let inner = self.render_inline(children, effective)?;
@@ -993,7 +995,12 @@ impl Writer<'_> {
                 child_effective.emphasis.bold = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
                 let close = style::appearance_close(&open, effective, term);
-                Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
+                Ok(apply_classes(
+                    &format!("{open}{inner}{close}"),
+                    &node.attrs.classes,
+                    effective,
+                    term,
+                ))
             }
             NodeKind::Delete { children } => {
                 let inner = self.render_inline(children, effective)?;
@@ -1001,7 +1008,12 @@ impl Writer<'_> {
                 child_effective.emphasis.strikethrough = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
                 let close = style::appearance_close(&open, effective, term);
-                Ok(apply_classes(&format!("{open}{inner}{close}"), &node.attrs.classes, effective, term))
+                Ok(apply_classes(
+                    &format!("{open}{inner}{close}"),
+                    &node.attrs.classes,
+                    effective,
+                    term,
+                ))
             }
             NodeKind::Span { children } => {
                 // An inline `Span` may carry a declared `Style`. Its
@@ -1032,7 +1044,12 @@ impl Writer<'_> {
                 child_effective.emphasis.inverse = true;
                 let open = style::text_appearance_sgr(&child_effective, term);
                 let close = style::appearance_close(&open, effective, term);
-                Ok(apply_classes(&format!("{open}{value}{close}"), &node.attrs.classes, effective, term))
+                Ok(apply_classes(
+                    &format!("{open}{value}{close}"),
+                    &node.attrs.classes,
+                    effective,
+                    term,
+                ))
             }
             NodeKind::Link {
                 url,
@@ -1114,14 +1131,12 @@ impl Writer<'_> {
                     GraphicsMode::Off | GraphicsMode::Vector => Ok(fallback()),
                     // Rich: attempt the inline image protocol, falling back to
                     // alt text when the source is out of contract or unrenderable.
-                    GraphicsMode::Rich => {
-                        Ok(self.render_terminal_image(url, alt).unwrap_or_else(fallback))
-                    }
+                    GraphicsMode::Rich => Ok(self
+                        .render_terminal_image(url, alt)
+                        .unwrap_or_else(fallback)),
                 }
             }
-            NodeKind::FootnoteReference { identifier } => {
-                Ok(format!("[^{identifier}]"))
-            }
+            NodeKind::FootnoteReference { identifier } => Ok(format!("[^{identifier}]")),
             NodeKind::SoftBreak => Ok(" ".to_string()),
             NodeKind::HardBreak => Ok("\n".to_string()),
             // Built-in tokens lower to direct SGR: `mark` highlights via
@@ -1129,7 +1144,9 @@ impl Writer<'_> {
             // legacy span-class path in `apply_classes`. An unrecognized token
             // renders its children as plain inline content.
             NodeKind::Extended {
-                token, children, payload,
+                token,
+                children,
+                payload,
             } => {
                 if token.as_ref() == "icon" {
                     return self.render_icon_payload(payload, term);
@@ -1274,12 +1291,7 @@ impl Writer<'_> {
             } else {
                 bullet.clone()
             };
-            lines.push(self.render_list_item(
-                child,
-                &prefix,
-                hanging_indent,
-                indent_children,
-            )?);
+            lines.push(self.render_list_item(child, &prefix, hanging_indent, indent_children)?);
         }
         Ok(lines.join("\n"))
     }
@@ -1744,7 +1756,9 @@ impl Writer<'_> {
             Err(_) => return Ok(payload.clone()),
         };
 
-        if icon.nerd_font_preferred && let Some(ref nerd) = icon.nerd_font {
+        if icon.nerd_font_preferred
+            && let Some(ref nerd) = icon.nerd_font
+        {
             return Ok(nerd.clone());
         }
         if let Some(ref unicode) = icon.unicode {
@@ -1978,7 +1992,12 @@ impl Writer<'_> {
         inner: &str,
         effective: &Style,
     ) -> Result<String, RenderError> {
-        let styled = apply_classes(inner, &node.attrs.classes, effective, &self.opts.context.terminal);
+        let styled = apply_classes(
+            inner,
+            &node.attrs.classes,
+            effective,
+            &self.opts.context.terminal,
+        );
         for class in &node.attrs.classes {
             if !is_known_class(class) && self.opts.strictness == RenderStrictness::Warn {
                 self.diagnostics.push(Diagnostic::lossy(
@@ -2271,7 +2290,12 @@ fn prefix_first_line(prefix: &str, body: &str) -> String {
 ///
 /// `mark` highlights via reverse video, `dim` dims, and `sup`/`sub` are
 /// approximated as dim text since terminals lack super/subscript.
-fn apply_classes(inner: &str, classes: &[String], effective: &Style, term: &crate::terminal::Terminal) -> String {
+fn apply_classes(
+    inner: &str,
+    classes: &[String],
+    effective: &Style,
+    term: &crate::terminal::Terminal,
+) -> String {
     let mut emphasis = TextEmphasis::default();
     for class in classes {
         match class.as_str() {
@@ -2710,7 +2734,11 @@ mod render_tree_tests {
                 _value: &str,
                 _meta: Option<&str>,
                 _attrs: &renderable::tree::NodeAttrs,
-            ) -> Option<renderable::browser::fragment::BrowserFragment<renderable::browser::fragment::Ready>> {
+            ) -> Option<
+                renderable::browser::fragment::BrowserFragment<
+                    renderable::browser::fragment::Ready,
+                >,
+            > {
                 None
             }
         }
@@ -2757,7 +2785,11 @@ mod render_tree_tests {
                 _value: &str,
                 _meta: Option<&str>,
                 _attrs: &renderable::tree::NodeAttrs,
-            ) -> Option<renderable::browser::fragment::BrowserFragment<renderable::browser::fragment::Ready>> {
+            ) -> Option<
+                renderable::browser::fragment::BrowserFragment<
+                    renderable::browser::fragment::Ready,
+                >,
+            > {
                 None
             }
         }
@@ -2783,16 +2815,16 @@ mod render_tree_tests {
 
         let contexts = seen.borrow();
         assert_eq!(contexts.len(), 2);
-        assert_eq!(
-            contexts[0].color_mode(),
-            renderable::color::ColorMode::Dark
-        );
+        assert_eq!(contexts[0].color_mode(), renderable::color::ColorMode::Dark);
         assert_eq!(
             contexts[1].color_mode(),
             renderable::color::ColorMode::Light
         );
         for context in contexts.iter() {
-            assert_eq!(context.color_depth(), renderable::color::ColorDepth::TrueColor);
+            assert_eq!(
+                context.color_depth(),
+                renderable::color::ColorDepth::TrueColor
+            );
             assert_eq!(context.code_theme_name(), Some("one-half"));
             assert!(context.line_numbers());
         }
@@ -3268,8 +3300,7 @@ mod render_tree_tests {
     }
 
     fn text_layout_link(label: &str, hints: TextLayoutHints) -> RenderNode {
-        let mut link =
-            RenderNode::link("https://example.com", None, vec![RenderNode::text(label)]);
+        let mut link = RenderNode::link("https://example.com", None, vec![RenderNode::text(label)]);
         link.attrs.set_text_layout(&hints);
         RenderNode::paragraph(vec![link])
     }
@@ -3421,8 +3452,8 @@ mod render_tree_tests {
 
     #[test]
     fn render_tree_image_text_layout_exact_width_includes_block_framing() {
-        use renderable::layout::{Alignment, Length, TargetValue};
         use super::super::options::ImagePlaceholder;
+        use renderable::layout::{Alignment, Length, TargetValue};
         // The block placeholder `▉ IMAGE[ab]` is 11 columns wide; a 16-column
         // exact width pads it (right-aligned) to fill the field, framing
         // included, rather than padding only the alt inside the brackets.
@@ -3472,7 +3503,10 @@ mod render_tree_tests {
 
         let right = render_pad(RAlignment::Right);
         let center = render_pad(RAlignment::Center);
-        assert!(right > center, "right pad {right} should exceed center {center}");
+        assert!(
+            right > center,
+            "right pad {right} should exceed center {center}"
+        );
         assert!(center > 0, "center pad should be positive");
     }
 
@@ -3920,7 +3954,7 @@ mod render_tree_tests {
 
     #[test]
     fn render_tree_max_width_with_margins() {
-        use renderable::layout::{Layout, Length, Edges, TargetValue};
+        use renderable::layout::{Edges, Layout, Length, TargetValue};
 
         let term = Terminal::new_optimistic(80);
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hello")]);
@@ -3945,7 +3979,7 @@ mod render_tree_tests {
 
     #[test]
     fn render_tree_nested_layout_composition_under_max_width() {
-        use renderable::layout::{Alignment, Layout, Length, Edges, TargetValue};
+        use renderable::layout::{Alignment, Edges, Layout, Length, TargetValue};
 
         let term = Terminal::new_optimistic(80);
 
@@ -4210,7 +4244,10 @@ mod render_tree_tests {
             ..Style::default()
         };
         let out = render_block_with_layout_and_style("hi", layout, style, 80);
-        let line = out.lines().find(|l| l.contains("hi")).expect("content line");
+        let line = out
+            .lines()
+            .find(|l| l.contains("hi"))
+            .expect("content line");
         assert_eq!(
             background_run_width(line),
             20,
@@ -4259,7 +4296,10 @@ mod render_tree_tests {
             ..Style::default()
         };
         let out = render_block_with_layout_and_style("hi", layout, style, 40);
-        let line = out.lines().find(|l| l.contains("hi")).expect("content line");
+        let line = out
+            .lines()
+            .find(|l| l.contains("hi"))
+            .expect("content line");
         assert_eq!(
             background_run_width(line),
             40,
@@ -4307,7 +4347,10 @@ mod render_tree_tests {
             ..Style::default()
         };
         let out = render_block_with_layout_and_style("hi", layout, style, 80);
-        let line = out.lines().find(|l| l.contains("hi")).expect("content line");
+        let line = out
+            .lines()
+            .find(|l| l.contains("hi"))
+            .expect("content line");
         assert_eq!(
             background_run_width(line),
             20,
@@ -4330,7 +4373,10 @@ mod render_tree_tests {
             ..Style::default()
         };
         let out = render_block_with_layout_and_style("hi\nthere", layout, style, 40);
-        for line in out.lines().filter(|l| l.contains("hi") || l.contains("there")) {
+        for line in out
+            .lines()
+            .filter(|l| l.contains("hi") || l.contains("there"))
+        {
             assert_eq!(
                 background_run_width(line),
                 5,
@@ -4354,7 +4400,10 @@ mod render_tree_tests {
             ..Style::default()
         };
         let out = render_block_with_layout_and_style("hi\nthere", layout, style, 80);
-        for line in out.lines().filter(|l| l.contains("hi") || l.contains("there")) {
+        for line in out
+            .lines()
+            .filter(|l| l.contains("hi") || l.contains("there"))
+        {
             assert_eq!(
                 background_run_width(line),
                 20,
@@ -4458,7 +4507,9 @@ mod render_tree_tests {
         let rule = plain
             .lines()
             .map(str::trim)
-            .find(|l| l.starts_with('┌') || l.starts_with('┏') || l.starts_with('╔') || l.starts_with('╭'))
+            .find(|l| {
+                l.starts_with('┌') || l.starts_with('┏') || l.starts_with('╔') || l.starts_with('╭')
+            })
             .unwrap_or_else(|| panic!("no top border rule in:\n{plain}"));
         visible_width(rule) as usize
     }
@@ -4507,7 +4558,10 @@ mod render_tree_tests {
             ..Style::default()
         };
         let out = render_block_with_layout_and_style("hi", layout, style, 40);
-        let first = out.lines().find(|l| l.contains("hi")).expect("line with hi");
+        let first = out
+            .lines()
+            .find(|l| l.contains("hi"))
+            .expect("line with hi");
         assert_eq!(
             leading_unstyled_spaces(first),
             2,
@@ -4774,11 +4828,7 @@ mod render_tree_tests {
             .set_style(&fg_style(renderable::color::BasicColor::Green));
         let mut parent = RenderNode::span(
             vec![],
-            vec![
-                RenderNode::text("head "),
-                child,
-                RenderNode::text(" tail"),
-            ],
+            vec![RenderNode::text("head "), child, RenderNode::text(" tail")],
         );
         parent.attrs.set_style(&inverse_style);
         let para = RenderNode::paragraph(vec![parent]);
@@ -4890,10 +4940,11 @@ mod render_tree_tests {
         use crate::discovery::detection::ImageSupport;
 
         let mut hr = RenderNode::thematic_break();
-        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
-            kind: Some(HrKind::Waves),
-            ..Default::default()
-        });
+        hr.attrs
+            .set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+                kind: Some(HrKind::Waves),
+                ..Default::default()
+            });
 
         let term = Terminal::builder()
             .width(40)
@@ -4952,10 +5003,11 @@ mod render_tree_tests {
     fn render_tree_thematic_break_off_mode_suppresses_image_tier() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
-        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
-            kind: Some(HrKind::Waves),
-            ..Default::default()
-        });
+        hr.attrs
+            .set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+                kind: Some(HrKind::Waves),
+                ..Default::default()
+            });
 
         let term = Terminal::builder()
             .width(40)
@@ -4985,10 +5037,11 @@ mod render_tree_tests {
     fn render_tree_thematic_break_rich_mode_uses_image_tier_when_available() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
-        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
-            kind: Some(HrKind::Waves),
-            ..Default::default()
-        });
+        hr.attrs
+            .set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+                kind: Some(HrKind::Waves),
+                ..Default::default()
+            });
 
         let term = Terminal::builder()
             .width(40)
@@ -5013,10 +5066,11 @@ mod render_tree_tests {
     fn render_tree_thematic_break_vector_mode_uses_text_tier() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
-        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
-            kind: Some(HrKind::Waves),
-            ..Default::default()
-        });
+        hr.attrs
+            .set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+                kind: Some(HrKind::Waves),
+                ..Default::default()
+            });
 
         let term = Terminal::builder()
             .width(40)
@@ -5046,10 +5100,11 @@ mod render_tree_tests {
     fn render_tree_thematic_break_force_graphics_rasterizes_on_unsupported_terminal() {
         use crate::discovery::detection::ImageSupport;
         let mut hr = RenderNode::thematic_break();
-        hr.attrs.set_thematic_break(&renderable::tree::ThematicBreakAttrs {
-            kind: Some(HrKind::Waves),
-            ..Default::default()
-        });
+        hr.attrs
+            .set_thematic_break(&renderable::tree::ThematicBreakAttrs {
+                kind: Some(HrKind::Waves),
+                ..Default::default()
+            });
 
         let term = Terminal::builder()
             .width(40)
@@ -5086,8 +5141,11 @@ mod render_tree_tests {
         use crate::discovery::detection::ImageSupport;
         use renderable::tree::{GraphicsMode, TerminalMermaidMode};
 
-        let mermaid_node =
-            RenderNode::code(Some("mermaid".to_string()), None, "flowchart LR\n    A --> B");
+        let mermaid_node = RenderNode::code(
+            Some("mermaid".to_string()),
+            None,
+            "flowchart LR\n    A --> B",
+        );
 
         let term = Terminal::builder()
             .width(80)
