@@ -1,7 +1,7 @@
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
-use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::components::table::types::ColumnType;
+use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::components::two_column::TwoColumn;
 use biscuit_terminal::terminal::Terminal;
 
@@ -64,12 +64,14 @@ pub fn build_table(rows: &[SetRow], term: &Terminal) -> Table {
 
     Table::new()
         .with_columns(vec![
-            TableColumn::new("Set")
-                .with_max_width(30)
-                .with_word_wrap(biscuit_terminal::utils::wrap_policy::WordWrap::WrapProse(None, None)),
+            TableColumn::new("Set").with_max_width(30).with_word_wrap(
+                biscuit_terminal::utils::wrap_policy::WordWrap::WrapProse(None, None),
+            ),
             TableColumn::new("Prefix")
                 .with_max_width(20)
-                .with_word_wrap(biscuit_terminal::utils::wrap_policy::WordWrap::WrapProse(None, None)),
+                .with_word_wrap(biscuit_terminal::utils::wrap_policy::WordWrap::WrapProse(
+                    None, None,
+                )),
             TableColumn::new("Total").with_type(ColumnType::Integer),
             TableColumn::new("Cached").with_type(ColumnType::Integer),
         ])
@@ -109,12 +111,10 @@ pub fn choose_layout(rows: &[SetRow], term: &Terminal) -> Layout {
 pub fn render_sets(rows: &[SetRow], term: &Terminal) -> String {
     match choose_layout(rows, term) {
         Layout::Single(table) => table.render(term),
-        Layout::Split(left, right) => {
-            TwoColumn::new(left, right)
-                .with_left_percent(0.5)
-                .with_gap(SPLIT_GAP)
-                .render(term)
-        }
+        Layout::Split(left, right) => TwoColumn::new(left, right)
+            .with_left_percent(0.5)
+            .with_gap(SPLIT_GAP)
+            .render(term),
     }
 }
 
@@ -134,10 +134,7 @@ mod tests {
     }
 
     fn term(width: u32, height: u32) -> Terminal {
-        Terminal::builder()
-            .width(width)
-            .height(height)
-            .build()
+        Terminal::builder().width(width).height(height).build()
     }
 
     #[test]
@@ -233,7 +230,10 @@ mod tests {
                     assert!(
                         diff <= 1,
                         "count={}: left={} right={} diff={}",
-                        count, left_count, right_count, diff
+                        count,
+                        left_count,
+                        right_count,
+                        diff
                     );
                     assert_eq!(left_count + right_count, count);
                 }
@@ -280,7 +280,11 @@ mod tests {
         }];
         let t = term(80, 10);
         let output = render_sets(&rows, &t);
-        assert!(output.contains("1,234,567"), "expected thousands separator; got: {}", output);
+        assert!(
+            output.contains("1,234,567"),
+            "expected thousands separator; got: {}",
+            output
+        );
     }
 
     #[test]
@@ -309,9 +313,7 @@ mod tests {
         let continuation = lines
             .iter()
             .find(|l| l.contains("emojibits") && !l.contains("streamlineplump"))
-            .unwrap_or_else(|| {
-                panic!("prefix did not wrap onto a continuation line:\n{output}")
-            });
+            .unwrap_or_else(|| panic!("prefix did not wrap onto a continuation line:\n{output}"));
         assert!(
             !continuation.contains("Stream"),
             "continuation line must not repeat the title: {continuation:?}"

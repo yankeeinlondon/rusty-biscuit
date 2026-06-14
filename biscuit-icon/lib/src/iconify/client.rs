@@ -9,7 +9,9 @@ const DEFAULT_BASE: &str = "https://api.iconify.design";
 /// Allowed characters in an Iconify prefix or name: ASCII alphanumeric,
 /// hyphen, and underscore.
 fn is_valid_id_part(s: &str) -> bool {
-    !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// A thin async client over the Iconify JSON API.
@@ -25,7 +27,9 @@ pub struct IconifyClient {
 /// Returns [`IconError::InvalidIdentifier`] when there is not exactly one `:`
 /// with non-empty, syntactically valid parts on both sides.
 pub fn parse_id(id: &str) -> Result<(String, String)> {
-    let (prefix, name) = id.split_once(':').ok_or_else(|| IconError::InvalidIdentifier(id.to_string()))?;
+    let (prefix, name) = id
+        .split_once(':')
+        .ok_or_else(|| IconError::InvalidIdentifier(id.to_string()))?;
     if !is_valid_id_part(prefix) || !is_valid_id_part(name) || name.contains(':') {
         return Err(IconError::InvalidIdentifier(id.to_string()));
     }
@@ -105,7 +109,10 @@ impl IconifyClient {
             .timeout(std::time::Duration::from_secs(10))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
-        Self { http, base: base.into() }
+        Self {
+            http,
+            base: base.into(),
+        }
     }
 
     /// Fetches a single icon body by `prefix:name`.
@@ -134,12 +141,21 @@ impl IconifyClient {
             .json()
             .await
             .map_err(|e| IconError::Fetch(e.to_string()))?;
-        let entry = data.icons.get(&name).ok_or_else(|| IconError::NotFound(id.to_string()))?;
+        let entry = data
+            .icons
+            .get(&name)
+            .ok_or_else(|| IconError::NotFound(id.to_string()))?;
         let width = entry.width.or(data.width).unwrap_or(16);
         let height = entry.height.or(data.height).unwrap_or(16);
         let left = entry.left.unwrap_or(0);
         let top = entry.top.unwrap_or(0);
-        Ok(IconBody::with_origin(entry.body.clone(), width, height, left, top))
+        Ok(IconBody::with_origin(
+            entry.body.clone(),
+            width,
+            height,
+            left,
+            top,
+        ))
     }
 
     /// Fetches the list of Iconify set prefixes, each with its human title,
@@ -155,12 +171,19 @@ impl IconifyClient {
             .map_err(|e| IconError::Fetch(e.to_string()))?
             .join("collections")
             .map_err(|e| IconError::Fetch(e.to_string()))?;
-        let resp = self.http.get(url).send().await.map_err(|e| IconError::Fetch(e.to_string()))?;
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| IconError::Fetch(e.to_string()))?;
         if !resp.status().is_success() {
             return Err(IconError::Fetch(format!("HTTP {}", resp.status())));
         }
-        let map: std::collections::BTreeMap<String, CollectionMeta> =
-            resp.json().await.map_err(|e| IconError::Fetch(e.to_string()))?;
+        let map: std::collections::BTreeMap<String, CollectionMeta> = resp
+            .json()
+            .await
+            .map_err(|e| IconError::Fetch(e.to_string()))?;
         Ok(map
             .into_iter()
             .map(|(prefix, meta)| CollectionInfo {
@@ -207,35 +230,45 @@ impl IconifyClient {
                 .join("search")
                 .map_err(|e| IconError::Fetch(e.to_string()))?;
             {
-            let mut qp = url.query_pairs_mut();
-            qp.append_pair("query", query);
-            qp.append_pair("limit", &BATCH.to_string());
-            qp.append_pair("start", &start.to_string());
-            if let Some(prefs) = prefixes && !prefs.is_empty() {
-                if prefs.len() == 1 {
-                    qp.append_pair("prefix", &prefs[0]);
-                } else {
-                    qp.append_pair("prefixes", &prefs.join(","));
+                let mut qp = url.query_pairs_mut();
+                qp.append_pair("query", query);
+                qp.append_pair("limit", &BATCH.to_string());
+                qp.append_pair("start", &start.to_string());
+                if let Some(prefs) = prefixes
+                    && !prefs.is_empty()
+                {
+                    if prefs.len() == 1 {
+                        qp.append_pair("prefix", &prefs[0]);
+                    } else {
+                        qp.append_pair("prefixes", &prefs.join(","));
+                    }
                 }
             }
-        }
-        let resp = self.http.get(url).send().await.map_err(|e| IconError::Fetch(e.to_string()))?;
-        if !resp.status().is_success() {
-            return Err(IconError::Fetch(format!("HTTP {}", resp.status())));
-        }
-        let data: SearchResponse = resp.json().await.map_err(|e| IconError::Fetch(e.to_string()))?;
-        let batch_len = data.icons.len();
-        total = data.total;
-        all.extend(data.icons);
-        if all.len() > limit {
-            all.truncate(limit);
-            break;
-        }
-        let effective_total = std::cmp::min(total, limit);
-        if batch_len == 0 || all.len() >= effective_total {
-            break;
-        }
-        start += batch_len;
+            let resp = self
+                .http
+                .get(url)
+                .send()
+                .await
+                .map_err(|e| IconError::Fetch(e.to_string()))?;
+            if !resp.status().is_success() {
+                return Err(IconError::Fetch(format!("HTTP {}", resp.status())));
+            }
+            let data: SearchResponse = resp
+                .json()
+                .await
+                .map_err(|e| IconError::Fetch(e.to_string()))?;
+            let batch_len = data.icons.len();
+            total = data.total;
+            all.extend(data.icons);
+            if all.len() > limit {
+                all.truncate(limit);
+                break;
+            }
+            let effective_total = std::cmp::min(total, limit);
+            if batch_len == 0 || all.len() >= effective_total {
+                break;
+            }
+            start += batch_len;
         }
 
         Ok((all, total))
@@ -256,17 +289,26 @@ mod tests {
 
     #[test]
     fn parse_id_rejects_missing_colon() {
-        assert!(matches!(parse_id("mdihome"), Err(IconError::InvalidIdentifier(_))));
+        assert!(matches!(
+            parse_id("mdihome"),
+            Err(IconError::InvalidIdentifier(_))
+        ));
     }
 
     #[test]
     fn parse_id_rejects_extra_colon() {
-        assert!(matches!(parse_id("mdi:home:extra"), Err(IconError::InvalidIdentifier(_))));
+        assert!(matches!(
+            parse_id("mdi:home:extra"),
+            Err(IconError::InvalidIdentifier(_))
+        ));
     }
 
     #[test]
     fn parse_id_rejects_invalid_characters() {
-        assert!(matches!(parse_id("mdi:home/home"), Err(IconError::InvalidIdentifier(_))));
+        assert!(matches!(
+            parse_id("mdi:home/home"),
+            Err(IconError::InvalidIdentifier(_))
+        ));
     }
 
     #[test]
@@ -332,7 +374,10 @@ mod tests {
             .mount(&server)
             .await;
         let client = IconifyClient::with_base(server.uri());
-        assert!(matches!(client.fetch_body("mdi:ghost").await, Err(IconError::NotFound(_))));
+        assert!(matches!(
+            client.fetch_body("mdi:ghost").await,
+            Err(IconError::NotFound(_))
+        ));
     }
 
     #[tokio::test]
@@ -374,7 +419,13 @@ mod tests {
             CollectionInfo {
                 prefix: "mdi".into(),
                 title: "Material Design Icons".into(),
-                license: Some(License { title: "Apache License 2.0".into(), spdx: "Apache-2.0".into(), url: Some("https://github.com/Templarian/MaterialDesign/blob/master/LICENSE".into()) }),
+                license: Some(License {
+                    title: "Apache License 2.0".into(),
+                    spdx: "Apache-2.0".into(),
+                    url: Some(
+                        "https://github.com/Templarian/MaterialDesign/blob/master/LICENSE".into()
+                    )
+                }),
                 total: Some(5000),
             }
         );
@@ -445,7 +496,10 @@ mod tests {
 
         let client = IconifyClient::with_base(server.uri());
         let prefixes = vec!["mdi".to_string()];
-        let (hits, total) = client.search_icons("home", None, Some(&prefixes)).await.unwrap();
+        let (hits, total) = client
+            .search_icons("home", None, Some(&prefixes))
+            .await
+            .unwrap();
         assert_eq!(hits, vec!["mdi:home"]);
         assert_eq!(total, 1);
     }
@@ -467,7 +521,10 @@ mod tests {
 
         let client = IconifyClient::with_base(server.uri());
         let prefixes = vec!["mdi".to_string(), "lucide".to_string()];
-        let (hits, total) = client.search_icons("home", None, Some(&prefixes)).await.unwrap();
+        let (hits, total) = client
+            .search_icons("home", None, Some(&prefixes))
+            .await
+            .unwrap();
         assert_eq!(hits, vec!["mdi:home"]);
         assert_eq!(total, 1);
     }

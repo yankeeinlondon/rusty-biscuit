@@ -48,7 +48,10 @@ mod tests {
     #[test]
     fn every_variant_has_an_iconify_id() {
         for variant in Os::iter() {
-            assert!(variant.iconify_id().contains(':'), "{variant:?} id must be prefix:name");
+            assert!(
+                variant.iconify_id().contains(':'),
+                "{variant:?} id must be prefix:name"
+            );
         }
     }
 }

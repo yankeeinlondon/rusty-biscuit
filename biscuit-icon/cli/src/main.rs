@@ -29,9 +29,10 @@ async fn main() {
     init_tracing(cli.debug);
 
     // Resolve the default `icons` command when none is given.
-    let command = cli
-        .command
-        .unwrap_or(Commands::Icons { filter: cli.filter, from: cli.from });
+    let command = cli.command.unwrap_or(Commands::Icons {
+        filter: cli.filter,
+        from: cli.from,
+    });
 
     if let Err(err) = commands::run(command, cli.nerd).await {
         render_error(&err, cli.verbose);

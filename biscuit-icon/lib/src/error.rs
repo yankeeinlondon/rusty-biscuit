@@ -40,7 +40,10 @@ mod tests {
 
     #[test]
     fn unknown_domain_icon_renders_set_and_name() {
-        let err = IconError::UnknownDomainIcon { set: "os", name: "frobnicate".into() };
+        let err = IconError::UnknownDomainIcon {
+            set: "os",
+            name: "frobnicate".into(),
+        };
         assert_eq!(err.to_string(), "unknown os icon: frobnicate");
     }
 

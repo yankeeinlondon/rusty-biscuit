@@ -34,9 +34,16 @@ fn completions_bash_emits_script() {
         .args(["completions", "bash"])
         .output()
         .expect("spawn icon completions");
-    assert!(output.status.success(), "completions exited with {:?}", output.status);
+    assert!(
+        output.status.success(),
+        "completions exited with {:?}",
+        output.status
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("icon"), "expected 'icon' in completion script; got: {stdout}");
+    assert!(
+        stdout.contains("icon"),
+        "expected 'icon' in completion script; got: {stdout}"
+    );
 }
 
 #[test]
@@ -190,8 +197,16 @@ async fn icons_limits_online_results_with_large_catalog() {
         .unwrap();
 
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("mdi:icon-0"), "expected bounded results; got: {}", stdout);
-    assert!(stdout.contains("mdi:icon-2"), "expected bounded results; got: {}", stdout);
+    assert!(
+        stdout.contains("mdi:icon-0"),
+        "expected bounded results; got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("mdi:icon-2"),
+        "expected bounded results; got: {}",
+        stdout
+    );
     assert!(
         stdout.contains("20 more result(s) available online"),
         "expected truncation notice; got: {}",
@@ -234,12 +249,23 @@ async fn icons_reports_failure_when_some_body_fetches_fail() {
         .unwrap();
 
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("mdi:home"), "expected successful hit in output; got: {}", stdout);
+    assert!(
+        stdout.contains("mdi:home"),
+        "expected successful hit in output; got: {}",
+        stdout
+    );
 
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("lucide:home"), "expected failed icon in stderr; got: {}", stderr);
+    assert!(
+        stderr.contains("lucide:home"),
+        "expected failed icon in stderr; got: {}",
+        stderr
+    );
 
-    assert!(!output.status.success(), "expected non-zero exit when some fetches fail");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit when some fetches fail"
+    );
 }
 
 #[tokio::test]
@@ -284,7 +310,11 @@ async fn icons_merges_offline_and_online_results() {
         .unwrap();
 
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("mdi:home"), "expected online hit in merged output; got: {}", stdout);
+    assert!(
+        stdout.contains("mdi:home"),
+        "expected online hit in merged output; got: {}",
+        stdout
+    );
 }
 
 #[tokio::test]
@@ -511,8 +541,16 @@ async fn icons_paginates_past_first_page() {
         .unwrap();
 
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("mdi:home"), "expected mdi:home from page 1; got: {}", stdout);
-    assert!(stdout.contains("fa:home"), "expected fa:home from page 2; got: {}", stdout);
+    assert!(
+        stdout.contains("mdi:home"),
+        "expected mdi:home from page 1; got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("fa:home"),
+        "expected fa:home from page 2; got: {}",
+        stdout
+    );
 }
 
 #[tokio::test]
@@ -673,8 +711,16 @@ async fn sets_merges_online_and_caches() {
         .output()
         .unwrap();
     let first_stdout = String::from_utf8(first.stdout).unwrap();
-    assert!(first_stdout.contains("custom"), "expected online set in output; got: {}", first_stdout);
-    assert!(first_stdout.contains("Custom Set"), "expected set title in output; got: {}", first_stdout);
+    assert!(
+        first_stdout.contains("custom"),
+        "expected online set in output; got: {}",
+        first_stdout
+    );
+    assert!(
+        first_stdout.contains("Custom Set"),
+        "expected set title in output; got: {}",
+        first_stdout
+    );
 
     // Second call with a dead endpoint and a *different* filter should still
     // find the previously fetched set from cache.
@@ -809,9 +855,16 @@ async fn sets_persists_total_across_offline_runs() {
         .output()
         .unwrap();
     let first_stdout = String::from_utf8(first.stdout).unwrap();
-    assert!(first_stdout.contains("Custom Set"), "expected set title; got: {}", first_stdout);
-    assert!(first_stdout.contains("5,000") || first_stdout.contains("5000"),
-        "expected total in first run; got: {}", first_stdout);
+    assert!(
+        first_stdout.contains("Custom Set"),
+        "expected set title; got: {}",
+        first_stdout
+    );
+    assert!(
+        first_stdout.contains("5,000") || first_stdout.contains("5000"),
+        "expected total in first run; got: {}",
+        first_stdout
+    );
 
     // Second run offline with matching filter should show cached total.
     let second = Command::cargo_bin("icon")
@@ -824,11 +877,19 @@ async fn sets_persists_total_across_offline_runs() {
     let second_stdout = String::from_utf8(second.stdout).unwrap();
     assert!(
         second.status.success(),
-        "second offline call failed. stdout={}", second_stdout
+        "second offline call failed. stdout={}",
+        second_stdout
     );
-    assert!(second_stdout.contains("Custom Set"), "expected cached set title; got: {}", second_stdout);
-    assert!(second_stdout.contains("5,000") || second_stdout.contains("5000"),
-        "expected persisted total in second run; got: {}", second_stdout);
+    assert!(
+        second_stdout.contains("Custom Set"),
+        "expected cached set title; got: {}",
+        second_stdout
+    );
+    assert!(
+        second_stdout.contains("5,000") || second_stdout.contains("5000"),
+        "expected persisted total in second run; got: {}",
+        second_stdout
+    );
 }
 
 #[tokio::test]
@@ -852,7 +913,11 @@ async fn sets_shows_unknown_for_missing_total() {
         .output()
         .unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("Unknown"), "expected 'Unknown' for missing total; got: {}", stdout);
+    assert!(
+        stdout.contains("Unknown"),
+        "expected 'Unknown' for missing total; got: {}",
+        stdout
+    );
 }
 
 /// Returns the trailing (`Cached`) cell of the table row whose `Prefix` cell
@@ -893,9 +958,27 @@ async fn sets_shows_cached_counts() {
         let cache_dir = home.path().join(".cache").join("biscuit-icon");
         std::fs::create_dir_all(&cache_dir).unwrap();
         let cache = biscuit_icon::cache::IconCache::open_at(cache_dir.join("icons.db")).unwrap();
-        cache.put("acme-full", "icon1", &biscuit_icon::IconBody::new("<path/>", 24, 24)).unwrap();
-        cache.put("acme-full", "icon2", &biscuit_icon::IconBody::new("<path/>", 24, 24)).unwrap();
-        cache.put("acme-full", "icon3", &biscuit_icon::IconBody::new("<path/>", 24, 24)).unwrap();
+        cache
+            .put(
+                "acme-full",
+                "icon1",
+                &biscuit_icon::IconBody::new("<path/>", 24, 24),
+            )
+            .unwrap();
+        cache
+            .put(
+                "acme-full",
+                "icon2",
+                &biscuit_icon::IconBody::new("<path/>", 24, 24),
+            )
+            .unwrap();
+        cache
+            .put(
+                "acme-full",
+                "icon3",
+                &biscuit_icon::IconBody::new("<path/>", 24, 24),
+            )
+            .unwrap();
     }
 
     let output = Command::cargo_bin("icon")
@@ -909,8 +992,16 @@ async fn sets_shows_cached_counts() {
         .output()
         .unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("Acme Full"), "expected Acme Full; got: {}", stdout);
-    assert!(stdout.contains("Acme Empty"), "expected Acme Empty; got: {}", stdout);
+    assert!(
+        stdout.contains("Acme Full"),
+        "expected Acme Full; got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("Acme Empty"),
+        "expected Acme Empty; got: {}",
+        stdout
+    );
     assert_eq!(
         cached_cell(&stdout, "acme-full"),
         "3",
@@ -945,9 +1036,15 @@ async fn sets_online_success_with_no_match_errors() {
         .args(["sets", "zzznomatch"])
         .output()
         .unwrap();
-    assert!(!output.status.success(), "expected non-zero exit for no match");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit for no match"
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(!stdout.contains('│'), "expected no table to be rendered; got:\n{stdout}");
+    assert!(
+        !stdout.contains('│'),
+        "expected no table to be rendered; got:\n{stdout}"
+    );
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
         stderr.contains("no icon sets match"),
@@ -967,9 +1064,15 @@ async fn sets_offline_with_no_match_errors() {
         .args(["sets", "zzznomatch"])
         .output()
         .unwrap();
-    assert!(!output.status.success(), "expected non-zero exit when offline with no match");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit when offline with no match"
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(!stdout.contains('│'), "expected no table to be rendered; got:\n{stdout}");
+    assert!(
+        !stdout.contains('│'),
+        "expected no table to be rendered; got:\n{stdout}"
+    );
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
         stderr.contains("no offline set listings available"),
@@ -1010,7 +1113,10 @@ async fn sets_narrow_terminal_uses_single_table() {
     let server = MockServer::start().await;
     let mut collections = serde_json::Map::new();
     for i in 0..20 {
-        collections.insert(format!("set{i}"), serde_json::json!({ "name": format!("Set {i}"), "total": 100 }));
+        collections.insert(
+            format!("set{i}"),
+            serde_json::json!({ "name": format!("Set {i}"), "total": 100 }),
+        );
     }
     let json = serde_json::Value::Object(collections);
     Mock::given(method("GET"))
@@ -1033,7 +1139,11 @@ async fn sets_narrow_terminal_uses_single_table() {
     // With narrow width, should be a single table.
     // Count header-separator lines (├─…) — one per table.
     let table_count = stdout.lines().filter(|l| l.starts_with('├')).count();
-    assert_eq!(table_count, 1, "expected single table; got {} tables", table_count);
+    assert_eq!(
+        table_count, 1,
+        "expected single table; got {} tables",
+        table_count
+    );
 }
 
 #[tokio::test]
@@ -1041,7 +1151,10 @@ async fn sets_wide_short_uses_two_tables() {
     let server = MockServer::start().await;
     let mut collections = serde_json::Map::new();
     for i in 0..10 {
-        collections.insert(format!("set{i}"), serde_json::json!({ "name": format!("Set {i}"), "total": 100 }));
+        collections.insert(
+            format!("set{i}"),
+            serde_json::json!({ "name": format!("Set {i}"), "total": 100 }),
+        );
     }
     let json = serde_json::Value::Object(collections);
     Mock::given(method("GET"))
@@ -1064,7 +1177,11 @@ async fn sets_wide_short_uses_two_tables() {
     // With wide+short, should be two tables rendered side-by-side.
     // Detect split by the presence of two table separators joined on one line.
     let is_split = stdout.lines().any(|l| l.contains('┤') && l.contains('├'));
-    assert!(is_split, "expected split layout (two tables side-by-side); got:\n{}", stdout);
+    assert!(
+        is_split,
+        "expected split layout (two tables side-by-side); got:\n{}",
+        stdout
+    );
 }
 
 #[tokio::test]
@@ -1072,7 +1189,10 @@ async fn sets_wide_tall_uses_single_table() {
     let server = MockServer::start().await;
     let mut collections = serde_json::Map::new();
     for i in 0..5 {
-        collections.insert(format!("set{i}"), serde_json::json!({ "name": format!("Set {i}"), "total": 100 }));
+        collections.insert(
+            format!("set{i}"),
+            serde_json::json!({ "name": format!("Set {i}"), "total": 100 }),
+        );
     }
     let json = serde_json::Value::Object(collections);
     Mock::given(method("GET"))
@@ -1095,7 +1215,11 @@ async fn sets_wide_tall_uses_single_table() {
     // With wide+tall (all rows fit), should be single table.
     // Count header-separator lines (├─…) — one per table.
     let table_count = stdout.lines().filter(|l| l.starts_with('├')).count();
-    assert_eq!(table_count, 1, "expected single table when all rows fit; got {} tables", table_count);
+    assert_eq!(
+        table_count, 1,
+        "expected single table when all rows fit; got {} tables",
+        table_count
+    );
 }
 
 #[tokio::test]

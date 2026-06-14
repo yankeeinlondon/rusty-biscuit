@@ -100,12 +100,18 @@ impl IconCache {
             let has_top = cols.contains(&"top".to_string());
 
             if !has_left {
-                tx.execute("ALTER TABLE icons ADD COLUMN left INTEGER NOT NULL DEFAULT 0", [])
-                    .map_err(map_sql)?;
+                tx.execute(
+                    "ALTER TABLE icons ADD COLUMN left INTEGER NOT NULL DEFAULT 0",
+                    [],
+                )
+                .map_err(map_sql)?;
             }
             if !has_top {
-                tx.execute("ALTER TABLE icons ADD COLUMN top INTEGER NOT NULL DEFAULT 0", [])
-                    .map_err(map_sql)?;
+                tx.execute(
+                    "ALTER TABLE icons ADD COLUMN top INTEGER NOT NULL DEFAULT 0",
+                    [],
+                )
+                .map_err(map_sql)?;
             }
 
             if has_view_box {
@@ -260,7 +266,11 @@ impl IconCache {
         let like = format!("%{needle}%");
         let rows = stmt
             .query_map(params![like], |row| {
-                Ok(format!("{}:{}", row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok(format!(
+                    "{}:{}",
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?
+                ))
             })
             .map_err(map_sql)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_sql)
@@ -272,8 +282,12 @@ impl IconCache {
     /// [`IconError::Cache`] on query failure.
     pub fn cached_prefixes(&self) -> Result<Vec<String>> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare("SELECT DISTINCT prefix FROM icons ORDER BY prefix").map_err(map_sql)?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0)).map_err(map_sql)?;
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT prefix FROM icons ORDER BY prefix")
+            .map_err(map_sql)?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(map_sql)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_sql)
     }
 
@@ -425,9 +439,15 @@ mod tests {
     #[test]
     fn search_names_matches_substring() {
         let (_d, cache) = temp_cache();
-        cache.put("mdi", "home", &IconBody::new("<a/>", 24, 24)).unwrap();
-        cache.put("mdi", "home-outline", &IconBody::new("<b/>", 24, 24)).unwrap();
-        cache.put("mdi", "alert", &IconBody::new("<c/>", 24, 24)).unwrap();
+        cache
+            .put("mdi", "home", &IconBody::new("<a/>", 24, 24))
+            .unwrap();
+        cache
+            .put("mdi", "home-outline", &IconBody::new("<b/>", 24, 24))
+            .unwrap();
+        cache
+            .put("mdi", "alert", &IconBody::new("<c/>", 24, 24))
+            .unwrap();
         let hits = cache.search_names("home").unwrap();
         assert_eq!(hits, vec!["mdi:home", "mdi:home-outline"]);
     }
@@ -435,7 +455,16 @@ mod tests {
     #[test]
     fn set_metadata_round_trips() {
         let (_d, cache) = temp_cache();
-        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "Material Design".into(), license: Some("Apache-2.0".into()), license_title: Some("Apache License 2.0".into()), license_url: None, total: None }).unwrap();
+        cache
+            .put_set(&SetInfo {
+                prefix: "mdi".into(),
+                title: "Material Design".into(),
+                license: Some("Apache-2.0".into()),
+                license_title: Some("Apache License 2.0".into()),
+                license_url: None,
+                total: None,
+            })
+            .unwrap();
         let hits = cache.search_sets("material").unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].prefix, "mdi");
@@ -446,7 +475,16 @@ mod tests {
     #[test]
     fn set_metadata_preserves_null_license() {
         let (_d, cache) = temp_cache();
-        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "Material Design".into(), license: None, license_title: None, license_url: None, total: None }).unwrap();
+        cache
+            .put_set(&SetInfo {
+                prefix: "mdi".into(),
+                title: "Material Design".into(),
+                license: None,
+                license_title: None,
+                license_url: None,
+                total: None,
+            })
+            .unwrap();
         let hits = cache.all_sets().unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].license, None);
@@ -455,8 +493,19 @@ mod tests {
     #[test]
     fn clear_empties_the_cache() {
         let (_d, cache) = temp_cache();
-        cache.put("mdi", "home", &IconBody::new("<a/>", 24, 24)).unwrap();
-        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "M".into(), license: None, license_title: None, license_url: None, total: None }).unwrap();
+        cache
+            .put("mdi", "home", &IconBody::new("<a/>", 24, 24))
+            .unwrap();
+        cache
+            .put_set(&SetInfo {
+                prefix: "mdi".into(),
+                title: "M".into(),
+                license: None,
+                license_title: None,
+                license_url: None,
+                total: None,
+            })
+            .unwrap();
         cache.clear().unwrap();
         assert_eq!(cache.get("mdi", "home").unwrap(), None);
         assert!(cache.all_sets().unwrap().is_empty());
@@ -504,7 +553,12 @@ mod tests {
             .unwrap();
             conn.execute(
                 "INSERT INTO sets (prefix, title, license, fetched_at) VALUES (?1, ?2, ?3, ?4)",
-                params!["mdi", "Material Design", "Apache-2.0", "2024-01-01T00:00:00Z"],
+                params![
+                    "mdi",
+                    "Material Design",
+                    "Apache-2.0",
+                    "2024-01-01T00:00:00Z"
+                ],
             )
             .unwrap();
         }
@@ -521,10 +575,16 @@ mod tests {
         assert_eq!(body.top, 20);
         let icon = crate::Icon::from_network("mdi:home", body);
         let svg = icon.svg();
-        assert!(svg.contains("viewBox=\"10 20 32 32\""), "non-zero viewBox lost in migration; got: {svg}");
+        assert!(
+            svg.contains("viewBox=\"10 20 32 32\""),
+            "non-zero viewBox lost in migration; got: {svg}"
+        );
 
         // Negative origin must also survive migration.
-        let neg = cache.get("mdi", "alert").unwrap().expect("negative-origin row readable");
+        let neg = cache
+            .get("mdi", "alert")
+            .unwrap()
+            .expect("negative-origin row readable");
         assert_eq!(neg.left, -5);
         assert_eq!(neg.top, -10);
         let neg_icon = crate::Icon::from_network("mdi:alert", neg);
@@ -540,9 +600,16 @@ mod tests {
 
         // Writes to the new columns should succeed.
         cache
-            .put("custom", "logo", &IconBody::with_origin("<path/>", 32, 32, 10, 20))
+            .put(
+                "custom",
+                "logo",
+                &IconBody::with_origin("<path/>", 32, 32, 10, 20),
+            )
             .unwrap();
-        let new_body = cache.get("custom", "logo").unwrap().expect("new row readable");
+        let new_body = cache
+            .get("custom", "logo")
+            .unwrap()
+            .expect("new row readable");
         assert_eq!(new_body.left, 10);
         assert_eq!(new_body.top, 20);
 
@@ -558,26 +625,51 @@ mod tests {
             .unwrap();
         let new_sets = cache.search_sets("lucide").unwrap();
         assert_eq!(new_sets[0].license_title, Some("ISC License".into()));
-        assert_eq!(new_sets[0].license_url, Some("https://opensource.org/licenses/ISC".into()));
+        assert_eq!(
+            new_sets[0].license_url,
+            Some("https://opensource.org/licenses/ISC".into())
+        );
     }
 
     #[test]
     fn timestamp_is_rfc3339_utc() {
         let (_d, cache) = temp_cache();
-        cache.put("mdi", "home", &IconBody::new("<path/>", 24, 24)).unwrap();
-        cache.put_set(&SetInfo { prefix: "mdi".into(), title: "M".into(), license: None, license_title: None, license_url: None, total: None }).unwrap();
+        cache
+            .put("mdi", "home", &IconBody::new("<path/>", 24, 24))
+            .unwrap();
+        cache
+            .put_set(&SetInfo {
+                prefix: "mdi".into(),
+                title: "M".into(),
+                license: None,
+                license_title: None,
+                license_url: None,
+                total: None,
+            })
+            .unwrap();
 
         let conn = Connection::open(cache.path()).unwrap();
         let icon_ts: String = conn
-            .query_row("SELECT fetched_at FROM icons WHERE prefix = 'mdi'", [], |row| row.get(0))
+            .query_row(
+                "SELECT fetched_at FROM icons WHERE prefix = 'mdi'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         let set_ts: String = conn
-            .query_row("SELECT fetched_at FROM sets WHERE prefix = 'mdi'", [], |row| row.get(0))
+            .query_row(
+                "SELECT fetched_at FROM sets WHERE prefix = 'mdi'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
 
         for ts in [icon_ts, set_ts] {
             assert!(ts.ends_with('Z'), "expected RFC 3339 UTC suffix; got: {ts}");
-            assert!(ts.contains('T'), "expected RFC 3339 date/time separator; got: {ts}");
+            assert!(
+                ts.contains('T'),
+                "expected RFC 3339 date/time separator; got: {ts}"
+            );
         }
     }
 
@@ -597,7 +689,10 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        assert!(cols.contains(&"total".to_string()), "sets table should have total column");
+        assert!(
+            cols.contains(&"total".to_string()),
+            "sets table should have total column"
+        );
     }
 
     #[test]
@@ -636,7 +731,12 @@ mod tests {
             .unwrap();
             conn.execute(
                 "INSERT INTO sets (prefix, title, license, fetched_at) VALUES (?1, ?2, ?3, ?4)",
-                params!["mdi", "Material Design", "Apache-2.0", "2024-01-01T00:00:00Z"],
+                params![
+                    "mdi",
+                    "Material Design",
+                    "Apache-2.0",
+                    "2024-01-01T00:00:00Z"
+                ],
             )
             .unwrap();
         }
@@ -652,9 +752,15 @@ mod tests {
         let sets = cache.all_sets().unwrap();
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].prefix, "mdi");
-        assert_eq!(sets[0].total, None, "existing v0 set total should be None after migration");
+        assert_eq!(
+            sets[0].total, None,
+            "existing v0 set total should be None after migration"
+        );
 
-        let body = cache.get("mdi", "home").unwrap().expect("icon should survive migration");
+        let body = cache
+            .get("mdi", "home")
+            .unwrap()
+            .expect("icon should survive migration");
         assert_eq!(body.body, "<path/>");
     }
 
@@ -707,7 +813,10 @@ mod tests {
 
         let sets = cache.all_sets().unwrap();
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].total, None, "existing v1 set total should be None after migration");
+        assert_eq!(
+            sets[0].total, None,
+            "existing v1 set total should be None after migration"
+        );
         assert_eq!(sets[0].license_title, Some("Apache License 2.0".into()));
     }
 
@@ -798,14 +907,20 @@ mod tests {
         }
 
         let result = IconCache::open_at(&path);
-        assert!(result.is_err(), "migration should fail when view_box cannot be dropped");
+        assert!(
+            result.is_err(),
+            "migration should fail when view_box cannot be dropped"
+        );
 
         // Rollback must leave both schema and version exactly as they were.
         let conn = Connection::open(&path).unwrap();
         let version: i32 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 0, "user_version must stay at 0 after a rolled-back migration");
+        assert_eq!(
+            version, 0,
+            "user_version must stay at 0 after a rolled-back migration"
+        );
 
         let cols: Vec<String> = conn
             .prepare("PRAGMA table_info(icons)")
@@ -814,13 +929,24 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        assert!(cols.contains(&"view_box".to_string()), "view_box must survive rollback");
-        assert!(!cols.contains(&"left".to_string()), "added left column must roll back");
-        assert!(!cols.contains(&"top".to_string()), "added top column must roll back");
+        assert!(
+            cols.contains(&"view_box".to_string()),
+            "view_box must survive rollback"
+        );
+        assert!(
+            !cols.contains(&"left".to_string()),
+            "added left column must roll back"
+        );
+        assert!(
+            !cols.contains(&"top".to_string()),
+            "added top column must roll back"
+        );
 
         // The original row data must be intact.
         let body: String = conn
-            .query_row("SELECT body FROM icons WHERE prefix = 'mdi'", [], |row| row.get(0))
+            .query_row("SELECT body FROM icons WHERE prefix = 'mdi'", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(body, "<path/>");
     }
@@ -866,14 +992,25 @@ mod tests {
     #[test]
     fn cached_icon_counts_groups_and_omits_zero() {
         let (_d, cache) = temp_cache();
-        cache.put("mdi", "home", &IconBody::new("<a/>", 24, 24)).unwrap();
-        cache.put("mdi", "alert", &IconBody::new("<b/>", 24, 24)).unwrap();
-        cache.put("ic", "baseline-apple", &IconBody::new("<c/>", 24, 24)).unwrap();
+        cache
+            .put("mdi", "home", &IconBody::new("<a/>", 24, 24))
+            .unwrap();
+        cache
+            .put("mdi", "alert", &IconBody::new("<b/>", 24, 24))
+            .unwrap();
+        cache
+            .put("ic", "baseline-apple", &IconBody::new("<c/>", 24, 24))
+            .unwrap();
 
-        let counts = cache.cached_icon_counts(&["mdi".into(), "ic".into(), "unknown".into()]).unwrap();
+        let counts = cache
+            .cached_icon_counts(&["mdi".into(), "ic".into(), "unknown".into()])
+            .unwrap();
         assert_eq!(counts.get("mdi"), Some(&2usize));
         assert_eq!(counts.get("ic"), Some(&1usize));
-        assert!(!counts.contains_key("unknown"), "zero-count prefix should be omitted");
+        assert!(
+            !counts.contains_key("unknown"),
+            "zero-count prefix should be omitted"
+        );
     }
 
     #[test]
@@ -887,9 +1024,14 @@ mod tests {
     fn cached_icon_counts_excludes_embedded_domain_icons() {
         // Embedded domain icons are not in the SQLite cache, so they are never counted.
         let (_d, cache) = temp_cache();
-        cache.put("mdi", "home", &IconBody::new("<a/>", 24, 24)).unwrap();
+        cache
+            .put("mdi", "home", &IconBody::new("<a/>", 24, 24))
+            .unwrap();
 
         let counts = cache.cached_icon_counts(&["ic".into()]).unwrap();
-        assert!(counts.is_empty(), "embedded domain prefix should have no cached count");
+        assert!(
+            counts.is_empty(),
+            "embedded domain prefix should have no cached count"
+        );
     }
 }

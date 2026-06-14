@@ -40,7 +40,9 @@ impl TryFrom<&str> for Flip {
             "horizontal" => Ok(Flip::Horizontal),
             "vertical" => Ok(Flip::Vertical),
             "both" => Ok(Flip::Both),
-            _ => Err(IconError::InvalidIdentifier(format!("invalid flip: {value}"))),
+            _ => Err(IconError::InvalidIdentifier(format!(
+                "invalid flip: {value}"
+            ))),
         }
     }
 }
@@ -64,7 +66,9 @@ impl TryFrom<&str> for Rotate {
             "90" => Ok(Rotate::R90),
             "180" => Ok(Rotate::R180),
             "270" => Ok(Rotate::R270),
-            _ => Err(IconError::InvalidIdentifier(format!("invalid rotate: {value}"))),
+            _ => Err(IconError::InvalidIdentifier(format!(
+                "invalid rotate: {value}"
+            ))),
         }
     }
 }
@@ -78,9 +82,17 @@ impl Style {
         let (left, top) = (f64::from(body.left), f64::from(body.top));
         let mut parts: Vec<String> = Vec::new();
         match self.flip {
-            Some(Flip::Horizontal) => parts.push(format!("translate({} 0) scale(-1 1)", 2.0 * left + w)),
-            Some(Flip::Vertical) => parts.push(format!("translate(0 {}) scale(1 -1)", 2.0 * top + h)),
-            Some(Flip::Both) => parts.push(format!("translate({} {}) scale(-1 -1)", 2.0 * left + w, 2.0 * top + h)),
+            Some(Flip::Horizontal) => {
+                parts.push(format!("translate({} 0) scale(-1 1)", 2.0 * left + w))
+            }
+            Some(Flip::Vertical) => {
+                parts.push(format!("translate(0 {}) scale(1 -1)", 2.0 * top + h))
+            }
+            Some(Flip::Both) => parts.push(format!(
+                "translate({} {}) scale(-1 -1)",
+                2.0 * left + w,
+                2.0 * top + h
+            )),
             None => {}
         }
         match self.rotate {
@@ -89,21 +101,31 @@ impl Style {
                 // swapped viewBox is filled without clipping.
                 parts.push(format!(
                     "translate({} {}) rotate(90) translate(-{} -{})",
-                    left + h / 2.0, top + w / 2.0,
-                    left + w / 2.0, top + h / 2.0,
+                    left + h / 2.0,
+                    top + w / 2.0,
+                    left + w / 2.0,
+                    top + h / 2.0,
                 ));
             }
-            Some(Rotate::R180) => parts.push(format!("rotate(180 {} {})", left + w / 2.0, top + h / 2.0)),
+            Some(Rotate::R180) => {
+                parts.push(format!("rotate(180 {} {})", left + w / 2.0, top + h / 2.0))
+            }
             Some(Rotate::R270) => {
                 parts.push(format!(
                     "translate({} {}) rotate(270) translate(-{} -{})",
-                    left + h / 2.0, top + w / 2.0,
-                    left + w / 2.0, top + h / 2.0,
+                    left + h / 2.0,
+                    top + w / 2.0,
+                    left + w / 2.0,
+                    top + h / 2.0,
                 ));
             }
             None => {}
         }
-        if parts.is_empty() { None } else { Some(parts.join(" ")) }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(" "))
+        }
     }
 
     /// Assembles a complete `<svg>` string from an icon body and this style.
@@ -198,7 +220,10 @@ mod tests {
 
     #[test]
     fn rotate_wraps_body_in_transform_group() {
-        let style = Style { rotate: Some(Rotate::R90), ..Style::default() };
+        let style = Style {
+            rotate: Some(Rotate::R90),
+            ..Style::default()
+        };
         let svg = style.assemble(&body());
         assert!(svg.contains("<g transform="));
         assert!(svg.contains("rotate(90)"));
@@ -207,56 +232,80 @@ mod tests {
 
     #[test]
     fn non_square_rotate_swaps_viewbox() {
-        let style = Style { rotate: Some(Rotate::R90), ..Style::default() };
+        let style = Style {
+            rotate: Some(Rotate::R90),
+            ..Style::default()
+        };
         let svg = style.assemble(&wide_body());
         assert!(svg.contains("viewBox=\"0 0 16 32\""));
     }
 
     #[test]
     fn flip_horizontal_emits_scale() {
-        let style = Style { flip: Some(Flip::Horizontal), ..Style::default() };
+        let style = Style {
+            flip: Some(Flip::Horizontal),
+            ..Style::default()
+        };
         let svg = style.assemble(&body());
         assert!(svg.contains("translate(24 0) scale(-1 1)"));
     }
 
     #[test]
     fn flip_vertical_emits_scale() {
-        let style = Style { flip: Some(Flip::Vertical), ..Style::default() };
+        let style = Style {
+            flip: Some(Flip::Vertical),
+            ..Style::default()
+        };
         let svg = style.assemble(&body());
         assert!(svg.contains("translate(0 24) scale(1 -1)"));
     }
 
     #[test]
     fn flip_both_emits_scale() {
-        let style = Style { flip: Some(Flip::Both), ..Style::default() };
+        let style = Style {
+            flip: Some(Flip::Both),
+            ..Style::default()
+        };
         let svg = style.assemble(&body());
         assert!(svg.contains("translate(24 24) scale(-1 -1)"));
     }
 
     #[test]
     fn rotate_180_emits_rotate() {
-        let style = Style { rotate: Some(Rotate::R180), ..Style::default() };
+        let style = Style {
+            rotate: Some(Rotate::R180),
+            ..Style::default()
+        };
         let svg = style.assemble(&body());
         assert!(svg.contains("rotate(180 12 12)"));
     }
 
     #[test]
     fn rotate_270_emits_rotate() {
-        let style = Style { rotate: Some(Rotate::R270), ..Style::default() };
+        let style = Style {
+            rotate: Some(Rotate::R270),
+            ..Style::default()
+        };
         let svg = style.assemble(&body());
         assert!(svg.contains("rotate(270)"));
     }
 
     #[test]
     fn view_box_flag_emits_transparent_rect() {
-        let style = Style { view_box: true, ..Style::default() };
+        let style = Style {
+            view_box: true,
+            ..Style::default()
+        };
         let svg = style.assemble(&body());
         assert!(svg.contains("<rect x=\"0\" y=\"0\" width=\"24\" height=\"24\" fill=\"none\"/>"));
     }
 
     #[test]
     fn malicious_color_is_escaped() {
-        let style = Style { color: Some("red\" onload=alert(1)".into()), ..Style::default() };
+        let style = Style {
+            color: Some("red\" onload=alert(1)".into()),
+            ..Style::default()
+        };
         let svg = style.assemble(&body());
         // The quote must be escaped so the attribute cannot be broken out of.
         assert!(svg.contains("&quot;"));
@@ -283,7 +332,10 @@ mod tests {
     #[test]
     fn non_zero_origin_flip_horizontal() {
         let body = IconBody::with_origin("<path d=\"M0 0\"/>", 32, 32, 10, 20);
-        let style = Style { flip: Some(Flip::Horizontal), ..Style::default() };
+        let style = Style {
+            flip: Some(Flip::Horizontal),
+            ..Style::default()
+        };
         let svg = style.assemble(&body);
         assert!(svg.contains("translate(52 0) scale(-1 1)"));
     }
@@ -291,7 +343,10 @@ mod tests {
     #[test]
     fn non_zero_origin_rotate_180() {
         let body = IconBody::with_origin("<path d=\"M0 0\"/>", 32, 32, 10, 20);
-        let style = Style { rotate: Some(Rotate::R180), ..Style::default() };
+        let style = Style {
+            rotate: Some(Rotate::R180),
+            ..Style::default()
+        };
         let svg = style.assemble(&body);
         assert!(svg.contains("rotate(180 26 36)"));
     }
@@ -299,7 +354,10 @@ mod tests {
     #[test]
     fn non_zero_origin_view_box_rect() {
         let body = IconBody::with_origin("<path d=\"M0 0\"/>", 32, 32, 10, 20);
-        let style = Style { view_box: true, ..Style::default() };
+        let style = Style {
+            view_box: true,
+            ..Style::default()
+        };
         let svg = style.assemble(&body);
         assert!(svg.contains("<rect x=\"10\" y=\"20\" width=\"32\" height=\"32\" fill=\"none\"/>"));
     }

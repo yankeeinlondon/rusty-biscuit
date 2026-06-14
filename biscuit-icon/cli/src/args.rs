@@ -85,7 +85,10 @@ fn icon_name_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
         ids.extend(hits);
     }
 
-    ids.into_iter().take(100).map(CompletionCandidate::new).collect()
+    ids.into_iter()
+        .take(100)
+        .map(CompletionCandidate::new)
+        .collect()
 }
 
 /// Offers icon-set prefixes matching the current token, merging built-in

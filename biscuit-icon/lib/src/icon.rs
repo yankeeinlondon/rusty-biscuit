@@ -100,8 +100,10 @@ impl Icon {
         let prefix_get = prefix.clone();
         let name_get = name.clone();
         let cached = tokio::task::spawn_blocking(move || {
-            let c = crate::cache::IconCache::open_at(&path).map_err(|e| IconError::Cache(e.to_string()))?;
-            c.get(&prefix_get, &name_get).map_err(|e| IconError::Cache(e.to_string()))
+            let c = crate::cache::IconCache::open_at(&path)
+                .map_err(|e| IconError::Cache(e.to_string()))?;
+            c.get(&prefix_get, &name_get)
+                .map_err(|e| IconError::Cache(e.to_string()))
         })
         .await
         .map_err(|e| IconError::Cache(e.to_string()))??;
@@ -114,8 +116,10 @@ impl Icon {
         let path = cache.path().to_path_buf();
         let body_for_cache = body.clone();
         tokio::task::spawn_blocking(move || {
-            let c = crate::cache::IconCache::open_at(&path).map_err(|e| IconError::Cache(e.to_string()))?;
-            c.put(&prefix, &name, &body_for_cache).map_err(|e| IconError::Cache(e.to_string()))
+            let c = crate::cache::IconCache::open_at(&path)
+                .map_err(|e| IconError::Cache(e.to_string()))?;
+            c.put(&prefix, &name, &body_for_cache)
+                .map_err(|e| IconError::Cache(e.to_string()))
         })
         .await
         .map_err(|e| IconError::Cache(e.to_string()))??;
@@ -210,7 +214,9 @@ impl TerminalRenderable for Icon {
     fn render(&self, term: &Terminal) -> String {
         use biscuit_terminal::components::prose::Prose;
 
-        if self.nerd_font && let Some(c) = self.nerd_font_char() {
+        if self.nerd_font
+            && let Some(c) = self.nerd_font_char()
+        {
             return Prose::new(c.to_string()).render(term);
         }
         if let Some(c) = self.unicode_char() {
@@ -246,13 +252,13 @@ impl Icon {
     /// Rasterizes the assembled SVG to a temp file and renders it via the
     /// terminal's image protocol.
     fn render_image(&self, term: &Terminal) -> std::io::Result<String> {
-        use std::io::Write;
         use biscuit_terminal::components::terminal_image::TerminalImage;
+        use std::io::Write;
 
         let mut file = tempfile::Builder::new().suffix(".svg").tempfile()?;
         file.write_all(self.svg().as_bytes())?;
-        let img = TerminalImage::new(file.path())
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        let img =
+            TerminalImage::new(file.path()).map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(img.render(term))
     }
 }
@@ -267,9 +273,12 @@ macro_rules! domain_ctor {
             /// Returns [`IconError::UnknownDomainIcon`] when the name is unknown.
             pub fn $fn_name(name: &str) -> Result<Icon> {
                 use crate::domain::DomainIcon;
-                <$enum>::from_str(name)
-                    .map(DomainIcon::icon)
-                    .map_err(|_| IconError::UnknownDomainIcon { set: $set, name: name.to_string() })
+                <$enum>::from_str(name).map(DomainIcon::icon).map_err(|_| {
+                    IconError::UnknownDomainIcon {
+                        set: $set,
+                        name: name.to_string(),
+                    }
+                })
             }
         }
     };
@@ -307,7 +316,11 @@ mod tests {
 
     #[test]
     fn flip_and_rotate_use_typed_enums() {
-        let svg = Os::Apple.icon().flip(Flip::Horizontal).rotate(Rotate::R90).svg();
+        let svg = Os::Apple
+            .icon()
+            .flip(Flip::Horizontal)
+            .rotate(Rotate::R90)
+            .svg();
         assert!(svg.contains("scale(-1 1)"));
         assert!(svg.contains("rotate(90)"));
     }
@@ -315,7 +328,10 @@ mod tests {
     #[test]
     fn string_ctor_unknown_name_errors() {
         let err = Icon::os("nope").unwrap_err();
-        assert!(matches!(err, IconError::UnknownDomainIcon { set: "os", .. }));
+        assert!(matches!(
+            err,
+            IconError::UnknownDomainIcon { set: "os", .. }
+        ));
     }
 
     #[test]
@@ -350,13 +366,23 @@ mod tests {
         let cache = crate::cache::IconCache::open_at(dir.path().join("icons.db")).unwrap();
         let client = crate::iconify::IconifyClient::with_base(server.uri());
 
-        let icon = Icon::iconify_with("custom:logo", &cache, &client).await.unwrap();
+        let icon = Icon::iconify_with("custom:logo", &cache, &client)
+            .await
+            .unwrap();
         let svg = icon.svg();
-        assert!(svg.contains("viewBox=\"10 20 32 32\""), "expected non-zero viewBox in assembled SVG; got: {svg}");
+        assert!(
+            svg.contains("viewBox=\"10 20 32 32\""),
+            "expected non-zero viewBox in assembled SVG; got: {svg}"
+        );
 
         // Ensure cache round-trip also preserves origin.
-        let cached = Icon::iconify_with("custom:logo", &cache, &client).await.unwrap();
+        let cached = Icon::iconify_with("custom:logo", &cache, &client)
+            .await
+            .unwrap();
         let cached_svg = cached.svg();
-        assert!(cached_svg.contains("viewBox=\"10 20 32 32\""), "expected non-zero viewBox after cache hit; got: {cached_svg}");
+        assert!(
+            cached_svg.contains("viewBox=\"10 20 32 32\""),
+            "expected non-zero viewBox after cache hit; got: {cached_svg}"
+        );
     }
 }

@@ -31,7 +31,9 @@ pub async fn run_with_client(command: Commands, nerd: bool, client: &IconifyClie
     match command {
         Commands::Icons { filter, from } => icons(filter, from, nerd, client).await,
         Commands::Sets { filter } => sets(filter, client).await,
-        Commands::Cache { action: CacheAction::Clear } => {
+        Commands::Cache {
+            action: CacheAction::Clear,
+        } => {
             IconCache::open_default()?.clear()?;
             println!("cache cleared");
             Ok(())
@@ -40,7 +42,12 @@ pub async fn run_with_client(command: Commands, nerd: bool, client: &IconifyClie
     }
 }
 
-async fn icons(filter: Option<String>, from: Option<String>, nerd: bool, client: &IconifyClient) -> Result<()> {
+async fn icons(
+    filter: Option<String>,
+    from: Option<String>,
+    nerd: bool,
+    client: &IconifyClient,
+) -> Result<()> {
     const MAX_RESULTS: usize = 100;
     const CONCURRENCY: usize = 10;
 
@@ -49,7 +56,13 @@ async fn icons(filter: Option<String>, from: Option<String>, nerd: bool, client:
 
     let allowed: BTreeSet<String> = from
         .as_ref()
-        .map(|s| s.split(',').map(str::trim).filter(|p| !p.is_empty()).map(String::from).collect())
+        .map(|s| {
+            s.split(',')
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(String::from)
+                .collect()
+        })
         .unwrap_or_default();
 
     let cache = IconCache::open_default()?;
@@ -86,22 +99,29 @@ async fn icons(filter: Option<String>, from: Option<String>, nerd: bool, client:
             return Err(eyre!("no icons available offline"));
         }
         if !errors.is_empty() {
-            return Err(eyre!("{} offline icon(s) could not be rendered", errors.len()));
+            return Err(eyre!(
+                "{} offline icon(s) could not be rendered",
+                errors.len()
+            ));
         }
         return Ok(());
     }
 
     let allowed_vec: Vec<String> = allowed.iter().cloned().collect();
-    let prefixes = if allowed_vec.is_empty() { None } else { Some(allowed_vec.as_slice()) };
+    let prefixes = if allowed_vec.is_empty() {
+        None
+    } else {
+        Some(allowed_vec.as_slice())
+    };
 
     // Paginate through online search results and merge with offline results.
-    match client.search_icons(&needle, Some(MAX_RESULTS), prefixes).await {
+    match client
+        .search_icons(&needle, Some(MAX_RESULTS), prefixes)
+        .await
+    {
         Ok((hits, total)) => {
             let seen: std::collections::HashSet<_> = offline.iter().cloned().collect();
-            let new_hits: Vec<_> = hits
-                .into_iter()
-                .filter(|id| !seen.contains(id))
-                .collect();
+            let new_hits: Vec<_> = hits.into_iter().filter(|id| !seen.contains(id)).collect();
             if offline.is_empty() && new_hits.is_empty() {
                 return Err(eyre!(
                     "no icons match {needle:?}; try `icon <prefix:name>` to fetch directly"

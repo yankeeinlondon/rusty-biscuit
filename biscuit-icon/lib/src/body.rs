@@ -24,13 +24,31 @@ impl IconBody {
     /// Builds a body with an explicit coordinate system.
     #[must_use]
     pub fn new(body: impl Into<String>, width: u32, height: u32) -> Self {
-        Self { body: body.into(), width, height, left: 0, top: 0 }
+        Self {
+            body: body.into(),
+            width,
+            height,
+            left: 0,
+            top: 0,
+        }
     }
 
     /// Builds a body with a non-zero view-box origin.
     #[must_use]
-    pub fn with_origin(body: impl Into<String>, width: u32, height: u32, left: i32, top: i32) -> Self {
-        Self { body: body.into(), width, height, left, top }
+    pub fn with_origin(
+        body: impl Into<String>,
+        width: u32,
+        height: u32,
+        left: i32,
+        top: i32,
+    ) -> Self {
+        Self {
+            body: body.into(),
+            width,
+            height,
+            left,
+            top,
+        }
     }
 
     /// The `viewBox` string, `"{left} {top} {width} {height}"`.

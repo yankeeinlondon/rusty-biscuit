@@ -2,15 +2,17 @@
 
 use std::collections::BTreeSet;
 
-use biscuit_icon::cache::{IconCache, SetInfo};
 use biscuit_icon::IconBody;
+use biscuit_icon::cache::{IconCache, SetInfo};
 use biscuit_icon::catalog;
 
 #[test]
 fn offline_icons_merges_builtin_and_cached_ids() {
     let dir = tempfile::tempdir().unwrap();
     let cache = IconCache::open_at(dir.path().join("icons.db")).unwrap();
-    cache.put("mdi", "home-automation", &IconBody::new("<a/>", 24, 24)).unwrap();
+    cache
+        .put("mdi", "home-automation", &IconBody::new("<a/>", 24, 24))
+        .unwrap();
 
     let hits = catalog::offline_icons(&cache, "apple", &BTreeSet::new()).unwrap();
     assert!(hits.iter().any(|id| id == "ic:baseline-apple"));
@@ -23,8 +25,12 @@ fn offline_icons_merges_builtin_and_cached_ids() {
 fn offline_icons_honors_from_prefix_filter() {
     let dir = tempfile::tempdir().unwrap();
     let cache = IconCache::open_at(dir.path().join("icons.db")).unwrap();
-    cache.put("mdi", "home", &IconBody::new("<a/>", 24, 24)).unwrap();
-    cache.put("ic", "baseline-apple", &IconBody::new("<b/>", 24, 24)).unwrap();
+    cache
+        .put("mdi", "home", &IconBody::new("<a/>", 24, 24))
+        .unwrap();
+    cache
+        .put("ic", "baseline-apple", &IconBody::new("<b/>", 24, 24))
+        .unwrap();
 
     let allowed: BTreeSet<String> = ["ic".to_string()].into_iter().collect();
     let hits = catalog::offline_icons(&cache, "home", &allowed).unwrap();
@@ -48,7 +54,10 @@ fn offline_sets_includes_builtin_prefixes_and_cached_metadata() {
 
     let hits = catalog::offline_sets(&cache, "").unwrap();
     assert!(hits.iter().any(|s| s.prefix == "ic"));
-    assert!(hits.iter().any(|s| s.prefix == "lucide" && s.title == "Lucide Icons"));
+    assert!(
+        hits.iter()
+            .any(|s| s.prefix == "lucide" && s.title == "Lucide Icons")
+    );
 }
 
 #[test]
@@ -68,7 +77,13 @@ fn offline_sets_deduplicates_overlapping_prefixes() {
         .unwrap();
 
     let hits = catalog::offline_sets(&cache, "").unwrap();
-    let ic = hits.iter().find(|s| s.prefix == "ic").expect("ic prefix should be present");
-    assert_eq!(ic.title, "Iconify Collections", "cached metadata should replace built-in placeholder");
+    let ic = hits
+        .iter()
+        .find(|s| s.prefix == "ic")
+        .expect("ic prefix should be present");
+    assert_eq!(
+        ic.title, "Iconify Collections",
+        "cached metadata should replace built-in placeholder"
+    );
     assert_eq!(ic.license, Some("MIT".into()));
 }

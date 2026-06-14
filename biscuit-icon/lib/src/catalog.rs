@@ -12,7 +12,11 @@ use crate::error::Result;
 ///
 /// ## Errors
 /// [`IconError::Cache`] on SQLite failure.
-pub fn offline_icons(cache: &IconCache, needle: &str, allowed_prefixes: &BTreeSet<String>) -> Result<Vec<String>> {
+pub fn offline_icons(
+    cache: &IconCache,
+    needle: &str,
+    allowed_prefixes: &BTreeSet<String>,
+) -> Result<Vec<String>> {
     let mut ids = BTreeSet::new();
 
     for id in crate::domain::all_iconify_ids() {
@@ -44,7 +48,14 @@ pub fn offline_sets(cache: &IconCache, needle: &str) -> Result<Vec<SetInfo>> {
         if let Some((prefix, _)) = id.split_once(':') {
             let title = prefix.to_string();
             if needle.is_empty() || prefix.contains(needle) || title.contains(needle) {
-                out.entry(prefix.to_string()).or_insert(SetInfo { prefix: prefix.to_string(), title, license: None, license_title: None, license_url: None, total: None });
+                out.entry(prefix.to_string()).or_insert(SetInfo {
+                    prefix: prefix.to_string(),
+                    title,
+                    license: None,
+                    license_title: None,
+                    license_url: None,
+                    total: None,
+                });
             }
         }
     }
@@ -86,7 +97,13 @@ mod tests {
     fn offline_icons_includes_builtin_and_cached() {
         let dir = tempfile::tempdir().unwrap();
         let cache = IconCache::open_at(dir.path().join("icons.db")).unwrap();
-        cache.put("mdi", "home-automation", &crate::body::IconBody::new("<a/>", 24, 24)).unwrap();
+        cache
+            .put(
+                "mdi",
+                "home-automation",
+                &crate::body::IconBody::new("<a/>", 24, 24),
+            )
+            .unwrap();
 
         let hits = offline_icons(&cache, "apple", &BTreeSet::new()).unwrap();
         assert!(hits.iter().any(|id| id == "ic:baseline-apple"));
