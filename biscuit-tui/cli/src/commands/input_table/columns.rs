@@ -1,10 +1,10 @@
 use std::io;
 
-use serde_json::Value;
 use biscuit_tui::components::input_table::{
     BooleanSwitchConfig, TextAreaInputConfig, TextInputConfig,
 };
 use biscuit_tui::{ChoiceInput, ChoiceOption, InputTableColumn};
+use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub(super) enum ColumnSpec {

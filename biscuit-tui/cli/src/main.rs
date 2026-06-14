@@ -6,9 +6,9 @@
 
 use std::process::ExitCode;
 
+use biscuit_tui::HeightSpec;
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
-use biscuit_tui::HeightSpec;
 
 mod choice_normalize;
 mod commands;

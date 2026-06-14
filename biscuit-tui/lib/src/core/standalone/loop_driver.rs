@@ -67,23 +67,24 @@ where
     let mut needs_redraw = true;
     loop {
         if needs_redraw {
-            terminal.draw(|f| {
-                let area = f.area();
-                let widget = component.clone();
-                f.render_stateful_widget(widget, area, state);
-                if let Some(hint_text) = help_hint
-                    && !hint_text.is_empty()
-                    && area.height > 1
-                {
-                    let y = area.bottom().saturating_sub(1);
-                    let hint_line = Line::styled(
-                        hint_text.to_string(),
-                        Style::default().add_modifier(Modifier::DIM),
-                    );
-                    f.buffer_mut().set_line(area.x, y, &hint_line, area.width);
-                }
-            })
-            .map_err(io::Error::other)?;
+            terminal
+                .draw(|f| {
+                    let area = f.area();
+                    let widget = component.clone();
+                    f.render_stateful_widget(widget, area, state);
+                    if let Some(hint_text) = help_hint
+                        && !hint_text.is_empty()
+                        && area.height > 1
+                    {
+                        let y = area.bottom().saturating_sub(1);
+                        let hint_line = Line::styled(
+                            hint_text.to_string(),
+                            Style::default().add_modifier(Modifier::DIM),
+                        );
+                        f.buffer_mut().set_line(area.x, y, &hint_line, area.width);
+                    }
+                })
+                .map_err(io::Error::other)?;
             needs_redraw = false;
         }
 
@@ -150,10 +151,11 @@ where
     let mut needs_redraw = true;
     loop {
         if needs_redraw {
-            terminal.draw(|f| {
-                render_frame(f, component.clone(), state, &effective_chrome, overlay_hint);
-            })
-            .map_err(io::Error::other)?;
+            terminal
+                .draw(|f| {
+                    render_frame(f, component.clone(), state, &effective_chrome, overlay_hint);
+                })
+                .map_err(io::Error::other)?;
             needs_redraw = false;
         }
 

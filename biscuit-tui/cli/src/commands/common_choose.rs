@@ -21,11 +21,11 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use clap::{Args, ValueEnum};
 use biscuit_tui::{
     ABORTED_KIND, ActiveChoiceColor, BorderStyle, CANCELLED_KIND, ChoiceInput, FrameChromeConfig,
     HeightSpec, HotkeyDisplayMode, Margin, Orientation, Padding, SelectionMode, SortOrder,
 };
+use clap::{Args, ValueEnum};
 
 use crate::choice_normalize::NamingConvention;
 use crate::choice_normalize::normalize_options;

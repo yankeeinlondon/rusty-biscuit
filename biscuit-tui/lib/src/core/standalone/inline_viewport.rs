@@ -35,11 +35,12 @@ where
         // rendered prompt disappears. Then position the cursor at the
         // viewport's top-left so the next shell prompt reuses the
         // space (matching fzf's behaviour).
-        terminal.draw(|f| {
-            let area = f.area();
-            f.render_widget(Clear, area);
-        })
-        .map_err(io::Error::other)?;
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                f.render_widget(Clear, area);
+            })
+            .map_err(io::Error::other)?;
         execute!(io::stdout(), MoveTo(area.x, area.y))?;
     }
     Ok(())
@@ -170,9 +171,10 @@ where
 {
     let (effective_chrome, needs_overlay) = prepare_chrome_for_hint(chrome, help_hint);
     let overlay_hint = if needs_overlay { help_hint } else { None };
-    terminal.draw(|f| {
-        render_frame(f, component, state, &effective_chrome, overlay_hint);
-    })
-    .map_err(io::Error::other)?;
+    terminal
+        .draw(|f| {
+            render_frame(f, component, state, &effective_chrome, overlay_hint);
+        })
+        .map_err(io::Error::other)?;
     Ok(())
 }

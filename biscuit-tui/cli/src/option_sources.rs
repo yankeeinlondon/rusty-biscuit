@@ -12,11 +12,11 @@ use std::fs;
 use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 
-use serde_json::Value as JsonValue;
 use biscuit_tui::{
     ChoiceBuilderError, ChoiceOption, choice_options_from_csv, choice_options_from_dictionary,
     choice_options_from_markdown_list,
 };
+use serde_json::Value as JsonValue;
 
 /// Errors that can occur while resolving options from a source.
 #[derive(Debug, thiserror::Error)]

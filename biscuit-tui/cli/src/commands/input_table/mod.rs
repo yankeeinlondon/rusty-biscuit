@@ -26,8 +26,6 @@
 
 use std::io::{self, Write};
 
-use clap::Args;
-use serde_json::{Value, json};
 #[cfg(test)]
 use biscuit_tui::components::input_table::BooleanSwitchConfig;
 use biscuit_tui::components::input_table::CellValue;
@@ -37,6 +35,8 @@ use biscuit_tui::{
 };
 #[cfg(test)]
 use biscuit_tui::{ChoiceInput, ChoiceOption};
+use clap::Args;
+use serde_json::{Value, json};
 
 use crate::output::OutputMode;
 

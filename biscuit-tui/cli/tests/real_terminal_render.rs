@@ -168,8 +168,8 @@ fn level2_wezterm_renders_option_labels() {
 fn level2_kitty_renders_option_labels() {
     require_level!(Level::L2, KittyHarness::available(), "kitty");
 
-    let mut guard = SHARED_KITTY
-        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let mut guard =
+        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
 
     harness.send_text(b"clear\n").expect("clear");
@@ -196,8 +196,8 @@ fn level2_kitty_renders_option_labels() {
 fn level2_tmux_renders_option_labels() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX
-        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard =
+        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
 
     harness.send_text(b"clear\n").expect("clear");
@@ -233,8 +233,8 @@ fn level2_tmux_renders_option_labels() {
 fn level2_tmux_ctrl_space_reveals_badges() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX
-        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard =
+        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
 
     harness.send_text(b"clear\n").expect("clear");
@@ -308,8 +308,8 @@ fn sgr_param_present(haystack: &str, param: &str) -> bool {
 fn level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX
-        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard =
+        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
 
     harness.send_text(b"clear\n").expect("clear");
@@ -375,8 +375,8 @@ fn level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr() {
 fn level2_tmux_ctrl_c_exits_130() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
-    let mut guard = SHARED_TMUX
-        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let mut guard =
+        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
 
     harness.send_text(b"clear\n").expect("clear");
@@ -387,9 +387,7 @@ fn level2_tmux_ctrl_c_exits_130() {
     // — the shared shell returns to its prompt naturally and the
     // next test starts with a `clear`.
     let bin = sh_quote(&question_binary());
-    let cmd = format!(
-        "{bin} choose-one Red Green Blue; printf '\\nEXIT:%s\\n' \"$?\"\n"
-    );
+    let cmd = format!("{bin} choose-one Red Green Blue; printf '\\nEXIT:%s\\n' \"$?\"\n");
     harness.send_text(cmd.as_bytes()).expect("launch question");
     std::thread::sleep(Duration::from_millis(QUESTION_RENDER_MS));
 
@@ -919,12 +917,7 @@ fn level3_wezterm_alt_r_chord_selects_red() {
     harness
         .spawn_program(
             &bin,
-            &[
-                "choose-one",
-                "[ALT+r] Red",
-                "[ALT+g] Green",
-                "[ALT+b] Blue",
-            ],
+            &["choose-one", "[ALT+r] Red", "[ALT+g] Green", "[ALT+b] Blue"],
         )
         .expect("spawn question in wezterm");
     std::thread::sleep(Duration::from_millis(400));
