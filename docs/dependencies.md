@@ -2,6 +2,15 @@
 
 ## Recent Dependency Notes
 
+- `claudine/contract` (`claudine-contract`) implements
+  `biscuit_contract::inference::InferenceAdapter` over a Claudine
+  non-interactive, tool-free agentic-CLI session. It is the one crate that
+  depends on **both** `biscuit-contract` and `claudine` (lib); it must not
+  depend on `claudine-cli`. Beyond those two it adds `async-trait`, `tokio`,
+  `serde_json`, `jsonschema` (`0.42`, the workspace-wide pin, for adapter-owned
+  Draft 2020-12 validation), `tempfile` (isolated session CWD), `thiserror`,
+  and `tracing`. See
+  [`claudine/contract/docs/dependencies.md`](./claudine/contract/docs/dependencies.md).
 - `biscuit-contract/lib` is a provider-neutral inference contract crate. It
   depends only on `async-trait` (object-safety for `Arc<dyn
   InferenceAdapter>`), `serde_json` (JSON Schema + structured payloads), and
@@ -32,6 +41,7 @@ This is a Rust workspace with the following modules:
 - `biscuit-terminal/lib/Cargo.toml` - Terminal detection, image rendering, diagrams
 - `biscuit-terminal/cli/Cargo.toml` - Terminal inspector CLI (`bt`)
 - `claudine/lib/Cargo.toml` - Universal hook/event handler for agentic CLIs
+- `claudine/contract/Cargo.toml` - InferenceAdapter over tool-free agentic-CLI sessions (biscuit-contract, claudine, jsonschema, tempfile)
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
 - `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
@@ -145,6 +155,12 @@ This is a Rust workspace with the following modules:
     _Hook manager CLI for agentic tool integration._
 
     _Tags: workspace, cli, hooks_
+
+- [claudine-contract](./claudine/contract) _v0.1.0_
+
+    _`InferenceAdapter` backed by a Claudine non-interactive, tool-free, filesystem-isolated agentic-CLI session. Bridges `biscuit-contract` and `claudine` for deterministic consumers (Reaper, Darkmatter); see [`claudine/contract/docs/dependencies.md`](./claudine/contract/docs/dependencies.md)._
+
+    _Tags: workspace, library, inference, adapter_
 
 - [darkmatter](./darkmatter) _v0.1.0_
 

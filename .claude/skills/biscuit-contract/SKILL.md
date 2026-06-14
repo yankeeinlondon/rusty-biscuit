@@ -100,12 +100,22 @@ fn make_adapter() -> Arc<dyn InferenceAdapter> {
 }
 ```
 
+## Provider Adapters
+
+- **`claudine-contract`** (`claudine/contract`) is the first provider adapter
+  implementing `InferenceAdapter`. It runs an agentic CLI (Claude Code, Codex)
+  as a single non-interactive, tool-free, filesystem-isolated session. It is
+  the only crate that depends on both `biscuit-contract` and `claudine` (lib);
+  consumers inject it as `Arc<dyn InferenceAdapter>`. See the `claudine` skill
+  and `claudine/contract/README.md` (provider support matrix, security posture).
+
 ## When You Need More
 
 - Full API and rationale: `biscuit-contract/README.md`
 - Dependency rules: `biscuit-contract/docs/dependencies.md`
 - Spec / plan: `reaper/features/2026-06-03-inference-trait/spec.md` and
   `reaper/features/2026-06-03-inference-trait/plan.md`
+- Claudine adapter: `reaper/features/2026-06-11-claudine-adapter/spec.md`
 
 ## Out of Scope
 
@@ -116,6 +126,7 @@ fn make_adapter() -> Arc<dyn InferenceAdapter> {
 - telemetry export or agent orchestration
 - provider-native request/response values
 
-Provider implementations in Claudine and Unchained AI, and consumer wiring
-in Reaper and Darkmatter, are follow-up work owned by their own package
-areas.
+Provider implementations live in their own package areas: `claudine-contract`
+(`claudine/contract`) is the first, implementing the trait over a tool-free
+agentic-CLI session. An Unchained AI adapter and consumer wiring in Reaper and
+Darkmatter are follow-up work owned by their own areas.

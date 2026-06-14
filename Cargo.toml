@@ -18,6 +18,7 @@ members = [
     "biscuit-terminal/cli",
     "biscuit-terminal/lib",
     "claudine/cli",
+    "claudine/contract",
     "claudine/lib",
     "darkmatter/cli",
     "darkmatter/lib",
