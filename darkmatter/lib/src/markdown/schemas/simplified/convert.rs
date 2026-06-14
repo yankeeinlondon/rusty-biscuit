@@ -26,8 +26,8 @@
 use serde_json::{Map, Value, json};
 
 use super::types::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
-    TypeExpr,
+    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
+    SimplifiedType, TypeExpr,
 };
 use crate::markdown::schemas::errors::SchemaError;
 

@@ -174,5 +174,4 @@ mod tests {
         assert_eq!(scope.unwrap(), cache.strikethrough);
         assert_eq!(scope.unwrap().to_string(), "markup.strikethrough.markdown");
     }
-
 }

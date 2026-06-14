@@ -755,7 +755,11 @@ mod tests {
             .iter()
             .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
             .collect();
-        assert!(inactive.is_empty(), "expected zero KnownButInactive warnings; got: {:?}", inactive);
+        assert!(
+            inactive.is_empty(),
+            "expected zero KnownButInactive warnings; got: {:?}",
+            inactive
+        );
     }
 
     #[test]
@@ -882,7 +886,12 @@ mod tests {
             .iter()
             .filter(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. }))
             .collect();
-        assert_eq!(deprecated.len(), 2, "expected 2 deprecated warnings: {:?}", w);
+        assert_eq!(
+            deprecated.len(),
+            2,
+            "expected 2 deprecated warnings: {:?}",
+            w
+        );
         assert!(deprecated.iter().any(|w| w.path == "hr.style"));
         assert!(deprecated.iter().any(|w| w.path == "hr.color"));
     }
@@ -905,8 +914,11 @@ mod tests {
         let mut fm = Frontmatter::new();
         fm.insert("style", json!({"hr": {"kind": "waves", "weight": "thick"}}))
             .unwrap();
-        fm.insert("hr", json!({"style": "dots", "weight": "thin", "color": "red"}))
-            .unwrap();
+        fm.insert(
+            "hr",
+            json!({"style": "dots", "weight": "thin", "color": "red"}),
+        )
+        .unwrap();
         let (s, w) = from_frontmatter(&fm).unwrap();
         let hr = s.hr.expect("hr should exist");
         // style.hr values win.
@@ -1007,8 +1019,10 @@ mod tests {
         match into_strict(parsed) {
             Err(StyleParseError::Strict { warnings }) => {
                 assert!(
-                    warnings.iter().any(|w| w.path == "hr"
-                        && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
+                    warnings
+                        .iter()
+                        .any(|w| w.path == "hr"
+                            && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
                     "expected hr deprecation, got {:?}",
                     warnings
                 );
@@ -1027,8 +1041,10 @@ mod tests {
         match into_strict(parsed) {
             Err(StyleParseError::Strict { warnings }) => {
                 assert!(
-                    warnings.iter().any(|w| w.path == "hr"
-                        && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
+                    warnings
+                        .iter()
+                        .any(|w| w.path == "hr"
+                            && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
                     "expected hr deprecation, got {:?}",
                     warnings
                 );
@@ -1103,13 +1119,11 @@ mod tests {
         match into_strict(parsed) {
             Err(StyleParseError::Strict { warnings }) => {
                 assert!(
-                    warnings
-                        .iter()
-                        .any(|w| w.path == "style.hr.alignment"
-                            && matches!(
-                                &w.kind,
-                                StyleWarningKind::Deprecated { replacement } if replacement == "center"
-                            )),
+                    warnings.iter().any(|w| w.path == "style.hr.alignment"
+                        && matches!(
+                            &w.kind,
+                            StyleWarningKind::Deprecated { replacement } if replacement == "center"
+                        )),
                     "expected style.hr.alignment deprecation with replacement=center, got {:?}",
                     warnings
                 );

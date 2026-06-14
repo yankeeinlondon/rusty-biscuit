@@ -47,17 +47,11 @@ pub enum HrAlignment {
 pub struct HrStyle {
     #[serde(deserialize_with = "deserialize_optional_length")]
     pub width: Option<Length>,
-    #[serde(
-        deserialize_with = "deserialize_optional_length",
-        alias = "max_width"
-    )]
+    #[serde(deserialize_with = "deserialize_optional_length", alias = "max_width")]
     pub max_width: Option<Length>,
     #[serde(deserialize_with = "deserialize_optional_color")]
     pub color: Option<StyleColor>,
-    #[serde(
-        deserialize_with = "deserialize_optional_color",
-        alias = "bg_color"
-    )]
+    #[serde(deserialize_with = "deserialize_optional_color", alias = "bg_color")]
     pub bg_color: Option<StyleColor>,
     pub alignment: Option<HrAlignment>,
     pub kind: Option<HrKind>,

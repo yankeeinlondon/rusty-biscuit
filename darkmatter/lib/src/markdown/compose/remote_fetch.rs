@@ -242,12 +242,10 @@ impl RemoteFetchRuntime {
     /// Checks whether a URL is allowed by policy, returning a
     /// `RemoteReadError::DeniedByPolicy` if not.
     pub fn check_allowed(&self, url: &Url) -> Result<(), RemoteReadError> {
-        let host = url
-            .host_str()
-            .ok_or_else(|| RemoteReadError::InvalidUrl {
-                url: url.to_string(),
-                reason: "missing host".to_string(),
-            })?;
+        let host = url.host_str().ok_or_else(|| RemoteReadError::InvalidUrl {
+            url: url.to_string(),
+            reason: "missing host".to_string(),
+        })?;
         if self.inner.policy.is_allowed(host) {
             Ok(())
         } else {
@@ -310,7 +308,9 @@ impl RemoteFetchRuntime {
                     // Count in-flight only past the semaphore so the peak
                     // reflects requests actually issued, bounded by the cap.
                     let current = task_inner.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
-                    task_inner.peak_in_flight.fetch_max(current, Ordering::SeqCst);
+                    task_inner
+                        .peak_in_flight
+                        .fetch_max(current, Ordering::SeqCst);
                     let result = match task_inner.client.as_ref() {
                         Some(client) => {
                             fetch_with_cache(
@@ -512,8 +512,8 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use wiremock::{Mock, MockServer, ResponseTemplate};
     use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn mock_server_fetch_succeeds() {
@@ -782,7 +782,11 @@ mod persistent_cache_tests {
         let dir = tempfile::tempdir().unwrap();
         let store = temp_store(&dir);
         let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
-        let cfg = config(Some(Duration::from_secs(3600)), false, RemoteFreshnessMode::Strict);
+        let cfg = config(
+            Some(Duration::from_secs(3600)),
+            false,
+            RemoteFreshnessMode::Strict,
+        );
 
         // First run: populates the cache from the network.
         let rt1 = runtime(Arc::clone(&store), cfg);
@@ -818,11 +822,18 @@ mod persistent_cache_tests {
             let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
             let rt = runtime(
                 Arc::clone(&store),
-                config(Some(Duration::from_secs(3600)), false, RemoteFreshnessMode::Optimistic),
+                config(
+                    Some(Duration::from_secs(3600)),
+                    false,
+                    RemoteFreshnessMode::Optimistic,
+                ),
             );
             rt.register_and_fetch(url.clone());
             tokio::time::sleep(SETTLE).await;
-            assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("cached-body"));
+            assert_eq!(
+                rt.get_content(&url).unwrap().as_deref(),
+                Some("cached-body")
+            );
             url
             // Server shuts down here.
         };
@@ -835,7 +846,10 @@ mod persistent_cache_tests {
         );
         rt.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
-        assert_eq!(rt.get_content(&url).unwrap().as_deref(), Some("cached-body"));
+        assert_eq!(
+            rt.get_content(&url).unwrap().as_deref(),
+            Some("cached-body")
+        );
         assert_eq!(rt.stats().cache_hits, 1);
         assert_eq!(rt.stats().failures, 0);
     }
@@ -940,7 +954,11 @@ mod persistent_cache_tests {
         // Populate cache with a long TTL (would otherwise be served from disk).
         let rt1 = runtime(
             Arc::clone(&store),
-            config(Some(Duration::from_secs(3600)), false, RemoteFreshnessMode::Strict),
+            config(
+                Some(Duration::from_secs(3600)),
+                false,
+                RemoteFreshnessMode::Strict,
+            ),
         );
         rt1.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
@@ -949,7 +967,11 @@ mod persistent_cache_tests {
         // refresh = true must revalidate even though the entry is fresh.
         let rt2 = runtime(
             Arc::clone(&store),
-            config(Some(Duration::from_secs(3600)), true, RemoteFreshnessMode::Strict),
+            config(
+                Some(Duration::from_secs(3600)),
+                true,
+                RemoteFreshnessMode::Strict,
+            ),
         );
         rt2.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
@@ -998,13 +1020,19 @@ mod persistent_cache_tests {
         let rt1 = runtime(Arc::clone(&store), cfg);
         rt1.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
-        assert_eq!(rt1.get_content(&url).unwrap().as_deref(), Some("stale-but-usable"));
+        assert_eq!(
+            rt1.get_content(&url).unwrap().as_deref(),
+            Some("stale-but-usable")
+        );
 
         // Revalidation returns 500; Fallback serves the stale cached body.
         let rt2 = runtime(Arc::clone(&store), cfg);
         rt2.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
-        assert_eq!(rt2.get_content(&url).unwrap().as_deref(), Some("stale-but-usable"));
+        assert_eq!(
+            rt2.get_content(&url).unwrap().as_deref(),
+            Some("stale-but-usable")
+        );
         assert_eq!(rt2.stats().stale_served, 1);
     }
 
@@ -1014,7 +1042,10 @@ mod persistent_cache_tests {
         // This test pins that contract through `RemoteFreshnessMode::default()`
         // rather than a hard-coded `Fallback`, so a future default flip fails
         // here loudly instead of silently regressing offline/CI resilience.
-        assert_eq!(RemoteFreshnessMode::default(), RemoteFreshnessMode::Fallback);
+        assert_eq!(
+            RemoteFreshnessMode::default(),
+            RemoteFreshnessMode::Fallback
+        );
 
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -1035,13 +1066,19 @@ mod persistent_cache_tests {
         let rt1 = runtime(Arc::clone(&store), cfg);
         rt1.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
-        assert_eq!(rt1.get_content(&url).unwrap().as_deref(), Some("stale-but-usable"));
+        assert_eq!(
+            rt1.get_content(&url).unwrap().as_deref(),
+            Some("stale-but-usable")
+        );
 
         // Revalidation returns 500; the default mode serves the stale body.
         let rt2 = runtime(Arc::clone(&store), cfg);
         rt2.register_and_fetch(url.clone());
         tokio::time::sleep(SETTLE).await;
-        assert_eq!(rt2.get_content(&url).unwrap().as_deref(), Some("stale-but-usable"));
+        assert_eq!(
+            rt2.get_content(&url).unwrap().as_deref(),
+            Some("stale-but-usable")
+        );
         assert_eq!(rt2.stats().stale_served, 1);
     }
 

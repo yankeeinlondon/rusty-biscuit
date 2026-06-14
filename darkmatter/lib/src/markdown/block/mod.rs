@@ -9,5 +9,5 @@ mod hr_builder;
 mod hr_parser;
 
 pub(crate) use hr_builder::{hr_alignment_to_string, hr_kind_to_string, hr_weight_to_string};
-pub use hr_parser::{scan_inline_hr_warnings, try_parse_hr_attrs};
 pub(crate) use hr_parser::{matches_horizontal_rule_pattern, parse_hr_attribute_block};
+pub use hr_parser::{scan_inline_hr_warnings, try_parse_hr_attrs};

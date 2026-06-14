@@ -18,8 +18,8 @@ use biscuit_browser_harness::{BrowserHarness, ChromeHarness, require_browser, wr
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter::markdown::output::HtmlOptions;
-use darkmatter::markdown::render_tree::{TerminalCodeRenderer, fold_markdown_to_document};
 use darkmatter::markdown::render_tree::svg_sanitizer::sanitize_svg;
+use darkmatter::markdown::render_tree::{TerminalCodeRenderer, fold_markdown_to_document};
 use renderable::tree::{
     BrowserMermaidMode, BrowserRenderOptions, GraphicsMode, HrAlignment, HrKind, HrWeight,
     RawHtmlPolicy, RenderNode, RenderStrictness, SourceDescriptor, ThematicBreakAttrs,
@@ -172,7 +172,10 @@ async fn hr_geometry(harness: &mut ChromeHarness, alignment: HrAlignment) -> (f6
         .computed_style("body", "width")
         .await
         .expect("body width"));
-    assert!(block_width > 0.0, "containing block must have a positive used width");
+    assert!(
+        block_width > 0.0,
+        "containing block must have a positive used width"
+    );
     (left, right, rule_width / block_width)
 }
 
@@ -201,7 +204,10 @@ async fn browser_hr_alignment_positions_narrow_rule() {
         l < 1.0 && r > 1.0,
         "left alignment must anchor left (ml≈0, mr>0); got ml={l}, mr={r}",
     );
-    assert!((w - 0.5).abs() < 0.02, "left rule must stay narrow (~50%); got width ratio {w}");
+    assert!(
+        (w - 0.5).abs() < 0.02,
+        "left rule must stay narrow (~50%); got width ratio {w}"
+    );
 
     // Right-anchored: the mirror image.
     let (l, r, w) = hr_geometry(&mut harness, HrAlignment::Right).await;
@@ -209,7 +215,10 @@ async fn browser_hr_alignment_positions_narrow_rule() {
         r < 1.0 && l > 1.0,
         "right alignment must anchor right (mr≈0, ml>0); got ml={l}, mr={r}",
     );
-    assert!((w - 0.5).abs() < 0.02, "right rule must stay narrow (~50%); got width ratio {w}");
+    assert!(
+        (w - 0.5).abs() < 0.02,
+        "right rule must stay narrow (~50%); got width ratio {w}"
+    );
 
     // Centered: equal slack on both sides.
     let (l, r, w) = hr_geometry(&mut harness, HrAlignment::Center).await;
@@ -217,7 +226,10 @@ async fn browser_hr_alignment_positions_narrow_rule() {
         l > 1.0 && r > 1.0 && (l - r).abs() < 1.0,
         "center alignment must split the slack evenly; got ml={l}, mr={r}",
     );
-    assert!((w - 0.5).abs() < 0.02, "center rule must stay narrow (~50%); got width ratio {w}");
+    assert!(
+        (w - 0.5).abs() < 0.02,
+        "center rule must stay narrow (~50%); got width ratio {w}"
+    );
 
     // Full: zero horizontal margin and stretched to the whole containing block,
     // overriding the authored 50% width (review-2 finding 1).
@@ -274,7 +286,9 @@ async fn browser_hr_hostile_attrs_inject_no_nodes() {
     // Source-level guard: the sanitized fragment must carry neither the injected
     // markup nor the attacker payload.
     assert!(
-        !fragment.contains("<img") && !fragment.contains("<script") && !fragment.contains("__pwned"),
+        !fragment.contains("<img")
+            && !fragment.contains("<script")
+            && !fragment.contains("__pwned"),
         "hostile HR hints must be dropped before raw-HTML emission; got:\n{fragment}",
     );
 
@@ -328,7 +342,9 @@ async fn browser_mermaid_static_svg_computes_in_browser() {
     let fragment = md.as_html(options).expect("as_html");
 
     if !fragment.contains("<svg") {
-        eprintln!("skipping: Mermaid toolchain unavailable (no SVG produced; degraded to code block)");
+        eprintln!(
+            "skipping: Mermaid toolchain unavailable (no SVG produced; degraded to code block)"
+        );
         return;
     }
 
@@ -569,7 +585,9 @@ async fn browser_sanitized_mermaid_svg_strips_external_css_references() {
 fn sanitized_real_mermaid_retains_diagram_geometry() {
     let html = render_tree_path_mermaid_html();
     if !html.contains("<svg") {
-        eprintln!("skipping: Mermaid toolchain unavailable (no SVG produced; degraded to code block)");
+        eprintln!(
+            "skipping: Mermaid toolchain unavailable (no SVG produced; degraded to code block)"
+        );
         return;
     }
     assert!(
@@ -723,11 +741,16 @@ async fn browser_page_max_width_percent_computes_against_viewport() {
         .await
         .expect("computed style query");
     assert!(
-        max_width != "none" && max_width != "<no-match>" && (max_width.ends_with("px") || max_width.ends_with('%')),
+        max_width != "none"
+            && max_width != "<no-match>"
+            && (max_width.ends_with("px") || max_width.ends_with('%')),
         "browser must accept and compute percentage max-width; got {max_width}",
     );
     if max_width.ends_with("px") {
-        assert!(px(&max_width) > 0.0, "resolved max-width must be positive; got {max_width}");
+        assert!(
+            px(&max_width) > 0.0,
+            "resolved max-width must be positive; got {max_width}"
+        );
     }
     harness.shutdown().await;
 }
@@ -786,7 +809,11 @@ async fn browser_table_center_alignment_computes_equal_margins() {
     if !require_browser() {
         return;
     }
-    let doc = style_page_doc(120, "table:\n  alignment: center\n  max-width: 20ch", TABLE_MD);
+    let doc = style_page_doc(
+        120,
+        "table:\n  alignment: center\n  max-width: 20ch",
+        TABLE_MD,
+    );
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");
@@ -800,8 +827,14 @@ async fn browser_table_center_alignment_computes_equal_margins() {
         .computed_style("table", "margin-right")
         .await
         .expect("computed style query");
-    assert_eq!(left, right, "centered table must have equal auto margins; got {left} / {right}");
-    assert!(px(&left) > 0.0, "centered table margins must be non-zero; got {left}");
+    assert_eq!(
+        left, right,
+        "centered table must have equal auto margins; got {left} / {right}"
+    );
+    assert!(
+        px(&left) > 0.0,
+        "centered table margins must be non-zero; got {left}"
+    );
     harness.shutdown().await;
 }
 
@@ -836,7 +869,10 @@ async fn browser_page_max_width_centers_frame() {
         left, right,
         "max-width page frame must center via equal auto side offsets; got {left} / {right}",
     );
-    assert!(px(&left) > 0.0, "centered page frame side offsets must be non-zero; got {left}");
+    assert!(
+        px(&left) > 0.0,
+        "centered page frame side offsets must be non-zero; got {left}"
+    );
 
     let max_width = harness
         .computed_style(".darkmatter-page", "max-width")
@@ -899,7 +935,11 @@ async fn browser_page_color_inherits_to_descendants() {
     if !require_browser() {
         return;
     }
-    let doc = style_page_doc(120, "page:\n  color: red-500", "A paragraph of text.\n\n# Heading\n");
+    let doc = style_page_doc(
+        120,
+        "page:\n  color: red-500",
+        "A paragraph of text.\n\n# Heading\n",
+    );
 
     let mut harness = ChromeHarness::new();
     harness.spawn().await.expect("spawn chrome");

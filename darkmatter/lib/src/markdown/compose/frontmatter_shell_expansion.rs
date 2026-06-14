@@ -13,7 +13,9 @@ use super::shell_expansion::types::{
     ChainOperator, ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective,
     ShellExpansionError, ShellPipeline, ShellPolicyPaths,
 };
-use super::shell_expansion::{PreparedShellDirective, execute_prepared_directive, prepare_directive};
+use super::shell_expansion::{
+    PreparedShellDirective, execute_prepared_directive, prepare_directive,
+};
 use super::types::{ComposeOptions, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::types::MarkdownResult;
@@ -120,7 +122,8 @@ pub(crate) struct FrontmatterShellDirective {
     #[allow(dead_code)] // Inspected by parser tests; production reads `ast`.
     pub args: Vec<String>,
     pub timeout_override: Option<std::time::Duration>,
-    #[allow(dead_code)] // Inspected by parser tests; production uses `directive_reachable_pipelines`.
+    #[allow(dead_code)]
+    // Inspected by parser tests; production uses `directive_reachable_pipelines`.
     pub pipeline: Option<ShellPipeline>,
     pub ast: FrontmatterShellAst,
 }
@@ -367,10 +370,7 @@ fn find_top_level_separator(input: &str, target: char) -> Option<usize> {
             ')' if !in_single && !in_double && paren_depth > 0 => paren_depth -= 1,
             c if c == target && !in_single && !in_double && paren_depth == 0 => {
                 let pre_ok = idx == 0
-                    || matches!(
-                        bytes.get(idx.saturating_sub(1)),
-                        Some(b' ') | Some(b'\t')
-                    );
+                    || matches!(bytes.get(idx.saturating_sub(1)), Some(b' ') | Some(b'\t'));
                 let after_idx = idx + c.len_utf8();
                 let post_ok = after_idx == bytes.len()
                     || matches!(bytes.get(after_idx), Some(b' ') | Some(b'\t'));
@@ -609,9 +609,7 @@ fn validate_pipeline_shape_preserved(
                 format!(
                     "Frontmatter shell pipeline{where_text} executable at action {} changed from `{}` to `{}` after interpolation; \
                      interpolation may not change the executable",
-                    idx,
-                    orig_action.command.executable,
-                    new_action.command.executable,
+                    idx, orig_action.command.executable, new_action.command.executable,
                 ),
             ));
         }
@@ -853,14 +851,14 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     BranchPosition::Else,
                 )?;
 
-                let pick_then = evaluate_ternary_condition(
-                    condition_source,
-                    state,
-                    &candidate.key,
-                    ctx,
-                )?;
+                let pick_then =
+                    evaluate_ternary_condition(condition_source, state, &candidate.key, ctx)?;
 
-                let selected = if pick_then { then_prepared } else { else_prepared };
+                let selected = if pick_then {
+                    then_prepared
+                } else {
+                    else_prepared
+                };
                 match selected {
                     None => Pending::Empty,
                     Some(prepared) => Pending::Execute(prepared),
@@ -1104,7 +1102,8 @@ fn prepare_optional_branch(
             let original_pipeline = parse_static_pipeline_shape(original_text, ctx)
                 .map_err(|error| remap_branch_parse_error(error, position, &candidate.key, ctx))?;
 
-            let resolved = interpolate_branch_text(original_text, state, position, &candidate.key, ctx)?;
+            let resolved =
+                interpolate_branch_text(original_text, state, position, &candidate.key, ctx)?;
             let tokens = tokenize(&resolved, ctx)
                 .map_err(|error| remap_branch_parse_error(error, position, &candidate.key, ctx))?;
             let pipeline = parse_pipeline(&tokens, ctx)
@@ -1512,9 +1511,7 @@ mod tests {
         }
     }
 
-    fn unwrap_ternary(
-        directive: &FrontmatterShellDirective,
-    ) -> (&str, &Branch, &Branch) {
+    fn unwrap_ternary(directive: &FrontmatterShellDirective) -> (&str, &Branch, &Branch) {
         match &directive.ast {
             FrontmatterShellAst::Ternary {
                 condition_source,
@@ -1591,8 +1588,12 @@ mod tests {
         assert_eq!(cond, "cond");
         match (then_b, else_b) {
             (
-                Branch::Pipeline { original_text: then_text },
-                Branch::Pipeline { original_text: else_text },
+                Branch::Pipeline {
+                    original_text: then_text,
+                },
+                Branch::Pipeline {
+                    original_text: else_text,
+                },
             ) => {
                 assert_eq!(then_text.trim(), "echo yes");
                 assert_eq!(else_text.trim(), "echo no");
@@ -1866,7 +1867,9 @@ mod tests {
                 assert_eq!(pipeline.actions[0].command.executable, "flag?");
             }
             FrontmatterShellAst::Ternary { .. } => {
-                panic!("expected Pipeline AST, got Ternary — separator must require whitespace padding")
+                panic!(
+                    "expected Pipeline AST, got Ternary — separator must require whitespace padding"
+                )
             }
         }
     }
@@ -2235,8 +2238,7 @@ mod execution_tests {
         });
         let mut runtime = make_runtime();
 
-        let err = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None)
-        {
+        let err = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None) {
             Ok(_) => panic!("expected directive to fail"),
             Err(err) => err,
         };
@@ -2262,8 +2264,7 @@ mod execution_tests {
         });
         let mut runtime = make_runtime();
 
-        let err = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None)
-        {
+        let err = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None) {
             Ok(_) => panic!("expected directive to fail"),
             Err(err) => err,
         };
@@ -2296,8 +2297,7 @@ mod execution_tests {
             });
         let mut runtime = make_runtime();
 
-        let err = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None)
-        {
+        let err = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None) {
             Ok(_) => panic!("expected directive to fail"),
             Err(err) => err,
         };
@@ -2493,12 +2493,15 @@ mod execution_tests {
             });
         let mut runtime = make_runtime();
 
-        let err =
-            match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, Some(&snapshot))
-            {
-                Ok(_) => panic!("expected directive to fail with a shape-preservation error"),
-                Err(err) => err,
-            };
+        let err = match execute_frontmatter_shell_expansion(
+            &mut fm,
+            &options,
+            &mut runtime,
+            Some(&snapshot),
+        ) {
+            Ok(_) => panic!("expected directive to fail with a shape-preservation error"),
+            Err(err) => err,
+        };
         let msg = err.to_string();
         assert!(
             msg.contains("changed from 1 action") || msg.contains("introduce new chain operators"),
@@ -2538,12 +2541,15 @@ mod execution_tests {
             });
         let mut runtime = make_runtime();
 
-        let err =
-            match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, Some(&snapshot))
-            {
-                Ok(_) => panic!("expected quote-breakout to fail"),
-                Err(err) => err,
-            };
+        let err = match execute_frontmatter_shell_expansion(
+            &mut fm,
+            &options,
+            &mut runtime,
+            Some(&snapshot),
+        ) {
+            Ok(_) => panic!("expected quote-breakout to fail"),
+            Err(err) => err,
+        };
         let msg = err.to_string();
         assert!(
             msg.contains("changed from 1 action")
@@ -2578,12 +2584,15 @@ mod execution_tests {
         });
         let mut runtime = make_runtime();
 
-        let err =
-            match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, Some(&snapshot))
-            {
-                Ok(_) => panic!("expected non-ternary directive to fail"),
-                Err(err) => err,
-            };
+        let err = match execute_frontmatter_shell_expansion(
+            &mut fm,
+            &options,
+            &mut runtime,
+            Some(&snapshot),
+        ) {
+            Ok(_) => panic!("expected non-ternary directive to fail"),
+            Err(err) => err,
+        };
         let msg = err.to_string();
         assert!(
             msg.contains("changed from 1 action") || msg.contains("introduce new chain operators"),

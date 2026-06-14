@@ -132,8 +132,14 @@ fn mark_envelope_parses_as_single_strikethrough_container() {
         .filter(|e| matches!(e, Event::End(TagEnd::Strikethrough)))
         .count();
 
-    assert_eq!(starts, 1, "envelope must open exactly one Strikethrough: {evs:?}");
-    assert_eq!(ends, 1, "envelope must close exactly one Strikethrough: {evs:?}");
+    assert_eq!(
+        starts, 1,
+        "envelope must open exactly one Strikethrough: {evs:?}"
+    );
+    assert_eq!(
+        ends, 1,
+        "envelope must close exactly one Strikethrough: {evs:?}"
+    );
 }
 
 #[test]
@@ -258,7 +264,10 @@ fn multi_field_sentinel_survives_in_payload() {
         1,
         "U+FDD1 field separator must survive as literal text: {joined:?}",
     );
-    assert!(joined.contains("term") && joined.contains("definition"), "{joined:?}");
+    assert!(
+        joined.contains("term") && joined.contains("definition"),
+        "{joined:?}"
+    );
 }
 
 #[test]

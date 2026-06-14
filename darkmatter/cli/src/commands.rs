@@ -488,7 +488,8 @@ pub fn run_render(
             emit_or_show_artifact(markdown_artifact(&md), show)?;
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&md, theme.prose, theme.code, theme.color_mode, cli, input)?;
+            let artifact =
+                html_artifact(&md, theme.prose, theme.code, theme.color_mode, cli, input)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {
@@ -846,8 +847,14 @@ pub fn run_compose(
             }
         }
         OutputFormat::Html => {
-            let artifact =
-                html_artifact(&composed, theme.prose, theme.code, theme.color_mode, cli, input)?;
+            let artifact = html_artifact(
+                &composed,
+                theme.prose,
+                theme.code,
+                theme.color_mode,
+                cli,
+                input,
+            )?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {
@@ -1366,8 +1373,8 @@ fn print_computed_hash(computed: &ComputedHash) -> Result<()> {
             let ComputedHash::Detailed(detailed) = computed else {
                 unreachable!("only detailed hashes lack a flat string form");
             };
-            let yaml = serde_yaml_ng::to_string(detailed)
-                .wrap_err("Failed to serialize detailed hash")?;
+            let yaml =
+                serde_yaml_ng::to_string(detailed).wrap_err("Failed to serialize detailed hash")?;
             print!("{yaml}");
         }
     }

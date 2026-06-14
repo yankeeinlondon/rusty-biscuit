@@ -494,19 +494,16 @@ mod tests {
         let warnings = scan_inline_hr_warnings("--- { style: waves }");
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].path, "hr.inline.style");
-        assert!(
-            matches!(
-                &warnings[0].kind,
-                StyleWarningKind::Deprecated { replacement } if replacement == "hr.inline.kind"
-            )
-        );
+        assert!(matches!(
+            &warnings[0].kind,
+            StyleWarningKind::Deprecated { replacement } if replacement == "hr.inline.kind"
+        ));
     }
 
     #[test]
     fn scan_inline_hr_warnings_detects_multiple_legacy_rules() {
-        let warnings = scan_inline_hr_warnings(
-            "--- { style: waves }\n\nSome text.\n\n--- { style: dots }\n",
-        );
+        let warnings =
+            scan_inline_hr_warnings("--- { style: waves }\n\nSome text.\n\n--- { style: dots }\n");
         assert_eq!(warnings.len(), 2);
     }
 

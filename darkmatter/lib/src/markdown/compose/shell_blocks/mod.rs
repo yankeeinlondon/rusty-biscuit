@@ -563,8 +563,7 @@ mod tests {
 
     #[test]
     fn indented_block_output_under_list_item_is_reindented() {
-        let content =
-            "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
+        let content = "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
         let (result, report) = run_block_stage(content);
         assert_eq!(report.shell_blocks_applied, 1);
         // Every output line keeps the opener's 4-space indent so the lines stay
@@ -613,7 +612,8 @@ mod tests {
         // verbatim, so after re-indenting the block ends in a bare newline —
         // never an indentation-only `"    "` line. Mirrors the `::shell`
         // trailing-newline guarantee.
-        let content = "- intro\n\n    ::shell-block\n    printf 'one\\n'\n    ::end-block\n\n- next\n";
+        let content =
+            "- intro\n\n    ::shell-block\n    printf 'one\\n'\n    ::end-block\n\n- next\n";
         let (result, report) = run_block_stage(content);
         assert_eq!(report.shell_blocks_applied, 1);
         assert!(result.contains("    one\n\n- next"), "got: {result:?}");
@@ -645,8 +645,7 @@ mod tests {
         // Re-indented block output is a continuation of the first list item, so
         // the document stays a single list with two items — the generated lines
         // are children of the parent <li>, not siblings of the outer list.
-        let content =
-            "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
+        let content = "- intro\n\n    ::shell-block\n    echo hello\n    echo world\n    ::end-block\n\n- next\n";
         let html = run_block_stage_to_html(content);
         assert_eq!(html.matches("<ul>").count(), 1, "got: {html}");
         assert_eq!(html.matches("<li>").count(), 2, "got: {html}");
@@ -656,8 +655,7 @@ mod tests {
     fn root_level_block_output_is_a_sibling_block_in_commonmark() {
         // The column-1 baseline is intentionally a top-level sibling: the spliced
         // output splits the surrounding list into two separate <ul> blocks.
-        let content =
-            "- intro\n\n::shell-block\necho hello\necho world\n::end-block\n\n- next\n";
+        let content = "- intro\n\n::shell-block\necho hello\necho world\n::end-block\n\n- next\n";
         let html = run_block_stage_to_html(content);
         assert_eq!(html.matches("<ul>").count(), 2, "got: {html}");
     }
@@ -694,10 +692,7 @@ mod tests {
         let content = "> > ::shell-block\n> > echo hello\n> > echo world\n> > ::end-block\n";
         let (result, report) = run_block_stage(content);
         assert_eq!(report.shell_blocks_applied, 1);
-        assert!(
-            result.contains("> > hello\n> > world\n"),
-            "got: {result:?}"
-        );
+        assert!(result.contains("> > hello\n> > world\n"), "got: {result:?}");
         assert!(!result.contains("\nhello\n"), "got: {result:?}");
     }
 

@@ -108,10 +108,7 @@ impl<'a> TreeBuildContext<'a> {
     /// the page background is painted once by the page frame. Copying either
     /// onto each link node would defeat inheritance and double-composite an
     /// alpha-bearing page background.
-    pub fn hyperlink_color(
-        &self,
-        is_local: bool,
-    ) -> (Option<PaintColor>, Option<PaintColor>) {
+    pub fn hyperlink_color(&self, is_local: bool) -> (Option<PaintColor>, Option<PaintColor>) {
         let merged = self.effective_hyperlink_style(is_local);
 
         let fg = merged
@@ -134,10 +131,7 @@ impl<'a> TreeBuildContext<'a> {
     /// foreground inherits to the alt-text placeholder through the styled root,
     /// and the page background is painted by the page frame, not copied onto
     /// each image node.
-    pub fn image_color(
-        &self,
-        is_local: bool,
-    ) -> (Option<PaintColor>, Option<PaintColor>) {
+    pub fn image_color(&self, is_local: bool) -> (Option<PaintColor>, Option<PaintColor>) {
         let local = if is_local {
             self.local_image_style
         } else {
@@ -226,11 +220,7 @@ fn component_for(kind: &NodeKind) -> Option<PageComponent> {
 }
 
 /// Writes the component's [`ComponentPolicy`] `layout` onto the node.
-fn apply_component_layout(
-    node: &mut RenderNode,
-    ctx: &TreeBuildContext,
-    component: PageComponent,
-) {
+fn apply_component_layout(node: &mut RenderNode, ctx: &TreeBuildContext, component: PageComponent) {
     let Some(policy) = ctx.component_policies.get(&component) else {
         return;
     };
@@ -241,11 +231,7 @@ fn apply_component_layout(
 }
 
 /// Sets foreground / background from the component's resolved colors.
-fn apply_component_color(
-    node: &mut RenderNode,
-    ctx: &TreeBuildContext,
-    component: PageComponent,
-) {
+fn apply_component_color(node: &mut RenderNode, ctx: &TreeBuildContext, component: PageComponent) {
     let fg = ctx.component_color(component);
     let bg = ctx.component_bg_color(component);
     if fg.is_none() && bg.is_none() {
@@ -311,9 +297,7 @@ fn apply_image_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
     }
 
     // Text-layout hints (typed, not content mutation).
-    if is_local
-        && let Some(common) = ctx.local_image_style
-    {
+    if is_local && let Some(common) = ctx.local_image_style {
         attach_text_layout(node, common);
     }
 
@@ -323,7 +307,8 @@ fn apply_image_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
             .local_image_style
             .and_then(|c| c.to_css_overlay())
             .map(|c| c.to_css().replace('\n', " "));
-        if let Some(directive) = parse_image_directive(&url, raw_title, frontmatter_css.as_deref()) {
+        if let Some(directive) = parse_image_directive(&url, raw_title, frontmatter_css.as_deref())
+        {
             directive.apply_to_image_node(node);
         }
     }
@@ -333,7 +318,7 @@ fn apply_image_policy(node: &mut RenderNode, ctx: &TreeBuildContext) {
 /// policy, so the terminal renderer lifts the marker and pads the body per the
 /// resolved alignment. Replaces the deleted `darkmatter.li` hint.
 fn apply_list_item_text_layout(node: &mut RenderNode, ctx: &TreeBuildContext) {
-    use renderable::layout::{Width};
+    use renderable::layout::Width;
     use renderable::tree::TextLayoutHints;
 
     let Some(policy) = ctx.component_policies.get(&PageComponent::Li) else {
@@ -653,7 +638,10 @@ fn parse_link_directive(
             None
         },
         data: if is_structured {
-            link.data().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+            link.data()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
         } else {
             Vec::new()
         },
@@ -750,7 +738,10 @@ mod structural_tests {
         doc
     }
 
-    fn find_node<'a>(node: &'a RenderNode, predicate: &dyn Fn(&RenderNode) -> bool) -> Option<&'a RenderNode> {
+    fn find_node<'a>(
+        node: &'a RenderNode,
+        predicate: &dyn Fn(&RenderNode) -> bool,
+    ) -> Option<&'a RenderNode> {
         if predicate(node) {
             return Some(node);
         }
@@ -849,8 +840,10 @@ mod structural_tests {
         );
         let ctx = ctx_for(&policies);
         let doc = fold_test("> quote\n", &ctx);
-        let quote = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::BlockQuote { .. }))
-            .expect("blockquote node");
+        let quote = find_node(&doc.root, &|n| {
+            matches!(n.kind, NodeKind::BlockQuote { .. })
+        })
+        .expect("blockquote node");
         let style = quote.attrs.style().expect("style is set");
         let bg = style
             .background
@@ -927,8 +920,8 @@ mod structural_tests {
             renderable::color::Tailwind::Blue500,
         )));
         let doc = fold_test("[label](https://example.com)\n", &ctx);
-        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
-            .expect("link node");
+        let link =
+            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
         assert!(
             link.attrs.style_ref().is_none_or(|s| s.is_empty()),
             "page color must not be copied onto the link; got {:?}",
@@ -985,8 +978,8 @@ mod structural_tests {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
         let doc = fold_test("[label](https://example.com \"class='btn'\")\n", &ctx);
-        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
-            .expect("link node");
+        let link =
+            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
         assert!(
             link.attrs.classes.iter().any(|c| c == "btn"),
             "class 'btn' attached: {:?}",
@@ -1004,30 +997,21 @@ mod structural_tests {
     fn context_fold_parses_structured_link_target() {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
-        let doc = fold_test(
-            "[x](https://example.com \"target='_blank'\")\n",
-            &ctx,
-        );
-        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
-            .expect("link node");
+        let doc = fold_test("[x](https://example.com \"target='_blank'\")\n", &ctx);
+        let link =
+            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
         let browser = link.attrs.browser_ref().expect("browser attrs");
         let link_attrs = browser.link.as_ref().expect("link browser attrs");
-        assert_eq!(
-            link_attrs.target,
-            Some(renderable::tree::LinkTarget::Blank)
-        );
+        assert_eq!(link_attrs.target, Some(renderable::tree::LinkTarget::Blank));
     }
 
     #[test]
     fn context_fold_parses_structured_link_data_prompt() {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
-        let doc = fold_test(
-            "[x](https://example.com \"prompt='explain'\")\n",
-            &ctx,
-        );
-        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
-            .expect("link node");
+        let doc = fold_test("[x](https://example.com \"prompt='explain'\")\n", &ctx);
+        let link =
+            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
         let browser = link.attrs.browser_ref().expect("browser attrs");
         let prompt_name = renderable::tree::DataAttrName::new("prompt").unwrap();
         assert_eq!(
@@ -1040,19 +1024,12 @@ mod structural_tests {
     fn context_fold_parses_structured_link_inline_style() {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
-        let doc = fold_test(
-            "[x](https://example.com \"style='color: red'\")\n",
-            &ctx,
-        );
-        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
-            .expect("link node");
+        let doc = fold_test("[x](https://example.com \"style='color: red'\")\n", &ctx);
+        let link =
+            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
         let browser = link.attrs.browser_ref().expect("browser attrs");
         let css = browser.inline_style.as_ref().expect("inline_style");
-        assert!(
-            css.to_css().contains("color: red"),
-            "css: {}",
-            css.to_css()
-        );
+        assert!(css.to_css().contains("color: red"), "css: {}", css.to_css());
     }
 
     // ── link children preserved ────────────────────────────────────────────
@@ -1062,8 +1039,8 @@ mod structural_tests {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
         let doc = fold_test("[**bold** label](https://example.com)\n", &ctx);
-        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
-            .expect("link node");
+        let link =
+            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
         assert!(
             link.children()
                 .iter()
@@ -1101,8 +1078,8 @@ mod structural_tests {
         let mut ctx = ctx_for(&policies);
         ctx.hyperlink_style = Some(&common);
         let doc = fold_test("[label](https://example.com)\n", &ctx);
-        let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
-            .expect("link node");
+        let link =
+            find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. })).expect("link node");
         let hints = link.attrs.text_layout_ref().expect("text_layout hints");
         assert!(hints.width.is_some(), "width hint attached");
     }

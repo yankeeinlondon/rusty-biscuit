@@ -94,8 +94,7 @@ impl ThemePair {
     }
 
     pub(crate) fn for_code_block(self, term: &Terminal, theme: Option<ThemePair>) -> Theme {
-        self.selected(theme)
-            .resolve(term.color_mode().inverted())
+        self.selected(theme).resolve(term.color_mode().inverted())
     }
 
     #[allow(dead_code)]
@@ -116,7 +115,9 @@ impl ThemePair {
     /// This is an internal method for resolving to the Theme enum.
     pub(crate) fn resolve(self, mode: ColorMode) -> Theme {
         match (self, mode) {
-            (ThemePair::Base16Ocean, ColorMode::Dark | ColorMode::Unknown) => Theme::Base16OceanDark,
+            (ThemePair::Base16Ocean, ColorMode::Dark | ColorMode::Unknown) => {
+                Theme::Base16OceanDark
+            }
             (ThemePair::Base16Ocean, ColorMode::Light) => Theme::Base16OceanLight,
             (ThemePair::Github, ColorMode::Dark | ColorMode::Unknown) => Theme::GithubDark,
             (ThemePair::Github, ColorMode::Light) => Theme::GithubLight,
@@ -132,7 +133,9 @@ impl ThemePair {
             (ThemePair::Dracula, ColorMode::Light) => Theme::OneHalfLight,
             (ThemePair::Monokai, ColorMode::Dark | ColorMode::Unknown) => Theme::MonokaiExtended,
             (ThemePair::Monokai, ColorMode::Light) => Theme::OneHalfLight,
-            (ThemePair::VisualStudioDark, ColorMode::Dark | ColorMode::Unknown) => Theme::VisualStudioDark,
+            (ThemePair::VisualStudioDark, ColorMode::Dark | ColorMode::Unknown) => {
+                Theme::VisualStudioDark
+            }
             (ThemePair::VisualStudioDark, ColorMode::Light) => Theme::GithubLight,
         }
     }

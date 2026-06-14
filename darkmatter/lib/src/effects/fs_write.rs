@@ -77,10 +77,7 @@ fn lexically_clean(path: &Path) -> std::path::PathBuf {
 
 /// Containment check returning the cleaned in-root path, for verbs that resolve
 /// a target before reading or mutating it.
-pub(crate) fn ensure_within(
-    root: &Path,
-    target: &Path,
-) -> Result<std::path::PathBuf, EffectError> {
+pub(crate) fn ensure_within(root: &Path, target: &Path) -> Result<std::path::PathBuf, EffectError> {
     normalize_within(root, target)
 }
 

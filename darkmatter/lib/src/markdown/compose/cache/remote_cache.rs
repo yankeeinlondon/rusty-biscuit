@@ -114,11 +114,7 @@ enum CacheAction {
 }
 
 /// Decides the fetch action from cache presence, freshness, and mode.
-fn decide_action(
-    cached_present: bool,
-    within_ttl: bool,
-    cfg: &RemoteCacheConfig,
-) -> CacheAction {
+fn decide_action(cached_present: bool, within_ttl: bool, cfg: &RemoteCacheConfig) -> CacheAction {
     if !cached_present {
         return CacheAction::FetchFresh;
     }
@@ -242,8 +238,7 @@ pub(crate) async fn fetch_with_cache(
             })
         }
         CacheAction::Revalidate => {
-            let (manifest, cached_body) =
-                cached.expect("Revalidate implies a cache entry");
+            let (manifest, cached_body) = cached.expect("Revalidate implies a cache entry");
             let conditional = Conditional {
                 if_none_match: manifest.etag.clone(),
                 if_modified_since: manifest.last_modified.clone(),

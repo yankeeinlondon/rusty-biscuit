@@ -260,7 +260,10 @@ fn build_styled_document() -> Document {
     let hr_owned = resolve_hr_defaults(&md, &page.hr_defaults());
     let ctx = build_context(&page, &hr_owned);
     let (doc, diags) = to_render_document_with_context(&md, &ctx);
-    assert!(diags.is_empty(), "styled corpus must fold cleanly: {diags:?}");
+    assert!(
+        diags.is_empty(),
+        "styled corpus must fold cleanly: {diags:?}"
+    );
     doc
 }
 
@@ -279,7 +282,10 @@ fn styled_corpus_populates_every_typed_group() {
         cov.component_policy,
         "corpus must carry baked component policy: {cov:?}"
     );
-    assert!(cov.text_layout, "corpus must carry text-layout hints: {cov:?}");
+    assert!(
+        cov.text_layout,
+        "corpus must carry text-layout hints: {cov:?}"
+    );
     assert!(
         cov.browser_link,
         "corpus must carry typed browser link attrs: {cov:?}"
@@ -445,8 +451,17 @@ fn markdown_dialects_degrade_within_policy() {
     // Paint, inline CSS, browser attrs, and inline HTML tags that must never
     // survive the portable-Markdown body.
     const FORBIDDEN: &[&str] = &[
-        "rgb(", "rgba(", "style=", "color:", "background", "data-", "target=",
-        "class=", "<a ", "<img", "<span",
+        "rgb(",
+        "rgba(",
+        "style=",
+        "color:",
+        "background",
+        "data-",
+        "target=",
+        "class=",
+        "<a ",
+        "<img",
+        "<span",
     ];
 
     let portable = render_markdown_node(&doc.root, &MarkdownRenderOptions::default())

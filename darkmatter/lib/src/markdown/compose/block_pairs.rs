@@ -138,8 +138,8 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
                     // A quoted `> ::end-block` only closes a quoted opener; when
                     // the top of the stack is unquoted (or the stack is empty)
                     // the line is literal quoted Markdown, not a closer.
-                    let is_active_closer = !is_quoted
-                        || matches!(stack.last(), Some((.., quoted)) if *quoted);
+                    let is_active_closer =
+                        !is_quoted || matches!(stack.last(), Some((.., quoted)) if *quoted);
 
                     if is_active_closer {
                         let trailing = after.trim();

@@ -35,9 +35,13 @@ pub fn discover(
     let (boundary, is_repo) = resolve_boundary(&source_path)?;
 
     let (candidates, component_root) = match &directive.mode {
-        FileLinksMode::Glob(glob) => {
-            discover_glob(glob, &source_dir, &boundary, &source_canonical, directive.line)?
-        }
+        FileLinksMode::Glob(glob) => discover_glob(
+            glob,
+            &source_dir,
+            &boundary,
+            &source_canonical,
+            directive.line,
+        )?,
         FileLinksMode::Dir { path, depth } => discover_dir(
             path,
             *depth,
@@ -283,10 +287,7 @@ fn walk_recursive(
         let entry_path = entry.path();
 
         // Skip symlinked directories to avoid loops; include symlinked files.
-        let is_symlink = entry
-            .file_type()
-            .map(|ft| ft.is_symlink())
-            .unwrap_or(false);
+        let is_symlink = entry.file_type().map(|ft| ft.is_symlink()).unwrap_or(false);
 
         let canonical = canonicalize(&entry_path);
 
@@ -391,7 +392,9 @@ fn compute_render(
         })
         .collect::<Vec<_>>();
 
-    let relative = component_root.strip_prefix(boundary).unwrap_or(Path::new(""));
+    let relative = component_root
+        .strip_prefix(boundary)
+        .unwrap_or(Path::new(""));
     let components: Vec<String> = relative
         .components()
         .filter_map(|c| c.as_os_str().to_str().map(|s| s.to_string()))
@@ -489,7 +492,10 @@ mod tests {
     ) -> Result<FileLinksResult, FileLinksError> {
         let directives = parse_file_links_directives(content)?;
         assert_eq!(directives.len(), 1, "expected exactly one directive");
-        discover(&directives[0], &ComposeSource::File(source_path.to_path_buf()))
+        discover(
+            &directives[0],
+            &ComposeSource::File(source_path.to_path_buf()),
+        )
     }
 
     // ── Glob mode ────────────────────────────────────────────────────────────
@@ -562,8 +568,18 @@ mod tests {
 
         let result = discover_content("::file-links *.md\n", &source).unwrap();
         let render = result.render.expect("expected matches");
-        assert!(render.included_paths.iter().all(|p| p != Path::new("index.md")));
-        assert!(render.included_paths.iter().any(|p| p == Path::new("other.md")));
+        assert!(
+            render
+                .included_paths
+                .iter()
+                .all(|p| p != Path::new("index.md"))
+        );
+        assert!(
+            render
+                .included_paths
+                .iter()
+                .any(|p| p == Path::new("other.md"))
+        );
     }
 
     #[test]
@@ -630,19 +646,27 @@ mod tests {
         write_file(&docs.join("sub").join("deep"), "very_deep.md", "");
         let source = write_file(dir.path(), "index.md", "");
 
-        let result =
-            discover_content("::file-links --dir docs --depth 1\n", &source).unwrap();
+        let result = discover_content("::file-links --dir docs --depth 1\n", &source).unwrap();
         let render = result.render.expect("expected matches");
         assert_eq!(render.included_paths.len(), 2);
-        assert!(render.included_paths.iter().any(|p| p == Path::new("top.md")));
-        assert!(render
-            .included_paths
-            .iter()
-            .any(|p| p == Path::new("sub/nested.md")));
-        assert!(!render
-            .included_paths
-            .iter()
-            .any(|p| p == Path::new("sub/deep/very_deep.md")));
+        assert!(
+            render
+                .included_paths
+                .iter()
+                .any(|p| p == Path::new("top.md"))
+        );
+        assert!(
+            render
+                .included_paths
+                .iter()
+                .any(|p| p == Path::new("sub/nested.md"))
+        );
+        assert!(
+            !render
+                .included_paths
+                .iter()
+                .any(|p| p == Path::new("sub/deep/very_deep.md"))
+        );
     }
 
     #[test]
@@ -656,8 +680,7 @@ mod tests {
         write_file(&docs.join("a").join("b").join("c"), "c.md", "");
         let source = write_file(dir.path(), "index.md", "");
 
-        let result =
-            discover_content("::file-links --dir docs --depth 2\n", &source).unwrap();
+        let result = discover_content("::file-links --dir docs --depth 2\n", &source).unwrap();
         let render = result.render.expect("expected matches");
         // depth 0: top.md; depth 1: a/a.md; depth 2: a/b/b.md; NOT a/b/c/c.md
         assert_eq!(render.included_paths.len(), 3);
@@ -674,10 +697,12 @@ mod tests {
         let result = discover_content("::file-links --dir .\n", &source).unwrap();
         let render = result.render.expect("expected matches");
         assert!(render.included_paths.iter().any(|p| p == Path::new("a.md")));
-        assert!(render
-            .included_paths
-            .iter()
-            .all(|p| p != Path::new("index.md")));
+        assert!(
+            render
+                .included_paths
+                .iter()
+                .all(|p| p != Path::new("index.md"))
+        );
     }
 
     #[test]
@@ -686,8 +711,7 @@ mod tests {
         make_repo(&dir);
         let source = write_file(dir.path(), "index.md", "");
 
-        let err =
-            discover_content("::file-links --dir nonexistent\n", &source).unwrap_err();
+        let err = discover_content("::file-links --dir nonexistent\n", &source).unwrap_err();
         assert!(matches!(err, FileLinksError::TargetNotFound { .. }));
     }
 
@@ -698,8 +722,7 @@ mod tests {
         write_file(dir.path(), "report.pdf", "pdf");
         let source = write_file(dir.path(), "index.md", "");
 
-        let err =
-            discover_content("::file-links --dir report.pdf\n", &source).unwrap_err();
+        let err = discover_content("::file-links --dir report.pdf\n", &source).unwrap_err();
         assert!(matches!(err, FileLinksError::TargetNotDirectory { .. }));
     }
 
@@ -715,8 +738,7 @@ mod tests {
         write_file(&docs, "e.bin", "");
         let source = write_file(dir.path(), "index.md", "");
 
-        let result =
-            discover_content("::file-links --dir docs\n", &source).unwrap();
+        let result = discover_content("::file-links --dir docs\n", &source).unwrap();
         let render = result.render.expect("expected matches");
         assert_eq!(render.included_paths.len(), 4);
     }
@@ -763,10 +785,7 @@ mod tests {
         let source = write_file(dir.path(), "index.md", "");
 
         // Try to escape via ..
-        let parent_glob = format!(
-            "::file-links \"{}/*.md\"\n",
-            outside.path().display()
-        );
+        let parent_glob = format!("::file-links \"{}/*.md\"\n", outside.path().display());
         let result = discover_content(&parent_glob, &source).unwrap();
         assert!(result.render.is_none());
     }
@@ -788,7 +807,9 @@ mod tests {
         let source = write_file(dir.path(), "index.md", "");
 
         let result = discover_content("::file-links docs/*.pdf\n", &source).unwrap();
-        let render = result.render.expect("expected the in-bound symlink to match");
+        let render = result
+            .render
+            .expect("expected the in-bound symlink to match");
         assert_eq!(render.target_name, "docs");
         assert_eq!(render.included_paths, vec![PathBuf::from("alias.pdf")]);
     }
@@ -815,8 +836,7 @@ mod tests {
 
     #[test]
     fn inline_content_without_source_errors() {
-        let directives =
-            parse_file_links_directives("::file-links *.md\n").unwrap();
+        let directives = parse_file_links_directives("::file-links *.md\n").unwrap();
         let err = discover(&directives[0], &ComposeSource::Unknown).unwrap_err();
         assert!(matches!(err, FileLinksError::MissingSourceContext { .. }));
     }
@@ -831,8 +851,7 @@ mod tests {
         write_file(&docs_topics, "a.md", "");
         let source = write_file(dir.path(), "index.md", "");
 
-        let result =
-            discover_content("::file-links --dir docs/topics\n", &source).unwrap();
+        let result = discover_content("::file-links --dir docs/topics\n", &source).unwrap();
         let render = result.render.expect("expected matches");
         assert_eq!(render.target_name, "topics");
         assert_eq!(render.dimmed_prefix, "/docs/");
@@ -919,20 +938,14 @@ mod tests {
 
     #[test]
     fn common_ancestor_multiple_files_same_dir() {
-        let paths = vec![
-            PathBuf::from("/a/b/x.md"),
-            PathBuf::from("/a/b/y.md"),
-        ];
+        let paths = vec![PathBuf::from("/a/b/x.md"), PathBuf::from("/a/b/y.md")];
         let ancestor = common_ancestor(&paths).unwrap();
         assert_eq!(ancestor, PathBuf::from("/a/b"));
     }
 
     #[test]
     fn common_ancestor_different_subdirs() {
-        let paths = vec![
-            PathBuf::from("/a/b/x.md"),
-            PathBuf::from("/a/c/y.md"),
-        ];
+        let paths = vec![PathBuf::from("/a/b/x.md"), PathBuf::from("/a/c/y.md")];
         let ancestor = common_ancestor(&paths).unwrap();
         assert_eq!(ancestor, PathBuf::from("/a"));
     }

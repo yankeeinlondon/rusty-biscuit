@@ -283,7 +283,10 @@ fn validate_detailed(detailed: &DetailedValue, property: &str) -> MarkdownResult
                 ),
             ));
         }
-        check(&format!("sections[{index}].content_hash"), &section.content_hash)?;
+        check(
+            &format!("sections[{index}].content_hash"),
+            &section.content_hash,
+        )?;
     }
     Ok(())
 }
@@ -363,7 +366,10 @@ mod tests {
         };
         // The promotion invariant: a string, never an object.
         let serialized = stored.to_frontmatter_value();
-        assert!(serialized.is_string(), "expected bare string, got {serialized}");
+        assert!(
+            serialized.is_string(),
+            "expected bare string, got {serialized}"
+        );
         assert_round_trip(stored);
     }
 
@@ -389,7 +395,11 @@ mod tests {
         let stored = StoredHash {
             kind: MdHashKind::Fm,
             value: StoredHashValue::Flat("aaaa000000000000".to_string()),
-            ignored: vec!["reviewed".to_string(), "draft".to_string(), "author".to_string()],
+            ignored: vec![
+                "reviewed".to_string(),
+                "draft".to_string(),
+                "author".to_string(),
+            ],
         };
         let serialized = stored.to_frontmatter_value();
         assert_eq!(
@@ -538,7 +548,10 @@ mod tests {
             "ignored": ["draft", 7],
         });
         let err = StoredHash::parse(&value, "hash").unwrap_err();
-        assert!(err.to_string().contains("'ignored' entries must be strings"));
+        assert!(
+            err.to_string()
+                .contains("'ignored' entries must be strings")
+        );
     }
 
     #[test]
@@ -549,7 +562,10 @@ mod tests {
             "ignored": ["reviewed", "draft"],
         });
         let stored = StoredHash::parse(&value, "hash").unwrap();
-        assert_eq!(stored.ignored, vec!["draft".to_string(), "reviewed".to_string()]);
+        assert_eq!(
+            stored.ignored,
+            vec!["draft".to_string(), "reviewed".to_string()]
+        );
     }
 
     #[test]
@@ -558,7 +574,10 @@ mod tests {
         let value = Value::String("zzzzzzzzzzzzzzzz-yyyyyyyyyyyyyyyy".to_string());
         let err = StoredHash::parse(&value, "hash").unwrap_err();
         assert!(matches!(err, MarkdownError::MalformedStoredHash { .. }));
-        assert!(err.to_string().contains("not a 16-digit lowercase hex hash"));
+        assert!(
+            err.to_string()
+                .contains("not a 16-digit lowercase hex hash")
+        );
     }
 
     #[test]
@@ -574,7 +593,10 @@ mod tests {
     fn rejects_shorthand_with_uppercase_hex() {
         let value = Value::String("AAAA000000000000-bbbb000000000000".to_string());
         let err = StoredHash::parse(&value, "hash").unwrap_err();
-        assert!(err.to_string().contains("not a 16-digit lowercase hex hash"));
+        assert!(
+            err.to_string()
+                .contains("not a 16-digit lowercase hex hash")
+        );
     }
 
     #[test]
@@ -582,7 +604,10 @@ mod tests {
         // Correct hex alphabet, but each component is the wrong length.
         let value = Value::String("aaaa-bbbb".to_string());
         let err = StoredHash::parse(&value, "hash").unwrap_err();
-        assert!(err.to_string().contains("not a 16-digit lowercase hex hash"));
+        assert!(
+            err.to_string()
+                .contains("not a 16-digit lowercase hex hash")
+        );
     }
 
     #[test]
@@ -602,7 +627,10 @@ mod tests {
             "value": "aaaa000000000000-bbbb000000000000-cccc000000000000-zzzzzzzzzzzzzzzz",
         });
         let err = StoredHash::parse(&value, "hash").unwrap_err();
-        assert!(err.to_string().contains("not a 16-digit lowercase hex hash"));
+        assert!(
+            err.to_string()
+                .contains("not a 16-digit lowercase hex hash")
+        );
     }
 
     #[test]

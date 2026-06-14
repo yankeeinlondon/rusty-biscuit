@@ -12,8 +12,8 @@ use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, Utc};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use super::{json_number, scalar_string, to_number, to_number_coerce};
 use super::resolve_ctx::{ResolutionContext, is_remote_url, normalize_path_arg};
+use super::{json_number, scalar_string, to_number, to_number_coerce};
 use crate::markdown::Markdown;
 use crate::markdown::schemas::DarkmatterSchemas;
 
@@ -669,13 +669,17 @@ fn load_markdown(raw: &str, ctx: &ResolutionContext, fname: &str) -> Result<Mark
         return match ctx.fetch_remote_text(raw)? {
             Some(body) => Markdown::try_from_content(body)
                 .map_err(|e| format!("{fname}() failed to parse {raw:?}: {e}")),
-            None => Err(format!("{fname}() remote reads are not enabled for {raw:?}")),
+            None => Err(format!(
+                "{fname}() remote reads are not enabled for {raw:?}"
+            )),
         };
     }
-    let path = resolve_arg(raw, ctx)?.ok_or_else(|| format!("{fname}() invalid file path: {raw:?}"))?;
+    let path =
+        resolve_arg(raw, ctx)?.ok_or_else(|| format!("{fname}() invalid file path: {raw:?}"))?;
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("{fname}() invalid file path {raw:?}: {e}"))?;
-    Markdown::try_from_content(content).map_err(|e| format!("{fname}() failed to parse {raw:?}: {e}"))
+    Markdown::try_from_content(content)
+        .map_err(|e| format!("{fname}() failed to parse {raw:?}: {e}"))
 }
 
 /// `frontmatter(file)` → object; `frontmatter(file, prop)` → value | null.
@@ -718,7 +722,12 @@ pub fn markdown_title_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Valu
     }
     let raw = require_string("markdown_title", &args[0])?;
     let md = load_markdown(raw, ctx, "markdown_title")?;
-    if let Some(t) = md.frontmatter().as_map().get("title").and_then(Value::as_str) {
+    if let Some(t) = md
+        .frontmatter()
+        .as_map()
+        .get("title")
+        .and_then(Value::as_str)
+    {
         return Ok(Value::String(t.to_string()));
     }
     let h1s: Vec<String> = md
@@ -889,42 +898,187 @@ pub struct FsFunction {
 /// (enforced by `descriptor_name_set_equals_dispatchable_runtime_name_set`).
 pub const PURE_FUNCTIONS: &[PureFunction] = &[
     // Type predicates
-    PureFunction { canonical: "is_string", aliases: &["isstring"], signatures: &["is_string(x)"], handler: is_string },
-    PureFunction { canonical: "is_number", aliases: &["isnumber"], signatures: &["is_number(x)"], handler: is_number },
-    PureFunction { canonical: "is_array", aliases: &["isarray"], signatures: &["is_array(x)"], handler: is_array },
-    PureFunction { canonical: "is_null", aliases: &["isnull"], signatures: &["is_null(x)"], handler: is_null },
-    PureFunction { canonical: "is_object", aliases: &["isobject"], signatures: &["is_object(x)"], handler: is_object },
-    PureFunction { canonical: "is_empty", aliases: &["isempty"], signatures: &["is_empty(x)"], handler: is_empty_fn },
+    PureFunction {
+        canonical: "is_string",
+        aliases: &["isstring"],
+        signatures: &["is_string(x)"],
+        handler: is_string,
+    },
+    PureFunction {
+        canonical: "is_number",
+        aliases: &["isnumber"],
+        signatures: &["is_number(x)"],
+        handler: is_number,
+    },
+    PureFunction {
+        canonical: "is_array",
+        aliases: &["isarray"],
+        signatures: &["is_array(x)"],
+        handler: is_array,
+    },
+    PureFunction {
+        canonical: "is_null",
+        aliases: &["isnull"],
+        signatures: &["is_null(x)"],
+        handler: is_null,
+    },
+    PureFunction {
+        canonical: "is_object",
+        aliases: &["isobject"],
+        signatures: &["is_object(x)"],
+        handler: is_object,
+    },
+    PureFunction {
+        canonical: "is_empty",
+        aliases: &["isempty"],
+        signatures: &["is_empty(x)"],
+        handler: is_empty_fn,
+    },
     // Math helpers
-    PureFunction { canonical: "min", aliases: &[], signatures: &["min(a, b)"], handler: min_fn },
-    PureFunction { canonical: "max", aliases: &[], signatures: &["max(a, b)"], handler: max_fn },
-    PureFunction { canonical: "abs", aliases: &[], signatures: &["abs(x)"], handler: abs_fn },
-    PureFunction { canonical: "round", aliases: &[], signatures: &["round(x, [default])"], handler: round_fn },
+    PureFunction {
+        canonical: "min",
+        aliases: &[],
+        signatures: &["min(a, b)"],
+        handler: min_fn,
+    },
+    PureFunction {
+        canonical: "max",
+        aliases: &[],
+        signatures: &["max(a, b)"],
+        handler: max_fn,
+    },
+    PureFunction {
+        canonical: "abs",
+        aliases: &[],
+        signatures: &["abs(x)"],
+        handler: abs_fn,
+    },
+    PureFunction {
+        canonical: "round",
+        aliases: &[],
+        signatures: &["round(x, [default])"],
+        handler: round_fn,
+    },
     // Collection helpers
-    PureFunction { canonical: "first", aliases: &[], signatures: &["first(x)"], handler: first_fn },
-    PureFunction { canonical: "last", aliases: &[], signatures: &["last(x)"], handler: last_fn },
-    PureFunction { canonical: "has_key", aliases: &["haskey"], signatures: &["has_key(obj, key)"], handler: has_key_fn },
-    PureFunction { canonical: "contains", aliases: &[], signatures: &["contains(haystack, needle)"], handler: contains_fn },
-    PureFunction { canonical: "length", aliases: &[], signatures: &["length(x)"], handler: length_fn },
+    PureFunction {
+        canonical: "first",
+        aliases: &[],
+        signatures: &["first(x)"],
+        handler: first_fn,
+    },
+    PureFunction {
+        canonical: "last",
+        aliases: &[],
+        signatures: &["last(x)"],
+        handler: last_fn,
+    },
+    PureFunction {
+        canonical: "has_key",
+        aliases: &["haskey"],
+        signatures: &["has_key(obj, key)"],
+        handler: has_key_fn,
+    },
+    PureFunction {
+        canonical: "contains",
+        aliases: &[],
+        signatures: &["contains(haystack, needle)"],
+        handler: contains_fn,
+    },
+    PureFunction {
+        canonical: "length",
+        aliases: &[],
+        signatures: &["length(x)"],
+        handler: length_fn,
+    },
     // Type conversion
-    PureFunction { canonical: "number", aliases: &[], signatures: &["number(x, [default])"], handler: number_fn },
+    PureFunction {
+        canonical: "number",
+        aliases: &[],
+        signatures: &["number(x, [default])"],
+        handler: number_fn,
+    },
     // String predicates
-    PureFunction { canonical: "starts_with", aliases: &["startswith"], signatures: &["starts_with(x, find)"], handler: starts_with },
-    PureFunction { canonical: "ends_with", aliases: &["endswith"], signatures: &["ends_with(x, find)"], handler: ends_with },
+    PureFunction {
+        canonical: "starts_with",
+        aliases: &["startswith"],
+        signatures: &["starts_with(x, find)"],
+        handler: starts_with,
+    },
+    PureFunction {
+        canonical: "ends_with",
+        aliases: &["endswith"],
+        signatures: &["ends_with(x, find)"],
+        handler: ends_with,
+    },
     // String mutations
-    PureFunction { canonical: "lower", aliases: &[], signatures: &["lower(x)"], handler: lower },
-    PureFunction { canonical: "upper", aliases: &[], signatures: &["upper(x)"], handler: upper },
-    PureFunction { canonical: "capitalize", aliases: &[], signatures: &["capitalize(x)"], handler: capitalize },
-    PureFunction { canonical: "kebab_case", aliases: &["kebabcase"], signatures: &["kebab_case(x)"], handler: kebab_case },
-    PureFunction { canonical: "snake_case", aliases: &["snakecase"], signatures: &["snake_case(x)"], handler: snake_case },
-    PureFunction { canonical: "camel_case", aliases: &["camelcase"], signatures: &["camel_case(x)"], handler: camel_case },
-    PureFunction { canonical: "pascal_case", aliases: &["pascalcase"], signatures: &["pascal_case(x)"], handler: pascal_case },
-    PureFunction { canonical: "title_case", aliases: &["titlecase"], signatures: &["title_case(x)"], handler: title_case },
+    PureFunction {
+        canonical: "lower",
+        aliases: &[],
+        signatures: &["lower(x)"],
+        handler: lower,
+    },
+    PureFunction {
+        canonical: "upper",
+        aliases: &[],
+        signatures: &["upper(x)"],
+        handler: upper,
+    },
+    PureFunction {
+        canonical: "capitalize",
+        aliases: &[],
+        signatures: &["capitalize(x)"],
+        handler: capitalize,
+    },
+    PureFunction {
+        canonical: "kebab_case",
+        aliases: &["kebabcase"],
+        signatures: &["kebab_case(x)"],
+        handler: kebab_case,
+    },
+    PureFunction {
+        canonical: "snake_case",
+        aliases: &["snakecase"],
+        signatures: &["snake_case(x)"],
+        handler: snake_case,
+    },
+    PureFunction {
+        canonical: "camel_case",
+        aliases: &["camelcase"],
+        signatures: &["camel_case(x)"],
+        handler: camel_case,
+    },
+    PureFunction {
+        canonical: "pascal_case",
+        aliases: &["pascalcase"],
+        signatures: &["pascal_case(x)"],
+        handler: pascal_case,
+    },
+    PureFunction {
+        canonical: "title_case",
+        aliases: &["titlecase"],
+        signatures: &["title_case(x)"],
+        handler: title_case,
+    },
     // Date formatting
-    PureFunction { canonical: "date", aliases: &[], signatures: &["date(iso, fmt)"], handler: date_fn },
+    PureFunction {
+        canonical: "date",
+        aliases: &[],
+        signatures: &["date(iso, fmt)"],
+        handler: date_fn,
+    },
     // Strict date validators
-    PureFunction { canonical: "is_date", aliases: &["isdate"], signatures: &["is_date(x)"], handler: is_date },
-    PureFunction { canonical: "is_date_utc", aliases: &["isdateutc"], signatures: &["is_date_utc(x)"], handler: is_date_utc },
+    PureFunction {
+        canonical: "is_date",
+        aliases: &["isdate"],
+        signatures: &["is_date(x)"],
+        handler: is_date,
+    },
+    PureFunction {
+        canonical: "is_date_utc",
+        aliases: &["isdateutc"],
+        signatures: &["is_date_utc(x)"],
+        handler: is_date_utc,
+    },
     PureFunction {
         canonical: "is_date_time",
         aliases: &["isdatetime", "is_datetime"],
@@ -938,30 +1092,60 @@ pub const PURE_FUNCTIONS: &[PureFunction] = &[
         handler: is_datetime_utc,
     },
     // Relative date validators
-    PureFunction { canonical: "is_today", aliases: &["istoday"], signatures: &["is_today(x)"], handler: is_today },
-    PureFunction { canonical: "is_today_utc", aliases: &["istodayutc"], signatures: &["is_today_utc(x)"], handler: is_today_utc },
-    PureFunction { canonical: "is_yesterday", aliases: &["isyesterday"], signatures: &["is_yesterday(x)"], handler: is_yesterday },
+    PureFunction {
+        canonical: "is_today",
+        aliases: &["istoday"],
+        signatures: &["is_today(x)"],
+        handler: is_today,
+    },
+    PureFunction {
+        canonical: "is_today_utc",
+        aliases: &["istodayutc"],
+        signatures: &["is_today_utc(x)"],
+        handler: is_today_utc,
+    },
+    PureFunction {
+        canonical: "is_yesterday",
+        aliases: &["isyesterday"],
+        signatures: &["is_yesterday(x)"],
+        handler: is_yesterday,
+    },
     PureFunction {
         canonical: "is_yesterday_utc",
         aliases: &["isyesterdayutc"],
         signatures: &["is_yesterday_utc(x)"],
         handler: is_yesterday_utc,
     },
-    PureFunction { canonical: "is_tomorrow", aliases: &["istomorrow"], signatures: &["is_tomorrow(x)"], handler: is_tomorrow },
+    PureFunction {
+        canonical: "is_tomorrow",
+        aliases: &["istomorrow"],
+        signatures: &["is_tomorrow(x)"],
+        handler: is_tomorrow,
+    },
     PureFunction {
         canonical: "is_tomorrow_utc",
         aliases: &["istomorrowutc"],
         signatures: &["is_tomorrow_utc(x)"],
         handler: is_tomorrow_utc,
     },
-    PureFunction { canonical: "is_this_month", aliases: &["isthismonth"], signatures: &["is_this_month(x)"], handler: is_this_month },
+    PureFunction {
+        canonical: "is_this_month",
+        aliases: &["isthismonth"],
+        signatures: &["is_this_month(x)"],
+        handler: is_this_month,
+    },
     PureFunction {
         canonical: "is_this_month_utc",
         aliases: &["isthismonthutc"],
         signatures: &["is_this_month_utc(x)"],
         handler: is_this_month_utc,
     },
-    PureFunction { canonical: "is_this_year", aliases: &["isthisyear"], signatures: &["is_this_year(x)"], handler: is_this_year },
+    PureFunction {
+        canonical: "is_this_year",
+        aliases: &["isthisyear"],
+        signatures: &["is_this_year(x)"],
+        handler: is_this_year,
+    },
     PureFunction {
         canonical: "is_this_year_utc",
         aliases: &["isthisyearutc"],
@@ -975,9 +1159,24 @@ pub const PURE_FUNCTIONS: &[PureFunction] = &[
 /// [`dispatch_fs`] resolves names against this slice, making it the single
 /// source of truth for the fs surface.
 pub const FS_FUNCTIONS: &[FsFunction] = &[
-    FsFunction { canonical: "absolute", aliases: &[], signatures: &["absolute(file)"], handler: absolute_fn },
-    FsFunction { canonical: "relative", aliases: &[], signatures: &["relative(file)"], handler: relative_fn },
-    FsFunction { canonical: "file_exists", aliases: &["fileexists"], signatures: &["file_exists(file)"], handler: file_exists_fn },
+    FsFunction {
+        canonical: "absolute",
+        aliases: &[],
+        signatures: &["absolute(file)"],
+        handler: absolute_fn,
+    },
+    FsFunction {
+        canonical: "relative",
+        aliases: &[],
+        signatures: &["relative(file)"],
+        handler: relative_fn,
+    },
+    FsFunction {
+        canonical: "file_exists",
+        aliases: &["fileexists"],
+        signatures: &["file_exists(file)"],
+        handler: file_exists_fn,
+    },
     FsFunction {
         canonical: "frontmatter",
         aliases: &[],
@@ -1035,8 +1234,16 @@ pub fn dispatchable_canonical_names() -> Vec<&'static str> {
 /// a matching descriptor — or vice versa — fails a test.
 pub fn dispatchable_signatures() -> Vec<&'static str> {
     let mut sigs: Vec<&'static str> = LAZY_OPERATOR_SIGNATURES.to_vec();
-    sigs.extend(PURE_FUNCTIONS.iter().flat_map(|f| f.signatures.iter().copied()));
-    sigs.extend(FS_FUNCTIONS.iter().flat_map(|f| f.signatures.iter().copied()));
+    sigs.extend(
+        PURE_FUNCTIONS
+            .iter()
+            .flat_map(|f| f.signatures.iter().copied()),
+    );
+    sigs.extend(
+        FS_FUNCTIONS
+            .iter()
+            .flat_map(|f| f.signatures.iter().copied()),
+    );
     sigs
 }
 
@@ -1424,7 +1631,10 @@ mod tests {
 
         #[test]
         fn date_null_propagates() {
-            assert_eq!(date_fn(&[json!(null), json!("short")]).unwrap(), json!(null));
+            assert_eq!(
+                date_fn(&[json!(null), json!("short")]).unwrap(),
+                json!(null)
+            );
         }
 
         #[test]
@@ -1506,7 +1716,11 @@ mod tests {
             let dir = tempfile::TempDir::new().unwrap();
             std::fs::write(dir.path().join("empty.md"), "---\ntitle: T\n---\n\n   \n").unwrap();
             std::fs::write(dir.path().join("full.md"), "---\n---\n# Heading\n\nWords\n").unwrap();
-            std::fs::write(dir.path().join("fm_title.md"), "---\ntitle: FM\n---\n# H1\n").unwrap();
+            std::fs::write(
+                dir.path().join("fm_title.md"),
+                "---\ntitle: FM\n---\n# H1\n",
+            )
+            .unwrap();
             let ctx = ResolutionContext::new(dir.path().to_path_buf());
 
             assert_eq!(
@@ -1704,9 +1918,11 @@ mod fn_remote_tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/doc.md"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "---\ntitle: Remote Title\nstatus: draft\n---\n# H1\n\nBody\n",
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(
+                    "---\ntitle: Remote Title\nstatus: draft\n---\n# H1\n\nBody\n",
+                ),
+            )
             .mount(&server)
             .await;
         let url = format!("{}/doc.md", server.uri());

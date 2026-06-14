@@ -115,9 +115,10 @@ pub fn apply_bespoke_style(
         if !overrides.code_theme
             && let Some(theme_name) = page_style.code.as_ref().and_then(|c| c.theme.as_deref())
         {
-            let theme = ThemePair::try_from(theme_name).map_err(|_| StyleApplyError::InvalidCodeTheme {
-                value: theme_name.to_string(),
-            })?;
+            let theme =
+                ThemePair::try_from(theme_name).map_err(|_| StyleApplyError::InvalidCodeTheme {
+                    value: theme_name.to_string(),
+                })?;
             page = page.with_page_code_theme(theme);
         }
     }
@@ -126,7 +127,9 @@ pub fn apply_bespoke_style(
     if let Some(hyperlinks) = style.hyperlinks.as_ref() {
         // Conflict detection for width/max-width in the common bucket.
         if hyperlinks.common.width.is_some() && hyperlinks.common.max_width.is_some() {
-            return Err(StyleApplyError::ComponentWidthConflict { bucket: "hyperlinks" });
+            return Err(StyleApplyError::ComponentWidthConflict {
+                bucket: "hyperlinks",
+            });
         }
 
         // Conflict detection for width/max-width in the local-style bucket.
@@ -141,9 +144,10 @@ pub fn apply_bespoke_style(
 
         page = page.with_hyperlink_style(hyperlinks.common.clone());
 
-        let merged_local = hyperlinks.local_style.as_ref().map(|local| {
-            merge_common_style(&hyperlinks.common, local)
-        });
+        let merged_local = hyperlinks
+            .local_style
+            .as_ref()
+            .map(|local| merge_common_style(&hyperlinks.common, local));
         if let Some(local) = merged_local {
             page = page.with_local_hyperlink_style(local);
         }
@@ -161,9 +165,10 @@ pub fn apply_bespoke_style(
             });
         }
 
-        let merged_local = images.local_style.as_ref().map(|local| {
-            merge_common_style(&images.common, local)
-        });
+        let merged_local = images
+            .local_style
+            .as_ref()
+            .map(|local| merge_common_style(&images.common, local));
         if let Some(local) = merged_local {
             page = page.with_local_image_style(local);
         }
@@ -562,20 +567,16 @@ mod tests {
 
     #[test]
     fn apply_bespoke_style_returns_page_unchanged_when_no_page_block() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::style::schema::StyleFrontmatter;
+        use biscuit_terminal::terminal::Terminal;
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
         let style = StyleFrontmatter::default();
-        let result = apply_bespoke_style(
-            page.clone(),
-            &style,
-            BespokeStyleOverrides::default(),
-            None,
-        )
-        .unwrap();
+        let result =
+            apply_bespoke_style(page.clone(), &style, BespokeStyleOverrides::default(), None)
+                .unwrap();
 
         assert_eq!(result.terminal_width(), page.terminal_width());
         assert!(result.stylesheet().is_none());
@@ -776,9 +777,9 @@ mod tests {
 
     #[test]
     fn apply_bespoke_style_with_stylesheet_and_meta() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::style::schema::{PageStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
 
         let dir = tempfile::tempdir().unwrap();
         let css_path = dir.path().join("style.css");
@@ -798,8 +799,13 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), Some(&source))
-            .unwrap();
+        let page = apply_bespoke_style(
+            page,
+            &style,
+            BespokeStyleOverrides::default(),
+            Some(&source),
+        )
+        .unwrap();
 
         assert!(page.stylesheet().is_some());
         assert!(page.page_meta().is_some());
@@ -809,10 +815,10 @@ mod tests {
 
     #[test]
     fn apply_bespoke_style_with_code_theme() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
-        use crate::style::schema::{PageStyle, StyleFrontmatter};
         use crate::markdown::highlighting::ThemePair;
+        use crate::style::schema::{PageStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
@@ -826,17 +832,17 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
 
         assert_eq!(page.page_code_theme(), Some(&ThemePair::Dracula));
     }
 
     #[test]
     fn apply_bespoke_style_code_theme_cli_override_skips_frontmatter() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::style::schema::{PageStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
@@ -853,14 +859,17 @@ mod tests {
         let overrides = BespokeStyleOverrides { code_theme: true };
 
         let page = apply_bespoke_style(page, &style, overrides, None).unwrap();
-        assert!(page.page_code_theme().is_none(), "CLI override should skip frontmatter code theme");
+        assert!(
+            page.page_code_theme().is_none(),
+            "CLI override should skip frontmatter code theme"
+        );
     }
 
     #[test]
     fn apply_bespoke_style_invalid_code_theme_returns_error() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::style::schema::{PageStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
@@ -874,8 +883,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap_err();
+        let err =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::InvalidCodeTheme {
@@ -899,9 +908,9 @@ mod tests {
 
     #[test]
     fn merge_common_style_field_by_field() {
-        use renderable::layout::Alignment;
-        use renderable::color::{Color, Tailwind};
         use crate::style::color::StyleColor;
+        use renderable::color::{Color, Tailwind};
+        use renderable::layout::Alignment;
 
         let base = CommonStyle {
             alignment: Some(Alignment::Left),
@@ -921,7 +930,11 @@ mod tests {
         };
 
         let merged = merge_common_style(&base, &local);
-        assert_eq!(merged.alignment, Some(Alignment::Right), "local alignment wins");
+        assert_eq!(
+            merged.alignment,
+            Some(Alignment::Right),
+            "local alignment wins"
+        );
         assert_eq!(
             merged.color,
             Some(StyleColor {
@@ -930,17 +943,14 @@ mod tests {
             }),
             "base color falls through when local is unset"
         );
-        assert!(
-            merged.bg_color.is_some(),
-            "local bg-color is present"
-        );
+        assert!(merged.bg_color.is_some(), "local bg-color is present");
     }
 
     #[test]
     fn apply_bespoke_style_hyperlink_width_conflict() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
         use renderable::layout::Length;
 
         let term = Terminal::new_optimistic(80);
@@ -957,19 +967,21 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap_err();
+        let err =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap_err();
         assert_eq!(
             err,
-            StyleApplyError::ComponentWidthConflict { bucket: "hyperlinks" }
+            StyleApplyError::ComponentWidthConflict {
+                bucket: "hyperlinks"
+            }
         );
     }
 
     #[test]
     fn apply_bespoke_style_hyperlink_local_style_width_conflict() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
         use renderable::layout::Length;
 
         let term = Terminal::new_optimistic(80);
@@ -986,8 +998,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap_err();
+        let err =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::ComponentWidthConflict {
@@ -998,9 +1010,9 @@ mod tests {
 
     #[test]
     fn apply_bespoke_style_hyperlink_style_stored() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
         use renderable::layout::{Alignment, Length};
 
         let term = Terminal::new_optimistic(80);
@@ -1020,8 +1032,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
 
         assert_eq!(
             page.hyperlink_style().map(|s| s.alignment),
@@ -1035,12 +1047,12 @@ mod tests {
 
     #[test]
     fn hyperlink_color_injected_into_html() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
-        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
-        use renderable::color::{Color, Tailwind};
         use crate::style::color::StyleColor;
+        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
+        use renderable::color::{Color, Tailwind};
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
@@ -1058,8 +1070,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "[link](https://example.com)".into();
         let html = page.render_to_browser(&md).unwrap();
         assert!(
@@ -1071,12 +1083,12 @@ mod tests {
 
     #[test]
     fn local_hyperlink_color_overrides_global_in_html() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
-        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
-        use renderable::color::{Color, Tailwind};
         use crate::style::color::StyleColor;
+        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
+        use renderable::color::{Color, Tailwind};
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
@@ -1100,8 +1112,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "[local](./file.md) and [remote](https://example.com)".into();
         let html = page.render_to_browser(&md).unwrap();
         assert!(
@@ -1118,12 +1130,12 @@ mod tests {
 
     #[test]
     fn hyperlink_per_link_inline_css_wins_over_frontmatter() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
-        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
-        use renderable::color::{Color, Tailwind};
         use crate::style::color::StyleColor;
+        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
+        use renderable::color::{Color, Tailwind};
 
         // Per-link inline `color: green` declares `color`, so frontmatter's
         // `color: red-500` must NOT replace it. Frontmatter still contributes
@@ -1148,10 +1160,9 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
-        let md: Markdown =
-            "[x](https://example.com \"style='color: green'\")".into();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
+        let md: Markdown = "[x](https://example.com \"style='color: green'\")".into();
         let html = page.render_to_browser(&md).unwrap();
 
         assert!(
@@ -1173,12 +1184,12 @@ mod tests {
 
     #[test]
     fn hyperlink_color_injected_into_terminal() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
-        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
-        use renderable::color::{Color, Tailwind};
         use crate::style::color::StyleColor;
+        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
+        use renderable::color::{Color, Tailwind};
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
@@ -1196,8 +1207,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "[link](https://example.com)".into();
         let output = page.render(&md).unwrap();
         // Terminal output should contain SGR color codes for red (38;2;239;68;68)
@@ -1210,12 +1221,12 @@ mod tests {
 
     #[test]
     fn local_hyperlink_color_overrides_global_in_terminal() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
-        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
-        use renderable::color::{Color, Tailwind};
         use crate::style::color::StyleColor;
+        use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
+        use renderable::color::{Color, Tailwind};
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
@@ -1239,8 +1250,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "[local](./file.md)".into();
         let output = page.render(&md).unwrap();
         // Local link should be blue (38;2;59;130;246)
@@ -1265,9 +1276,9 @@ mod tests {
 
     #[test]
     fn apply_bespoke_style_image_local_style_width_conflict() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::style::schema::{ImageStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
         use renderable::layout::Length;
 
         let term = Terminal::new_optimistic(80);
@@ -1284,8 +1295,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap_err();
+        let err =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::ComponentWidthConflict {
@@ -1296,9 +1307,9 @@ mod tests {
 
     #[test]
     fn apply_bespoke_style_image_local_style_stored() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::style::schema::{ImageStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
         use renderable::layout::{Alignment, Length};
 
         let term = Terminal::new_optimistic(80);
@@ -1318,8 +1329,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
 
         assert_eq!(
             page.local_image_style().map(|s| s.alignment),
@@ -1333,12 +1344,12 @@ mod tests {
 
     #[test]
     fn local_image_color_injected_into_html() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
-        use crate::style::schema::{ImageStyle, StyleFrontmatter};
-        use renderable::color::{Color, Tailwind};
         use crate::style::color::StyleColor;
+        use crate::style::schema::{ImageStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
+        use renderable::color::{Color, Tailwind};
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
@@ -1356,8 +1367,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "![alt](./local.png)".into();
         let html = page.render_to_browser(&md).unwrap();
         assert!(
@@ -1369,12 +1380,12 @@ mod tests {
 
     #[test]
     fn remote_image_does_not_get_local_style_in_html() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
-        use crate::style::schema::{ImageStyle, StyleFrontmatter};
-        use renderable::color::{Color, Tailwind};
         use crate::style::color::StyleColor;
+        use crate::style::schema::{ImageStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
+        use renderable::color::{Color, Tailwind};
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
@@ -1392,8 +1403,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "![alt](https://example.com/remote.png)".into();
         let html = page.render_to_browser(&md).unwrap();
         assert!(
@@ -1405,12 +1416,12 @@ mod tests {
 
     #[test]
     fn local_image_color_injected_into_terminal() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
-        use crate::style::schema::{ImageStyle, StyleFrontmatter};
-        use renderable::color::{Color, Tailwind};
         use crate::style::color::StyleColor;
+        use crate::style::schema::{ImageStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
+        use renderable::color::{Color, Tailwind};
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
@@ -1428,8 +1439,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "![alt](./local.png)".into();
         let output = page.render(&md).unwrap();
         // Terminal fallback should contain SGR color codes for red
@@ -1444,10 +1455,10 @@ mod tests {
 
     #[test]
     fn hyperlink_width_pads_terminal_display_text() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
         use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
         use renderable::layout::{Alignment, Length};
 
         // A minimal frame (`margin-left`) deliberately selects the optimistic
@@ -1469,8 +1480,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "[hi](https://example.com)".into();
         let output = page.render(&md).unwrap();
 
@@ -1486,10 +1497,10 @@ mod tests {
 
     #[test]
     fn hyperlink_max_width_truncates_terminal_display_text() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
         use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
         use renderable::layout::Length;
 
         let term = Terminal::new_optimistic(80);
@@ -1505,8 +1516,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "[abcdefghij](https://example.com)".into();
         let output = page.render(&md).unwrap();
 
@@ -1526,10 +1537,10 @@ mod tests {
 
     #[test]
     fn hyperlink_alignment_center_pads_both_sides() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
         use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
         use renderable::layout::{Alignment, Length};
 
         let term = Terminal::new_optimistic(80);
@@ -1546,8 +1557,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "[ab](https://example.com)".into();
         let output = page.render(&md).unwrap();
 
@@ -1562,10 +1573,10 @@ mod tests {
 
     #[test]
     fn hyperlink_css_length_rejected_for_terminal() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::{DarkmatterPage, PageRenderError};
         use crate::markdown::Markdown;
         use crate::style::schema::{HyperlinkStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
         use renderable::layout::Length;
         use renderable::stylesheet::CssSizing;
 
@@ -1582,8 +1593,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "[x](https://example.com)".into();
         let err = page.render(&md).unwrap_err();
         assert_eq!(
@@ -1597,10 +1608,10 @@ mod tests {
 
     #[test]
     fn local_image_css_length_rejected_for_terminal() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::{DarkmatterPage, PageRenderError};
         use crate::markdown::Markdown;
         use crate::style::schema::{ImageStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
         use renderable::layout::Length;
         use renderable::stylesheet::CssSizing;
 
@@ -1617,8 +1628,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "![alt](./local.png)".into();
         let err = page.render(&md).unwrap_err();
         assert_eq!(
@@ -1632,10 +1643,10 @@ mod tests {
 
     #[test]
     fn local_image_alignment_pads_terminal_fallback() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
         use crate::style::schema::{ImageStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
         use renderable::layout::{Alignment, Length};
 
         let term = Terminal::new_optimistic(80);
@@ -1652,8 +1663,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "![a](./local.png)".into();
         let output = page.render(&md).unwrap();
 
@@ -1706,12 +1717,12 @@ mod tests {
 
     #[test]
     fn remote_image_terminal_fallback_unchanged() {
-        use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
-        use crate::style::schema::{ImageStyle, StyleFrontmatter};
-        use renderable::color::{Color, Tailwind};
         use crate::style::color::StyleColor;
+        use crate::style::schema::{ImageStyle, StyleFrontmatter};
+        use biscuit_terminal::terminal::Terminal;
+        use renderable::color::{Color, Tailwind};
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
@@ -1729,8 +1740,8 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap();
+        let page =
+            apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).unwrap();
         let md: Markdown = "![alt](https://example.com/remote.png)".into();
         let output = page.render(&md).unwrap();
         // Remote image fallback should NOT contain red SGR

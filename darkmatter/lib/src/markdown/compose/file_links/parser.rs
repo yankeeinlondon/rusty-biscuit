@@ -8,7 +8,7 @@
 //! Lines inside fenced or indented code blocks are ignored. Directive spans
 //! and indentation are preserved for later replacement.
 
-use super::types::{FileLinksDirective, FileLinksError, FileLinksMode, DEFAULT_DIR_DEPTH};
+use super::types::{DEFAULT_DIR_DEPTH, FileLinksDirective, FileLinksError, FileLinksMode};
 use crate::markdown::compose::parse_utils::{Cursor, find_code_regions, is_in_code_region};
 
 /// Parses all `::file-links` directives from markdown content.
@@ -68,10 +68,7 @@ pub fn parse_file_links_directives(
 fn is_file_links_keyword(trimmed: &str) -> bool {
     const KEYWORD: &str = "::file-links";
     match trimmed.strip_prefix(KEYWORD) {
-        Some(rest) => rest
-            .chars()
-            .next()
-            .is_none_or(|c| c.is_ascii_whitespace()),
+        Some(rest) => rest.chars().next().is_none_or(|c| c.is_ascii_whitespace()),
         None => false,
     }
 }
@@ -234,11 +231,9 @@ fn parse_dir_form(
                 cursor.skip_ws();
                 let value = cursor.read_value(line)?;
                 let value = value.trim();
-                let parsed: u32 = value.parse().map_err(|_| {
-                    FileLinksError::ParseDirective {
-                        line,
-                        message: format!("'--depth' expects a non-negative integer, got '{value}'"),
-                    }
+                let parsed: u32 = value.parse().map_err(|_| FileLinksError::ParseDirective {
+                    line,
+                    message: format!("'--depth' expects a non-negative integer, got '{value}'"),
                 })?;
                 depth = Some(parsed);
             }
@@ -342,8 +337,7 @@ mod tests {
 
     #[test]
     fn parses_glob_form() {
-        let directives =
-            parse_file_links_directives("::file-links docs/**/*.md\n").unwrap();
+        let directives = parse_file_links_directives("::file-links docs/**/*.md\n").unwrap();
         assert_eq!(directives.len(), 1);
         assert_eq!(
             directives[0].mode,
@@ -353,8 +347,7 @@ mod tests {
 
     #[test]
     fn parses_quoted_glob_with_spaces() {
-        let directives =
-            parse_file_links_directives("::file-links \"my docs/**/*.md\"\n").unwrap();
+        let directives = parse_file_links_directives("::file-links \"my docs/**/*.md\"\n").unwrap();
         assert_eq!(directives.len(), 1);
         assert_eq!(
             directives[0].mode,
@@ -364,8 +357,7 @@ mod tests {
 
     #[test]
     fn parses_dir_form_default_depth() {
-        let directives =
-            parse_file_links_directives("::file-links --dir docs\n").unwrap();
+        let directives = parse_file_links_directives("::file-links --dir docs\n").unwrap();
         assert_eq!(directives.len(), 1);
         assert_eq!(
             directives[0].mode,
@@ -392,8 +384,7 @@ mod tests {
 
     #[test]
     fn parses_dir_form_quoted_path() {
-        let directives =
-            parse_file_links_directives("::file-links --dir \"my docs\"\n").unwrap();
+        let directives = parse_file_links_directives("::file-links --dir \"my docs\"\n").unwrap();
         assert_eq!(
             directives[0].mode,
             FileLinksMode::Dir {
@@ -429,30 +420,26 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_dir() {
-        let err =
-            parse_file_links_directives("::file-links --dir a --dir b\n").unwrap_err();
+        let err = parse_file_links_directives("::file-links --dir a --dir b\n").unwrap_err();
         assert!(matches!(err, FileLinksError::ParseDirective { .. }));
     }
 
     #[test]
     fn rejects_duplicate_depth() {
         let err =
-            parse_file_links_directives("::file-links --dir a --depth 1 --depth 2\n")
-                .unwrap_err();
+            parse_file_links_directives("::file-links --dir a --depth 1 --depth 2\n").unwrap_err();
         assert!(matches!(err, FileLinksError::ParseDirective { .. }));
     }
 
     #[test]
     fn rejects_invalid_depth() {
-        let err =
-            parse_file_links_directives("::file-links --dir a --depth abc\n").unwrap_err();
+        let err = parse_file_links_directives("::file-links --dir a --depth abc\n").unwrap_err();
         assert!(matches!(err, FileLinksError::ParseDirective { .. }));
     }
 
     #[test]
     fn rejects_unknown_option() {
-        let err =
-            parse_file_links_directives("::file-links --dir a --bogus 1\n").unwrap_err();
+        let err = parse_file_links_directives("::file-links --dir a --bogus 1\n").unwrap_err();
         assert!(matches!(err, FileLinksError::ParseDirective { .. }));
     }
 
@@ -492,8 +479,7 @@ mod tests {
 
     #[test]
     fn skips_directives_inside_code_blocks() {
-        let content =
-            "```\n::file-links docs/**/*.md\n```\n::file-links notes/*.md\n";
+        let content = "```\n::file-links docs/**/*.md\n```\n::file-links notes/*.md\n";
         let directives = parse_file_links_directives(content).unwrap();
         assert_eq!(directives.len(), 1);
         assert_eq!(
@@ -504,15 +490,13 @@ mod tests {
 
     #[test]
     fn captures_indent() {
-        let directives =
-            parse_file_links_directives("  ::file-links docs/*.md\n").unwrap();
+        let directives = parse_file_links_directives("  ::file-links docs/*.md\n").unwrap();
         assert_eq!(directives[0].indent, "  ");
     }
 
     #[test]
     fn infers_indent_from_list_item() {
-        let directives =
-            parse_file_links_directives("- Item\n::file-links docs/*.md\n").unwrap();
+        let directives = parse_file_links_directives("- Item\n::file-links docs/*.md\n").unwrap();
         assert_eq!(directives[0].indent, "");
         assert_eq!(directives[0].inferred_indent, Some("  ".to_string()));
     }

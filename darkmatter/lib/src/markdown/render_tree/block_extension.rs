@@ -148,10 +148,8 @@ where
             // warnings are surfaced by the `scan_inline_hr_warnings` preflight,
             // which parses through the same `parse_hr_attribute_block` helper.
             let attrs = parse_hr_attribute_block(&attribute_str).attrs;
-            self.pending.push_back(BlockExtensionEvent::HorizontalRule {
-                attrs,
-                body_range,
-            });
+            self.pending
+                .push_back(BlockExtensionEvent::HorizontalRule { attrs, body_range });
             return;
         }
 
@@ -217,10 +215,7 @@ where
                 (State::BufferingParagraph { .. }, Event::End(TagEnd::Paragraph)) => {
                     self.close_paragraph(range);
                 }
-                (
-                    State::BufferingParagraph { buffer, simple, .. },
-                    _,
-                ) => {
+                (State::BufferingParagraph { buffer, simple, .. }, _) => {
                     if !matches!(event, Event::Text(_)) {
                         *simple = false;
                     }

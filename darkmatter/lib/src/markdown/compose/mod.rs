@@ -73,8 +73,8 @@ pub mod interpolation;
 pub(crate) mod link_normalization;
 pub(crate) mod link_resolve;
 pub mod page_blocks;
-pub(crate) mod remote_fetch;
 pub mod remote;
+pub(crate) mod remote_fetch;
 pub mod replacement;
 pub mod shell_blocks;
 pub mod shell_expansion;
@@ -486,10 +486,8 @@ impl Markdown {
                 .map(std::sync::Arc::new)
                 .ok()
         });
-        let remote_fetch = remote_fetch::RemoteFetchRuntime::with_store(
-            &options.remote_read_config,
-            remote_store,
-        );
+        let remote_fetch =
+            remote_fetch::RemoteFetchRuntime::with_store(&options.remote_read_config, remote_store);
 
         let mut runtime = shell_expansion::types::PipelineRuntime::with_remote_fetch(
             options.max_transclusion_depth,
@@ -511,11 +509,9 @@ impl Markdown {
             if options.allow_remote_transclusion
                 && options.is_enabled(ComposeOperation::BlockTransclusion)
             {
-                let directives = transclusion::parse_directives(
-                    &self.content,
-                    self.source_context_for_errors(),
-                )
-                .unwrap_or_default();
+                let directives =
+                    transclusion::parse_directives(&self.content, self.source_context_for_errors())
+                        .unwrap_or_default();
                 for entry in
                     remote::discover_remote_urls_from_directives(&directives, &options.source)
                 {
@@ -1376,10 +1372,7 @@ impl Markdown {
             if let Some(start) = span_start {
                 perf.record_shell_span(ShellCommandSpan {
                     command_display: redact_shell_command(&directive.raw_command),
-                    command_hash: format!(
-                        "{:016x}",
-                        biscuit_hash::xx_hash(&directive.raw_command)
-                    ),
+                    command_hash: format!("{:016x}", biscuit_hash::xx_hash(&directive.raw_command)),
                     elapsed: start.elapsed(),
                 });
             }
@@ -1778,9 +1771,7 @@ impl Markdown {
                 });
                 *next_order += 1;
             }
-            transclusion::ResolvedTarget::Url { url, .. }
-                if options.allow_remote_transclusion =>
-            {
+            transclusion::ResolvedTarget::Url { url, .. } if options.allow_remote_transclusion => {
                 // Frontmatter `prologue`/`epilogue` URLs are not seen by the
                 // eager pre-scan (it only covers directives and expression
                 // arguments), so register the slot here. Without this,
@@ -1996,11 +1987,9 @@ impl Markdown {
                 };
                 let body_text = remote_fetch
                     .get_content(&url)
-                    .map_err(|e| {
-                        transclusion::TransclusionError::RemoteFetchFailed {
-                            url: url.to_string(),
-                            reason: e,
-                        }
+                    .map_err(|e| transclusion::TransclusionError::RemoteFetchFailed {
+                        url: url.to_string(),
+                        reason: e,
                     })?
                     .ok_or_else(|| transclusion::TransclusionError::RemoteFetchFailed {
                         url: url.to_string(),
@@ -2063,8 +2052,8 @@ impl Markdown {
                 let mut child_options = options.clone();
                 child_options.source = child_source;
 
-                let child_report = child
-                    .run_compose_pipeline_internal(child_options, &mut child_runtime)?;
+                let child_report =
+                    child.run_compose_pipeline_internal(child_options, &mut child_runtime)?;
                 {
                     let mut runtime = runtime_mutex.lock().unwrap();
                     runtime.merge_child(&child_runtime);
@@ -2111,11 +2100,9 @@ impl Markdown {
                 };
                 let body_text = remote_fetch
                     .get_content(&url)
-                    .map_err(|e| {
-                        transclusion::TransclusionError::RemoteFetchFailed {
-                            url: url.to_string(),
-                            reason: e,
-                        }
+                    .map_err(|e| transclusion::TransclusionError::RemoteFetchFailed {
+                        url: url.to_string(),
+                        reason: e,
                     })?
                     .ok_or_else(|| transclusion::TransclusionError::RemoteFetchFailed {
                         url: url.to_string(),
@@ -2328,9 +2315,8 @@ impl Markdown {
             fs = fs.with_root_display_name(&render.target_name);
         }
         if render.uses_repo_icon {
-            fs = fs.with_root_icon(
-                biscuit_terminal::components::filesystem::RootIconKind::Repository,
-            );
+            fs = fs
+                .with_root_icon(biscuit_terminal::components::filesystem::RootIconKind::Repository);
         }
 
         // Carry the fully-styled render subtree through the composed document
@@ -5516,7 +5502,9 @@ Rounded: {{ round(pi) }}"#;
             match err {
                 MarkdownError::SchemaValidationFailed { problems, .. } => {
                     assert!(
-                        problems.iter().any(|p| p.property.as_deref() == Some("child_input")),
+                        problems
+                            .iter()
+                            .any(|p| p.property.as_deref() == Some("child_input")),
                         "Expected problem on child_input, got: {problems:?}"
                     );
                 }
@@ -5642,8 +5630,8 @@ Rounded: {{ round(pi) }}"#;
     mod remote_transclusion_tests {
         use super::*;
         use crate::markdown::compose::remote::RemoteReadConfig;
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         async fn compose_with_remote(
             content: &str,
@@ -5670,7 +5658,9 @@ Rounded: {{ round(pi) }}"#;
             let server = MockServer::start().await;
             Mock::given(method("GET"))
                 .and(path("/remote.md"))
-                .respond_with(ResponseTemplate::new(200).set_body_string("# Remote\n\nHello from remote"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_string("# Remote\n\nHello from remote"),
+                )
                 .mount(&server)
                 .await;
 
@@ -5756,9 +5746,7 @@ Rounded: {{ round(pi) }}"#;
             let remote_url = format!("{}/shared.md", server.uri());
             // Two line-start directives referencing the same URL: directives
             // are line-oriented, so each must begin its own line.
-            let content = format!(
-                "# Doc\n\n::file {remote_url}\n\n::file {remote_url}\n"
-            );
+            let content = format!("# Doc\n\n::file {remote_url}\n\n::file {remote_url}\n");
             std::fs::write(&root, &content).unwrap();
 
             let (composed, report) =
@@ -5844,11 +5832,8 @@ Rounded: {{ round(pi) }}"#;
 
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn remote_file_exists_expression_reads_url() {
-            let text = compose_expr_against_doc(
-                "# Present\n",
-                "X: {{ file_exists(\"{URL}\") }}\n",
-            )
-            .await;
+            let text =
+                compose_expr_against_doc("# Present\n", "X: {{ file_exists(\"{URL}\") }}\n").await;
             assert_eq!(text, "X: true\n");
         }
 
@@ -5907,7 +5892,10 @@ Rounded: {{ round(pi) }}"#;
 
             assert_eq!(composed.content(), "T: Interp Only\n");
             let rf = report.remote_fetch_stats.unwrap();
-            assert_eq!(rf.fetched, 1, "URL must be fetched without BlockTransclusion");
+            assert_eq!(
+                rf.fetched, 1,
+                "URL must be fetched without BlockTransclusion"
+            );
         }
 
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -5938,16 +5926,15 @@ Rounded: {{ round(pi) }}"#;
             let child_url = format!("{}/child.md", server.uri());
             Mock::given(method("GET"))
                 .and(path("/parent.md"))
-                .respond_with(ResponseTemplate::new(200).set_body_string(format!(
-                    "# Parent\n\n::file {child_url}\n"
-                )))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(format!("# Parent\n\n::file {child_url}\n")),
+                )
                 .mount(&server)
                 .await;
             Mock::given(method("GET"))
                 .and(path("/child.md"))
-                .respond_with(
-                    ResponseTemplate::new(200).set_body_string("nested child body"),
-                )
+                .respond_with(ResponseTemplate::new(200).set_body_string("nested child body"))
                 .mount(&server)
                 .await;
 
@@ -6112,7 +6099,9 @@ Rounded: {{ round(pi) }}"#;
             let server = MockServer::start().await;
             Mock::given(method("GET"))
                 .and(path("/intro.md"))
-                .respond_with(ResponseTemplate::new(200).set_body_string("# Intro\n\nFrom prologue"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_string("# Intro\n\nFrom prologue"),
+                )
                 .mount(&server)
                 .await;
 
@@ -6140,7 +6129,9 @@ Rounded: {{ round(pi) }}"#;
             let server = MockServer::start().await;
             Mock::given(method("GET"))
                 .and(path("/outro.md"))
-                .respond_with(ResponseTemplate::new(200).set_body_string("# Outro\n\nFrom epilogue"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_string("# Outro\n\nFrom epilogue"),
+                )
                 .mount(&server)
                 .await;
 
@@ -6213,7 +6204,10 @@ Rounded: {{ round(pi) }}"#;
             let text = composed.content();
             assert!(text.contains("a.md"), "content: {text}");
             assert!(text.contains("b.txt"), "content: {text}");
-            assert!(!text.contains("::file-links"), "directive should be replaced: {text}");
+            assert!(
+                !text.contains("::file-links"),
+                "directive should be replaced: {text}"
+            );
             assert_eq!(report.transclusions_applied, 1);
         }
 
@@ -6338,18 +6332,33 @@ Rounded: {{ round(pi) }}"#;
 
             // Extension-specific Unicode glyphs.
             for glyph in ["📝", "📕", "📗", "📘"] {
-                assert!(output.contains(glyph), "missing glyph {glyph:?}: {output:?}");
+                assert!(
+                    output.contains(glyph),
+                    "missing glyph {glyph:?}: {output:?}"
+                );
             }
             // Repository icon, never the ordinary folder icon (no subdirs).
             assert!(output.contains("📦"), "missing repository icon: {output:?}");
             assert!(!output.contains("📂"), "unexpected folder icon: {output:?}");
             // Dotfile italic, gitignored dim, target bold.
-            assert!(output.contains("\x1b[3m"), "missing italic dotfile: {output:?}");
+            assert!(
+                output.contains("\x1b[3m"),
+                "missing italic dotfile: {output:?}"
+            );
             assert!(output.contains("\x1b[2m"), "missing dim entry: {output:?}");
-            assert!(output.contains("\x1b[1m"), "missing bold target: {output:?}");
+            assert!(
+                output.contains("\x1b[1m"),
+                "missing bold target: {output:?}"
+            );
             // The gitignored document is present but dim, the dotfile present.
-            assert!(output.contains("ignored.md"), "missing ignored.md: {output:?}");
-            assert!(output.contains(".hidden.md"), "missing .hidden.md: {output:?}");
+            assert!(
+                output.contains("ignored.md"),
+                "missing ignored.md: {output:?}"
+            );
+            assert!(
+                output.contains(".hidden.md"),
+                "missing .hidden.md: {output:?}"
+            );
             assert!(
                 !output.contains(".gitignore"),
                 ".gitignore should not be a tree entry: {output:?}"
@@ -6473,7 +6482,10 @@ Rounded: {{ round(pi) }}"#;
             assert!(!text.contains("No matching files"), "content: {text}");
             assert_eq!(report.transclusions_skipped, 1);
             assert!(
-                report.warnings.iter().any(|w| w.message.contains("No matching files")),
+                report
+                    .warnings
+                    .iter()
+                    .any(|w| w.message.contains("No matching files")),
                 "expected warning: {:?}",
                 report.warnings
             );
@@ -6551,7 +6563,10 @@ Rounded: {{ round(pi) }}"#;
             let (composed, _report) = md.compose_with(options).unwrap();
 
             let text = composed.content();
-            assert!(text.contains("::file-links"), "directive should remain: {text}");
+            assert!(
+                text.contains("::file-links"),
+                "directive should remain: {text}"
+            );
         }
 
         #[test]
@@ -6576,10 +6591,7 @@ Rounded: {{ round(pi) }}"#;
             // Each output line should be indented to match the list item
             for line in text.lines().skip(3) {
                 if line.contains("a.md") {
-                    assert!(
-                        line.starts_with("  "),
-                        "expected indent, got: {line}"
-                    );
+                    assert!(line.starts_with("  "), "expected indent, got: {line}");
                 }
             }
         }

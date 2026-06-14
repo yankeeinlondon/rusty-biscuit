@@ -178,11 +178,7 @@ fn diff_components(
 }
 
 /// Splits a flat hash string into exactly `expected` `-`-joined components.
-fn split_flat<'a>(
-    flat: &'a str,
-    expected: usize,
-    property: &str,
-) -> MarkdownResult<Vec<&'a str>> {
+fn split_flat<'a>(flat: &'a str, expected: usize, property: &str) -> MarkdownResult<Vec<&'a str>> {
     let parts: Vec<&str> = flat.split('-').collect();
     if parts.len() != expected {
         return Err(malformed(

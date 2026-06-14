@@ -619,13 +619,7 @@ fn test_compose_remote_refresh_revalidates_cached_url() {
     let input = format!("# Local\n\n::file {url}\n");
 
     md_cmd()
-        .args([
-            "compose",
-            "-",
-            "--allow-host",
-            "127.0.0.1",
-            "--cache-root",
-        ])
+        .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
         .arg(cache_dir.path())
         .write_stdin(input.clone())
         .assert()
@@ -633,13 +627,7 @@ fn test_compose_remote_refresh_revalidates_cached_url() {
         .stdout(predicate::str::contains("First remote body"));
 
     md_cmd()
-        .args([
-            "compose",
-            "-",
-            "--allow-host",
-            "127.0.0.1",
-            "--cache-root",
-        ])
+        .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
         .arg(cache_dir.path())
         .args(["--remote-refresh"])
         .write_stdin(input)
@@ -669,13 +657,7 @@ fn test_compose_remote_fallback_serves_stale_cache_on_failure() {
     let input = format!("# Local\n\n::file {url}\n");
 
     md_cmd()
-        .args([
-            "compose",
-            "-",
-            "--allow-host",
-            "127.0.0.1",
-            "--cache-root",
-        ])
+        .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
         .arg(cache_dir.path())
         .write_stdin(input.clone())
         .assert()
@@ -683,13 +665,7 @@ fn test_compose_remote_fallback_serves_stale_cache_on_failure() {
         .stdout(predicate::str::contains("Cached remote body"));
 
     md_cmd()
-        .args([
-            "compose",
-            "-",
-            "--allow-host",
-            "127.0.0.1",
-            "--cache-root",
-        ])
+        .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
         .arg(cache_dir.path())
         .args(["--remote-freshness", "fallback"])
         .write_stdin(input)
@@ -1870,7 +1846,12 @@ fn test_hash_diff_malformed_stored_hash_exits_one() {
     )
     .unwrap();
 
-    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(1);
+    md_cmd()
+        .arg("hash")
+        .arg("--diff")
+        .arg(&file)
+        .assert()
+        .code(1);
 }
 
 #[test]
@@ -1899,7 +1880,12 @@ fn test_hash_diff_detailed_bad_section_level_exits_one() {
     )
     .unwrap();
 
-    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(1);
+    md_cmd()
+        .arg("hash")
+        .arg("--diff")
+        .arg(&file)
+        .assert()
+        .code(1);
 }
 
 #[test]
@@ -2019,7 +2005,9 @@ fn test_hash_diff_no_stored_hash_exits_two() {
         .write_stdin("---\ntitle: T\n---\n# H\n\nBody.")
         .assert()
         .code(2)
-        .stdout(predicate::str::contains("No stored hash to compare against"));
+        .stdout(predicate::str::contains(
+            "No stored hash to compare against",
+        ));
 }
 
 #[test]
@@ -2029,7 +2017,12 @@ fn test_hash_diff_unchanged_exits_zero() {
     std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
 
     // Establish a baseline, then diff against it without any edit.
-    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+    md_cmd()
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success();
 
     md_cmd()
         .arg("hash")
@@ -2046,14 +2039,24 @@ fn test_hash_diff_changed_exits_two() {
     let file = dir.path().join("doc.md");
     std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
 
-    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+    md_cmd()
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success();
 
     // Edit the body, leaving the stored hash in place.
     let stored = std::fs::read_to_string(&file).unwrap();
     let edited = stored.replace("Body.", "Different body.");
     std::fs::write(&file, edited).unwrap();
 
-    md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(2);
+    md_cmd()
+        .arg("hash")
+        .arg("--diff")
+        .arg(&file)
+        .assert()
+        .code(2);
 }
 
 #[test]
@@ -2259,7 +2262,10 @@ fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
     // asserting on the visible text.
     let stderr = strip_ansi_codes(&String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("MarkdownError"), "stderr: {stderr}");
-    assert!(stderr.contains("frontmatter parse failed"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("frontmatter parse failed"),
+        "stderr: {stderr}"
+    );
     assert!(
         stderr.contains("'@' magic lookup emits results"),
         "offending line must be shown. stderr: {stderr}"
@@ -3887,7 +3893,9 @@ fn fill_for(page: &DarkmatterPage, component: PageComponent) -> TestFill {
                     // Asymmetric padding — treat as indent if only left is non-zero
                     TestFill::Indent(tv_length(&l.padding.left))
                 }
-            } else if let Some(max_width) = &l.max_width && l.width == Width::Auto {
+            } else if let Some(max_width) = &l.max_width
+                && l.width == Width::Auto
+            {
                 TestFill::Max(tv_length(max_width))
             } else if matches!(l.width, Width::Fixed(_)) {
                 TestFill::Explicit(width_length(&l.width))
@@ -3912,7 +3920,6 @@ fn width_length(w: &Width) -> Length {
     }
 }
 
-
 #[test]
 fn layout_resolved_margin_shorthand_then_top_override() {
     // `-m 2 --mt 0`: shorthand sets all sides to 2, then --mt clears just the
@@ -3920,7 +3927,11 @@ fn layout_resolved_margin_shorthand_then_top_override() {
     // should assert observable resolved behavior, not parse success.
     let page = resolved_page(&["fixture.md", "-m", "2", "--mt", "0"]);
     let m = page.page_margin();
-    assert_eq!(tv_cells(&m.top), 0, "--mt 0 must override -m 2 on the top edge");
+    assert_eq!(
+        tv_cells(&m.top),
+        0,
+        "--mt 0 must override -m 2 on the top edge"
+    );
     assert_eq!(tv_cells(&m.bottom), 2, "-m 2 must apply to the bottom edge");
     assert_eq!(tv_cells(&m.left), 2, "-m 2 must apply to the left edge");
     assert_eq!(tv_cells(&m.right), 2, "-m 2 must apply to the right edge");
@@ -3932,8 +3943,16 @@ fn layout_resolved_margin_axis_then_side() {
     // then top to 1.
     let page = resolved_page(&["fixture.md", "-m", "4", "--mx", "2", "--mt", "1"]);
     let m = page.page_margin();
-    assert_eq!(tv_cells(&m.top), 1, "--mt 1 overrides axis and shorthand on top");
-    assert_eq!(tv_cells(&m.bottom), 4, "shorthand survives on bottom (no override)");
+    assert_eq!(
+        tv_cells(&m.top),
+        1,
+        "--mt 1 overrides axis and shorthand on top"
+    );
+    assert_eq!(
+        tv_cells(&m.bottom),
+        4,
+        "shorthand survives on bottom (no override)"
+    );
     assert_eq!(tv_cells(&m.left), 2, "--mx 2 overrides shorthand on left");
     assert_eq!(tv_cells(&m.right), 2, "--mx 2 overrides shorthand on right");
 }
@@ -4008,19 +4027,11 @@ fn layout_resolved_alignment_global_then_component_specific() {
     );
 }
 
-
-
 #[test]
 fn layout_resolved_align_lists_broadcast_then_granular_override() {
     // `--align-lists right --align-ul left`: broadcast sets all three list
     // components to Right, then the granular flag overrides only Ul.
-    let page = resolved_page(&[
-        "fixture.md",
-        "--align-lists",
-        "right",
-        "--align-ul",
-        "left",
-    ]);
+    let page = resolved_page(&["fixture.md", "--align-lists", "right", "--align-ul", "left"]);
     assert_eq!(
         alignment_for(&page, PageComponent::Ul),
         Alignment::Left,
@@ -4642,12 +4653,17 @@ fn style_frontmatter_html_emits_component_layout_css() {
     // renderable browser fold (build_component_css was deleted in the cutover).
     // Table: center alignment + max-width: 60ch → margin-left:auto;margin-right:auto.
     assert!(
-        html.contains("<table") && html.contains("max-width:60ch") && html.contains("margin-left:auto") && html.contains("margin-right:auto"),
+        html.contains("<table")
+            && html.contains("max-width:60ch")
+            && html.contains("margin-left:auto")
+            && html.contains("margin-right:auto"),
         "expected centered table with inline max-width and auto margins in HTML. html:\n{html}",
     );
     // Block-quote: right alignment + max-width: 50ch → margin-left:auto.
     assert!(
-        html.contains("<blockquote") && html.contains("max-width:50ch") && html.contains("margin-left:auto"),
+        html.contains("<blockquote")
+            && html.contains("max-width:50ch")
+            && html.contains("margin-left:auto"),
         "expected right-aligned blockquote with inline max-width and auto margin in HTML. html:\n{html}",
     );
     // Image: max-width and alignment are applied to the wrapping paragraph via
@@ -4791,10 +4807,26 @@ fn style_prop_fixture_resolves_to_expected_page_margins() {
     let page = apply_style_for(&raw, &["doc.md"]);
 
     let m = page.page_margin();
-    assert_eq!(tv_cells(&m.left), 2, "fixture left-margin: 2ch must reach the page");
-    assert_eq!(tv_cells(&m.right), 4, "fixture right-margin: 4ch must reach the page");
-    assert_eq!(tv_cells(&m.top), 1, "fixture top-margin: 1 must reach the page");
-    assert_eq!(tv_cells(&m.bottom), 0, "fixture bottom-margin: 0 must reach the page");
+    assert_eq!(
+        tv_cells(&m.left),
+        2,
+        "fixture left-margin: 2ch must reach the page"
+    );
+    assert_eq!(
+        tv_cells(&m.right),
+        4,
+        "fixture right-margin: 4ch must reach the page"
+    );
+    assert_eq!(
+        tv_cells(&m.top),
+        1,
+        "fixture top-margin: 1 must reach the page"
+    );
+    assert_eq!(
+        tv_cells(&m.bottom),
+        0,
+        "fixture bottom-margin: 0 must reach the page"
+    );
 }
 
 #[test]
@@ -4843,9 +4875,7 @@ terminal is reasonably wide.\n";
         .filter(|l| {
             let trimmed = l.trim_start();
             // Common blockquote indicators across themes (`│`, `▌`, `▐`).
-            trimmed.starts_with('│')
-                || trimmed.starts_with('▌')
-                || trimmed.starts_with('▐')
+            trimmed.starts_with('│') || trimmed.starts_with('▌') || trimmed.starts_with('▐')
         })
         .map(|l| l.trim_end().to_string())
         .collect();

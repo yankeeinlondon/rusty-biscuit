@@ -20,10 +20,10 @@ use biscuit_terminal::terminal::Terminal;
 use criterion::{Criterion, criterion_group, criterion_main};
 use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::yaml_block::YamlBlock;
 use darkmatter::markdown::render_tree::{
     TerminalCodeRenderer, fold_markdown_spanned_with_frontmatter,
 };
+use darkmatter::markdown::yaml_block::YamlBlock;
 use renderable::tree::{
     BrowserMermaidMode, BrowserRenderOptions, RawHtmlPolicy, RenderStrictness, SourceDescriptor,
     render_browser_document_html,
@@ -44,7 +44,9 @@ fn corpus() -> String {
 }
 
 fn source() -> SourceDescriptor {
-    SourceDescriptor::Virtual { name: "pipeline_corpus".into() }
+    SourceDescriptor::Virtual {
+        name: "pipeline_corpus".into(),
+    }
 }
 
 fn tree_terminal_options() -> TerminalRenderOptions {
@@ -142,8 +144,9 @@ fn bench_render_pipeline_browser(c: &mut Criterion) {
 }
 
 fn bench_darkmatter_components(c: &mut Criterion) {
-    let yaml = YamlBlock::new("name: example\nvalues:\n  - a\n  - b\n  - c\ncount: 3\nactive: true")
-        .expect("valid yaml");
+    let yaml =
+        YamlBlock::new("name: example\nvalues:\n  - a\n  - b\n  - c\ncount: 3\nactive: true")
+            .expect("valid yaml");
     let term = Terminal::new_optimistic(120);
     let page_md: Markdown =
         "# Page\n\nParagraph with *emphasis* and a list:\n\n- one\n- two\n\n```rust\nfn x() {}\n```\n".into();
@@ -242,7 +245,8 @@ fn apply_styles(page: DarkmatterPage, md: &Markdown) -> DarkmatterPage {
     let page = apply_list_style(page, &style, ListStyleOverrides::default()).expect("list style");
     let page = apply_hr_style(page, &style, HrStyleOverrides::default()).expect("hr style");
     let page = apply_color_style(page, &style).expect("color style");
-    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).expect("bespoke style")
+    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        .expect("bespoke style")
 }
 
 /// Benchmarks the **real styled production entry points** —

@@ -31,8 +31,8 @@ use biscuit_terminal::render_tree::{
 };
 use biscuit_terminal::terminal::Terminal;
 use renderable::tree::{
-    BrowserRenderOptions, Diagnostic, Document, GraphicsMode, MarkdownDialect, MarkdownRenderOptions,
-    RawHtmlPolicy, RenderStrictness, SourceDescriptor, TerminalMermaidMode,
+    BrowserRenderOptions, Diagnostic, Document, GraphicsMode, MarkdownDialect,
+    MarkdownRenderOptions, RawHtmlPolicy, RenderStrictness, SourceDescriptor, TerminalMermaidMode,
     render_browser_document_html, render_markdown_document,
 };
 
@@ -301,7 +301,9 @@ pub(crate) fn render_tree_html_with_context(
 /// [`InvalidLineRange`](crate::markdown::MarkdownError::InvalidLineRange)) that
 /// [`parse_code_info`](crate::markdown::dsl::parse_code_info) raises for the
 /// first malformed directive, in document order.
-pub(crate) fn validate_code_directives(root: &RenderNode) -> Result<(), crate::markdown::MarkdownError> {
+pub(crate) fn validate_code_directives(
+    root: &RenderNode,
+) -> Result<(), crate::markdown::MarkdownError> {
     use crate::markdown::dsl::parse_code_info;
 
     if let NodeKind::Code { lang, meta, .. } = &root.kind {
@@ -617,15 +619,9 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     // terminal renderer. Mermaid promotion and inline image rendering both
     // key off this field.
     let graphics_mode = match opts.image_mode {
-        crate::markdown::output::terminal::TerminalImageMode::Never => {
-            GraphicsMode::Off
-        }
-        crate::markdown::output::terminal::TerminalImageMode::Auto => {
-            GraphicsMode::Rich
-        }
-        crate::markdown::output::terminal::TerminalImageMode::Force => {
-            GraphicsMode::Rich
-        }
+        crate::markdown::output::terminal::TerminalImageMode::Never => GraphicsMode::Off,
+        crate::markdown::output::terminal::TerminalImageMode::Auto => GraphicsMode::Rich,
+        crate::markdown::output::terminal::TerminalImageMode::Force => GraphicsMode::Rich,
     };
 
     // Map the legacy Mermaid opt-in onto the terminal Mermaid promotion mode.
@@ -960,8 +956,8 @@ mod tests {
     /// `ThematicBreak` carrying the typed `thematic_break.kind`.
     #[test]
     fn to_render_document_uses_span_aware_fold_for_hr_attributes() {
-#[cfg(test)]
-use renderable::tree::{NodeKind, RenderNode};
+        #[cfg(test)]
+        use renderable::tree::{NodeKind, RenderNode};
 
         fn find_hr(node: &RenderNode) -> Option<&RenderNode> {
             if matches!(node.kind, NodeKind::ThematicBreak) {
@@ -1335,7 +1331,9 @@ use renderable::tree::{NodeKind, RenderNode};
             }),
             ..TerminalOptions::default()
         };
-        let out = render_tree_terminal(&md, &opts).expect("terminal render").output;
+        let out = render_tree_terminal(&md, &opts)
+            .expect("terminal render")
+            .output;
         // The default dashed rule uses `╌`/`-`; a dots default switches the
         // glyph to `·` (or the ASCII `.` fallback).
         assert!(
@@ -1363,7 +1361,10 @@ use renderable::tree::{NodeKind, RenderNode};
         let html = render_tree_html(&md, &opts).expect("html render").output;
         assert!(html.contains(r#"width="50%""#), "{html}");
         assert!(html.contains("--hr-color: red"), "{html}");
-        assert!(html.contains("--hr-weight: 8"), "thick weight ⇒ 8px: {html}");
+        assert!(
+            html.contains("--hr-weight: 8"),
+            "thick weight ⇒ 8px: {html}"
+        );
     }
 
     // ================================================================
@@ -1438,7 +1439,8 @@ use renderable::tree::{NodeKind, RenderNode};
 
     #[test]
     fn hr_defaults_from_frontmatter_missing_key_returns_none() {
-        let md = Markdown::with_frontmatter(crate::markdown::Frontmatter::new(), "---\n".to_string());
+        let md =
+            Markdown::with_frontmatter(crate::markdown::Frontmatter::new(), "---\n".to_string());
         assert!(hr_defaults_from_frontmatter(&md).is_none());
     }
 
@@ -1454,7 +1456,9 @@ use renderable::tree::{NodeKind, RenderNode};
             image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
             ..TerminalOptions::default()
         };
-        let out = render_tree_terminal(&md, &opts).expect("terminal render").output;
+        let out = render_tree_terminal(&md, &opts)
+            .expect("terminal render")
+            .output;
         assert!(
             out.contains('·') || out.contains('.'),
             "bare rule must adopt the `dots` frontmatter default; got:\n{out:?}",
@@ -1466,12 +1470,16 @@ use renderable::tree::{NodeKind, RenderNode};
     /// the direct `Markdown::as_html` fallback.
     #[test]
     fn render_tree_html_falls_back_to_top_level_hr_frontmatter() {
-        let md: Markdown = "---\nhr:\n  style: waves\n  weight: thick\n  width: \"50%\"\n---\n\n---\n".into();
+        let md: Markdown =
+            "---\nhr:\n  style: waves\n  weight: thick\n  width: \"50%\"\n---\n\n---\n".into();
         let html = render_tree_html(&md, &HtmlOptions::default())
             .expect("html render")
             .output;
         assert!(html.contains(r#"width="50%""#), "{html}");
-        assert!(html.contains("--hr-weight: 8"), "thick weight ⇒ 8px: {html}");
+        assert!(
+            html.contains("--hr-weight: 8"),
+            "thick weight ⇒ 8px: {html}"
+        );
         assert!(html.contains("<path"), "waves ⇒ <path> svg: {html}");
     }
 
@@ -1760,8 +1768,8 @@ use renderable::tree::{NodeKind, RenderNode};
     /// caller's mode rather than the optimistic terminal default.
     #[test]
     fn terminal_options_mapping_threads_color_mode() {
-        use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
         use crate::markdown::highlighting::ColorMode as DmColorMode;
+        use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
 
         let mut opts = TerminalOptions {
             color_mode: DmColorMode::Light,
@@ -1783,8 +1791,8 @@ use renderable::tree::{NodeKind, RenderNode};
 
     #[test]
     fn terminal_options_mapping_preserves_code_pipeline_inputs_for_both_modes() {
-        use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
         use crate::markdown::highlighting::ColorMode as DmColorMode;
+        use biscuit_terminal::discovery::detection::ColorMode as TermColorMode;
 
         for (dm_mode, term_mode) in [
             (DmColorMode::Dark, TermColorMode::Dark),

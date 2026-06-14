@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::layout::{DarkmatterPage, PageBackground, PageComponent};
 use darkmatter::markdown::Markdown;
-use darkmatter::style::warning::StyleWarningKind;
 use darkmatter::markdown::highlighting::ThemePair;
+use darkmatter::style::warning::StyleWarningKind;
 use darkmatter::style::{
     BespokeStyleOverrides, PageStyleOverrides, StyleFrontmatter, apply_bespoke_style,
     apply_page_style, from_frontmatter, into_strict,
@@ -123,19 +123,23 @@ fn fixture_applies_expected_page_margins() {
 
     let m = applied.page_margin();
     assert_eq!(
-        edge_ch(&m.left), 2,
+        edge_ch(&m.left),
+        2,
         "left margin should come from style.page.left-margin"
     );
     assert_eq!(
-        edge_ch(&m.right), 4,
+        edge_ch(&m.right),
+        4,
         "right margin should come from style.page.right-margin"
     );
     assert_eq!(
-        edge_ch(&m.top), 1,
+        edge_ch(&m.top),
+        1,
         "top margin should come from style.page.top-margin"
     );
     assert_eq!(
-        edge_ch(&m.bottom), 0,
+        edge_ch(&m.bottom),
+        0,
         "bottom margin should come from style.page.bottom-margin"
     );
 }
@@ -242,7 +246,10 @@ fn percent_margin_retained_and_resolved_per_target() {
 
     // Browser: the percent survives to CSS.
     let html = applied.render_to_browser(&md).expect("browser render");
-    assert!(html.contains("10%"), "browser must emit percent margin; got: {html}");
+    assert!(
+        html.contains("10%"),
+        "browser must emit percent margin; got: {html}"
+    );
 
     // Terminal: the percent resolves to an 8-cell left margin.
     let out = applied.render(&md).expect("terminal render");
@@ -328,8 +335,8 @@ fn color_frontmatter_applies_to_page_via_apply_color_style() {
     let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
 
     let page = page_with_width(80);
-    let page = apply_page_style(page, &style, PageStyleOverrides::default())
-        .expect("apply_page_style");
+    let page =
+        apply_page_style(page, &style, PageStyleOverrides::default()).expect("apply_page_style");
     let page = apply_color_style(page, &style).expect("apply_color_style");
 
     assert!(

@@ -12,7 +12,7 @@ use biscuit_terminal::prelude::strip_escape_codes;
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::{TerminalCodeRenderer, YamlBlock};
-use renderable::layout::{Alignment, Layout, Length, Edges, TargetValue, WordWrap};
+use renderable::layout::{Alignment, Edges, Layout, Length, TargetValue, WordWrap};
 use renderable::tree::{RenderNode, RenderStrictness};
 
 /// A `Edges` with a single side set to `length`, all other sides zero.

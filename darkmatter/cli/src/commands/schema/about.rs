@@ -16,8 +16,8 @@ use biscuit_terminal::discovery::detection::ColorMode as TerminalColorMode;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use color_eyre::eyre::Result;
-use darkmatter::markdown::highlighting::ColorMode as MarkdownColorMode;
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::highlighting::ColorMode as MarkdownColorMode;
 use darkmatter::markdown::output::TerminalOptions;
 use darkmatter::markdown::schemas::{
     CoercionRuleDescriptor, InlineObjectRuleDescriptor, SchemaConstraintDescriptor,
@@ -66,7 +66,10 @@ struct SchemaAboutReport<'a> {
 impl<'a> SchemaAboutReport<'a> {
     fn new(terminal: &'a Terminal) -> Self {
         let margin_width = LEFT_MARGIN_CH + RIGHT_MARGIN_CH;
-        let width = terminal.width().saturating_sub(margin_width).max(MIN_REPORT_WIDTH);
+        let width = terminal
+            .width()
+            .saturating_sub(margin_width)
+            .max(MIN_REPORT_WIDTH);
         Self {
             terminal,
             width,
@@ -248,9 +251,7 @@ In this example, constraints are added to a string, a number, and an array of st
 
     fn validation_behavior(&mut self, behaviors: &[ValidationBehaviorDescriptor]) -> Result<()> {
         self.heading("Validation Notes");
-        self.markdown(
-            "These notes explain how Darkmatter applies schemas in real documents.",
-        )?;
+        self.markdown("These notes explain how Darkmatter applies schemas in real documents.")?;
         self.detail_list(
             behaviors.iter().map(|b| (&b.name, &b.rule, &b.description)),
             "Details",
@@ -307,10 +308,7 @@ In this example, constraints are added to a string, a number, and an array of st
                     escape_prose(&plain_markdown_text(detail))
                 )
             };
-            list.add(
-                Prose::new(item)
-                    .with_word_wrap(WordWrap::WrapProse(Some(8), Some(2))),
-            );
+            list.add(Prose::new(item).with_word_wrap(WordWrap::WrapProse(Some(8), Some(2))));
         }
         self.block(&list.render_in_width(self.terminal, self.width));
         self.blank();
@@ -374,20 +372,16 @@ fn format_constraint_use(constraint: &SchemaConstraintDescriptor) -> String {
 
 fn format_constraint_meaning(constraint: &SchemaConstraintDescriptor) -> String {
     match constraint.keyword {
-        "min" => {
-            "Sets a lower bound.\n\
+        "min" => "Sets a lower bound.\n\
              - <b>string</b>: minimum length\n\
              - <b>number</b>: minimum value\n\
              - <b>array</b>: minimum item count"
-                .to_string()
-        }
-        "max" => {
-            "Sets an upper bound.\n\
+            .to_string(),
+        "max" => "Sets an upper bound.\n\
              - <b>string</b>: maximum length\n\
              - <b>number</b>: maximum value\n\
              - <b>array</b>: maximum item count"
-                .to_string()
-        }
+            .to_string(),
         _ => markdown_inline_to_prose(constraint.description),
     }
 }
@@ -547,11 +541,9 @@ mod tests {
         let mut options = report.markdown_options();
         options.code_theme = ThemePair::OneHalf;
         options.prose_theme = ThemePair::OneHalf;
-        Markdown::from(
-            "```yaml\n$schema:\n    # a string type\n    bar: string[]\n```\n",
-        )
-        .as_terminal(options)
-        .expect("schema-about markdown render")
+        Markdown::from("```yaml\n$schema:\n    # a string type\n    bar: string[]\n```\n")
+            .as_terminal(options)
+            .expect("schema-about markdown render")
     }
 
     fn assert_yaml_uses_exact_theme(output: &str, expected_mode: MarkdownColorMode) {

@@ -18,7 +18,9 @@ fn schema_about_prints_simplified_schema_reference() {
         .stdout(predicate::str::contains("Schema Shapes"))
         .stdout(predicate::str::contains("Type System"))
         .stdout(predicate::str::contains("Constraint Vocabulary"))
-        .stdout(predicate::str::contains("use --verbose to see additional details"))
+        .stdout(predicate::str::contains(
+            "use --verbose to see additional details",
+        ))
         .stdout(predicate::str::contains("Nested Objects").not())
         .stdout(predicate::str::contains("Compose-time Coercion").not())
         .stdout(predicate::str::contains("Validation Notes").not());
@@ -27,7 +29,10 @@ fn schema_about_prints_simplified_schema_reference() {
 #[test]
 fn schema_about_lists_every_supported_type_keyword() {
     let mut cmd = md_cmd();
-    let output = cmd.args(["schema", "about"]).output().expect("run md schema about");
+    let output = cmd
+        .args(["schema", "about"])
+        .output()
+        .expect("run md schema about");
     let stdout = String::from_utf8(output.stdout).expect("utf-8 stdout");
     for keyword in [
         "string",
@@ -90,7 +95,10 @@ fn schema_about_is_documentation_only() {
         .expect("run md schema about from project root");
 
     assert!(output_a.status.success(), "first invocation should succeed");
-    assert!(output_b.status.success(), "second invocation should succeed");
+    assert!(
+        output_b.status.success(),
+        "second invocation should succeed"
+    );
 
     let a = String::from_utf8_lossy(&output_a.stdout);
     let b = String::from_utf8_lossy(&output_b.stdout);
@@ -122,7 +130,10 @@ fn schema_about_uses_readable_terminal_components() {
         .and_then(|after_heading| after_heading.split("Constraint Vocabulary").next())
         .expect("type system section should precede constraint vocabulary");
 
-    assert!(plain.contains("┌"), "type/constraint sections should render real tables");
+    assert!(
+        plain.contains("┌"),
+        "type/constraint sections should render real tables"
+    );
     assert!(
         !plain.contains("file://"),
         "schema examples must not be interpreted as Markdown links"
@@ -176,7 +187,9 @@ fn schema_about_uses_readable_terminal_components() {
         "constraint table headings should be author-facing"
     );
     assert!(
-        plain.contains("│ Write ") && plain.contains("│ Applies To ") && plain.contains("│ Meaning "),
+        plain.contains("│ Write ")
+            && plain.contains("│ Applies To ")
+            && plain.contains("│ Meaning "),
         "constraint table should name usage and applicability clearly"
     );
     assert!(
@@ -235,7 +248,10 @@ fn schema_about_uses_readable_terminal_components() {
         "advanced schema details should only render with --verbose"
     );
     assert!(
-        plain.lines().filter(|line| !line.is_empty()).all(|line| line.starts_with(' ')),
+        plain
+            .lines()
+            .filter(|line| !line.is_empty())
+            .all(|line| line.starts_with(' ')),
         "nonblank report lines should use the document left margin"
     );
 }

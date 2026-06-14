@@ -2,11 +2,11 @@ use crate::args::{Cli, CliFill};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::layout::{DarkmatterPage, PageComponent};
+use darkmatter::markdown::block::scan_inline_hr_warnings;
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
-use darkmatter::markdown::block::scan_inline_hr_warnings;
 use darkmatter::style::{
     BespokeStyleOverrides, ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides,
     PageStyleOverrides, StyleWarning, StyleWarningKind, apply_bespoke_style, apply_color_style,
@@ -214,7 +214,10 @@ fn apply_component_alignment(
     component: PageComponent,
     alignment: renderable::layout::Alignment,
 ) -> DarkmatterPage {
-    let mut policy = page.component_policy(component).cloned().unwrap_or_default();
+    let mut policy = page
+        .component_policy(component)
+        .cloned()
+        .unwrap_or_default();
     policy.layout.alignment = alignment;
     page.with_component_policy(component, policy)
 }
@@ -227,7 +230,10 @@ fn apply_component_fill(
 ) -> DarkmatterPage {
     use renderable::layout::{Edges, TargetValue, Width};
 
-    let mut policy = page.component_policy(component).cloned().unwrap_or_default();
+    let mut policy = page
+        .component_policy(component)
+        .cloned()
+        .unwrap_or_default();
     match fill {
         CliFill::Full => {
             policy.layout.width = Width::Auto;
@@ -1277,6 +1283,9 @@ style:\n\
         let md = Markdown::try_from_content(raw).unwrap();
         let cli = cli_from(&["md", "doc.md"]);
         let page = apply_style_frontmatter(test_page(), &md, &cli, None).expect("apply");
-        assert!(page.stylesheet().is_some(), "sub-spec #7 key should be applied");
+        assert!(
+            page.stylesheet().is_some(),
+            "sub-spec #7 key should be applied"
+        );
     }
 }

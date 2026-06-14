@@ -297,7 +297,10 @@ mod tests {
             .iter()
             .position(|s| *s == ComposeStage::FrontmatterShellExpansion)
             .unwrap();
-        assert!(fi < sv, "FrontmatterInterpolation must precede SchemaValidation");
+        assert!(
+            fi < sv,
+            "FrontmatterInterpolation must precede SchemaValidation"
+        );
         assert!(
             sv < fse,
             "SchemaValidation must precede FrontmatterShellExpansion"

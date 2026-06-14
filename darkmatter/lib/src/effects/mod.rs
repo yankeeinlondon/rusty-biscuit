@@ -10,9 +10,7 @@ mod error;
 mod fs_write;
 mod verbs;
 
-pub use catalog::{
-    effect_descriptors, EffectDescriptor, EffectSafety, EFFECT_DESCRIPTORS,
-};
+pub use catalog::{EFFECT_DESCRIPTORS, EffectDescriptor, EffectSafety, effect_descriptors};
 pub use error::EffectError;
 
 use std::path::{Path, PathBuf};

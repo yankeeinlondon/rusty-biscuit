@@ -158,11 +158,7 @@ fn render_tree_terminal_spanned_text_tier_to_tempfile(
     body: &str,
     name: &str,
 ) -> (tempfile::TempDir, std::path::PathBuf) {
-    write_doc_to_tempfile(
-        fold_spanned_doc(body, name),
-        name,
-        Some(ImageSupport::None),
-    )
+    write_doc_to_tempfile(fold_spanned_doc(body, name), name, Some(ImageSupport::None))
 }
 
 /// Like [`render_tree_terminal_spanned_to_tempfile`] but pins
@@ -250,7 +246,11 @@ fn run_in_pane_spanned_text_tier(
     body: &str,
     name: &str,
 ) -> Option<(CapturedFrame, tempfile::TempDir)> {
-    drive_pane(body, name, render_tree_terminal_spanned_text_tier_to_tempfile)
+    drive_pane(
+        body,
+        name,
+        render_tree_terminal_spanned_text_tier_to_tempfile,
+    )
 }
 
 /// Drives the shared WezTerm pane with the **span-aware** fold at
@@ -1258,7 +1258,10 @@ fn level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal() {
         name: "rich_image".into(),
     };
     let (doc, diags) = fold_markdown_to_document(source, "![cat](pic.png)\n");
-    assert!(diags.is_empty(), "image fixture must fold cleanly: {diags:?}");
+    assert!(
+        diags.is_empty(),
+        "image fixture must fold cleanly: {diags:?}"
+    );
 
     // Rich tier on an iTerm2-capable TTY (WezTerm renders iTerm2 graphics).
     let mut term = Terminal::new_optimistic(120);
@@ -1352,7 +1355,10 @@ fn pixel_classification_distinguishes_magenta_from_black() {
     write_solid_png(&magenta_path, 64, MAGENTA);
     let (near, non_black, total) = classify_pixels(&fs::read(&magenta_path).unwrap(), MAGENTA, 60);
     assert_eq!(total, 64 * 64);
-    assert_eq!(near, total, "every magenta pixel must classify as near-target");
+    assert_eq!(
+        near, total,
+        "every magenta pixel must classify as near-target"
+    );
     assert_eq!(non_black, total, "magenta is not black");
 
     let black_path = dir.path().join("b.png");
@@ -1404,7 +1410,10 @@ fn level2_tree_rich_image_node_paints_distinctive_pixels() {
         name: "rich_image_pixels".into(),
     };
     let (doc, diags) = fold_markdown_to_document(source, "![probe](probe.png)\n");
-    assert!(diags.is_empty(), "image fixture must fold cleanly: {diags:?}");
+    assert!(
+        diags.is_empty(),
+        "image fixture must fold cleanly: {diags:?}"
+    );
 
     let mut term = Terminal::new_optimistic(120);
     term.image_support = ImageSupport::ITerm;
@@ -1483,7 +1492,9 @@ fn render_public_as_terminal_to_tempfile(
     let mut opts = TerminalOptions::default();
     opts.max_width = Some(120);
     opts.color_depth = Some(ColorDepth::TrueColor);
-    let rendered = md.as_terminal(opts).expect("public Markdown::as_terminal render");
+    let rendered = md
+        .as_terminal(opts)
+        .expect("public Markdown::as_terminal render");
 
     let dir = tempdir().unwrap();
     let path = dir.path().join(format!("{name}.ansi"));
@@ -1570,8 +1581,11 @@ fn render_unmatched_policy_page_to_tempfile(
 fn level2_public_as_terminal_entry_renders_in_real_terminal() {
     let body = "# Public Entry\n\nBody paragraph via the public API.\n\n\
                 ```rust\nfn demo() {}\n```\n";
-    let Some((frame, _dir)) = drive_pane(body, "public_as_terminal", render_public_as_terminal_to_tempfile)
-    else {
+    let Some((frame, _dir)) = drive_pane(
+        body,
+        "public_as_terminal",
+        render_public_as_terminal_to_tempfile,
+    ) else {
         return;
     };
 
@@ -1758,7 +1772,9 @@ fn level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal(
     let no_policy_links = osc8_openers(&no_policy_frame.raw);
     let matched_links = osc8_openers(&matched_frame.raw);
     assert!(
-        no_policy_links.iter().any(|l| l.contains("https://example.com")),
+        no_policy_links
+            .iter()
+            .any(|l| l.contains("https://example.com")),
         "test premise: the no-policy page must emit a real OSC8 hyperlink in the pane; \
          openers: {no_policy_links:?}\nraw:\n{}",
         no_policy_frame.raw
@@ -1786,12 +1802,18 @@ fn level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal(
 #[serial(level2_terminal)]
 fn level2_zero_config_page_render_renders_in_real_terminal() {
     let body = "# Zero Config Page\n\nNo builder calls means the default-layout tree path.\n";
-    let Some((frame, _dir)) = drive_pane(body, "zero_config_page", render_zero_config_page_to_tempfile)
-    else {
+    let Some((frame, _dir)) = drive_pane(
+        body,
+        "zero_config_page",
+        render_zero_config_page_to_tempfile,
+    ) else {
         return;
     };
 
-    for token in &["Zero Config Page", "No builder calls means the default-layout tree path."] {
+    for token in &[
+        "Zero Config Page",
+        "No builder calls means the default-layout tree path.",
+    ] {
         assert!(
             frame.plain.contains(token),
             "zero-config page token {token:?} missing from real-terminal capture. plain:\n{}",
@@ -1855,7 +1877,9 @@ fn level2_percent_page_frame_offset_and_width_in_real_terminal() {
         darkmatter::style::PageStyleOverrides::default(),
     )
     .expect("apply percentage page style");
-    let rendered = page.render(&md).expect("decorated percent frame must render");
+    let rendered = page
+        .render(&md)
+        .expect("decorated percent frame must render");
 
     let dir = tempdir().unwrap();
     let path = dir.path().join("percent_frame.ansi");
@@ -1957,7 +1981,11 @@ fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempfile::TempDi
     fs::write(sub.join("buried.md"), "# Buried\n").unwrap();
 
     let root = dir.path().join("root.md");
-    fs::write(&root, "# Root\n\n::file-links --dir docs/topics --depth 1\n").unwrap();
+    fs::write(
+        &root,
+        "# Root\n\n::file-links --dir docs/topics --depth 1\n",
+    )
+    .unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let (composed, _report) = md
@@ -1973,7 +2001,9 @@ fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempfile::TempDi
     options.dim_mode = DimMode::Always;
     options.hyperlink_mode = HyperlinkMode::Always;
     options.max_width = Some(100);
-    let rendered = composed.as_terminal(options).expect("render composed ::file-links");
+    let rendered = composed
+        .as_terminal(options)
+        .expect("render composed ::file-links");
 
     let path = dir.path().join(format!("{name}.ansi"));
     fs::write(&path, rendered).unwrap();
@@ -2152,12 +2182,7 @@ fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
 
     // Extension-specific Unicode glyphs distinguish each document kind (the
     // projection bakes Unicode icons; the bytes survive regardless of font).
-    for (glyph, label) in &[
-        ("📝", "txt"),
-        ("📕", "pdf"),
-        ("📗", "xls"),
-        ("📘", "doc"),
-    ] {
+    for (glyph, label) in &[("📝", "txt"), ("📕", "pdf"), ("📗", "xls"), ("📘", "doc")] {
         assert!(
             frame.plain.contains(glyph),
             "expected {label} glyph {glyph:?} in capture. plain:\n{}",
@@ -2190,8 +2215,8 @@ fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
     // semantics. Asserting the run surrounding each name (not merely that *some*
     // dim exists) is what the dimmed root prefix alone could otherwise satisfy.
     for name in &["ignored.md", "buried.md"] {
-        let attrs =
-            active_sgr_params(&styled, name).unwrap_or_else(|| panic!("{name} missing from capture"));
+        let attrs = active_sgr_params(&styled, name)
+            .unwrap_or_else(|| panic!("{name} missing from capture"));
         assert!(
             attrs.contains(&2),
             "gitignored `{name}` must carry the dim SGR on its own name; raw:\n{}",

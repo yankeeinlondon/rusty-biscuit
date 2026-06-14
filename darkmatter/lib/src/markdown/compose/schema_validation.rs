@@ -90,15 +90,17 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
     // coerced top-level properties back, so real types flow to every later
     // stage and into the composed output. `effective_for` returns an owned
     // schema, so no borrow of `markdown` persists into the mutation below.
-    if let Some(effective) = schemas.effective_for(markdown).map_err(|err| {
-        MarkdownError::SchemaValidationFailed {
-            path: path.clone(),
-            problems: Vec::new(),
-            summary: format!("schema could not be prepared: {err}"),
-            description: description.clone(),
-            source: Some(Box::new(err)),
-        }
-    })? {
+    if let Some(effective) =
+        schemas
+            .effective_for(markdown)
+            .map_err(|err| MarkdownError::SchemaValidationFailed {
+                path: path.clone(),
+                problems: Vec::new(),
+                summary: format!("schema could not be prepared: {err}"),
+                description: description.clone(),
+                source: Some(Box::new(err)),
+            })?
+    {
         // Build the validation instance and the shell-pending key set while
         // holding only an immutable borrow; both are dropped before the write.
         let (instance, shell_pending) = {
@@ -122,7 +124,8 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
             (serde_json::Value::Object(object), shell_pending)
         };
 
-        let outcome = coerce_frontmatter_with_pending(&effective.json_schema, &instance, &shell_pending);
+        let outcome =
+            coerce_frontmatter_with_pending(&effective.json_schema, &instance, &shell_pending);
         if outcome.changed
             && let serde_json::Value::Object(coerced) = outcome.value
         {
@@ -139,15 +142,16 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
         }
     }
 
-    let report = schemas.validate(markdown).map_err(|err| {
-        MarkdownError::SchemaValidationFailed {
-            path: path.clone(),
-            problems: Vec::new(),
-            summary: format!("schema could not be prepared: {err}"),
-            description: description.clone(),
-            source: Some(Box::new(err)),
-        }
-    })?;
+    let report =
+        schemas
+            .validate(markdown)
+            .map_err(|err| MarkdownError::SchemaValidationFailed {
+                path: path.clone(),
+                problems: Vec::new(),
+                summary: format!("schema could not be prepared: {err}"),
+                description: description.clone(),
+                source: Some(Box::new(err)),
+            })?;
 
     // Defer problems whose value will be re-resolved by frontmatter shell
     // expansion. The compose-time validator runs BEFORE shell expansion so
@@ -162,8 +166,7 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
     // re-validates `$(...)` values, so deferring would silently accept a
     // schema violation. In that case every problem is final and must be
     // reported here.
-    let shell_expansion_enabled =
-        options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
+    let shell_expansion_enabled = options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
     let fm_map = markdown.frontmatter().as_map();
     let composition_independent: Vec<_> = report
         .problems
@@ -204,8 +207,12 @@ fn value_needs_shell_expansion(value: Option<&serde_json::Value>) -> bool {
     let Some(value) = value else { return false };
     match value {
         serde_json::Value::String(s) => s.contains("$("),
-        serde_json::Value::Array(items) => items.iter().any(|v| value_needs_shell_expansion(Some(v))),
-        serde_json::Value::Object(map) => map.values().any(|v| value_needs_shell_expansion(Some(v))),
+        serde_json::Value::Array(items) => {
+            items.iter().any(|v| value_needs_shell_expansion(Some(v)))
+        }
+        serde_json::Value::Object(map) => {
+            map.values().any(|v| value_needs_shell_expansion(Some(v)))
+        }
         _ => false,
     }
 }
@@ -255,7 +262,8 @@ fn source_path(markdown: &Markdown, options: &ComposeOptions) -> PathBuf {
 mod tests {
     use super::*;
     use crate::markdown::schemas::{
-        Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
+        Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType,
+        TypeExpr,
     };
     use indexmap::IndexMap;
 
@@ -322,10 +330,16 @@ mod tests {
         let options = ComposeOptions::new();
         let err = run(&mut md, &options).unwrap_err();
         match err {
-            MarkdownError::SchemaValidationFailed { problems, summary, .. } => {
+            MarkdownError::SchemaValidationFailed {
+                problems, summary, ..
+            } => {
                 assert!(!problems.is_empty());
                 assert_eq!(summary, "frontmatter did not satisfy the schema");
-                assert!(problems.iter().any(|p| p.property.as_deref() == Some("title")));
+                assert!(
+                    problems
+                        .iter()
+                        .any(|p| p.property.as_deref() == Some("title"))
+                );
             }
             other => panic!("expected SchemaValidationFailed, got {other:?}"),
         }
@@ -474,7 +488,11 @@ mod tests {
         let err = run(&mut md, &options).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed { problems, .. } => {
-                assert!(problems.iter().any(|p| p.property.as_deref() == Some("owner")));
+                assert!(
+                    problems
+                        .iter()
+                        .any(|p| p.property.as_deref() == Some("owner"))
+                );
             }
             other => panic!("expected SchemaValidationFailed, got {other:?}"),
         }
@@ -494,9 +512,17 @@ mod tests {
         let err = run(&mut md, &options).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed { problems, .. } => {
-                assert!(problems.iter().any(|p| p.property.as_deref() == Some("owner")));
+                assert!(
+                    problems
+                        .iter()
+                        .any(|p| p.property.as_deref() == Some("owner"))
+                );
                 // Document schema property should not be reported as missing
-                assert!(!problems.iter().any(|p| p.property.as_deref() == Some("title")));
+                assert!(
+                    !problems
+                        .iter()
+                        .any(|p| p.property.as_deref() == Some("title"))
+                );
             }
             other => panic!("expected SchemaValidationFailed, got {other:?}"),
         }
@@ -546,7 +572,8 @@ mod tests {
         // Set overrides are applied by the pipeline before schema_validation::run
         // is called. To unit-test the interaction, we manually apply the override
         // to the frontmatter and then call run.
-        let mut md = md_with_schema("$schema:\n  spec: 'string(min(1);required)'\nspec: 'design.md'\n");
+        let mut md =
+            md_with_schema("$schema:\n  spec: 'string(min(1);required)'\nspec: 'design.md'\n");
         md.frontmatter_mut()
             .as_map_mut()
             .insert("spec".into(), serde_json::json!(""));
@@ -640,7 +667,9 @@ mod tests {
         let options = ComposeOptions::new();
         let err = run(&mut md, &options).unwrap_err();
         match err {
-            MarkdownError::SchemaValidationFailed { problems, summary, .. } => {
+            MarkdownError::SchemaValidationFailed {
+                problems, summary, ..
+            } => {
                 assert!(problems.is_empty());
                 assert!(
                     summary.contains("schema could not be prepared"),
@@ -691,7 +720,10 @@ mod tests {
         let mut md = md_with_schema("$schema:\n  title: 'string(required)'\nother: stuff\n");
         let options = ComposeOptions::new();
         let err = run(&mut md, &options).unwrap_err();
-        assert!(err.source().is_none(), "validation failure should have no source");
+        assert!(
+            err.source().is_none(),
+            "validation failure should have no source"
+        );
     }
 
     // ── Inline object coercion (Phase 2) ─────────────────────────────────
@@ -771,7 +803,10 @@ mod tests {
         let authors = &md.frontmatter().as_map()["authors"];
         assert_eq!(authors[0]["active"], serde_json::json!(true));
         assert_eq!(authors[1]["active"], serde_json::json!(false));
-        assert_eq!(authors[0]["metadata"], serde_json::json!({ "role": "admin" }));
+        assert_eq!(
+            authors[0]["metadata"],
+            serde_json::json!({ "role": "admin" })
+        );
     }
 
     #[test]
@@ -898,9 +933,6 @@ mod tests {
         // both arms validate; coercion bails out and the value is left
         // alone. The string arm still validates the original `"42"`, so
         // the document is valid.
-        assert_eq!(
-            md.frontmatter().as_map()["count"],
-            serde_json::json!("42")
-        );
+        assert_eq!(md.frontmatter().as_map()["count"], serde_json::json!("42"));
     }
 }

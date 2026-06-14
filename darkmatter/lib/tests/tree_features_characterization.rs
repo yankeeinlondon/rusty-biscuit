@@ -136,14 +136,13 @@ fn indent(text: &str, spaces: usize) -> String {
 fn apply_all_styles(page: DarkmatterPage, md: &Markdown) -> DarkmatterPage {
     let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
 
-    let page = apply_page_style(page, &style, PageStyleOverrides::default())
-        .expect("apply_page_style");
+    let page =
+        apply_page_style(page, &style, PageStyleOverrides::default()).expect("apply_page_style");
     let page = apply_component_style(page, &style, ComponentStyleOverrides::default())
         .expect("apply_component_style");
-    let page = apply_list_style(page, &style, ListStyleOverrides::default())
-        .expect("apply_list_style");
-    let page = apply_hr_style(page, &style, HrStyleOverrides::default())
-        .expect("apply_hr_style");
+    let page =
+        apply_list_style(page, &style, ListStyleOverrides::default()).expect("apply_list_style");
+    let page = apply_hr_style(page, &style, HrStyleOverrides::default()).expect("apply_hr_style");
     let page = apply_color_style(page, &style).expect("apply_color_style");
     apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
         .expect("apply_bespoke_style")
@@ -195,7 +194,10 @@ fn char_component_color_opaque() {
         "block-quote:\n  bg-color: red-500\n",
         "> A quoted paragraph.\n",
     );
-    insta::assert_snapshot!("char_component_color_opaque_browser", render_browser_body(&md));
+    insta::assert_snapshot!(
+        "char_component_color_opaque_browser",
+        render_browser_body(&md)
+    );
 }
 
 #[test]
@@ -268,9 +270,18 @@ fn char_structured_link_attributes() {
     .expect("parse structured link");
     let body = render_as_html_body(&md);
     assert!(body.contains(r#"class="btn""#), "class lost. body:\n{body}");
-    assert!(body.contains(r#"target="_blank""#), "target lost. body:\n{body}");
-    assert!(body.contains(r#"data-prompt="Run it""#), "prompt lost. body:\n{body}");
-    assert!(body.contains(r#"data-id="42""#), "custom data-* lost. body:\n{body}");
+    assert!(
+        body.contains(r#"target="_blank""#),
+        "target lost. body:\n{body}"
+    );
+    assert!(
+        body.contains(r#"data-prompt="Run it""#),
+        "prompt lost. body:\n{body}"
+    );
+    assert!(
+        body.contains(r#"data-id="42""#),
+        "custom data-* lost. body:\n{body}"
+    );
     insta::assert_snapshot!("char_structured_link_attributes_html", body);
 }
 
@@ -318,10 +329,7 @@ fn char_local_image_styling() {
 #[test]
 fn char_hyperlink_exact_width_pads() {
     // `width` establishes an exact field width: the short label is padded.
-    let md = with_style(
-        "hyperlinks:\n  width: 20\n",
-        "[HI](https://example.com)\n",
-    );
+    let md = with_style("hyperlinks:\n  width: 20\n", "[HI](https://example.com)\n");
     insta::assert_snapshot!(
         "char_hyperlink_exact_width_terminal",
         render_terminal(&md, 60)

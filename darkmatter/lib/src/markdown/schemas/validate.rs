@@ -478,7 +478,11 @@ mod tests {
         });
         let validator = build_validator(&schema).unwrap();
         let problems = collect_problems(&validator, &json!({}), &PositionMap::new());
-        assert_eq!(problems.len(), 1, "expected one Required error: {problems:?}");
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected one Required error: {problems:?}"
+        );
         assert_eq!(problems[0].kind, ValidationProblemKind::Missing);
         assert_eq!(problems[0].property.as_deref(), Some("title"));
     }
@@ -506,12 +510,12 @@ mod tests {
             "properties": { "name": { "type": "string", "minLength": 5 } }
         });
         let validator = build_validator(&schema).unwrap();
-        let problems = collect_problems(
-            &validator,
-            &json!({ "name": "no" }),
-            &PositionMap::new(),
+        let problems = collect_problems(&validator, &json!({ "name": "no" }), &PositionMap::new());
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected one MinLength error: {problems:?}"
         );
-        assert_eq!(problems.len(), 1, "expected one MinLength error: {problems:?}");
         assert_eq!(problems[0].kind, ValidationProblemKind::Invalid);
     }
 
@@ -717,12 +721,18 @@ mod tests {
         let v = build_validator(&darkmatter_file_schema()).unwrap();
         let instance = json!({ "doc": "./does-not-exist.md" });
         let problems = collect_problems(&v, &instance, &PositionMap::new());
-        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected one Format problem: {problems:?}"
+        );
         let problem = &problems[0];
         assert_eq!(problem.path, "/doc");
         assert_eq!(problem.kind, ValidationProblemKind::Invalid);
         assert!(
-            problem.message.contains("no existing file matched reference"),
+            problem
+                .message
+                .contains("no existing file matched reference"),
             "expected NoMatch-style message, got: {}",
             problem.message,
         );
@@ -747,7 +757,11 @@ mod tests {
         // An empty string is rejected at parse time.
         let instance = json!({ "doc": "" });
         let problems = collect_problems(&v, &instance, &PositionMap::new());
-        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected one Format problem: {problems:?}"
+        );
         let problem = &problems[0];
         assert_eq!(problem.path, "/doc");
         assert!(
@@ -795,7 +809,11 @@ mod tests {
         let v = build_validator(&schema).unwrap();
         let instance = json!({ "v": "not-an-email" });
         let problems = collect_problems(&v, &instance, &PositionMap::new());
-        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected one Format problem: {problems:?}"
+        );
         let problem = &problems[0];
         assert!(
             problem.message.contains(r#"is not a "email""#),
@@ -880,7 +898,9 @@ mod tests {
         assert_eq!(problem.path, "/doc");
         assert_eq!(problem.kind, ValidationProblemKind::Invalid);
         assert!(
-            problem.message.contains("no existing file matched reference"),
+            problem
+                .message
+                .contains("no existing file matched reference"),
             "expected NoMatch-style message, got: {}",
             problem.message,
         );
@@ -910,7 +930,9 @@ mod tests {
         assert_eq!(problem.path, "/doc");
         assert_eq!(problem.kind, ValidationProblemKind::Invalid);
         assert!(
-            problem.message.contains("does not match the configured file globs"),
+            problem
+                .message
+                .contains("does not match the configured file globs"),
             "expected glob mismatch message, got: {}",
             problem.message,
         );
@@ -935,10 +957,16 @@ mod tests {
         let v = build_validator(&schema).unwrap();
         let instance = json!({ "doc": { "cover": "./missing.md" } });
         let problems = collect_problems(&v, &instance, &PositionMap::new());
-        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected one Format problem: {problems:?}"
+        );
         assert_eq!(problems[0].path, "/doc/cover");
         assert!(
-            problems[0].message.contains("no existing file matched reference"),
+            problems[0]
+                .message
+                .contains("no existing file matched reference"),
             "expected improved message, got: {}",
             problems[0].message,
         );
@@ -961,10 +989,16 @@ mod tests {
         let v = build_validator(&schema).unwrap();
         let instance = json!({ "docs": ["./missing.md"] });
         let problems = collect_problems(&v, &instance, &PositionMap::new());
-        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected one Format problem: {problems:?}"
+        );
         assert_eq!(problems[0].path, "/docs/0");
         assert!(
-            problems[0].message.contains("no existing file matched reference"),
+            problems[0]
+                .message
+                .contains("no existing file matched reference"),
             "expected improved message, got: {}",
             problems[0].message,
         );
@@ -1002,7 +1036,9 @@ mod tests {
         assert_eq!(problem.arm_index, Some(0));
         assert_eq!(problem.path, "/doc");
         assert!(
-            problem.message.contains("no existing file matched reference"),
+            problem
+                .message
+                .contains("no existing file matched reference"),
             "expected improved file-reference message in root-union arm, got: {}",
             problem.message,
         );

@@ -1026,9 +1026,15 @@ title: Test
             .as_html(output::HtmlOptions::default())
             .expect("structured link must render");
 
-        assert!(html.contains(r#"href="https://example.com""#), "html={html}");
+        assert!(
+            html.contains(r#"href="https://example.com""#),
+            "html={html}"
+        );
         assert!(html.contains(r#"class="btn""#), "class lost; html={html}");
-        assert!(html.contains(r#"target="_blank""#), "target lost; html={html}");
+        assert!(
+            html.contains(r#"target="_blank""#),
+            "target lost; html={html}"
+        );
         assert!(
             html.contains(r#"data-prompt="Read docs""#),
             "prompt lost; html={html}"
@@ -1548,8 +1554,8 @@ title: Test
     #[test]
     fn test_dim_cross_format_consistency() {
         use crate::markdown::highlighting::{ColorMode, ThemePair};
-        use crate::markdown::output::terminal::{ColorDepth, DimMode, TerminalOptions};
         use crate::markdown::output::HtmlOptions;
+        use crate::markdown::output::terminal::{ColorDepth, DimMode, TerminalOptions};
         use crate::testing::strip_ansi_codes;
 
         let md: Markdown = "The ⌄dimmed text⌄ here.".into();

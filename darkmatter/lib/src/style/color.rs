@@ -559,7 +559,10 @@ pub fn paint_to_css_string(paint: &renderable::style::PaintColor) -> Option<Stri
             if paint.opacity.is_opaque() {
                 Some(format!("rgb({r}, {g}, {b})"))
             } else {
-                Some(format!("rgba({r}, {g}, {b}, {:.3})", paint.opacity.as_css_alpha()))
+                Some(format!(
+                    "rgba({r}, {g}, {b}, {:.3})",
+                    paint.opacity.as_css_alpha()
+                ))
             }
         }
     }
@@ -574,7 +577,11 @@ pub fn paint_to_css_string(paint: &renderable::style::PaintColor) -> Option<Stri
 ///   `\x1b[48;2;r;g;b`m` for background.
 /// - Non-RGB values (`DefaultForeground`, `DefaultBackground`, `Reset`,
 ///   Tailwind specials) return `None`.
-pub fn lower_to_sgr(style_color: &StyleColor, color_depth: ColorDepth, is_background: bool) -> Option<String> {
+pub fn lower_to_sgr(
+    style_color: &StyleColor,
+    color_depth: ColorDepth,
+    is_background: bool,
+) -> Option<String> {
     if color_depth == ColorDepth::None {
         return None;
     }
@@ -952,14 +959,24 @@ mod tests {
 
     fn red_rgb() -> StyleColor {
         StyleColor {
-            color: Color::Rgb(renderable::color::RgbColor::new(255, 0, 0, renderable::color::BasicColor::Red)),
+            color: Color::Rgb(renderable::color::RgbColor::new(
+                255,
+                0,
+                0,
+                renderable::color::BasicColor::Red,
+            )),
             opacity: None,
         }
     }
 
     fn red_with_opacity() -> StyleColor {
         StyleColor {
-            color: Color::Rgb(renderable::color::RgbColor::new(255, 0, 0, renderable::color::BasicColor::Red)),
+            color: Color::Rgb(renderable::color::RgbColor::new(
+                255,
+                0,
+                0,
+                renderable::color::BasicColor::Red,
+            )),
             opacity: Some(50),
         }
     }
@@ -980,24 +997,51 @@ mod tests {
     #[test]
     fn lower_to_css_tailwind_specials() {
         assert_eq!(
-            lower_to_css(&StyleColor { color: Color::Tailwind(Tailwind::Transparent), opacity: None }),
+            lower_to_css(&StyleColor {
+                color: Color::Tailwind(Tailwind::Transparent),
+                opacity: None
+            }),
             Some("transparent".to_string())
         );
         assert_eq!(
-            lower_to_css(&StyleColor { color: Color::Tailwind(Tailwind::Current), opacity: None }),
+            lower_to_css(&StyleColor {
+                color: Color::Tailwind(Tailwind::Current),
+                opacity: None
+            }),
             Some("currentColor".to_string())
         );
         assert_eq!(
-            lower_to_css(&StyleColor { color: Color::Tailwind(Tailwind::Inherit), opacity: None }),
+            lower_to_css(&StyleColor {
+                color: Color::Tailwind(Tailwind::Inherit),
+                opacity: None
+            }),
             Some("inherit".to_string())
         );
     }
 
     #[test]
     fn lower_to_css_unsupported_returns_none() {
-        assert!(lower_to_css(&StyleColor { color: Color::DefaultForeground, opacity: None }).is_none());
-        assert!(lower_to_css(&StyleColor { color: Color::DefaultBackground, opacity: None }).is_none());
-        assert!(lower_to_css(&StyleColor { color: Color::Reset, opacity: None }).is_none());
+        assert!(
+            lower_to_css(&StyleColor {
+                color: Color::DefaultForeground,
+                opacity: None
+            })
+            .is_none()
+        );
+        assert!(
+            lower_to_css(&StyleColor {
+                color: Color::DefaultBackground,
+                opacity: None
+            })
+            .is_none()
+        );
+        assert!(
+            lower_to_css(&StyleColor {
+                color: Color::Reset,
+                opacity: None
+            })
+            .is_none()
+        );
     }
 
     #[test]
@@ -1024,19 +1068,34 @@ mod tests {
 
     #[test]
     fn lower_to_sgr_non_rgb_returns_none() {
-        let transparent = StyleColor { color: Color::Tailwind(Tailwind::Transparent), opacity: None };
-        assert_eq!(lower_to_sgr(&transparent, ColorDepth::TrueColor, false), None);
+        let transparent = StyleColor {
+            color: Color::Tailwind(Tailwind::Transparent),
+            opacity: None,
+        };
+        assert_eq!(
+            lower_to_sgr(&transparent, ColorDepth::TrueColor, false),
+            None
+        );
 
-        let current = StyleColor { color: Color::Tailwind(Tailwind::Current), opacity: None };
+        let current = StyleColor {
+            color: Color::Tailwind(Tailwind::Current),
+            opacity: None,
+        };
         assert_eq!(lower_to_sgr(&current, ColorDepth::TrueColor, false), None);
 
-        let inherit = StyleColor { color: Color::Tailwind(Tailwind::Inherit), opacity: None };
+        let inherit = StyleColor {
+            color: Color::Tailwind(Tailwind::Inherit),
+            opacity: None,
+        };
         assert_eq!(lower_to_sgr(&inherit, ColorDepth::TrueColor, false), None);
     }
 
     #[test]
     fn wrap_with_color_no_colors_returns_unchanged() {
-        assert_eq!(wrap_with_color("hello", None, None, ColorDepth::TrueColor), "hello");
+        assert_eq!(
+            wrap_with_color("hello", None, None, ColorDepth::TrueColor),
+            "hello"
+        );
     }
 
     #[test]
@@ -1053,14 +1112,24 @@ mod tests {
 
     #[test]
     fn wrap_with_color_fg_and_bg() {
-        let out = wrap_with_color("hello", Some(&red_rgb()), Some(&red_rgb()), ColorDepth::TrueColor);
+        let out = wrap_with_color(
+            "hello",
+            Some(&red_rgb()),
+            Some(&red_rgb()),
+            ColorDepth::TrueColor,
+        );
         assert_eq!(out, "\x1b[38;2;255;0;0m\x1b[48;2;255;0;0mhello\x1b[0m");
     }
 
     #[test]
     fn wrap_with_color_none_depth_ignores_colors() {
         assert_eq!(
-            wrap_with_color("hello", Some(&red_rgb()), Some(&red_rgb()), ColorDepth::None),
+            wrap_with_color(
+                "hello",
+                Some(&red_rgb()),
+                Some(&red_rgb()),
+                ColorDepth::None
+            ),
             "hello"
         );
     }
@@ -1068,7 +1137,10 @@ mod tests {
     #[test]
     fn wrap_with_color_reset_only_when_sgr_opened() {
         // A non-RGB color should not trigger reset.
-        let transparent = StyleColor { color: Color::Tailwind(Tailwind::Transparent), opacity: None };
+        let transparent = StyleColor {
+            color: Color::Tailwind(Tailwind::Transparent),
+            opacity: None,
+        };
         assert_eq!(
             wrap_with_color("hello", Some(&transparent), None, ColorDepth::TrueColor),
             "hello"

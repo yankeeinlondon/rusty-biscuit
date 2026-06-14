@@ -251,7 +251,9 @@ fn sanitize_style_element(
         buf.clear();
     }
     if css_is_safe(&css) {
-        writer.write_event(Event::Start(sanitize_start(start))).ok()?;
+        writer
+            .write_event(Event::Start(sanitize_start(start)))
+            .ok()?;
         for ev in inner {
             writer.write_event(ev).ok()?;
         }
@@ -322,7 +324,10 @@ mod tests {
         assert!(!out.contains("evil.example"), "external href kept: {out}");
         assert!(out.contains("#local"), "local fragment ref dropped: {out}");
         // The `<a>`/`<text>` structure survives, just without the live link.
-        assert!(out.contains("<text") || out.contains("&lt;text"), "text dropped: {out}");
+        assert!(
+            out.contains("<text") || out.contains("&lt;text"),
+            "text dropped: {out}"
+        );
     }
 
     #[test]
@@ -333,15 +338,25 @@ mod tests {
         assert!(out.contains("viewBox"), "viewBox dropped: {out}");
         assert!(out.contains(r##"fill="#ff00ff""##), "fill dropped: {out}");
         // The escaped `&` must round-trip as a single entity, not double-escaped.
-        assert!(out.contains("A &amp; B"), "text not preserved cleanly: {out}");
-        assert!(!out.contains("&amp;amp;"), "attribute/text double-escaped: {out}");
+        assert!(
+            out.contains("A &amp; B"),
+            "text not preserved cleanly: {out}"
+        );
+        assert!(
+            !out.contains("&amp;amp;"),
+            "attribute/text double-escaped: {out}"
+        );
     }
 
     #[test]
     fn case_obfuscated_script_is_dropped() {
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><ScRiPt>alert(1)</ScRiPt><rect/></svg>"#;
+        let svg =
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><ScRiPt>alert(1)</ScRiPt><rect/></svg>"#;
         let out = sanitize_svg(svg).expect("well-formed");
-        assert!(!out.to_ascii_lowercase().contains("script"), "cased script kept: {out}");
+        assert!(
+            !out.to_ascii_lowercase().contains("script"),
+            "cased script kept: {out}"
+        );
         assert!(!out.contains("alert(1)"), "script body kept: {out}");
     }
 
@@ -350,7 +365,10 @@ mod tests {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>@import url(https://attacker.example/x.css);</style><rect/></svg>"#;
         let out = sanitize_svg(svg).expect("well-formed");
         assert!(!out.contains("@import"), "@import kept: {out}");
-        assert!(!out.contains("attacker.example"), "external host kept: {out}");
+        assert!(
+            !out.contains("attacker.example"),
+            "external host kept: {out}"
+        );
         assert!(!out.contains("<style"), "unsafe style block kept: {out}");
         assert!(out.contains("<rect"), "safe sibling dropped: {out}");
     }
@@ -359,7 +377,10 @@ mod tests {
     fn drops_style_block_with_external_url() {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>rect { fill: url(https://attacker.example/p.svg#x) }</style><rect/></svg>"#;
         let out = sanitize_svg(svg).expect("well-formed");
-        assert!(!out.contains("attacker.example"), "external url kept: {out}");
+        assert!(
+            !out.contains("attacker.example"),
+            "external url kept: {out}"
+        );
         assert!(!out.contains("<style"), "unsafe style block kept: {out}");
     }
 
@@ -368,14 +389,20 @@ mod tests {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>rect { fill: url(#grad) }</style><rect/></svg>"#;
         let out = sanitize_svg(svg).expect("well-formed");
         assert!(out.contains("<style"), "benign style block dropped: {out}");
-        assert!(out.contains("url(#grad)"), "local fragment url dropped: {out}");
+        assert!(
+            out.contains("url(#grad)"),
+            "local fragment url dropped: {out}"
+        );
     }
 
     #[test]
     fn drops_style_attribute_with_external_url() {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:url(https://attacker.example/p.svg#x)" width="1"/></svg>"#;
         let out = sanitize_svg(svg).expect("well-formed");
-        assert!(!out.contains("attacker.example"), "external url in style attr kept: {out}");
+        assert!(
+            !out.contains("attacker.example"),
+            "external url in style attr kept: {out}"
+        );
         assert!(!out.contains("style="), "unsafe style attr kept: {out}");
         // The element itself and its safe attribute survive.
         assert!(out.contains("<rect"), "rect element dropped: {out}");
@@ -386,21 +413,31 @@ mod tests {
     fn drops_filter_attribute_with_external_url() {
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect filter="url(https://attacker.example/filter.svg#f)" width="1"/></svg>"#;
         let out = sanitize_svg(svg).expect("well-formed");
-        assert!(!out.contains("attacker.example"), "external filter url kept: {out}");
+        assert!(
+            !out.contains("attacker.example"),
+            "external filter url kept: {out}"
+        );
         assert!(!out.contains("filter="), "unsafe filter attr kept: {out}");
         assert!(out.contains("<rect"), "rect element dropped: {out}");
     }
 
     #[test]
     fn keeps_filter_attribute_with_local_fragment() {
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg"><rect filter="url(#f)" width="1"/></svg>"##;
+        let svg =
+            r##"<svg xmlns="http://www.w3.org/2000/svg"><rect filter="url(#f)" width="1"/></svg>"##;
         let out = sanitize_svg(svg).expect("well-formed");
-        assert!(out.contains(r##"filter="url(#f)""##), "local fragment filter dropped: {out}");
+        assert!(
+            out.contains(r##"filter="url(#f)""##),
+            "local fragment filter dropped: {out}"
+        );
     }
 
     #[test]
     fn malformed_xml_returns_none() {
-        assert!(sanitize_svg("<svg><rect></svg>").is_none(), "unbalanced tags must fail closed");
+        assert!(
+            sanitize_svg("<svg><rect></svg>").is_none(),
+            "unbalanced tags must fail closed"
+        );
         assert!(sanitize_svg("not xml < at all").is_none());
     }
 }

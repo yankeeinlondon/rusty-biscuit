@@ -904,7 +904,11 @@ impl ShellExpansionRuntime {
     ///   this exact command and the caller either passed `may_wait = false` or
     ///   the wait timed out. The caller MUST NOT implicitly approve other
     ///   un-reserved commands in the same chain.
-    pub(crate) fn reserve_allow_once(&mut self, normalized: &str, may_wait: bool) -> ReserveOutcome {
+    pub(crate) fn reserve_allow_once(
+        &mut self,
+        normalized: &str,
+        may_wait: bool,
+    ) -> ReserveOutcome {
         let mut shared = self.shared.lock().unwrap();
         loop {
             if shared.allow_once.contains(normalized) {

@@ -438,10 +438,7 @@ fn coerce_array(inner: &CoercionTarget, value: &Value) -> Option<Value> {
 /// The returned value is `Some(coerced_object)` only when at least one
 /// listed property was actually converted — this keeps the recursion
 /// idempotent and lets the caller set [`CoercionOutcome::changed`] cheaply.
-fn coerce_inline_object(
-    props: &[(String, CoercionTarget)],
-    value: &Value,
-) -> Option<Value> {
+fn coerce_inline_object(props: &[(String, CoercionTarget)], value: &Value) -> Option<Value> {
     let Value::Object(obj) = value else {
         return None;
     };
@@ -740,10 +737,16 @@ mod tests {
     #[test]
     fn string_to_object_and_object_to_string_untouched() {
         // string field holding an object → ToString leaves object untouched.
-        assert_eq!(coerce_value(&CoercionTarget::ToString, &json!({"a": 1})), None);
+        assert_eq!(
+            coerce_value(&CoercionTarget::ToString, &json!({"a": 1})),
+            None
+        );
         // object field is not a recognized target at all (covered above), and a
         // string value has no scalar target that would touch it.
-        assert_eq!(coerce_value(&CoercionTarget::ToString, &json!("text")), None);
+        assert_eq!(
+            coerce_value(&CoercionTarget::ToString, &json!("text")),
+            None
+        );
     }
 
     // ── typed arrays ────────────────────────────────────────────────────
@@ -1032,8 +1035,16 @@ mod tests {
         match coercion_target(&frag) {
             Some(CoercionTarget::Object(props)) => {
                 assert_eq!(props.len(), 2);
-                assert!(props.iter().any(|(k, t)| k == "enabled" && *t == CoercionTarget::ToBoolean));
-                assert!(props.iter().any(|(k, t)| k == "retries" && *t == CoercionTarget::ToNumber));
+                assert!(
+                    props
+                        .iter()
+                        .any(|(k, t)| k == "enabled" && *t == CoercionTarget::ToBoolean)
+                );
+                assert!(
+                    props
+                        .iter()
+                        .any(|(k, t)| k == "retries" && *t == CoercionTarget::ToNumber)
+                );
             }
             other => panic!("expected Object, got {other:?}"),
         }

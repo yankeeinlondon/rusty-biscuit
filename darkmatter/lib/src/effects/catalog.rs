@@ -255,8 +255,7 @@ mod tests {
     #[test]
     fn verb_signature_set_equals_descriptor_signature_set() {
         let verbs: HashSet<&str> = EFFECT_VERBS.iter().map(|v| v.signature).collect();
-        let descriptors: HashSet<&str> =
-            EFFECT_DESCRIPTORS.iter().map(|d| d.signature).collect();
+        let descriptors: HashSet<&str> = EFFECT_DESCRIPTORS.iter().map(|d| d.signature).collect();
 
         let verbs_without_descriptors: Vec<_> = verbs.difference(&descriptors).collect();
         let descriptors_without_verbs: Vec<_> = descriptors.difference(&verbs).collect();
@@ -286,22 +285,15 @@ mod tests {
         let eng = EffectEngine::builder().mutation_root(dir.path()).build();
 
         for verb in EFFECT_VERBS {
-            (verb.exercise)(&eng).unwrap_or_else(|e| {
-                panic!("verb `{}` is not reachable: {e:?}", verb.signature)
-            });
+            (verb.exercise)(&eng)
+                .unwrap_or_else(|e| panic!("verb `{}` is not reachable: {e:?}", verb.signature));
         }
     }
 
     #[test]
     fn descriptor_traversal_order_is_deterministic() {
-        let sigs: Vec<&str> = EFFECT_DESCRIPTORS
-            .iter()
-            .map(|d| d.signature)
-            .collect();
-        let sigs_again: Vec<&str> = EFFECT_DESCRIPTORS
-            .iter()
-            .map(|d| d.signature)
-            .collect();
+        let sigs: Vec<&str> = EFFECT_DESCRIPTORS.iter().map(|d| d.signature).collect();
+        let sigs_again: Vec<&str> = EFFECT_DESCRIPTORS.iter().map(|d| d.signature).collect();
         assert_eq!(sigs, sigs_again);
     }
 

@@ -353,10 +353,10 @@ pub fn expression_function_descriptors() -> &'static [ExpressionFunctionDescript
 mod tests {
     use super::*;
     use crate::markdown::compose::expression::functions::{
-        dispatchable_signatures, LAZY_OPERATOR_NAMES,
+        LAZY_OPERATOR_NAMES, dispatchable_signatures,
     };
     use crate::markdown::compose::expression::{
-        evaluate, parse, EvaluationLookup, ResolutionContext,
+        EvaluationLookup, ResolutionContext, evaluate, parse,
     };
     use serde_json::Value;
     use std::collections::HashSet;
@@ -474,7 +474,9 @@ mod tests {
         for name in LAZY_OPERATOR_NAMES {
             let err = dispatch_error(name, &lookup);
             assert!(
-                err.as_deref().map(|e| !e.contains("Unknown function")).unwrap_or(true),
+                err.as_deref()
+                    .map(|e| !e.contains("Unknown function"))
+                    .unwrap_or(true),
                 "lazy operator `{name}` must dispatch; got error: {err:?}"
             );
         }

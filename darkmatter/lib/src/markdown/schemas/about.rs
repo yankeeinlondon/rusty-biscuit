@@ -504,10 +504,10 @@ pub struct ValidationBehaviorDescriptor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::simplified::types::{Constraint, SimplifiedType};
-    use crate::markdown::schemas::simplified::parse_yaml_schema;
+    use super::*;
     use crate::markdown::schemas::simplified::grammar;
+    use crate::markdown::schemas::simplified::parse_yaml_schema;
     use crate::markdown::schemas::simplified::{PropertyDef, SimplifiedSchema, TypeExpr};
     use std::collections::HashSet;
 
@@ -515,10 +515,8 @@ mod tests {
     /// every type descriptor maps to a parseable implemented type.
     #[test]
     fn simplified_type_keyword_set_matches_descriptor_set() {
-        let descriptor_keywords: HashSet<&str> = SCHEMA_TYPE_DESCRIPTORS
-            .iter()
-            .map(|d| d.keyword)
-            .collect();
+        let descriptor_keywords: HashSet<&str> =
+            SCHEMA_TYPE_DESCRIPTORS.iter().map(|d| d.keyword).collect();
 
         let mut implemented: HashSet<&'static str> = HashSet::new();
         for ty in [
@@ -598,10 +596,8 @@ mod tests {
             implemented.insert(c.keyword());
         }
 
-        let missing_descriptors: Vec<_> =
-            implemented.difference(&descriptor_keywords).collect();
-        let extra_descriptors: Vec<_> =
-            descriptor_keywords.difference(&implemented).collect();
+        let missing_descriptors: Vec<_> = implemented.difference(&descriptor_keywords).collect();
+        let extra_descriptors: Vec<_> = descriptor_keywords.difference(&implemented).collect();
 
         assert!(
             missing_descriptors.is_empty(),
@@ -617,25 +613,34 @@ mod tests {
     #[test]
     fn descriptor_traversal_order_is_deterministic() {
         let types_again: Vec<&str> = SCHEMA_TYPE_DESCRIPTORS.iter().map(|d| d.keyword).collect();
-        let types_third: Vec<&str> =
-            schema_type_descriptors().iter().map(|d| d.keyword).collect();
+        let types_third: Vec<&str> = schema_type_descriptors()
+            .iter()
+            .map(|d| d.keyword)
+            .collect();
         assert_eq!(types_again, types_third);
 
-        let constraints_again: Vec<&str> =
-            SCHEMA_CONSTRAINT_DESCRIPTORS.iter().map(|d| d.name).collect();
-        let constraints_third: Vec<&str> =
-            schema_constraint_descriptors().iter().map(|d| d.name).collect();
+        let constraints_again: Vec<&str> = SCHEMA_CONSTRAINT_DESCRIPTORS
+            .iter()
+            .map(|d| d.name)
+            .collect();
+        let constraints_third: Vec<&str> = schema_constraint_descriptors()
+            .iter()
+            .map(|d| d.name)
+            .collect();
         assert_eq!(constraints_again, constraints_third);
 
         let shapes_again: Vec<&str> = SCHEMA_SHAPE_DESCRIPTORS.iter().map(|d| d.name).collect();
-        let shapes_third: Vec<&str> =
-            schema_shape_descriptors().iter().map(|d| d.name).collect();
+        let shapes_third: Vec<&str> = schema_shape_descriptors().iter().map(|d| d.name).collect();
         assert_eq!(shapes_again, shapes_third);
 
-        let rules_again: Vec<&str> =
-            INLINE_OBJECT_RULE_DESCRIPTORS.iter().map(|d| d.name).collect();
-        let rules_third: Vec<&str> =
-            inline_object_rule_descriptors().iter().map(|d| d.name).collect();
+        let rules_again: Vec<&str> = INLINE_OBJECT_RULE_DESCRIPTORS
+            .iter()
+            .map(|d| d.name)
+            .collect();
+        let rules_third: Vec<&str> = inline_object_rule_descriptors()
+            .iter()
+            .map(|d| d.name)
+            .collect();
         assert_eq!(rules_again, rules_third);
 
         let coercion_again: Vec<&str> = COERCION_RULE_DESCRIPTORS.iter().map(|d| d.name).collect();
@@ -643,10 +648,14 @@ mod tests {
             coercion_rule_descriptors().iter().map(|d| d.name).collect();
         assert_eq!(coercion_again, coercion_third);
 
-        let validation_again: Vec<&str> =
-            VALIDATION_BEHAVIOR_DESCRIPTORS.iter().map(|d| d.name).collect();
-        let validation_third: Vec<&str> =
-            validation_behavior_descriptors().iter().map(|d| d.name).collect();
+        let validation_again: Vec<&str> = VALIDATION_BEHAVIOR_DESCRIPTORS
+            .iter()
+            .map(|d| d.name)
+            .collect();
+        let validation_third: Vec<&str> = validation_behavior_descriptors()
+            .iter()
+            .map(|d| d.name)
+            .collect();
         assert_eq!(validation_again, validation_third);
     }
 
@@ -763,12 +772,12 @@ mod tests {
                     );
                     for part in &parts {
                         let stripped = part.trim_matches('"');
-                        let _ = grammar::parse_type_expr("test", stripped)
-                            .unwrap_or_else(|e| {
-                                panic!("union arm `{stripped}` failed to parse: {e:?}")
-                            });
+                        let _ = grammar::parse_type_expr("test", stripped).unwrap_or_else(|e| {
+                            panic!("union arm `{stripped}` failed to parse: {e:?}")
+                        });
                     }
-                    let wrapped = format!("x: [{arm_a}, {arm_b}]", arm_a = parts[0], arm_b = parts[1]);
+                    let wrapped =
+                        format!("x: [{arm_a}, {arm_b}]", arm_a = parts[0], arm_b = parts[1]);
                     let value: serde_yaml_ng::Value =
                         serde_yaml_ng::from_str(&wrapped).expect("yaml must parse");
                     let schema = parse_yaml_schema(&value)

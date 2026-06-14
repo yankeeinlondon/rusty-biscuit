@@ -1645,14 +1645,15 @@ pub fn redact_shell_command(raw: &str) -> String {
     });
     // Query-string secrets: ?token=… / &access_token=… / &password=… / &key=….
     static QUERY_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(r"(?i)([?&](?:access_token|token|password|api-?key|secret|key)=)[^&\s'\x22]+")
-            .expect("valid query regex")
+        regex::Regex::new(
+            r"(?i)([?&](?:access_token|token|password|api-?key|secret|key)=)[^&\s'\x22]+",
+        )
+        .expect("valid query regex")
     });
     // Long opaque token-like blobs (JWT / base64): mixes letters and digits,
     // no slash, length >= 40.
-    static BLOB_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(r"[A-Za-z0-9_\-.+=]{40,}").expect("valid blob regex")
-    });
+    static BLOB_RE: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"[A-Za-z0-9_\-.+=]{40,}").expect("valid blob regex"));
 
     // Collapse all whitespace runs to single spaces and trim.
     let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1823,8 +1824,7 @@ impl ComposePerfReport {
             }
         }
 
-        self.shell_spans
-            .extend(other.shell_spans.iter().cloned());
+        self.shell_spans.extend(other.shell_spans.iter().cloned());
         self.capture_timings
             .extend(other.capture_timings.iter().cloned());
     }
@@ -2729,7 +2729,10 @@ mod tests {
 
     #[test]
     fn compose_stage_phase_mapping() {
-        assert_eq!(ComposeStage::ShellExpansion.phase(), ComposePhase::InlinePre);
+        assert_eq!(
+            ComposeStage::ShellExpansion.phase(),
+            ComposePhase::InlinePre
+        );
         assert_eq!(
             ComposeStage::TransclusionApply.phase(),
             ComposePhase::Transclusion

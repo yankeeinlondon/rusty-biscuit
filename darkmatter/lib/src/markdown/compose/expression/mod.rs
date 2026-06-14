@@ -73,15 +73,14 @@ pub mod resolve_ctx;
 
 pub use ast::{BinaryOp, Expr};
 pub use catalog::{
-    expression_function_descriptors, ExpressionFunctionDescriptor,
-    EXPRESSION_FUNCTION_DESCRIPTORS,
+    EXPRESSION_FUNCTION_DESCRIPTORS, ExpressionFunctionDescriptor, expression_function_descriptors,
 };
 pub use ctx::CtxLookup;
-pub use resolve_ctx::ResolutionContext;
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseMode, Token,
 };
 pub use parser::{ParseError, Parser, parse, parse_condition};
+pub use resolve_ctx::ResolutionContext;
 
 use serde_json::Value;
 

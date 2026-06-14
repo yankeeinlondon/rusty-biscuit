@@ -849,13 +849,10 @@ mod tests {
             .collect();
 
         let ctx = ComposeContext::capture_for_dir(&std::env::temp_dir());
-        let runtime_names: HashSet<&str> =
-            ctx.values().keys().map(|k| k.as_str()).collect();
+        let runtime_names: HashSet<&str> = ctx.values().keys().map(|k| k.as_str()).collect();
 
-        let missing_descriptors: Vec<_> =
-            runtime_names.difference(&descriptor_names).collect();
-        let extra_descriptors: Vec<_> =
-            descriptor_names.difference(&runtime_names).collect();
+        let missing_descriptors: Vec<_> = runtime_names.difference(&descriptor_names).collect();
+        let extra_descriptors: Vec<_> = descriptor_names.difference(&runtime_names).collect();
 
         assert!(
             missing_descriptors.is_empty(),
@@ -884,11 +881,7 @@ mod tests {
     fn descriptor_names_are_unique() {
         let mut seen = HashSet::new();
         for d in CONTEXT_VARIABLE_DESCRIPTORS {
-            assert!(
-                seen.insert(d.name),
-                "Duplicate descriptor name: {}",
-                d.name
-            );
+            assert!(seen.insert(d.name), "Duplicate descriptor name: {}", d.name);
         }
     }
 

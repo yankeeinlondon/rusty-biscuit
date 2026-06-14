@@ -377,7 +377,10 @@ fn lower_hr_attrs_to_node(
             .or(attrs.legacy_style)
             .as_deref()
             .and_then(HrKind::from_authored),
-        alignment: attrs.alignment.as_deref().and_then(HrAlignment::from_authored),
+        alignment: attrs
+            .alignment
+            .as_deref()
+            .and_then(HrAlignment::from_authored),
         weight: attrs.weight.as_deref().and_then(HrWeight::from_authored),
         width: attrs.width,
         color: attrs.color,
@@ -901,11 +904,12 @@ fn build_container(kind: ContainerKind, children: Vec<RenderNode>) -> RenderNode
             // `output::terminal::emit_highlighted_code_block`). The browser code
             // hook ignores this hint, so HTML output is unaffected; the plain
             // (no-`CodeRenderer`) tree fallback ignores it too.
-            node.attrs.set_code_hints(&renderable::tree::CodeRenderHints {
-                header_row: true,
-                language_label: lang,
-                highlight: true,
-            });
+            node.attrs
+                .set_code_hints(&renderable::tree::CodeRenderHints {
+                    header_row: true,
+                    language_label: lang,
+                    highlight: true,
+                });
             node
         }
         ContainerKind::List { ordered, start } => RenderNode::list(ordered, start, children),
@@ -963,7 +967,10 @@ fn envelope_token(children: &[RenderNode]) -> Option<String> {
 /// resolves the remaining payload bytes back to the original source. Boundary
 /// text nodes left empty by stripping are dropped.
 fn strip_envelope_markers(mut children: Vec<RenderNode>, name: &str) -> Vec<RenderNode> {
-    let marker = format!("{{{{!{name}!}}}}{}", super::inline_extension::ENVELOPE_SENTINEL);
+    let marker = format!(
+        "{{{{!{name}!}}}}{}",
+        super::inline_extension::ENVELOPE_SENTINEL
+    );
     if let Some(first) = children.first_mut() {
         strip_text_prefix(first, &marker);
     }
@@ -1011,7 +1018,10 @@ fn strip_text_suffix(node: &mut RenderNode, marker: &str) {
 /// initially indexes the rewritten bytes. This pass walks the whole tree and
 /// applies the rewriter's [`ProvenanceTable`](super::inline_extension::ProvenanceTable)
 /// so downstream consumers see the bytes the user actually typed.
-fn resolve_node_spans(node: &mut RenderNode, provenance: &super::inline_extension::ProvenanceTable) {
+fn resolve_node_spans(
+    node: &mut RenderNode,
+    provenance: &super::inline_extension::ProvenanceTable,
+) {
     if let Some(location) = node.span.location.as_mut() {
         location.bytes = provenance.resolve_range(location.bytes.clone());
     }
@@ -1386,8 +1396,7 @@ mod tests {
         use renderable::style::{Style, TextEmphasis};
         use renderable::tree::encode_embedded_subtree;
 
-        let mut span =
-            RenderNode::span(vec!["fs-dir".to_string()], vec![RenderNode::text(text)]);
+        let mut span = RenderNode::span(vec!["fs-dir".to_string()], vec![RenderNode::text(text)]);
         span.attrs.set_style(&Style {
             emphasis: TextEmphasis {
                 dim: true,
@@ -1444,9 +1453,9 @@ mod tests {
         let (doc, diags) = fold(&input);
 
         assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("unterminated embedded render-tree region")),
+            diags.iter().any(|d| d
+                .message
+                .contains("unterminated embedded render-tree region")),
             "an unterminated region must be diagnosed: {diags:?}",
         );
         // The decoded subtree is never spliced (the region never closed), but
@@ -1492,7 +1501,11 @@ mod tests {
 
         let mut spans = Vec::new();
         collect_fs_dir_spans(&doc.root, &mut spans);
-        assert_eq!(spans.len(), 2, "both adjacent regions splice their subtrees");
+        assert_eq!(
+            spans.len(),
+            2,
+            "both adjacent regions splice their subtrees"
+        );
         assert!(
             has_text(&doc.root, "alpha") && has_text(&doc.root, "beta"),
             "each decoded subtree carries its distinguishing text",
@@ -1729,7 +1742,10 @@ mod tests {
         // A real GFM strikethrough carries no envelope marker, so it must fold
         // to `NodeKind::Delete`, never an `Extended` node.
         let (doc, diags) = fold_spanned("plain ~~struck~~ after");
-        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "clean fixture must fold cleanly: {diags:?}"
+        );
         assert!(
             collect_extended(&doc.root, "mark").is_empty()
                 && collect_extended(&doc.root, "dim").is_empty(),
@@ -2088,7 +2104,10 @@ mod tests {
     fn span_aware_fold_mark_inner_text_resolves_to_original_payload_bytes() {
         let input = "plain ==highlighted== after";
         let (doc, diags) = fold_spanned(input);
-        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "clean fixture must fold cleanly: {diags:?}"
+        );
         let mark = find_extended(&doc.root, "mark").expect("mark Extended node must exist");
         let text = mark
             .children()
@@ -2232,7 +2251,10 @@ mod tests {
     #[test]
     fn span_aware_fold_inline_code_keeps_delimiters_literal() {
         let (doc, diags) = fold_spanned("text `==code==` more");
-        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "clean fixture must fold cleanly: {diags:?}"
+        );
         assert!(
             collect_extended(&doc.root, "mark").is_empty(),
             "an inline code span must not produce a mark Extended node",
@@ -2255,7 +2277,10 @@ mod tests {
     #[test]
     fn span_aware_fold_fenced_code_keeps_delimiters_literal() {
         let (doc, diags) = fold_spanned("```\n==code== and \u{2304}dim\u{2304}\n```\n");
-        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "clean fixture must fold cleanly: {diags:?}"
+        );
         assert!(
             collect_extended(&doc.root, "mark").is_empty()
                 && collect_extended(&doc.root, "dim").is_empty(),
@@ -2284,7 +2309,10 @@ mod tests {
     #[test]
     fn span_aware_fold_mark_inside_table_cell_preserves_columns() {
         let (doc, diags) = fold_spanned("| ==hi== | ok |\n|----|----|\n| a | b |\n");
-        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "clean fixture must fold cleanly: {diags:?}"
+        );
 
         fn find_table(node: &RenderNode) -> Option<&RenderNode> {
             if matches!(node.kind, NodeKind::Table { .. }) {
@@ -2293,7 +2321,11 @@ mod tests {
             node.children().iter().find_map(find_table)
         }
         let table = find_table(&doc.root).expect("table node must exist");
-        let NodeKind::Table { align, children: rows } = &table.kind else {
+        let NodeKind::Table {
+            align,
+            children: rows,
+        } = &table.kind
+        else {
             unreachable!("matched above");
         };
         assert_eq!(align.len(), 2, "table must keep exactly two columns");

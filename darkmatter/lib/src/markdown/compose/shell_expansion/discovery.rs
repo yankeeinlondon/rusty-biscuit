@@ -354,10 +354,8 @@ fn collect_frontmatter_commands_recursive(
     let prepared_ctx = prepared.source_context_for_errors();
     let remote_fetch =
         remote_fetch::RemoteFetchRuntime::with_store(&options.remote_read_config, None);
-    let lookup = state::ResolvingLookup::new(
-        &state,
-        options.expression_resolution_context(&remote_fetch),
-    );
+    let lookup =
+        state::ResolvingLookup::new(&state, options.expression_resolution_context(&remote_fetch));
     for directive in transclusion::parse_directives(prepared.content(), prepared_ctx.clone())? {
         if directive.kind != transclusion::DirectiveKind::File {
             continue;
@@ -478,12 +476,8 @@ fn scan_one_frontmatter(
         // discovery. The legacy `executable`/`args` fields on the candidate
         // are placeholders for the ternary case (see `parse_shell_value`)
         // and cannot be used directly.
-        let pipelines = directive_reachable_pipelines(
-            &candidate,
-            fm_clone.frontmatter(),
-            options,
-            &scan_ctx,
-        )?;
+        let pipelines =
+            directive_reachable_pipelines(&candidate, fm_clone.frontmatter(), options, &scan_ctx)?;
 
         for pipeline in pipelines {
             // Build a synthetic per-pipeline ShellDirective so we can reuse the
@@ -1121,7 +1115,10 @@ out: \"$(flag ? echo a && pwd : ls)\"
         let entries = collect_shell_commands(&md, &options).unwrap();
 
         let executables: Vec<&str> = entries.iter().map(|e| e.executable.as_str()).collect();
-        assert!(executables.contains(&"echo"), "missing echo: {executables:?}");
+        assert!(
+            executables.contains(&"echo"),
+            "missing echo: {executables:?}"
+        );
         assert!(executables.contains(&"pwd"), "missing pwd: {executables:?}");
         assert!(executables.contains(&"ls"), "missing ls: {executables:?}");
     }
@@ -1165,8 +1162,7 @@ out: \"$(flag ? {{cmd_name}} hi : '')\"
 
         let err = collect_shell_commands(&md, &options).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("may not come from interpolation"),
+            err.to_string().contains("may not come from interpolation"),
             "unexpected error: {err}"
         );
     }

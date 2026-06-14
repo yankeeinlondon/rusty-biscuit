@@ -335,7 +335,10 @@ pub(crate) fn schema_validation_failed_block(
     }
 
     StatusBlock::new(StatusState::Error)
-        .error_header(ErrorHeader::new("MarkdownError", "schema validation failed"))
+        .error_header(ErrorHeader::new(
+            "MarkdownError",
+            "schema validation failed",
+        ))
         .body(body_lines.join("\n"))
         .hint("Correct the frontmatter so it satisfies the declared $schema (or baseline schema).")
 }
@@ -426,7 +429,10 @@ mod tests {
             "expected following line shown: {out}",
         );
         // The opening delimiter shows as the preceding context line.
-        assert!(out.contains("1 │ ---"), "expected preceding line shown: {out}");
+        assert!(
+            out.contains("1 │ ---"),
+            "expected preceding line shown: {out}"
+        );
     }
 
     /// The excerpt body carries syntax-highlight SGR (best-effort, tolerant of
@@ -529,12 +535,12 @@ mod tests {
             "expected one of: fm, body, simple, structured, detailed",
         ));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
-        assert!(out.contains("malformed stored hash"), "missing summary: {out}");
-        assert!(out.contains("hash"), "missing property: {out}");
         assert!(
-            out.contains("expected one of"),
-            "missing reason: {out}"
+            out.contains("malformed stored hash"),
+            "missing summary: {out}"
         );
+        assert!(out.contains("hash"), "missing property: {out}");
+        assert!(out.contains("expected one of"), "missing reason: {out}");
     }
 
     /// Preparation failures (malformed `$schema`, unresolved baseline) arrive
@@ -547,8 +553,14 @@ mod tests {
         let summary = "schema could not be prepared: could not resolve ./missing.yaml";
         let block = schema_validation_failed_block(&path, &[], summary, &None);
         let out = render_block(&block);
-        assert!(out.contains("schema could not be prepared"), "missing summary: {out}");
-        assert!(out.contains("could not resolve ./missing.yaml"), "missing detail: {out}");
+        assert!(
+            out.contains("schema could not be prepared"),
+            "missing summary: {out}"
+        );
+        assert!(
+            out.contains("could not resolve ./missing.yaml"),
+            "missing detail: {out}"
+        );
         assert!(out.contains("bad-schema.md"), "missing path: {out}");
     }
 
@@ -559,7 +571,10 @@ mod tests {
         let path = std::path::PathBuf::from("/tmp/test/empty.md");
         let block = schema_validation_failed_block(&path, &[], "", &None);
         let out = render_block(&block);
-        assert!(out.contains("schema could not be prepared"), "missing fallback summary: {out}");
+        assert!(
+            out.contains("schema could not be prepared"),
+            "missing fallback summary: {out}"
+        );
     }
 
     /// `reqwest::Error` cannot be constructed without firing a real HTTP
@@ -576,8 +591,7 @@ mod tests {
     /// ensure the test exits quickly even if the kernel queues the RST.
     #[tokio::test]
     async fn url_fetch_block_renders_with_reqwest_error() {
-        let listener =
-            std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
         let port = listener.local_addr().expect("local_addr").port();
         drop(listener);
         let url = format!("http://127.0.0.1:{port}");

@@ -1830,16 +1830,11 @@ fn level2_cli_align_ul_granular_indents_only_ul_in_real_terminal() {
     // versus the left baseline, while leaving an ordered list unaffected.
     let body = "- sentinel_ul_only\n\n1. sentinel_ol_only\n";
 
-    let Some((left, _)) = run_md(
-        body,
-        "--align-ul left --fill-ul max=30 --max-width 60",
-    ) else {
+    let Some((left, _)) = run_md(body, "--align-ul left --fill-ul max=30 --max-width 60") else {
         return;
     };
-    let Some((center, _)) = run_md(
-        body,
-        "--align-ul center --fill-ul max=30 --max-width 60",
-    ) else {
+    let Some((center, _)) = run_md(body, "--align-ul center --fill-ul max=30 --max-width 60")
+    else {
         return;
     };
 
@@ -2142,17 +2137,21 @@ hr_weight_tail_anchor
         return;
     };
 
-    let Some((thick_rule_line, _)) =
-        locate_hr_between_sentinels(&frame_thick, "hr_weight_lead_anchor", "hr_weight_tail_anchor")
-    else {
+    let Some((thick_rule_line, _)) = locate_hr_between_sentinels(
+        &frame_thick,
+        "hr_weight_lead_anchor",
+        "hr_weight_tail_anchor",
+    ) else {
         panic!(
             "expected a thick HR rule row but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
             frame_thick.plain, frame_thick.raw
         );
     };
-    let Some((thin_rule_line, _)) =
-        locate_hr_between_sentinels(&frame_thin, "hr_weight_lead_anchor", "hr_weight_tail_anchor")
-    else {
+    let Some((thin_rule_line, _)) = locate_hr_between_sentinels(
+        &frame_thin,
+        "hr_weight_lead_anchor",
+        "hr_weight_tail_anchor",
+    ) else {
         panic!(
             "expected a thin HR rule row but none was captured.\nfull plain:\n{}\nfull raw:\n{}",
             frame_thin.plain, frame_thin.raw
@@ -2405,10 +2404,7 @@ hr_width_tail_anchor
     // Count only the visible rule glyphs (skip the left padding). Dashes
     // render as `╌` (Unicode) or `-` (ASCII fallback). The rule glyphs are
     // contiguous; non-rule characters are spaces.
-    let rule_glyph_count = plain
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .count();
+    let rule_glyph_count = plain.chars().filter(|c| !c.is_whitespace()).count();
     assert!(
         rule_glyph_count > 0,
         "expected visible rule glyphs in row:\n{plain}\nfull plain:\n{}",
@@ -2643,22 +2639,25 @@ fn level2_style_hyperlinks_truncation_does_not_bleed_color_in_terminal() {
     // an SGR reset (or default-foreground) between the last red introduction and
     // the marker. WezTerm reconstructs SGR per cell, so a leaked color would
     // wrap the marker cells with red and no intervening reset.
-    let trail_pos = frame
-        .raw
-        .find("ZZTRAIL")
-        .unwrap_or_else(|| panic!("trailing marker missing in raw capture. plain:\n{}", frame.plain));
+    let trail_pos = frame.raw.find("ZZTRAIL").unwrap_or_else(|| {
+        panic!(
+            "trailing marker missing in raw capture. plain:\n{}",
+            frame.plain
+        )
+    });
     let before = &frame.raw[..trail_pos];
     let red_idx = before
         .rfind(red_semi)
         .or_else(|| before.rfind(red_colon))
         .unwrap_or_else(|| {
-            panic!("link's red SGR must precede the trailing marker. raw:\n{}", frame.raw)
+            panic!(
+                "link's red SGR must precede the trailing marker. raw:\n{}",
+                frame.raw
+            )
         });
     let between = &before[red_idx..];
     assert!(
-        between.contains("\x1b[0m")
-            || between.contains("\x1b[m")
-            || between.contains("\x1b[39m"),
+        between.contains("\x1b[0m") || between.contains("\x1b[m") || between.contains("\x1b[39m"),
         "trailing text inherits the truncated link color: no reset between the \
          red SGR and the marker. raw:\n{}",
         frame.raw
@@ -2757,7 +2756,12 @@ fn level2_style_images_exact_width_truncates_long_alt_in_terminal() {
         .plain
         .lines()
         .find(|l| l.contains('…'))
-        .unwrap_or_else(|| panic!("placeholder line missing in plain capture:\n{}", frame.plain));
+        .unwrap_or_else(|| {
+            panic!(
+                "placeholder line missing in plain capture:\n{}",
+                frame.plain
+            )
+        });
     assert!(
         !placeholder_line.contains("image alt text"),
         "the overflowing alt tail must not appear in the visible field: {placeholder_line:?}"
@@ -2800,22 +2804,25 @@ fn level2_style_images_truncation_does_not_bleed_color_in_terminal() {
     // an SGR reset (or default-foreground) between the last red introduction and
     // the marker. WezTerm reconstructs SGR per cell, so a leaked color would
     // wrap the marker cells with red and no intervening reset.
-    let trail_pos = frame
-        .raw
-        .find("ZZTRAIL")
-        .unwrap_or_else(|| panic!("trailing marker missing in raw capture. plain:\n{}", frame.plain));
+    let trail_pos = frame.raw.find("ZZTRAIL").unwrap_or_else(|| {
+        panic!(
+            "trailing marker missing in raw capture. plain:\n{}",
+            frame.plain
+        )
+    });
     let before = &frame.raw[..trail_pos];
     let red_idx = before
         .rfind(red_semi)
         .or_else(|| before.rfind(red_colon))
         .unwrap_or_else(|| {
-            panic!("image's red SGR must precede the trailing marker. raw:\n{}", frame.raw)
+            panic!(
+                "image's red SGR must precede the trailing marker. raw:\n{}",
+                frame.raw
+            )
         });
     let between = &before[red_idx..];
     assert!(
-        between.contains("\x1b[0m")
-            || between.contains("\x1b[m")
-            || between.contains("\x1b[39m"),
+        between.contains("\x1b[0m") || between.contains("\x1b[m") || between.contains("\x1b[39m"),
         "trailing text inherits the truncated image color: no reset between the \
          red SGR and the marker. raw:\n{}",
         frame.raw

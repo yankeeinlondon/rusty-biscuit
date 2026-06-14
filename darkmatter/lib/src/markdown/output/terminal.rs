@@ -755,7 +755,7 @@ impl Default for TerminalOptions {
 fn header_text_color(color_mode: ColorMode) -> (u8, u8, u8) {
     match color_mode {
         ColorMode::Dark | ColorMode::Unknown => (255, 255, 255), // WHITE
-        ColorMode::Light => (0, 0, 0),      // BLACK
+        ColorMode::Light => (0, 0, 0),                           // BLACK
     }
 }
 
@@ -849,7 +849,6 @@ pub(crate) fn format_header_row(
 
     output
 }
-
 
 /// Adjusts a background color based on color mode and RGB delta values.
 ///

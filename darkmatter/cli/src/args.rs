@@ -1384,12 +1384,18 @@ mod tests {
 
     #[test]
     fn parse_cli_length_fixed() {
-        assert_eq!(parse_cli_length("80").unwrap(), renderable::layout::Length::ch(80));
+        assert_eq!(
+            parse_cli_length("80").unwrap(),
+            renderable::layout::Length::ch(80)
+        );
     }
 
     #[test]
     fn parse_cli_length_percent() {
-        assert_eq!(parse_cli_length("50%").unwrap(), renderable::layout::Length::Percent(50.0));
+        assert_eq!(
+            parse_cli_length("50%").unwrap(),
+            renderable::layout::Length::Percent(50.0)
+        );
     }
 
     #[test]

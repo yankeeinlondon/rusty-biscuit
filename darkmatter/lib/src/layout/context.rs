@@ -9,7 +9,7 @@
 //! and are baked into the render tree during the fold.
 
 use super::PageRenderError;
-use super::page::{length_to_cells};
+use super::page::length_to_cells;
 use super::types::PageBackground;
 use crate::markdown::highlighting::ColorMode;
 
@@ -108,7 +108,7 @@ fn edges_is_zero(edges: &renderable::layout::Edges) -> bool {
         && length_is_zero(&edges.left)
 }
 
-use super::page::{length_is_zero};
+use super::page::length_is_zero;
 
 impl LayoutContext {
     /// Build a layout context from page state.
@@ -143,7 +143,10 @@ impl LayoutContext {
 
         let content_width = terminal_width.saturating_sub(required);
         // A percentage `max-width` resolves against the content width.
-        let effective_width = match page_max_width.as_ref().map(|tv| length_to_cells(tv, content_width)) {
+        let effective_width = match page_max_width
+            .as_ref()
+            .map(|tv| length_to_cells(tv, content_width))
+        {
             Some(0) => return Err(PageRenderError::MaxWidthZero),
             Some(mw) => content_width.min(mw),
             None => content_width,
@@ -183,7 +186,9 @@ impl LayoutContext {
             }
             PageBackground::Pronounced => {
                 let (bg, inverted) = match surface_mode {
-                    ColorMode::Dark | ColorMode::Unknown => (PAGE_BG_PRONOUNCED_DARK, ColorMode::Light),
+                    ColorMode::Dark | ColorMode::Unknown => {
+                        (PAGE_BG_PRONOUNCED_DARK, ColorMode::Light)
+                    }
                     ColorMode::Light => (PAGE_BG_PRONOUNCED_LIGHT, ColorMode::Dark),
                 };
                 (Some(bg), inverted)
