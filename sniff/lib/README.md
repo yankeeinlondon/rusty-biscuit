@@ -400,7 +400,7 @@ let git = detect_git(Path::new("."), false, 10)?;
 if let Some(info) = git {
     println!("Repository: {:?}", info.repo_root);
     println!("Branch: {:?}", info.current_branch);
-    println!("Dirty: {}", info.status.is_dirty);
+    println!("Dirty: {}", info.status.as_ref().map_or(false, |s| s.is_dirty));
     println!("Commits ahead: {}", info.recent.len());
 
     for commit in info.recent.iter().take(5) {
@@ -419,13 +419,15 @@ if let Some(info) = git_deep {
     }
 
     // Check if behind
-    if let Some(ref behind) = info.status.is_behind {
-        match behind {
-            sniff::filesystem::git::BehindStatus::NotBehind => {
-                println!("Up to date with remotes");
-            }
-            sniff::filesystem::git::BehindStatus::Behind(remotes) => {
-                println!("Behind: {}", remotes.join(", "));
+    if let Some(status) = &info.status {
+        if let Some(behind) = &status.is_behind {
+            match behind {
+                sniff::filesystem::git::BehindStatus::NotBehind => {
+                    println!("Up to date with remotes");
+                }
+                sniff::filesystem::git::BehindStatus::Behind(remotes) => {
+                    println!("Behind: {}", remotes.join(", "));
+                }
             }
         }
     }

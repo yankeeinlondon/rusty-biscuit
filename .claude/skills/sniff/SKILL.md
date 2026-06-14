@@ -80,16 +80,17 @@ let result = detect_with_config(config)?;
 | `OsRequest` | `summary()`, `full()` | Package managers, locale, timezone, NTP status (up to 10s on Linux) |
 | `HardwareRequest` | `summary()`, `full()` | Storage, GPU, audio (~1.5s macOS) |
 | `NetworkRequest` | `interfaces_only()`, `full()` | WAN IP lookup (HTTP); `.force_refresh(true)` bypasses the TTL cache |
-| `GitRequest` | `summary()`, `full()`, `deep()` | Commits, per-file stats, worktrees, unified diffs, remote refresh |
+| `GitRequest` | `identity()`, `summary()`, `full()`, `deep()` | Commits, per-file stats, worktrees, unified diffs, remote refresh |
 | `RepoRequest` | `structure()`, `full()` | Per-package language scanning (10-50x slower than `structure()`) |
 | `FilesystemRequest` | `new()` (default full) | Composes git + repo + file inventory + formatting + docs |
 | `DetectionPlan` | `new()` (default full) | Composes all four domains (os, hardware, network, filesystem) |
 
 **Git preset cheat sheet:**
+- `identity()` -- repo root, branch, HEAD id, worktree flag, base repo root, and org/repo only. **No working-tree status walk**, no commits, no branches, no remotes, no config. This is the new floor below `minimal()`.
 - `minimal()` / `summary()` -- branch + dirty *flag* only (no per-category counts, no commits, no worktrees). The two presets are currently byte-identical.
 - `full()` -- 10 commits, per-file change stats, worktrees; no unified diffs, no network
 - `deep()` -- adds full unified diffs, remote refresh, branch details, and per-commit containment
-- **Every** preset (including `minimal`) runs a working-tree status walk -- there is no "repo root without status" request level; use the Tier-3 `GitRepo::discover().repo_root()` handle for that.
+- Every preset except `identity()` runs a working-tree status walk. Use `identity()` when you only need repository identity, or use the Tier-3 `GitRepo::discover().repo_root()` handle for bare repo-root access.
 
 ## Key Types
 
