@@ -39,8 +39,8 @@ Addresses all findings from [review-5](./review-5.md).
 | `shuffle_preserves_hotkey_mapping` | `choose_one.rs` | After shuffle, hotkeys still map to the correct logical option by first-character match. |
 
 ### Lint checklist
-- `cargo clippy --all-targets` on `tui-chrome` — ensure no unused import warnings from `rand`.
-- `cargo test -p tui-chrome` — all existing + new tests pass.
+- `cargo clippy --all-targets` on `biscuit-tui` — ensure no unused import warnings from `rand`.
+- `cargo test -p biscuit-tui` — all existing + new tests pass.
 
 ---
 
@@ -75,8 +75,8 @@ Addresses all findings from [review-5](./review-5.md).
 | `many_dictionary_surfaces_parse_errors` | `choice_builders.rs` | Returns `Err(ChoiceBuilderError::Parse(_))`. |
 
 ### Lint checklist
-- `cargo clippy --all-targets` on `tui-chrome`.
-- `cargo test -p tui-chrome` — all existing + new tests pass.
+- `cargo clippy --all-targets` on `biscuit-tui`.
+- `cargo test -p biscuit-tui` — all existing + new tests pass.
 
 ---
 
@@ -163,8 +163,8 @@ fn compute_column_widths(columns: &[InputTableColumn], total_width: u16) -> Vec<
 | `render_static_text_stays_tight` | `table.rs` | Render a table with StaticText + TextInput columns at 40 cols wide. Read back the buffer and verify StaticText column cell width equals the text's unicode width (no trailing padding beyond what the layout allocates). |
 
 ### Lint checklist
-- `cargo clippy --all-targets` on `tui-chrome`.
-- `cargo test -p tui-chrome` — all existing + new tests pass.
+- `cargo clippy --all-targets` on `biscuit-tui`.
+- `cargo test -p biscuit-tui` — all existing + new tests pass.
 - Specifically re-run `render_mixed_cell_table_paints_static_and_body` and any other render tests to verify no regressions.
 
 ---
@@ -198,7 +198,7 @@ The recommended path is to **explicitly document the limitation** rather than re
 No new tests required — the existing `public_api_names.rs` integration test already confirms `InputTableColumn::ChooseOne(ChoiceInput<String>)` compiles. The documentation-only change needs no test coverage.
 
 ### Lint checklist
-- `cargo doc -p tui-chrome --no-deps` — verify docs build without warnings.
+- `cargo doc -p biscuit-tui --no-deps` — verify docs build without warnings.
 
 ---
 
@@ -207,11 +207,11 @@ No new tests required — the existing `public_api_names.rs` integration test al
 Run the full validation suite:
 
 ```bash
-cargo clippy --all-targets -p tui-chrome -- -D warnings
-cargo clippy --all-targets -p tui-chrome-cli -- -D warnings
-cargo test -p tui-chrome
-cargo test -p tui-chrome-cli
-cargo doc -p tui-chrome --no-deps
+cargo clippy --all-targets -p biscuit-tui -- -D warnings
+cargo clippy --all-targets -p biscuit-tui-cli -- -D warnings
+cargo test -p biscuit-tui
+cargo test -p biscuit-tui-cli
+cargo doc -p biscuit-tui --no-deps
 ```
 
 All tests must pass. All clippy lints must be clean. Docs must build without warnings.

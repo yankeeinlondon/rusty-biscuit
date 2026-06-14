@@ -2,8 +2,8 @@
 
 This plan implements every recommendation from
 `biscuit-tui/features/2026-04-28-choose-one-improvements/review-6.md` for the
-`biscuit-tui` package area. The affected crates are `tui-chrome` in
-`biscuit-tui/lib` and `tui-chrome-cli` in `biscuit-tui/cli`.
+`biscuit-tui` package area. The affected crates are `biscuit-tui` in
+`biscuit-tui/lib` and `biscuit-tui-cli` in `biscuit-tui/cli`.
 
 ## Source References
 
@@ -228,8 +228,8 @@ Run from the repository root:
 
 ```bash
 just -f biscuit-tui/justfile check
-cargo test -p tui-chrome -p tui-chrome-cli -- --skip completions_shell --skip keyboard_protocol
-cargo test -p tui-chrome -p tui-chrome-cli
+cargo test -p biscuit-tui -p biscuit-tui-cli -- --skip completions_shell --skip keyboard_protocol
+cargo test -p biscuit-tui -p biscuit-tui-cli
 just -f biscuit-tui/justfile lint
 ```
 
@@ -238,14 +238,14 @@ lacks a required shell, PTY capability, or keyboard-protocol support, record the
 failure and rerun the deterministic subset:
 
 ```bash
-cargo test -p tui-chrome -p tui-chrome-cli -- --skip completions_shell --skip keyboard_protocol
+cargo test -p biscuit-tui -p biscuit-tui-cli -- --skip completions_shell --skip keyboard_protocol
 ```
 
-Lint errors anywhere in `tui-chrome` or `tui-chrome-cli` must be fixed, even if
+Lint errors anywhere in `biscuit-tui` or `biscuit-tui-cli` must be fixed, even if
 they predate these review changes. After lint fixes, rerun:
 
 ```bash
-cargo test -p tui-chrome -p tui-chrome-cli -- --skip completions_shell --skip keyboard_protocol
+cargo test -p biscuit-tui -p biscuit-tui-cli -- --skip completions_shell --skip keyboard_protocol
 just -f biscuit-tui/justfile lint
 ```
 
@@ -255,7 +255,7 @@ just -f biscuit-tui/justfile lint
 - Gated shell/PTY tests either pass or have a clearly recorded environmental
   reason for not passing.
 - `just -f biscuit-tui/justfile lint` passes with no warnings or errors for both
-  `tui-chrome` and `tui-chrome-cli`.
+  `biscuit-tui` and `biscuit-tui-cli`.
 - No unrelated workspace packages are modified to satisfy this review.
 
 ## Developer Handoff Notes

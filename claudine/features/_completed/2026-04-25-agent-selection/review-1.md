@@ -24,7 +24,7 @@ The CLI never triggers a `refresh()` or `refresh_all()` on the `ModelCatalogServ
 ## Broken or Incomplete Features
 
 ### 1. CRITICAL: Sequence Review Provider Selection
-In `claudine/cli/src/commands/wrap/selection_ui.rs`, the `review_sequence` function incorrectly uses `row.get_text("provider")` to read back the user's choice from a `ChooseOne` cell. Because `tui-chrome` returns a `CellValue::ChosenOne` for such cells, `get_text` always returns `None`. This causes the provider to always default to `Provider::Claude` (via the `unwrap_or(Provider::Claude)` fallback) regardless of what the user selected in the UI.
+In `claudine/cli/src/commands/wrap/selection_ui.rs`, the `review_sequence` function incorrectly uses `row.get_text("provider")` to read back the user's choice from a `ChooseOne` cell. Because `biscuit-tui` returns a `CellValue::ChosenOne` for such cells, `get_text` always returns `None`. This causes the provider to always default to `Provider::Claude` (via the `unwrap_or(Provider::Claude)` fallback) regardless of what the user selected in the UI.
 
 ### 2. Sequence Review Decoder Robustness
 The decoder in `review_sequence` uses `Provider::fuzzy_match_cli_name` on a slug that is guaranteed to be valid (since it comes from the picker's own option IDs). Using a fuzzy matcher here is unnecessary, and the default fallback to `Provider::Claude` is dangerous. It should ideally use an exact match or handle the `None` case as a hard error/abort.

@@ -1,7 +1,7 @@
 # Local SQLite Cache
 
-`Icon::iconify` and the `icon sets` / `icon icons` CLI commands are
-backed by a single on-disk SQLite database. Cache hits never touch the
+`Icon::iconify` and the `icon sets` / `icon show` / `icon cache` CLI
+commands are backed by a single on-disk SQLite database. Cache hits never touch the
 network; cache misses fetch from the Iconify API and persist the body
 for next time.
 
@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS sets (
     license_title   TEXT,
     license_url     TEXT,
     total           INTEGER,
+    author_name     TEXT,
+    author_url      TEXT,
+    tags            TEXT,     -- comma-separated
+    category        TEXT,
     fetched_at      TEXT NOT NULL
 );
 ```
@@ -61,10 +65,13 @@ rather than advertising a partially-migrated schema.
   `left INTEGER` / `top INTEGER` origin conversion, column drops,
   and the version bump.
 - **v1 → v2** — `ALTER TABLE sets ADD COLUMN total INTEGER` (nullable)
-  + `PRAGMA user_version = 2`. Existing `sets` rows read as
-  `total = None`; no backfill, no network request on open.
+  + `PRAGMA user_version = 2`.
+- **v2 → v3** — `ALTER TABLE sets ADD COLUMN author_name TEXT`,
+  `author_url TEXT`, `tags TEXT`, `category TEXT` +
+  `PRAGMA user_version = 3`. Each `ALTER` is guarded by
+  `PRAGMA table_info(sets)` so re-runs are idempotent.
 
-The migration is idempotent: a database that already contains `total`
+The migration is idempotent: a database that already contains a column
 but reports an older `user_version` is detected by a
 `PRAGMA table_info(sets)` check and the `ALTER` is skipped.
 
@@ -78,11 +85,14 @@ impl IconCache {
     pub fn open_default() -> Result<Self>;            // ~/.cache/biscuit-icon/icons.db
     pub fn open_at(path: impl AsRef<Path>) -> Result<Self>;
     pub fn clear(&self) -> Result<()>;
+    pub fn clear_filtered(&self, filter: &str) -> Result<usize>; // icons only, leaves sets
     pub fn put(&self, prefix: &str, name: &str, body: &IconBody) -> Result<()>;
     pub fn get(&self, prefix: &str, name: &str) -> Result<Option<IconBody>>;
     pub fn search_names(&self, needle: &str) -> Result<Vec<String>>;
     pub fn cached_prefixes(&self) -> Result<Vec<String>>;
     pub fn cached_icon_counts(&self, prefixes: &[String]) -> Result<BTreeMap<String, usize>>;
+    pub fn list_icons(&self) -> Result<Vec<CachedIcon>>;          // ordered by prefix, name
+    pub fn set_title(&self, prefix: &str) -> Result<Option<String>>;
     pub fn put_set(&self, set: &SetInfo) -> Result<()>;
     pub fn search_sets(&self, needle: &str) -> Result<Vec<SetInfo>>;
     pub fn all_sets(&self) -> Result<Vec<SetInfo>>;
@@ -100,6 +110,15 @@ pub struct SetInfo {
     pub license_title: Option<String>,
     pub license_url: Option<String>,
     pub total: Option<usize>,            // None when unknown (not zero)
+    pub author_name: Option<String>,
+    pub author_url: Option<String>,
+    pub tags: Option<String>,            // comma-separated
+    pub category: Option<String>,
+}
+
+pub struct CachedIcon {
+    pub prefix: String,
+    pub name: String,
 }
 ```
 

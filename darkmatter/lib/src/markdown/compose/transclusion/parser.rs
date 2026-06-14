@@ -383,6 +383,8 @@ fn apply_option(
         "disclosure" => {
             if value.eq_ignore_ascii_case("false") {
                 options.disclosure = None;
+            } else if value.eq_ignore_ascii_case("true") {
+                options.disclosure = Some(String::new());
             } else {
                 options.disclosure = Some(value.to_string());
             }
@@ -435,6 +437,24 @@ mod tests {
         assert_eq!(options.quotation, Some(String::new()));
         assert_eq!(options.disclosure, Some("More".to_string()));
         assert_eq!(options.when_expr, Some("env.DEBUG".to_string()));
+    }
+
+    #[test]
+    fn parses_disclosure_true_as_empty_summary() {
+        let content = r#"::code ./mod.rs disclosure=true"#;
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].options.disclosure, Some(String::new()));
+    }
+
+    #[test]
+    fn parses_disclosure_false_as_disabled() {
+        let content = r#"::code ./mod.rs disclosure=false"#;
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
+
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].options.disclosure, None);
     }
 
     #[test]

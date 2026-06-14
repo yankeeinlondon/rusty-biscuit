@@ -198,12 +198,20 @@ The `Icon` struct then provides builder methods for stylizing the icon:
 
 The CLI binary `icon` has an API surface of:
 
-- `sets <filter>` provides the list of icon sets as a striped, four-column table (`Set`, `Prefix`, `Total`, `Cached`); you can optionally filter down the returned sets with the `<filter>` param. The `Total` column shows the upstream icon count when known (or `Unknown` when not reported), and `Cached` shows how many icons from that set are stored locally. In terminals that support OSC8 hyperlinks, each `Set` name links to its Iconify catalog page (`https://icon-sets.iconify.design/{prefix}`); elsewhere it renders as plain text. Output adapts to terminal size: a single table when all rows fit, or two balanced side-by-side tables when rows exceed the available height and the terminal is wide enough.
-- `icons [filter] [--from <csv>]`
-    - provides a list of icons (and icon names) whose name includes the `filter` parameter
-    - when `filter` is omitted, only offline icons (built-in domain catalog and local cache) are listed
-    - you can isolate to an enumerated set of icon sets using the `--from <csv>` filter (e.g., `icon icons happy --from fa,mdi`)
-    - offline results come from the built-in domain catalog plus the local cache; when a filter is provided, the online Iconify catalog is also queried and merged with offline results
+- `show [id…] [--from <csv>] [--svg|--code-block|--css] [--meta] [--list] [--pick]` (default command)
+    - renders one or more icons by exact `prefix:name` id, or searches by substring when no `:` is present
+    - format flags: `--svg` (raw markup), `--code-block` (syntax-highlighted), `--css` (percent-encoded `url(...)` data URI), default (terminal ladder render)
+    - `--meta` forces a metadata table with columns `Set`, `Icon`, `Categories`, `Tags`, plus `Author`/`License` when populated
+    - `--list` forces a plain text list; `--pick` forces the interactive picker (errors in non-TTY)
+    - multiple ids render as a table; single id renders inline
+    - in a TTY with ≥2 inexact matches, the interactive picker launches; in non-TTY all matches are listed
+- `sets [filter]` provides the list of icon sets as a striped, four-column table (`Set`, `Prefix`, `Total`, `Cached`); you can optionally filter down the returned sets with the `<filter>` param. The `Total` column shows the upstream icon count when known (or `Unknown` when not reported), and `Cached` shows how many icons from that set are stored locally. In terminals that support OSC8 hyperlinks, each `Set` name links to its Iconify catalog page (`https://icon-sets.iconify.design/{prefix}`); elsewhere it renders as plain text. Output adapts to terminal size: a single table when all rows fit, or two balanced side-by-side tables when rows exceed the available height and the terminal is wide enough.
+- `domain [arg]` — curated domain icons (offline-only, no network):
+    - no arg → table of the 16 curated enum-set names with variant counts
+    - enum name → list variants with columns `Variant`, `Glyph`, `Iconify ID`
+    - `enum:variant` → render the single curated icon (infallible, compile-time)
+- `cache list` — table of cached icons with columns `Set`, `Icon`, `Display` (omitted when the terminal cannot render visuals), `Categories`, `Tags`
+- `cache clear [filter]` — drop cached icons. No filter → wipe both `icons` and `sets` tables. With a filter → delete `icons` rows whose id contains the filter (case-insensitive); `sets` is left intact
 - `completions`
     - provides dynamic shell completions
     - it will always know the icon set names and the static icon sets built into the binary
@@ -212,7 +220,7 @@ The CLI binary `icon` has an API surface of:
     - `--verbose` increases user-facing diagnostic detail (e.g., cause chains in styled errors)
     - `--debug` enables raw `tracing` output on stderr (or use `RUST_LOG`)
     - `--nerd` (or `ICON_NERD_FONT=1`) prefers Nerd Font glyphs when an icon defines one
-- the `icons` subcommand is the _default_ command so a caller can call `icon icons mdi:home` or `icon mdi:home` and both are identical in behavior.
+- `show` is the default command: `icon mdi:home` ≡ `icon show mdi:home`, `icon home` ≡ `icon show home`
 
 ## Tech Stack
 

@@ -7,8 +7,9 @@ expression: out
 ┃ Condition evaluation failed for when="length(items) > 0":
 ┃ 
 ┃ ```md
-┃        9 │ line 9
-┃     > 10 │ line 10
-┃       11 │ line 11
+┃    9 │ line 9
+┃ > 10 │ line 10
+┃   11 │ line 11
+┃ ```
 ┃ 
 ┃ Error: items not found

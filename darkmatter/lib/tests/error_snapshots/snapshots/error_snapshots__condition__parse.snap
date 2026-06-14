@@ -7,9 +7,10 @@ expression: out
 ┃ Condition parsing failed for when="a &&& b":
 ┃ 
 ┃ ```md
-┃       3 │ line 3
-┃     > 4 │ line 4
-┃       5 │ line 5
+┃   3 │ line 3
+┃ > 4 │ line 4
+┃   5 │ line 5
+┃ ```
 ┃ 
 ┃     ^ (near position 3)
 ┃ 

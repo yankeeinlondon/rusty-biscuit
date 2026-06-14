@@ -65,3 +65,9 @@ pub enum PageRenderError {
         field: &'static str,
     },
 }
+
+impl From<crate::markdown::MarkdownError> for PageRenderError {
+    fn from(err: crate::markdown::MarkdownError) -> Self {
+        PageRenderError::Render(err.to_string())
+    }
+}

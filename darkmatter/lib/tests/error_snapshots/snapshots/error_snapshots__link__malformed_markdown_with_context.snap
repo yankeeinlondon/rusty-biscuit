@@ -9,7 +9,8 @@ expression: out
 ┃ Link parsing failed here:
 ┃ 
 ┃ ```md
-┃     > 1 │ [label] target
+┃ > 1 │ [label] target
+┃ ```
 ┃ 
 ┃          ^ (offset 8)
 ┃ 

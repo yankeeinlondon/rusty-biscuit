@@ -48,6 +48,8 @@ pub struct PageStyleOverrides {
     pub padding_left: bool,
     pub max_width: bool,
     pub background: bool,
+    /// `style.page.bg-color` claimed by a CLI flag (e.g. `--page-bg-color`).
+    pub background_color: bool,
     pub alignment: bool,
     pub align_images: bool,
     pub align_lists: bool,
@@ -95,6 +97,7 @@ impl PageStyleOverrides {
             PageComponent::CodeBlocks => self.align_code_blocks,
             PageComponent::Hr => false,
             PageComponent::Hyperlinks => false,
+            PageComponent::Disclosure => false,
         }
     }
 }
@@ -121,6 +124,19 @@ pub struct ListStyleOverrides {
 /// because a CLI flag already claimed it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HrStyleOverrides {
+    pub alignment: bool,
+    pub fill: bool,
+    pub color: bool,
+    pub bg_color: bool,
+}
+
+/// Field-level CLI overrides for disclosure component style
+/// (`style.disclosure.*`).
+///
+/// Each `true` value means the corresponding frontmatter field must be ignored
+/// because a CLI flag already claimed it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DisclosureStyleOverrides {
     pub alignment: bool,
     pub fill: bool,
     pub color: bool,
@@ -306,6 +322,14 @@ pub fn apply_page_style(
         && let Some(bg) = page_style.background
     {
         page = page.with_page_background(bg);
+    }
+
+    // Page background color — claimed by `--page-bg-color` so the
+    // frontmatter value is skipped.
+    if !overrides.background_color
+        && let Some(bg_color) = page_style.bg_color.as_ref()
+    {
+        page = page.with_page_bg_color(bg_color.to_paint_color());
     }
 
     // Max width — stored as the authored `Length`. Percent resolves against the
@@ -505,6 +529,9 @@ pub fn apply_color_style(
     if let Some(block_quote) = style.block_quote.as_ref() {
         page = apply_common_color(page, PageComponent::BlockQuotes, &block_quote.common);
     }
+    if let Some(disclosure) = style.disclosure.as_ref() {
+        page = apply_common_color(page, PageComponent::Disclosure, &disclosure.common);
+    }
     if let Some(hyperlinks) = style.hyperlinks.as_ref() {
         page = apply_common_color(page, PageComponent::Hyperlinks, &hyperlinks.common);
     }
@@ -664,6 +691,38 @@ pub fn map_hr_alignment(alignment: HrAlignment) -> RuleAlignment {
         HrAlignment::Center => RuleAlignment::Centered,
         HrAlignment::Right => RuleAlignment::Right,
     }
+}
+
+/// Apply parsed disclosure component style (`style.disclosure.*`) onto a
+/// [`DarkmatterPage`] builder.
+///
+/// `overrides` carries the field-level CLI claims; for any field where the
+/// corresponding bool is `true`, the matching frontmatter value is skipped so
+/// the CLI flag stays in effect.
+///
+/// ## Errors
+///
+/// - [`StyleApplyError::ComponentWidthConflict`] when both `width` and
+///   `max-width` appear in the `style.disclosure` bucket.
+/// - [`StyleApplyError::ComponentInvalidCssLength`] when `width` or
+///   `max-width` is a [`Length::Css(_)`] value.
+pub fn apply_disclosure_style(
+    page: DarkmatterPage,
+    style: &StyleFrontmatter,
+    overrides: DisclosureStyleOverrides,
+) -> Result<DarkmatterPage, StyleApplyError> {
+    let Some(disclosure) = style.disclosure.as_ref() else {
+        return Ok(page);
+    };
+
+    apply_common_style(
+        page,
+        "disclosure",
+        PageComponent::Disclosure,
+        &disclosure.common,
+        overrides.alignment,
+        overrides.fill,
+    )
 }
 
 /// Apply one list bucket's [`CommonStyle`] onto `page`.
@@ -959,6 +1018,17 @@ mod tests {
     }
 
     #[test]
+    fn apply_lowers_disclosure_color_to_policy() {
+        use renderable::color::{Color, Tailwind};
+        let page = apply_for_test("disclosure:\n  color: red-500\n  bg-color: blue-500\n");
+        let policy = page.component_policy(PageComponent::Disclosure).unwrap();
+        let color = policy.color.as_ref().expect("disclosure color must reach policy");
+        assert_eq!(color.color, Color::Tailwind(Tailwind::Red500));
+        let bg = policy.bg_color.as_ref().expect("disclosure bg-color must reach policy");
+        assert_eq!(bg.color, Color::Tailwind(Tailwind::Blue500));
+    }
+
+    #[test]
     fn apply_lowers_alignment_broadcast_to_all_components() {
         let page = apply_for_test("page:\n  alignment: center\n");
         for component in PageComponent::ALL {
@@ -1237,11 +1307,20 @@ mod tests {
 
     // ----- apply_component_style -----
 
-    use crate::style::schema::{BlockQuoteStyle, CommonStyle, ImageStyle, TableStyle};
+    use crate::style::schema::{
+        BlockQuoteStyle, CommonStyle, DisclosureStyle, ImageStyle, TableStyle,
+    };
 
     fn style_with_table(common: CommonStyle) -> StyleFrontmatter {
         StyleFrontmatter {
             table: Some(TableStyle { common }),
+            ..StyleFrontmatter::default()
+        }
+    }
+
+    fn style_with_disclosure(common: CommonStyle) -> StyleFrontmatter {
+        StyleFrontmatter {
+            disclosure: Some(DisclosureStyle { common }),
             ..StyleFrontmatter::default()
         }
     }
@@ -1394,6 +1473,27 @@ mod tests {
         assert!(
             msg.contains("`style.block-quote.width`"),
             "expected kebab-case bucket in message, got: {msg}"
+        );
+    }
+
+    /// The `disclosure` bucket delegates to the same `apply_common_style` helper
+    /// as `table`/`block-quote`, but the spec calls out the `width` + `max-width`
+    /// conflict explicitly, so assert it directly for `disclosure` rather than
+    /// relying on helper reuse (review-5 finding #3).
+    #[test]
+    fn disclosure_width_and_max_width_together_rejected() {
+        let style = style_with_disclosure(CommonStyle {
+            width: Some(Length::Ch(40)),
+            max_width: Some(Length::Percent(50.0)),
+            ..CommonStyle::default()
+        });
+        let err = apply_disclosure_style(page(80), &style, DisclosureStyleOverrides::default())
+            .unwrap_err();
+        assert_eq!(
+            err,
+            StyleApplyError::ComponentWidthConflict {
+                bucket: "disclosure"
+            }
         );
     }
 

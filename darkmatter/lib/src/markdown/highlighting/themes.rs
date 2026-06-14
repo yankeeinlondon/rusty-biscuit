@@ -4,7 +4,6 @@
 //! with descriptions and utilities for loading syntect themes.
 
 pub use biscuit_terminal::discovery::detection::ColorMode;
-use biscuit_terminal::terminal::Terminal;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -22,6 +21,75 @@ impl std::fmt::Display for InvalidThemeName {
         write!(
             f,
             "Invalid theme name: '{}'. Valid names: github, one-half, base16-ocean, gruvbox, solarized, nord, dracula, monokai, vs-dark",
+            self.0
+        )
+    }
+}
+
+/// How a code block's theme variant is chosen relative to the page color mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CodeBlockMode {
+    /// Opposite variant from the page (default): dark page -> light panel.
+    #[default]
+    Inverse,
+    /// Always the dark variant.
+    Dark,
+    /// Always the light variant.
+    Light,
+    /// Same variant as the page.
+    Same,
+}
+
+impl CodeBlockMode {
+    /// Resolves the code block's color mode given the page's color mode.
+    #[must_use]
+    pub fn resolve(self, page_mode: ColorMode) -> ColorMode {
+        match self {
+            CodeBlockMode::Inverse => page_mode.inverted(),
+            CodeBlockMode::Same => page_mode,
+            CodeBlockMode::Dark => ColorMode::Dark,
+            CodeBlockMode::Light => ColorMode::Light,
+        }
+    }
+}
+
+impl std::str::FromStr for CodeBlockMode {
+    type Err = InvalidCodeBlockMode;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "inverse" => Ok(CodeBlockMode::Inverse),
+            "dark" => Ok(CodeBlockMode::Dark),
+            "light" => Ok(CodeBlockMode::Light),
+            "same" => Ok(CodeBlockMode::Same),
+            _ => Err(InvalidCodeBlockMode(s.to_string())),
+        }
+    }
+}
+
+impl std::fmt::Display for CodeBlockMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            CodeBlockMode::Inverse => "inverse",
+            CodeBlockMode::Dark => "dark",
+            CodeBlockMode::Light => "light",
+            CodeBlockMode::Same => "same",
+        };
+        f.write_str(name)
+    }
+}
+
+/// Error type for invalid [`CodeBlockMode`] parsing.
+#[derive(Debug, Clone)]
+pub struct InvalidCodeBlockMode(pub String);
+
+impl std::error::Error for InvalidCodeBlockMode {}
+
+impl std::fmt::Display for InvalidCodeBlockMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Invalid code-block mode: '{}'. Valid values: inverse, dark, light, same",
             self.0
         )
     }
@@ -93,27 +161,13 @@ impl ThemePair {
             .unwrap_or(self)
     }
 
-    pub(crate) fn for_code_block(self, term: &Terminal, theme: Option<ThemePair>) -> Theme {
-        self.selected(theme)
-            .resolve(term.color_mode().inverted())
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn for_page(self, term: &Terminal, theme: Option<ThemePair>) -> Theme {
-        self.selected(theme).resolve(term.color_mode())
-    }
-
-    pub(crate) fn for_code_block_mode(self, mode: ColorMode, theme: Option<ThemePair>) -> Theme {
-        self.selected(theme).resolve(mode.inverted())
-    }
-
-    pub(crate) fn for_page_mode(self, mode: ColorMode, theme: Option<ThemePair>) -> Theme {
-        self.selected(theme).resolve(mode)
-    }
-
     /// Resolves the theme pair to a specific theme variant based on color mode (light/dark).
     ///
-    /// This is an internal method for resolving to the Theme enum.
+    /// This is an internal method for resolving to the Theme enum. The public
+    /// boundary resolver is
+    /// [`resolve_for_surface`](super::resolve::ThemePair::resolve_for_surface)
+    /// in [`super::resolve`], which feeds both the page surface and the code
+    /// panel through the same source of truth.
     pub(crate) fn resolve(self, mode: ColorMode) -> Theme {
         match (self, mode) {
             (ThemePair::Base16Ocean, ColorMode::Dark | ColorMode::Unknown) => Theme::Base16OceanDark,
@@ -326,10 +380,10 @@ lazy_static! {
 
 /// Returns the default code theme for a given prose theme.
 ///
-/// Code blocks use the page theme pair, resolved against the inverted color
-/// mode by the code renderer. This function therefore returns the prose theme
-/// unchanged; explicit code-theme overrides are handled by
-/// [`detect_code_theme`].
+/// Code blocks use the page theme pair, resolved against a color mode chosen by
+/// the code renderer's [`CodeBlockMode`] (default `Inverse`). This function
+/// therefore returns the prose theme unchanged; explicit code-theme overrides
+/// are handled by [`detect_code_theme`].
 ///
 /// ## Examples
 ///
@@ -373,9 +427,10 @@ pub fn detect_prose_theme() -> ThemePair {
 /// Detects the code theme from environment variables or derives it from the prose theme.
 ///
 /// First checks the `CODE_THEME` environment variable. If not set or invalid,
-/// uses the given prose theme. Code blocks resolve that theme pair against the
-/// inverted color mode, so the default code block theme is the page theme on
-/// the opposite surface.
+/// uses the given prose theme. Code blocks resolve that theme pair against a
+/// color mode chosen by the code renderer's [`CodeBlockMode`] (default
+/// `Inverse`), so by default the code block theme is the page theme on the
+/// opposite surface.
 ///
 /// ## Examples
 ///
@@ -461,7 +516,12 @@ pub fn detect_color_mode() -> ColorMode {
 ///
 /// Panics if the theme cannot be loaded (should never happen with valid Theme variants).
 pub(crate) fn load_theme(theme_pair: ThemePair, color_mode: ColorMode) -> SyntectTheme {
-    load_resolved_theme(theme_pair.for_page_mode(color_mode, Some(theme_pair)))
+    let resolved = theme_pair.resolve_for_surface(
+        crate::markdown::highlighting::Surface::Mode(color_mode),
+        Some(theme_pair),
+        CodeBlockMode::Same,
+    );
+    load_resolved_theme(resolved.theme)
 }
 
 pub(crate) fn load_resolved_theme(theme: Theme) -> SyntectTheme {
@@ -576,10 +636,20 @@ mod tests {
     #[test]
     fn all_theme_pair_code_block_backgrounds_are_lighter_in_dark_terminals() {
         for theme_pair in ThemePair::all() {
-            let dark_terminal_code_theme =
-                theme_pair.for_code_block_mode(ColorMode::Dark, Some(*theme_pair));
-            let light_terminal_code_theme =
-                theme_pair.for_code_block_mode(ColorMode::Light, Some(*theme_pair));
+            let dark_terminal_code_theme = theme_pair
+                .resolve_for_surface(
+                    crate::markdown::highlighting::Surface::Mode(ColorMode::Dark),
+                    Some(*theme_pair),
+                    CodeBlockMode::default(),
+                )
+                .theme;
+            let light_terminal_code_theme = theme_pair
+                .resolve_for_surface(
+                    crate::markdown::highlighting::Surface::Mode(ColorMode::Light),
+                    Some(*theme_pair),
+                    CodeBlockMode::default(),
+                )
+                .theme;
             let dark_terminal_bg = load_resolved_theme(dark_terminal_code_theme)
                 .settings
                 .background
@@ -779,27 +849,42 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_theme_pair_for_page_uses_terminal_mode_for_all_pairs() {
+    fn test_resolve_for_surface_page_uses_terminal_mode_for_all_pairs() {
         let _env = ScopedEnv::unset("THEME");
         for theme_pair in ThemePair::all() {
             let light = terminal_with_color_mode(TerminalColorMode::Light);
             let dark = terminal_with_color_mode(TerminalColorMode::Dark);
             let unknown = terminal_with_color_mode(TerminalColorMode::Unknown);
 
+            let page_light = theme_pair.resolve_for_surface(
+                crate::markdown::highlighting::Surface::Terminal(&light),
+                None,
+                CodeBlockMode::Same,
+            );
             assert_eq!(
-                theme_pair.for_page(&light, None),
+                page_light.theme,
                 theme_pair.resolve(ColorMode::Light),
                 "page light resolution failed for {:?}",
                 theme_pair
             );
+            let page_dark = theme_pair.resolve_for_surface(
+                crate::markdown::highlighting::Surface::Terminal(&dark),
+                None,
+                CodeBlockMode::Same,
+            );
             assert_eq!(
-                theme_pair.for_page(&dark, None),
+                page_dark.theme,
                 theme_pair.resolve(ColorMode::Dark),
                 "page dark resolution failed for {:?}",
                 theme_pair
             );
+            let page_unknown = theme_pair.resolve_for_surface(
+                crate::markdown::highlighting::Surface::Terminal(&unknown),
+                None,
+                CodeBlockMode::Same,
+            );
             assert_eq!(
-                theme_pair.for_page(&unknown, None),
+                page_unknown.theme,
                 theme_pair.resolve(ColorMode::Dark),
                 "page unknown-mode fallback failed for {:?}",
                 theme_pair
@@ -809,27 +894,42 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_theme_pair_for_code_block_inverts_terminal_mode_for_all_pairs() {
+    fn test_resolve_for_surface_code_block_inverts_terminal_mode_for_all_pairs() {
         let _env = ScopedEnv::unset("THEME");
         for theme_pair in ThemePair::all() {
             let light = terminal_with_color_mode(TerminalColorMode::Light);
             let dark = terminal_with_color_mode(TerminalColorMode::Dark);
             let unknown = terminal_with_color_mode(TerminalColorMode::Unknown);
 
+            let code_light = theme_pair.resolve_for_surface(
+                crate::markdown::highlighting::Surface::Terminal(&light),
+                None,
+                CodeBlockMode::default(),
+            );
             assert_eq!(
-                theme_pair.for_code_block(&light, None),
+                code_light.theme,
                 theme_pair.resolve(ColorMode::Dark),
                 "code light inversion failed for {:?}",
                 theme_pair
             );
+            let code_dark = theme_pair.resolve_for_surface(
+                crate::markdown::highlighting::Surface::Terminal(&dark),
+                None,
+                CodeBlockMode::default(),
+            );
             assert_eq!(
-                theme_pair.for_code_block(&dark, None),
+                code_dark.theme,
                 theme_pair.resolve(ColorMode::Light),
                 "code dark inversion failed for {:?}",
                 theme_pair
             );
+            let code_unknown = theme_pair.resolve_for_surface(
+                crate::markdown::highlighting::Surface::Terminal(&unknown),
+                None,
+                CodeBlockMode::default(),
+            );
             assert_eq!(
-                theme_pair.for_code_block(&unknown, None),
+                code_unknown.theme,
                 theme_pair.resolve(ColorMode::Light),
                 "code unknown-mode inversion fallback failed for {:?}",
                 theme_pair
@@ -839,34 +939,42 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_theme_pair_for_page_and_code_block_use_theme_env_when_option_missing() {
+    fn test_resolve_for_surface_uses_theme_env_when_option_missing() {
         let _env = ScopedEnv::set("THEME", "GITHUB");
         let dark = terminal_with_color_mode(TerminalColorMode::Dark);
 
-        assert_eq!(
-            ThemePair::OneHalf.for_page(&dark, None),
-            ThemePair::Github.resolve(ColorMode::Dark)
+        let page = ThemePair::OneHalf.resolve_for_surface(
+            crate::markdown::highlighting::Surface::Terminal(&dark),
+            None,
+            CodeBlockMode::Same,
         );
-        assert_eq!(
-            ThemePair::OneHalf.for_code_block(&dark, None),
-            ThemePair::Github.resolve(ColorMode::Light)
+        assert_eq!(page.theme, ThemePair::Github.resolve(ColorMode::Dark));
+        let code = ThemePair::OneHalf.resolve_for_surface(
+            crate::markdown::highlighting::Surface::Terminal(&dark),
+            None,
+            CodeBlockMode::default(),
         );
+        assert_eq!(code.theme, ThemePair::Github.resolve(ColorMode::Light));
     }
 
     #[test]
     #[serial]
-    fn test_theme_pair_for_page_and_code_block_option_overrides_theme_env() {
+    fn test_resolve_for_surface_option_overrides_theme_env() {
         let _env = ScopedEnv::set("THEME", "github");
         let dark = terminal_with_color_mode(TerminalColorMode::Dark);
 
-        assert_eq!(
-            ThemePair::OneHalf.for_page(&dark, Some(ThemePair::Gruvbox)),
-            ThemePair::Gruvbox.resolve(ColorMode::Dark)
+        let page = ThemePair::OneHalf.resolve_for_surface(
+            crate::markdown::highlighting::Surface::Terminal(&dark),
+            Some(ThemePair::Gruvbox),
+            CodeBlockMode::Same,
         );
-        assert_eq!(
-            ThemePair::OneHalf.for_code_block(&dark, Some(ThemePair::Gruvbox)),
-            ThemePair::Gruvbox.resolve(ColorMode::Light)
+        assert_eq!(page.theme, ThemePair::Gruvbox.resolve(ColorMode::Dark));
+        let code = ThemePair::OneHalf.resolve_for_surface(
+            crate::markdown::highlighting::Surface::Terminal(&dark),
+            Some(ThemePair::Gruvbox),
+            CodeBlockMode::default(),
         );
+        assert_eq!(code.theme, ThemePair::Gruvbox.resolve(ColorMode::Light));
     }
 
     #[test]
@@ -940,5 +1048,54 @@ mod tests {
         }
 
         0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+    }
+
+    #[test]
+    fn code_block_mode_resolve_against_dark_page() {
+        assert_eq!(CodeBlockMode::Inverse.resolve(ColorMode::Dark), ColorMode::Light);
+        assert_eq!(CodeBlockMode::Same.resolve(ColorMode::Dark), ColorMode::Dark);
+        assert_eq!(CodeBlockMode::Dark.resolve(ColorMode::Dark), ColorMode::Dark);
+        assert_eq!(CodeBlockMode::Light.resolve(ColorMode::Dark), ColorMode::Light);
+    }
+
+    #[test]
+    fn code_block_mode_resolve_against_light_page() {
+        assert_eq!(CodeBlockMode::Inverse.resolve(ColorMode::Light), ColorMode::Dark);
+        assert_eq!(CodeBlockMode::Same.resolve(ColorMode::Light), ColorMode::Light);
+        assert_eq!(CodeBlockMode::Dark.resolve(ColorMode::Light), ColorMode::Dark);
+        assert_eq!(CodeBlockMode::Light.resolve(ColorMode::Light), ColorMode::Light);
+    }
+
+    #[test]
+    fn code_block_mode_default_is_inverse() {
+        assert_eq!(CodeBlockMode::default(), CodeBlockMode::Inverse);
+    }
+
+    #[test]
+    fn code_block_mode_from_str_valid() {
+        use std::str::FromStr;
+        assert_eq!(CodeBlockMode::from_str("inverse").unwrap(), CodeBlockMode::Inverse);
+        assert_eq!(CodeBlockMode::from_str("DARK").unwrap(), CodeBlockMode::Dark);
+        assert_eq!(CodeBlockMode::from_str("Light").unwrap(), CodeBlockMode::Light);
+        assert_eq!(CodeBlockMode::from_str(" same ").unwrap(), CodeBlockMode::Same);
+    }
+
+    #[test]
+    fn code_block_mode_from_str_invalid() {
+        use std::str::FromStr;
+        assert!(CodeBlockMode::from_str("sideways").is_err());
+    }
+
+    #[test]
+    fn code_block_mode_display_roundtrips() {
+        use std::str::FromStr;
+        for mode in [
+            CodeBlockMode::Inverse,
+            CodeBlockMode::Dark,
+            CodeBlockMode::Light,
+            CodeBlockMode::Same,
+        ] {
+            assert_eq!(CodeBlockMode::from_str(&mode.to_string()).unwrap(), mode);
+        }
     }
 }
