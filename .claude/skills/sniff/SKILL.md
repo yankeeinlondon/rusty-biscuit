@@ -132,7 +132,12 @@ sniff services             # System services
 sniff docs                 # Markdown documents
 sniff topics               # Table of available topics
 sniff just                 # Justfiles and recipes
-sniff repo                 # Repository/monorepo structure
+sniff repo                 # Repository name (bare `sniff repo` is distinct from `sniff repo name`)
+sniff repo name            # Repository name only
+sniff repo name -v         # Repository name only (verbose styling)
+sniff repo is-monorepo     # Whether the repo is a monorepo (yes/no; `{ "is-monorepo": bool }` with --json)
+sniff repo package-count   # Number of discovered packages (`{ "package-count": N }` with --json)
+sniff repo version         # Repository version from root manifest (`{ "version": "..." | null }` with --json)
 sniff repo git-status      # Git status with commit history
 sniff repo language        # Primary programming language for the repository
 sniff repo worktree        # Linked worktree name (exit 1 if main worktree)
@@ -149,6 +154,9 @@ sniff hardware --json      # Subcommand with JSON output
 **Output modes:**
 - No subcommand: help (use `--json` for full JSON)
 - With subcommand: Text (default), `--json` for JSON, `--plain` for unstyled
+
+**`sniff repo --json` aggregate:**
+Bare `sniff repo --json` returns a scope-complete aggregate of all participating child subcommands, keyed by subcommand name. Single-key leaves (e.g. `name`, `version`, `is-monorepo`, `package-count`, `worktree`, `package`) contribute their unwrapped value; multi-field children (e.g. `structure`, `deps`, `packages`, `package-areas`, `git-status`, `worktrees`, file-list leaves, package-change families, boolean leaves, commit families) contribute their whole scope object. Network-primary subcommands (`remote`, `pr`) and parameterized subcommands (`hash`) are excluded, and no network requests are made by the aggregate.
 
 ## Detailed Topics
 

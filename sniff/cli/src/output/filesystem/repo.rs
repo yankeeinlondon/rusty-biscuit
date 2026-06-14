@@ -15,15 +15,20 @@ use super::{format_number, relative_path};
 
 /// Render `sniff repo name` output.
 ///
-/// At verbosity `0`, emits just the bare repo name followed by a newline so
-/// the command pipes cleanly. At verbosity `>= 1`, decorates the name with
-/// version and a language-or-monorepo-package-count suffix, styled through
-/// Prose so terminal-aware fallbacks apply.
-pub fn render_repo_name(identity: &RepoIdentity, verbose: u8) -> String {
-    if verbose == 0 {
-        return format!("{}\n", identity.name);
-    }
+/// Emits just the bare repo name followed by a newline so the command pipes
+/// cleanly and its terminal output matches the `{ name }` JSON scope at every
+/// verbosity level. The bare-`repo` parent command uses
+/// [`render_repo_default_verbose`] for the rich one-liner.
+pub fn render_repo_name(identity: &RepoIdentity, _verbose: u8) -> String {
+    format!("{}\n", identity.name)
+}
 
+/// Render the rich one-liner for bare `sniff repo -v`.
+///
+/// Draws from the full `RepoIdentity`, including the version suffix, the
+/// monorepo package-count suffix, and the primary language suffix. Every field
+/// shown is part of the parent aggregate scope.
+pub fn render_repo_default_verbose(identity: &RepoIdentity) -> String {
     let mut markup = format!("**{}**", identity.name);
     if let Some(version) = identity.version.as_deref() {
         markup.push_str(&format!(" v{version}"));

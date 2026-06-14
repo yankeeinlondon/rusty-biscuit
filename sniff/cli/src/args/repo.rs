@@ -193,6 +193,16 @@ pub enum RepoAction {
         verbose: bool,
     },
     Name,
+    IsMonorepo,
+    PackageCount,
+    Version {
+        no_error: bool,
+        on_error: Option<String>,
+    },
+    /// Bare `sniff repo` dispatch marker. Distinct from `Name` so the parent
+    /// command can aggregate its children's scopes in `--json` mode while
+    /// preserving the existing text fallback.
+    Default,
 }
 
 // ---------------------------------------------------------------------------
@@ -617,4 +627,21 @@ pub enum RepoSubcommand {
     },
     /// Output the repository name (plain text); use -v for version + language/monorepo info
     Name,
+    /// Output whether the repository is a monorepo
+    #[command(name = "is-monorepo")]
+    IsMonorepo,
+    /// Output the number of packages discovered in the repository
+    #[command(name = "package-count")]
+    PackageCount,
+    /// Output the repository version from a root manifest, when present
+    #[command(name = "version")]
+    Version {
+        /// Exit 0 with no output when no version is found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+
+        /// Message to display when no version is found
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
+        on_error: Option<String>,
+    },
 }

@@ -1,6 +1,6 @@
 # The `sniff repo` Subcommand
 
-Provides monorepo and git repository analysis. The default subcommand (`sniff repo` with no arguments) is an alias for [`sniff repo structure`](./repo_structure.md).
+Provides monorepo and git repository analysis. With no subcommand, `sniff repo` prints the repository name (matching [`sniff repo name`](./repo_name.md) in text mode); when invoked as `sniff repo --json`, it returns the scope-complete aggregate of all participating children described below.
 
 ## Global Flags
 
@@ -16,6 +16,17 @@ These flags apply to all `sniff repo` subcommands:
 | `-b/--base <DIR>` | Analyze a specific directory instead of current |
 
 ## Subcommands
+
+### Identity
+
+| Subcommand | Description |
+|------------|-------------|
+| [`name`](./repo_name.md) | Repository name (default when no subcommand is given) |
+| [`language`](./repo_language.md) | Primary programming language for the repository |
+| [`is-monorepo`](./repo_is-monorepo.md) | Whether the repository is a monorepo (`yes`/`no`; `{ "is-monorepo": bool }` with `--json`) |
+| [`package-count`](./repo_package-count.md) | Number of discovered packages (`{ "package-count": N }` with `--json`) |
+| [`version`](./repo_version.md) | Repository version from the root manifest (`{ "version": "..." \| null }` with `--json`) |
+| [`worktree`](./repo_worktree.md) | Name of the current Git linked worktree |
 
 ### Repository Structure
 
@@ -111,3 +122,17 @@ sniff --json repo git-status
 sniff --json repo structure
 sniff --json repo deps
 ```
+
+### Aggregate output for bare `sniff repo --json`
+
+When `sniff repo` is invoked without a subcommand and with `--json`, the output is a scope-complete aggregate of the participating children, keyed by each child's subcommand name:
+
+- **Single-key leaves** contribute their unwrapped value directly under the subcommand name. Examples include `name`, `version`, `language`, `is-monorepo`, `package-count`, `worktree`, `package`, `package-area`, `area`, `package-root`, `package-area-root`, and `root`.
+- **Multi-field children** contribute their whole scope object under the subcommand name. Examples include `structure`, `deps`, `packages`, `package-areas`, `git-status`, `worktrees`, all file-list subcommands, package-change families, boolean leaves, and commit families.
+- **Excluded children:** `hash` (requires a parameter), `remote`, and `pr` (network-primary) are omitted from the aggregate. No network requests are made by the aggregate.
+
+```bash
+sniff repo --json
+```
+
+The returned object contains every participating child, including stable empty shapes (`null`, `""`, `[]`, or `{ ... }`) when a given value is absent. Network-only fields such as remote branch lists or latest dependency versions are not included unless the relevant opt-in flag is used on the specific leaf subcommand.

@@ -216,11 +216,7 @@ pub(super) fn handle_file_list_command(
     }
 
     if json {
-        let json_val = serde_json::json!({
-            "scope": scope,
-            "kind": kind,
-            "paths": result.paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
-        });
+        let json_val = crate::output::repo_json::file_list_value(scope, kind, &result.paths);
         output::print_json_value(json_val, perf.build_report().as_ref());
     } else {
         let format = path_list_format(args);

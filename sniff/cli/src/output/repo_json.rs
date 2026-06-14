@@ -18,13 +18,23 @@
 //!   and an optional explicit `exit_code`. `commands.rs` is responsible for
 //!   honoring that exit code after `attach_performance` + `println!`.
 
+use std::path::Path;
+
 use serde_json::{Map, Value, json};
 use sniff::SniffResult;
+use sniff::filesystem::blast_radius::{
+    ChangeScope, ChangedPathKind, ChangedPathQuery, collect_changed_paths,
+};
+use sniff::filesystem::git::list_worktrees;
 use sniff::filesystem::repo::Package;
+use sniff::filesystem::repo::RepoIdentity;
 use sniff::filesystem::repo::types::RepoInfo;
 
 use crate::args::RepoAction;
 use crate::output::filesystem;
+use crate::output::recent_commits::{
+    RecentCommitsMode, commit_family_value, default_commit_family_set,
+};
 
 /// Result returned by [`build_with_outcome`] for repo-action JSON.
 ///
@@ -354,6 +364,38 @@ pub(crate) fn worktree_outcome(name: Option<&str>, no_error: bool) -> BuildOutco
     }
 }
 
+/// Build the JSON outcome for `repo is-monorepo --json`.
+///
+/// Returns `{ "is-monorepo": bool }` with exit code `0`.
+pub(crate) fn is_monorepo_outcome(value: bool) -> BuildOutcome {
+    BuildOutcome::pure(json!({ "is-monorepo": value }))
+}
+
+/// Build the JSON outcome for `repo package-count --json`.
+///
+/// Returns `{ "package-count": N }` with exit code `0`.
+pub(crate) fn package_count_outcome(count: usize) -> BuildOutcome {
+    BuildOutcome::pure(json!({ "package-count": count }))
+}
+
+/// Build the JSON outcome for `repo version --json`.
+///
+/// Returns `{ "version": "..." | null }`. Exit code is `0` when a version
+/// is found and `1` otherwise (or `0` when `no_error` is `true`).
+pub(crate) fn version_outcome(version: Option<&str>, no_error: bool) -> BuildOutcome {
+    let exit_code = if version.is_some() {
+        None
+    } else if no_error {
+        Some(0)
+    } else {
+        Some(1)
+    };
+    BuildOutcome {
+        value: json!({ "version": version }),
+        exit_code,
+    }
+}
+
 /// Build the JSON value for `repo worktrees --json`.
 ///
 /// Returns `{ "worktrees": [ { name, branch, path, current, detached }, ... ] }`.
@@ -366,6 +408,23 @@ pub(crate) fn worktrees_value(entries: &[sniff::filesystem::git::WorktreeEntry])
             "current": e.is_current,
             "detached": e.is_detached,
         })).collect::<Vec<_>>(),
+    })
+}
+
+/// Build the JSON value for a file-list subcommand.
+///
+/// Returns `{ "scope": "...", "kind": "...", "paths": [] }` without
+/// exiting, so the bare `repo --json` aggregate can include every file-list
+/// child even when there are no matching changed files.
+pub(crate) fn file_list_value(
+    scope: ChangeScope,
+    kind: ChangedPathKind,
+    paths: &[std::path::PathBuf],
+) -> Value {
+    json!({
+        "scope": scope,
+        "kind": kind,
+        "paths": paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
     })
 }
 
@@ -530,6 +589,251 @@ fn structure_value(
     let mut repo_clone = repo.clone();
     repo_clone.packages = Some(filtered);
     serde_json::to_value(&repo_clone).unwrap_or(Value::Null)
+}
+
+/// Assemble the scope-complete aggregate for bare `sniff repo --json`.
+///
+/// Returns a flat object keyed by the participating children's subcommand
+/// names. Single-key leaves contribute their unwrapped value; multi-field
+/// children contribute their whole scope object. Network-primary children
+/// (`remote`, `pr`) and parameterized children (`hash`) are excluded.
+///
+/// ## Errors
+///
+/// Propagates any local detection failure so the parent command fails
+/// rather than emitting a partial aggregate. In `--json` mode the caller
+/// must ensure diagnostics go to stderr and stdout contains either the
+/// valid aggregate or nothing.
+pub(crate) fn build_aggregate_value(
+    result: &SniffResult,
+    base_dir: Option<&Path>,
+    identity: &RepoIdentity,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let dir = base_dir.unwrap_or_else(|| Path::new("."));
+    let mut map = Map::new();
+
+    // Identity leaves — single-key, unwrapped.
+    map.insert("name".into(), Value::String(identity.name.clone()));
+    map.insert(
+        "version".into(),
+        identity
+            .version
+            .clone()
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+    );
+    map.insert(
+        "language".into(),
+        filesystem::primary_language_name(result)
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+    );
+    map.insert("is-monorepo".into(), Value::Bool(identity.is_monorepo));
+    map.insert(
+        "package-count".into(),
+        Value::Number(identity.package_count.unwrap_or(0).into()),
+    );
+
+    // Structure / dependency leaves — whole scope objects.
+    map.insert("structure".into(), structure_value(result, &[], None, None));
+    map.insert("deps".into(), build_deps_value(result, &[], None, None));
+
+    // Package and package-area name arrays.
+    let (packages, package_areas) = result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.repo.as_ref())
+        .map(|repo| {
+            let names = filesystem::collect_repo_package_names(repo, &[], None, None);
+            let areas = filesystem::collect_repo_package_area_names(repo, &[], None, None);
+            (
+                names
+                    .into_iter()
+                    .map(|s| Value::String(s.to_string()))
+                    .collect::<Vec<_>>(),
+                areas
+                    .into_iter()
+                    .map(|s| Value::String(s.to_string()))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .unwrap_or_default();
+    map.insert("packages".into(), Value::Array(packages));
+    map.insert("package-areas".into(), Value::Array(package_areas));
+
+    // Worktrees — enumerate separately; the aggregate shape matches the
+    // focused `repo worktrees --json` object.
+    let worktrees = match list_worktrees(dir)? {
+        Some(entries) => worktrees_value(&entries),
+        None => json!({ "worktrees": [] }),
+    };
+    map.insert("worktrees".into(), worktrees);
+
+    // Git status — local form only.
+    map.insert("git-status".into(), git_status_value(result));
+
+    // File-list leaves — stable empty shape when nothing changed.
+    let file_list_queries = [
+        (
+            "staged-files",
+            ChangeScope::Staged,
+            ChangedPathKind::AllFiles,
+        ),
+        (
+            "unstaged-files",
+            ChangeScope::Unstaged,
+            ChangedPathKind::AllFiles,
+        ),
+        (
+            "untracked-files",
+            ChangeScope::Untracked,
+            ChangedPathKind::AllFiles,
+        ),
+        (
+            "dirty-source-code",
+            ChangeScope::Dirty,
+            ChangedPathKind::SourceCode,
+        ),
+        (
+            "staged-source-code",
+            ChangeScope::Staged,
+            ChangedPathKind::SourceCode,
+        ),
+        (
+            "unstaged-source-code",
+            ChangeScope::Unstaged,
+            ChangedPathKind::SourceCode,
+        ),
+        ("dirty-files", ChangeScope::Dirty, ChangedPathKind::AllFiles),
+    ];
+    for (key, scope, kind) in file_list_queries {
+        let query = ChangedPathQuery {
+            scope,
+            kind,
+            package: None,
+            package_area: None,
+            filters: Vec::new(),
+        };
+        let changed = collect_changed_paths(dir, &query)?;
+        map.insert(key.into(), file_list_value(scope, kind, &changed.paths));
+    }
+
+    // Package-context locator leaves — unwrapped string values.
+    map.insert(
+        "package".into(),
+        Value::String(filesystem::render_repo_package(result, base_dir, 0)),
+    );
+    map.insert(
+        "package-area".into(),
+        Value::String(filesystem::render_repo_package_area(result, base_dir)),
+    );
+    map.insert(
+        "area".into(),
+        Value::String(filesystem::render_repo_area(result, base_dir)),
+    );
+    map.insert(
+        "package-root".into(),
+        Value::String(filesystem::render_repo_package_root(result, base_dir)),
+    );
+    map.insert(
+        "package-area-root".into(),
+        Value::String(filesystem::render_repo_package_area_root(result, base_dir)),
+    );
+    map.insert(
+        "root".into(),
+        Value::String(filesystem::render_repo_root(result)),
+    );
+
+    // Package/area change-family leaves.
+    map.insert(
+        "dirty-packages".into(),
+        package_family_value(
+            "dirty",
+            "packages",
+            filesystem::select_dirty_package_names(result, &[], None, None),
+        ),
+    );
+    map.insert(
+        "dirty-package-areas".into(),
+        package_family_value(
+            "dirty",
+            "package_areas",
+            filesystem::select_dirty_package_area_names(result, &[], None, None),
+        ),
+    );
+    map.insert(
+        "staged-packages".into(),
+        package_family_value(
+            "staged",
+            "packages",
+            filesystem::select_staged_package_names(result, &[], None, None),
+        ),
+    );
+    map.insert(
+        "staged-package-areas".into(),
+        package_family_value(
+            "staged",
+            "package_areas",
+            filesystem::select_staged_package_area_names(result, &[], None, None),
+        ),
+    );
+    map.insert(
+        "unstaged-packages".into(),
+        package_family_value(
+            "unstaged",
+            "packages",
+            filesystem::select_unstaged_package_names(result, &[], None, None),
+        ),
+    );
+    map.insert(
+        "unstaged-package-areas".into(),
+        package_family_value(
+            "unstaged",
+            "package_areas",
+            filesystem::select_unstaged_package_area_names(result, &[], None, None),
+        ),
+    );
+
+    // Boolean leaves — unwrapped bool values.
+    let dirty = filesystem::current_package_area_is_dirty(result, base_dir).unwrap_or(false);
+    map.insert("is-current-package-area-dirty".into(), Value::Bool(dirty));
+    let has_source_changes = filesystem::package_area_source_code_change_count(result, base_dir)
+        .map(|(has, _, _)| has)
+        .unwrap_or(false);
+    map.insert(
+        "package-area-has-source-code-changes".into(),
+        Value::Bool(has_source_changes),
+    );
+    let has_conflict = if let Some(repo_root) = sniff::filesystem::repo_root(dir)? {
+        let conflicted = sniff::filesystem::merge_conflicts_at(&repo_root)?;
+        !conflicted.is_empty()
+    } else {
+        false
+    };
+    map.insert("has-merge-conflict".into(), Value::Bool(has_conflict));
+
+    // Worktree leaf — unwrapped value.
+    let worktree_name = sniff::filesystem::git::get_current_worktree_name(dir)
+        .ok()
+        .flatten();
+    map.insert("worktree".into(), json!(worktree_name));
+
+    // Commit-family leaves — default period (last 3 days), local only.
+    let commit_set = default_commit_family_set(dir)?;
+    map.insert(
+        "recent-commits".into(),
+        commit_family_value(&commit_set, RecentCommitsMode::RecentCommits),
+    );
+    map.insert(
+        "source-code-changes".into(),
+        commit_family_value(&commit_set, RecentCommitsMode::SourceCodeChanges),
+    );
+    map.insert(
+        "documentation-changes".into(),
+        commit_family_value(&commit_set, RecentCommitsMode::DocumentationChanges),
+    );
+
+    Ok(Value::Object(map))
 }
 
 /// Build the legacy full-`RepoInfo` JSON value (today's behavior).
@@ -1196,6 +1500,41 @@ mod tests {
         }
 
         #[test]
+        fn is_monorepo_outcome_wraps_bool() {
+            let outcome = is_monorepo_outcome(true);
+            assert_eq!(outcome.value, json!({ "is-monorepo": true }));
+            assert!(outcome.exit_code.is_none());
+        }
+
+        #[test]
+        fn package_count_outcome_wraps_number() {
+            let outcome = package_count_outcome(42);
+            assert_eq!(outcome.value, json!({ "package-count": 42 }));
+            assert!(outcome.exit_code.is_none());
+        }
+
+        #[test]
+        fn version_outcome_wraps_some_string() {
+            let outcome = version_outcome(Some("1.2.3"), false);
+            assert_eq!(outcome.value, json!({ "version": "1.2.3" }));
+            assert!(outcome.exit_code.is_none());
+        }
+
+        #[test]
+        fn version_outcome_none_sets_exit_code_one() {
+            let outcome = version_outcome(None, false);
+            assert_eq!(outcome.value, json!({ "version": null }));
+            assert_eq!(outcome.exit_code, Some(1));
+        }
+
+        #[test]
+        fn version_outcome_none_with_no_error_sets_exit_code_zero() {
+            let outcome = version_outcome(None, true);
+            assert_eq!(outcome.value, json!({ "version": null }));
+            assert_eq!(outcome.exit_code, Some(0));
+        }
+
+        #[test]
         fn worktrees_value_shapes_entries() {
             use sniff::filesystem::git::WorktreeEntry;
             use std::path::PathBuf;
@@ -1728,6 +2067,313 @@ mod tests {
             };
             let value = structure_value(&result, &["alpha".to_string()], None, None);
             assert_eq!(value, json!({}));
+        }
+    }
+
+    mod aggregate {
+        //! Phase 2 — scope-complete aggregate for bare `sniff repo --json`.
+
+        use super::*;
+        use sniff::filesystem::repo::RepoIdentity;
+        use std::collections::HashSet;
+        use std::path::PathBuf;
+
+        fn temp_git_repo() -> (tempfile::TempDir, PathBuf) {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().to_path_buf();
+            let repo = git2::Repository::init(&path).unwrap();
+            let mut config = repo.config().unwrap();
+            config.set_str("user.email", "test@test.com").unwrap();
+            config.set_str("user.name", "Test").unwrap();
+
+            let sig = repo.signature().unwrap();
+            let tree_id = repo.index().unwrap().write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+                .unwrap();
+
+            (dir, path)
+        }
+
+        fn identity_fixture() -> RepoIdentity {
+            RepoIdentity {
+                name: "fixture-repo".into(),
+                version: Some("1.0.0".into()),
+                language: None,
+                is_monorepo: false,
+                package_count: Some(0),
+            }
+        }
+
+        fn result_fixture(repo_root: &Path) -> SniffResult {
+            let repo = RepoInfo {
+                is_monorepo: false,
+                monorepo_tool: None,
+                workspace_tools: Vec::new(),
+                root: repo_root.to_path_buf(),
+                dependencies: None,
+                dev_dependencies: None,
+                peer_dependencies: None,
+                optional_dependencies: None,
+                packages: None,
+            };
+            let mut git = fixture_git_info();
+            git.repo_root = repo_root.to_path_buf();
+            git.status = Some(sniff::filesystem::git::RepoStatus::default());
+            let filesystem = FilesystemInfo {
+                repo: Some(repo),
+                git: Some(git),
+                ..Default::default()
+            };
+            SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: Some(filesystem),
+                performance: None,
+            }
+        }
+
+        #[test]
+        fn file_list_value_returns_stable_shape() {
+            let value = file_list_value(
+                sniff::filesystem::blast_radius::ChangeScope::Staged,
+                sniff::filesystem::blast_radius::ChangedPathKind::SourceCode,
+                &[PathBuf::from("src/main.rs")],
+            );
+            assert_eq!(value["scope"], "staged");
+            assert_eq!(value["kind"], "source_code");
+            assert_eq!(value["paths"], json!(["src/main.rs"]));
+        }
+
+        #[test]
+        fn default_commit_family_set_loads_without_error() {
+            let (_temp, path) = temp_git_repo();
+            let set = default_commit_family_set(&path).expect("load default commit set");
+            assert!(
+                set.commits.is_empty() || !set.commits.is_empty(),
+                "commit set must be well-formed"
+            );
+        }
+
+        #[test]
+        fn aggregate_includes_all_participating_keys() {
+            let (_temp, path) = temp_git_repo();
+            let result = result_fixture(&path);
+            let identity = identity_fixture();
+            let value = build_aggregate_value(&result, Some(&path), &identity)
+                .expect("aggregate should build");
+
+            let obj = value.as_object().expect("aggregate must be object");
+            let keys: HashSet<_> = obj.keys().map(String::as_str).collect();
+
+            let expected: HashSet<&str> = [
+                // Identity leaves
+                "name",
+                "version",
+                "language",
+                "is-monorepo",
+                "package-count",
+                // Structure / dependency leaves
+                "structure",
+                "packages",
+                "package-areas",
+                "deps",
+                // Git and file leaves
+                "git-status",
+                "staged-files",
+                "unstaged-files",
+                "untracked-files",
+                "dirty-source-code",
+                "staged-source-code",
+                "unstaged-source-code",
+                "dirty-files",
+                // Package-context leaves
+                "package",
+                "package-area",
+                "area",
+                "package-root",
+                "package-area-root",
+                "root",
+                // Change-family leaves
+                "dirty-packages",
+                "dirty-package-areas",
+                "staged-packages",
+                "staged-package-areas",
+                "unstaged-packages",
+                "unstaged-package-areas",
+                // Boolean leaves
+                "is-current-package-area-dirty",
+                "package-area-has-source-code-changes",
+                "has-merge-conflict",
+                // History / worktree leaves
+                "recent-commits",
+                "source-code-changes",
+                "documentation-changes",
+                "worktree",
+                "worktrees",
+            ]
+            .iter()
+            .copied()
+            .collect();
+
+            let missing: Vec<_> = expected.difference(&keys).collect();
+            assert!(
+                missing.is_empty(),
+                "missing aggregate keys: {missing:?}\n{value}"
+            );
+        }
+
+        #[test]
+        fn aggregate_excludes_network_and_parameterized_keys() {
+            let (_temp, path) = temp_git_repo();
+            let result = result_fixture(&path);
+            let identity = identity_fixture();
+            let value = build_aggregate_value(&result, Some(&path), &identity)
+                .expect("aggregate should build");
+
+            let obj = value.as_object().expect("aggregate must be object");
+            for forbidden in ["remote", "pr", "hash"] {
+                assert!(
+                    !obj.contains_key(forbidden),
+                    "aggregate must not contain `{forbidden}`: {value}"
+                );
+            }
+        }
+
+        #[test]
+        fn aggregate_single_key_leaves_are_unwrapped() {
+            let (_temp, path) = temp_git_repo();
+            let result = result_fixture(&path);
+            let identity = identity_fixture();
+            let value = build_aggregate_value(&result, Some(&path), &identity)
+                .expect("aggregate should build");
+
+            assert_eq!(value["name"], "fixture-repo");
+            assert_eq!(value["version"], "1.0.0");
+            assert_eq!(value["language"], Value::Null);
+            assert_eq!(value["is-monorepo"], false);
+            assert_eq!(value["package-count"], 0);
+            assert_eq!(value["package"], "");
+            assert_eq!(value["package-area"], "");
+            assert_eq!(value["package-root"], "");
+            assert_eq!(value["package-area-root"], "");
+            assert!(
+                value["root"].is_string() && !value["root"].as_str().unwrap().is_empty(),
+                "root must be a non-empty string: {value}"
+            );
+            assert!(
+                value["worktree"].is_string() || value["worktree"].is_null(),
+                "worktree must be unwrapped: {value}"
+            );
+        }
+
+        #[test]
+        fn aggregate_file_list_leaves_have_stable_empty_shape() {
+            let (_temp, path) = temp_git_repo();
+            let result = result_fixture(&path);
+            let identity = identity_fixture();
+            let value = build_aggregate_value(&result, Some(&path), &identity)
+                .expect("aggregate should build");
+
+            for key in [
+                "staged-files",
+                "unstaged-files",
+                "untracked-files",
+                "dirty-source-code",
+                "staged-source-code",
+                "unstaged-source-code",
+                "dirty-files",
+            ] {
+                let leaf = &value[key];
+                assert!(leaf.is_object(), "{key} must be an object: {value}");
+                assert!(leaf.get("scope").is_some(), "{key} missing scope: {leaf}");
+                assert!(leaf.get("kind").is_some(), "{key} missing kind: {leaf}");
+                assert_eq!(
+                    leaf["paths"],
+                    json!([]),
+                    "{key} paths must be empty: {leaf}"
+                );
+            }
+        }
+
+        #[test]
+        fn aggregate_change_family_leaves_have_scope_kind_names() {
+            let (_temp, path) = temp_git_repo();
+            let result = result_fixture(&path);
+            let identity = identity_fixture();
+            let value = build_aggregate_value(&result, Some(&path), &identity)
+                .expect("aggregate should build");
+
+            for key in [
+                "dirty-packages",
+                "dirty-package-areas",
+                "staged-packages",
+                "staged-package-areas",
+                "unstaged-packages",
+                "unstaged-package-areas",
+            ] {
+                let leaf = &value[key];
+                assert!(leaf.is_object(), "{key} must be an object: {value}");
+                assert!(leaf.get("scope").is_some(), "{key} missing scope: {leaf}");
+                assert!(leaf.get("kind").is_some(), "{key} missing kind: {leaf}");
+                assert_eq!(
+                    leaf["names"],
+                    json!([]),
+                    "{key} names must be empty: {leaf}"
+                );
+            }
+        }
+
+        #[test]
+        fn aggregate_commit_family_leaves_are_objects() {
+            let (_temp, path) = temp_git_repo();
+            let result = result_fixture(&path);
+            let identity = identity_fixture();
+            let value = build_aggregate_value(&result, Some(&path), &identity)
+                .expect("aggregate should build");
+
+            for key in [
+                "recent-commits",
+                "source-code-changes",
+                "documentation-changes",
+            ] {
+                assert!(
+                    value[key].is_object(),
+                    "{key} must be an object in aggregate: {value}"
+                );
+            }
+        }
+
+        #[test]
+        fn aggregate_worktrees_contains_main_entry() {
+            let (_temp, path) = temp_git_repo();
+            let result = result_fixture(&path);
+            let identity = identity_fixture();
+            let value = build_aggregate_value(&result, Some(&path), &identity)
+                .expect("aggregate should build");
+
+            let worktrees = value["worktrees"]["worktrees"]
+                .as_array()
+                .expect("worktrees array");
+            assert!(
+                !worktrees.is_empty(),
+                "main worktree must be present: {value}"
+            );
+        }
+
+        #[test]
+        fn aggregate_propagates_detection_errors_instead_of_partial_json() {
+            // Point base_dir at a path that is not a git repository so local
+            // detection required by the aggregate fails.
+            let bad_path = PathBuf::from("/tmp/not-a-git-repo-for-aggregate-test-42");
+            let result = result_fixture(&bad_path);
+            let identity = identity_fixture();
+            let outcome = build_aggregate_value(&result, Some(&bad_path), &identity);
+            assert!(
+                outcome.is_err(),
+                "aggregate must fail rather than emit partial JSON"
+            );
         }
     }
 }

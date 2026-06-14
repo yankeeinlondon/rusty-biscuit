@@ -9,7 +9,7 @@ blast_radius:
 
 # The `sniff repo structure` Subcommand
 
-Detects and displays the structure of a repository, whether single-package or monorepo. Catalogs all packages, their languages, and interdependencies. This is also the default subcommand when running `sniff repo` with no arguments.
+Detects and displays the structure of a repository, whether single-package or monorepo. Catalogs all packages, their languages, and interdependencies. Run it explicitly with `sniff repo structure`; the bare `sniff repo` command dispatches to [`sniff repo name`](./repo_name.md).
 
 ## Scope Resolution
 

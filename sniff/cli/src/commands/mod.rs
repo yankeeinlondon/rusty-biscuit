@@ -696,6 +696,75 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 perf.emit_stderr(None);
                 return Ok(());
             }
+            crate::args::RepoAction::Default => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
+                if !cli.json {
+                    // v0 prints the bare name (a subset of the aggregate, unchanged
+                    // from the legacy default). `-v` prints the rich one-liner
+                    // whose fields all live in the parent aggregate scope.
+                    let rendered = if cli.verbose > 0 {
+                        output::render_repo_default_verbose(&identity)
+                    } else {
+                        output::render_repo_name(&identity, 0)
+                    };
+                    output::emit_text(&rendered, cli.plain);
+                    perf.emit_stderr(None);
+                    return Ok(());
+                }
+            }
+            crate::args::RepoAction::IsMonorepo => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
+                if cli.json {
+                    let outcome = output::repo_json::is_monorepo_outcome(identity.is_monorepo);
+                    output::print_json_value(outcome.value, perf.build_report().as_ref());
+                    return Ok(());
+                }
+                println!("{}", if identity.is_monorepo { "yes" } else { "no" });
+                perf.emit_stderr(None);
+                return Ok(());
+            }
+            crate::args::RepoAction::PackageCount => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
+                let count = identity.package_count.unwrap_or(0);
+                if cli.json {
+                    let outcome = output::repo_json::package_count_outcome(count);
+                    output::print_json_value(outcome.value, perf.build_report().as_ref());
+                    return Ok(());
+                }
+                println!("{count}");
+                perf.emit_stderr(None);
+                return Ok(());
+            }
+            crate::args::RepoAction::Version { no_error, on_error } => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
+                if cli.json {
+                    let outcome =
+                        output::repo_json::version_outcome(identity.version.as_deref(), *no_error);
+                    output::print_json_value(outcome.value, perf.build_report().as_ref());
+                    if let Some(code) = outcome.exit_code {
+                        std::process::exit(code);
+                    }
+                    return Ok(());
+                }
+                if let Some(version) = identity.version {
+                    println!("{version}");
+                    perf.emit_stderr(None);
+                    return Ok(());
+                }
+                return handle_no_results(*no_error, on_error, cli.plain, &perf);
+            }
             crate::args::RepoAction::Worktree { no_error, on_error } => {
                 let dir = base_dir
                     .as_deref()
@@ -728,7 +797,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return handle_no_results(*no_error, on_error, cli.plain, &perf);
             }
-            crate::args::RepoAction::Worktrees { md, list: _, csv, .. } => {
+            crate::args::RepoAction::Worktrees {
+                md, list: _, csv, ..
+            } => {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
@@ -785,8 +856,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .iter()
                             .map(|(is_current, body)| {
                                 let marker = if *is_current { "* " } else { "" };
-                                let prefix =
-                                    if *md { format!("- {marker}") } else { marker.to_string() };
+                                let prefix = if *md {
+                                    format!("- {marker}")
+                                } else {
+                                    marker.to_string()
+                                };
                                 render(&format!("{prefix}{body}"))
                             })
                             .collect::<Vec<_>>()
@@ -1134,11 +1208,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .status
                     .as_mut()
                     .expect("git-status command always computes status");
-                status.dirty
+                status
+                    .dirty
                     .retain(|f| f.filepath.to_string_lossy().starts_with(path_prefix));
 
                 // Filter untracked files
-                status.untracked
+                status
+                    .untracked
                     .retain(|f| f.filepath.to_string_lossy().starts_with(path_prefix));
 
                 // Update counts to match filtered lists
@@ -1423,6 +1499,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     if latest_versions_enabled {
         result = enrich_result_dependencies(result).await;
+    }
+
+    // Bare `sniff repo --json` assembles the scope-complete aggregate of its
+    // participating children. It must run after the full detection pass so
+    // the aggregate can draw from the shared `SniffResult`.
+    if matches!(repo_action, Some(crate::args::RepoAction::Default)) && cli.json {
+        let dir = base_dir
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
+        let aggregate =
+            output::repo_json::build_aggregate_value(&result, base_dir.as_deref(), &identity)?;
+        output::print_json_value(aggregate, result.performance.as_ref());
+        perf.emit_for_json(result.performance.as_ref());
+        return Ok(());
     }
 
     let docs_filter = cli

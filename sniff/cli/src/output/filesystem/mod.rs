@@ -106,7 +106,9 @@ pub(crate) use packages::{
     select_dirty_package_names, select_repo_packages, select_staged_package_names,
     select_unstaged_package_names,
 };
-pub use repo::{render_filesystem_section, render_repo_name, render_repo_section};
+pub use repo::{
+    render_filesystem_section, render_repo_default_verbose, render_repo_name, render_repo_section,
+};
 
 /// Format a commit datetime to a relative date string and 12hr time string.
 ///
@@ -1919,7 +1921,10 @@ mod tests {
             // to a transient label — they must be ignored in favor of `~`.
             let path = PathBuf::from("/Users/ken/.claudine/worktrees/rusty-biscuit/sniff");
             let vars = env(&[
-                ("OLDPWD", "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff"),
+                (
+                    "OLDPWD",
+                    "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff",
+                ),
                 ("PWD", "/Users/ken/.claudine/worktrees/rusty-biscuit/sniff"),
             ]);
             assert_eq!(
@@ -1933,7 +1938,10 @@ mod tests {
             let path = PathBuf::from("/opt/tool/bin");
             // Relative and empty env values must never match.
             let vars = env(&[("REL", "opt/tool"), ("EMPTY", "")]);
-            assert_eq!(alias_path_with(&path, &vars, Some(Path::new("/home/other"))), "/opt/tool/bin");
+            assert_eq!(
+                alias_path_with(&path, &vars, Some(Path::new("/home/other"))),
+                "/opt/tool/bin"
+            );
         }
 
         #[test]
@@ -2551,7 +2559,8 @@ mod tests {
         fn build_result(repo: RepoInfo, dirty_paths: &[&str]) -> SniffResult {
             let mut git = make_git_info(vec![]);
             git.repo_root = repo.root.clone();
-            git.status.as_mut().unwrap().dirty = dirty_paths.iter().map(|p| dirty_file(p)).collect();
+            git.status.as_mut().unwrap().dirty =
+                dirty_paths.iter().map(|p| dirty_file(p)).collect();
             let filesystem = FilesystemInfo {
                 repo: Some(repo),
                 git: Some(git),

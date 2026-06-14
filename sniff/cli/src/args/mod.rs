@@ -683,7 +683,7 @@ impl Commands {
     pub fn to_repo_action(&self) -> Option<RepoAction> {
         match self {
             Commands::Repo { repo_subcommand } => Some(match repo_subcommand {
-                None => RepoAction::Name,
+                None => RepoAction::Default,
                 Some(RepoSubcommand::Structure {
                     filter,
                     latest_versions,
@@ -943,6 +943,12 @@ impl Commands {
                     verbose: false,
                 },
                 Some(RepoSubcommand::Name) => RepoAction::Name,
+                Some(RepoSubcommand::IsMonorepo) => RepoAction::IsMonorepo,
+                Some(RepoSubcommand::PackageCount) => RepoAction::PackageCount,
+                Some(RepoSubcommand::Version { no_error, on_error }) => RepoAction::Version {
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
             }),
             _ => None,
         }
@@ -1105,7 +1111,14 @@ Output modes:
 pub const REPO_AFTER_HELP: &str = "\
 Identity:
   sniff repo name                     Repository name (plain text)
-  sniff repo name -v                  Name + version + language or package count
+  sniff repo name -v                  Repository name only (verbose styling, no extra fields)
+  sniff repo -v                       Rich one-liner: name + version + language/package count
+  sniff repo is-monorepo              Whether the repo is a monorepo (yes/no, or { \"is-monorepo\": bool } with --json)
+  sniff repo is-monorepo --json       { \"is-monorepo\": true }
+  sniff repo package-count            Number of discovered packages (or { \"package-count\": N } with --json)
+  sniff repo package-count --json     { \"package-count\": 48 }
+  sniff repo version                  Repository version from root manifest (or { \"version\": \"...\" } with --json)
+  sniff repo version --json           { \"version\": \"0.1.0\" }
 
 Structure:
   sniff repo structure                Show repository/monorepo structure
@@ -1328,12 +1341,12 @@ mod tests {
         }
 
         #[test]
-        fn repo_no_subcommand_is_name() {
+        fn repo_no_subcommand_is_default() {
             let cli = parse_args(&["repo"]).unwrap();
             let Some(cmd) = &cli.command else {
                 panic!("Expected Repo command")
             };
-            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Name)));
+            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Default)));
         }
 
         #[test]
@@ -2218,9 +2231,17 @@ mod tests {
         }
 
         #[test]
-        fn to_repo_action_none_is_name() {
+        fn to_repo_action_none_is_default() {
             let cmd = Commands::Repo {
                 repo_subcommand: None,
+            };
+            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Default)));
+        }
+
+        #[test]
+        fn to_repo_action_name_is_name() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Name),
             };
             assert!(matches!(cmd.to_repo_action(), Some(RepoAction::Name)));
         }
@@ -2310,6 +2331,42 @@ mod tests {
                     assert!(!verbose);
                 }
                 _ => panic!("Expected Worktrees action"),
+            }
+        }
+
+        #[test]
+        fn to_repo_action_is_monorepo() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::IsMonorepo),
+            };
+            assert!(matches!(cmd.to_repo_action(), Some(RepoAction::IsMonorepo)));
+        }
+
+        #[test]
+        fn to_repo_action_package_count() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::PackageCount),
+            };
+            assert!(matches!(
+                cmd.to_repo_action(),
+                Some(RepoAction::PackageCount)
+            ));
+        }
+
+        #[test]
+        fn to_repo_action_version() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Version {
+                    no_error: true,
+                    on_error: Some("msg".to_string()),
+                }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::Version { no_error, on_error }) => {
+                    assert!(no_error);
+                    assert_eq!(on_error, Some("msg".to_string()));
+                }
+                _ => panic!("Expected Version action"),
             }
         }
     }

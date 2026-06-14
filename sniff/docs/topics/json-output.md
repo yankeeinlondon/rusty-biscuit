@@ -33,7 +33,7 @@ The Golden Exception:
 
 ## Example
 
-Given a parent node `repo` with child subcommands `name`, `packages`, and `areas`:
+Given the `repo` parent node:
 
 ```sh
 sniff repo name --json
@@ -43,11 +43,24 @@ sniff repo name --json
 sniff repo --json
 # {
 #   "name": "rusty-biscuit",
-#   "packages": [ ... ],
-#   "areas": [ ... ]
+#   "version": "1.2.3",
+#   "language": "Rust",
+#   "is-monorepo": true,
+#   "package-count": 8,
+#   "structure": { ... },
+#   "deps": { "packages": [ ... ] },
+#   "packages": [ "pkg-a", "pkg-b", ... ],
+#   "package-areas": [ "area-a", "area-b", ... ],
+#   "git-status": { ... },
+#   "worktrees": { "worktrees": [ ... ] },
+#   "staged-files": { "scope": "staged", "kind": "all_files", "paths": [] },
+#   "recent-commits": { "commits": [], "period_label": "last 3 days", ... },
+#   ...
 # }
-# aggregate of every child scope, keyed by subcommand name
-# the keys (`name`, `packages`, `areas`) match the subcommands you could invoke directly
+# aggregate of every participating child scope, keyed by subcommand name
+# single-key leaves contribute their unwrapped value; multi-field children
+# contribute their whole scope object. Network-primary children (`remote`,
+# `pr`) and parameterized children (`hash`) are excluded from the aggregate.
 
 sniff repo
 # (with no --json: dispatches to the default subcommand `name` and prints the name)

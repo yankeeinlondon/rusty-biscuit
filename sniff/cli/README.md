@@ -123,6 +123,18 @@ sniff repo unstaged-files        # Unstaged modified files
 sniff repo untracked-files       # Untracked files
 ```
 
+**Repository Identity:**
+
+```bash
+sniff repo                 # Repository name (default text dispatch; --json returns the aggregate)
+sniff repo name            # Repository name only
+sniff repo name -v         # Repository name only (verbose styling; no foreign fields)
+sniff repo is-monorepo     # Whether the repo is a monorepo (yes/no)
+sniff repo package-count   # Number of discovered packages
+sniff repo version         # Repository version from root manifest
+sniff repo language        # Primary programming language for the repository
+```
+
 **Repository Queries:**
 
 ```bash
@@ -443,7 +455,13 @@ table summarises the contract; see the per-subcommand docs under
 
 | Subcommand | JSON shape |
 |---|---|
-| `repo` / `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...) |
+| `repo` (bare, `--json`) | Scope-complete aggregate of participating child subcommands, keyed by subcommand name; see [`sniff/docs/topics/json-output.md`](../../docs/topics/json-output.md) |
+| `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...) |
+| `repo name` | `{ "name": "..." }` |
+| `repo language` | `{ "language": "..." \| null }` (or full language breakdown with `--breakdown`) |
+| `repo is-monorepo` | `{ "is-monorepo": true \| false }` |
+| `repo package-count` | `{ "package-count": N }` |
+| `repo version` | `{ "version": "..." \| null }` |
 | `repo git-status` | `GitInfo` object directly (`repo_root`, `status`, `recent`, `branches`, ...) |
 | `repo deps` | `{ packages: [{ name, depends_on, used_by, dependencies, dev_dependencies, ... }] }` |
 | `repo dirty-packages` | `{ scope: "dirty", kind: "packages", names: [...] }` |

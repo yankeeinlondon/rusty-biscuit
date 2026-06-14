@@ -18,7 +18,13 @@ use std::path::PathBuf;
 use sniff::filesystem::git::{GitConfig, GitInfo, RepoStatus, WorktreeInfo};
 use sniff_cli::output::render_git_section;
 
-fn worktree(branch: &str, path: &str, ahead: usize, behind: usize, is_current: bool) -> WorktreeInfo {
+fn worktree(
+    branch: &str,
+    path: &str,
+    ahead: usize,
+    behind: usize,
+    is_current: bool,
+) -> WorktreeInfo {
     WorktreeInfo {
         branch: branch.to_string(),
         filepath: PathBuf::from(path),

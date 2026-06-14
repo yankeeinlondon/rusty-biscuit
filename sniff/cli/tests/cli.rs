@@ -292,6 +292,333 @@ fn repo_name_json_is_leaf_only() {
     }
 }
 
+// ============================================================================
+// `sniff repo --json` aggregate tests (scope-complete-json plan, Phase 2)
+// ============================================================================
+
+#[test]
+fn repo_aggregate_json_is_valid_object() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+
+    assert!(
+        output.status.success(),
+        "sniff repo --json must succeed: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
+    assert!(
+        json.is_object(),
+        "repo --json aggregate must be an object: {json}"
+    );
+}
+
+#[test]
+fn repo_aggregate_json_excludes_network_and_parameterized_keys() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+
+    let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
+    let obj = json.as_object().expect("aggregate object");
+
+    for forbidden in ["remote", "pr", "hash"] {
+        assert!(
+            !obj.contains_key(forbidden),
+            "aggregate must not contain network/parameterized key `{forbidden}`: {json}"
+        );
+    }
+}
+
+#[test]
+fn repo_aggregate_json_not_partial() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+
+    let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
+    let obj = json.as_object().expect("aggregate object");
+
+    let expected = [
+        "name",
+        "version",
+        "language",
+        "is-monorepo",
+        "package-count",
+        "structure",
+        "packages",
+        "package-areas",
+        "deps",
+        "worktrees",
+        "git-status",
+        "staged-files",
+        "unstaged-files",
+        "untracked-files",
+        "dirty-source-code",
+        "staged-source-code",
+        "unstaged-source-code",
+        "dirty-files",
+        "package",
+        "package-area",
+        "area",
+        "package-root",
+        "package-area-root",
+        "root",
+        "dirty-packages",
+        "dirty-package-areas",
+        "staged-packages",
+        "staged-package-areas",
+        "unstaged-packages",
+        "unstaged-package-areas",
+        "is-current-package-area-dirty",
+        "package-area-has-source-code-changes",
+        "has-merge-conflict",
+        "worktree",
+        "recent-commits",
+        "source-code-changes",
+        "documentation-changes",
+    ];
+
+    for key in expected {
+        assert!(
+            obj.contains_key(key),
+            "aggregate must contain participating key `{key}`: {json}"
+        );
+    }
+}
+
+#[test]
+fn repo_aggregate_json_keys_round_trip() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+
+    let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
+    let obj = json.as_object().expect("aggregate object");
+
+    // Every top-level key must correspond to an invokable `sniff repo <key>`
+    // subcommand. Some leaves exit 1 on a false/empty value, so we only check
+    // that the parser accepts the subcommand.
+    for key in obj.keys() {
+        let child = cargo_bin_cmd!("sniff")
+            .args(["repo", key, "--json"])
+            .output()
+            .unwrap_or_else(|e| panic!("failed to run `sniff repo {key} --json`: {e}"));
+
+        let stderr = String::from_utf8_lossy(&child.stderr);
+        assert!(
+            !stderr.contains("unrecognized subcommand"),
+            "`sniff repo {key} --json` was not recognized: {stderr}"
+        );
+        assert!(
+            !stderr.contains("Found argument"),
+            "`sniff repo {key} --json` got a parser error: {stderr}"
+        );
+        assert!(
+            !stderr.contains("unexpected argument"),
+            "`sniff repo {key} --json` got an unexpected argument: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn repo_aggregate_json_single_key_leaves_unwrapped() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+
+    let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
+
+    // Identity leaves are unwrapped values, not nested objects.
+    assert!(json["name"].is_string());
+    assert!(json["is-monorepo"].is_boolean());
+    assert!(
+        json["package-count"].is_number(),
+        "package-count must be unwrapped number: {json}"
+    );
+
+    // Locator leaves are unwrapped strings.
+    assert!(json["package"].is_string());
+    assert!(json["package-area"].is_string());
+    assert!(json["area"].is_string());
+    assert!(json["package-root"].is_string());
+    assert!(json["package-area-root"].is_string());
+    assert!(json["root"].is_string());
+
+    // Boolean leaves are unwrapped booleans.
+    assert!(json["is-current-package-area-dirty"].is_boolean());
+    assert!(json["package-area-has-source-code-changes"].is_boolean());
+    assert!(json["has-merge-conflict"].is_boolean());
+}
+
+#[test]
+fn repo_aggregate_json_file_list_leaves_have_stable_shape() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+
+    let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
+
+    for key in [
+        "staged-files",
+        "unstaged-files",
+        "untracked-files",
+        "dirty-source-code",
+        "staged-source-code",
+        "unstaged-source-code",
+        "dirty-files",
+    ] {
+        let leaf = &json[key];
+        assert!(
+            leaf.is_object(),
+            "{key} must be an object in aggregate: {json}"
+        );
+        assert!(leaf["scope"].is_string(), "{key} missing scope: {leaf}");
+        assert!(leaf["kind"].is_string(), "{key} missing kind: {leaf}");
+        assert!(
+            leaf["paths"].is_array(),
+            "{key} paths must be an array: {leaf}"
+        );
+    }
+}
+
+#[test]
+fn repo_aggregate_json_is_offline() {
+    // The aggregate must not trigger a network call. We verify this indirectly
+    // by ensuring the output completes successfully and does not contain the
+    // excluded network-primary keys; the spec excludes `remote`, `pr`, and
+    // `hash` from the aggregate.
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "--json"])
+        .output()
+        .expect("run sniff repo --json");
+
+    assert!(
+        output.status.success(),
+        "offline aggregate must succeed: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
+    let obj = json.as_object().expect("aggregate object");
+    assert!(!obj.contains_key("remote"));
+    assert!(!obj.contains_key("pr"));
+    assert!(!obj.contains_key("hash"));
+}
+
+#[test]
+fn repo_name_json_is_still_leaf_only() {
+    // Regression guard: `sniff repo name --json` must remain a single-key leaf
+    // even after the bare `repo --json` aggregate landed.
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "name", "--json"])
+        .output()
+        .expect("run sniff repo name --json");
+
+    assert!(output.status.success());
+    let json_str = std::str::from_utf8(&output.stdout).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(json_str).expect("valid json");
+    let obj = json.as_object().expect("object");
+    assert_eq!(
+        obj.len(),
+        1,
+        "repo name --json must remain leaf-only: {json}"
+    );
+    assert!(obj.contains_key("name"));
+}
+
+// ============================================================================
+// `sniff repo` / `sniff repo name` terminal-subset tests (Phase 3)
+// ============================================================================
+
+#[test]
+fn repo_name_verbose_is_name_only() {
+    let name_output = cargo_bin_cmd!("sniff")
+        .args(["repo", "name"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo name");
+
+    let name_verbose_output = cargo_bin_cmd!("sniff")
+        .args(["repo", "name", "-v"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo name -v");
+
+    assert!(name_verbose_output.status.success());
+    let stdout = std::str::from_utf8(&name_verbose_output.stdout).expect("utf8");
+    let name_stdout = std::str::from_utf8(&name_output.stdout).expect("utf8");
+
+    assert_eq!(
+        stdout, name_stdout,
+        "repo name -v must match repo name (no foreign fields): got {stdout:?}"
+    );
+    assert!(
+        !stdout.contains(" v"),
+        "repo name -v must not contain version suffix: {stdout:?}"
+    );
+    assert!(
+        !stdout.contains("package monorepo"),
+        "repo name -v must not contain monorepo suffix: {stdout:?}"
+    );
+}
+
+#[test]
+fn repo_default_is_bare_name() {
+    let name_output = cargo_bin_cmd!("sniff")
+        .args(["repo", "name"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo name");
+
+    let default_output = cargo_bin_cmd!("sniff")
+        .args(["repo"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo");
+
+    assert!(default_output.status.success());
+    assert_eq!(
+        std::str::from_utf8(&default_output.stdout).expect("utf8"),
+        std::str::from_utf8(&name_output.stdout).expect("utf8"),
+        "sniff repo must print the bare name"
+    );
+}
+
+#[test]
+fn repo_default_verbose_is_rich_oneliner() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "-v"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo -v");
+
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+
+    assert!(
+        stdout.contains(" v")
+            || stdout.contains("package monorepo")
+            || (stdout.contains('[') && stdout.contains(']')),
+        "sniff repo -v must print a rich one-liner with version, monorepo, or language suffix: {stdout:?}"
+    );
+}
+
 #[test]
 fn test_base_flag_before_subcommand() {
     cargo_bin_cmd!("sniff")
@@ -4084,7 +4411,10 @@ fn test_repo_root_is_absolute_without_base_from_subdir() {
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let printed = stdout.trim();
     let root = Path::new(printed);
-    assert!(root.is_absolute(), "root must be absolute, got: {printed:?}");
+    assert!(
+        root.is_absolute(),
+        "root must be absolute, got: {printed:?}"
+    );
     assert!(
         !printed.ends_with('/'),
         "root must not have a trailing separator, got: {printed:?}"
@@ -5136,7 +5466,10 @@ fn test_git_status_from_linked_worktree_renders_case_a() {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
-    assert!(stdout.contains("main:"), "Case A shows main location: {stdout}");
+    assert!(
+        stdout.contains("main:"),
+        "Case A shows main location: {stdout}"
+    );
     assert!(
         stdout.contains("Current Worktree:"),
         "Case A shows current worktree: {stdout}"
@@ -5273,7 +5606,10 @@ fn test_git_status_json_worktree_ahead_is_lazy_by_default() {
         "git-status",
         "--json",
     ]);
-    assert_eq!(lazy, 0, "non-current worktree ahead must be lazy (0) by default");
+    assert_eq!(
+        lazy, 0,
+        "non-current worktree ahead must be lazy (0) by default"
+    );
 
     // Full detail (deep) computes it: ahead-wt is one ahead of main.
     let eager = read_ahead(&[
@@ -5675,10 +6011,7 @@ fn test_repo_worktrees_list_verbose_composes_and_has_no_leading_space() {
         .assert()
         .success();
     let bare_v_out = String::from_utf8(bare_v.get_output().stdout.clone()).unwrap();
-    assert_eq!(
-        bare_v_out, list_v_out,
-        "bare `-v` must match `--list -v`"
-    );
+    assert_eq!(bare_v_out, list_v_out, "bare `-v` must match `--list -v`");
 }
 
 #[test]
