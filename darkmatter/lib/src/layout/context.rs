@@ -168,7 +168,11 @@ impl LayoutContext {
 
         // Resolve background color and render color mode.
         let (background_color, render_color_mode) = match page_background {
-            PageBackground::Transparent => (None, options_color_mode),
+            // Decision #4: even without a painted surface, the code panel must
+            // invert against the terminal mode, not an independently-detected
+            // option mode. `surface_mode` is terminal-derived (Unknown falls back
+            // to the option mode), so a real terminal is the source of truth.
+            PageBackground::Transparent => (None, surface_mode),
             PageBackground::Subtle => {
                 let bg = match surface_mode {
                     ColorMode::Dark | ColorMode::Unknown => PAGE_BG_SUBTLE_DARK,

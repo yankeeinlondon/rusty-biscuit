@@ -91,6 +91,31 @@ impl HighlightSpec {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// Iterates the underlying ranges in declaration order.
+    pub fn iter(&self) -> std::slice::Iter<'_, ValidLineRange> {
+        self.0.iter()
+    }
+}
+
+impl std::fmt::Display for HighlightSpec {
+    /// Re-renders the highlight spec in the same `1,3-5` format the
+    /// [`parse_code_info`](super::parser::parse_code_info) DSL accepts.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut first = true;
+        for range in &self.0 {
+            if !first {
+                f.write_str(",")?;
+            }
+            first = false;
+            if range.start == range.end {
+                write!(f, "{}", range.start)?;
+            } else {
+                write!(f, "{}-{}", range.start, range.end)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Validated line range with enforced invariants (start <= end).

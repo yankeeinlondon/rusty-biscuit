@@ -174,6 +174,32 @@ fn test_output_html() {
 }
 
 #[test]
+fn test_output_html_alias_browser() {
+    md_cmd()
+        .args(["--output", "browser", "-"])
+        .write_stdin("# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
+}
+
+#[test]
+fn test_output_markdown_plus_renders_disclosure_as_html_details() {
+    let input = "::disclosure Summary\n::details\nBody\n::end-disclosure";
+    md_cmd()
+        .args(["--output", "markdown-plus", "-"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<details>"))
+        .stdout(predicate::str::contains("<summary>"))
+        .stdout(predicate::str::contains("Summary"))
+        .stdout(predicate::str::contains("</summary>"))
+        .stdout(predicate::str::contains("Body"))
+        .stdout(predicate::str::contains("</details>"));
+}
+
+#[test]
 fn test_output_json_alias_ast() {
     md_cmd()
         .args(["--output", "ast", "-"])
@@ -472,6 +498,25 @@ fn test_compose_basic() {
         .success()
         .stdout(predicate::str::contains("Hello"))
         .stdout(predicate::str::contains("World"));
+}
+
+#[test]
+fn test_compose_markdown_plus_renders_disclosure_as_details() {
+    // `md compose --output markdown-plus` must route the composed document
+    // through the MarkdownPlus fold, emitting `<details>`/`<summary>` HTML
+    // rather than preserving the `::disclosure` DSL verbatim.
+    md_cmd()
+        .args(["compose", "--output", "markdown-plus", "-"])
+        .write_stdin(
+            "::disclosure\nLicense *Agreement*\n::details\nKeep your **hands** off.\n::end-disclosure\n",
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<details>"))
+        .stdout(predicate::str::contains("<summary>"))
+        .stdout(predicate::str::contains("</summary>"))
+        .stdout(predicate::str::contains("</details>"))
+        .stdout(predicate::str::contains("::disclosure").not());
 }
 
 #[test]
@@ -3713,6 +3758,126 @@ fn layout_page_background_alias_works() {
 }
 
 #[test]
+fn layout_page_bg_color_hex_accepted() {
+    let tmp = md_file("# Hello\n");
+    for hex in ["#1e1e23", "#abc", "#ffffff"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--page-bg-color")
+            .arg(hex)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "--page-bg-color {hex} should succeed; stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn layout_page_bg_color_rgb_triple_accepted() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--page-bg-color")
+        .arg("30,30,35")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_page_bg_color_tailwind_accepted() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--page-bg-color")
+        .arg("red-500")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_page_bg_color_special_keyword_accepted() {
+    let tmp = md_file("# Hello\n");
+    for kw in ["transparent", "currentColor", "inherit"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--page-bg-color")
+            .arg(kw)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "--page-bg-color {kw} should succeed");
+    }
+}
+
+#[test]
+fn layout_page_bg_color_invalid_rejected() {
+    let tmp = md_file("# Hello\n");
+    for bad in ["not-a-color", "256,0,0", "1,2", "purple-555"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--page-bg-color")
+            .arg(bad)
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "--page-bg-color {bad} should fail"
+        );
+    }
+}
+
+#[test]
+fn layout_width_flag_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--width")
+        .arg("80")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--width") || stderr.contains("max-width"),
+        "--width should be rejected with a helpful error; got: {stderr}"
+    );
+}
+
+#[test]
+fn layout_margin_aliases_work() {
+    // `--margin-top` and friends should be accepted as visible_aliases for
+    // the existing `--mt` / `--mb` / `--ml` / `--mr` flags.
+    let tmp = md_file("# Hello\n");
+    for args in [
+        ["--margin-top", "1"],
+        ["--margin-bottom", "1"],
+        ["--margin-left", "1"],
+        ["--margin-right", "1"],
+        ["--padding-top", "1"],
+        ["--padding-bottom", "1"],
+        ["--padding-left", "1"],
+        ["--padding-right", "1"],
+    ] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} {} should be accepted; stderr: {}",
+            args[0],
+            args[1],
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn layout_line_numbers_flag_accepted() {
     let tmp = md_file("```rust\nfn main() {}\n```\n");
     let output = md_cmd()
@@ -4864,4 +5029,28 @@ terminal is reasonably wide.\n";
         max_len <= 60,
         "blockquote visible width should be capped under max-width: 50% on a 100-col terminal, got max={max_len}. plain:\n{plain}",
     );
+}
+
+#[test]
+fn render_accepts_code_block_flag() {
+    let tmp = md_file("# Title\n\n```rust\nfn main() {}\n```\n");
+    for mode in ["inverse", "dark", "light", "same"] {
+        md_cmd()
+            .args(["--code-block", mode])
+            .arg(tmp.path())
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Title"));
+    }
+}
+
+#[test]
+fn render_rejects_invalid_code_block_value() {
+    let tmp = md_file("# Title\n");
+    md_cmd()
+        .args(["--code-block", "sideways"])
+        .arg(tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value 'sideways'"));
 }

@@ -321,8 +321,15 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         }
     }
 
+<<<<<<< Updated upstream
     #[allow(clippy::too_many_arguments)]
     fn on_provider_limit(
+||||||| Stash base
+    #[allow(clippy::too_many_arguments)]
+    fn on_rate_limit(
+=======
+    fn on_provider_limit(
+>>>>>>> Stashed changes
         &mut self,
         record: &OpenCodeLogRecord,
         status_code: u16,
@@ -332,6 +339,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         model_id: Option<String>,
         provider_error: String,
     ) -> StderrIngestOutcome {
+<<<<<<< Updated upstream
         let rendered_message = match kind {
             ProviderLimitKind::Overloaded => "server overloaded; will retry".to_string(),
             ProviderLimitKind::RateLimited => "request throttled; will retry".to_string(),
@@ -346,6 +354,17 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             kind,
             ProviderLimitKind::UsageCap | ProviderLimitKind::RetriesExhausted
         );
+||||||| Stash base
+        let stdout_seen = self.stdout_event_seen.load(Ordering::SeqCst);
+        let rendered_message = render_rate_limit_message(provider_id, model_id, reset_at);
+=======
+        let stdout_seen = self.stdout_event_seen.load(Ordering::SeqCst);
+        let rendered_message = render_rate_limit_message(provider_id, model_id, reset_at);
+        let is_terminal = matches!(
+            kind,
+            ProviderLimitKind::UsageCap | ProviderLimitKind::RetriesExhausted
+        );
+>>>>>>> Stashed changes
 
         {
             let mut state = self.state.lock().expect("stderr state poisoned");
@@ -379,12 +398,48 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             extra_map.insert("provider_error".into(), Value::String(provider_error));
         }
 
+<<<<<<< Updated upstream
         if is_terminal {
+||||||| Stash base
+        if stdout_seen || !is_fatal {
+=======
+        if stdout_seen || !is_terminal {
+>>>>>>> Stashed changes
             debug!(
                 status_code,
                 kind = ?kind,
                 reset_at = ?reset_at,
+<<<<<<< Updated upstream
                 "opencode provider-limit classified as terminal; requesting early termination",
+||||||| Stash base
+                is_fatal,
+                "opencode rate-limit classified after stdout activity or non-fatal; emitting warning",
+            );
+            self.sink.on_semantic_event(SemanticEvent::Warning {
+                message: rendered_message,
+                extra: Value::Object(extra_map),
+            });
+        } else {
+            debug!(
+                status_code,
+                error_name = %error_name,
+                reset_at = ?reset_at,
+                is_fatal,
+                "opencode rate-limit classified before any stdout activity and fatal; requesting early termination",
+=======
+                "opencode provider-limit classified after stdout activity or non-terminal; emitting warning",
+            );
+            self.sink.on_semantic_event(SemanticEvent::Warning {
+                message: rendered_message,
+                extra: Value::Object(extra_map),
+            });
+        } else {
+            debug!(
+                status_code,
+                kind = ?kind,
+                reset_at = ?reset_at,
+                "opencode provider-limit classified before any stdout activity and terminal; requesting early termination",
+>>>>>>> Stashed changes
             );
             self.sink.on_semantic_event(SemanticEvent::Error {
                 message: rendered_message.clone(),
@@ -1166,7 +1221,13 @@ mod tests {
                 // We no longer assert the exact timestamp because it's converted to local time
                 assert!(message.contains("2026-04-"), "{message}");
                 assert_string(extra, "classification", "rate_limit");
+<<<<<<< Updated upstream
                 assert_string(extra, "kind", "UsageCap");
+||||||| Stash base
+                assert_string(extra, "error_name", "AI_RetryError");
+=======
+                assert_string(extra, "kind", "RetriesExhausted");
+>>>>>>> Stashed changes
             }
             other => panic!("expected Error, got {other:?}"),
         }
@@ -1198,6 +1259,7 @@ mod tests {
                 assert_eq!(*kind, SemanticErrorKind::ApiRemote);
                 assert!(message.to_lowercase().contains("usage limit"));
                 assert_string(extra, "classification", "rate_limit");
+                assert_string(extra, "kind", "RetriesExhausted");
             }
             other => panic!("expected Error, got {other:?}"),
         }

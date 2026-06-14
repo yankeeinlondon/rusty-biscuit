@@ -1,8 +1,8 @@
 ---
 name: darkmatter
-description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
-hash: 751ea2392b8b3231-3cb2b295b95a3f38
-last_updated: 2026-06-08
+description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
+hash: 87f17662fa397abe-42fad25e44d4a604
+last_updated: 2026-06-13
 ---
 
 # darkmatter
@@ -14,9 +14,23 @@ terminal components, images, Mermaid, and graph rendering are delegated to
 
 ## Start Here
 
+The simplified-rendering model centers on **two public components**:
+
+- `darkmatter::markdown::code_block::CodeBlock` — the atomic renderer for
+  one syntax-highlighted code block. Use it for a single snippet, a fenced
+  block in Markdown (which routes through the same helper), or a direct
+  `CodeBlock::yaml/rust/json/toml/from_source_file` call. It implements
+  `TerminalRenderable` and `BrowserRenderable` directly.
+- `darkmatter::layout::DarkmatterPage` — the page assembler that renders
+  a full Markdown document. It owns page-frame layout (margins, padding,
+  max-width, page background) and delegates nested code blocks to
+  `CodeBlock` so a fence in a `DarkmatterPage` renders byte-for-byte
+  equal to a direct `CodeBlock` call.
+
+Other entry points:
+
 - Use `darkmatter::markdown::Markdown` for document content.
 - Use the compose pipeline for source transformations before rendering.
-- Use `DarkmatterPage` for page-level terminal/browser layout around Markdown.
 - Use `darkmatter::style` for document `style:` frontmatter.
 - Use `biscuit-terminal` components for rich terminal UI outside ordinary
   parsed Markdown rendering.
@@ -153,6 +167,48 @@ links are preserved and not fetched.
 
 See `darkmatter/docs/topics/remote-url-references.md` for public guidance.
 
+## Disclosure Blocks
+
+Darkmatter supports render-time disclosure blocks using the `::disclosure` / `::details` / `::end-disclosure` directive triple. The syntax is a block-level extension; directives must appear at line boundaries and be followed by ASCII whitespace or end-of-line.
+
+```md
+::disclosure License *Agreement*
+::details
+Keep your **hands** off.
+::end-disclosure
+```
+
+- The summary region (between `::disclosure` and `::details`) is phrasing-only: no paragraph breaks, hard line breaks, or block-level elements.
+- The body region (between `::details` and `::end-disclosure`) is full block-level Markdown and may contain nested disclosures.
+- `::file` and `::code` transclusion can wrap content in a disclosure block with `disclosure="Summary text"` or `disclosure=true` (default summary is `"Details"`).
+
+Render-tree representation: `renderable::tree::NodeKind::Disclosure { summary, children, layout, style }`, where `summary` and `children` are slices of `RenderNode` and `style` carries inline opener hints. Target behavior:
+
+| Target | Behavior |
+|--------|----------|
+| Terminal | Summary rendered normally; body rendered as a block quote with dim and italic text. |
+| Markdown (dialect) | DSL emitted verbatim: `::disclosure`, `::details`, `::end-disclosure`. |
+| MarkdownPlus | Summary and body rendered to Markdown, then wrapped in `<details><summary>…</summary>…</details>`. |
+| Browser | Summary and body rendered to HTML, then wrapped in native `<details>`/`<summary>` elements; no JavaScript. |
+| JSON | Serialized natively through `Markdown::as_document()` as `NodeKind::Disclosure`. |
+
+### Styling
+
+Disclosures honor `style.disclosure.*` frontmatter using the same `CommonStyle` shape as tables and block-quotes (`width`, `max-width`, `alignment`, `color`, `bg-color`). Kebab-case keys are canonical; snake-case aliases (`max_width`, `bg_color`) emit a `Deprecated` warning and `--strict-style` rejects them. `width` and `max-width` are mutually exclusive.
+
+Inline opener style tokens take precedence over frontmatter:
+
+```md
+::disclosure max-width=60ch color=red-500 License Agreement
+::details
+Keep your **hands** off.
+::end-disclosure
+```
+
+Recognized inline keys are `width`, `max-width`/`max_width`, `alignment`, `color`, `bg-color`/`bg_color`. Unrecognized or invalid tokens become part of the summary text.
+
+Malformed disclosures raise `MarkdownError::MalformedDisclosure { reason, range }`.
+
 ## Progressive Disclosure
 
 Open only the topic file needed for the task:
@@ -181,10 +237,31 @@ the `biscuit-terminal` skill for terminal tree rendering.
   been deleted (tree-cutover Phase 5).
 - `darkmatter::markdown::render_tree::fold_markdown_to_document` is the
   Markdown-to-`Document` bridge every public render path folds through.
-- `YamlBlock` projects to the render tree and uses shared code-block helpers
-  for terminal and browser syntax highlighting.
-- Code-block themes resolve against the inverted page color mode for contrast;
-  ordinary prose follows the real mode.
+- `YamlBlock` is a deprecated thin compatibility wrapper around
+  [`CodeBlock::yaml`](darkmatter/lib/src/markdown/code_block.rs); both
+  render through the same shared code-block helpers, so terminal and
+  browser output is byte-for-byte equal for the same payload. New code
+  should use [`CodeBlock`](darkmatter/lib/src/markdown/code_block.rs)
+  directly with `CodeBlock::yaml`, `CodeBlock::rust`, `CodeBlock::json`,
+  `CodeBlock::toml`, `CodeBlock::from_source_file`, or
+  `CodeBlock::new(code, Some("lang"))`; `YamlBlock`'s validation
+  constructors remain (with a deprecation warning) for callers that need
+  upfront YAML validation. The CLI exposes the same surface as
+  `md code-block <file-or-content> --language LANG [--theme THEME] [--title TITLE] [--line-numbering] [--highlight RANGE] --output terminal|html|markdown`,
+  which constructs a `CodeBlock` directly without routing through the
+  Markdown fold.
+- Code-block themes resolve against the inverted page color mode for contrast
+  **by default**; ordinary prose follows the real mode. The code panel's mode is
+  derived from the terminal (the same source as the page), not a separate
+  env-only detector. The inversion is configurable via the `CodeBlockMode` enum
+  (`inverse` (default) / `dark` / `light` / `same`) — exposed as the global
+  `md --code-block <...>` flag and `DarkmatterPage::with_code_block_mode(...)`.
+  `CodeBlockMode` is honored on **both** terminal and browser: the browser code
+  path resolves through `HtmlOptions::code_block_mode`, and the injected
+  `.code-block` stylesheet background is computed against the same mode so
+  markup and stylesheet agree. A direct `CodeBlock::with_theme(theme)` /
+  `md code-block --theme` override wins over the page/context theme on both
+  surfaces. See `darkmatter/docs/rendering/code-highlighting.md`.
 - Horizontal rules: canonical styling is `style.hr.*` with `apply_hr_style`;
   top-level `hr:` and inline `{ style: ... }` remain deprecated aliases.
 - The darkmatter cutover is complete: deprecated `PageMargin`, `PagePadding`,

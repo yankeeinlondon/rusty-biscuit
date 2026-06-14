@@ -2612,7 +2612,13 @@ impl Markdown {
         }
 
         if let Some(summary) = &directive_options.disclosure {
-            content = transclusion::wrap_disclosure(&content, summary);
+            let summary = if summary.is_empty() || summary.eq_ignore_ascii_case("true") {
+                "Details"
+            } else {
+                summary.as_str()
+            };
+            let body = content.trim_end_matches('\n');
+            content = format!("::disclosure\n{summary}\n::details\n{body}\n::end-disclosure");
         }
 
         content
@@ -6282,6 +6288,7 @@ Rounded: {{ round(pi) }}"#;
                 mermaid_mode: MermaidMode::Off,
                 hyperlink_mode: HyperlinkMode::Always,
                 hr_defaults: None,
+                code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
             };
             let output = composed.as_terminal(options).unwrap();
 
@@ -6704,5 +6711,97 @@ Rounded: {{ round(pi) }}"#;
             assert!(pos_a < pos_b, "deterministic order violated: {text}");
             assert_eq!(report.transclusions_applied, 2);
         }
+    }
+
+    #[test]
+    fn disclosure_block_markers_survive_compose() {
+        let content = "::disclosure\nLicense\n::details\nBody\n::end-disclosure\n";
+        let md: Markdown = content.into();
+
+        let (composed, _report) = md.compose().unwrap();
+        let text = composed.content();
+
+        assert!(
+            text.contains("::disclosure"),
+            "compose must preserve ::disclosure marker: {text}"
+        );
+        assert!(
+            text.contains("::details"),
+            "compose must preserve ::details marker: {text}"
+        );
+        assert!(
+            text.contains("::end-disclosure"),
+            "compose must preserve ::end-disclosure marker: {text}"
+        );
+        assert!(text.contains("License"), "summary text must survive: {text}");
+        assert!(text.contains("Body"), "body text must survive: {text}");
+    }
+
+    #[test]
+    fn apply_wrappers_emits_disclosure_dsl() {
+        let md: Markdown = "# Test\n".into();
+        let options = transclusion::BlockOptions {
+            disclosure: Some("More".to_string()),
+            ..Default::default()
+        };
+
+        let wrapped = md.apply_wrappers("# Included\n\nBody.\n".to_string(), &options);
+
+        assert!(
+            wrapped.contains("::disclosure"),
+            "must emit ::disclosure opener: {wrapped}"
+        );
+        assert!(
+            wrapped.contains("::details"),
+            "must emit ::details separator: {wrapped}"
+        );
+        assert!(
+            wrapped.contains("::end-disclosure"),
+            "must emit ::end-disclosure closer: {wrapped}"
+        );
+        assert!(
+            wrapped.contains("More"),
+            "must include summary text: {wrapped}"
+        );
+        assert!(
+            !wrapped.contains("<details>"),
+            "must not emit HTML details: {wrapped}"
+        );
+        assert!(
+            !wrapped.contains("<summary>"),
+            "must not emit HTML summary: {wrapped}"
+        );
+    }
+
+    #[test]
+    fn apply_wrappers_normalizes_empty_disclosure_summary_to_details() {
+        let md: Markdown = "# Test\n".into();
+        let options = transclusion::BlockOptions {
+            disclosure: Some(String::new()),
+            ..Default::default()
+        };
+
+        let wrapped = md.apply_wrappers("Body.\n".to_string(), &options);
+
+        assert!(
+            wrapped.contains("::disclosure\nDetails\n::details"),
+            "empty summary must normalize to 'Details': {wrapped}"
+        );
+    }
+
+    #[test]
+    fn apply_wrappers_normalizes_true_disclosure_summary_to_details() {
+        let md: Markdown = "# Test\n".into();
+        let options = transclusion::BlockOptions {
+            disclosure: Some("true".to_string()),
+            ..Default::default()
+        };
+
+        let wrapped = md.apply_wrappers("Body.\n".to_string(), &options);
+
+        assert!(
+            wrapped.contains("::disclosure\nDetails\n::details"),
+            "'true' summary must normalize to 'Details': {wrapped}"
+        );
     }
 }

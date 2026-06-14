@@ -879,7 +879,13 @@ impl Markdown {
         }
 
         if let Some(summary) = &directive_options.disclosure {
-            content = transclusion::wrap_disclosure(&content, summary);
+            let summary = if summary.is_empty() || summary.eq_ignore_ascii_case("true") {
+                "Details"
+            } else {
+                summary.as_str()
+            };
+            let body = content.trim_end_matches('\n');
+            content = format!("::disclosure\n{summary}\n::details\n{body}\n::end-disclosure");
         }
 
         content

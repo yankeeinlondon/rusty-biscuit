@@ -196,7 +196,7 @@ fn level2_schema_about_constraint_table_renders_striped_row() {
 }
 
 fn assert_schema_about_yaml_uses_theme(frame: &CapturedFrame, expected_mode: ColorMode) {
-    let code_line = raw_line_anywhere(&frame, "bar: string[]").unwrap_or_else(|| {
+    let code_line = raw_line_anywhere(frame, "bar: string[]").unwrap_or_else(|| {
         panic!(
             "could not locate schema-about YAML example line.\nplain:\n{}\nraw:\n{}",
             frame.plain, frame.raw,

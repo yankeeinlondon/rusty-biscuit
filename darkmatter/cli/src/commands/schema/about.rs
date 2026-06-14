@@ -16,6 +16,7 @@ use biscuit_terminal::discovery::detection::ColorMode as TerminalColorMode;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use color_eyre::eyre::Result;
+use darkmatter::markdown::highlighting::CodeBlockMode;
 use darkmatter::markdown::highlighting::ColorMode as MarkdownColorMode;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::TerminalOptions;
@@ -38,9 +39,9 @@ fn markdown_color_mode_from_terminal(mode: TerminalColorMode) -> MarkdownColorMo
 }
 
 /// Run `md schema about`.
-pub fn run_about(verbose: bool) -> Result<()> {
+pub fn run_about(verbose: bool, code_block_mode: CodeBlockMode) -> Result<()> {
     let terminal = Terminal::default();
-    let mut report = SchemaAboutReport::new(&terminal);
+    let mut report = SchemaAboutReport::new(&terminal, code_block_mode);
 
     report.header()?;
     report.shapes(schema_shape_descriptors())?;
@@ -61,16 +62,18 @@ struct SchemaAboutReport<'a> {
     terminal: &'a Terminal,
     width: u32,
     previous_blank: bool,
+    code_block_mode: CodeBlockMode,
 }
 
 impl<'a> SchemaAboutReport<'a> {
-    fn new(terminal: &'a Terminal) -> Self {
+    fn new(terminal: &'a Terminal, code_block_mode: CodeBlockMode) -> Self {
         let margin_width = LEFT_MARGIN_CH + RIGHT_MARGIN_CH;
         let width = terminal.width().saturating_sub(margin_width).max(MIN_REPORT_WIDTH);
         Self {
             terminal,
             width,
             previous_blank: true,
+            code_block_mode,
         }
     }
 
@@ -282,6 +285,7 @@ In this example, constraints are added to a string, a number, and an array of st
         let mut options = TerminalOptions::default();
         options.max_width = Some(self.width.min(u16::MAX as u32) as u16);
         options.color_mode = markdown_color_mode_from_terminal(self.terminal.color_mode());
+        options.code_block_mode = self.code_block_mode;
         options
     }
 
@@ -543,7 +547,7 @@ mod tests {
 
     fn render_schema_about_markdown(mode: TerminalColorMode) -> String {
         let terminal = terminal_for_mode(mode);
-        let report = SchemaAboutReport::new(&terminal);
+        let report = SchemaAboutReport::new(&terminal, CodeBlockMode::default());
         let mut options = report.markdown_options();
         options.code_theme = ThemePair::OneHalf;
         options.prose_theme = ThemePair::OneHalf;
@@ -603,7 +607,7 @@ mod tests {
             (TerminalColorMode::Unknown, MarkdownColorMode::Dark),
         ] {
             let terminal = terminal_for_mode(terminal_mode);
-            let report = SchemaAboutReport::new(&terminal);
+            let report = SchemaAboutReport::new(&terminal, CodeBlockMode::default());
             let options = report.markdown_options();
 
             assert_eq!(options.color_mode, markdown_mode);

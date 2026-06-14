@@ -270,6 +270,53 @@ fn schema_about_verbose_prints_advanced_sections_as_readable_lists() {
 }
 
 #[test]
+fn schema_about_accepts_code_block_flag() {
+    md_cmd()
+        .args(["schema", "about", "--code-block", "light"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("SimplifiedSchema"));
+}
+
+#[test]
+fn schema_about_rejects_invalid_code_block_value() {
+    md_cmd()
+        .args(["schema", "about", "--code-block", "sideways"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value 'sideways'"));
+}
+
+#[test]
+fn schema_about_code_block_dark_and_light_differ() {
+    // The OneHalf code theme is paired, so forcing the dark vs light variant
+    // must change the code-block background SGR. We assert each run carries a
+    // background SGR the other does not, independent of exact RGB.
+    let dark = md_cmd()
+        .args(["schema", "about", "--code-block", "dark"])
+        .env("FORCE_COLOR", "1")
+        .env("COLORTERM", "truecolor")
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("run dark");
+    let light = md_cmd()
+        .args(["schema", "about", "--code-block", "light"])
+        .env("FORCE_COLOR", "1")
+        .env("COLORTERM", "truecolor")
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("run light");
+    assert!(dark.status.success() && light.status.success());
+
+    let dark_out = String::from_utf8_lossy(&dark.stdout);
+    let light_out = String::from_utf8_lossy(&light.stdout);
+    assert_ne!(
+        dark_out, light_out,
+        "forcing the dark vs light code-block variant must change the rendered output"
+    );
+}
+
+#[test]
 fn schema_about_emits_table_stripes_when_color_is_enabled() {
     let output = md_cmd()
         .args(["schema", "about"])

@@ -1,5 +1,6 @@
 //! Type definitions for the markdown module.
 
+use std::ops::Range;
 use std::path::PathBuf;
 
 use biscuit_file::YamlParseError;
@@ -104,6 +105,18 @@ pub enum MarkdownError {
         reason: String,
     },
 
+    /// A disclosure block was malformed at render time.
+    ///
+    /// Raised by the block-extension processor when a `::disclosure` region
+    /// violates the summary/body rules or is missing a required delimiter.
+    #[error("Malformed disclosure block: {reason}")]
+    MalformedDisclosure {
+        /// Human-readable reason the block was rejected.
+        reason: String,
+        /// Byte range of the disclosure region in the source document.
+        range: Range<usize>,
+    },
+
     /// The render-tree document renderer rejected the document.
     ///
     /// Raised when [`Markdown::as_html`](crate::markdown::Markdown::as_html) or
@@ -205,6 +218,9 @@ impl BlockError for MarkdownError {
             MarkdownError::RenderTree(source) => blocks::render_tree_block(&source.to_string()),
             MarkdownError::MalformedStoredHash { property, reason } => {
                 blocks::malformed_stored_hash_block(property, reason)
+            }
+            MarkdownError::MalformedDisclosure { reason, range } => {
+                blocks::malformed_disclosure_block(reason, range)
             }
             MarkdownError::SchemaValidationFailed {
                 path,
