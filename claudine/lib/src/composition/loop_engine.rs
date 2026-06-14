@@ -37,7 +37,7 @@ pub struct LoopExecutionOptions {
     pub interrupt_check: Option<fn() -> bool>,
     /// Override for the safety margin added on top of a provider's `reset_at`
     /// when pausing for a rate limit. `None` uses the built-in
-    /// [`PAUSE_RESET_MARGIN`]. The CLI populates this from
+    /// `PAUSE_RESET_MARGIN`. The CLI populates this from
     /// `CLAUDINE_PAUSE_RESET_MARGIN`; tests inject a near-zero value to keep
     /// pause-policy coverage fast without weakening it.
     pub pause_reset_margin: Option<std::time::Duration>,

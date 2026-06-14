@@ -79,7 +79,7 @@ just populate-assets # dev-only: refresh curated domain bodies from Iconify
 | Styled `<svg>` assembly (color, flip, rotate, view-box) | `biscuit-icon::style` |
 | Browser / markdown / terminal render-tree integration   | `biscuit-icon` (via `renderable` + `biscuit-terminal`) |
 | Terminal ladder (Nerd Font → Unicode → image → text)    | `biscuit-icon` (via `biscuit-terminal`) |
-| `icon sets`, `icon icons`, `icon completions`, `icon cache clear` | `biscuit-icon-cli` |
+| `icon show`, `icon sets`, `icon domain`, `icon cache list`/`cache clear`, `icon completions` | `biscuit-icon-cli` |
 | `mdi:home` URL routing on icon-sets.iconify.design      | Iconify      |
 
 ## Core Public Types (Library)
@@ -170,6 +170,10 @@ icon cache clear
   the set directory is at <https://icon-sets.iconify.design> and supports
   filters for `?palette=`, `?commercial=`, `?attribution=`, `?grid=`,
   `?category=`, and `?tag=`.
+- Icon sets expose rich **metadata** — name, author, license, category, tags,
+  palette flag — and icons within sets expose **categories**, **themes**
+  (prefix/suffix variations), and optional **character maps** (for icon-font
+  imports). See [iconify.md § Iconify Platform Metadata](iconify.md#iconify-platform-metadata).
 
 For endpoint-by-endpoint coverage (the three endpoints the library uses,
 plus their query parameters and response shapes), see [iconify.md](iconify.md).
