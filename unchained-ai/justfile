@@ -42,17 +42,19 @@ default:
     just --list | grep -v 'default'
     echo
 
-# build unchained-ai packages (lib, cli, gen)
+# build unchained-ai packages (lib, cli, gen, contract)
 build *args="":
     @just _build unchained-ai "unchained-ai Library" {{ args }}
-    @just _build unchained-ai-cli "unchained-ai Library" {{ args }}
-    @just _build unchained-ai-gen "unchained-ai Library" {{ args }}
+    @just _build unchained-ai-contract "unchained-ai Contract Library" {{ args }}
+    @just _build unchained-ai-cli "unchained-ai CLI" {{ args }}
+    @just _build unchained-ai-gen "unchained-ai Gen" {{ args }}
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
     @just _sanity unchained-ai
+    @just _sanity unchained-ai-contract
     @just _sanity unchained-ai-cli
     @just _sanity unchained-ai-gen
     @just _sanity model_id
@@ -60,6 +62,7 @@ sanity:
 # Test both library and CLI.
 test *args="":
     @just _test unchained-ai {{ args }}
+    @just _test unchained-ai-contract {{ args }}
     @just _test unchained-ai-cli {{ args }}
     @just _test unchained-ai-gen {{ args }}
     @just _test model_id {{ args }}
@@ -89,6 +92,7 @@ bench:
 # Per-package LCOV coverage.
 coverage *args="":
     @just _coverage unchained-ai {{ args }}
+    @just _coverage unchained-ai-contract {{ args }}
     @just _coverage unchained-ai-cli {{ args }}
     @just _coverage unchained-ai-gen {{ args }}
     @just _coverage model_id {{ args }}
@@ -96,6 +100,7 @@ coverage *args="":
 # Doctests.
 doctest *args="":
     @just _doctest unchained-ai {{ args }}
+    @just _doctest unchained-ai-contract {{ args }}
     @just _doctest unchained-ai-cli {{ args }}
     @just _doctest unchained-ai-gen {{ args }}
     @just _doctest model_id {{ args }}
@@ -118,6 +123,7 @@ all:
 # run clippy on unchained-ai packages
 lint *args="":
     @just _lint unchained-ai {{ args }}
+    @just _lint unchained-ai-contract {{ args }}
     @just _lint unchained-ai-cli {{ args }}
     @just _lint unchained-ai-gen {{ args }}
 
@@ -133,9 +139,9 @@ install *args="":
 
 check:
     @echo ""
-    @echo "Checking unchained-ai Library, CLI and Gen"
+    @echo "Checking unchained-ai Library, Contract, CLI and Gen"
     @echo ""
-    @cargo check -p unchained-ai -p unchained-ai-cli -p unchained-ai-gen
+    @cargo check -p unchained-ai -p unchained-ai-contract -p unchained-ai-cli -p unchained-ai-gen
 
 # Regenerate provider model enums and metadata lookup tables.
 

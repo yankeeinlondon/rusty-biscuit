@@ -51,7 +51,7 @@ Core pipeline machinery and the atomic steps used by the CLI and higher-level fl
     - binary detection (PNG/JPEG/GIF/WebP/SVG, MP3/WAV/OGG/FLAC)
     - a builder-style API for capability selection and structured responses
     - async validation of external resources via HEAD requests
-    - note: `execute` currently returns a fatal error (LLM execution not implemented yet).
+    - `execute` / `execute_readonly` resolve the requested capability to a concrete provider/model and run a single-turn completion through the `execution/` surface
 - `OpenCodeDelegation`: delegates a step to the `opencode` CLI. It builds prompts embedding state and JSON schema, supports interactive/headless modes, manages sessions, and parses the JSON event stream to return assistant output.
 - `UserContent` and `Transcribe` are placeholders for future atomic steps.
 
@@ -146,7 +146,6 @@ The provider registry (see `rigging/providers/provider.rs`) defines how each pro
 
 ## Known gaps and placeholders
 
-- `Prompt::execute` is not implemented yet and always returns a fatal `StepError`.
 - `api/hugging_face_api.rs`, `functional_grouping::SmartConcat`, `Transcribe`, `UserContent`, and `foreign_agent` are scaffolds for future work.
 
 ## Where to start
