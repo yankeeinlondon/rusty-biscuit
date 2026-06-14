@@ -89,7 +89,9 @@ sniff repo recent-commits "{{timeframe}}" --package-area "{{area}}" --plain -vv
 - Once the document is complete, provide a summary description of your findings to the caller
     - save this same summary which you report to STDOUT to the `summary` frontmatter property
 
-> **Note:** the `features` and `fixes` Frontmatter properties refer to the parent directory name from where "spec.md" file was located
+> **Note:** the `features` and `fixes` Frontmatter properties refer to the parent directory name from where "spec.md" file was located. If we were in a
+> package area called "foobar" then you'd expect directories like `foobar/features` and `foobar/fixes` to exist and an active feature being worked on 
+> might be called something like: `foobar/features/2026-06-06-do-something/spec.md`. The "name" of the feature in this case would be `2026-06-06-do-something`.
 > 
 > - `fixes` are those which were found under the directory "*/fixes/"
 > - `features` are those which were found under the directory "*/features/"
