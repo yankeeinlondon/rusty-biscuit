@@ -1167,3 +1167,157 @@ async fn browser_page_code_block_mode_same_vs_inverse_computes() {
     );
     harness.shutdown().await;
 }
+
+// ---------------------------------------------------------------------------
+// Review-5 finding 1: browser disclosure behavior was only verified at Level 1
+// (HTML-source substrings). The spec requires native `<details>`/`<summary>`
+// with NO JavaScript, where the body is revealed by the browser's own
+// click-to-open behavior. These drive a real headless Chromium and assert the
+// parsed DOM toggles: the body is unrendered while `details.open === false` and
+// rendered after the summary is clicked and `details.open === true`. The whole
+// interaction runs in one `evaluate` because each `computed_style` call opens a
+// fresh page and could not observe the click.
+// ---------------------------------------------------------------------------
+
+/// Parses a `"key=value;key=value"` payload (the shape the disclosure probe
+/// scripts return) into a lookup map.
+fn parse_kv(payload: &str) -> std::collections::HashMap<String, String> {
+    payload
+        .split(';')
+        .filter_map(|pair| pair.split_once('='))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+/// Review-5 finding 1: a disclosure rendered to HTML must parse into a native
+/// `<details>`/`<summary>` DOM, carry no `<script>`, hide the body while closed,
+/// and reveal it when the summary is clicked — proven against a real browser,
+/// not an HTML-source substring.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_disclosure_click_reveals_body() {
+    if !require_browser() {
+        return;
+    }
+
+    let md: Markdown =
+        "::disclosure\nSummary text\n::details\nBody paragraph.\n::end-disclosure\n".into();
+    let fragment = md.as_html(HtmlOptions::default()).expect("as_html");
+    let doc = wrap_fragment(&fragment, "#ffffff");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    // `checkVisibility()` reports the browser's own rendered-visibility verdict:
+    // a closed `<details>` hides its non-summary content (Chrome wraps it in a
+    // `content-visibility: hidden` `::details-content`), so the body computes
+    // not-visible while closed and visible once the summary is clicked open. (A
+    // bounding-box height check is unreliable here: Chrome still lays the body
+    // out at its intrinsic size even while it is visually hidden.)
+    let probe = "(() => {\
+        const d = document.querySelector('details');\
+        if (!d) return 'err=no-details';\
+        const summary = d.querySelector('summary');\
+        if (!summary) return 'err=no-summary';\
+        const body = d.querySelector('p');\
+        if (!body) return 'err=no-body';\
+        const scripts = document.querySelectorAll('script').length;\
+        const closedOpen = d.open;\
+        const closedVis = body.checkVisibility();\
+        summary.click();\
+        const openedOpen = d.open;\
+        const openedVis = body.checkVisibility();\
+        return `scripts=${scripts};closedOpen=${closedOpen};closedVis=${closedVis};openedOpen=${openedOpen};openedVis=${openedVis}`;\
+    })()";
+    let result = harness.evaluate(probe).await.expect("evaluate disclosure probe");
+    assert!(
+        !result.starts_with("err="),
+        "disclosure DOM probe failed: {result}",
+    );
+    let kv = parse_kv(&result);
+
+    assert_eq!(
+        kv.get("scripts").map(String::as_str),
+        Some("0"),
+        "native disclosure must include no <script>; got {result}",
+    );
+    assert_eq!(
+        kv.get("closedOpen").map(String::as_str),
+        Some("false"),
+        "disclosure must start closed; got {result}",
+    );
+    assert_eq!(
+        kv.get("closedVis").map(String::as_str),
+        Some("false"),
+        "body must be hidden while closed; got {result}",
+    );
+    assert_eq!(
+        kv.get("openedOpen").map(String::as_str),
+        Some("true"),
+        "clicking the summary must open the disclosure; got {result}",
+    );
+    assert_eq!(
+        kv.get("openedVis").map(String::as_str),
+        Some("true"),
+        "body must be visible once opened; got {result}",
+    );
+
+    harness.shutdown().await;
+}
+
+/// Review-5 finding 1 (nested): a disclosure nested in another's body must parse
+/// as a second `<details>`, stay unrendered until the outer opens, then toggle
+/// independently when its own summary is clicked.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_nested_disclosure_toggles_independently() {
+    if !require_browser() {
+        return;
+    }
+
+    let md: Markdown = "::disclosure\nOuter\n::details\nOuter body.\n\n::disclosure\nInner\n::details\nInner body.\n::end-disclosure\n\n::end-disclosure\n".into();
+    let fragment = md.as_html(HtmlOptions::default()).expect("as_html");
+    let doc = wrap_fragment(&fragment, "#ffffff");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let probe = "(() => {\
+        const all = document.querySelectorAll('details');\
+        if (all.length < 2) return `err=count-${all.length}`;\
+        const outer = all[0], inner = all[1];\
+        const innerVisClosed = inner.checkVisibility();\
+        outer.querySelector('summary').click();\
+        const innerVisOuterOpen = inner.checkVisibility();\
+        inner.querySelector('summary').click();\
+        return `count=${all.length};innerVisClosed=${innerVisClosed};innerVisOuterOpen=${innerVisOuterOpen};innerOpen=${inner.open}`;\
+    })()";
+    let result = harness.evaluate(probe).await.expect("evaluate nested probe");
+    assert!(!result.starts_with("err="), "nested DOM probe failed: {result}");
+    let kv = parse_kv(&result);
+
+    assert_eq!(
+        kv.get("count").map(String::as_str),
+        Some("2"),
+        "nested disclosures must parse as two <details>; got {result}",
+    );
+    assert_eq!(
+        kv.get("innerVisClosed").map(String::as_str),
+        Some("false"),
+        "inner disclosure must be hidden while the outer is closed; got {result}",
+    );
+    assert_eq!(
+        kv.get("innerVisOuterOpen").map(String::as_str),
+        Some("true"),
+        "inner disclosure must become visible once the outer opens; got {result}",
+    );
+    assert_eq!(
+        kv.get("innerOpen").map(String::as_str),
+        Some("true"),
+        "clicking the inner summary must open the inner disclosure; got {result}",
+    );
+
+    harness.shutdown().await;
+}

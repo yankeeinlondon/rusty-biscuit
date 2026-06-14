@@ -67,6 +67,34 @@ static SHARED_HARNESS: SharedHarness<WezTermHarness> = SharedHarness::new();
 /// Monotonic counter for sentinel uniqueness across tests in this binary.
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
 
+/// Absolute path to the `md` binary built for *this* workspace, injected by
+/// Cargo at compile time. Using it instead of a bare `md` keeps Level 2 tests
+/// from silently passing against a stale `md` installed on the host `PATH`
+/// (e.g. `~/.cargo/bin/md`) while the code under review still fails.
+const MD_BIN: &str = env!("CARGO_BIN_EXE_md");
+
+/// Absolute path to a `md` symlink (under the system temp dir) that points at
+/// [`MD_BIN`]. Tests invoke this instead of `MD_BIN` directly because the built
+/// binary lives under `…/rusty-biscuit/…/target/debug/md`, whose path contains
+/// the substring `rust`. Embedding that path in the shell command would put
+/// `rust` into the captured command echo, where `find(|l| l.contains("rust"))`
+/// anchors (the rust code-fence label) would match the echo instead of the
+/// rendered code block. The symlink lives under `/var/folders/…`, so the
+/// visible command carries no `rust` while still running the freshly built
+/// binary rather than whatever `md` happens to be installed on the host.
+fn md_shim() -> &'static str {
+    static SHIM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SHIM.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("dm-md-shim-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create md shim dir");
+        let link = dir.join("md");
+        // Idempotent across reruns within the same pid: replace any stale link.
+        let _ = fs::remove_file(&link);
+        std::os::unix::fs::symlink(MD_BIN, &link).expect("symlink md shim");
+        link.to_str().expect("shim path is valid UTF-8").to_string()
+    })
+}
+
 /// Maximum wall time we'll spend waiting for a single command's completion
 /// sentinel to appear in the pane. Generous — most `md` invocations finish
 /// in well under a second; this is a safety net for first-run cold builds.
@@ -125,10 +153,30 @@ fn run_md(file_body: &str, extra_args: &str) -> Option<(CapturedFrame, std::path
     run_md_env(file_body, extra_args, &[])
 }
 
+/// Like [`run_md`] but runs the just-built `md` ([`md_shim`]) instead of the
+/// host `PATH` binary. Used by the disclosure Level 2 tests so they verify the
+/// code under review rather than whatever `md` is installed on the host
+/// (review-4 finding #3).
+fn run_md_built(file_body: &str, extra_args: &str) -> Option<(CapturedFrame, std::path::PathBuf)> {
+    run_md_env_bin(md_shim(), file_body, extra_args, &[])
+}
+
 /// Like [`run_md`] but injects inline environment assignments onto the `md`
 /// invocation (e.g. `COLORFGBG` to force light/dark color-mode detection
 /// deterministically).
 fn run_md_env(
+    file_body: &str,
+    extra_args: &str,
+    env: &[(&str, &str)],
+) -> Option<(CapturedFrame, std::path::PathBuf)> {
+    run_md_env_bin("md", file_body, extra_args, env)
+}
+
+/// Core of [`run_md_env`] parameterized over the `md` program to invoke. `bin`
+/// is either the bare `md` (resolved through the pane's `PATH`) or an absolute
+/// path to the just-built binary via [`md_shim`].
+fn run_md_env_bin(
+    bin: &str,
     file_body: &str,
     extra_args: &str,
     env: &[(&str, &str)],
@@ -154,7 +202,7 @@ fn run_md_env(
     // into this capture. `clear` is portable across bash and zsh.
     run_with_sentinel(harness, "clear");
 
-    let cmd = format!("md {} {}", file_path.display(), extra_args);
+    let cmd = format!("{bin} {} {}", file_path.display(), extra_args);
     let frame = run_with_sentinel_env(harness, &cmd, env);
     // Keep tempdir alive past capture by returning its path.
     Some((frame, file_path))
@@ -2856,7 +2904,7 @@ fn raw_sgr_has_attr(raw: &str, param: u32) -> bool {
 #[serial(level2_terminal)]
 fn level2_disclosure_body_renders_as_dim_italic_block_quote() {
     let body = "::disclosure\nLicense_sentinel Agreement\n::details\nKeep_sentinel your hands off.\n::end-disclosure\n";
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    let Some((frame, _)) = run_md_built(body, "--max-width 60") else {
         return;
     };
 
@@ -2899,7 +2947,7 @@ fn level2_disclosure_honors_inline_opener_color_and_width() {
     // must reach the real terminal: the summary carries the truecolor red and
     // the narrow `max-width` wraps the body into multiple quoted lines.
     let body = "::disclosure color=red-500 max-width=24ch Inline_sentinel Title\n::details\nThis disclosed body is comfortably longer than twenty-four columns wide here.\n::end-disclosure\n";
-    let Some((frame, _)) = run_md(body, "--max-width 70") else {
+    let Some((frame, _)) = run_md_built(body, "--max-width 70") else {
         return;
     };
 
@@ -2924,6 +2972,114 @@ fn level2_disclosure_honors_inline_opener_color_and_width() {
     assert!(
         frame.raw.contains("251;44;54") || frame.raw.contains("251:44:54"),
         "expected red-500 truecolor on the disclosure. raw:\n{}",
+        frame.raw
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_disclosure_inline_width_overrides_frontmatter_max_width() {
+    // Cross-property precedence: an instance `width=60ch` must override the
+    // lower-priority frontmatter `max-width: 24ch` (review-6 finding). The two
+    // properties are a mutually exclusive layout choice across precedence
+    // layers, so the stale 24-column cap must not survive to clamp the body.
+    //
+    // The body is wider than 24 columns but well under 60: with the bug the
+    // stale cap wraps it to multiple quoted lines; with the fix it renders on a
+    // single quoted line at the 60-column instance width.
+    let body = r#"---
+style:
+    disclosure:
+        max-width: 24ch
+---
+
+::disclosure width=60ch Inline_sentinel Title
+::details
+This disclosed body stays on one line at sixty wide.
+::end-disclosure
+"#;
+    let Some((frame, _)) = run_md_built(body, "--max-width 80") else {
+        return;
+    };
+
+    assert!(
+        frame.plain.contains("Inline_sentinel"),
+        "expected disclosure summary text in capture. plain:\n{}",
+        frame.plain
+    );
+
+    // Only one block-quoted (`│`) line: the inline `width=60ch` wins, so the
+    // ~52-column body is not clamped to the frontmatter 24-column cap.
+    let quoted_lines = frame.plain.lines().filter(|l| l.contains('│')).count();
+    assert_eq!(
+        quoted_lines, 1,
+        "inline width=60ch must override frontmatter max-width=24ch; body must \
+         stay on a single quoted line. plain:\n{}",
+        frame.plain
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_disclosure_honors_frontmatter_style_color_width_alignment() {
+    // `style.disclosure.*` frontmatter must reach the real terminal through the
+    // built CLI (which wires `apply_disclosure_style` + `apply_color_style`): the
+    // summary carries the truecolor red, the narrow `max-width` wraps the body
+    // into multiple quoted lines, and `alignment: center` indents the centered
+    // block (review-5 finding #2).
+    //
+    // `bg-color` terminal-cell painting for disclosures is not asserted here: the
+    // disclosure terminal target renders its body as a dim/italic block quote and
+    // does not fill background cells for the component bucket. The browser tier
+    // (`darkmatter/lib/tests/browser_render.rs`) covers component `bg-color`.
+    let body = r#"---
+style:
+    disclosure:
+        color: red-500
+        max-width: 24ch
+        alignment: center
+---
+
+::disclosure
+Frontmatter_sentinel Title
+::details
+This disclosed body is comfortably longer than twenty-four columns wide here.
+::end-disclosure
+"#;
+    let Some((frame, _)) = run_md_built(body, "--max-width 70") else {
+        return;
+    };
+
+    // The summary sentinel only appears in rendered output, never in the echoed
+    // command (which carries the temp path, not the file contents).
+    let summary_line = frame
+        .plain
+        .lines()
+        .find(|l| l.contains("Frontmatter_sentinel"))
+        .unwrap_or_else(|| panic!("disclosure summary line missing. plain:\n{}", frame.plain));
+
+    // `alignment: center` centers the narrow block, so the summary line carries
+    // a left indent.
+    let leading = summary_line.chars().take_while(|c| *c == ' ').count();
+    assert!(
+        leading >= 2,
+        "centered disclosure summary must be indented, got {leading} leading spaces: {summary_line:?}"
+    );
+
+    // `max-width=24ch` forces the body to wrap into more than one block-quoted
+    // (`│`) line.
+    let quoted_lines = frame.plain.lines().filter(|l| l.contains('│')).count();
+    assert!(
+        quoted_lines >= 2,
+        "frontmatter max-width must wrap the body into multiple quoted lines. plain:\n{}",
+        frame.plain
+    );
+
+    // red-500 lowers to truecolor `251;44;54`; WezTerm may re-emit it in ITU
+    // colon form.
+    assert!(
+        frame.raw.contains("251;44;54") || frame.raw.contains("251:44:54"),
+        "expected red-500 truecolor from frontmatter on the disclosure. raw:\n{}",
         frame.raw
     );
 }
