@@ -108,6 +108,13 @@ fn make_adapter() -> Arc<dyn InferenceAdapter> {
   the only crate that depends on both `biscuit-contract` and `claudine` (lib);
   consumers inject it as `Arc<dyn InferenceAdapter>`. See the `claudine` skill
   and `claudine/contract/README.md` (provider support matrix, security posture).
+- **`unchained-ai-contract`** (`unchained-ai/contract`) is the second provider
+  adapter implementing `InferenceAdapter`. It routes single-turn inference
+  requests through the `unchained-ai` execution surface and capability-based
+  model resolver. It is the only crate that depends on both `biscuit-contract`
+  and `unchained-ai` (lib); consumers inject it as `Arc<dyn InferenceAdapter>`.
+  See the `unchained-ai` skill and
+  `unchained-ai/contract/docs/dependencies.md`.
 
 ## When You Need More
 
@@ -127,6 +134,6 @@ fn make_adapter() -> Arc<dyn InferenceAdapter> {
 - provider-native request/response values
 
 Provider implementations live in their own package areas: `claudine-contract`
-(`claudine/contract`) is the first, implementing the trait over a tool-free
-agentic-CLI session. An Unchained AI adapter and consumer wiring in Reaper and
-Darkmatter are follow-up work owned by their own areas.
+(`claudine/contract`) implements the trait over a tool-free agentic-CLI
+session, and `unchained-ai-contract` (`unchained-ai/contract`) implements it
+over the `unchained-ai` execution surface and model resolver.
