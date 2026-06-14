@@ -4514,6 +4514,22 @@ Rounded: {{ round(pi) }}"#;
     // ── Frontmatter Interpolation Integration Tests ─────────────────
 
     #[test]
+    fn debug_review_prompt_repro() {
+        let content = "---\ndir: \"$(dirname '{{spec}}')\"\nreview: \"{{ dir + '/review-' + iteration + '.md' }}\"\n---\nbody\n";
+        let md: Markdown = content.into();
+        let result = md.compose_with(
+            ComposeOptions::new().with_set_overrides(serde_json::json!({
+                "spec": "features/2026-06-13-rough-edges/spec.md",
+                "iteration": 1,
+            })),
+        );
+        match result {
+            Ok((composed, _)) => eprintln!("DM_DEBUG OK frontmatter:\n{}", composed.content()),
+            Err(e) => eprintln!("DM_DEBUG ERR: {e}"),
+        }
+    }
+
+    #[test]
     fn test_frontmatter_interpolation_spec_example() {
         let content = "---\nbase: /path/to/something\nspec: \"{{base}}/spec.md\"\nplan: \"{{base}}/plan.md\"\n---\nThe spec is located at: {{spec}}\nThe plan is located at: {{plan}}";
         let md: Markdown = content.into();
