@@ -36,7 +36,7 @@
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaShape,
-    SimplifiedSchema, SimplifiedType, ValidationProblem, ValidationProblemKind,
+    SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem, ValidationProblemKind,
 };
 
 use super::error::{
@@ -641,7 +641,12 @@ fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
 /// Returns `None` when the atom describes a shape that cannot be
 /// collected via a single TUI widget (e.g. `object`, `any`).
 fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
-    match atom.ty {
+    // Inline-object atoms have no single-widget representation, like `object`.
+    let ty = match &atom.ty {
+        TypeExpr::Primitive(ty) => *ty,
+        TypeExpr::InlineObject(_) => return None,
+    };
+    match ty {
         SimplifiedType::Enum => {
             let members: Vec<String> = atom
                 .constraints
@@ -695,7 +700,11 @@ fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
 
 fn type_label_for_atom(atom: &PropertyAtom) -> String {
     let suffix = if atom.is_array { "[]" } else { "" };
-    if matches!(atom.ty, SimplifiedType::Enum) {
+    let ty = match &atom.ty {
+        TypeExpr::Primitive(ty) => *ty,
+        TypeExpr::InlineObject(_) => return format!("object{suffix}"),
+    };
+    if matches!(ty, SimplifiedType::Enum) {
         let members = atom.constraints.iter().find_map(|c| match c {
             Constraint::Members(m) => Some(m.join("|")),
             _ => None,
@@ -705,7 +714,7 @@ fn type_label_for_atom(atom: &PropertyAtom) -> String {
             None => format!("enum(){suffix}"),
         }
     } else {
-        format!("{base}{suffix}", base = atom.ty.as_keyword())
+        format!("{base}{suffix}", base = ty.as_keyword())
     }
 }
 
