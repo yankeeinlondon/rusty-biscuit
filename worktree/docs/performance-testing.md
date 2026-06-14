@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-6dae13caf54390d4
+hash: ef46db3751d8e999-5f1753d5627d5caa
 ---
 
 # Performance Testing — Worktree
@@ -39,11 +39,34 @@ The third owned cost center is the verbose commit block rendered by `wt list -v`
 
 ## Bench Recipe
 
-The worktree package `justfile` does not define a `bench` recipe today. Adding Criterion benchmarks and wiring them through the shared `/just` bench pattern is a follow-up; until then, this document defines the surfaces a future benchmark suite should cover.
+The library-owned gather surface is benchmarked with Criterion in [`worktree/lib/benches/list_status.rs`](../../worktree/lib/benches/list_status.rs). The bench runs end-to-end against `list_worktrees()` in the ambient `rusty-biscuit` checkout, using `iter_batched_ref` with a throughput of one element per iteration so the report shows calls/sec.
+
+Run the benches from the package area with:
+
+```sh
+just -d worktree bench
+```
+
+The HTML report is written to `target/criterion/report/index.html`.
+
+Use the shared baseline workflow to compare before and after a change:
+
+```sh
+just -d worktree bench-save   # capture this host's baseline
+just -d worktree bench-compare  # compare the current run against it
+```
+
+The shared `_bench_preflight` recipe checks battery, memory, and load before running, and `_bench_id` produces a host-derived baseline ID so baselines do not accidentally migrate across machines.
 
 ## Measurement Methodology
 
-Until Criterion benchmarks are wired, the `perf_*` tests plus the `gather_branch_uses_one_merge_base_and_no_short_sha` fixture test provide reproducible subprocess-count and wall-clock measurements. Run the perf tests with:
+Criterion benches, the `--perf` runtime diagnostic, and the `perf_*` tests together provide complementary measurement surfaces. The benches cover the library-owned gather stage, `--perf` covers the full CLI pipeline end-to-end, and the `perf_*` tests assert reproducible subprocess-count and wall-clock bounds.
+
+### Runtime `--perf` flag
+
+`wt list --perf` emits a per-stage timing report to stderr after the command completes. The report is rendered with `biscuit-terminal`'s `MetricsTree` inside a `BlockQuote` and shows only the stages that actually ran, plus an `unattributed` node so the tree reconciles to the wall-clock total. On a non-image terminal the graph-gather and graph-image-render stages are omitted, matching the package's exclusion of rasterization from worktree-owned benchmarks. Use this as a runtime diagnostic complement to the dev-time Criterion benches.
+
+Run the perf tests with:
 
 ```sh
 cargo nextest run -p worktree-cli -E 'test(/perf_/)' --nocapture
