@@ -25,7 +25,7 @@ The review document you will produce will consist of the following sections:
     - report on code which has been made more DRY
     - report on code which has been made more performant
     - report on code that has been made more ergonomic
-    - report on fixes made to documenation drift
+    - report on fixes made to documentation drift
 
     Where possible you should:
 
@@ -35,11 +35,11 @@ The review document you will produce will consist of the following sections:
 
 - at the same time that you're evaluating the activity/achievements, you should be evaluating what **more** could or should be done:
     - this content will go in the `## Suggestions` section
-    - what aspects of the code do NOT follow the DRY standard? How could better reuse and less codepaths be achieved to ensure we don't end up with duplicative code or even worse, slightly variant implementations of the same functionality.
+    - what aspects of the code do NOT follow the DRY standard? How could better reuse and less code paths be achieved to ensure we don't end up with duplicative code or even worse, slightly variant implementations of the same functionality.
         - you are allowed to consider design patterns which include not only packages in the '{{area}}' but also other packages in the monorepo which are a direct dependency of the packages in '{{area}}'
-    - are there ways to make the code more ergnomic?
+    - are there ways to make the code more ergonomic?
     - how can we make the code more performant?
-        - segment these opportunties into opportunties which have only upside versus those which have some sort of complexity such as:
+        - segment these opportunities into opportunities which have only upside versus those which have some sort of complexity such as:
             - Complexity: adding lifetimes, large number of callsites and requires changing signature
             - Ergonomics: the performance gain would come as an ergonomic loss
             - etc.
@@ -108,4 +108,3 @@ sniff repo recent-commits "{{timeframe}}" --package-area "{{area}}" --plain -vv
 >     - each review writes the `ready` frontmatter property to true/false
 >     - when a review reaches a state that it's considered "production ready" the `ready` property will be set to `true` and in 99.9% of cases that 
 >       means we consider this fix/feature to be done
-
