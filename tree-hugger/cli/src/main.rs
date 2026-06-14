@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use biscuit_terminal::discovery::detection::ColorDepth;
-use biscuit_terminal::prelude::{Prose, Terminal, TerminalRenderable, WordWrap, strip_escape_codes};
+use biscuit_terminal::prelude::{
+    Prose, Terminal, TerminalRenderable, WordWrap, strip_escape_codes,
+};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
@@ -20,6 +22,7 @@ use tree_hugger::cache::{
     AnalyzerFingerprint, CacheConfig, FileCacheKey, InMemorySymbolCache, InProcessCache,
     PersistentCache, SymbolSnapshot,
 };
+use tree_hugger::god_files::{GodAnalysis, GodFiles, RefactorHint, RiskBand, SymbolBlock};
 use tree_hugger::{
     CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary,
     FileSymbolIndex, FunctionSignature, ImportSymbol, LintDiagnostic, ParameterInfo,
@@ -27,7 +30,6 @@ use tree_hugger::{
     SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError, TypeMetadata, VariantInfo,
     find_git_root, find_package_root,
 };
-use tree_hugger::god_files::{GodAnalysis, GodFiles, RefactorHint, RiskBand, SymbolBlock};
 mod import_format;
 mod prelude;
 mod scanner;
@@ -899,11 +901,12 @@ fn main() -> Result<(), TreeHuggerError> {
                 } else {
                     analyses.iter().collect()
                 };
-                let json =
-                    serde_json::to_string_pretty(&emitted).map_err(|source| TreeHuggerError::Io {
+                let json = serde_json::to_string_pretty(&emitted).map_err(|source| {
+                    TreeHuggerError::Io {
                         path: PathBuf::from("<stdout>"),
                         source: std::io::Error::other(source),
-                    })?;
+                    }
+                })?;
                 println!("{json}");
             }
             OutputFormat::Pretty | OutputFormat::Plain => {
@@ -929,7 +932,17 @@ fn main() -> Result<(), TreeHuggerError> {
 
     // Extract scan options from the subcommand args. God-files and completions
     // are handled earlier; every remaining subcommand carries a `ScanOptions`.
-    let (language, exclude_files, exclude_symbols, comments, no_cache, group_by_file, group_by_module, sort_by_kind, sort_by_module) = match &cli.command {
+    let (
+        language,
+        exclude_files,
+        exclude_symbols,
+        comments,
+        no_cache,
+        group_by_file,
+        group_by_module,
+        sort_by_kind,
+        sort_by_module,
+    ) = match &cli.command {
         Command::Functions(args)
         | Command::Types(args)
         | Command::Symbols(args)
@@ -3339,7 +3352,12 @@ fn render_symbol_block(term: &Terminal, plain: bool, block: &SymbolBlock) {
         }
         let remaining = callout.member_count.saturating_sub(callout.members.len());
         if remaining > 0 {
-            prose_line(term, plain, 6, &format!("- <dim>…and {remaining} more</dim>"));
+            prose_line(
+                term,
+                plain,
+                6,
+                &format!("- <dim>…and {remaining} more</dim>"),
+            );
         }
     }
 }
@@ -3369,7 +3387,9 @@ fn format_refactor_hint(hint: &RefactorHint) -> String {
             )
         }
         RefactorHint::ManyUnrelatedTopLevel { count } => {
-            format!("likely refactor: {count} unrelated top-level symbols — split by responsibility")
+            format!(
+                "likely refactor: {count} unrelated top-level symbols — split by responsibility"
+            )
         }
         RefactorHint::DeeplyNested { depth } => {
             format!("likely refactor: deeply nested (depth {depth}) — extract / flatten")

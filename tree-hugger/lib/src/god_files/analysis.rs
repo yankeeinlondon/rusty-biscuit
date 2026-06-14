@@ -1515,7 +1515,11 @@ mod tests {
         assert!(
             !result.blocks.iter().any(|b| b.name == "documented"),
             "comment-heavy block should fall below the SLOC floor, got {:?}",
-            result.blocks.iter().map(|b| (&b.name, b.sloc)).collect::<Vec<_>>()
+            result
+                .blocks
+                .iter()
+                .map(|b| (&b.name, b.sloc))
+                .collect::<Vec<_>>()
         );
         assert_eq!(result.blocks.len(), 1);
         assert_eq!(result.blocks[0].name, "lean");
@@ -1601,7 +1605,9 @@ class BigClass:
         }
         source.push_str("    class Inner:\n");
         for i in 0..11 {
-            source.push_str(&format!("        def m{i}(self):\n            return {i}\n"));
+            source.push_str(&format!(
+                "        def m{i}(self):\n            return {i}\n"
+            ));
         }
         let dir = TempDir::new().unwrap();
         let path = temp_file(&dir, "nested.py", &source);
@@ -1757,7 +1763,10 @@ class BigClass:
             .iter()
             .filter(|r| SymbolKind::from(r.kind) == SymbolKind::Variable)
             .count();
-        assert_eq!(var_count, 12, "all twelve file-scope variables are top-level");
+        assert_eq!(
+            var_count, 12,
+            "all twelve file-scope variables are top-level"
+        );
         assert!(
             top_level.iter().any(|r| r.identity.name == "helper"),
             "the top-level function must remain counted"
@@ -2081,11 +2090,7 @@ x = 1
             3,
         ),
         // Perl: until block holding a foreach (`for_statement_2`) → depth 2.
-        (
-            "pl",
-            "until ($done) {\n  for my $i (@list) {}\n}\n",
-            2,
-        ),
+        ("pl", "until ($done) {\n  for my $i (@list) {}\n}\n", 2),
         // Perl: C-style for (`for_statement_1`) holding an if → depth 2.
         (
             "pl",
@@ -2359,23 +2364,88 @@ x = 1
     /// source carries comment-only lines and at least one line mixing code with
     /// a trailing comment, which must count as code.
     const COMMENT_CLASSIFICATION_CASES: &[(&str, &str, usize, usize)] = &[
-        ("rs", "// alpha\n// beta\nfn helper() {}\nconst VALUE: i32 = 1; // trailing\n", 2, 2),
-        ("go", "// alpha\n// beta\npackage main\nvar value = 1 // trailing\n", 2, 2),
+        (
+            "rs",
+            "// alpha\n// beta\nfn helper() {}\nconst VALUE: i32 = 1; // trailing\n",
+            2,
+            2,
+        ),
+        (
+            "go",
+            "// alpha\n// beta\npackage main\nvar value = 1 // trailing\n",
+            2,
+            2,
+        ),
         ("py", "# alpha\n# beta\nx = 1\ny = 2  # trailing\n", 2, 2),
-        ("pl", "# alpha\n# beta\nmy $x = 1;\nmy $y = 2; # trailing\n", 2, 2),
+        (
+            "pl",
+            "# alpha\n# beta\nmy $x = 1;\nmy $y = 2; # trailing\n",
+            2,
+            2,
+        ),
         ("sh", "# alpha\n# beta\nx=1\ny=2 # trailing\n", 2, 2),
         ("zsh", "# alpha\n# beta\nx=1\ny=2 # trailing\n", 2, 2),
-        ("lua", "-- alpha\n-- beta\nlocal x = 1\nlocal y = 2 -- trailing\n", 2, 2),
-        ("c", "// alpha\n// beta\nint helper(void) { return 0; }\nint value = 1; // trailing\n", 2, 2),
-        ("cpp", "// alpha\n// beta\nint helper(void) { return 0; }\nint value = 1; // trailing\n", 2, 2),
-        ("cs", "// alpha\n// beta\nint x = 1;\nint y = 2; // trailing\n", 2, 2),
-        ("java", "// alpha\n// beta\nclass Helper {}\nint value = 1; // trailing\n", 2, 2),
-        ("js", "// alpha\n// beta\nlet x = 1;\nlet y = 2; // trailing\n", 2, 2),
-        ("ts", "// alpha\n// beta\nlet x = 1;\nlet y = 2; // trailing\n", 2, 2),
-        ("scala", "// alpha\n// beta\nval x = 1\nval y = 2 // trailing\n", 2, 2),
-        ("swift", "// alpha\n// beta\nlet x = 1\nlet y = 2 // trailing\n", 2, 2),
+        (
+            "lua",
+            "-- alpha\n-- beta\nlocal x = 1\nlocal y = 2 -- trailing\n",
+            2,
+            2,
+        ),
+        (
+            "c",
+            "// alpha\n// beta\nint helper(void) { return 0; }\nint value = 1; // trailing\n",
+            2,
+            2,
+        ),
+        (
+            "cpp",
+            "// alpha\n// beta\nint helper(void) { return 0; }\nint value = 1; // trailing\n",
+            2,
+            2,
+        ),
+        (
+            "cs",
+            "// alpha\n// beta\nint x = 1;\nint y = 2; // trailing\n",
+            2,
+            2,
+        ),
+        (
+            "java",
+            "// alpha\n// beta\nclass Helper {}\nint value = 1; // trailing\n",
+            2,
+            2,
+        ),
+        (
+            "js",
+            "// alpha\n// beta\nlet x = 1;\nlet y = 2; // trailing\n",
+            2,
+            2,
+        ),
+        (
+            "ts",
+            "// alpha\n// beta\nlet x = 1;\nlet y = 2; // trailing\n",
+            2,
+            2,
+        ),
+        (
+            "scala",
+            "// alpha\n// beta\nval x = 1\nval y = 2 // trailing\n",
+            2,
+            2,
+        ),
+        (
+            "swift",
+            "// alpha\n// beta\nlet x = 1\nlet y = 2 // trailing\n",
+            2,
+            2,
+        ),
         // PHP comments only parse inside `<?php`; the opening tag is one code line.
-        ("php", "<?php\n// alpha\n// beta\n$x = 1;\n$y = 2; // trailing\n", 2, 3),
+        (
+            "php",
+            "<?php\n// alpha\n// beta\n$x = 1;\n$y = 2; // trailing\n",
+            2,
+            3,
+        ),
     ];
 
     #[test]
@@ -2384,8 +2454,8 @@ x = 1
         for (ext, source, expected_comment_only, expected_effective) in COMMENT_CLASSIFICATION_CASES
         {
             let path = temp_file(&dir, &format!("case.{ext}"), source);
-            let tree_file = TreeFile::new(&path)
-                .unwrap_or_else(|e| panic!("{ext}: TreeFile::new failed: {e}"));
+            let tree_file =
+                TreeFile::new(&path).unwrap_or_else(|e| panic!("{ext}: TreeFile::new failed: {e}"));
             let metrics = compute_sloc_metrics(tree_file.source(), Some(&tree_file));
 
             assert_eq!(
@@ -2505,7 +2575,11 @@ x = 1
             .unwrap_or_else(|| {
                 panic!(
                     "edge block missing; got {:?}",
-                    result.blocks.iter().map(|b| (&b.name, b.sloc)).collect::<Vec<_>>()
+                    result
+                        .blocks
+                        .iter()
+                        .map(|b| (&b.name, b.sloc))
+                        .collect::<Vec<_>>()
                 )
             });
         assert_eq!(edge.sloc, 15, "block SLOC must span the declaration line");
