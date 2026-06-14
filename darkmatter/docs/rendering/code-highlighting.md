@@ -23,21 +23,23 @@ ThemePair::resolve(ColorMode) -> Theme
 > does not mean "the dark GitHub theme"; it means "GitHub, resolved for the
 > current mode."
 
-### Single-variant themes
+### Borrowed-light pairs
 
-A few pairs are **single-variant by design** — they resolve to one theme and
-ignore the mode entirely:
+Every `ThemePair` resolves to a distinct light **and** dark variant — there is
+no single-variant, mode-invariant theme. A few pairs have no native light theme
+of their own, so they borrow a generic light companion for the light variant:
 
 | ThemePair | Light | Dark |
 |-----------|-------|------|
-| `dracula` | Dracula | Dracula |
-| `nord` | Nord | Nord |
-| `monokai` | Monokai | Monokai |
-| `vs-dark` | VS Dark | VS Dark |
+| `dracula` | One Half Light | Dracula |
+| `nord` | One Half Light | Nord |
+| `monokai` | One Half Light | Monokai Extended |
+| `vs-dark` | GitHub Light | VS Dark |
 
-For these, mode resolution (and the inversion below) is a deliberate **no-op**:
-they have no opposite variant, so they cannot lift contrast. This is documented
-behavior, not a bug.
+Because these still resolve to two different variants, mode resolution and the
+inversion below are **not** a no-op: a dark page yields the borrowed light panel
+and a light page yields the named dark theme. The two modes therefore produce
+different output for the same `ThemePair`.
 
 ## Code blocks contrast against the page
 
@@ -75,16 +77,17 @@ Theme *selection* uses the resolved (by default inverted) mode; the panel's
 *internal* contrast decisions — the header-pill text color and the
 highlighted-line background math — key off the **resolved theme background** via
 `code_block::mode_for_background`, not the requested mode. That keeps a
-single-variant dark theme's chrome readable (light header text on its dark panel)
-even though its background never inverts.
+borrowed-light pair's chrome readable when its dark variant lands on a light
+page (light header text on the dark panel).
 
 ```rust
 use darkmatter::markdown::highlighting::ColorMode;
 
 assert_eq!(ColorMode::Dark.inverted(), ColorMode::Light);
-// Dark page + `github` code theme  -> GithubLight panel (light on dark page)
-// Light page + `github` code theme -> GithubDark panel  (dark on light page)
-// Dark page + `dracula` code theme -> Dracula (single-variant; no contrast lift)
+// Dark page + `github` code theme  -> GithubLight panel  (light on dark page)
+// Light page + `github` code theme -> GithubDark panel   (dark on light page)
+// Dark page + `dracula` code theme -> OneHalfLight panel (borrowed light variant)
+// Light page + `dracula` code theme -> Dracula panel     (named dark variant)
 ```
 
 ## HTML inverts too (cross-target parity)
