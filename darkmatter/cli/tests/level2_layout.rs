@@ -2891,3 +2891,39 @@ fn level2_disclosure_body_renders_as_dim_italic_block_quote() {
         frame.raw
     );
 }
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_disclosure_honors_inline_opener_color_and_width() {
+    // Inline opener tokens (`color`, `max-width`) on the `::disclosure` line
+    // must reach the real terminal: the summary carries the truecolor red and
+    // the narrow `max-width` wraps the body into multiple quoted lines.
+    let body = "::disclosure color=red-500 max-width=24ch Inline_sentinel Title\n::details\nThis disclosed body is comfortably longer than twenty-four columns wide here.\n::end-disclosure\n";
+    let Some((frame, _)) = run_md(body, "--max-width 70") else {
+        return;
+    };
+
+    assert!(
+        frame.plain.contains("Inline_sentinel"),
+        "expected disclosure summary text in capture. plain:\n{}",
+        frame.plain
+    );
+
+    // `max-width=24ch` forces the body to wrap, so more than one block-quoted
+    // (`│`) line must appear in the visible capture.
+    let quoted_lines = frame.plain.lines().filter(|l| l.contains('│')).count();
+    assert!(
+        quoted_lines >= 2,
+        "expected max-width to wrap the body into multiple quoted lines. plain:\n{}",
+        frame.plain
+    );
+
+    // Tailwind `red-500` lowers to the truecolor triple `251;44;54`. WezTerm
+    // preserves the operands but may re-emit them in ITU colon form
+    // (`38:2::251:44:54`), so accept either separator between the RGB values.
+    assert!(
+        frame.raw.contains("251;44;54") || frame.raw.contains("251:44:54"),
+        "expected red-500 truecolor on the disclosure. raw:\n{}",
+        frame.raw
+    );
+}

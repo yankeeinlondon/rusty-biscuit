@@ -465,6 +465,14 @@ fn is_inline_kind(kind: &NodeKind) -> bool {
 /// `Event::Text` when the body is plain text. Pre-splitting ensures the
 /// block-extension pass sees each directive as its own text event, so
 /// disclosures with plain-text summaries/bodies are recognized correctly.
+///
+/// The `::disclosure` opener keeps the remainder of its line attached to the
+/// directive event so the block-extension opener handler can parse inline
+/// `key=value` style tokens (and any same-line summary) via
+/// `parse_disclosure_opener_style`. Splitting at the bare keyword would strand
+/// those tokens in a following text event, where they would be mistaken for
+/// summary content. The other directives carry no inline tail and split at the
+/// keyword boundary.
 fn split_disclosure_directives<'a>(
     events: Vec<(Event<'a>, Range<usize>)>,
 ) -> Vec<(Event<'a>, Range<usize>)> {
@@ -519,10 +527,28 @@ fn split_disclosure_directives<'a>(
                 offset += before_len;
             }
 
-            let dir_text = text_str[dir_pos..dir_pos + dir_len].to_string();
-            out.push((Event::Text(CowStr::from(dir_text)), offset..offset + dir_len));
-            offset += dir_len;
-            split_from = dir_pos + dir_len;
+            // For the `::disclosure` opener, keep the remainder of the line
+            // (inline `key=value` style tokens and any same-line summary text)
+            // attached to the directive event. The block-extension opener
+            // handler parses that tail via `parse_disclosure_opener_style`;
+            // splitting at the keyword boundary would strand the style tokens in
+            // a following text event, where they would be mistaken for summary
+            // content. The other directives carry no inline tail, so they split
+            // at the keyword boundary as before.
+            let is_opener = &text_str[dir_pos..dir_pos + dir_len] == DIRECTIVES[0];
+            let dir_end = if is_opener {
+                text_str[dir_pos..]
+                    .find('\n')
+                    .map_or(text_str.len(), |nl| dir_pos + nl)
+            } else {
+                dir_pos + dir_len
+            };
+
+            let dir_text = text_str[dir_pos..dir_end].to_string();
+            let dir_text_len = dir_text.len();
+            out.push((Event::Text(CowStr::from(dir_text)), offset..offset + dir_text_len));
+            offset += dir_text_len;
+            split_from = dir_end;
         }
     }
     out

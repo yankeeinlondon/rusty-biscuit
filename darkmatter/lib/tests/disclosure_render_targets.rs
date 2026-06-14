@@ -4,10 +4,18 @@
 //! source through the Terminal, Markdown, MarkdownPlus, Browser, and JSON
 //! targets, including nested disclosures.
 
+use biscuit_terminal::terminal::Terminal;
+use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::{HtmlOptions, TerminalOptions};
 use darkmatter::markdown::render_tree::{render_tree_markdown, render_tree_markdown_dialect};
+use darkmatter::style::{
+    DisclosureStyleOverrides, apply_color_style, apply_disclosure_style, from_frontmatter,
+};
 use renderable::tree::MarkdownDialect;
+
+/// Truecolor SGR foreground for Tailwind `red-500` (`#fb2c36`).
+const RED_500_FG: &str = "\u{1b}[38;2;251;44;54m";
 
 /// Returns a disclosure fixture with phrasing summary and a single-paragraph body.
 fn fixture() -> Markdown {
@@ -120,6 +128,91 @@ fn terminal_target_renders_summary_and_dim_italic_body() {
     // Dim and italic SGR escapes should appear somewhere in the body region.
     assert!(rendered.contains("\u{001b}[2m"), "body must contain dim escape: {rendered}");
     assert!(rendered.contains("\u{001b}[3m"), "body must contain italic escape: {rendered}");
+}
+
+/// Inline opener style tokens on the same line as `::disclosure` must be parsed
+/// off the summary and captured on the node — they must not leak into the
+/// rendered summary text. Regression for the `split_disclosure_directives`
+/// boundary that previously stranded the tokens as summary content.
+#[test]
+fn inline_opener_style_is_parsed_off_the_summary() {
+    let md = Markdown::new(
+        "::disclosure max-width=30ch color=red-500 alignment=center License Terms\n::details\nBody.\n::end-disclosure\n".to_string(),
+    );
+    let doc = md.as_document().expect("fold must succeed");
+    let NodeKind::Disclosure { summary, style, .. } = &doc.root.children()[0].kind else {
+        panic!("expected Disclosure node");
+    };
+
+    let style = style.as_ref().expect("inline opener style must be captured");
+    assert!(style.layout.is_some(), "max-width/alignment must lower to layout: {style:?}");
+    assert!(style.color.is_some(), "color must be captured: {style:?}");
+
+    let mut summary_text = String::new();
+    collect_text(summary, &mut summary_text);
+    assert_eq!(
+        summary_text.trim(),
+        "License Terms",
+        "style tokens must not leak into summary: {summary_text:?}"
+    );
+}
+
+/// Terminal rendering must honor inline opener `color`, `alignment`, and
+/// `max-width`: the summary carries the foreground color, centered alignment
+/// indents the rendered lines, and `max-width` wraps the body into multiple
+/// quoted lines.
+#[test]
+fn terminal_target_honors_inline_opener_style() {
+    let md = Markdown::new(
+        "::disclosure color=red-500 alignment=center max-width=24ch A Title\n::details\nThis disclosed body is comfortably longer than twenty-four columns wide.\n::end-disclosure\n".to_string(),
+    );
+    let term = Terminal::new_optimistic(80);
+    let rendered = DarkmatterPage::new(&term).render(&md).expect("render must succeed");
+
+    assert!(rendered.contains(RED_500_FG), "summary must carry red-500 fg: {rendered:?}");
+
+    let title_line = rendered
+        .lines()
+        .find(|l| l.contains("A Title"))
+        .expect("summary line present");
+    assert!(
+        title_line.starts_with(' '),
+        "centered summary must be indented: {title_line:?}"
+    );
+
+    let quoted_body_lines = rendered.lines().filter(|l| l.contains('│')).count();
+    assert!(
+        quoted_body_lines >= 2,
+        "max-width must wrap the body into multiple quoted lines: {rendered:?}"
+    );
+}
+
+/// Terminal rendering must honor `style.disclosure.*` frontmatter applied
+/// through the same `apply_disclosure_style` + `apply_color_style` sequence the
+/// CLI runs: the body wraps to the frontmatter `max-width` and the summary
+/// carries the frontmatter `color`.
+#[test]
+fn terminal_target_honors_frontmatter_disclosure_style() {
+    let md = Markdown::try_from_content(
+        "---\nstyle:\n  disclosure:\n    color: red-500\n    max-width: 24ch\n    alignment: center\n---\n::disclosure\nFrontmatter Summary\n::details\nThis disclosed body is comfortably longer than twenty-four columns wide.\n::end-disclosure\n",
+    )
+    .expect("frontmatter parse must succeed");
+
+    let term = Terminal::new_optimistic(80);
+    let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("style parse must succeed");
+    let page = DarkmatterPage::new(&term);
+    let page = apply_disclosure_style(page, &style, DisclosureStyleOverrides::default())
+        .expect("disclosure style apply must succeed");
+    let page = apply_color_style(page, &style).expect("color style apply must succeed");
+    let rendered = page.render(&md).expect("render must succeed");
+
+    assert!(rendered.contains(RED_500_FG), "summary must carry red-500 fg: {rendered:?}");
+
+    let quoted_body_lines = rendered.lines().filter(|l| l.contains('│')).count();
+    assert!(
+        quoted_body_lines >= 2,
+        "max-width must wrap the body into multiple quoted lines: {rendered:?}"
+    );
 }
 
 #[test]
