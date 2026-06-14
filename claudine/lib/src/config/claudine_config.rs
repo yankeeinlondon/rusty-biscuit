@@ -189,7 +189,10 @@ pub struct ClaudineConfig {
     /// `MissingProperties` error instead.
     ///
     /// User-scope only; repo configs may not declare this field.
-    #[serde(default = "default_prompt_for_missing", skip_serializing_if = "is_true")]
+    #[serde(
+        default = "default_prompt_for_missing",
+        skip_serializing_if = "is_true"
+    )]
     pub prompt_for_missing: bool,
 }
 

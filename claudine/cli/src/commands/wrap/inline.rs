@@ -313,8 +313,7 @@ mod tests {
 
         let term = Terminal::new_optimistic(120);
         // Unaligned table
-        let dirty_response =
-            "|A|B|\n|---|---|\n|short|much longer column|\n";
+        let dirty_response = "|A|B|\n|---|---|\n|short|much longer column|\n";
 
         try_inline_closure(
             &plan,

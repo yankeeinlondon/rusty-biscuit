@@ -2468,12 +2468,7 @@ fn compose_dry_run_non_tty_unapproved_shell_emits_gate_error() {
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
-        .args([
-            "compose",
-            "--goose",
-            "--dry-run",
-            md_file.to_str().unwrap(),
-        ])
+        .args(["compose", "--goose", "--dry-run", md_file.to_str().unwrap()])
         .assert()
         .failure();
 
@@ -3228,7 +3223,10 @@ printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","nu
     );
 
     // Neither must contain narration.
-    for (body, label) in [&non_harness_body, &harness_body].iter().zip(["non-harness", "harness"]) {
+    for (body, label) in [&non_harness_body, &harness_body]
+        .iter()
+        .zip(["non-harness", "harness"])
+    {
         assert!(
             !body.contains("Let me gather the required context."),
             "{label}: first narration leaked into body"
@@ -5084,7 +5082,10 @@ fn run_sequence_dry_run_agent_state(
 #[test]
 fn sequence_dry_run_no_agent_renders_state_per_step() {
     let (ok, stdout, stderr) = run_sequence_dry_run_agent_state("", &["goose"]);
-    assert!(ok, "no-agent sequence dry-run should succeed; stderr:\n{stderr}");
+    assert!(
+        ok,
+        "no-agent sequence dry-run should succeed; stderr:\n{stderr}"
+    );
     // Both composed bodies still reach stdout.
     assert_eq!(
         stdout.matches("SEQ_BODY_MARKER").count(),
@@ -5103,9 +5104,11 @@ fn sequence_dry_run_no_agent_renders_state_per_step() {
 #[cfg(unix)]
 #[test]
 fn sequence_dry_run_single_invalid_renders_state_per_step() {
-    let (ok, _stdout, stderr) =
-        run_sequence_dry_run_agent_state("agent: not-real\n", &["claude"]);
-    assert!(ok, "single-invalid sequence dry-run should succeed; stderr:\n{stderr}");
+    let (ok, _stdout, stderr) = run_sequence_dry_run_agent_state("agent: not-real\n", &["claude"]);
+    assert!(
+        ok,
+        "single-invalid sequence dry-run should succeed; stderr:\n{stderr}"
+    );
     assert!(
         stderr.matches("Invalid Agent").count() >= 2,
         "each step must render the single-invalid cell; stderr:\n{stderr}"
@@ -5121,8 +5124,7 @@ fn sequence_dry_run_single_invalid_renders_state_per_step() {
 #[cfg(unix)]
 #[test]
 fn sequence_dry_run_single_not_installed_renders_state_per_step() {
-    let (ok, _stdout, stderr) =
-        run_sequence_dry_run_agent_state("agent: gemini\n", &["claude"]);
+    let (ok, _stdout, stderr) = run_sequence_dry_run_agent_state("agent: gemini\n", &["claude"]);
     assert!(
         ok,
         "single-not-installed sequence dry-run should succeed; stderr:\n{stderr}"
@@ -5229,7 +5231,10 @@ fn run_sequence_live_agent_state(agent_line: &str, installed: &[&str]) -> (i32, 
 fn sequence_live_no_agent_aborts_without_launching_provider() {
     let (code, stderr, ran) = run_sequence_live_agent_state("", &["claude"]);
     assert!(!ran, "no provider may launch for a no-agent live sequence");
-    assert_eq!(code, 1, "no-agent live sequence must abort; stderr:\n{stderr}");
+    assert_eq!(
+        code, 1,
+        "no-agent live sequence must abort; stderr:\n{stderr}"
+    );
     assert!(
         stderr.contains("agent resolution failed"),
         "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
@@ -5247,8 +5252,14 @@ fn sequence_live_no_agent_aborts_without_launching_provider() {
 #[test]
 fn sequence_live_single_invalid_aborts_without_launching_provider() {
     let (code, stderr, ran) = run_sequence_live_agent_state("agent: not-real\n", &["claude"]);
-    assert!(!ran, "no provider may launch for an invalid-agent live sequence");
-    assert_eq!(code, 1, "invalid-agent live sequence must abort; stderr:\n{stderr}");
+    assert!(
+        !ran,
+        "no provider may launch for an invalid-agent live sequence"
+    );
+    assert_eq!(
+        code, 1,
+        "invalid-agent live sequence must abort; stderr:\n{stderr}"
+    );
     assert!(
         stderr.contains("agent resolution failed"),
         "abort must surface the structured agent-resolution error; stderr:\n{stderr}"
@@ -5265,7 +5276,10 @@ fn sequence_live_single_invalid_aborts_without_launching_provider() {
 #[test]
 fn sequence_live_single_not_installed_aborts_without_launching_provider() {
     let (code, stderr, ran) = run_sequence_live_agent_state("agent: gemini\n", &["claude"]);
-    assert!(!ran, "no provider may launch for a not-installed-agent live sequence");
+    assert!(
+        !ran,
+        "no provider may launch for a not-installed-agent live sequence"
+    );
     assert_eq!(
         code, 1,
         "not-installed-agent live sequence must abort; stderr:\n{stderr}"
@@ -5287,7 +5301,10 @@ fn sequence_live_single_not_installed_aborts_without_launching_provider() {
 fn sequence_live_zero_installed_list_aborts_without_launching_provider() {
     let (code, stderr, ran) =
         run_sequence_live_agent_state("agent: [not-real, also-fake]\n", &["claude"]);
-    assert!(!ran, "no provider may launch for a zero-installed-list live sequence");
+    assert!(
+        !ran,
+        "no provider may launch for a zero-installed-list live sequence"
+    );
     assert_eq!(
         code, 1,
         "zero-installed-list live sequence must abort; stderr:\n{stderr}"
@@ -5363,7 +5380,11 @@ fn sequence_live_silent_does_not_suppress_agent_resolution_abort() {
 
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     assert!(!sentinel.exists(), "no provider may launch under the abort");
-    assert_eq!(output.status.code(), Some(1), "must abort; stderr:\n{stderr}");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "must abort; stderr:\n{stderr}"
+    );
     assert!(
         stderr.contains("agent resolution failed") && stderr.contains("Invalid Agent"),
         "--silent must not suppress the agent-resolution abort message; stderr:\n{stderr}"
@@ -5601,8 +5622,7 @@ fn inline_compose_dry_run_schema_error_to_stderr_with_clean_stdout() {
     seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("doc.md");
-    let original =
-        "---\n$schema:\n  topic: 'string(required)'\nprompt: Plan {{topic}}\nagent: goose\n---\nOriginal body\n";
+    let original = "---\n$schema:\n  topic: 'string(required)'\nprompt: Plan {{topic}}\nagent: goose\n---\nOriginal body\n";
     fs::write(&md_file, original).unwrap();
 
     write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
@@ -7167,11 +7187,7 @@ fn compose_opencode_dry_run_calls_opencode_models_and_fails_with_test_double() {
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .env("OPENCODE_MODEL", "test-model")
-        .args([
-            "compose",
-            "--opencode",
-            md_file.to_str().unwrap(),
-        ])
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .assert()
         .success();
 }
@@ -7301,11 +7317,7 @@ exit 0
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .env("CLAUDINE_READY_MARKER", &ready_marker)
-        .args([
-            "compose",
-            "--opencode",
-            md_file.to_str().unwrap(),
-        ])
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()

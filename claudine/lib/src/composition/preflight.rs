@@ -303,15 +303,20 @@ mod tests {
             ..Default::default()
         };
 
-        let err = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options)
-            .unwrap_err();
+        let err =
+            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("Cannot dry-run: shell command 'curl https://example.com' requires \
-                          interactive approval."),
+            msg.contains(
+                "Cannot dry-run: shell command 'curl https://example.com' requires \
+                          interactive approval."
+            ),
             "expected dry-run gate message naming the command; got: {msg}"
         );
-        assert!(msg.contains("--yolo"), "message should mention --yolo; got: {msg}");
+        assert!(
+            msg.contains("--yolo"),
+            "message should mention --yolo; got: {msg}"
+        );
     }
 
     #[test]
@@ -322,8 +327,8 @@ mod tests {
         let compose_options = ComposeOptions::new();
         let (_dir, options) = approval_options_with_whitelist(&[]);
 
-        let err = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options)
-            .unwrap_err();
+        let err =
+            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("no approval handler"),

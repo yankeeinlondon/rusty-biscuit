@@ -245,12 +245,7 @@ async fn run() -> Result<(), ClientError> {
             for row in response.rows {
                 println!(
                     "chunk={} chunk_index={} sequence={} source={} level={} message={}",
-                    row.chunk_id,
-                    row.chunk_index,
-                    row.sequence,
-                    row.source,
-                    row.level,
-                    row.message,
+                    row.chunk_id, row.chunk_index, row.sequence, row.source, row.level, row.message,
                 );
             }
         }
@@ -272,20 +267,13 @@ async fn run() -> Result<(), ClientError> {
             match response.peer {
                 Some(peer) => println!(
                     "connected node_id={} socket_addr={} state={} source={} last_error={}",
-                    peer.node_id,
-                    peer.socket_addr,
-                    peer.state,
-                    peer.source,
-                    peer.last_error,
+                    peer.node_id, peer.socket_addr, peer.state, peer.source, peer.last_error,
                 ),
                 None => println!("connected (no peer info returned)"),
             }
         }
         Command::ListPeers => {
-            let response = client
-                .list_peers(ListPeersRequest {})
-                .await?
-                .into_inner();
+            let response = client.list_peers(ListPeersRequest {}).await?.into_inner();
             for peer in response.peers {
                 println!(
                     "node_id={} socket_addr={} state={} source={} last_seen_unix_ms={} last_error={}",

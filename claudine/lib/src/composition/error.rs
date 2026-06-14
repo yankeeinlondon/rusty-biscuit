@@ -902,11 +902,14 @@ impl BlockError for CompositionError {
                 let file_link = render_file_link(source_path);
                 let body = render_agent_resolution_failed_body(state, installed, &file_link);
                 StatusBlock::new(StatusState::Error)
-                    .error_header(ErrorHeader::new("CompositionError", "agent resolution failed"))
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "agent resolution failed",
+                    ))
                     .body(body)
                     .hint(
                         "Specify an installed provider with --claude, --codex, etc., run in an \
-                         interactive terminal, or correct the `agent` frontmatter property."
+                         interactive terminal, or correct the `agent` frontmatter property.",
                     )
             }
             CompositionError::ComposedBodyEmpty {
@@ -1014,9 +1017,7 @@ impl BlockError for CompositionError {
 /// The Prose layer downgrades `<a href>` to plain text when the terminal
 /// does not support OSC8.
 fn render_file_link(path: &std::path::Path) -> String {
-    let abs = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf());
+    let abs = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let abs_display = abs.display().to_string();
     let label = path.display().to_string();
     format!(
@@ -1043,8 +1044,9 @@ fn render_inline_sequence_mismatch_block(
 ) -> StatusBlock {
     let file_link = render_file_link(source_path);
 
-    let opening =
-        Prose::new("You tried to run an inline-compose operation on a document configured as a sequence.");
+    let opening = Prose::new(
+        "You tried to run an inline-compose operation on a document configured as a sequence.",
+    );
 
     let explanation = Prose::new(format!(
         "The document {file_link} defines both <cyan>`prompt`</cyan> and <cyan>`sequence`</cyan>. \
@@ -1140,7 +1142,10 @@ fn render_sequence_missing_properties_block(
             .as_deref()
             .filter(|d| !d.trim().is_empty())
         {
-            body.push_str(&format!("\n  <i><dim>{}</dim></i>", escape_prose_path(desc)));
+            body.push_str(&format!(
+                "\n  <i><dim>{}</dim></i>",
+                escape_prose_path(desc)
+            ));
         }
         if !failure.missing.is_empty() {
             for prop in &failure.missing {
@@ -1182,11 +1187,20 @@ fn render_missing_properties_block(
 ) -> StatusBlock {
     let file_link = render_file_link(source_path);
 
-    let mut body = format!("Required {plural} missing in {file_link}.",
-        plural = if missing.len() == 1 { "property is" } else { "properties are" });
+    let mut body = format!(
+        "Required {plural} missing in {file_link}.",
+        plural = if missing.len() == 1 {
+            "property is"
+        } else {
+            "properties are"
+        }
+    );
 
     if let Some(desc) = frontmatter_description.filter(|d| !d.trim().is_empty()) {
-        body.push_str(&format!("\n\n<i><dim>{}</dim></i>", escape_prose_path(desc)));
+        body.push_str(&format!(
+            "\n\n<i><dim>{}</dim></i>",
+            escape_prose_path(desc)
+        ));
     }
 
     if !missing.is_empty() {
@@ -1449,8 +1463,7 @@ mod tests {
         let block = err.status_block(&Terminal::default());
         let rendered = block.render(&Terminal::default());
         assert!(
-            rendered.contains("Pass key=value")
-                || rendered.contains("prompt_for_missing"),
+            rendered.contains("Pass key=value") || rendered.contains("prompt_for_missing"),
             "expected remediation hint in rendered output: {rendered}"
         );
     }
@@ -1552,7 +1565,10 @@ mod tests {
             body.contains("choose interactively between suggested Agents"),
             "got: {body}"
         );
-        assert!(!body.contains("the interactive picker would ask"), "got: {body}");
+        assert!(
+            !body.contains("the interactive picker would ask"),
+            "got: {body}"
+        );
     }
 
     #[test]
@@ -1574,8 +1590,14 @@ mod tests {
             hint: "nope".into(),
         };
         let body = render_agent_resolution_failed_body(&state, &[Provider::Claude], FILE_LINK);
-        assert!(body.starts_with(&invalid_agent_message("nope", FILE_LINK)), "got: {body}");
-        assert!(body.contains(&format!("- {}", Provider::Claude)), "got: {body}");
+        assert!(
+            body.starts_with(&invalid_agent_message("nope", FILE_LINK)),
+            "got: {body}"
+        );
+        assert!(
+            body.contains(&format!("- {}", Provider::Claude)),
+            "got: {body}"
+        );
     }
 
     #[test]
@@ -1630,7 +1652,10 @@ mod tests {
         // reflow.
         let err = mismatch_err(true);
         let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
-        assert!(rendered.contains("greeting.md"), "document name: {rendered}");
+        assert!(
+            rendered.contains("greeting.md"),
+            "document name: {rendered}"
+        );
         assert!(rendered.contains("prompt"), "names prompt: {rendered}");
         assert!(rendered.contains("sequence"), "names sequence: {rendered}");
         assert!(

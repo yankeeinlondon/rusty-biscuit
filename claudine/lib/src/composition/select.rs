@@ -78,9 +78,13 @@ pub fn classify_agent_resolution(
         }
         Some(AgentHint::Single(provider)) => {
             if snapshot.runnable.contains(provider) {
-                AgentResolutionState::Selected { provider: *provider }
+                AgentResolutionState::Selected {
+                    provider: *provider,
+                }
             } else {
-                AgentResolutionState::SingleNotInstalled { provider: *provider }
+                AgentResolutionState::SingleNotInstalled {
+                    provider: *provider,
+                }
             }
         }
         Some(AgentHint::List(providers)) => {
@@ -1008,10 +1012,7 @@ mod tests {
 
     // -- Agent-resolution classification tests -------------------------------
 
-    fn hints_from_agent(
-        agent: Option<AgentHint>,
-        invalid: Vec<String>,
-    ) -> EffectiveSelectionHints {
+    fn hints_from_agent(agent: Option<AgentHint>, invalid: Vec<String>) -> EffectiveSelectionHints {
         let was_list = matches!(agent, Some(AgentHint::List(_)));
         hints_from_agent_with_list(agent, invalid, was_list)
     }
@@ -1083,7 +1084,10 @@ mod tests {
 
     #[test]
     fn classify_list_multiple_installed() {
-        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex, Provider::Gemini], BTreeSet::new());
+        let snapshot = make_snapshot(
+            vec![Provider::Claude, Provider::Codex, Provider::Gemini],
+            BTreeSet::new(),
+        );
         let state = classify_agent_resolution(
             &hints_from_agent(
                 Some(AgentHint::List(vec![Provider::Codex, Provider::Gemini])),

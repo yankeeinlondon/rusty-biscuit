@@ -151,14 +151,14 @@ pub fn summary_to_event_meta_with_context(
     // fields remain authoritative for JSONL and SQL ingest; these
     // mirrors exist only for template/expression bridging.
     if let Some(pid) = env.claudine_pid {
-        extra.entry("claudine_pid".to_string()).or_insert(Value::Number(
-            serde_json::Number::from(pid),
-        ));
+        extra
+            .entry("claudine_pid".to_string())
+            .or_insert(Value::Number(serde_json::Number::from(pid)));
     }
     if let Some(pid) = agent_pid {
-        extra.entry("agent_pid".to_string()).or_insert(Value::Number(
-            serde_json::Number::from(pid),
-        ));
+        extra
+            .entry("agent_pid".to_string())
+            .or_insert(Value::Number(serde_json::Number::from(pid)));
     }
 
     EventMeta {

@@ -158,8 +158,7 @@ impl ChunkConfig {
     /// either configured cap and the daemon should rotate first.
     #[must_use]
     pub fn should_rotate(&self, current_entries: u64, current_bytes: u64) -> bool {
-        current_entries >= self.max_entries_per_chunk
-            || current_bytes >= self.max_bytes_per_chunk
+        current_entries >= self.max_entries_per_chunk || current_bytes >= self.max_bytes_per_chunk
     }
 }
 

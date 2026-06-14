@@ -40,8 +40,7 @@ const ACCEPTED_ENVELOPES: TableDefinition<'_, &str, &[u8]> =
 /// Outbound counter table: hex-encoded `node_id` → last-issued
 /// monotonic message-ID counter (`u64`). Allows the daemon to resume
 /// the outbound counter after restart instead of resetting to zero.
-const OUTBOUND_COUNTER: TableDefinition<'_, &str, u64> =
-    TableDefinition::new("outbound_counter");
+const OUTBOUND_COUNTER: TableDefinition<'_, &str, u64> = TableDefinition::new("outbound_counter");
 
 /// Errors that the storage layer can return.
 ///
@@ -156,7 +155,9 @@ impl Storage {
             #[cfg(test)]
             fail_next_save: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(test)]
-            fail_next_accepted_envelope: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            fail_next_accepted_envelope: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                false,
+            )),
         };
         storage.bootstrap_tables()?;
         Ok(storage)
@@ -171,14 +172,16 @@ impl Storage {
     /// auto-resets after firing so that subsequent writes succeed.
     #[cfg(test)]
     pub fn inject_save_failure(&self) {
-        self.fail_next_save.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.fail_next_save
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Inject a failure into the next `save_accepted_envelope` call. The
     /// flag auto-resets after firing.
     #[cfg(test)]
     pub fn inject_accepted_envelope_failure(&self) {
-        self.fail_next_accepted_envelope.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.fail_next_accepted_envelope
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Open the tables once with an empty write transaction so subsequent
@@ -203,7 +206,10 @@ impl Storage {
     /// on-disk view never disagrees with the in-memory state.
     pub fn save_snapshot(&self, chunk: &ChunkId, snapshot: &[u8]) -> Result<(), StorageError> {
         #[cfg(test)]
-        if self.fail_next_save.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        if self
+            .fail_next_save
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
             return Err(StorageError::Storage(Box::new(redb::StorageError::Io(
                 std::io::Error::new(std::io::ErrorKind::Other, "injected save failure"),
             ))));
@@ -320,10 +326,11 @@ impl Storage {
             paired_at_unix_ms,
             note: note.to_string(),
         };
-        let encoded = serde_json::to_string(&value).map_err(|source| StorageError::MalformedPairing {
-            node_id: node_id.to_string(),
-            source,
-        })?;
+        let encoded =
+            serde_json::to_string(&value).map_err(|source| StorageError::MalformedPairing {
+                node_id: node_id.to_string(),
+                source,
+            })?;
         let txn = self.db.begin_write()?;
         {
             let mut table = txn.open_table(PAIRINGS)?;
@@ -352,11 +359,12 @@ impl Storage {
         let Some(value) = table.get(node_id)? else {
             return Ok(None);
         };
-        let parsed: PairingValue =
-            serde_json::from_str(value.value()).map_err(|source| StorageError::MalformedPairing {
+        let parsed: PairingValue = serde_json::from_str(value.value()).map_err(|source| {
+            StorageError::MalformedPairing {
                 node_id: node_id.to_string(),
                 source,
-            })?;
+            }
+        })?;
         Ok(Some(parsed))
     }
 
@@ -393,9 +401,15 @@ impl Storage {
         envelope: &AcceptedEnvelope,
     ) -> Result<bool, StorageError> {
         #[cfg(test)]
-        if self.fail_next_accepted_envelope.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        if self
+            .fail_next_accepted_envelope
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
             return Err(StorageError::Storage(Box::new(redb::StorageError::Io(
-                std::io::Error::new(std::io::ErrorKind::Other, "injected accepted-envelope failure"),
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "injected accepted-envelope failure",
+                ),
             ))));
         }
         let composite_key = format!("{sender_hex}:{message_id_hex}");
@@ -575,10 +589,7 @@ mod tests {
         }
         let chunks = storage.list_chunks("node-a", "session-1").expect("list");
         assert_eq!(
-            chunks
-                .iter()
-                .map(|c| c.chunk_index)
-                .collect::<Vec<_>>(),
+            chunks.iter().map(|c| c.chunk_index).collect::<Vec<_>>(),
             vec![0, 1, 2],
         );
     }
@@ -654,7 +665,11 @@ mod tests {
     #[test]
     fn save_and_check_accepted_envelope_round_trips() {
         let (storage, _tmp) = fresh_storage();
-        assert!(!storage.has_accepted_envelope("sender-hex", "ab01").expect("has"));
+        assert!(
+            !storage
+                .has_accepted_envelope("sender-hex", "ab01")
+                .expect("has")
+        );
 
         let envelope = AcceptedEnvelope {
             sender_hex: "sender-hex".into(),
@@ -671,7 +686,11 @@ mod tests {
             .expect("save");
         assert!(inserted);
 
-        assert!(storage.has_accepted_envelope("sender-hex", "ab01").expect("has"));
+        assert!(
+            storage
+                .has_accepted_envelope("sender-hex", "ab01")
+                .expect("has")
+        );
         assert_eq!(storage.accepted_envelope_count().expect("count"), 1);
 
         let mut visited = Vec::new();
@@ -736,8 +755,16 @@ mod tests {
             payload_bytes: Vec::new(),
             accepted_at_unix_ms: 200,
         };
-        assert!(storage.save_accepted_envelope("alice", "0000", &envelope_a).expect("a"));
-        assert!(storage.save_accepted_envelope("bob", "0000", &envelope_b).expect("b"));
+        assert!(
+            storage
+                .save_accepted_envelope("alice", "0000", &envelope_a)
+                .expect("a")
+        );
+        assert!(
+            storage
+                .save_accepted_envelope("bob", "0000", &envelope_b)
+                .expect("b")
+        );
         assert_eq!(storage.accepted_envelope_count().expect("count"), 2);
     }
 
@@ -747,7 +774,9 @@ mod tests {
         assert_eq!(storage.load_outbound_counter("node-x").expect("load"), 0);
         storage.save_outbound_counter("node-x", 42).expect("save");
         assert_eq!(storage.load_outbound_counter("node-x").expect("load"), 42);
-        storage.save_outbound_counter("node-x", 100).expect("update");
+        storage
+            .save_outbound_counter("node-x", 100)
+            .expect("update");
         assert_eq!(storage.load_outbound_counter("node-x").expect("load"), 100);
     }
 
@@ -797,9 +826,21 @@ mod tests {
             payload_bytes: Vec::new(),
             accepted_at_unix_ms: 100,
         };
-        assert!(storage.save_accepted_envelope("alice", "0000", &env_a).expect("save a"));
-        assert!(storage.has_accepted_envelope("alice", "0000").expect("has a"));
-        assert!(!storage.has_accepted_envelope("bob", "0000").expect("no bob"));
+        assert!(
+            storage
+                .save_accepted_envelope("alice", "0000", &env_a)
+                .expect("save a")
+        );
+        assert!(
+            storage
+                .has_accepted_envelope("alice", "0000")
+                .expect("has a")
+        );
+        assert!(
+            !storage
+                .has_accepted_envelope("bob", "0000")
+                .expect("no bob")
+        );
         let env_b = AcceptedEnvelope {
             sender_hex: "bob".into(),
             message_id_hex: "0000".into(),
@@ -810,9 +851,21 @@ mod tests {
             payload_bytes: Vec::new(),
             accepted_at_unix_ms: 200,
         };
-        assert!(storage.save_accepted_envelope("bob", "0000", &env_b).expect("save b"));
+        assert!(
+            storage
+                .save_accepted_envelope("bob", "0000", &env_b)
+                .expect("save b")
+        );
         assert!(storage.has_accepted_envelope("bob", "0000").expect("has b"));
-        assert!(!storage.save_accepted_envelope("alice", "0000", &env_a).expect("dup a"));
-        assert!(!storage.save_accepted_envelope("bob", "0000", &env_b).expect("dup b"));
+        assert!(
+            !storage
+                .save_accepted_envelope("alice", "0000", &env_a)
+                .expect("dup a")
+        );
+        assert!(
+            !storage
+                .save_accepted_envelope("bob", "0000", &env_b)
+                .expect("dup b")
+        );
     }
 }

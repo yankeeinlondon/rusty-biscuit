@@ -25,6 +25,4 @@ pub use server::{DaemonConfig, ServerError, ServerHandle, spawn_uds_server};
 pub use service::RemoteSignalService;
 pub use session_log::{AppendOutcome, ExportedUpdate, SessionLogError, SessionLogManager};
 pub use storage::{PairingValue, Storage, StorageError};
-pub use sync::{
-    SYNC_PROTOCOL_VERSION, SyncChunkOutcome, SyncError, SyncOutcome, SyncService,
-};
+pub use sync::{SYNC_PROTOCOL_VERSION, SyncChunkOutcome, SyncError, SyncOutcome, SyncService};

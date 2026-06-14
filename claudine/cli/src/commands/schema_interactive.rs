@@ -25,12 +25,12 @@ use std::io;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
+use biscuit_tui::prelude::*;
 use claudine::composition::{
     CompositionError, DroppedOptional, InteractiveSchemaOptions, InteractiveShape, MissingProperty,
     PreValidatedSchema, PropertyState, PropertyStatus, ResolvedCompositionSource,
     SchemaStatusReport, TextFormat, build_schema_status_report, pre_validate_schema,
 };
-use biscuit_tui::prelude::*;
 
 use crate::log;
 
@@ -58,7 +58,9 @@ pub fn render_status_report(report: &SchemaStatusReport, term: &Terminal) {
     );
 
     if report.raw_json_schema {
-        body.push_str("\n  <dim><i>(raw JSON Schema — per-property metadata unavailable)</i></dim>");
+        body.push_str(
+            "\n  <dim><i>(raw JSON Schema — per-property metadata unavailable)</i></dim>",
+        );
         let prose = Prose::new(body);
         log::message(&prose.render(term));
         return;
@@ -106,15 +108,15 @@ fn render_optional_line(status: &PropertyStatus) -> String {
     let ty = escape_prose(&status.type_label);
     let desc = description_suffix(status.description.as_deref());
     match status.state {
-        PropertyState::Valid => format!(
-            "<green>✓</green> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}"
-        ),
-        PropertyState::Missing => format!(
-            "<grey>⍉</grey> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}"
-        ),
-        PropertyState::Invalid => format!(
-            "<yellow>!</yellow> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}"
-        ),
+        PropertyState::Valid => {
+            format!("<green>✓</green> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}")
+        }
+        PropertyState::Missing => {
+            format!("<grey>⍉</grey> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}")
+        }
+        PropertyState::Invalid => {
+            format!("<yellow>!</yellow> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}")
+        }
     }
 }
 
@@ -340,7 +342,10 @@ fn prompt_for_property(
             let state = ChooseManyState::from_options(options).with_label(label);
             let selected: Vec<String> = run_standalone(ChooseMany::new(), state, None)?;
             Ok(serde_json::Value::Array(
-                selected.into_iter().map(serde_json::Value::String).collect(),
+                selected
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
             ))
         }
         InteractiveShape::Number { integer } => collect_number(label, *integer),
@@ -566,8 +571,8 @@ mod tests {
             "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
         )
         .unwrap();
-        let source = claudine::composition::resolve_composition_source(file.to_str().unwrap())
-            .unwrap();
+        let source =
+            claudine::composition::resolve_composition_source(file.to_str().unwrap()).unwrap();
 
         // Build interactive options that DENY (default: all false).
         let interactive = InteractiveSchemaOptions::default();
@@ -592,8 +597,8 @@ mod tests {
             "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
         )
         .unwrap();
-        let source = claudine::composition::resolve_composition_source(file.to_str().unwrap())
-            .unwrap();
+        let source =
+            claudine::composition::resolve_composition_source(file.to_str().unwrap()).unwrap();
 
         let overrides = serde_json::json!({ "title": "Plan" });
         let term = Terminal::default();
@@ -605,10 +610,7 @@ mod tests {
         )
         .unwrap();
         let fm = pre.set_overrides.unwrap();
-        assert_eq!(
-            fm.get("title").and_then(|v| v.as_str()),
-            Some("Plan")
-        );
+        assert_eq!(fm.get("title").and_then(|v| v.as_str()), Some("Plan"));
     }
 
     #[test]
@@ -621,8 +623,8 @@ mod tests {
             "---\n$schema:\n  config: 'object(required)'\n---\nbody\n",
         )
         .unwrap();
-        let source = claudine::composition::resolve_composition_source(file.to_str().unwrap())
-            .unwrap();
+        let source =
+            claudine::composition::resolve_composition_source(file.to_str().unwrap()).unwrap();
 
         // Allow interactive so the helper attempts to enter the loop.
         let interactive = InteractiveSchemaOptions {

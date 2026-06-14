@@ -470,10 +470,7 @@ fn assert_inverse_theme_yaml(frame: &CapturedFrame) {
     let yaml_lines = &raw_lines[heading_idx + 2..table_start];
 
     // At least one YAML line must carry SGR escape codes (syntax highlighting).
-    let highlighted_count = yaml_lines
-        .iter()
-        .filter(|l| l.contains('\x1b'))
-        .count();
+    let highlighted_count = yaml_lines.iter().filter(|l| l.contains('\x1b')).count();
     assert!(
         highlighted_count >= 1,
         "expected at least one YAML line with syntax-highlighting SGR.\n\
@@ -771,11 +768,8 @@ fn level2_dry_run_no_agent_multiline_alignment_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
-    let capture = run_dry_run_compose_with_doc(
-        &mut harness,
-        FIXTURE_NO_AGENT,
-        "claudine-dryrun-noagent-l2",
-    );
+    let capture =
+        run_dry_run_compose_with_doc(&mut harness, FIXTURE_NO_AGENT, "claudine-dryrun-noagent-l2");
 
     let plain = &capture.frame.plain;
     assert!(

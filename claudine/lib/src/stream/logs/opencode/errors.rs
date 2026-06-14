@@ -8,7 +8,9 @@ use std::sync::LazyLock;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use regex::Regex;
 
-use crate::stream::logs::opencode::events::{AssetType, LogClassification, OpenCodeLogRecord, ProviderLimitKind};
+use crate::stream::logs::opencode::events::{
+    AssetType, LogClassification, OpenCodeLogRecord, ProviderLimitKind,
+};
 use crate::stream::summary::RateLimitInfo;
 
 static RESET_AT_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -491,15 +493,13 @@ fn infer_service_from_message(record: &OpenCodeLogRecord) -> &'static str {
 
     match msg {
         "loop" | "exiting loop"
-            if record.tags.contains_key("session.id")
-                && record.tags.contains_key("step") =>
+            if record.tags.contains_key("session.id") && record.tags.contains_key("step") =>
         {
             "session.prompt"
         }
         "exiting loop" if record.tags.contains_key("session.id") => "session.prompt",
         "stream"
-            if record.tags.contains_key("providerID")
-                && record.tags.contains_key("modelID") =>
+            if record.tags.contains_key("providerID") && record.tags.contains_key("modelID") =>
         {
             "llm"
         }
@@ -1213,7 +1213,10 @@ mod tests {
             } => {
                 assert_eq!(status_code, Some(500));
                 assert_eq!(error_name, "AI_APICallError");
-                assert_eq!(message, "AI_APICallError (500: Internal Server Error): upstream boom");
+                assert_eq!(
+                    message,
+                    "AI_APICallError (500: Internal Server Error): upstream boom"
+                );
                 assert!(!is_fatal);
             }
             other => panic!("expected ApiFailure, got {other:?}"),
@@ -1317,7 +1320,9 @@ mod tests {
             panic!("overload fixture failed to parse");
         };
         match classify(&record) {
-            LogClassification::ProviderLimit { kind, status_code, .. } => {
+            LogClassification::ProviderLimit {
+                kind, status_code, ..
+            } => {
                 assert_eq!(status_code, 429);
                 assert_eq!(kind, ProviderLimitKind::Overloaded);
             }
@@ -1333,9 +1338,7 @@ mod tests {
         };
         match classify(&record) {
             LogClassification::ProviderLimit {
-                status_code,
-                kind,
-                ..
+                status_code, kind, ..
             } => {
                 assert_eq!(status_code, 429);
                 assert_eq!(kind, ProviderLimitKind::Overloaded);
@@ -1352,9 +1355,7 @@ mod tests {
         };
         match classify(&record) {
             LogClassification::ProviderLimit {
-                status_code,
-                kind,
-                ..
+                status_code, kind, ..
             } => {
                 assert_eq!(status_code, 429);
                 assert_eq!(kind, ProviderLimitKind::RateLimited);
@@ -1371,9 +1372,7 @@ mod tests {
         };
         match classify(&record) {
             LogClassification::ProviderLimit {
-                status_code,
-                kind,
-                ..
+                status_code, kind, ..
             } => {
                 assert_eq!(status_code, 429);
                 assert_eq!(kind, ProviderLimitKind::RetriesExhausted);
@@ -1396,9 +1395,7 @@ mod tests {
         };
         match classify(&record) {
             LogClassification::ProviderLimit {
-                status_code,
-                kind,
-                ..
+                status_code, kind, ..
             } => {
                 assert_eq!(status_code, 403);
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
@@ -1415,9 +1412,7 @@ mod tests {
         };
         match classify(&record) {
             LogClassification::ProviderLimit {
-                status_code,
-                kind,
-                ..
+                status_code, kind, ..
             } => {
                 assert_eq!(status_code, 429);
                 assert_eq!(kind, ProviderLimitKind::UsageCap);
@@ -1428,7 +1423,8 @@ mod tests {
 
     #[test]
     fn cap_phrase_without_error_tag_is_advisory_api_failure() {
-        let line = "ERROR 2026-05-15T19:26:02 +100ms service=llm dummy={} Usage limit reached for k2p6";
+        let line =
+            "ERROR 2026-05-15T19:26:02 +100ms service=llm dummy={} Usage limit reached for k2p6";
         let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
             panic!("expected Structured");
         };
@@ -1455,9 +1451,7 @@ mod tests {
         };
         match classify(&record) {
             LogClassification::ProviderLimit {
-                status_code,
-                kind,
-                ..
+                status_code, kind, ..
             } => {
                 assert_eq!(status_code, 429);
                 assert_eq!(kind, ProviderLimitKind::UsageCap);

@@ -891,7 +891,8 @@ mod tests {
         // not satisfied (no `review` override provided). After composition
         // the body should be empty and detection must fire — this mirrors
         // the real-world prompt that triggered the user-facing bug report.
-        let body = "::block when=\"review\"\n## Context\n\nThis is review-only content.\n::end-block\n";
+        let body =
+            "::block when=\"review\"\n## Context\n\nThis is review-only content.\n::end-block\n";
         let source = make_source(&dir, &[("title", json!("Test"))], body);
 
         let options = PrepareOptions {

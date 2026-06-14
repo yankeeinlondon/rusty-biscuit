@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 use remote_signal_client::connect_uds;
 use remote_signal_core::{
     AppendEntryRequest, ApprovePeerRequest, ChunkConfig, ConnectToPeerRequest,
-    CreateInvitationRequest, ListChunkEntriesRequest, ListSessionChunksRequest, PeerConnectionState,
-    QueryProjectionRequest, RemoteSignalClient, SyncWithPeerRequest,
+    CreateInvitationRequest, ListChunkEntriesRequest, ListSessionChunksRequest,
+    PeerConnectionState, QueryProjectionRequest, RemoteSignalClient, SyncWithPeerRequest,
 };
 use remote_signal_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
 use tempfile::TempDir;
@@ -39,10 +39,7 @@ fn base_config(data_dir: PathBuf) -> DaemonConfig {
         .with_networking(networking_config())
 }
 
-async fn boot_daemon(
-    tmp: &TempDir,
-    name: &str,
-) -> (ServerHandle, PathBuf) {
+async fn boot_daemon(tmp: &TempDir, name: &str) -> (ServerHandle, PathBuf) {
     let data_dir = tmp.path().join(name);
     boot_daemon_with(tmp, name, base_config(data_dir)).await
 }
@@ -250,7 +247,10 @@ async fn two_nodes_converge_across_namespaces() {
     // Chunk catalogs for Alice's namespace must match.
     let alice_chunks = collect_chunk_ids(&mut alice_client, &alice_node, "s1").await;
     let bob_replica_chunks = collect_chunk_ids(&mut bob_client, &alice_node, "s1").await;
-    assert_eq!(alice_chunks, bob_replica_chunks, "chunk catalogs must converge");
+    assert_eq!(
+        alice_chunks, bob_replica_chunks,
+        "chunk catalogs must converge"
+    );
 
     alice.shutdown().await.expect("alice shutdown");
     bob.shutdown().await.expect("bob shutdown");
@@ -292,7 +292,10 @@ async fn chunk_rotation_propagates_through_sync() {
         alice_chunks.len() >= 3,
         "expected at least three chunks on Alice, got {alice_chunks:?}",
     );
-    assert!(alice_chunks[0].starts_with("session/"), "chunk ids must be deterministic");
+    assert!(
+        alice_chunks[0].starts_with("session/"),
+        "chunk ids must be deterministic"
+    );
 
     alice_client
         .sync_with_peer(SyncWithPeerRequest {
@@ -324,8 +327,7 @@ async fn restart_replays_state_and_resumes_sync() {
     let bob_dir = tmp.path().join("bob");
 
     // Phase 1: boot both daemons, pair, write on Alice's side only.
-    let (alice, alice_sock) =
-        boot_daemon_with(&tmp, "alice", base_config(alice_dir.clone())).await;
+    let (alice, alice_sock) = boot_daemon_with(&tmp, "alice", base_config(alice_dir.clone())).await;
     let (bob, bob_sock) = boot_daemon_with(&tmp, "bob", base_config(bob_dir.clone())).await;
     let alice_node = alice.node_id();
     let bob_node = bob.node_id();
@@ -345,7 +347,11 @@ async fn restart_replays_state_and_resumes_sync() {
     // Phase 2: re-spawn Alice on the same data directory.
     let (alice2, alice_sock2) =
         boot_daemon_with(&tmp, "alice", base_config(alice_dir.clone())).await;
-    assert_eq!(alice2.node_id(), alice_node, "identity must persist across restart");
+    assert_eq!(
+        alice2.node_id(),
+        alice_node,
+        "identity must persist across restart"
+    );
 
     let mut alice_client2 = connect_uds(alice_sock2).await.expect("alice2 client");
 
@@ -502,7 +508,10 @@ async fn paired_peer_cannot_write_foreign_namespace() {
 
     // Before sync, Bob has no replica of Alice's data.
     let before = collect_messages(&mut bob_client, &alice_node, "owned").await;
-    assert!(before.is_empty(), "bob should not have alice's data yet; got {before:?}");
+    assert!(
+        before.is_empty(),
+        "bob should not have alice's data yet; got {before:?}"
+    );
 
     // Sync succeeds (Alice pushes her own namespace data).
     alice_client
@@ -626,7 +635,10 @@ async fn poc_demo_end_to_end_flow() {
 
     // Bob should see his own entry.
     let bob_own = collect_messages(&mut bob_client, &bob_node, "main").await;
-    assert!(bob_own.contains(&"bob-0".to_string()), "bob missing own entry");
+    assert!(
+        bob_own.contains(&"bob-0".to_string()),
+        "bob missing own entry"
+    );
 
     // Alice should have a replica of Bob's entry.
     let alice_replica = collect_messages(&mut alice_client, &bob_node, "main").await;
@@ -748,9 +760,7 @@ async fn wait_for_messages(
             return;
         }
         if Instant::now() >= deadline {
-            panic!(
-                "timed out waiting for messages {expected:?}; saw {messages:?}",
-            );
+            panic!("timed out waiting for messages {expected:?}; saw {messages:?}",);
         }
         sleep(Duration::from_millis(100)).await;
     }

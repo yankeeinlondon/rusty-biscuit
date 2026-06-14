@@ -73,7 +73,10 @@ async fn dropping_handle_removes_socket_file() {
     {
         let handle = spawn_uds_server(socket_path.clone(), config).expect("spawn daemon");
         wait_until_bound(&socket_path).await;
-        assert!(socket_path.exists(), "socket should exist while server runs");
+        assert!(
+            socket_path.exists(),
+            "socket should exist while server runs"
+        );
         drop(handle);
     }
 

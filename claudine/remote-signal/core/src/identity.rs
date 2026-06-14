@@ -15,9 +15,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use ed25519_dalek::{
-    SECRET_KEY_LENGTH, Signature, Signer, SigningKey, Verifier, VerifyingKey,
-};
+use ed25519_dalek::{SECRET_KEY_LENGTH, Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand_core::{OsRng, RngCore};
 
 /// Length, in bytes, of an ed25519 public key.

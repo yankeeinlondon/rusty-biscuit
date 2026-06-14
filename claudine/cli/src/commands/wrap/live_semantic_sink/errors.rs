@@ -7,7 +7,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::prelude::StatusBlock;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::{Length, Edges, TargetValue, WordWrap};
+use biscuit_terminal::utils::layout::{Edges, Length, TargetValue, WordWrap};
 
 impl LiveSemanticSink {
     /// Render a typed [`SemanticEvent::Error`] as a colored `BlockQuote`

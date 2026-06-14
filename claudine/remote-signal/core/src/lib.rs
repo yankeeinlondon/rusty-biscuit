@@ -28,20 +28,18 @@ pub use proto::remote_signal_client::RemoteSignalClient;
 pub use proto::remote_signal_server::{RemoteSignal, RemoteSignalServer};
 pub use proto::{
     AppendEntryRequest, AppendEntryResponse, ApprovePeerRequest, ApprovePeerResponse,
-    ConnectToPeerRequest, ConnectToPeerResponse, CreateInvitationRequest,
-    CreateInvitationResponse, ListChunkEntriesRequest, ListChunkEntriesResponse,
-    ListPairingsRequest, ListPairingsResponse, ListPeersRequest, ListPeersResponse,
-    ListSessionChunksRequest, ListSessionChunksResponse, PairingInfo, PeerConnectionState,
-    PeerInfo, PeerSource, PingRequest, PingResponse, ProjectionRow, QueryProjectionRequest,
-    QueryProjectionResponse, RevokePeerRequest, RevokePeerResponse, SessionEntry,
-    SignedEnvelopeWire, StatusRequest, StatusResponse, SyncAdvertiseEnd, SyncChunkAdvertise,
-    SyncChunkOutcome, SyncDelta, SyncEnd, SyncError, SyncFrame, SyncHello, SyncWithPeerRequest,
-    SyncWithPeerResponse, sync_frame,
+    ConnectToPeerRequest, ConnectToPeerResponse, CreateInvitationRequest, CreateInvitationResponse,
+    ListChunkEntriesRequest, ListChunkEntriesResponse, ListPairingsRequest, ListPairingsResponse,
+    ListPeersRequest, ListPeersResponse, ListSessionChunksRequest, ListSessionChunksResponse,
+    PairingInfo, PeerConnectionState, PeerInfo, PeerSource, PingRequest, PingResponse,
+    ProjectionRow, QueryProjectionRequest, QueryProjectionResponse, RevokePeerRequest,
+    RevokePeerResponse, SessionEntry, SignedEnvelopeWire, StatusRequest, StatusResponse,
+    SyncAdvertiseEnd, SyncChunkAdvertise, SyncChunkOutcome, SyncDelta, SyncEnd, SyncError,
+    SyncFrame, SyncHello, SyncWithPeerRequest, SyncWithPeerResponse, sync_frame,
 };
 
 pub use envelope::{
-    ENVELOPE_HASH_LENGTH, EnvelopeError, EnvelopeInbox, EnvelopeSealer, PayloadKind,
-    SignedEnvelope,
+    ENVELOPE_HASH_LENGTH, EnvelopeError, EnvelopeInbox, EnvelopeSealer, PayloadKind, SignedEnvelope,
 };
 pub use identity::{
     NodeIdentity, NodeIdentityError, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH, verify_signature,

@@ -9,7 +9,7 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::{Layout, Length, Edges, WordWrap};
+use biscuit_terminal::utils::layout::{Edges, Layout, Length, WordWrap};
 use claudine::badges;
 use claudine::linking::{
     ExceptionType, LinkableResource, ProviderSkillPaths, SkillDirectoryDiagnostic, SkillException,

@@ -5,7 +5,7 @@ use color_eyre::eyre::Result;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::utils::layout::{Length, Edges, TargetValue};
+use biscuit_terminal::utils::layout::{Edges, Length, TargetValue};
 use claudine::actions::{HookAction, ReportFormat};
 use claudine::config::AgentConfigurator;
 use claudine::config::claudine_config::ClaudineConfig;

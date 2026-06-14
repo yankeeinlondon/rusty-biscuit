@@ -319,11 +319,8 @@ pub fn spawn_uds_server(
         config.chunk_config,
         Arc::clone(&identity),
     )?;
-    let sync_service = SyncService::new(
-        session_log.clone(),
-        storage.clone(),
-        Arc::clone(&identity),
-    );
+    let sync_service =
+        SyncService::new(session_log.clone(), storage.clone(), Arc::clone(&identity));
 
     let listener = UnixListener::bind(&socket_path).map_err(|source| ServerError::Bind {
         path: socket_path.clone(),
@@ -368,7 +365,12 @@ pub fn spawn_uds_server(
                 mdns = net_config.mdns_enabled,
                 "Phase-4 networking ready",
             );
-            (Some(registry), Some(workers), discovery_handle, Some(quic_local_addr))
+            (
+                Some(registry),
+                Some(workers),
+                discovery_handle,
+                Some(quic_local_addr),
+            )
         }
         None => (None, None, None, None),
     };

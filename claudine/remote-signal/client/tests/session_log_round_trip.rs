@@ -102,7 +102,10 @@ async fn append_persists_to_redb_and_eventually_to_duckdb() {
             .into_inner();
         if rows.rows.len() == 5 {
             let messages: Vec<_> = rows.rows.iter().map(|r| r.message.clone()).collect();
-            assert_eq!(messages, (0..5).map(|i| format!("hello-{i}")).collect::<Vec<_>>());
+            assert_eq!(
+                messages,
+                (0..5).map(|i| format!("hello-{i}")).collect::<Vec<_>>()
+            );
             break;
         }
         if std::time::Instant::now() >= deadline {

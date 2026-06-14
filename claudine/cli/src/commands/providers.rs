@@ -3,7 +3,7 @@ use color_eyre::eyre::{Result, WrapErr};
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::utils::layout::{Alignment, Length, Edges};
+use biscuit_terminal::utils::layout::{Alignment, Edges, Length};
 use clap::{Args, ValueEnum};
 use claudine::events::AgenticEvent;
 use claudine::linking::{LinkableResource, capabilities_for};

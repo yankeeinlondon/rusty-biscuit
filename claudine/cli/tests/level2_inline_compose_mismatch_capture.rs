@@ -58,7 +58,11 @@ fn stage() -> Staged {
 
 /// Poll the pane until `marker` (after escape stripping) appears, returning the
 /// frame that first contains it. Panics on timeout.
-fn wait_for_pane_marker(harness: &mut TmuxHarness, marker: &str, deadline: Duration) -> CapturedFrame {
+fn wait_for_pane_marker(
+    harness: &mut TmuxHarness,
+    marker: &str,
+    deadline: Duration,
+) -> CapturedFrame {
     let stop = Instant::now() + deadline;
     loop {
         let frame = harness.capture().expect("capture pane");
@@ -124,7 +128,12 @@ fn level2_tmux_mismatch_renders_styled_diagnostic_with_yaml() {
         "the linked document name must be visible.\nplain:\n{}",
         frame.plain,
     );
-    for fragment in ["# leading comment", "sequence: &seq", "prompt: |-", "alias: *seq"] {
+    for fragment in [
+        "# leading comment",
+        "sequence: &seq",
+        "prompt: |-",
+        "alias: *seq",
+    ] {
         assert!(
             frame.plain.contains(fragment),
             "verbatim YAML fragment `{fragment}` missing.\nplain:\n{}",

@@ -3,7 +3,7 @@ use color_eyre::eyre::Result;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::utils::layout::{Alignment, Length, Edges};
+use biscuit_terminal::utils::layout::{Alignment, Edges, Length};
 use claudine::events::event_support_matrix;
 use claudine::provider::EventSupportLevel;
 

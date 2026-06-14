@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::discovery::DiscoveredPeer;
-use crate::quic::{InboundConnection, QuicError, QuicEndpoint};
+use crate::quic::{InboundConnection, QuicEndpoint, QuicError};
 use crate::sync::SyncService;
 
 /// Snapshot of what the daemon knows about a single peer.
@@ -217,12 +217,10 @@ impl PeerRegistry {
 
         let connect_future = endpoint.connect(socket_addr, "remote-signal");
         let result = match connect_future {
-            Ok(connecting) => {
-                tokio::time::timeout(Duration::from_secs(5), connecting)
-                    .await
-                    .map_err(|_| QuicError::Connection(quinn::ConnectionError::TimedOut))
-                    .and_then(|res| res.map_err(QuicError::Connection))
-            }
+            Ok(connecting) => tokio::time::timeout(Duration::from_secs(5), connecting)
+                .await
+                .map_err(|_| QuicError::Connection(quinn::ConnectionError::TimedOut))
+                .and_then(|res| res.map_err(QuicError::Connection)),
             Err(err) => Err(QuicError::Connect(err)),
         };
 
@@ -240,10 +238,7 @@ impl PeerRegistry {
                     let registry = self.clone();
                     let node_for_sync = node_id.clone();
                     tokio::spawn(async move {
-                        match service
-                            .sync_initiator(&conn_for_sync, &node_for_sync)
-                            .await
-                        {
+                        match service.sync_initiator(&conn_for_sync, &node_for_sync).await {
                             Ok(outcome) => {
                                 tracing::info!(
                                     target: "remote_signal_daemon::peers",
@@ -292,14 +287,14 @@ impl PeerRegistry {
     fn record_discovery(&self, peer: DiscoveredPeer) {
         let mut map = self.inner.peers.write();
         let now = unix_now_ms();
-        let entry = map
-            .entry(peer.node_id.clone())
-            .or_insert_with(|| PeerRecord::new_discovered(
+        let entry = map.entry(peer.node_id.clone()).or_insert_with(|| {
+            PeerRecord::new_discovered(
                 peer.node_id.clone(),
                 peer.socket_addr,
                 PeerSource::Mdns,
                 now,
-            ));
+            )
+        });
         entry.socket_addr = peer.socket_addr;
         entry.last_seen_unix_ms = now;
         if entry.source == PeerSource::Unspecified {
@@ -389,12 +384,7 @@ impl PeerRegistry {
             });
     }
 
-    fn update_state(
-        &self,
-        node_id: &str,
-        state: PeerConnectionState,
-        error: Option<String>,
-    ) {
+    fn update_state(&self, node_id: &str, state: PeerConnectionState, error: Option<String>) {
         let mut map = self.inner.peers.write();
         if let Some(rec) = map.get_mut(node_id) {
             rec.state = state;
@@ -404,7 +394,11 @@ impl PeerRegistry {
     }
 
     fn mark_failed(&self, node_id: &str, error: &str) {
-        self.update_state(node_id, PeerConnectionState::Failed, Some(error.to_string()));
+        self.update_state(
+            node_id,
+            PeerConnectionState::Failed,
+            Some(error.to_string()),
+        );
     }
 
     fn snapshot(&self, node_id: &str) -> PeerInfo {

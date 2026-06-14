@@ -79,9 +79,10 @@ impl DryRunRender {
         // auto-select), reclassify from the snapshot so the cell carries the
         // full breakdown — otherwise an auto-selected one-installed list would
         // collapse to a bare provider name and lose its auto-select header.
-        let explicit_flag = request.resolved_target.as_ref().is_some_and(|t| {
-            matches!(t.provider_reason, ProviderResolutionReason::ExplicitFlag)
-        });
+        let explicit_flag = request
+            .resolved_target
+            .as_ref()
+            .is_some_and(|t| matches!(t.provider_reason, ProviderResolutionReason::ExplicitFlag));
         let agent = if explicit_flag {
             AgentResolutionState::Selected {
                 provider: request.resolved_target.as_ref().unwrap().provider,
@@ -159,8 +160,7 @@ pub(crate) fn render_frontmatter(frontmatter: &Value, term: &Terminal) -> String
         biscuit_terminal::discovery::detection::ColorMode::Light => DmColorMode::Dark,
         _ => DmColorMode::Light,
     };
-    let highlighted =
-        highlight_yaml_lines_with_theme(yaml.trim_end(), theme_pair, color_mode);
+    let highlighted = highlight_yaml_lines_with_theme(yaml.trim_end(), theme_pair, color_mode);
     // 1ch left margin on every line.
     highlighted
         .into_iter()
@@ -220,8 +220,10 @@ pub(crate) fn render_metadata_table(render: &DryRunRender, term: &Terminal) -> S
             .unwrap_or_else(|| relative_or_abs(&render.document_path))
     });
     let href = format!("file://{}", render.document_path.display());
-    let document_cell =
-        Prose::new(format!("<blue><a href=\"{href}\">{document_label}</a></blue>")).render(term);
+    let document_cell = Prose::new(format!(
+        "<blue><a href=\"{href}\">{document_label}</a></blue>"
+    ))
+    .render(term);
     table.add_row(vec!["Document".into(), document_cell.into()]);
 
     // Description: only when present, italic + dim.
@@ -302,7 +304,14 @@ mod tests {
 
     #[test]
     fn table_omits_description_when_absent() {
-        let render = render_with(Some("doc"), None, AgentResolutionState::NoAgent, None, false, None);
+        let render = render_with(
+            Some("doc"),
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            None,
+        );
         let plain = plain_table(&render);
         assert!(!plain.contains("Description"));
     }
@@ -353,7 +362,14 @@ mod tests {
 
     #[test]
     fn agent_falls_back_to_interactive() {
-        let render = render_with(Some("doc"), None, AgentResolutionState::NoAgent, None, false, None);
+        let render = render_with(
+            Some("doc"),
+            None,
+            AgentResolutionState::NoAgent,
+            None,
+            false,
+            None,
+        );
         let plain = plain_table(&render);
         assert!(plain.contains("interactive"));
     }
@@ -442,14 +458,7 @@ mod tests {
 
     #[test]
     fn document_uses_path_when_name_absent() {
-        let render = render_with(
-            None,
-            None,
-            AgentResolutionState::NoAgent,
-            None,
-            false,
-            None,
-        );
+        let render = render_with(None, None, AgentResolutionState::NoAgent, None, false, None);
         let plain = plain_table(&render);
         // No `name` ⇒ the document label is derived from the path.
         assert!(plain.contains("doc.md"));
@@ -486,8 +495,14 @@ mod tests {
         let term = Terminal::default();
         let rendered = render_frontmatter_heading(&term);
         let plain = strip_escape_codes(&rendered);
-        assert!(plain.contains("Frontmatter"), "heading should contain 'Frontmatter': {plain}");
-        assert!(plain.contains("resolved"), "heading should contain 'resolved': {plain}");
+        assert!(
+            plain.contains("Frontmatter"),
+            "heading should contain 'Frontmatter': {plain}"
+        );
+        assert!(
+            plain.contains("resolved"),
+            "heading should contain 'resolved': {plain}"
+        );
     }
 
     #[test]
@@ -495,7 +510,10 @@ mod tests {
         let term = Terminal::default();
         let rendered = render_hr(&term);
         let plain = strip_escape_codes(&rendered);
-        assert!(!plain.trim().is_empty(), "horizontal rule should not be empty");
+        assert!(
+            !plain.trim().is_empty(),
+            "horizontal rule should not be empty"
+        );
     }
 
     #[test]

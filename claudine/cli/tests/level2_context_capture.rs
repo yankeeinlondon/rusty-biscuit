@@ -62,12 +62,12 @@
 #[allow(deprecated)]
 use assert_cmd::cargo::cargo_bin;
 use biscuit_terminal::utils::block_constraint::visible_width;
-use biscuit_test_harness::tmux::{kill_session_by_name, TmuxHarness};
+use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name};
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
-use test_toolkit::{require_level, Level};
+use test_toolkit::{Level, require_level};
 
 /// Captures a `claudine context <args>` run inside a freshly spawned tmux
 /// session of `cols` × `rows` cells, then tears the session down.
@@ -109,10 +109,8 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     let claudine = cargo_bin!("claudine").display().to_string();
     let cols_s = cols.to_string();
     let cmd = format!("{claudine} context {}", args.join(" "));
-    let send = harness.send_command_with_env(
-        &cmd,
-        &[("FORCE_COLOR", "1"), ("COLUMNS", cols_s.as_str())],
-    );
+    let send =
+        harness.send_command_with_env(&cmd, &[("FORCE_COLOR", "1"), ("COLUMNS", cols_s.as_str())]);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
     std::thread::sleep(Duration::from_millis(250));
     let frame = harness.capture();
@@ -800,7 +798,11 @@ fn level2_context_expressions_constrained_50_wraps_in_tmux() {
         frame.plain,
     );
     let max = max_visible_width(&frame);
-    assert!(max <= 50, "rows must fit the 50-col pane; max={max}.\nplain:\n{}", frame.plain);
+    assert!(
+        max <= 50,
+        "rows must fit the 50-col pane; max={max}.\nplain:\n{}",
+        frame.plain
+    );
 }
 
 /// `--side-effects` at the minimum supported width (53 columns): wraps, no

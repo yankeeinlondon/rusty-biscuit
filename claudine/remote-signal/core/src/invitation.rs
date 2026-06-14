@@ -202,7 +202,10 @@ mod tests {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 42)), 4242);
         let invitation = Invitation::new(&id, addr);
         let encoded = invitation.encode();
-        assert!(encoded.starts_with("rs1"), "expected HRP prefix, got {encoded}");
+        assert!(
+            encoded.starts_with("rs1"),
+            "expected HRP prefix, got {encoded}"
+        );
         let decoded: Invitation = encoded.parse().expect("decode");
         assert_eq!(decoded, invitation);
     }
@@ -210,10 +213,7 @@ mod tests {
     #[test]
     fn round_trip_ipv6_invitation() {
         let id = fixed_identity();
-        let addr = SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
-            7777,
-        );
+        let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)), 7777);
         let invitation = Invitation::new(&id, addr);
         let decoded: Invitation = invitation.encode().parse().expect("decode");
         assert_eq!(decoded.socket_addr, addr);

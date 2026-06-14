@@ -1136,9 +1136,7 @@ mod tests {
         let pid_str = added
             .get("CLAUDINE_PID")
             .expect("CLAUDINE_PID must be added even in non-interactive mode");
-        let pid: u32 = pid_str
-            .parse()
-            .expect("CLAUDINE_PID must parse as u32");
+        let pid: u32 = pid_str.parse().expect("CLAUDINE_PID must parse as u32");
         assert_eq!(pid, std::process::id());
     }
 

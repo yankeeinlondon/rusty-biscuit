@@ -35,8 +35,8 @@
 
 #[allow(deprecated)]
 use assert_cmd::cargo::cargo_bin;
-use expectrl::session::OsSession;
 use expectrl::Session;
+use expectrl::session::OsSession;
 use std::fs;
 use std::io::Write;
 use std::process::Command;
@@ -92,17 +92,16 @@ fn wait_for_marker(session: &mut OsSession, marker: &str, deadline: Duration) ->
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
-                || e.kind() == std::io::ErrorKind::TimedOut =>
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
             {
                 std::thread::sleep(Duration::from_millis(20));
             }
             Err(_) => break,
         }
     }
-    panic!(
-        "marker {marker:?} did not appear within {deadline:?}; transcript:\n{transcript}"
-    );
+    panic!("marker {marker:?} did not appear within {deadline:?}; transcript:\n{transcript}");
 }
 
 /// Alternate-screen enter sequence crossterm emits via `EnterAlternateScreen`.
@@ -145,8 +144,9 @@ fn wait_for_raw_mode(session: &mut OsSession, seed: String, deadline: Duration) 
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
-                || e.kind() == std::io::ErrorKind::TimedOut =>
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
             {
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -177,7 +177,11 @@ fn stage_default_config(home_dir: &std::path::Path) {
 /// with the workspace's `bin` dir on PATH and HOME set to the workspace so
 /// `prompt_for_missing` reads the default (`true`) instead of any real
 /// user config.
-fn compose_command(workspace_dir: &std::path::Path, bin_dir: &std::path::Path, md_file: &std::path::Path) -> Command {
+fn compose_command(
+    workspace_dir: &std::path::Path,
+    bin_dir: &std::path::Path,
+    md_file: &std::path::Path,
+) -> Command {
     stage_default_config(workspace_dir);
     let mut cmd = Command::new(cargo_bin!("claudine"));
     cmd.args(["compose", "--goose", md_file.to_str().unwrap()]);
@@ -293,7 +297,9 @@ fn level2_pty_schema_prompt_collects_enum_selection() {
 
     // ChooseOne defaults to the first option highlighted. Pressing Enter
     // submits the current selection (`small`).
-    session.write_all(b"\r").expect("submit default enum choice");
+    session
+        .write_all(b"\r")
+        .expect("submit default enum choice");
     session.flush().ok();
 
     let stop = Instant::now() + Duration::from_secs(15);
@@ -385,7 +391,9 @@ fn level2_pty_schema_prompt_number_retries_on_invalid_input() {
     // and keep the previous buffer. (The retry's submission waits on the
     // widget-rendered validation error below, which already implies raw
     // mode for the second prompt iteration.)
-    session.write_all(b"not-a-number\r").expect("write bad value");
+    session
+        .write_all(b"not-a-number\r")
+        .expect("write bad value");
     session.flush().ok();
 
     // Wait for the re-prompt to render the validation error. The error
@@ -443,12 +451,7 @@ fn level2_pty_schema_silent_suppresses_prompt_under_tty() {
     // instead.
     stage_default_config(workspace.path());
     let mut cmd = Command::new(cargo_bin!("claudine"));
-    cmd.args([
-        "compose",
-        "--goose",
-        "--silent",
-        md_file.to_str().unwrap(),
-    ]);
+    cmd.args(["compose", "--goose", "--silent", md_file.to_str().unwrap()]);
     cmd.env("HOME", workspace.path());
     cmd.env("PATH", augmented_path(&bin_dir));
     cmd.env("TERM", "xterm-256color");
@@ -798,7 +801,9 @@ exit 0
     // Drive the prompt to completion. The deduper should fire `topic`
     // exactly once and reuse the answer for both steps.
     let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session.write_all(b"collected\r").expect("write topic value");
+    session
+        .write_all(b"collected\r")
+        .expect("write topic value");
     session.flush().ok();
 
     let stop = Instant::now() + Duration::from_secs(20);
@@ -1028,7 +1033,9 @@ fn level2_pty_sequence_invalid_agent_shows_preprompt_before_review() {
     // Cancel the review screen (Esc) so the child exits instead of blocking
     // on the picker. Gate the keystroke on raw mode like the schema tests.
     let _ = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session.write_all(b"\x1b").expect("send Esc to cancel review");
+    session
+        .write_all(b"\x1b")
+        .expect("send Esc to cancel review");
     session.flush().ok();
 
     let _ = read_for(&mut session, Duration::from_secs(5));
@@ -1087,7 +1094,9 @@ fn level2_pty_sequence_zero_installed_list_shows_preprompt_before_review() {
     );
 
     let _ = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session.write_all(b"\x1b").expect("send Esc to cancel review");
+    session
+        .write_all(b"\x1b")
+        .expect("send Esc to cancel review");
     session.flush().ok();
 
     let _ = read_for(&mut session, Duration::from_secs(5));
@@ -1168,7 +1177,9 @@ fn level2_pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
     );
 
     let _ = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session.write_all(b"\x1b").expect("send Esc to cancel review");
+    session
+        .write_all(b"\x1b")
+        .expect("send Esc to cancel review");
     session.flush().ok();
 
     let _ = read_for(&mut session, Duration::from_secs(5));

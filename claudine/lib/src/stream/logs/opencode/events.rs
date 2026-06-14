@@ -196,11 +196,7 @@ pub fn parse_line(line: &str) -> ParsedOpenCodeStderrLine {
     ParsedOpenCodeStderrLine::RawText(line.to_string())
 }
 
-fn parse_captures(
-    line: &str,
-    caps: &Captures<'_>,
-    delta_ms: u64,
-) -> ParsedOpenCodeStderrLine {
+fn parse_captures(line: &str, caps: &Captures<'_>, delta_ms: u64) -> ParsedOpenCodeStderrLine {
     let Some(level) = caps
         .name("level")
         .and_then(|m| LogLevel::from_str(m.as_str()))
@@ -511,7 +507,10 @@ mod tests {
 
         assert_eq!(record.level, LogLevel::Info);
         assert_eq!(
-            record.timestamp.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+            record
+                .timestamp
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string(),
             "2026-06-10T16:11:27.352Z",
         );
         assert_eq!(record.delta_ms, 0);
@@ -534,9 +533,8 @@ mod tests {
             ("WARN", LogLevel::Warn),
             ("ERROR", LogLevel::Error),
         ] {
-            let line = format!(
-                "timestamp=2026-06-10T16:11:27.352Z level={level_str} service=default"
-            );
+            let line =
+                format!("timestamp=2026-06-10T16:11:27.352Z level={level_str} service=default");
             let ParsedOpenCodeStderrLine::Structured(record) = parse_line(&line) else {
                 panic!("expected Structured for {level_str}");
             };

@@ -157,7 +157,11 @@ fn prompt_region(frame: &CapturedFrame) -> (Vec<String>, Vec<String>) {
 /// `clear` runs first so the shared pane shows only this run — otherwise a
 /// prior run's prompt (still on screen) would be the one `prompt_region`
 /// extracts.
-fn capture_prompt_in_mode(harness: &mut TmuxHarness, staged: &Staged, dry_run: bool) -> CapturedFrame {
+fn capture_prompt_in_mode(
+    harness: &mut TmuxHarness,
+    staged: &Staged,
+    dry_run: bool,
+) -> CapturedFrame {
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&staged.bin_dir);
     let path = path.to_string_lossy().into_owned();
@@ -225,7 +229,9 @@ fn level2_dry_run_approval_prompt_matches_normal_mode_in_tmux() {
         normal_plain
             .iter()
             .any(|l| l.contains("Shell Approval Required"))
-            && normal_plain.iter().any(|l| l.contains("tty-approved-marker"))
+            && normal_plain
+                .iter()
+                .any(|l| l.contains("tty-approved-marker"))
             && normal_plain.iter().any(|l| l.contains("Allow once")),
         "normal-mode capture did not contain the expected approval prompt; got:\n{normal_plain:#?}\nplain:\n{}",
         normal.plain,

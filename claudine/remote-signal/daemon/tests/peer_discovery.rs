@@ -34,7 +34,11 @@ fn daemon_config(tmp: &TempDir, name: &str, mdns_enabled: bool) -> DaemonConfig 
         .with_networking(networking_config(mdns_enabled))
 }
 
-async fn boot_daemon(tmp: &TempDir, name: &str, mdns_enabled: bool) -> (ServerHandle, std::path::PathBuf) {
+async fn boot_daemon(
+    tmp: &TempDir,
+    name: &str,
+    mdns_enabled: bool,
+) -> (ServerHandle, std::path::PathBuf) {
     let socket = tmp.path().join(format!("{name}.sock"));
     let handle = spawn_uds_server(socket.clone(), daemon_config(tmp, name, mdns_enabled))
         .expect("spawn daemon");
@@ -61,7 +65,9 @@ async fn two_daemons_connect_via_manual_invitation() {
     assert!(!invitation.invitation.is_empty(), "invitation must be set");
     assert_eq!(invitation.node_id, bob.node_id());
 
-    let mut alice_client = connect_uds(alice_sock.clone()).await.expect("alice connect");
+    let mut alice_client = connect_uds(alice_sock.clone())
+        .await
+        .expect("alice connect");
     let response = alice_client
         .connect_to_peer(ConnectToPeerRequest {
             invitation: invitation.invitation,
@@ -109,7 +115,9 @@ async fn real_two_daemons_discover_each_other_via_mdns() {
     let (alice, alice_sock) = boot_daemon(&tmp, "alice", true).await;
     let (bob, _bob_sock) = boot_daemon(&tmp, "bob", true).await;
 
-    let mut alice_client = connect_uds(alice_sock.clone()).await.expect("alice connect");
+    let mut alice_client = connect_uds(alice_sock.clone())
+        .await
+        .expect("alice connect");
 
     let deadline = Instant::now() + Duration::from_secs(15);
     let target_node = bob.node_id();
@@ -179,7 +187,9 @@ async fn wait_until_bound(path: &Path) {
 #[tokio::test]
 async fn real_mdns_discovered_peer_cannot_sync_before_approval() {
     if std::env::var("REMOTE_SIGNAL_REAL_MDNS").as_deref() != Ok("1") {
-        eprintln!("skipping real_ mDNS data-exchange boundary test (set REMOTE_SIGNAL_REAL_MDNS=1 to run)");
+        eprintln!(
+            "skipping real_ mDNS data-exchange boundary test (set REMOTE_SIGNAL_REAL_MDNS=1 to run)"
+        );
         return;
     }
     let tmp = TempDir::new().expect("tempdir");
@@ -188,7 +198,9 @@ async fn real_mdns_discovered_peer_cannot_sync_before_approval() {
     let alice_node = alice.node_id();
     let bob_node = bob.node_id();
 
-    let mut alice_client = connect_uds(alice_sock.clone()).await.expect("alice connect");
+    let mut alice_client = connect_uds(alice_sock.clone())
+        .await
+        .expect("alice connect");
     let mut bob_client = connect_uds(bob_sock.clone()).await.expect("bob connect");
 
     // Bob writes a "secret" entry in his own namespace.

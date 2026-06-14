@@ -273,8 +273,12 @@ fn level2_perf_tree_renders_styled_in_tmux() {
     // a truecolor fg selector is present rather than an exact RGB triple, which
     // capture paths may renormalize. Read from a row that is always inside the
     // captured viewport (the headline scrolls off — see `assert_tree_structure`).
-    let frame_line = raw_line(&capture.frame, "environment setup")
-        .unwrap_or_else(|| panic!("environment setup row not found.\nraw:\n{}", capture.frame.raw));
+    let frame_line = raw_line(&capture.frame, "environment setup").unwrap_or_else(|| {
+        panic!(
+            "environment setup row not found.\nraw:\n{}",
+            capture.frame.raw
+        )
+    });
     assert!(
         frame_line.contains("38;2;"),
         "expected the `▌` frame to render a truecolor foreground.\nrow: {frame_line:?}",

@@ -1117,7 +1117,9 @@ Step about {{config}}.
         "expected aggregated `sequence missing properties` surface; stderr:\n{plain}"
     );
     assert!(
-        !plain.to_lowercase().contains("unsupported interactive schema"),
+        !plain
+            .to_lowercase()
+            .contains("unsupported interactive schema"),
         "non-TTY must NOT short-circuit to UnsupportedInteractiveSchema; stderr:\n{plain}"
     );
     // Both step labels should appear in the aggregated report so a user

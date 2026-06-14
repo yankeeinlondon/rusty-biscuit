@@ -935,10 +935,7 @@ fn completion_inline_compose_enum_values_from_schema() {
         ),
     );
 
-    let got = run_complete(
-        ws.path(),
-        &["inline-compose", "prompts/inline.md", "tier="],
-    );
+    let got = run_complete(ws.path(), &["inline-compose", "prompts/inline.md", "tier="]);
     assert!(
         got.iter().any(|c| c == "tier='small'"),
         "expected tier='small' from inline-compose schema completer: {got:?}"
@@ -1019,10 +1016,7 @@ fn completion_sequence_enum_values_from_schema() {
         ),
     );
 
-    let got = run_complete(
-        ws.path(),
-        &["sequence", "sequences/plan.seq.md", "tier="],
-    );
+    let got = run_complete(ws.path(), &["sequence", "sequences/plan.seq.md", "tier="]);
     assert!(
         got.iter().any(|c| c == "tier='small'"),
         "expected tier='small' from sequence schema completer: {got:?}"
@@ -1098,13 +1092,13 @@ fn completion_file_match_emits_path_qualified_glob_matches() {
     // Seed files inside and outside `src/` — only files under `src/`
     // should appear in the candidate set.
     write_file(&ws.path().join("src").join("lib.rs"), "// lib");
-    write_file(&ws.path().join("src").join("inner").join("mod.rs"), "// mod");
+    write_file(
+        &ws.path().join("src").join("inner").join("mod.rs"),
+        "// mod",
+    );
     write_file(&ws.path().join("tests").join("integration.rs"), "// test");
 
-    let got = run_complete(
-        ws.path(),
-        &["compose", "prompts/plan.md", "source_code="],
-    );
+    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "source_code="]);
     assert!(
         got.iter().any(|c| c == "source_code='src/lib.rs'"),
         "expected source_code='src/lib.rs' from path-qualified glob: {got:?}"
@@ -1144,10 +1138,7 @@ fn completion_file_match_honors_negated_path_qualified_glob() {
         "// inner test",
     );
 
-    let got = run_complete(
-        ws.path(),
-        &["compose", "prompts/plan.md", "source_code="],
-    );
+    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "source_code="]);
     assert!(
         got.iter().any(|c| c == "source_code='src/lib.rs'"),
         "expected source_code='src/lib.rs' to survive negation: {got:?}"

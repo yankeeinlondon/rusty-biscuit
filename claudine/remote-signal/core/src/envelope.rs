@@ -252,10 +252,7 @@ impl EnvelopeInbox {
     /// Verify `envelope` and record its message ID so subsequent
     /// duplicates are rejected. Returns the verified payload bytes on
     /// success.
-    pub fn accept<'a>(
-        &mut self,
-        envelope: &'a SignedEnvelope,
-    ) -> Result<&'a [u8], EnvelopeError> {
+    pub fn accept<'a>(&mut self, envelope: &'a SignedEnvelope) -> Result<&'a [u8], EnvelopeError> {
         if self.seen.contains(&envelope.message_id) {
             return Err(EnvelopeError::DuplicateMessageId(envelope.message_id_hex()));
         }
@@ -328,8 +325,7 @@ mod tests {
     fn seal_and_verify_round_trip() {
         let identity = fixed_identity(7);
         let mut sealer = EnvelopeSealer::new(identity.clone());
-        let envelope =
-            sealer.seal("doc/test".into(), PayloadKind::Delta, b"hello".to_vec());
+        let envelope = sealer.seal("doc/test".into(), PayloadKind::Delta, b"hello".to_vec());
         let payload = envelope.verify().expect("verify");
         assert_eq!(payload, b"hello");
         assert_eq!(envelope.sender, identity.public_key_bytes());
@@ -342,8 +338,7 @@ mod tests {
     fn verify_rejects_tampered_payload() {
         let identity = fixed_identity(1);
         let mut sealer = EnvelopeSealer::new(identity);
-        let mut envelope =
-            sealer.seal("doc/a".into(), PayloadKind::Snapshot, b"original".to_vec());
+        let mut envelope = sealer.seal("doc/a".into(), PayloadKind::Snapshot, b"original".to_vec());
         envelope.payload = b"tampered".to_vec();
         assert_eq!(envelope.verify(), Err(EnvelopeError::ContentHashMismatch));
     }
@@ -352,8 +347,7 @@ mod tests {
     fn verify_rejects_tampered_signature() {
         let identity = fixed_identity(2);
         let mut sealer = EnvelopeSealer::new(identity);
-        let mut envelope =
-            sealer.seal("doc/b".into(), PayloadKind::Delta, b"payload".to_vec());
+        let mut envelope = sealer.seal("doc/b".into(), PayloadKind::Delta, b"payload".to_vec());
         envelope.signature[0] ^= 0xFF;
         assert_eq!(envelope.verify(), Err(EnvelopeError::InvalidSignature));
     }
@@ -363,8 +357,7 @@ mod tests {
         let alice = fixed_identity(3);
         let mallory = fixed_identity(4);
         let mut sealer = EnvelopeSealer::new(alice);
-        let mut envelope =
-            sealer.seal("doc/c".into(), PayloadKind::Delta, b"hi".to_vec());
+        let mut envelope = sealer.seal("doc/c".into(), PayloadKind::Delta, b"hi".to_vec());
         envelope.sender = mallory.public_key_bytes();
         assert_eq!(envelope.verify(), Err(EnvelopeError::InvalidSignature));
     }
@@ -373,10 +366,8 @@ mod tests {
     fn monotonic_ids_increment_per_seal() {
         let identity = fixed_identity(5);
         let mut sealer = EnvelopeSealer::new(identity);
-        let first =
-            sealer.seal("doc-1".into(), PayloadKind::Delta, b"payload".to_vec());
-        let second =
-            sealer.seal("doc-1".into(), PayloadKind::Delta, b"payload".to_vec());
+        let first = sealer.seal("doc-1".into(), PayloadKind::Delta, b"payload".to_vec());
+        let second = sealer.seal("doc-1".into(), PayloadKind::Delta, b"payload".to_vec());
         let first_id = u64::from_be_bytes(first.message_id[24..].try_into().unwrap());
         let second_id = u64::from_be_bytes(second.message_id[24..].try_into().unwrap());
         assert!(second_id > first_id);
@@ -397,8 +388,7 @@ mod tests {
     fn verify_rejects_wrong_document_id() {
         let identity = fixed_identity(11);
         let mut sealer = EnvelopeSealer::new(identity);
-        let mut envelope =
-            sealer.seal("doc/original".into(), PayloadKind::Delta, b"data".to_vec());
+        let mut envelope = sealer.seal("doc/original".into(), PayloadKind::Delta, b"data".to_vec());
         envelope.document_id = "doc/other".into();
         assert_eq!(envelope.verify(), Err(EnvelopeError::InvalidSignature));
     }
@@ -407,8 +397,7 @@ mod tests {
     fn verify_rejects_wrong_payload_kind() {
         let identity = fixed_identity(12);
         let mut sealer = EnvelopeSealer::new(identity);
-        let mut envelope =
-            sealer.seal("doc/x".into(), PayloadKind::Snapshot, b"data".to_vec());
+        let mut envelope = sealer.seal("doc/x".into(), PayloadKind::Snapshot, b"data".to_vec());
         envelope.payload_kind = PayloadKind::Delta;
         assert_eq!(envelope.verify(), Err(EnvelopeError::InvalidSignature));
     }
@@ -417,8 +406,7 @@ mod tests {
     fn inbox_accepts_first_occurrence_and_rejects_replay() {
         let identity = fixed_identity(8);
         let mut sealer = EnvelopeSealer::new(identity);
-        let envelope =
-            sealer.seal("doc/r".into(), PayloadKind::Delta, b"once".to_vec());
+        let envelope = sealer.seal("doc/r".into(), PayloadKind::Delta, b"once".to_vec());
         let mut inbox = EnvelopeInbox::new();
         let bytes = inbox.accept(&envelope).expect("accept first");
         assert_eq!(bytes, b"once");
@@ -431,8 +419,7 @@ mod tests {
     fn inbox_rejects_invalid_envelope_without_storing_id() {
         let identity = fixed_identity(9);
         let mut sealer = EnvelopeSealer::new(identity);
-        let mut envelope =
-            sealer.seal("doc/s".into(), PayloadKind::Delta, b"bad".to_vec());
+        let mut envelope = sealer.seal("doc/s".into(), PayloadKind::Delta, b"bad".to_vec());
         envelope.signature[0] ^= 0xFF;
         let mut inbox = EnvelopeInbox::new();
         let err = inbox.accept(&envelope).expect_err("invalid");
@@ -444,10 +431,8 @@ mod tests {
     fn inbox_accepts_distinct_envelopes_from_same_sender() {
         let identity = fixed_identity(10);
         let mut sealer = EnvelopeSealer::new(identity);
-        let first =
-            sealer.seal("doc/d".into(), PayloadKind::Delta, b"alpha".to_vec());
-        let second =
-            sealer.seal("doc/d".into(), PayloadKind::Delta, b"beta".to_vec());
+        let first = sealer.seal("doc/d".into(), PayloadKind::Delta, b"alpha".to_vec());
+        let second = sealer.seal("doc/d".into(), PayloadKind::Delta, b"beta".to_vec());
         let mut inbox = EnvelopeInbox::new();
         inbox.accept(&first).expect("alpha");
         inbox.accept(&second).expect("beta");
@@ -460,12 +445,9 @@ mod tests {
         let mut sealer = EnvelopeSealer::new(identity);
         let mut inbox = EnvelopeInbox::new();
         assert_eq!(inbox.high_water_mark(), None);
-        let e0 =
-            sealer.seal("doc/h".into(), PayloadKind::Delta, b"a".to_vec());
-        let e1 =
-            sealer.seal("doc/h".into(), PayloadKind::Delta, b"b".to_vec());
-        let e2 =
-            sealer.seal("doc/h".into(), PayloadKind::Delta, b"c".to_vec());
+        let e0 = sealer.seal("doc/h".into(), PayloadKind::Delta, b"a".to_vec());
+        let e1 = sealer.seal("doc/h".into(), PayloadKind::Delta, b"b".to_vec());
+        let e2 = sealer.seal("doc/h".into(), PayloadKind::Delta, b"c".to_vec());
         inbox.accept(&e0).expect("e0");
         inbox.accept(&e1).expect("e1");
         inbox.accept(&e2).expect("e2");
@@ -477,8 +459,7 @@ mod tests {
         let identity = fixed_identity(15);
         let mut sealer = EnvelopeSealer::with_start(identity, 100);
         assert_eq!(sealer.next_counter(), 100);
-        let envelope =
-            sealer.seal("doc/o".into(), PayloadKind::Delta, b"x".to_vec());
+        let envelope = sealer.seal("doc/o".into(), PayloadKind::Delta, b"x".to_vec());
         let counter = u64::from_be_bytes(envelope.message_id[24..].try_into().unwrap());
         assert_eq!(counter, 100);
         assert_eq!(sealer.next_counter(), 101);
@@ -490,10 +471,8 @@ mod tests {
         let bob = fixed_identity(21);
         let mut alice_sealer = EnvelopeSealer::new(alice.clone());
         let mut bob_sealer = EnvelopeSealer::new(bob);
-        let alice_env =
-            alice_sealer.seal("doc/d".into(), PayloadKind::Delta, b"a".to_vec());
-        let bob_env =
-            bob_sealer.seal("doc/d".into(), PayloadKind::Delta, b"b".to_vec());
+        let alice_env = alice_sealer.seal("doc/d".into(), PayloadKind::Delta, b"a".to_vec());
+        let bob_env = bob_sealer.seal("doc/d".into(), PayloadKind::Delta, b"b".to_vec());
         // Both start at counter 0, but the message IDs include only the
         // counter — they will be the same bytes. The inbox (in-memory,
         // single-sender) would reject the second because it only tracks
@@ -516,10 +495,8 @@ mod tests {
         let bob = fixed_identity(31);
         let mut alice_sealer = EnvelopeSealer::new(alice);
         let mut bob_sealer = EnvelopeSealer::new(bob);
-        let env_a =
-            alice_sealer.seal("doc/d".into(), PayloadKind::Delta, b"a".to_vec());
-        let env_b =
-            bob_sealer.seal("doc/d".into(), PayloadKind::Delta, b"b".to_vec());
+        let env_a = alice_sealer.seal("doc/d".into(), PayloadKind::Delta, b"a".to_vec());
+        let env_b = bob_sealer.seal("doc/d".into(), PayloadKind::Delta, b"b".to_vec());
         let mut inbox_a = EnvelopeInbox::new();
         let mut inbox_b = EnvelopeInbox::new();
         inbox_a.accept(&env_a).expect("alice inbox accepts alice");

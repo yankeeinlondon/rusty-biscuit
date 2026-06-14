@@ -469,8 +469,12 @@ pub(crate) fn eagerly_resolve_target(
             refresh_for_model_validation(&catalog, provider, hints, Some(&probe_reason));
         }
         let catalog_ref = if dry_run { None } else { Some(&catalog) };
-        let (model, model_reason) =
-            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, catalog_ref);
+        let (model, model_reason) = claudine::composition::resolve_model_with_hints(
+            provider,
+            hints,
+            cli_model,
+            catalog_ref,
+        );
         return Ok(Some(ResolvedExecutionTarget {
             provider,
             provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
@@ -505,8 +509,16 @@ pub(crate) fn eagerly_resolve_target(
         }));
     }
 
-    resolve_live_target(state, hints, snapshot, favorite, cli_model, &catalog, source_path)
-        .map(Some)
+    resolve_live_target(
+        state,
+        hints,
+        snapshot,
+        favorite,
+        cli_model,
+        &catalog,
+        source_path,
+    )
+    .map(Some)
 }
 
 /// Resolve a classified agent state for a live (non-dry-run) run.
@@ -560,8 +572,12 @@ fn resolve_live_target_with_tty(
         let (_, probe_reason) =
             claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
         refresh_for_model_validation(catalog, provider, hints, Some(&probe_reason));
-        let (model, model_reason) =
-            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, Some(catalog));
+        let (model, model_reason) = claudine::composition::resolve_model_with_hints(
+            provider,
+            hints,
+            cli_model,
+            Some(catalog),
+        );
         let provider_reason = match state {
             AgentResolutionState::Selected { .. } => ProviderResolutionReason::FrontmatterSingle,
             _ => ProviderResolutionReason::FrontmatterList,
@@ -575,13 +591,16 @@ fn resolve_live_target_with_tty(
     }
 
     if is_tty {
-        let provider =
-            prompt_for_agent_state(&state, hints, snapshot, favorite, source_path)?;
+        let provider = prompt_for_agent_state(&state, hints, snapshot, favorite, source_path)?;
         let (_, probe_reason) =
             claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
         refresh_for_model_validation(catalog, provider, hints, Some(&probe_reason));
-        let (model, model_reason) =
-            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, Some(catalog));
+        let (model, model_reason) = claudine::composition::resolve_model_with_hints(
+            provider,
+            hints,
+            cli_model,
+            Some(catalog),
+        );
         Ok(ResolvedExecutionTarget {
             provider,
             provider_reason: ProviderResolutionReason::InteractivePicker,
@@ -684,8 +703,7 @@ fn build_scoped_picker_plan(
     favorite: Option<Provider>,
     scope: Option<&[Provider]>,
 ) -> Result<claudine::composition::ProviderPickerPlan, CompositionError> {
-    let mut plan =
-        claudine::composition::build_picker_plan_with_hints(hints, snapshot, favorite)?;
+    let mut plan = claudine::composition::build_picker_plan_with_hints(hints, snapshot, favorite)?;
 
     if let Some(scope) = scope {
         let scope_set: std::collections::BTreeSet<Provider> = scope.iter().copied().collect();
@@ -2397,12 +2415,8 @@ mod tests {
     fn load_selection_config_handles_missing_config() {
         let dir = tempfile::tempdir().unwrap();
         let nonexistent = dir.path().join("no-such-config.json");
-        let result =
-            claudine::dispatch::loader::load_claudine_config(Some(&nonexistent), None);
-        assert!(
-            result.is_err(),
-            "expected error for missing config file"
-        );
+        let result = claudine::dispatch::loader::load_claudine_config(Some(&nonexistent), None);
+        assert!(result.is_err(), "expected error for missing config file");
     }
 
     #[test]
@@ -3040,7 +3054,10 @@ mod tests {
         };
         let msg = agent_prompt_message(&state, Path::new("/tmp/doc.md"))
             .expect("single-invalid has a pre-prompt message");
-        assert!(msg.contains("<red><b>Invalid Agent:</b></red>"), "got: {msg}");
+        assert!(
+            msg.contains("<red><b>Invalid Agent:</b></red>"),
+            "got: {msg}"
+        );
         assert!(msg.contains("totally-bogus"), "got: {msg}");
         assert!(msg.contains("/tmp/doc.md"), "got: {msg}");
         // The TTY pre-prompt and the no-TTY abort body share this exact text.

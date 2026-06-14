@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 use remote_signal_client::connect_uds;
 use remote_signal_core::{
     AppendEntryRequest, ApprovePeerRequest, ConnectToPeerRequest, CreateInvitationRequest,
-    ListChunkEntriesRequest, ListPairingsRequest, ListSessionChunksRequest,
-    PeerConnectionState, RemoteSignalClient, RevokePeerRequest, SyncWithPeerRequest,
+    ListChunkEntriesRequest, ListPairingsRequest, ListSessionChunksRequest, PeerConnectionState,
+    RemoteSignalClient, RevokePeerRequest, SyncWithPeerRequest,
 };
 use remote_signal_daemon::server::{DaemonConfig, NetworkConfig, ServerHandle, spawn_uds_server};
 use tempfile::TempDir;
@@ -33,13 +33,9 @@ fn daemon_config(tmp: &TempDir, name: &str) -> DaemonConfig {
         .with_networking(networking_config())
 }
 
-async fn boot_daemon(
-    tmp: &TempDir,
-    name: &str,
-) -> (ServerHandle, std::path::PathBuf) {
+async fn boot_daemon(tmp: &TempDir, name: &str) -> (ServerHandle, std::path::PathBuf) {
     let socket = tmp.path().join(format!("{name}.sock"));
-    let handle =
-        spawn_uds_server(socket.clone(), daemon_config(tmp, name)).expect("spawn daemon");
+    let handle = spawn_uds_server(socket.clone(), daemon_config(tmp, name)).expect("spawn daemon");
     wait_until_bound(&socket).await;
     (handle, socket)
 }
@@ -63,7 +59,9 @@ async fn paired_daemons_converge_after_direct_sync() {
     let alice_node = alice.node_id();
     let bob_node = bob.node_id();
 
-    let mut alice_client = connect_uds(alice_sock.clone()).await.expect("alice connect");
+    let mut alice_client = connect_uds(alice_sock.clone())
+        .await
+        .expect("alice connect");
     let mut bob_client = connect_uds(bob_sock.clone()).await.expect("bob connect");
 
     // Pre-approve each other so the initial sync attempt that fires
@@ -158,7 +156,9 @@ async fn sync_is_rejected_when_pairing_is_missing() {
     let (alice, alice_sock) = boot_daemon(&tmp, "alice").await;
     let (bob, bob_sock) = boot_daemon(&tmp, "bob").await;
 
-    let mut alice_client = connect_uds(alice_sock.clone()).await.expect("alice connect");
+    let mut alice_client = connect_uds(alice_sock.clone())
+        .await
+        .expect("alice connect");
     let mut bob_client = connect_uds(bob_sock.clone()).await.expect("bob connect");
 
     // Connect QUIC via manual invitation. This auto-pairs Alice with
@@ -201,8 +201,7 @@ async fn pairings_can_be_listed_and_revoked() {
     let (alice, alice_sock) = boot_daemon(&tmp, "alice").await;
     let mut client = connect_uds(alice_sock.clone()).await.expect("connect");
 
-    let node_id =
-        "1111111111111111111111111111111111111111111111111111111111111111".to_string();
+    let node_id = "1111111111111111111111111111111111111111111111111111111111111111".to_string();
     client
         .approve_peer(ApprovePeerRequest {
             node_id: node_id.clone(),
@@ -249,13 +248,14 @@ async fn wait_for_messages(
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let messages = collect_messages_async(client, owner, session).await;
-        if expected.iter().all(|want| messages.iter().any(|m| m == *want)) {
+        if expected
+            .iter()
+            .all(|want| messages.iter().any(|m| m == *want))
+        {
             return;
         }
         if Instant::now() >= deadline {
-            panic!(
-                "timed out waiting for messages {expected:?}; saw {messages:?}",
-            );
+            panic!("timed out waiting for messages {expected:?}; saw {messages:?}",);
         }
         sleep(Duration::from_millis(100)).await;
     }

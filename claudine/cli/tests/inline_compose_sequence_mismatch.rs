@@ -242,11 +242,7 @@ fn sequence_without_prompt_yields_missing_prompt_not_mismatch() {
     // behavior, NOT the mismatch.
     let workspace = tempdir().unwrap();
     let md_file = workspace.path().join("doc.md");
-    fs::write(
-        &md_file,
-        "---\nsequence:\n  - name: Hello\n---\nbody\n",
-    )
-    .unwrap();
+    fs::write(&md_file, "---\nsequence:\n  - name: Hello\n---\nbody\n").unwrap();
 
     let (plain, failed) = run_inline_compose(&md_file);
     assert!(failed, "missing prompt must exit nonzero; stderr:\n{plain}");

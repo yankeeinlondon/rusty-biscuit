@@ -12,14 +12,14 @@ use std::time::Instant;
 
 use remote_signal_core::{
     AppendEntryRequest, AppendEntryResponse, ApprovePeerRequest, ApprovePeerResponse, ChunkId,
-    ConnectToPeerRequest, ConnectToPeerResponse, CreateInvitationRequest,
-    CreateInvitationResponse, DAEMON_VERSION, Invitation, ListChunkEntriesRequest,
-    ListChunkEntriesResponse, ListPairingsRequest, ListPairingsResponse, ListPeersRequest,
-    ListPeersResponse, ListSessionChunksRequest, ListSessionChunksResponse, NodeIdentity,
-    PairingInfo, PeerSource, PingRequest, PingResponse, ProjectionRow as ProtoProjectionRow,
-    QueryProjectionRequest, QueryProjectionResponse, RemoteSignal, RevokePeerRequest,
-    RevokePeerResponse, SessionEntry, StatusRequest, StatusResponse,
-    SyncChunkOutcome as ProtoSyncChunkOutcome, SyncWithPeerRequest, SyncWithPeerResponse,
+    ConnectToPeerRequest, ConnectToPeerResponse, CreateInvitationRequest, CreateInvitationResponse,
+    DAEMON_VERSION, Invitation, ListChunkEntriesRequest, ListChunkEntriesResponse,
+    ListPairingsRequest, ListPairingsResponse, ListPeersRequest, ListPeersResponse,
+    ListSessionChunksRequest, ListSessionChunksResponse, NodeIdentity, PairingInfo, PeerSource,
+    PingRequest, PingResponse, ProjectionRow as ProtoProjectionRow, QueryProjectionRequest,
+    QueryProjectionResponse, RemoteSignal, RevokePeerRequest, RevokePeerResponse, SessionEntry,
+    StatusRequest, StatusResponse, SyncChunkOutcome as ProtoSyncChunkOutcome, SyncWithPeerRequest,
+    SyncWithPeerResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -95,10 +95,7 @@ impl RemoteSignalService {
 
 #[tonic::async_trait]
 impl RemoteSignal for RemoteSignalService {
-    async fn ping(
-        &self,
-        request: Request<PingRequest>,
-    ) -> Result<Response<PingResponse>, Status> {
+    async fn ping(&self, request: Request<PingRequest>) -> Result<Response<PingResponse>, Status> {
         let nonce = request.into_inner().nonce;
         tracing::debug!(nonce = %nonce, "ping received");
         Ok(Response::new(PingResponse {
@@ -153,12 +150,12 @@ impl RemoteSignal for RemoteSignalService {
         request: Request<ListChunkEntriesRequest>,
     ) -> Result<Response<ListChunkEntriesResponse>, Status> {
         let body = request.into_inner();
-        let chunk: ChunkId = body
-            .chunk_id
-            .parse()
-            .map_err(|err: remote_signal_core::ChunkIdParseError| {
-                Status::invalid_argument(err.to_string())
-            })?;
+        let chunk: ChunkId =
+            body.chunk_id
+                .parse()
+                .map_err(|err: remote_signal_core::ChunkIdParseError| {
+                    Status::invalid_argument(err.to_string())
+                })?;
         let entries = self
             .session_log
             .list_chunk_entries(&chunk)
@@ -214,11 +211,9 @@ impl RemoteSignal for RemoteSignalService {
         let socket_addr = if body.advertise_addr.is_empty() {
             advertised_socket_addr(local_addr)
         } else {
-            body.advertise_addr
-                .parse::<SocketAddr>()
-                .map_err(|err| {
-                    Status::invalid_argument(format!("advertise_addr is not a valid SocketAddr: {err}"))
-                })?
+            body.advertise_addr.parse::<SocketAddr>().map_err(|err| {
+                Status::invalid_argument(format!("advertise_addr is not a valid SocketAddr: {err}"))
+            })?
         };
         let invitation = Invitation::new(self.identity.as_ref(), socket_addr);
         Ok(Response::new(CreateInvitationResponse {
@@ -237,20 +232,18 @@ impl RemoteSignal for RemoteSignalService {
             .as_ref()
             .ok_or_else(|| Status::unavailable("peer registry not enabled"))?;
         let body = request.into_inner();
-        let invitation: Invitation = body
-            .invitation
-            .parse()
-            .map_err(|err: remote_signal_core::InvitationError| {
-                Status::invalid_argument(err.to_string())
-            })?;
+        let invitation: Invitation =
+            body.invitation
+                .parse()
+                .map_err(|err: remote_signal_core::InvitationError| {
+                    Status::invalid_argument(err.to_string())
+                })?;
         let node_id = invitation.node_id();
         match peers
             .connect(node_id.clone(), invitation.socket_addr, PeerSource::Manual)
             .await
         {
-            Ok(peer) => {
-                Ok(Response::new(ConnectToPeerResponse { peer: Some(peer) }))
-            }
+            Ok(peer) => Ok(Response::new(ConnectToPeerResponse { peer: Some(peer) })),
             Err(error) => Err(Status::unavailable(format!(
                 "failed to connect to peer {node_id}: {error}"
             ))),
@@ -323,11 +316,11 @@ impl RemoteSignal for RemoteSignalService {
             .ok_or_else(|| Status::unavailable("peer registry not enabled"))?;
         let body = request.into_inner();
         let node_id = normalize_node_id(&body.node_id)?;
-        let connection = peers
-            .connection_for(&node_id)
-            .ok_or_else(|| Status::failed_precondition(format!(
+        let connection = peers.connection_for(&node_id).ok_or_else(|| {
+            Status::failed_precondition(format!(
                 "no active QUIC connection to peer {node_id}; call ConnectToPeer first",
-            )))?;
+            ))
+        })?;
         let outcome = self
             .sync_service
             .sync_initiator(&connection, &node_id)
@@ -450,10 +443,13 @@ mod tests {
         let tmp = TempDir::new().expect("tempdir");
         let storage = Storage::open(tmp.path().join("session.redb")).expect("storage");
         let projection = Projection::in_memory().expect("projection");
-        let worker = spawn(projection.clone(), BatcherConfig {
-            flush_interval: Duration::from_millis(20),
-            flush_size: 16,
-        });
+        let worker = spawn(
+            projection.clone(),
+            BatcherConfig {
+                flush_interval: Duration::from_millis(20),
+                flush_size: 16,
+            },
+        );
         let identity = Arc::new(NodeIdentity::from_seed([5u8; 32]));
         let session_log = SessionLogManager::new(
             storage.clone(),
@@ -463,18 +459,10 @@ mod tests {
             Arc::clone(&identity),
         )
         .expect("mgr");
-        let sync_service = SyncService::new(
-            session_log.clone(),
-            storage.clone(),
-            Arc::clone(&identity),
-        );
-        let service = RemoteSignalService::new(
-            session_log,
-            projection,
-            identity,
-            storage,
-            sync_service,
-        );
+        let sync_service =
+            SyncService::new(session_log.clone(), storage.clone(), Arc::clone(&identity));
+        let service =
+            RemoteSignalService::new(session_log, projection, identity, storage, sync_service);
         Harness {
             service,
             _worker: worker,
