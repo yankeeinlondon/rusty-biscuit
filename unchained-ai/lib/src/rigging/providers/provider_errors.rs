@@ -48,4 +48,10 @@ pub enum ProviderError {
 
     #[error("Failed to build client for {provider}: {reason}")]
     ClientBuildFailed { provider: String, reason: String },
+
+    #[error("No runnable model found for capability {capability}")]
+    NoRunnableModel { capability: String },
+
+    #[error("LLM execution failed for {provider}: {reason}")]
+    ExecutionFailed { provider: String, reason: String },
 }
