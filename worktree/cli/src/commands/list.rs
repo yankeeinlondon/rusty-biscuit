@@ -1,4 +1,5 @@
 use std::io::IsTerminal as _;
+use std::time::Instant;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::mermaid::MermaidDiagram;
@@ -12,17 +13,34 @@ use biscuit_terminal::utils::layout::Alignment;
 use worktree::WorktreeError;
 use worktree::worktree::{DirtyStatus, WorktreeStatus, list_worktrees};
 
+use crate::perf;
 use super::git_graph;
 
 const MIN_GRAPH_TERMINAL_WIDTH: u32 = 80;
 
-pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError> {
+pub fn run(
+    width_spec: Option<&str>,
+    verbose: bool,
+    perf: bool,
+    process_start: Instant,
+) -> Result<(), WorktreeError> {
+    let mut collector = if perf {
+        Some(perf::PerfCollector::new(process_start))
+    } else {
+        None
+    };
+    perf::record(&mut collector, "pre-dispatch", process_start.elapsed());
+
+    let t0 = Instant::now();
     let list = list_worktrees()?;
+    perf::record(&mut collector, "list gather", t0.elapsed());
     let statuses = &list.statuses;
     let terminal = Terminal::default();
 
+    let t0 = Instant::now();
     let table = build_status_table(statuses, &terminal);
     eprintln!("\n{}", table.render(&terminal));
+    perf::record(&mut collector, "table render", t0.elapsed());
 
     // Detect image support from the real stderr TTY + env. Width and verbose
     // gating live inside `gather_extras` so the same decision is exercised by
@@ -35,6 +53,9 @@ pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError>
     };
     let parsed_width = width_spec.and_then(|s| parse_width_spec(s).ok());
 
+    let graph_eligible = image_support != ImageSupport::None;
+
+    let t0 = Instant::now();
     let (needs_graph, needs_verbose, current_branch_data, base_graph_data) = gather_extras(
         &list.default_branch,
         statuses,
@@ -43,6 +64,9 @@ pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError>
         &parsed_width,
         verbose,
     );
+    if graph_eligible {
+        perf::record(&mut collector, "graph gather", t0.elapsed());
+    }
 
     // Generate graph instructions and render when image support is present.
     if needs_graph {
@@ -67,15 +91,27 @@ pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError>
             };
 
             if fits {
+                let t0 = Instant::now();
                 let img_term = image_terminal(&terminal);
                 let diagram = MermaidDiagram::new(instructions).with_width(graph_width);
                 eprint!("{}", diagram.render(&img_term));
+                perf::record(
+                    &mut collector,
+                    "graph image render (biscuit-terminal)",
+                    t0.elapsed(),
+                );
             }
         }
     }
 
     if needs_verbose {
+        let t0 = Instant::now();
         render_verbose(statuses, &list.default_branch, current_branch_data.as_ref(), &terminal);
+        perf::record(&mut collector, "verbose render", t0.elapsed());
+    }
+
+    if let Some(c) = collector {
+        c.emit();
     }
 
     Ok(())
@@ -517,7 +553,7 @@ mod tests {
         }
 
         recorder::start_recording();
-        let result = super::run(None, false);
+        let result = super::run(None, false, false, std::time::Instant::now());
         let calls = recorder::finish_recording();
 
         unsafe {
