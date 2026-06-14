@@ -257,8 +257,14 @@ mod tests {
 
     #[test]
     fn paint_to_css_color_terminal_defaults_have_no_declaration() {
-        assert_eq!(paint_to_css_color(PaintColor::new(Color::DefaultForeground)), None);
-        assert_eq!(paint_to_css_color(PaintColor::new(Color::DefaultBackground)), None);
+        assert_eq!(
+            paint_to_css_color(PaintColor::new(Color::DefaultForeground)),
+            None
+        );
+        assert_eq!(
+            paint_to_css_color(PaintColor::new(Color::DefaultBackground)),
+            None
+        );
         assert_eq!(paint_to_css_color(PaintColor::new(Color::Reset)), None);
     }
 }

@@ -5,8 +5,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use renderable::tree::{
     BrowserRenderOptions, Document, DocumentMetadata, HeadingDepth, MarkdownRenderOptions,
-    RenderNode, SourceRegistry, render_browser_document,
-    render_markdown_document,
+    RenderNode, SourceRegistry, render_browser_document, render_markdown_document,
 };
 use std::hint::black_box;
 
@@ -23,9 +22,7 @@ fn large_document() -> Document {
         ));
         for para in 0..10 {
             children.push(RenderNode::paragraph(vec![
-                RenderNode::text(format!(
-                    "This is paragraph {para} in section {section}. ")
-                ),
+                RenderNode::text(format!("This is paragraph {para} in section {section}. ")),
                 RenderNode::strong(vec![RenderNode::text("Bold text. ")]),
                 RenderNode::emphasis(vec![RenderNode::text("Italic text. ")]),
                 RenderNode::link(
@@ -75,9 +72,7 @@ fn table_heavy_document() -> Document {
     for r in 0..100 {
         rows.push(RenderNode::table_row(
             (0..8)
-                .map(|c| {
-                    RenderNode::table_cell(vec![RenderNode::text(format!("r{r}c{c}"))])
-                })
+                .map(|c| RenderNode::table_cell(vec![RenderNode::text(format!("r{r}c{c}"))]))
                 .collect(),
         ));
     }

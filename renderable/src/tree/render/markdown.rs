@@ -1479,7 +1479,7 @@ mod tests {
 
     #[test]
     fn markdown_body_is_unchanged_when_layout_is_present() {
-        use crate::layout::{Layout, Length, Edges};
+        use crate::layout::{Edges, Layout, Length};
 
         let plain = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("hi")])]);
 
@@ -2205,9 +2205,9 @@ mod tests {
         use crate::style::{PerMode, Style};
         let span = styled_span(
             Style {
-                background: Some(TargetValue::universal(PerMode::universal(Color::BasicColor(
-                    BasicColor::Red,
-                )))),
+                background: Some(TargetValue::universal(PerMode::universal(
+                    Color::BasicColor(BasicColor::Red),
+                ))),
                 ..Default::default()
             },
             vec![RenderNode::text("y")],
@@ -2217,7 +2217,10 @@ mod tests {
             &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
         )
         .output;
-        assert_eq!(out, "<span style=\"background-color: rgb(128, 0, 0)\">y</span>");
+        assert_eq!(
+            out,
+            "<span style=\"background-color: rgb(128, 0, 0)\">y</span>"
+        );
     }
 
     #[test]
@@ -2293,7 +2296,10 @@ mod tests {
             &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
         )
         .output;
-        assert_eq!(out, "<span style=\"color: rgb(128, 0, 0)\">a &amp; b</span>");
+        assert_eq!(
+            out,
+            "<span style=\"color: rgb(128, 0, 0)\">a &amp; b</span>"
+        );
     }
 
     #[test]
@@ -2391,7 +2397,11 @@ mod tests {
 
     #[test]
     fn link_destination_escapes_backslash() {
-        let link = RenderNode::link(r"https://example.com/a\b", None, vec![RenderNode::text("go")]);
+        let link = RenderNode::link(
+            r"https://example.com/a\b",
+            None,
+            vec![RenderNode::text("go")],
+        );
         assert_eq!(render(&link).output, r"[go](https://example.com/a\\b)");
     }
 

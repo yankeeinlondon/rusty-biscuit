@@ -2686,9 +2686,10 @@ mod tests {
             serde_json::to_value(ColumnConditional::WidthGreaterThan(80)).unwrap(),
             serde_json::Value::String(ColumnConditional::WidthGreaterThan(80).to_token())
         );
-        let back: ColumnConditional =
-            serde_json::from_str(&serde_json::to_string(&ColumnConditional::LessThanOrEqual(40)).unwrap())
-                .unwrap();
+        let back: ColumnConditional = serde_json::from_str(
+            &serde_json::to_string(&ColumnConditional::LessThanOrEqual(40)).unwrap(),
+        )
+        .unwrap();
         assert_eq!(back, ColumnConditional::LessThanOrEqual(40));
     }
 
@@ -2718,8 +2719,7 @@ mod tests {
         let task = TaskHints {
             state: TaskState::Blocked,
         };
-        let back: TaskHints =
-            serde_json::from_str(&serde_json::to_string(&task).unwrap()).unwrap();
+        let back: TaskHints = serde_json::from_str(&serde_json::to_string(&task).unwrap()).unwrap();
         assert_eq!(task, back);
     }
 
@@ -2819,7 +2819,7 @@ mod tests {
 
     #[test]
     fn layout_roundtrips_through_node_attrs() {
-        use crate::layout::{Alignment, Layout, Length, Edges};
+        use crate::layout::{Alignment, Edges, Layout, Length};
 
         let layout = Layout {
             margin: Edges::x(Length::ch(2)),
@@ -3310,9 +3310,7 @@ mod tests {
         use crate::color::{Color, Tailwind};
         use crate::layout::{Layout, TargetValue};
         use crate::style::{PerMode, Style, TextEmphasis};
-        use crate::tree::{
-            Document, DocumentMetadata, HeadingDepth, RenderNode, SourceRegistry,
-        };
+        use crate::tree::{Document, DocumentMetadata, HeadingDepth, RenderNode, SourceRegistry};
 
         let red = Style {
             color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
@@ -3333,8 +3331,10 @@ mod tests {
         };
 
         // Heading carrying layout + an inheritable style.
-        let mut heading =
-            RenderNode::heading(HeadingDepth::new(2).unwrap(), vec![RenderNode::text("Title")]);
+        let mut heading = RenderNode::heading(
+            HeadingDepth::new(2).unwrap(),
+            vec![RenderNode::text("Title")],
+        );
         heading.attrs.set_layout(&Layout::default());
         heading.attrs.set_style(&red);
 
@@ -3342,8 +3342,7 @@ mod tests {
         // span, so the fold walks inline style inheritance.
         let mut inner_span = RenderNode::span(vec![], vec![RenderNode::text("inner")]);
         inner_span.attrs.set_style(&italic);
-        let mut outer_span =
-            RenderNode::span(vec![], vec![RenderNode::text("outer "), inner_span]);
+        let mut outer_span = RenderNode::span(vec![], vec![RenderNode::text("outer "), inner_span]);
         outer_span.attrs.set_style(&red);
         let styled_para = RenderNode::paragraph(vec![outer_span]);
 
@@ -3367,9 +3366,10 @@ mod tests {
 
         // List with a marker policy and list hints; one task item carries an
         // opaque package-local extension hint to populate the bag.
-        let mut task_item = RenderNode::list_item(Some(false), vec![RenderNode::paragraph(vec![
-            RenderNode::text("todo"),
-        ])]);
+        let mut task_item = RenderNode::list_item(
+            Some(false),
+            vec![RenderNode::paragraph(vec![RenderNode::text("todo")])],
+        );
         task_item.attrs.set_task_hints(&TaskHints {
             state: TaskState::InProgress,
         });
@@ -3390,9 +3390,8 @@ mod tests {
 
         // Table with a column hint, a title, terminal striping hints, and a
         // data row whose typed cell carries cell hints.
-        let header_row = RenderNode::table_row(vec![RenderNode::table_cell(vec![
-            RenderNode::text("c0"),
-        ])]);
+        let header_row =
+            RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text("c0")])]);
         let mut data_cell = RenderNode::table_cell(vec![RenderNode::text("42")]);
         data_cell.attrs.set_table_cell_hints(&TableCellHints {
             kind: "integer".into(),
@@ -3430,21 +3429,21 @@ mod tests {
         // width-dependent text layout. These exercise the browser/text_layout
         // typed groups; the renderers consuming them is a later phase, so the
         // fold simply must not round-trip them through `data`.
-        let mut link = RenderNode::link("https://example.com", Some("t".into()), vec![
-            RenderNode::text("link"),
-        ]);
+        let mut link = RenderNode::link(
+            "https://example.com",
+            Some("t".into()),
+            vec![RenderNode::text("link")],
+        );
         link.attrs.set_browser(&BrowserAttrs {
             link: Some(LinkBrowserAttrs {
                 target: Some(LinkTarget::Blank),
                 rel: vec![LinkRelation::NoOpener, LinkRelation::NoReferrer],
                 ..Default::default()
             }),
-            inline_style: Some(
-                crate::stylesheet::CssStyle::new().add(
-                    crate::stylesheet::CssColorProp::Color,
-                    crate::stylesheet::CssColor::rgb(0x33, 0x66, 0x99),
-                ),
-            ),
+            inline_style: Some(crate::stylesheet::CssStyle::new().add(
+                crate::stylesheet::CssColorProp::Color,
+                crate::stylesheet::CssColor::rgb(0x33, 0x66, 0x99),
+            )),
             data_attrs: {
                 let mut m = std::collections::BTreeMap::new();
                 m.insert(DataAttrName::new("prompt").unwrap(), "explain".to_string());
@@ -3479,7 +3478,14 @@ mod tests {
             sources: SourceRegistry::default(),
             metadata: DocumentMetadata::default(),
             root: RenderNode::root(vec![
-                heading, styled_para, progress, columns, list, table, code, media_para,
+                heading,
+                styled_para,
+                progress,
+                columns,
+                list,
+                table,
+                code,
+                media_para,
             ]),
         }
     }
@@ -3648,7 +3654,10 @@ mod tests {
         // A real mutation survives the retain.
         attrs.text_layout_mut_or_default().overflow = TextOverflow::Truncate;
         attrs.retain_non_default_text_layout();
-        assert_eq!(attrs.text_layout().unwrap().overflow, TextOverflow::Truncate);
+        assert_eq!(
+            attrs.text_layout().unwrap().overflow,
+            TextOverflow::Truncate
+        );
     }
 
     #[test]
@@ -3662,13 +3671,10 @@ mod tests {
                 rel: vec![LinkRelation::NoOpener, LinkRelation::NoReferrer],
                 download: Some("file.pdf".into()),
             }),
-            inline_style: Some(
-                crate::stylesheet::CssStyle::new()
-                    .add(
-                        crate::stylesheet::CssColorProp::Color,
-                        crate::stylesheet::CssColor::rgb(1, 2, 3),
-                    ),
-            ),
+            inline_style: Some(crate::stylesheet::CssStyle::new().add(
+                crate::stylesheet::CssColorProp::Color,
+                crate::stylesheet::CssColor::rgb(1, 2, 3),
+            )),
             ..Default::default()
         };
         browser

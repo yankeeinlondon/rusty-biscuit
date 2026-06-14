@@ -272,8 +272,15 @@ mod tests {
 
     #[test]
     fn dots_with_thin() {
-        let svg =
-            horizontal_rule_svg(Some(HrKind::Dots), Some(HrWeight::Thin), None, None, None, "0", "0");
+        let svg = horizontal_rule_svg(
+            Some(HrKind::Dots),
+            Some(HrWeight::Thin),
+            None,
+            None,
+            None,
+            "0",
+            "0",
+        );
         assert!(svg.contains("--hr-weight: 2"));
         assert!(svg.contains("stroke-dasharray=\"2,6\""));
     }
@@ -338,20 +345,55 @@ mod tests {
     #[test]
     fn full_alignment_overrides_authored_width_to_full() {
         // A narrow authored width that any other alignment would honor.
-        let full = horizontal_rule_svg(None, None, Some(HrAlignment::Full), Some("50%"), None, "0", "0");
-        assert!(full.contains(r#"width="100%""#), "full must force 100% width: {full}");
-        assert!(full.contains("--hr-width: 100%"), "full must force the --hr-width var: {full}");
-        assert!(full.contains("margin: 0 0 0 0"), "full keeps zero horizontal margin: {full}");
+        let full = horizontal_rule_svg(
+            None,
+            None,
+            Some(HrAlignment::Full),
+            Some("50%"),
+            None,
+            "0",
+            "0",
+        );
+        assert!(
+            full.contains(r#"width="100%""#),
+            "full must force 100% width: {full}"
+        );
+        assert!(
+            full.contains("--hr-width: 100%"),
+            "full must force the --hr-width var: {full}"
+        );
+        assert!(
+            full.contains("margin: 0 0 0 0"),
+            "full keeps zero horizontal margin: {full}"
+        );
 
         // The same narrow width is preserved for a non-full alignment.
-        let left = horizontal_rule_svg(None, None, Some(HrAlignment::Left), Some("50%"), None, "0", "0");
-        assert!(left.contains(r#"width="50%""#), "non-full alignment keeps the authored width: {left}");
+        let left = horizontal_rule_svg(
+            None,
+            None,
+            Some(HrAlignment::Left),
+            Some("50%"),
+            None,
+            "0",
+            "0",
+        );
+        assert!(
+            left.contains(r#"width="50%""#),
+            "non-full alignment keeps the authored width: {left}"
+        );
     }
 
     #[test]
     fn stroke_and_fill_use_css_variables() {
-        let svg =
-            horizontal_rule_svg(Some(HrKind::LineStar), None, None, None, Some("red"), "0", "0");
+        let svg = horizontal_rule_svg(
+            Some(HrKind::LineStar),
+            None,
+            None,
+            None,
+            Some("red"),
+            "0",
+            "0",
+        );
         assert!(svg.contains("stroke=\"var(--hr-color, red)\""));
         assert!(svg.contains("fill=\"var(--hr-color, red)\""));
     }

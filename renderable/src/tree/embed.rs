@@ -122,10 +122,8 @@ mod tests {
     /// Builds a subtree whose styling (dim + classes) has no plain-Markdown
     /// form, so a successful round-trip proves the embed path is lossless.
     fn styled_subtree() -> RenderNode {
-        let mut span = RenderNode::span(
-            vec!["fs-dir".to_string()],
-            vec![RenderNode::text("topics")],
-        );
+        let mut span =
+            RenderNode::span(vec!["fs-dir".to_string()], vec![RenderNode::text("topics")]);
         span.attrs.set_style(&Style {
             emphasis: TextEmphasis {
                 dim: true,
