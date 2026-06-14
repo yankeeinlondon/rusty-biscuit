@@ -528,11 +528,16 @@ fn i7_code_block_inverts_theme_against_dark_terminal() {
 }
 
 /// The mirror of I7: a light terminal must use the dark variant for code.
+///
+/// The terminal is the source of truth for color mode (Decision #4), and
+/// `with_color_mode` only takes effect when detection is `Unknown`. So a real
+/// *light* terminal is built by setting `color_mode` directly — overriding a
+/// definite-`Dark` `new_optimistic` terminal would be ignored.
 #[test]
 fn i7_code_block_inverts_theme_against_light_terminal() {
-    let term = Terminal::new_optimistic(80);
+    let mut term = Terminal::new_optimistic(80);
+    term.color_mode = biscuit_terminal::discovery::detection::ColorMode::Light;
     let page = DarkmatterPage::new(&term)
-        .with_color_mode(ColorMode::Light)
         .with_code_theme("github")
         .with_margin_left(2)
         .with_margin_right(2);
@@ -546,12 +551,13 @@ fn i7_code_block_inverts_theme_against_light_terminal() {
     );
 }
 
-/// Single-variant themes (e.g. `dracula`) resolve identically under both modes
-/// by design; inversion is a deliberate no-op. Pin it so a future change can't
-/// silently break the documented abstraction.
+/// Every `ThemePair` resolves to a distinct light and dark variant; Dracula's
+/// pairing is dark=Dracula, light=OneHalfLight. There is no mode-invariant
+/// theme, so the two modes must differ. Pin it so a future change can't
+/// silently collapse a pair back to a single variant.
 #[test]
-fn single_variant_theme_ignores_mode() {
-    assert_eq!(
+fn theme_pair_resolves_distinct_variants_per_mode() {
+    assert_ne!(
         theme_bg_ansi(ThemePair::Dracula, ColorMode::Dark),
         theme_bg_ansi(ThemePair::Dracula, ColorMode::Light),
     );
