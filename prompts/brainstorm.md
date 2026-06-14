@@ -2,7 +2,7 @@
 $prompt:
     # describes what we're brainstorming about
     context: string(required)
-    
+id:
 interactive: true
 ---
 
@@ -20,12 +20,19 @@ The user would like to brainstorm with you on a given topic (see Topic section b
 1. start by reviewing the **Topic** section and then doing research on it:
     - look in this repo (and specifically the {{area}} package area) to better understand the topic
     - if there are elements to the topic which would benefit from online research then do that too
-2. propose an idea related to the topic at hand
+2. if anything is unclear/ambiguous then you should ask the user for clarification up front (don't assume you understand what was met)
+3. propose an idea related to the topic at hand along with an alternative/variant idea
 
+    - make sure to explain both ideas
+    - provide examples for each ideas
+    - provide pros/cons for each idea
 
+    As the user for their thoughts:
 
-- Start out by listing out some of the less defined aspects of the user document {{doc}}.
-- For each list item identify 1-2 key variant types involved in the 
-- With this list in mind create 2-3 high level solutions which provide different 
-    - at this point you don't need to dig into details
-    - however you must be able to articulate the pros and cons of the different solution types
+    - do they propose one idea over the other?
+    - do neither ideas feel relevant? Have user explain.
+
+4. Repeat #3
+
+    - every time you get a response from the user update your understanding of the problem that is being discussed and use that to update the log of this discussion saved at {temp}/{{ctx.repo}}/{{ctx.area}}/{{}}
+    - in order to capture the discussion
