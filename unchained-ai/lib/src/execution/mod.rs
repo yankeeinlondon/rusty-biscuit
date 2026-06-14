@@ -214,30 +214,99 @@ fn build_user_prompt(request: &CompletionRequest) -> String {
     }
 }
 
+/// Extracts a single JSON value from assistant text.
+///
+/// Accepts the whole (trimmed) text as one JSON value, or — tolerating
+/// surrounding prose and Markdown code fences — exactly one balanced
+/// `{...}`/`[...]` span that parses as JSON. Empty output, no parseable value,
+/// or *more than one* parseable value is a [`ProviderError::StructuredParse`]:
+/// a response carrying multiple JSON values is ambiguous and must never be
+/// silently narrowed to the first.
 fn extract_json(text: &str) -> Result<Value, ProviderError> {
     let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err(structured_parse("provider returned empty output"));
+    }
 
-    // If the response is wrapped in a markdown code fence, strip it.
-    let cleaned = if let Some(inner) = trimmed.strip_prefix("```json") {
-        inner
-            .trim_end()
-            .strip_suffix("```")
-            .unwrap_or(inner)
-            .trim()
-    } else if let Some(inner) = trimmed.strip_prefix("```") {
-        inner
-            .trim_end()
-            .strip_suffix("```")
-            .unwrap_or(inner)
-            .trim()
-    } else {
-        trimmed
-    };
+    // `serde_json` rejects trailing tokens, so a clean parse here is already
+    // proven to be the single value.
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        return Ok(value);
+    }
 
-    serde_json::from_str(cleaned).map_err(|e| ProviderError::ExecutionFailed {
-        provider: "execution".to_string(),
-        reason: format!("structured response was not valid JSON: {e}"),
-    })
+    // Permissive fallback. Scanning balanced object/array spans also covers
+    // fenced ```json blocks, whose braces sit inside the fence; require exactly
+    // one span to parse as JSON.
+    let mut found: Option<Value> = None;
+    for span in balanced_spans(trimmed) {
+        if let Ok(value) = serde_json::from_str::<Value>(span) {
+            if found.is_some() {
+                return Err(structured_parse(
+                    "output contained more than one JSON value; expected a single value",
+                ));
+            }
+            found = Some(value);
+        }
+    }
+
+    found.ok_or_else(|| structured_parse("output was not a single JSON value"))
+}
+
+fn structured_parse(reason: impl Into<String>) -> ProviderError {
+    ProviderError::StructuredParse {
+        reason: reason.into(),
+    }
+}
+
+/// Returns every top-level balanced `{...}`/`[...]` span, in source order.
+fn balanced_spans(text: &str) -> Vec<&str> {
+    let bytes = text.as_bytes();
+    let mut spans = Vec::new();
+    let mut cursor = 0;
+    while let Some(offset) = bytes[cursor..].iter().position(|&b| b == b'{' || b == b'[') {
+        let start = cursor + offset;
+        let open = bytes[start];
+        let close = if open == b'{' { b'}' } else { b']' };
+        match span_end(bytes, start, open, close) {
+            Some(end) => {
+                spans.push(&text[start..=end]);
+                cursor = end + 1;
+            }
+            None => cursor = start + 1,
+        }
+    }
+    spans
+}
+
+/// Index of the byte closing the balanced span opened at `start`, if it closes.
+fn span_end(bytes: &[u8], start: usize, open: u8, close: u8) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, &byte) in bytes.iter().enumerate().skip(start) {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b if b == open => depth += 1,
+            b if b == close => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Production backend that builds a rig-core client from a [`ProviderModel`]
@@ -385,9 +454,9 @@ impl CompletionBackend for RigCompletionBackend {
                 let client = zenmux::Client::from_env()?;
                 prompt_with_agent_builder(client.agent(&model_id), request).await
             }
-            Provider::HuggingFace => Err(ProviderError::ExecutionFailed {
+            Provider::HuggingFace => Err(ProviderError::Unsupported {
                 provider: provider.display_name().to_string(),
-                reason: "HuggingFace is not supported for text completion".to_string(),
+                reason: "text completion is not supported".to_string(),
             }),
         }
     }
@@ -410,6 +479,13 @@ where
     if let Some(max_tokens) = request.parameters.max_tokens {
         builder = builder.max_tokens(max_tokens);
     }
+    // `temperature`/`max_tokens` have dedicated builder setters; every other
+    // resolved parameter (sampling knobs plus provider-specific `extra` such as
+    // OpenAI `reasoning_effort` or Anthropic `thinking`) rides through rig's
+    // single `additional_params` JSON bag, or it is silently dropped.
+    if let Some(extra_params) = additional_params(&request.parameters) {
+        builder = builder.additional_params(extra_params);
+    }
 
     let agent = builder.build();
     agent
@@ -419,6 +495,54 @@ where
             provider: "LLM".to_string(),
             reason: e.to_string(),
         })
+}
+
+/// Collects the resolved parameters that rig does not expose a dedicated
+/// builder setter for into a single JSON object suitable for
+/// [`AgentBuilder::additional_params`](rig::agent::AgentBuilder::additional_params).
+///
+/// Returns `None` when there is nothing to pass so the builder is left at its
+/// provider defaults. The provider-specific `extra` map is merged last and wins
+/// on key collisions, letting a caller override a sampling knob with a raw
+/// provider payload when needed.
+fn additional_params(parameters: &ResolvedParameters) -> Option<Value> {
+    let mut params = serde_json::Map::new();
+
+    if let Some(top_p) = parameters.top_p {
+        params.insert("top_p".to_string(), json_number_f32(top_p));
+    }
+    if let Some(top_k) = parameters.top_k {
+        params.insert("top_k".to_string(), Value::from(top_k));
+    }
+    if let Some(frequency_penalty) = parameters.frequency_penalty {
+        params.insert(
+            "frequency_penalty".to_string(),
+            json_number_f32(frequency_penalty),
+        );
+    }
+    if let Some(presence_penalty) = parameters.presence_penalty {
+        params.insert(
+            "presence_penalty".to_string(),
+            json_number_f32(presence_penalty),
+        );
+    }
+    if let Some(extra) = &parameters.extra {
+        for (key, value) in extra {
+            params.insert(key.clone(), value.clone());
+        }
+    }
+
+    if params.is_empty() {
+        None
+    } else {
+        Some(Value::Object(params))
+    }
+}
+
+/// Encodes an `f32` parameter as a JSON number, falling back to `null` for
+/// non-finite values rather than panicking.
+fn json_number_f32(value: f32) -> Value {
+    serde_json::Number::from_f64(f64::from(value)).map_or(Value::Null, Value::Number)
 }
 
 fn resolve_api_key(model: &ProviderModel) -> Result<String, ProviderError> {
@@ -560,6 +684,108 @@ pub fn clear_test_backend_factory() {
 mod tests {
     use super::*;
     use crate::rigging::providers::models::openai::ProviderModelOpenAi;
+
+    /// Backend that records the [`BackendRequest`] it last received so tests can
+    /// assert which resolved parameters actually reached the transport seam.
+    #[derive(Default, Clone)]
+    struct RecordingBackend {
+        last: Arc<std::sync::Mutex<Option<BackendRequest>>>,
+    }
+
+    #[async_trait]
+    impl CompletionBackend for RecordingBackend {
+        async fn complete_text(&self, request: BackendRequest) -> Result<String, ProviderError> {
+            *self.last.lock().expect("recording backend lock poisoned") = Some(request);
+            Ok("ok".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_forwards_resolved_parameters_to_backend() {
+        let backend = RecordingBackend::default();
+        let mut extra = serde_json::Map::new();
+        extra.insert(
+            "reasoning_effort".to_string(),
+            serde_json::Value::String("high".to_string()),
+        );
+        let request = CompletionRequest {
+            model: ProviderModel::OpenAi(ProviderModelOpenAi::O3),
+            system_prompt: None,
+            prompt: "hi".to_string(),
+            schema: None,
+            parameters: Some(ResolvedParameters {
+                top_p: Some(0.5),
+                extra: Some(extra),
+                ..ResolvedParameters::default()
+            }),
+        };
+
+        complete(&backend, request).await.unwrap();
+
+        let recorded = backend.last.lock().unwrap().clone().expect("request recorded");
+        assert_eq!(recorded.parameters.top_p, Some(0.5));
+        assert_eq!(
+            recorded
+                .parameters
+                .extra
+                .as_ref()
+                .and_then(|e| e.get("reasoning_effort")),
+            Some(&serde_json::Value::String("high".to_string()))
+        );
+    }
+
+    #[test]
+    fn additional_params_merges_sampling_knobs_and_extra() {
+        let mut extra = serde_json::Map::new();
+        extra.insert("thinking".to_string(), serde_json::json!({"budget_tokens": 1024}));
+        let params = ResolvedParameters {
+            top_p: Some(0.9),
+            top_k: Some(40),
+            frequency_penalty: Some(0.1),
+            presence_penalty: Some(0.2),
+            extra: Some(extra),
+            ..ResolvedParameters::default()
+        };
+
+        let value = additional_params(&params).expect("non-empty params");
+        // f32 → f64 widening is not exact, so compare sampling knobs by
+        // proximity rather than bit-equality.
+        let approx = |key: &str, expected: f64| {
+            let actual = value[key].as_f64().expect("number");
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "{key}: {actual} not within tolerance of {expected}"
+            );
+        };
+        approx("top_p", 0.9);
+        approx("frequency_penalty", 0.1);
+        approx("presence_penalty", 0.2);
+        assert_eq!(value["top_k"], serde_json::json!(40));
+        assert_eq!(value["thinking"], serde_json::json!({"budget_tokens": 1024}));
+    }
+
+    #[test]
+    fn additional_params_is_none_when_empty() {
+        assert!(additional_params(&ResolvedParameters::default()).is_none());
+    }
+
+    #[test]
+    fn extract_json_handles_surrounding_prose() {
+        let value = extract_json("Sure! Here it is: {\"answer\": 7} — hope that helps").unwrap();
+        assert_eq!(value["answer"], 7);
+    }
+
+    #[test]
+    fn extract_json_rejects_multiple_values() {
+        let err = extract_json("{\"a\":1}\n{\"b\":2}").unwrap_err();
+        assert!(matches!(err, ProviderError::StructuredParse { .. }));
+    }
+
+    #[test]
+    fn extract_json_rejects_empty_output() {
+        let err = extract_json("   ").unwrap_err();
+        assert!(matches!(err, ProviderError::StructuredParse { .. }));
+    }
 
     #[tokio::test]
     async fn test_complete_prose_returns_text() {
