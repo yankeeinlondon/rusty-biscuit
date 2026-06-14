@@ -543,6 +543,174 @@ fn repo_name_json_is_still_leaf_only() {
 }
 
 // ============================================================================
+// `repo is-monorepo` / `package-count` / `version` leaf end-to-end tests
+// (scope-complete-json plan — single-key public leaves)
+// ============================================================================
+
+#[test]
+fn repo_is_monorepo_json_is_single_key_bool() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "is-monorepo", "--json"])
+        .output()
+        .expect("run sniff repo is-monorepo --json");
+
+    assert!(
+        output.status.success(),
+        "repo is-monorepo --json must exit 0: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: Value =
+        serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8")).expect("json");
+    let obj = json.as_object().expect("object");
+    assert_eq!(
+        obj.len(),
+        1,
+        "is-monorepo --json must be a single key: {json}"
+    );
+    assert!(
+        obj["is-monorepo"].is_boolean(),
+        "is-monorepo value must be a bool (kebab-case key): {json}"
+    );
+}
+
+#[test]
+fn repo_is_monorepo_text_is_yes_or_no() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "is-monorepo"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo is-monorepo");
+
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8").trim();
+    assert!(
+        stdout == "yes" || stdout == "no",
+        "repo is-monorepo text must be `yes` or `no`: {stdout:?}"
+    );
+}
+
+#[test]
+fn repo_package_count_json_is_single_key_number() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "package-count", "--json"])
+        .output()
+        .expect("run sniff repo package-count --json");
+
+    assert!(
+        output.status.success(),
+        "repo package-count --json must exit 0: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: Value =
+        serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8")).expect("json");
+    let obj = json.as_object().expect("object");
+    assert_eq!(
+        obj.len(),
+        1,
+        "package-count --json must be a single key: {json}"
+    );
+    assert!(
+        obj["package-count"].is_u64() || obj["package-count"].is_i64(),
+        "package-count value must be an integer (kebab-case key): {json}"
+    );
+}
+
+#[test]
+fn repo_package_count_text_is_integer() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "package-count"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo package-count");
+
+    assert!(output.status.success());
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8").trim();
+    assert!(
+        stdout.parse::<u64>().is_ok(),
+        "repo package-count text must be an integer: {stdout:?}"
+    );
+}
+
+#[test]
+fn repo_version_json_is_single_key_and_exit_tracks_null() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "version", "--json"])
+        .output()
+        .expect("run sniff repo version --json");
+
+    // stdout must always be a valid single-key JSON object, even when absent.
+    let json: Value =
+        serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8")).expect("json");
+    let obj = json.as_object().expect("object");
+    assert_eq!(obj.len(), 1, "version --json must be a single key: {json}");
+    assert!(obj.contains_key("version"));
+
+    let version = &obj["version"];
+    assert!(
+        version.is_null() || version.is_string(),
+        "version value must be a string or null: {json}"
+    );
+
+    // Exit code mirrors null-ness: absent version → exit 1, present → exit 0.
+    if version.is_null() {
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "version null must exit 1: {json}"
+        );
+    } else {
+        assert!(
+            output.status.success(),
+            "present version must exit 0: {json}"
+        );
+    }
+}
+
+#[test]
+fn repo_version_json_no_error_exits_zero() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "version", "--json", "--no-error"])
+        .output()
+        .expect("run sniff repo version --json --no-error");
+
+    assert!(
+        output.status.success(),
+        "version --json --no-error must exit 0 even when absent: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: Value =
+        serde_json::from_str(std::str::from_utf8(&output.stdout).expect("utf8")).expect("json");
+    let obj = json.as_object().expect("object");
+    assert_eq!(obj.len(), 1, "version --json must be a single key: {json}");
+    assert!(obj.contains_key("version"));
+}
+
+#[test]
+fn repo_version_text_absent_exits_one() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["repo", "version"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run sniff repo version");
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8").trim();
+    if stdout.is_empty() {
+        // No root version present in this repo: must signal absence via exit 1.
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "repo version with no output must exit 1"
+        );
+    } else {
+        // A version was found: stdout is the bare version string, exit 0.
+        assert!(output.status.success(), "present version must exit 0");
+    }
+}
+
+// ============================================================================
 // `sniff repo` / `sniff repo name` terminal-subset tests (Phase 3)
 // ============================================================================
 
