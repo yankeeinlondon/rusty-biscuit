@@ -11,9 +11,9 @@ These flags apply to all `sniff repo` subcommands:
 | `--json` | Output JSON instead of styled text |
 | `-v` / `--verbose` | Increase output verbosity (stackable: `-vv`) |
 | `--plain` | Strip all ANSI escape codes from text output |
-| `--latest-versions` | Query package registries for dependency update info |
-| `--refresh-remotes` | Fetch remotes before reporting (for `git-status`) |
 | `-b/--base <DIR>` | Analyze a specific directory instead of current |
+
+`--latest-versions` (on `structure`) and `--refresh-remotes` (on `git-status`) are **command-local** flags, not global ones. They affect only the subcommand that declares them and are **not** inputs to the bare `sniff repo --json` aggregate, which never performs network requests.
 
 ## Subcommands
 
@@ -32,7 +32,7 @@ These flags apply to all `sniff repo` subcommands:
 
 | Subcommand | Description |
 |------------|-------------|
-| [`structure`](./repo_structure.md) | Display hierarchical repo/monorepo package overview (default) |
+| [`structure`](./repo_structure.md) | Display hierarchical repo/monorepo package overview |
 | [`deps`](./repo_deps.md) | Show internal package dependency graph (text or `--ui` Mermaid diagram) |
 | [`remote <REMOTE>`](./repo_remote.md) | Inspect a remote repository via URL, name, or `owner/repo` shorthand |
 
@@ -115,7 +115,7 @@ Passing both flags produces the AND intersection: the resolved package must live
 
 ## JSON Output (`--json`)
 
-All display subcommands support `--json`. Path and exit-code subcommands always produce plain text or no output.
+All display subcommands support `--json`. Path subcommands emit a `{ "root": "..." }` (or `{ "name": "..." }`) object under `--json` while still honoring exit codes. Exit-code leaves such as `is-monorepo`, `version`, `is-current-package-area-dirty`, `package-area-has-source-code-changes`, and `has-merge-conflict` emit a stable single-key object under `--json` (e.g. `{ "is-monorepo": true }`) alongside their exit code, so scripts can branch on `$?` without parsing the body. Without `--json` they produce plain text or no output.
 
 ```bash
 sniff --json repo git-status

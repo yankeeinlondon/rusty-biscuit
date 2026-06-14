@@ -625,7 +625,7 @@ pub enum RepoSubcommand {
         #[arg(long, conflicts_with_all = ["md", "list"])]
         csv: bool,
     },
-    /// Output the repository name (plain text); use -v for version + language/monorepo info
+    /// Output the repository name (plain text); the rich version + language/monorepo one-liner lives on the parent `repo -v`
     Name,
     /// Output whether the repository is a monorepo
     #[command(name = "is-monorepo")]

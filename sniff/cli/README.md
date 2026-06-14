@@ -864,7 +864,7 @@ cargo test -p sniff-cli cli_parsing
 sniff --json > build-context.json
 
 # Check if running in a monorepo
-if sniff repo --json | jq -e '.is_monorepo'; then
+if sniff repo --json | jq -e '."is-monorepo"'; then
     echo "Detected monorepo"
 fi
 ```

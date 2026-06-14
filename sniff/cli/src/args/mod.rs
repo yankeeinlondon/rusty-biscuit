@@ -297,7 +297,7 @@ pub enum Commands {
     /// Show only audio devices (inputs, outputs, sample rates)
     AudioDevices,
 
-    /// Show only repository/monorepo structure
+    /// Show repository info (repository name by default; `--json` emits the scope-complete aggregate)
     Repo {
         #[command(subcommand)]
         repo_subcommand: Option<RepoSubcommand>,
@@ -1076,7 +1076,7 @@ Commands:
     sniff audio-devices   Show audio devices
 
   Repository & Filesystem:
-    sniff repo            Show repository structure (use --help for all repo commands)
+    sniff repo            Show repository name (--json for the scope-complete aggregate; --help for all repo commands)
     sniff filesystem      Show full filesystem report
     sniff language        Show language detection
     sniff files           Show file associations

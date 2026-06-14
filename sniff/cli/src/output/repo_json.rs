@@ -7,9 +7,11 @@
 //!
 //! ## Notes
 //!
-//! - The default branch (no action / `Structure { .. }` / not yet wired)
-//!   preserves today's behavior — `serde_json::to_value(&fs.repo)` — so
-//!   bare `sniff repo` and `sniff repo structure --json` are unchanged.
+//! - Bare `sniff repo --json` no longer reaches this builder: `commands.rs`
+//!   intercepts `RepoAction::Default` and assembles the scope-complete
+//!   aggregate via [`build_aggregate_value`]. The `None` / unspecialized
+//!   fallback below (`serde_json::to_value(&fs.repo)`) is retained for
+//!   defensive routing and keeps `sniff repo structure --json` unchanged.
 //! - Builders return a plain `serde_json::Value`. Performance attachment
 //!   happens once in `print_json` via `attach_performance`.
 //! - Locator and boolean families need to influence the process exit code
@@ -74,9 +76,10 @@ impl BuildOutcome {
 /// ## Returns
 ///
 /// A `serde_json::Value` that mirrors the text-mode output of the given
-/// `RepoAction`. When `repo_action` is `None` (bare `sniff repo`) or set
-/// to a variant that has not yet been specialized, this falls back to the
-/// full `RepoInfo` blob — preserving today's behavior.
+/// `RepoAction`. When `repo_action` is `None` or set to a variant that has
+/// not yet been specialized, this falls back to the full `RepoInfo` blob.
+/// (Bare `sniff repo --json` does not pass through here — see the module
+/// note; it is handled as the aggregate in `commands.rs`.)
 #[cfg(test)]
 pub(crate) fn build(
     result: &SniffResult,
@@ -98,8 +101,9 @@ pub(crate) fn build_with_outcome(
     base_dir: Option<&std::path::Path>,
 ) -> BuildOutcome {
     match repo_action {
-        // Bare `sniff repo` keeps the full RepoInfo blob — this matches
-        // today's behavior and the spec.
+        // Unspecialized / defensive fallback — the full RepoInfo blob. Bare
+        // `sniff repo --json` is routed to the aggregate in `commands.rs` and
+        // does not reach this arm.
         None => BuildOutcome::pure(fallback_repo_value(result)),
         // `sniff repo structure --json` honors `--filter` so JSON consumers
         // get the same scoped package list as text mode. `--latest-versions`
