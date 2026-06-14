@@ -1,14 +1,26 @@
 ---
-ready: false
+ready: true
 agent: codex
 model: ""
 ---
 
 # Review: Disclosure Blocks
 
+## Resolution
+
+All findings below have been addressed. The terminal dim + italic body styling
+landed in commit `367a85041` ("feat(darkmatter): render terminal disclosure body
+as dim + italic block quote"). Both verification tiers now pass:
+
+- Level 1: `cargo test -p darkmatter --test disclosure_render_targets` —
+  `terminal_target_renders_summary_and_dim_italic_body` passes (all 11 tests green).
+- Level 2: `cargo test -p darkmatter-cli --test level2_layout
+  level2_disclosure_body_renders_as_dim_italic_block_quote` passes against the
+  real-terminal harness (summary text, `│` block-quote glyph, SGR 2 dim, SGR 3 italic).
+
 ## Findings
 
-### High: Terminal disclosure body still does not emit the required dim + italic styling
+### High (RESOLVED): Terminal disclosure body still does not emit the required dim + italic styling
 
 The spec requires terminal disclosure output to render the body as a block quote whose text is dim and italic. The implementation in `biscuit-terminal/lib/src/render_tree/render.rs:698` builds a dim/italic style and applies it before wrapping the body in `BlockQuote`, and the focused Level 1 test in `darkmatter/lib/tests/disclosure_render_targets.rs:110` asserts those SGR attributes are present.
 
@@ -50,4 +62,6 @@ cargo test -p darkmatter --test disclosure_transclusion_integration --color=neve
 
 ## Production Readiness
 
-Not ready for production. The prior MarkdownPlus compose issue and transclusion unification appear fixed, but the terminal target still fails the specified dim + italic body styling behavior.
+Ready for production. The MarkdownPlus compose issue and transclusion unification
+were already fixed, and the terminal target now emits the specified dim + italic
+body styling, verified at both Level 1 and Level 2.
