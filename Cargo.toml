@@ -5,6 +5,8 @@ members = [
     "biscuit-clipboard/lib",
     "biscuit-clipboard/service",
     "biscuit-contract/lib",
+    "reaper/lib",
+    "reaper/cli",
     "biscuit-file/cli",
     "biscuit-file/lib",
     "biscuit-hash/cli",
