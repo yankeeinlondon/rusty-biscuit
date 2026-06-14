@@ -1,6 +1,6 @@
 # Disclosure Blocks
 
-Darkmatter provides render-time disclosure blocks using the `::disclosure` / `::details` / `::end-disclosure` directive triple. The summary region is rendered as a clickable heading; the body region is hidden until the summary is activated.
+Darkmatter provides render-time disclosure blocks using the `::disclosure` / `::details` / `::end-disclosure` directive triple — a portable equivalent of the HTML `<details>`/`<summary>` pair. The summary region is the always-visible label; the body region is the disclosed content. Each target lowers the block its own way (see [Render Targets](#render-targets)): in the browser the body is collapsed behind a clickable summary, while in the terminal both regions are always shown with the body styled as a dim, italic block quote.
 
 ## Syntax
 
