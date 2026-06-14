@@ -958,7 +958,10 @@ impl GitRepo {
             org,
             repo,
             current_branch,
-            head_id: self.head_id(),
+            // Identity-only requests carry `head_id`; every status-bearing
+            // preset leaves it unset so existing JSON shapes (e.g. `sniff repo
+            // git-status --json`) gain no new top-level field.
+            head_id: None,
             branches,
             in_worktree: self.in_worktree(),
             base_repo_root: self.base_repo_root(),
@@ -1006,7 +1009,11 @@ pub struct GitInfo {
     pub repo: Option<String>,
     /// Current branch name (None for detached HEAD).
     pub current_branch: Option<String>,
-    /// HEAD commit id as a full hex SHA, or `None` for an unborn HEAD.
+    /// HEAD commit id as a full hex SHA.
+    ///
+    /// Only populated by [`GitRequest::identity()`]; status-bearing presets
+    /// leave it `None` to preserve their existing JSON shape. Also `None` for an
+    /// unborn HEAD even in identity mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub head_id: Option<String>,
     /// All local branches with commit hashes and ahead/behind counts.
@@ -1509,17 +1516,23 @@ mod tests {
             .unwrap()
             .expect("repo should be discoverable");
 
-        crate::filesystem::git::status::reset_status_walk_counter();
+        // Measure walks for this repo's path as a before/after delta: a global
+        // counter would be contaminated by other tests' walks under `cargo test`.
+        let before = crate::filesystem::git::status::status_walk_count(dir.path());
         let info = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
 
-        assert_eq!(crate::filesystem::git::status::status_walk_count(), 0);
+        assert_eq!(
+            crate::filesystem::git::status::status_walk_count(dir.path()),
+            before,
+            "identity() must not trigger a working-tree status walk"
+        );
         assert!(info.status.is_none());
 
         // Prove the gate is real: summary() does trigger a status walk.
         let _ = git_repo.detect_with_request(&GitRequest::summary()).unwrap();
         assert!(
-            crate::filesystem::git::status::status_walk_count() > 0,
-            "summary() must increment the status-walk counter"
+            crate::filesystem::git::status::status_walk_count(dir.path()) > before,
+            "summary() must record a status walk"
         );
     }
 

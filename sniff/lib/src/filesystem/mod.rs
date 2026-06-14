@@ -411,7 +411,10 @@ mod tests {
     fn identity_plan_does_not_walk_status_end_to_end() {
         let (_dir, path) = create_dirty_git_repo();
 
-        crate::filesystem::git::status::reset_status_walk_counter();
+        // Measure walks for this repo's path as a before/after delta. The plan's
+        // git stage runs on a scoped thread, but walks are recorded per repo path
+        // regardless of thread, so no cross-thread counter propagation is needed.
+        let before = crate::filesystem::git::status::status_walk_count(&path);
 
         let plan = DetectionPlan::new()
             .base_dir(path.clone())
@@ -432,8 +435,8 @@ mod tests {
         let git = fs.git.expect("git should be present");
 
         assert_eq!(
-            crate::filesystem::git::status::status_walk_count(),
-            0,
+            crate::filesystem::git::status::status_walk_count(&path),
+            before,
             "identity plan must not trigger a working-tree status walk"
         );
         assert!(

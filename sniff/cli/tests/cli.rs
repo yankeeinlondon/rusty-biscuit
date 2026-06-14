@@ -749,6 +749,13 @@ fn test_git_status_subcommand_json_output() {
         "git-status JSON should have top-level `branches`: {json}"
     );
 
+    // The identity-only `head_id` field must not appear in status-bearing
+    // git-status JSON — the identity request work did not expand this shape.
+    assert!(
+        json.get("head_id").is_none(),
+        "git-status JSON should NOT contain identity-only `head_id`: {json}"
+    );
+
     // RepoInfo-only fields must not leak into git-status JSON.
     assert!(
         json.get("is_monorepo").is_none(),

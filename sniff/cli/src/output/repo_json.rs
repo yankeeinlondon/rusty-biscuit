@@ -557,7 +557,8 @@ mod tests {
             org: Some("rusty-biscuit".to_string()),
             repo: Some("sniff".to_string()),
             current_branch: Some("main".to_string()),
-            head_id: Some("1234567890abcdef".to_string()),
+            // Status-bearing GitInfo (non-identity) never carries `head_id`.
+            head_id: None,
             branches: Vec::new(),
             in_worktree: false,
             base_repo_root: None,
@@ -700,6 +701,13 @@ mod tests {
         assert!(
             value.get("branches").is_some(),
             "GitInfo `branches` should be top-level: {value}"
+        );
+
+        // Status-bearing git-status JSON must not gain the identity-only
+        // `head_id` field — its shape is unchanged by the identity request work.
+        assert!(
+            value.get("head_id").is_none(),
+            "git-status JSON should NOT contain identity-only `head_id`: {value}"
         );
 
         // RepoInfo-only fields must NOT appear at the top level

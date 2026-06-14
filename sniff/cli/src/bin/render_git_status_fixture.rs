@@ -50,7 +50,7 @@ fn main() {
         org: None,
         repo: None,
         current_branch: Some("feature/login".to_string()),
-        head_id: Some("1234567890abcdef".to_string()),
+        head_id: None,
         branches: vec![],
         in_worktree: true,
         base_repo_root: Some(PathBuf::from("/tmp/demo/project")),
