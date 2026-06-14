@@ -714,9 +714,9 @@ Themes come in light/dark pairs with automatic mode detection:
 | `Monokai` | One Half Light | Monokai Extended |
 | `VisualStudioDark` | GitHub Light | VS Dark |
 
-Every pair resolves to a distinct light and dark variant. The bottom four have
-no native light theme of their own, so they borrow a generic light companion for
-their light variant.
+Each `ThemePair` is a (light theme, dark theme) couple. Several pairs use the
+same theme in their light slot: `Nord`, `Dracula`, and `Monokai` use One Half
+Light, and `VisualStudioDark` uses GitHub Light.
 
 ### Color Mode Detection
 

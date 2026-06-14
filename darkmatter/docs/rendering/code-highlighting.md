@@ -23,11 +23,11 @@ ThemePair::resolve(ColorMode) -> Theme
 > does not mean "the dark GitHub theme"; it means "GitHub, resolved for the
 > current mode."
 
-### Borrowed-light pairs
+### Pairs that share a light theme
 
-Every `ThemePair` resolves to a distinct light **and** dark variant — there is
-no single-variant, mode-invariant theme. A few pairs have no native light theme
-of their own, so they borrow a generic light companion for the light variant:
+A `ThemePair` is a (light theme, dark theme) couple; `resolve` returns one or the
+other for the requested mode. The two slots are always distinct themes. Several
+pairs use the same theme in their light slot:
 
 | ThemePair | Light | Dark |
 |-----------|-------|------|
@@ -36,10 +36,11 @@ of their own, so they borrow a generic light companion for the light variant:
 | `monokai` | One Half Light | Monokai Extended |
 | `vs-dark` | GitHub Light | VS Dark |
 
-Because these still resolve to two different variants, mode resolution and the
-inversion below are **not** a no-op: a dark page yields the borrowed light panel
-and a light page yields the named dark theme. The two modes therefore produce
-different output for the same `ThemePair`.
+Mode resolution and the inversion below are never a no-op: a dark page yields the
+pair's light theme and a light page its dark theme. The two modes therefore
+produce different output for the same `ThemePair`. (Because `dracula`, `nord`,
+and `monokai` share One Half Light, their light panels are identical to each
+other.)
 
 ## Code blocks contrast against the page
 
@@ -76,9 +77,9 @@ and `render_browser_code` resolves the panel variant against it through the same
 Theme *selection* uses the resolved (by default inverted) mode; the panel's
 *internal* contrast decisions — the header-pill text color and the
 highlighted-line background math — key off the **resolved theme background** via
-`code_block::mode_for_background`, not the requested mode. That keeps a
-borrowed-light pair's chrome readable when its dark variant lands on a light
-page (light header text on the dark panel).
+`code_block::mode_for_background`, not the requested mode. That keeps the panel
+chrome readable whichever of a pair's two themes is shown — e.g. light header
+text when a pair's dark theme lands on a light page.
 
 ```rust
 use darkmatter::markdown::highlighting::ColorMode;
@@ -86,8 +87,8 @@ use darkmatter::markdown::highlighting::ColorMode;
 assert_eq!(ColorMode::Dark.inverted(), ColorMode::Light);
 // Dark page + `github` code theme  -> GithubLight panel  (light on dark page)
 // Light page + `github` code theme -> GithubDark panel   (dark on light page)
-// Dark page + `dracula` code theme -> OneHalfLight panel (borrowed light variant)
-// Light page + `dracula` code theme -> Dracula panel     (named dark variant)
+// Dark page + `dracula` code theme -> OneHalfLight panel (dracula's light theme)
+// Light page + `dracula` code theme -> Dracula panel     (dracula's dark theme)
 ```
 
 ## HTML inverts too (cross-target parity)

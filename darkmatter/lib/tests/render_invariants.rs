@@ -551,10 +551,10 @@ fn i7_code_block_inverts_theme_against_light_terminal() {
     );
 }
 
-/// Every `ThemePair` resolves to a distinct light and dark variant; Dracula's
-/// pairing is dark=Dracula, light=OneHalfLight. There is no mode-invariant
-/// theme, so the two modes must differ. Pin it so a future change can't
-/// silently collapse a pair back to a single variant.
+/// A `ThemePair` is a (light theme, dark theme) couple with two distinct themes;
+/// Dracula's are dark=Dracula, light=OneHalfLight. The two modes must therefore
+/// differ. Pin it so a future change can't silently collapse a pair's two slots
+/// to one theme.
 #[test]
 fn theme_pair_resolves_distinct_variants_per_mode() {
     assert_ne!(

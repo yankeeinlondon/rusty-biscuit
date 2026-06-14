@@ -58,13 +58,14 @@ Themes come in light/dark pairs with automatic mode detection:
 | `Monokai` | One Half Light | Monokai Extended |
 | `VisualStudioDark` | GitHub Light | VS Dark |
 
-**`ThemePair` is an abstract, mode-agnostic name.** `ThemePair::resolve(ColorMode)`
-maps the name **plus** a mode to a concrete light/dark theme (`(Github, Dark) →
-GithubDark`). **Every pair resolves to a distinct light *and* dark variant —
-there is no single-variant, mode-invariant theme.** The bottom four pairs have no
-native light theme of their own, so they borrow a generic light companion for the
-light variant (`Dracula`/`Nord`/`Monokai` → One Half Light, `VS-Dark` → GitHub
-Light). Do not confuse the user-facing name with a concrete light/dark theme.
+**`ThemePair` is an abstract, mode-agnostic name.** A `ThemePair` is simply a
+(light theme, dark theme) couple; `ThemePair::resolve(ColorMode)` maps the name
+**plus** a mode to one of those two themes (`(Github, Dark) → GithubDark`).
+**Every pair resolves to a distinct light *and* dark theme** — the light and
+dark slots never collapse to one theme. Note that several pairs use the same
+theme in their light slot: `Dracula`, `Nord`, and `Monokai` all use One Half
+Light, and `VS-Dark` uses GitHub Light. Do not confuse the user-facing name with
+a concrete light/dark theme.
 
 ### Code blocks invert for page contrast (terminal and HTML)
 
@@ -73,10 +74,10 @@ Code blocks resolve their theme *variant* against the **inverted** terminal mode
 This lifts the code panel off the page. Prose, headings, tables, and the page
 background follow the terminal's real mode so body text stays readable.
 
-- Every pair contrasts correctly because every pair has both variants: a dark
-  terminal resolves the light variant and a light terminal the dark one. For the
-  borrowed-light pairs (`dracula`/`nord`/`monokai`/`vs-dark`) the light panel is
-  the generic companion (One Half Light / GitHub Light), not the named theme.
+- Every pair contrasts correctly because every pair has both a light and a dark
+  theme: a dark terminal resolves the light theme and a light terminal the dark
+  one. For `dracula`/`nord`/`monokai` the light theme is One Half Light and for
+  `vs-dark` it is GitHub Light (the light slots several pairs share).
 - Because no pair is mode-invariant, the same `ThemePair` produces **different**
   terminal and HTML output under dark vs light pages — do not expect identical
   bytes across modes for any theme.
