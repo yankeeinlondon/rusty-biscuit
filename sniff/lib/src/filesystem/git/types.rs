@@ -1519,7 +1519,9 @@ mod tests {
         // Measure walks for this repo's path as a before/after delta: a global
         // counter would be contaminated by other tests' walks under `cargo test`.
         let before = crate::filesystem::git::status::status_walk_count(dir.path());
-        let info = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
+        let info = git_repo
+            .detect_with_request(&GitRequest::identity())
+            .unwrap();
 
         assert_eq!(
             crate::filesystem::git::status::status_walk_count(dir.path()),
@@ -1529,7 +1531,9 @@ mod tests {
         assert!(info.status.is_none());
 
         // Prove the gate is real: summary() does trigger a status walk.
-        let _ = git_repo.detect_with_request(&GitRequest::summary()).unwrap();
+        let _ = git_repo
+            .detect_with_request(&GitRequest::summary())
+            .unwrap();
         assert!(
             crate::filesystem::git::status::status_walk_count(dir.path()) > before,
             "summary() must record a status walk"
@@ -1543,10 +1547,14 @@ mod tests {
         let git_repo = GitRepo::discover(dir.path())
             .unwrap()
             .expect("repo should be discoverable");
-        let info = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
+        let info = git_repo
+            .detect_with_request(&GitRequest::identity())
+            .unwrap();
 
         assert!(
-            info.current_branch.as_deref().is_some_and(|b| !b.is_empty()),
+            info.current_branch
+                .as_deref()
+                .is_some_and(|b| !b.is_empty()),
             "current_branch should be set on a branch: {:?}",
             info.current_branch
         );
@@ -1569,12 +1577,18 @@ mod tests {
         let git_repo = GitRepo::discover(&worktree_path)
             .unwrap()
             .expect("worktree should be discoverable");
-        let info = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
+        let info = git_repo
+            .detect_with_request(&GitRequest::identity())
+            .unwrap();
 
         assert!(info.in_worktree);
         assert!(info.base_repo_root.is_some());
         assert_eq!(
-            info.base_repo_root.as_ref().unwrap().canonicalize().unwrap(),
+            info.base_repo_root
+                .as_ref()
+                .unwrap()
+                .canonicalize()
+                .unwrap(),
             dir.path().canonicalize().unwrap()
         );
         assert!(info.status.is_none());
@@ -1589,7 +1603,9 @@ mod tests {
         let git_repo = GitRepo::discover(dir.path())
             .unwrap()
             .expect("repo should be discoverable");
-        let info = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
+        let info = git_repo
+            .detect_with_request(&GitRequest::identity())
+            .unwrap();
 
         assert_eq!(info.current_branch, None);
         assert!(info.head_id.is_some());
@@ -1604,7 +1620,9 @@ mod tests {
         let git_repo = GitRepo::discover(dir.path())
             .unwrap()
             .expect("repo should be discoverable");
-        let info = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
+        let info = git_repo
+            .detect_with_request(&GitRequest::identity())
+            .unwrap();
 
         assert_eq!(info.current_branch, None);
         assert_eq!(info.head_id, None);
@@ -1618,7 +1636,9 @@ mod tests {
         let git_repo = GitRepo::discover(dir.path())
             .unwrap()
             .expect("repo should be discoverable");
-        let identity = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
+        let identity = git_repo
+            .detect_with_request(&GitRequest::identity())
+            .unwrap();
         let identity_json = serde_json::to_string(&identity).unwrap();
         let identity_value: serde_json::Value = serde_json::from_str(&identity_json).unwrap();
         assert!(
@@ -1626,7 +1646,9 @@ mod tests {
             "identity() JSON must omit the status field"
         );
 
-        let summary = git_repo.detect_with_request(&GitRequest::summary()).unwrap();
+        let summary = git_repo
+            .detect_with_request(&GitRequest::summary())
+            .unwrap();
         let summary_json = serde_json::to_string(&summary).unwrap();
         let summary_value: serde_json::Value = serde_json::from_str(&summary_json).unwrap();
         assert!(

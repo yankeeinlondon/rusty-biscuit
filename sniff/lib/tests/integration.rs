@@ -11,10 +11,9 @@ mod fixtures;
 fn test_detect_returns_hardware_info() {
     // OS + hardware only; the full convenience detect() path is exercised by
     // test_detect_completes_in_reasonable_time.
-    let result = sniff::detect_with_plan(
-        DetectionPlan::new().without_network().without_filesystem(),
-    )
-    .unwrap();
+    let result =
+        sniff::detect_with_plan(DetectionPlan::new().without_network().without_filesystem())
+            .unwrap();
     let os = result.os.expect("os should be present");
     assert!(!os.name.is_empty());
     let hardware = result.hardware.expect("hardware should be present");
@@ -1027,7 +1026,10 @@ fn test_git_full_reports_conflicted_files() {
     let fs = result.filesystem.expect("filesystem should be present");
     let git = fs.git.expect("git should be present");
 
-    assert!(git.status.as_ref().unwrap().is_dirty, "conflicted repo should be dirty");
+    assert!(
+        git.status.as_ref().unwrap().is_dirty,
+        "conflicted repo should be dirty"
+    );
     assert!(
         git.file_changes
             .iter()

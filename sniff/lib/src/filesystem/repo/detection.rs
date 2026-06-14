@@ -143,14 +143,12 @@ pub(crate) fn detect_repo_inner_with_shared(
     // file: without one, every detector below returns `None`, so the index
     // would never be consumed. This keeps `detect_repo` on a non-repo directory
     // -- e.g. a large system temp dir -- from walking unrelated subtrees.
-    let manifest_index = if structure_only
-        || shared_manifest_index.is_some()
-        || !has_workspace_marker(root)
-    {
-        None
-    } else {
-        Some(ManifestIndex::build(root))
-    };
+    let manifest_index =
+        if structure_only || shared_manifest_index.is_some() || !has_workspace_marker(root) {
+            None
+        } else {
+            Some(ManifestIndex::build(root))
+        };
     let manifest_index = shared_manifest_index.or(manifest_index.as_ref());
 
     let mut workspace_tools = Vec::new();

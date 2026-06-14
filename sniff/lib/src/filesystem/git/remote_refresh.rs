@@ -627,8 +627,7 @@ pub(crate) fn get_worktrees(
 
     // Canonicalize the current worktree path once so every worker can do a
     // cheap path comparison without repeated disk access.
-    let current_canonical = current_worktree_path
-        .and_then(|p| std::fs::canonicalize(p).ok());
+    let current_canonical = current_worktree_path.and_then(|p| std::fs::canonicalize(p).ok());
 
     // Collect (name, worktree path) pairs up front — cheap sequential work —
     // before the per-worktree analysis fans out. Trust, permission, I/O, and
@@ -665,10 +664,7 @@ pub(crate) fn get_worktrees(
 
             // Determine whether this worktree is the current one.
             let is_current = current_canonical.as_ref().is_some_and(|current| {
-                std::fs::canonicalize(worktree_path)
-                    .ok()
-                    .as_ref()
-                    == Some(current)
+                std::fs::canonicalize(worktree_path).ok().as_ref() == Some(current)
             });
 
             // Skip expensive commit-graph walks for non-current worktrees when
@@ -701,9 +697,7 @@ pub(crate) fn get_worktrees(
                     false
                 } else {
                     match (wt_head, base_oid) {
-                        (Some(wt), Some(base_id)) => {
-                            has_merge_conflicts(&base, wt, base_id)?
-                        }
+                        (Some(wt), Some(base_id)) => has_merge_conflicts(&base, wt, base_id)?,
                         _ => false,
                     }
                 }
@@ -1790,7 +1784,10 @@ mod tests {
         );
 
         let other = worktrees.get("other").expect("other worktree must exist");
-        assert!(!other.is_current, "other worktree must not be marked current");
+        assert!(
+            !other.is_current,
+            "other worktree must not be marked current"
+        );
         assert_eq!(
             other.ahead, 0,
             "non-current worktree must skip ahead in default mode"

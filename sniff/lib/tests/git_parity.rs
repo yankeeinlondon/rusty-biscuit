@@ -138,9 +138,21 @@ fn golden_status_categories_staged_unstaged_untracked() {
         .unwrap()
         .expect("repo found");
 
-    assert_eq!(info.status.as_ref().unwrap().staged_count, 1, "one staged add");
-    assert_eq!(info.status.as_ref().unwrap().unstaged_count, 1, "one unstaged modify");
-    assert_eq!(info.status.as_ref().unwrap().untracked_count, 1, "one untracked file");
+    assert_eq!(
+        info.status.as_ref().unwrap().staged_count,
+        1,
+        "one staged add"
+    );
+    assert_eq!(
+        info.status.as_ref().unwrap().unstaged_count,
+        1,
+        "one unstaged modify"
+    );
+    assert_eq!(
+        info.status.as_ref().unwrap().untracked_count,
+        1,
+        "one untracked file"
+    );
     assert!(info.status.as_ref().unwrap().is_dirty);
 }
 
@@ -1753,7 +1765,8 @@ fn phase3_distinct_non_utf8_paths_do_not_collide() {
         .expect("repo found");
 
     assert_eq!(
-        info.status.as_ref().unwrap().staged_count, 2,
+        info.status.as_ref().unwrap().staged_count,
+        2,
         "distinct byte paths must not collapse to one"
     );
     assert_eq!(
@@ -1803,10 +1816,22 @@ fn phase3_counts_only_matches_full_request_totals() {
     .unwrap()
     .expect("repo found");
 
-    assert_eq!(counts.status.as_ref().unwrap().is_dirty, full.status.as_ref().unwrap().is_dirty);
-    assert_eq!(counts.status.as_ref().unwrap().staged_count, full.status.as_ref().unwrap().staged_count);
-    assert_eq!(counts.status.as_ref().unwrap().unstaged_count, full.status.as_ref().unwrap().unstaged_count);
-    assert_eq!(counts.status.as_ref().unwrap().untracked_count, full.status.as_ref().unwrap().untracked_count);
+    assert_eq!(
+        counts.status.as_ref().unwrap().is_dirty,
+        full.status.as_ref().unwrap().is_dirty
+    );
+    assert_eq!(
+        counts.status.as_ref().unwrap().staged_count,
+        full.status.as_ref().unwrap().staged_count
+    );
+    assert_eq!(
+        counts.status.as_ref().unwrap().unstaged_count,
+        full.status.as_ref().unwrap().unstaged_count
+    );
+    assert_eq!(
+        counts.status.as_ref().unwrap().untracked_count,
+        full.status.as_ref().unwrap().untracked_count
+    );
 }
 
 #[test]
@@ -1831,16 +1856,29 @@ fn phase3_detailed_counts_match_full_request_totals() {
         .unwrap()
         .expect("repo found");
 
-    assert_eq!(detailed.status.as_ref().unwrap().is_dirty, full.status.as_ref().unwrap().is_dirty);
-    assert_eq!(detailed.status.as_ref().unwrap().staged_count, full.status.as_ref().unwrap().staged_count);
-    assert_eq!(detailed.status.as_ref().unwrap().unstaged_count, full.status.as_ref().unwrap().unstaged_count);
-    assert_eq!(detailed.status.as_ref().unwrap().untracked_count, full.status.as_ref().unwrap().untracked_count);
+    assert_eq!(
+        detailed.status.as_ref().unwrap().is_dirty,
+        full.status.as_ref().unwrap().is_dirty
+    );
+    assert_eq!(
+        detailed.status.as_ref().unwrap().staged_count,
+        full.status.as_ref().unwrap().staged_count
+    );
+    assert_eq!(
+        detailed.status.as_ref().unwrap().unstaged_count,
+        full.status.as_ref().unwrap().unstaged_count
+    );
+    assert_eq!(
+        detailed.status.as_ref().unwrap().untracked_count,
+        full.status.as_ref().unwrap().untracked_count
+    );
 
     // Detailed includes path lists; the count of dirty + untracked entries
     // should equal the file_changes length (excluding conflicts, which this
     // fixture does not produce).
     assert_eq!(
-        detailed.status.as_ref().unwrap().dirty.len() + detailed.status.as_ref().unwrap().untracked.len(),
+        detailed.status.as_ref().unwrap().dirty.len()
+            + detailed.status.as_ref().unwrap().untracked.len(),
         full.file_changes.len()
     );
 }

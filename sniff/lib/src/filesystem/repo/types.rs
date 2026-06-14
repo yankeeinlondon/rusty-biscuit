@@ -1,5 +1,6 @@
 use crate::Result;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::instrument;
@@ -206,9 +207,11 @@ impl RepoInfo {
     /// a single value useful inside a monorepo.
     ///
     /// The rule: if `dir` is inside a package, the area is that package's name;
-    /// otherwise the area is the surrounding package-area string (the literal
-    /// `"root"` for top-level locations). Falls back to `"root"` when neither
-    /// helper resolves a value (e.g. CWD at repo root with no top-level package).
+    /// otherwise the area is the surrounding package-area string. When no
+    /// discovered package names the area — e.g. a freshly scaffolded area whose
+    /// crates are not yet listed in `[workspace] members` — the area is taken
+    /// from the directory structure (see [`directory_area_fallback`]). Falls
+    /// back to `"root"` only at the repo root.
     ///
     /// ## Examples
     ///
@@ -217,12 +220,57 @@ impl RepoInfo {
     ///
     /// - CWD inside `sniff/lib/src` → `"sniff-lib"` (the package name)
     /// - CWD at `sniff/` but outside any package → `"sniff"`
-    /// - CWD at repo root with no top-level package → `"root"`
-    pub fn area_for_dir(&self, dir: &Path) -> &str {
+    /// - CWD in `reaper/lib` while `reaper/*` is not yet a workspace member →
+    ///   `"reaper"` (directory-structure fallback)
+    /// - CWD at repo root → `"root"`
+    ///
+    /// [`directory_area_fallback`]: Self::directory_area_fallback
+    pub fn area_for_dir(&self, dir: &Path) -> Cow<'_, str> {
         if let Some(pkg) = self.package_for_dir(dir) {
-            return &pkg.name;
+            return Cow::Borrowed(&pkg.name);
         }
-        self.package_area_for_dir(dir).unwrap_or("root")
+        if let Some(area) = self.package_area_for_dir(dir) {
+            return Cow::Borrowed(area);
+        }
+        self.directory_area_fallback(dir)
+            .map_or(Cow::Borrowed("root"), Cow::Owned)
+    }
+
+    /// Resolve the package-area label for `dir`, falling back to the directory
+    /// structure when no discovered package names the area.
+    ///
+    /// Behaves like [`package_area_for_dir`](Self::package_area_for_dir) but, in
+    /// a monorepo, also resolves the area of a directory that holds no workspace
+    /// member yet — e.g. a freshly scaffolded area not listed in
+    /// `[workspace] members`. Returns `None` at the repo root or outside the repo.
+    pub fn package_area_label_for_dir(&self, dir: &Path) -> Option<Cow<'_, str>> {
+        if let Some(area) = self.package_area_for_dir(dir) {
+            return Some(Cow::Borrowed(area));
+        }
+        self.directory_area_fallback(dir).map(Cow::Owned)
+    }
+
+    /// Derive an area name for `dir` from the directory structure alone.
+    ///
+    /// Used as the last resort when no discovered package identifies the area,
+    /// so that a scaffolded area resolves before its crates are wired into the
+    /// workspace `members`. The area is the first path component of `dir`
+    /// relative to the repo root.
+    ///
+    /// Returns `None` outside a monorepo, at the repo root, or when `dir` is not
+    /// under the root — the area concept is monorepo-only, mirroring the
+    /// `is_monorepo` gate the reporting commands already apply.
+    fn directory_area_fallback(&self, dir: &Path) -> Option<String> {
+        if !self.is_monorepo {
+            return None;
+        }
+        let dir = canonicalize_path(dir);
+        let root = canonicalize_path(&self.root);
+        let rel = dir.strip_prefix(&root).ok()?;
+        match rel.components().next()? {
+            std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+            _ => None,
+        }
     }
 
     /// Find the package area that contains `dir`.
@@ -499,5 +547,49 @@ mod tests {
     fn area_for_dir_returns_root_at_repo_root() {
         let repo = monorepo_with_areas();
         assert_eq!(repo.area_for_dir(Path::new("/repo")), "root");
+    }
+
+    #[test]
+    fn area_for_dir_falls_back_to_directory_name_for_unwired_area() {
+        // `reaper/lib` exists on disk but is not yet a workspace member, so no
+        // package carries the "reaper" area. The area still resolves from the
+        // directory structure.
+        let repo = monorepo_with_areas();
+        assert_eq!(
+            repo.area_for_dir(Path::new("/repo/reaper/lib/src")),
+            "reaper"
+        );
+        assert_eq!(repo.area_for_dir(Path::new("/repo/reaper")), "reaper");
+    }
+
+    #[test]
+    fn package_area_label_falls_back_to_directory_name_for_unwired_area() {
+        let repo = monorepo_with_areas();
+        assert_eq!(
+            repo.package_area_label_for_dir(Path::new("/repo/reaper/lib"))
+                .as_deref(),
+            Some("reaper")
+        );
+        // Member-discovered areas still resolve exactly as before.
+        assert_eq!(
+            repo.package_area_label_for_dir(Path::new("/repo/sniff"))
+                .as_deref(),
+            Some("sniff")
+        );
+        // Repo root has no area.
+        assert_eq!(repo.package_area_label_for_dir(Path::new("/repo")), None);
+    }
+
+    #[test]
+    fn directory_fallback_disabled_outside_monorepo() {
+        let mut repo = monorepo_with_areas();
+        repo.is_monorepo = false;
+        // Without a monorepo the area concept does not apply: no directory-name
+        // fallback, so an unwired path resolves to the "root" sentinel.
+        assert_eq!(repo.area_for_dir(Path::new("/repo/reaper/lib")), "root");
+        assert_eq!(
+            repo.package_area_label_for_dir(Path::new("/repo/reaper/lib")),
+            None
+        );
     }
 }
