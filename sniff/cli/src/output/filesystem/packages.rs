@@ -139,13 +139,16 @@ pub(crate) fn dirty_package_names(result: &sniff::SniffResult) -> Vec<String> {
     };
 
     // Collect all dirty file paths (relative to repo root)
-    let dirty_paths: Vec<&str> = git
+    let status = git
         .status
+        .as_ref()
+        .expect("dirty package rendering always receives status");
+    let dirty_paths: Vec<&str> = status
         .dirty
         .iter()
         .map(|d| d.filepath.to_str().unwrap_or(""))
         .chain(
-            git.status
+            status
                 .untracked
                 .iter()
                 .map(|u| u.filepath.to_str().unwrap_or("")),

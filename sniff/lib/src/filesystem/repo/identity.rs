@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Result;
 use crate::error::SniffError;
+use crate::filesystem::git::GitRepo;
 
 use super::cargo::{cargo_package_name, cargo_package_version};
 use super::go::go_module_name_from_content;
@@ -71,21 +72,37 @@ pub struct RepoIdentity {
 pub fn detect_repo_identity(dir: &Path) -> Result<RepoIdentity> {
     // Trust/permission/I/O/corruption failures surface via `?`; only genuine
     // repository absence becomes `NotARepository`.
-    let root = crate::filesystem::repo_root(dir)?
-        .ok_or_else(|| SniffError::NotARepository(dir.to_path_buf()))?;
+    let Some(git_repo) = GitRepo::discover(dir)? else {
+        return Err(SniffError::NotARepository(dir.to_path_buf()));
+    };
+    detect_repo_identity_with_repo(&git_repo)
+}
 
-    let monorepo = detect_repo_structure(&root)?;
+/// Detect repository identity using an already-discovered [`GitRepo`] handle.
+///
+/// This avoids the redundant `repo_root` discovery that
+/// [`detect_repo_identity`](Self::detect_repo_identity) performs when it has to
+/// discover the repository itself. Callers that already have a `GitRepo` from
+/// the plan-based detection path should prefer this helper.
+///
+/// ## Errors
+///
+/// Returns [`SniffError::NotARepository`] if the handle points at a path with
+/// no working directory (bare repositories are not supported here).
+pub fn detect_repo_identity_with_repo(git_repo: &GitRepo) -> Result<RepoIdentity> {
+    let root = git_repo.repo_root();
+    let monorepo = detect_repo_structure(root)?;
     let (is_monorepo, package_count) = match monorepo {
         Some(info) if info.is_monorepo => (true, info.packages.as_ref().map(Vec::len)),
         _ => (false, None),
     };
 
-    let name = resolve_name(&root);
-    let version = resolve_version(&root);
+    let name = resolve_name(root);
+    let version = resolve_version(root);
     let language = if is_monorepo {
         None
     } else {
-        resolve_language(&root)
+        resolve_language(root)
     };
 
     Ok(RepoIdentity {
@@ -235,6 +252,27 @@ fn read_json(path: &Path) -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_identity_via_existing_git_repo_handle() {
+        let tmp = tempfile::tempdir().unwrap();
+        git2::Repository::init(tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"my-crate\"\nversion = \"1.2.3\"\n",
+        )
+        .unwrap();
+
+        let git_repo = GitRepo::discover(tmp.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+        let identity = detect_repo_identity_with_repo(&git_repo).unwrap();
+
+        assert_eq!(identity.name, "my-crate");
+        assert_eq!(identity.version.as_deref(), Some("1.2.3"));
+        assert_eq!(identity.language.as_deref(), Some("Rust"));
+        assert!(!identity.is_monorepo);
+    }
 
     #[test]
     fn errors_when_not_in_git_repo() {

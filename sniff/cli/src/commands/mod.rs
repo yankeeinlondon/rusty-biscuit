@@ -1130,17 +1130,19 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .retain(|f| f.path.to_string_lossy().starts_with(path_prefix));
 
                 // Filter dirty files
-                git.status
-                    .dirty
+                let status = git
+                    .status
+                    .as_mut()
+                    .expect("git-status command always computes status");
+                status.dirty
                     .retain(|f| f.filepath.to_string_lossy().starts_with(path_prefix));
 
                 // Filter untracked files
-                git.status
-                    .untracked
+                status.untracked
                     .retain(|f| f.filepath.to_string_lossy().starts_with(path_prefix));
 
                 // Update counts to match filtered lists
-                git.status.staged_count = git
+                status.staged_count = git
                     .file_changes
                     .iter()
                     .filter(|f| {
@@ -1148,7 +1150,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             || f.status == sniff::filesystem::git::FileStatus::Both
                     })
                     .count();
-                git.status.unstaged_count = git
+                status.unstaged_count = git
                     .file_changes
                     .iter()
                     .filter(|f| {
@@ -1156,14 +1158,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             || f.status == sniff::filesystem::git::FileStatus::Both
                     })
                     .count();
-                git.status.untracked_count = git
+                status.untracked_count = git
                     .file_changes
                     .iter()
                     .filter(|f| f.status == sniff::filesystem::git::FileStatus::Untracked)
                     .count();
-                git.status.is_dirty = git.status.staged_count > 0
-                    || git.status.unstaged_count > 0
-                    || git.status.untracked_count > 0
+                status.is_dirty = status.staged_count > 0
+                    || status.unstaged_count > 0
+                    || status.untracked_count > 0
                     || git
                         .file_changes
                         .iter()
@@ -1201,12 +1203,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             // not the one being inspected — clear it so the output doesn't
             // imply those files are dirty on the target branch.
             git.file_changes.clear();
-            git.status.dirty.clear();
-            git.status.untracked.clear();
-            git.status.staged_count = 0;
-            git.status.unstaged_count = 0;
-            git.status.untracked_count = 0;
-            git.status.is_dirty = false;
+            let status = git
+                .status
+                .as_mut()
+                .expect("git-status command always computes status");
+            status.dirty.clear();
+            status.untracked.clear();
+            status.staged_count = 0;
+            status.unstaged_count = 0;
+            status.untracked_count = 0;
+            status.is_dirty = false;
         }
     }
 
@@ -1242,7 +1248,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let file_changes = wt_repo.file_changes().unwrap_or_default();
                     let repo_status = wt_repo.repo_status().unwrap_or_default();
                     git.file_changes = file_changes;
-                    git.status = repo_status;
+                    git.status = Some(repo_status);
                 }
                 // Reflect the worktree's location so absolute file paths in
                 // the rendered output resolve to the worktree, and the queried

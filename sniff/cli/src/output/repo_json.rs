@@ -557,11 +557,12 @@ mod tests {
             org: Some("rusty-biscuit".to_string()),
             repo: Some("sniff".to_string()),
             current_branch: Some("main".to_string()),
+            head_id: Some("1234567890abcdef".to_string()),
             branches: Vec::new(),
             in_worktree: false,
             base_repo_root: None,
             recent: Vec::new(),
-            status: RepoStatus::default(),
+            status: Some(RepoStatus::default()),
             remotes: Vec::new(),
             worktrees: HashMap::new(),
             config: GitConfig::default(),
@@ -801,7 +802,7 @@ mod tests {
                 packages: Some(packages),
             };
             let mut git = fixture_git_info();
-            git.status.dirty = dirty_paths
+            git.status.as_mut().unwrap().dirty = dirty_paths
                 .iter()
                 .map(|p| DirtyFile {
                     filepath: PathBuf::from(p),
@@ -1030,7 +1031,7 @@ mod tests {
                 ]),
             };
             let mut git = fixture_git_info();
-            git.status.dirty = dirty_paths
+            git.status.as_mut().unwrap().dirty = dirty_paths
                 .iter()
                 .map(|p| DirtyFile {
                     filepath: PathBuf::from(p),

@@ -14,6 +14,29 @@ use crate::Result;
 
 use super::types::*;
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Counter incremented at the entry of every working-tree status walk.
+///
+/// Used by unit tests to prove that [`GitRequest::identity()`] never triggers
+/// a status walk. The counter is process-local; nextest runs each test in its
+/// own process, so tests cannot contaminate each other.
+#[cfg(test)]
+static STATUS_WALK_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Reset the status-walk counter to zero.
+#[cfg(test)]
+pub(crate) fn reset_status_walk_counter() {
+    STATUS_WALK_COUNT.store(0, Ordering::SeqCst);
+}
+
+/// Read the current status-walk counter value.
+#[cfg(test)]
+pub(crate) fn status_walk_count() -> usize {
+    STATUS_WALK_COUNT.load(Ordering::SeqCst)
+}
+
 /// Per-file line stats accumulated from a diff.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct LineStats {
@@ -59,6 +82,8 @@ pub(crate) fn get_repo_status_with_changes(
     repo: &gix::Repository,
     include_diffs: bool,
 ) -> Result<(RepoStatus, Vec<FileChange>)> {
+    #[cfg(test)]
+    STATUS_WALK_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     use gix::bstr::{BString, ByteSlice};
     let workdir = repo.workdir().map(Path::to_path_buf);
 
@@ -864,6 +889,8 @@ pub(crate) fn get_repo_status_counts(repo: &gix::Repository) -> crate::Result<(b
 /// untracked-inclusive dirty definition, unlike gix's tracked-only
 /// [`gix::Repository::is_dirty`] (which disables the directory walk).
 pub(crate) fn is_repo_dirty(repo: &gix::Repository) -> Result<bool> {
+    #[cfg(test)]
+    STATUS_WALK_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let platform = repo
         .status(gix::progress::Discard)
         .map_err(|e| crate::SniffError::git("status", e))?
@@ -903,6 +930,8 @@ pub(crate) fn is_repo_dirty(repo: &gix::Repository) -> Result<bool> {
 pub(crate) fn get_repo_status_counts_detailed(
     repo: &gix::Repository,
 ) -> Result<(bool, usize, usize, usize)> {
+    #[cfg(test)]
+    STATUS_WALK_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let mut staged = 0usize;
     let mut unstaged = 0usize;
     let mut untracked = 0usize;

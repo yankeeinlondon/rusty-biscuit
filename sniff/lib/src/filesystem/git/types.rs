@@ -795,6 +795,29 @@ impl GitRepo {
     /// - `include_file_changes`: false skips per-file diff stats
     /// - `include_worktrees`: false skips worktree enumeration
     /// - `refresh_remote_tracking`: true fetches remote refs (network)
+    ///
+    /// Build the status-free identity payload used by [`GitRequest::identity()`].
+    fn identity_only_info(&self, current_branch: Option<String>) -> GitInfo {
+        let (org, repo) = self.org_and_repo();
+        GitInfo {
+            repo_root: self.repo_root.clone(),
+            org,
+            repo,
+            current_branch,
+            head_id: self.head_id(),
+            branches: Vec::new(),
+            in_worktree: self.in_worktree(),
+            base_repo_root: self.base_repo_root(),
+            recent: Vec::new(),
+            status: None,
+            remotes: Vec::new(),
+            worktrees: HashMap::new(),
+            config: GitConfig::default(),
+            tracking: Vec::new(),
+            file_changes: Vec::new(),
+        }
+    }
+
     pub fn detect_with_request(&self, request: &GitRequest) -> Result<GitInfo> {
         // Resolve the branch fallibly: a missing or malformed HEAD must surface
         // for every detection preset, not only the metadata-producing ones.
@@ -803,6 +826,11 @@ impl GitRepo {
         // result is reused for branch/tracking collection to avoid re-reading
         // HEAD per accessor.
         let current_branch = self.try_current_branch()?;
+
+        if request.is_identity_only() {
+            return Ok(self.identity_only_info(current_branch));
+        }
+
         let is_minimal = request.is_minimal();
 
         if request.refresh_remote_tracking {
@@ -930,11 +958,12 @@ impl GitRepo {
             org,
             repo,
             current_branch,
+            head_id: self.head_id(),
             branches,
             in_worktree: self.in_worktree(),
             base_repo_root: self.base_repo_root(),
             recent,
-            status,
+            status: Some(status),
             remotes,
             worktrees,
             config,
@@ -959,7 +988,10 @@ impl GitRepo {
 /// if let Some(info) = git_info {
 ///     println!("Repository: {:?}", info.repo_root);
 ///     println!("Branch: {:?}", info.current_branch);
-///     println!("Dirty: {}", info.status.is_dirty);
+///     match info.status {
+///         Some(status) => println!("Dirty: {}", status.is_dirty),
+///         None => println!("Status not requested"),
+///     }
 /// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -974,6 +1006,9 @@ pub struct GitInfo {
     pub repo: Option<String>,
     /// Current branch name (None for detached HEAD).
     pub current_branch: Option<String>,
+    /// HEAD commit id as a full hex SHA, or `None` for an unborn HEAD.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_id: Option<String>,
     /// All local branches with commit hashes and ahead/behind counts.
     pub branches: Vec<LocalBranchInfo>,
     /// Whether the current path is inside a worktree (vs main repository).
@@ -984,7 +1019,11 @@ pub struct GitInfo {
     /// Recent commits from HEAD (last 10 commits).
     pub recent: Vec<CommitInfo>,
     /// Working tree status.
-    pub status: RepoStatus,
+    ///
+    /// `None` means the status was not requested (e.g., an identity-only
+    /// request), not that the repository is clean.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<RepoStatus>,
     /// Configured remotes.
     pub remotes: Vec<RemoteInfo>,
     /// Linked worktrees (keyed by branch name).
@@ -1219,9 +1258,11 @@ pub struct WorktreeInfo {
 /// use std::path::Path;
 ///
 /// let git_info = detect_git(Path::new("."), false, 10).unwrap().unwrap();
-/// for dirty_file in &git_info.status.dirty {
-///     println!("Modified: {:?}", dirty_file.filepath);
-///     println!("Diff:\n{}", dirty_file.diff);
+/// if let Some(status) = &git_info.status {
+///     for dirty_file in &status.dirty {
+///         println!("Modified: {:?}", dirty_file.filepath);
+///         println!("Diff:\n{}", dirty_file.diff);
+///     }
 /// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1250,8 +1291,10 @@ pub struct DirtyFile {
 /// use std::path::Path;
 ///
 /// let git_info = detect_git(Path::new("."), false, 10).unwrap().unwrap();
-/// for untracked in &git_info.status.untracked {
-///     println!("Untracked: {:?}", untracked.filepath);
+/// if let Some(status) = &git_info.status {
+///     for untracked in &status.untracked {
+///         println!("Untracked: {:?}", untracked.filepath);
+///     }
 /// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1454,5 +1497,162 @@ mod tests {
             git_repo.tracking_status().is_empty(),
             "infallible tracking_status() must suppress errors to an empty vec"
         );
+    }
+
+    #[test]
+    fn identity_request_does_not_walk_status() {
+        let (dir, _repo) = setup_repo();
+        // Make the repo dirty so a status walk would be observable.
+        std::fs::write(dir.path().join("dirty.txt"), "x\n").unwrap();
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        crate::filesystem::git::status::reset_status_walk_counter();
+        let info = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
+
+        assert_eq!(crate::filesystem::git::status::status_walk_count(), 0);
+        assert!(info.status.is_none());
+
+        // Prove the gate is real: summary() does trigger a status walk.
+        let _ = git_repo.detect_with_request(&GitRequest::summary()).unwrap();
+        assert!(
+            crate::filesystem::git::status::status_walk_count() > 0,
+            "summary() must increment the status-walk counter"
+        );
+    }
+
+    #[test]
+    fn identity_request_on_branch_has_expected_fields() {
+        let (dir, _repo) = setup_repo();
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+        let info = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
+
+        assert!(
+            info.current_branch.as_deref().is_some_and(|b| !b.is_empty()),
+            "current_branch should be set on a branch: {:?}",
+            info.current_branch
+        );
+        assert!(!info.in_worktree);
+        assert!(info.head_id.is_some());
+        assert!(info.status.is_none());
+        assert!(info.branches.is_empty());
+        assert!(info.remotes.is_empty());
+        assert!(info.worktrees.is_empty());
+        assert!(info.recent.is_empty());
+        assert!(info.file_changes.is_empty());
+    }
+
+    #[test]
+    fn identity_request_in_linked_worktree_has_expected_fields() {
+        let (dir, repo) = setup_repo();
+        let worktree_path = dir.path().join("linked-wt");
+        repo.worktree("linked", &worktree_path, None).unwrap();
+
+        let git_repo = GitRepo::discover(&worktree_path)
+            .unwrap()
+            .expect("worktree should be discoverable");
+        let info = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
+
+        assert!(info.in_worktree);
+        assert!(info.base_repo_root.is_some());
+        assert_eq!(
+            info.base_repo_root.as_ref().unwrap().canonicalize().unwrap(),
+            dir.path().canonicalize().unwrap()
+        );
+        assert!(info.status.is_none());
+    }
+
+    #[test]
+    fn identity_request_detached_head_has_expected_fields() {
+        let (dir, repo) = setup_repo();
+        let commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.set_head_detached(commit.id()).unwrap();
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+        let info = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
+
+        assert_eq!(info.current_branch, None);
+        assert!(info.head_id.is_some());
+        assert!(info.status.is_none());
+    }
+
+    #[test]
+    fn identity_request_unborn_head_has_expected_fields() {
+        let dir = TempDir::new().unwrap();
+        let _repo = git2::Repository::init(dir.path()).unwrap();
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+        let info = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
+
+        assert_eq!(info.current_branch, None);
+        assert_eq!(info.head_id, None);
+        assert!(info.status.is_none());
+    }
+
+    #[test]
+    fn identity_request_serializes_without_status_field() {
+        let (dir, _repo) = setup_repo();
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+        let identity = git_repo.detect_with_request(&GitRequest::identity()).unwrap();
+        let identity_json = serde_json::to_string(&identity).unwrap();
+        let identity_value: serde_json::Value = serde_json::from_str(&identity_json).unwrap();
+        assert!(
+            !identity_value.as_object().unwrap().contains_key("status"),
+            "identity() JSON must omit the status field"
+        );
+
+        let summary = git_repo.detect_with_request(&GitRequest::summary()).unwrap();
+        let summary_json = serde_json::to_string(&summary).unwrap();
+        let summary_value: serde_json::Value = serde_json::from_str(&summary_json).unwrap();
+        assert!(
+            summary_value.as_object().unwrap().contains_key("status"),
+            "summary() JSON must include the status field"
+        );
+    }
+
+    #[test]
+    fn existing_presets_still_compute_status() {
+        let (dir, _repo) = setup_repo();
+        // Make the repo dirty so the dirty-flag contract is observable.
+        std::fs::write(dir.path().join("dirty.txt"), "x\n").unwrap();
+
+        let git_repo = GitRepo::discover(dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        for request in [GitRequest::minimal(), GitRequest::summary()] {
+            let info = git_repo.detect_with_request(&request).unwrap();
+            assert!(
+                info.status.is_some(),
+                "{:?} must still yield a status object",
+                request
+            );
+            assert!(
+                info.status.unwrap().is_dirty,
+                "{:?} must report a dirty fixture",
+                request
+            );
+        }
+
+        for request in [GitRequest::full(), GitRequest::deep()] {
+            let info = git_repo.detect_with_request(&request).unwrap();
+            assert!(
+                info.status.is_some(),
+                "{:?} must still yield a status object",
+                request
+            );
+        }
     }
 }

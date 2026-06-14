@@ -703,20 +703,20 @@ pub fn render_filesystem_section(
             }
         }
 
-        let dirty = if git.status.is_dirty {
-            "dirty"
-        } else {
-            "clean"
-        };
+        let status = git
+            .status
+            .as_ref()
+            .expect("repo git-status renderer always receives status");
+        let dirty = if status.is_dirty { "dirty" } else { "clean" };
         writeln!(
             out,
             "  Status: {} ({} staged, {} unstaged, {} untracked)",
-            dirty, git.status.staged_count, git.status.unstaged_count, git.status.untracked_count
+            dirty, status.staged_count, status.unstaged_count, status.untracked_count
         )
         .unwrap();
 
         // Show is_behind status (deep mode only)
-        if let Some(ref behind) = git.status.is_behind {
+        if let Some(ref behind) = status.is_behind {
             match behind {
                 BehindStatus::NotBehind => writeln!(out, "  Behind: no").unwrap(),
                 BehindStatus::Behind(remotes) => {
@@ -750,9 +750,9 @@ pub fn render_filesystem_section(
         }
 
         // Show dirty file details at verbose level 1+
-        if verbose > 0 && !git.status.dirty.is_empty() {
+        if verbose > 0 && !status.dirty.is_empty() {
             writeln!(out, "  Dirty files:").unwrap();
-            for dirty_file in &git.status.dirty {
+            for dirty_file in &status.dirty {
                 writeln!(out, "    - {}", dirty_file.filepath.display()).unwrap();
                 // Show diff at verbose level 2+
                 if verbose > 1 && !dirty_file.diff.is_empty() {
@@ -768,17 +768,17 @@ pub fn render_filesystem_section(
         }
 
         // Show untracked files at verbose level 1+
-        if verbose > 0 && !git.status.untracked.is_empty() {
+        if verbose > 0 && !status.untracked.is_empty() {
             writeln!(out, "  Untracked files:").unwrap();
-            let show_count = 5.min(git.status.untracked.len());
-            for untracked in git.status.untracked.iter().take(show_count) {
+            let show_count = 5.min(status.untracked.len());
+            for untracked in status.untracked.iter().take(show_count) {
                 writeln!(out, "    - {}", untracked.filepath.display()).unwrap();
             }
-            if git.status.untracked.len() > show_count {
+            if status.untracked.len() > show_count {
                 writeln!(
                     out,
                     "    ... and {} more",
-                    git.status.untracked.len() - show_count
+                    status.untracked.len() - show_count
                 )
                 .unwrap();
             }

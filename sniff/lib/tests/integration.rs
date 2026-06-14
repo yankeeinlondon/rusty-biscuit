@@ -942,18 +942,18 @@ fn test_git_full_has_file_changes_but_no_diff_payloads() {
 
     // But does NOT include unified diff payloads
     assert!(
-        git.status.dirty.is_empty(),
+        git.status.as_ref().unwrap().dirty.is_empty(),
         "full() should NOT populate dirty diff payloads"
     );
     assert!(
-        git.status.untracked.is_empty(),
+        git.status.as_ref().unwrap().untracked.is_empty(),
         "full() should NOT populate untracked file details"
     );
 
     // Verify the counts are correct
-    assert!(git.status.is_dirty);
-    assert!(git.status.unstaged_count > 0);
-    assert!(git.status.untracked_count > 0);
+    assert!(git.status.as_ref().unwrap().is_dirty);
+    assert!(git.status.as_ref().unwrap().unstaged_count > 0);
+    assert!(git.status.as_ref().unwrap().untracked_count > 0);
 }
 
 #[test]
@@ -986,16 +986,16 @@ fn test_git_deep_includes_diff_payloads() {
         "deep() should populate file_changes"
     );
     assert!(
-        !git.status.dirty.is_empty(),
+        !git.status.as_ref().unwrap().dirty.is_empty(),
         "deep() should populate dirty diff payloads"
     );
     assert!(
-        !git.status.untracked.is_empty(),
+        !git.status.as_ref().unwrap().untracked.is_empty(),
         "deep() should populate untracked file details"
     );
 
     // Verify the diff payload contains actual content
-    let dirty_file = &git.status.dirty[0];
+    let dirty_file = &git.status.as_ref().unwrap().dirty[0];
     assert!(
         !dirty_file.diff.is_empty(),
         "dirty file should have a non-empty diff"
@@ -1027,7 +1027,7 @@ fn test_git_full_reports_conflicted_files() {
     let fs = result.filesystem.expect("filesystem should be present");
     let git = fs.git.expect("git should be present");
 
-    assert!(git.status.is_dirty, "conflicted repo should be dirty");
+    assert!(git.status.as_ref().unwrap().is_dirty, "conflicted repo should be dirty");
     assert!(
         git.file_changes
             .iter()

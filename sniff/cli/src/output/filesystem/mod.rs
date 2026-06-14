@@ -863,7 +863,12 @@ pub fn render_git_section(
             // Verbose: nested list with current branch + other branches
             let mut local_list = UnorderedList::empty();
 
-            let dirty = if git.status.is_dirty {
+            let dirty = if git
+                .status
+                .as_ref()
+                .expect("git status renderer always receives status")
+                .is_dirty
+            {
                 "<red>+</red>"
             } else {
                 ""
@@ -1180,13 +1185,16 @@ pub(crate) fn current_package_area_is_dirty(
 
     let area_prefix = if area == "root" { "" } else { area };
 
-    let has_dirty = git
+    let status = git
         .status
+        .as_ref()
+        .expect("package-area dirty check always receives status");
+    let has_dirty = status
         .dirty
         .iter()
         .map(|d| d.filepath.to_str().unwrap_or(""))
         .chain(
-            git.status
+            status
                 .untracked
                 .iter()
                 .map(|u| u.filepath.to_str().unwrap_or("")),
@@ -1255,13 +1263,17 @@ pub(crate) fn package_area_source_code_change_count(
 
     let area_prefix = if area == "root" { "" } else { area };
 
-    let count = git
+    let status = git
         .status
+        .as_ref()
+        .expect("package-area change count always receives status");
+
+    let count = status
         .dirty
         .iter()
         .map(|d| d.filepath.to_str().unwrap_or(""))
         .chain(
-            git.status
+            status
                 .untracked
                 .iter()
                 .map(|u| u.filepath.to_str().unwrap_or("")),
@@ -1393,6 +1405,7 @@ mod tests {
             org: None,
             repo: None,
             current_branch: Some("main".to_string()),
+            head_id: Some("1234567890abcdef".to_string()),
             branches: vec![],
             in_worktree: false,
             base_repo_root: None,
@@ -1404,7 +1417,7 @@ mod tests {
                 remotes: None,
                 refs: vec![],
             }],
-            status: RepoStatus {
+            status: Some(RepoStatus {
                 is_dirty: !file_changes.is_empty(),
                 staged_count,
                 unstaged_count,
@@ -1412,7 +1425,7 @@ mod tests {
                 dirty: vec![],
                 untracked: vec![],
                 is_behind: None,
-            },
+            }),
             remotes: vec![],
             worktrees: HashMap::new(),
             config: GitConfig::default(),
@@ -2363,7 +2376,7 @@ mod tests {
             let packages = vec![make_package("alpha", "alpha", &[])];
             let repo = make_repo(packages, false);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![make_dirty_file("alpha/src/main.rs")];
+            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("alpha/src/main.rs")];
             let result = build_result(repo, git);
 
             let names = select_dirty_package_names(&result, &[], None, None);
@@ -2386,7 +2399,7 @@ mod tests {
 
             let repo = make_repo(packages, true);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
+            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
             let result = build_result(repo, git);
 
             let names = select_dirty_package_names(&result, &[], None, None);
@@ -2404,7 +2417,7 @@ mod tests {
 
             let repo = make_repo(packages, true);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
+            git.status.as_mut().unwrap().dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
             let result = build_result(repo, git);
 
             let areas = select_dirty_package_area_names(&result, &[], None, None);
@@ -2422,7 +2435,7 @@ mod tests {
 
             let repo = make_repo(packages, true);
             let mut git = make_git_info(vec![]);
-            git.status.dirty = vec![
+            git.status.as_mut().unwrap().dirty = vec![
                 make_dirty_file("area-a/alpha/src/main.rs"),
                 make_dirty_file("area-b/beta/src/lib.rs"),
             ];
@@ -2543,7 +2556,7 @@ mod tests {
         fn build_result(repo: RepoInfo, dirty_paths: &[&str]) -> SniffResult {
             let mut git = make_git_info(vec![]);
             git.repo_root = repo.root.clone();
-            git.status.dirty = dirty_paths.iter().map(|p| dirty_file(p)).collect();
+            git.status.as_mut().unwrap().dirty = dirty_paths.iter().map(|p| dirty_file(p)).collect();
             let filesystem = FilesystemInfo {
                 repo: Some(repo),
                 git: Some(git),
@@ -2659,8 +2672,8 @@ mod tests {
             git.repo_root = repo.root.clone();
             // Force status.dirty / status.untracked empty so the test
             // exclusively exercises the file_changes branch.
-            git.status.dirty = Vec::new();
-            git.status.untracked = Vec::new();
+            git.status.as_mut().unwrap().dirty = Vec::new();
+            git.status.as_mut().unwrap().untracked = Vec::new();
             let filesystem = FilesystemInfo {
                 repo: Some(repo),
                 git: Some(git),
