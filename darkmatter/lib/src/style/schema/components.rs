@@ -1,5 +1,5 @@
 //! Component buckets whose schema is exactly `CommonStyle` (no bespoke
-//! fields): `table`, `block-quote`.
+//! fields): `table`, `block-quote`, `disclosure`.
 
 use serde::Deserialize;
 
@@ -15,6 +15,13 @@ pub struct TableStyle {
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
 pub struct BlockQuoteStyle {
+    #[serde(flatten)]
+    pub common: CommonStyle,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "kebab-case", default)]
+pub struct DisclosureStyle {
     #[serde(flatten)]
     pub common: CommonStyle,
 }

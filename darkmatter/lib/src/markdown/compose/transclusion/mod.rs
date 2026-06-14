@@ -23,4 +23,4 @@ pub use types::{
     BlockDirective, BlockOptions, DeferredSetError, DependencyNode, DirectiveKind, FrontmatterRefs,
     ReplaceOption, ResolvedTarget, TransclusionError, TransclusionRuntime, TransclusionSource,
 };
-pub use wrappers::{wrap_disclosure, wrap_quotation};
+pub use wrappers::wrap_quotation;

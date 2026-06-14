@@ -5,7 +5,7 @@ agent: codex
 
 # Review 1
 
-The feature is not ready for production. The focused test suite passes (`cargo test -p tui-chrome -p tui-chrome-cli`), but several specification requirements are either unimplemented or only partially scaffolded, and the current tests do not catch those gaps.
+The feature is not ready for production. The focused test suite passes (`cargo test -p biscuit-tui -p biscuit-tui-cli`), but several specification requirements are either unimplemented or only partially scaffolded, and the current tests do not catch those gaps.
 
 ## Findings
 

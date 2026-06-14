@@ -12,7 +12,7 @@ The implementation of the agent-selection feature has been reviewed against the 
 - **Layered Resolver:** The resolution logic correctly implements the split between TTY (always picker unless explicit flag) and non-TTY (strict chain: explicit > frontmatter > favorite > error) modes.
 - **Frontmatter Hints:** Both `agent` and `model` hints support singular and list values, with author-order preservation and fuzzy matching for providers.
 - **Model Catalog:** The catalog service successfully combines static sources, dynamic fetching (`opencode models`), and user overrides (additive/replace). Stale-cache fallback is implemented correctly.
-- **TTY Components:** The transition to `tui-chrome::ChooseOne` and `tui-chrome::InputTable` for interactive selection and sequence review provides a consistent and ergonomic UX.
+- **TTY Components:** The transition to `biscuit-tui::ChooseOne` and `biscuit-tui::InputTable` for interactive selection and sequence review provides a consistent and ergonomic UX.
 - **Sequence UX:** The front-loading of all agent/model decisions before execution starts is correctly implemented in `sequence.rs`, honoring the requirement for non-interactivity once the session begins.
 - **OpenCode Special Case:** The hard error for missing model in non-interactive OpenCode sessions is correctly implemented and provides actionable guidance.
 

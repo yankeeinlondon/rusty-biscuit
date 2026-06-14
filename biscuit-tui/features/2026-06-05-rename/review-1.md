@@ -4,7 +4,7 @@ agent: codex
 model: ""
 ---
 
-# Review: Rename `tui-chrome` to `biscuit-tui`
+# Review: Rename `biscuit-tui` to `biscuit-tui`
 
 ## Findings
 

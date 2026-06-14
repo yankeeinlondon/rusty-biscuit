@@ -28,12 +28,26 @@ async fn main() {
 
     init_tracing(cli.debug);
 
-    // Resolve the default `icons` command when none is given.
-    let command = cli
-        .command
-        .unwrap_or(Commands::Icons { filter: cli.filter, from: cli.from });
+    // Bare invocation (no subcommand, no filter) shows help and exits. Without
+    // this short-circuit, the default `show` branch below would dump every
+    // curated domain icon, which is rarely what a first-time user wants.
+    if cli.command.is_none() && cli.filter.is_none() {
+        let _ = Cli::command().print_help();
+        return;
+    }
 
-    if let Err(err) = commands::run(command, cli.nerd).await {
+    // Resolve the default `show` command when a filter was given without a
+    // subcommand (e.g. `icon mdi:home`). The show format flags live on the
+    // top-level Cli via flatten, so they are picked up here directly.
+    let command = cli.command.unwrap_or_else(|| {
+        let filter = cli.filter.unwrap_or_default();
+        Commands::Show {
+            ids: vec![filter],
+            show: cli.show,
+        }
+    });
+
+    if let Err(err) = commands::run(command, cli.nerd, cli.verbose).await {
         render_error(&err, cli.verbose);
         std::process::exit(1);
     }

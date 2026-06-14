@@ -14,9 +14,13 @@
 //! failure (for CI that provisions one). Point `CHROME` at an explicit
 //! executable to override discovery.
 
+// Whitebox: these tests wire the deprecated `TerminalCodeRenderer` adapter
+// directly to exercise the render-tree code path.
+#![allow(deprecated)]
+
 use biscuit_browser_harness::{BrowserHarness, ChromeHarness, require_browser, wrap_fragment};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
+use darkmatter::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
 use darkmatter::markdown::output::HtmlOptions;
 use darkmatter::markdown::render_tree::{TerminalCodeRenderer, fold_markdown_to_document};
 use darkmatter::markdown::render_tree::svg_sanitizer::sanitize_svg;
@@ -1013,5 +1017,307 @@ async fn browser_list_left_margin_computes() {
         margin_left.ends_with("px") && px(&margin_left) > 0.0,
         "list left-margin must compute to a non-zero px margin; got {margin_left}",
     );
+    harness.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// Review-2 finding 2: the browser-visible code-block theme/mode is
+// user-observable styling — the `.code-block` panel background and the syntax
+// `<span>` colors must compute to the page-resolved theme/mode in an actual
+// browser. The L1 string-luminance checks in `page.rs` do not exercise the
+// parser/cascade/computed-style path, so these drive
+// `DarkmatterPage::render_to_browser` through a real headless Chromium.
+// ---------------------------------------------------------------------------
+
+/// Parses a `"rgb(r, g, b)"` / `"rgba(r, g, b, a)"` computed color into a
+/// perceptual luminance in `0.0..=1.0`. Returns `None` for any other shape.
+fn rgb_luminance(value: &str) -> Option<f32> {
+    let trimmed = value.trim();
+    let inner = trimmed
+        .strip_prefix("rgb(")
+        .or_else(|| trimmed.strip_prefix("rgba("))?
+        .strip_suffix(')')?;
+    let mut parts = inner.split(',').map(str::trim);
+    let r: f32 = parts.next()?.parse().ok()?;
+    let g: f32 = parts.next()?.parse().ok()?;
+    let b: f32 = parts.next()?.parse().ok()?;
+    Some((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0)
+}
+
+/// Renders a fenced code block through `DarkmatterPage::render_to_browser` with
+/// a captured terminal `mode` (and optional `CodeBlockMode`), loads it in the
+/// browser, and returns the computed `(.code-block background-color, first
+/// .code-block span color)`. The `github` paired theme is pinned so the result
+/// is deterministic across hosts and unaffected by ambient `THEME` env.
+async fn page_code_block_computed_styles(
+    harness: &mut ChromeHarness,
+    mode: ColorMode,
+    code_block_mode: Option<CodeBlockMode>,
+) -> (String, String) {
+    use biscuit_terminal::terminal::Terminal;
+    use darkmatter::layout::DarkmatterPage;
+
+    let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+    let mut term = Terminal::new_optimistic(80);
+    term.color_mode = mode;
+    let mut page = DarkmatterPage::new(&term).with_code_theme("github");
+    if let Some(cbm) = code_block_mode {
+        page = page.with_code_block_mode(cbm);
+    }
+    let html = page.render_to_browser(&md).expect("render_to_browser");
+    let doc = wrap_fragment(&html, "#202020");
+    harness.render_html(&doc).await.expect("render html");
+
+    let bg = harness
+        .computed_style(".code-block", "background-color")
+        .await
+        .expect("computed style query");
+    let color = harness
+        .computed_style(".code-block span", "color")
+        .await
+        .expect("computed style query");
+    (bg, color)
+}
+
+/// Review-2 finding 2: `DarkmatterPage::render_to_browser` must resolve the
+/// code panel's theme variant against the *captured terminal mode* in a real
+/// browser. A dark terminal inverts (default) to a light panel and a light
+/// terminal to a dark panel; both the `.code-block` computed `background-color`
+/// and a representative syntax `<span>`'s computed `color` must follow that
+/// page-resolved mode — not a fixed default theme.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_page_code_block_theme_follows_captured_terminal_mode() {
+    if !require_browser() {
+        return;
+    }
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+
+    let (dark_bg, dark_span) =
+        page_code_block_computed_styles(&mut harness, ColorMode::Dark, None).await;
+    let (light_bg, light_span) =
+        page_code_block_computed_styles(&mut harness, ColorMode::Light, None).await;
+
+    let dark_bg_lum =
+        rgb_luminance(&dark_bg).unwrap_or_else(|| panic!("unparseable dark panel bg {dark_bg:?}"));
+    let light_bg_lum = rgb_luminance(&light_bg)
+        .unwrap_or_else(|| panic!("unparseable light panel bg {light_bg:?}"));
+
+    // Dark page -> inverse -> light panel; light page -> inverse -> dark panel.
+    assert!(
+        dark_bg_lum > 0.6,
+        "a dark terminal must invert to a light code panel; got {dark_bg:?} (lum {dark_bg_lum:.3})",
+    );
+    assert!(
+        light_bg_lum < 0.4,
+        "a light terminal must invert to a dark code panel; got {light_bg:?} (lum {light_bg_lum:.3})",
+    );
+    assert!(
+        (dark_bg_lum - light_bg_lum).abs() > 0.4,
+        "captured-mode panels must be well-separated; dark {dark_bg_lum:.3}, light {light_bg_lum:.3}",
+    );
+
+    // The syntax markup color must follow the page-resolved mode too (the L1
+    // bug: markup painted a fixed default theme while the panel inverted).
+    assert_ne!(
+        dark_span, light_span,
+        "syntax span color must follow the captured terminal mode; dark {dark_span:?} vs light {light_span:?}",
+    );
+    harness.shutdown().await;
+}
+
+/// Review-2 finding 2: `CodeBlockMode::Same` vs `Inverse` must be
+/// browser-observable through `DarkmatterPage::render_to_browser`. On a dark
+/// page, `Inverse` (default) computes a light panel while `Same` keeps a dark
+/// panel, so the `.code-block` computed `background-color` must differ and
+/// `Inverse` must be the lighter of the two.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_page_code_block_mode_same_vs_inverse_computes() {
+    if !require_browser() {
+        return;
+    }
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+
+    let (inverse_bg, _) =
+        page_code_block_computed_styles(&mut harness, ColorMode::Dark, Some(CodeBlockMode::Inverse))
+            .await;
+    let (same_bg, _) =
+        page_code_block_computed_styles(&mut harness, ColorMode::Dark, Some(CodeBlockMode::Same))
+            .await;
+
+    let inverse_lum = rgb_luminance(&inverse_bg)
+        .unwrap_or_else(|| panic!("unparseable inverse panel bg {inverse_bg:?}"));
+    let same_lum =
+        rgb_luminance(&same_bg).unwrap_or_else(|| panic!("unparseable same panel bg {same_bg:?}"));
+
+    assert!(
+        inverse_lum > 0.6,
+        "Inverse on a dark page must compute a light panel; got {inverse_bg:?} (lum {inverse_lum:.3})",
+    );
+    assert!(
+        same_lum < 0.4,
+        "Same on a dark page must compute a dark panel; got {same_bg:?} (lum {same_lum:.3})",
+    );
+    assert_ne!(
+        inverse_bg, same_bg,
+        "Inverse and Same must compute different code-panel backgrounds",
+    );
+    harness.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// Review-5 finding 1: browser disclosure behavior was only verified at Level 1
+// (HTML-source substrings). The spec requires native `<details>`/`<summary>`
+// with NO JavaScript, where the body is revealed by the browser's own
+// click-to-open behavior. These drive a real headless Chromium and assert the
+// parsed DOM toggles: the body is unrendered while `details.open === false` and
+// rendered after the summary is clicked and `details.open === true`. The whole
+// interaction runs in one `evaluate` because each `computed_style` call opens a
+// fresh page and could not observe the click.
+// ---------------------------------------------------------------------------
+
+/// Parses a `"key=value;key=value"` payload (the shape the disclosure probe
+/// scripts return) into a lookup map.
+fn parse_kv(payload: &str) -> std::collections::HashMap<String, String> {
+    payload
+        .split(';')
+        .filter_map(|pair| pair.split_once('='))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+/// Review-5 finding 1: a disclosure rendered to HTML must parse into a native
+/// `<details>`/`<summary>` DOM, carry no `<script>`, hide the body while closed,
+/// and reveal it when the summary is clicked — proven against a real browser,
+/// not an HTML-source substring.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_disclosure_click_reveals_body() {
+    if !require_browser() {
+        return;
+    }
+
+    let md: Markdown =
+        "::disclosure\nSummary text\n::details\nBody paragraph.\n::end-disclosure\n".into();
+    let fragment = md.as_html(HtmlOptions::default()).expect("as_html");
+    let doc = wrap_fragment(&fragment, "#ffffff");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    // `checkVisibility()` reports the browser's own rendered-visibility verdict:
+    // a closed `<details>` hides its non-summary content (Chrome wraps it in a
+    // `content-visibility: hidden` `::details-content`), so the body computes
+    // not-visible while closed and visible once the summary is clicked open. (A
+    // bounding-box height check is unreliable here: Chrome still lays the body
+    // out at its intrinsic size even while it is visually hidden.)
+    let probe = "(() => {\
+        const d = document.querySelector('details');\
+        if (!d) return 'err=no-details';\
+        const summary = d.querySelector('summary');\
+        if (!summary) return 'err=no-summary';\
+        const body = d.querySelector('p');\
+        if (!body) return 'err=no-body';\
+        const scripts = document.querySelectorAll('script').length;\
+        const closedOpen = d.open;\
+        const closedVis = body.checkVisibility();\
+        summary.click();\
+        const openedOpen = d.open;\
+        const openedVis = body.checkVisibility();\
+        return `scripts=${scripts};closedOpen=${closedOpen};closedVis=${closedVis};openedOpen=${openedOpen};openedVis=${openedVis}`;\
+    })()";
+    let result = harness.evaluate(probe).await.expect("evaluate disclosure probe");
+    assert!(
+        !result.starts_with("err="),
+        "disclosure DOM probe failed: {result}",
+    );
+    let kv = parse_kv(&result);
+
+    assert_eq!(
+        kv.get("scripts").map(String::as_str),
+        Some("0"),
+        "native disclosure must include no <script>; got {result}",
+    );
+    assert_eq!(
+        kv.get("closedOpen").map(String::as_str),
+        Some("false"),
+        "disclosure must start closed; got {result}",
+    );
+    assert_eq!(
+        kv.get("closedVis").map(String::as_str),
+        Some("false"),
+        "body must be hidden while closed; got {result}",
+    );
+    assert_eq!(
+        kv.get("openedOpen").map(String::as_str),
+        Some("true"),
+        "clicking the summary must open the disclosure; got {result}",
+    );
+    assert_eq!(
+        kv.get("openedVis").map(String::as_str),
+        Some("true"),
+        "body must be visible once opened; got {result}",
+    );
+
+    harness.shutdown().await;
+}
+
+/// Review-5 finding 1 (nested): a disclosure nested in another's body must parse
+/// as a second `<details>`, stay unrendered until the outer opens, then toggle
+/// independently when its own summary is clicked.
+#[tokio::test]
+#[serial(browser)]
+async fn browser_nested_disclosure_toggles_independently() {
+    if !require_browser() {
+        return;
+    }
+
+    let md: Markdown = "::disclosure\nOuter\n::details\nOuter body.\n\n::disclosure\nInner\n::details\nInner body.\n::end-disclosure\n\n::end-disclosure\n".into();
+    let fragment = md.as_html(HtmlOptions::default()).expect("as_html");
+    let doc = wrap_fragment(&fragment, "#ffffff");
+
+    let mut harness = ChromeHarness::new();
+    harness.spawn().await.expect("spawn chrome");
+    harness.render_html(&doc).await.expect("render html");
+
+    let probe = "(() => {\
+        const all = document.querySelectorAll('details');\
+        if (all.length < 2) return `err=count-${all.length}`;\
+        const outer = all[0], inner = all[1];\
+        const innerVisClosed = inner.checkVisibility();\
+        outer.querySelector('summary').click();\
+        const innerVisOuterOpen = inner.checkVisibility();\
+        inner.querySelector('summary').click();\
+        return `count=${all.length};innerVisClosed=${innerVisClosed};innerVisOuterOpen=${innerVisOuterOpen};innerOpen=${inner.open}`;\
+    })()";
+    let result = harness.evaluate(probe).await.expect("evaluate nested probe");
+    assert!(!result.starts_with("err="), "nested DOM probe failed: {result}");
+    let kv = parse_kv(&result);
+
+    assert_eq!(
+        kv.get("count").map(String::as_str),
+        Some("2"),
+        "nested disclosures must parse as two <details>; got {result}",
+    );
+    assert_eq!(
+        kv.get("innerVisClosed").map(String::as_str),
+        Some("false"),
+        "inner disclosure must be hidden while the outer is closed; got {result}",
+    );
+    assert_eq!(
+        kv.get("innerVisOuterOpen").map(String::as_str),
+        Some("true"),
+        "inner disclosure must become visible once the outer opens; got {result}",
+    );
+    assert_eq!(
+        kv.get("innerOpen").map(String::as_str),
+        Some("true"),
+        "clicking the inner summary must open the inner disclosure; got {result}",
+    );
+
     harness.shutdown().await;
 }

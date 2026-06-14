@@ -38,7 +38,7 @@ subagents committing semantic groups of staged files):
 The 2 subagents that never emitted `after_tool task` (and never produced
 git commits) were the two largest groups:
 
-- `ses_2191b6c4cffe…` — *"Commit tui-chrome-cli src files"*
+- `ses_2191b6c4cffe…` — *"Commit biscuit-tui-cli src files"*
 - `ses_2191b4a04ffe…` — *"Commit feature work files"*
 
 OpenCode's session storage at
@@ -332,9 +332,9 @@ surface within ~`step_timeout` + `CLAUDINE_WATCHDOG_INTERVAL` +
 `CLAUDINE_KILL_GRACE` of the last successful `task_completed`:
 
 ```text
- ← Task(successful, Commit tui-chrome lib components)
+ ← Task(successful, Commit biscuit-tui lib components)
 
- ⏳ Awaiting subagent: Commit tui-chrome-cli src files (15m 12s)
+ ⏳ Awaiting subagent: Commit biscuit-tui-cli src files (15m 12s)
  ⏳ Awaiting subagent: Commit feature work files (15m 12s)
 
 ▌ Step Timeout
@@ -342,7 +342,7 @@ surface within ~`step_timeout` + `CLAUDINE_WATCHDOG_INTERVAL` +
 ▌ terminated. 2 subagents were still outstanding when the timeout
 ▌ fired:
 ▌
-▌   • ses_2191b6c4… "Commit tui-chrome-cli src files"
+▌   • ses_2191b6c4… "Commit biscuit-tui-cli src files"
 ▌     idle since 04:14:??Z (30m 0s)
 ▌   • ses_2191b4a04… "Commit feature work files"
 ▌     idle since 04:14:??Z (30m 0s)

@@ -167,12 +167,12 @@ follow its style for tempfile setup so the new tests stay consistent.
 Run:
 
 ```bash
-cargo test -p tui-chrome-cli option_sources
-cargo test -p tui-chrome-cli parse_file
-cargo test -p tui-chrome-cli choose_cli
+cargo test -p biscuit-tui-cli option_sources
+cargo test -p biscuit-tui-cli parse_file
+cargo test -p biscuit-tui-cli choose_cli
 ```
 
-If exact module filters differ, fall back to `cargo test -p tui-chrome-cli`
+If exact module filters differ, fall back to `cargo test -p biscuit-tui-cli`
 and read output. Confirm the new `UnsupportedFormat` variant fires and the
 old plain-list fallback no longer accepts `.txt`.
 
@@ -330,9 +330,9 @@ stay consistent.
 Run:
 
 ```bash
-cargo test -p tui-chrome-cli choice_normalize
-cargo test -p tui-chrome-cli hotkey
-cargo test -p tui-chrome-cli choose_cli
+cargo test -p biscuit-tui-cli choice_normalize
+cargo test -p biscuit-tui-cli hotkey
+cargo test -p biscuit-tui-cli choose_cli
 ```
 
 Confirm the new collision tests fire `NormalizeError::DuplicateHotkey`
@@ -350,9 +350,9 @@ Phase 2.
 Run from the repository root:
 
 ```bash
-cargo test -p tui-chrome -p tui-chrome-cli
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
-cargo test -p tui-chrome -p tui-chrome-cli
+cargo test -p biscuit-tui -p biscuit-tui-cli
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
+cargo test -p biscuit-tui -p biscuit-tui-cli
 ```
 
 The first command must pass with zero failing tests. The second must
@@ -366,8 +366,8 @@ Review 9 did not flag the gated PTY suites, but rerun them as a sanity
 check that Phase 1 and Phase 2 did not perturb PTY behavior:
 
 ```bash
-RUN_PTY_TESTS=1 cargo test -p tui-chrome-cli --test keyboard_protocol -- --nocapture
-RUN_SHELL_TESTS=1 cargo test -p tui-chrome-cli --test completions_shell -- --nocapture
+RUN_PTY_TESTS=1 cargo test -p biscuit-tui-cli --test keyboard_protocol -- --nocapture
+RUN_SHELL_TESTS=1 cargo test -p biscuit-tui-cli --test completions_shell -- --nocapture
 ```
 
 Failures here are out of scope for this review unless they were caused
@@ -412,10 +412,10 @@ The review is complete when:
   implicit/implicit collisions emit `NormalizeError::DuplicateHotkey`
   for both `choose-one` and `choose-many`, with new tests covering each
   collision shape and a CLI-level test per subcommand.
-- `cargo test -p tui-chrome -p tui-chrome-cli` passes.
-- `cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings`
+- `cargo test -p biscuit-tui -p biscuit-tui-cli` passes.
+- `cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings`
   passes.
-- The post-lint `cargo test -p tui-chrome -p tui-chrome-cli` rerun passes.
+- The post-lint `cargo test -p biscuit-tui -p biscuit-tui-cli` rerun passes.
 
 ## Risks and Open Questions
 

@@ -5,8 +5,8 @@ source_review: review-4.md
 package_area: biscuit-tui
 phases: 5
 crates:
-  - tui-chrome
-  - tui-chrome-cli
+  - biscuit-tui
+  - biscuit-tui-cli
 ---
 
 # Review-4 Remediation Plan
@@ -82,9 +82,9 @@ Add component-level render tests, not only `ChoiceRenderContext` tests:
 Focused verification:
 
 ```bash
-cargo test -p tui-chrome terminal_style
-cargo test -p tui-chrome render_uses_nerd_font
-cargo test -p tui-chrome render_uses_light_background
+cargo test -p biscuit-tui terminal_style
+cargo test -p biscuit-tui render_uses_nerd_font
+cargo test -p biscuit-tui render_uses_light_background
 ```
 
 ## Phase 2: Make TOML File Sources Actually Usable
@@ -174,8 +174,8 @@ Integration test in `cli/tests/choose_cli.rs`:
 Focused verification:
 
 ```bash
-cargo test -p tui-chrome-cli option_sources::tests::parse_file_toml
-cargo test -p tui-chrome-cli --test choose_cli choose_one_file_toml
+cargo test -p biscuit-tui-cli option_sources::tests::parse_file_toml
+cargo test -p biscuit-tui-cli --test choose_cli choose_one_file_toml
 ```
 
 ## Phase 3: Preserve Explicit Values Against Value Conventions
@@ -238,7 +238,7 @@ Unit tests in `choice_normalize.rs`:
 Focused verification:
 
 ```bash
-cargo test -p tui-chrome-cli choice_normalize::tests::normalize_options
+cargo test -p biscuit-tui-cli choice_normalize::tests::normalize_options
 ```
 
 ## Phase 4: Fix Horizontal Badge Visible-Row Accounting
@@ -302,8 +302,8 @@ renderer-level short-viewport test if it makes the helper easier to pin:
 Focused verification:
 
 ```bash
-cargo test -p tui-chrome horizontal_badges
-cargo test -p tui-chrome short_viewport
+cargo test -p biscuit-tui horizontal_badges
+cargo test -p biscuit-tui short_viewport
 ```
 
 ## Phase 5: Docs, Full Tests, and Lint
@@ -331,11 +331,11 @@ Run focused tests first while implementing, then the complete package-area
 verification:
 
 ```bash
-cargo test -p tui-chrome terminal_style
-cargo test -p tui-chrome horizontal_badges
-cargo test -p tui-chrome-cli choice_normalize::tests::normalize_options
-cargo test -p tui-chrome-cli option_sources::tests::parse_file_toml
-cargo test -p tui-chrome-cli --test choose_cli choose_one_file_toml
+cargo test -p biscuit-tui terminal_style
+cargo test -p biscuit-tui horizontal_badges
+cargo test -p biscuit-tui-cli choice_normalize::tests::normalize_options
+cargo test -p biscuit-tui-cli option_sources::tests::parse_file_toml
+cargo test -p biscuit-tui-cli --test choose_cli choose_one_file_toml
 
 cd biscuit-tui
 just test
@@ -345,12 +345,12 @@ just lint
 If `just lint` does not treat warnings as hard failures, also run:
 
 ```bash
-cargo clippy -p tui-chrome -p tui-chrome-cli --all-targets -- -D warnings
+cargo clippy -p biscuit-tui -p biscuit-tui-cli --all-targets -- -D warnings
 ```
 
 The final state must have:
 
-- `cargo test -p tui-chrome -p tui-chrome-cli` passing.
+- `cargo test -p biscuit-tui -p biscuit-tui-cli` passing.
 - `just test` passing from `biscuit-tui/`.
 - `just lint` passing from `biscuit-tui/`.
 - No clippy warnings under `-D warnings`.

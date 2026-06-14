@@ -18,6 +18,7 @@ pub mod style;
 
 pub use body::IconBody;
 pub use cache::SetInfo;
+pub use catalog::IconMeta;
 pub use error::IconError;
 pub use glyph::Glyph;
 pub use icon::{Icon, Source};

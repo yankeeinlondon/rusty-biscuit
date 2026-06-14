@@ -86,15 +86,19 @@ test is at the wrong level under "Findings" with severity at least "high".
 ## Closure
 
 - Save your review suggestions to "{{review_path}}"
-- based on your review suggestions indicate whether you think this feature is **ready for production** by setting the `ready` frontmatter property on "{{review_path}}" to `true` or `false`
+- based on your review:
+    - indicate whether you think this feature is **ready for production** by setting the `ready` frontmatter property on "{{review_path}}" to `true` or `false`
+    - specify the number of suggestions you've made in this review by setting `review_suggestions` frontmatter property on "{{review_path}}" as a numeric value
 - save the `agent` frontmatter property as "{{env.AGENT}}" in the "{{review_path}}" file
 - save the `model` frontmatter property as "{{env.MODEL}}" in the "{{review_path}}" file
+- save the `created` frontmatter property as "{{ctx.now}}" in the "{{review_path}}" file
+- save the `yolo` frontmatter property as "{{env.YOLO}}" in the "{{review_path}}" file
 
 ## **IMPORTANT:**
 
 - do NOT change the `ready` property in the review file after implementing
-    - you may feel that everything in that review was fixed but the review's assessment at that time should not change
-    - furthermore, we will be running another review _after_ you've completed here to validate that everything is fixed
+    - you may feel that everything in that review was fixed but the review's assessment at that time **should not change**
+    - furthermore, we will be running another review _after_ you've completed here to validate that everything is indeed fixed
 - do not run `cargo fmt` ... we want functional changes during this work not formatting changes
 - do not commit your work to git (this will be done as an independent process which you are not responsible for)
 ::file ./you-are-non-interactive.md

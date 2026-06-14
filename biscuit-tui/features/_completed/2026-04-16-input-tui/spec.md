@@ -6,7 +6,7 @@ USE: 'tui' and 'cli' agent skills
 
 ## Initialize
 
-This package area, which includes `tui-chrome` (library) and `tui-chrome-cli` (cli) -- are brand new. So the first thing we will need to do is make sure all the plumbing and configuration files are in place.
+This package area, which includes `biscuit-tui` (library) and `biscuit-tui-cli` (cli) -- are brand new. So the first thing we will need to do is make sure all the plumbing and configuration files are in place.
 
 - Library
     - This library will be a TUI component library for other callers

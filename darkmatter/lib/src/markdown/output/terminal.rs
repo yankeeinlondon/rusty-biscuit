@@ -27,7 +27,7 @@
 //! // Output contains ANSI escape codes for terminal display
 //! ```
 
-use crate::markdown::highlighting::{ColorMode, ThemePair};
+use crate::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
 #[cfg(test)]
 use crate::markdown::output::code_block;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
@@ -710,6 +710,13 @@ pub struct TerminalOptions {
     /// default horizontal-rule style instead of reading the deprecated top-level
     /// `hr:` frontmatter block.
     pub hr_defaults: Option<crate::markdown::inline::HorizontalRuleAttrs>,
+    /// Controls how a code block's theme variant is chosen relative to the page
+    /// color mode.
+    ///
+    /// - `Inverse` (default): opposite variant from the page (dark page -> light panel)
+    /// - `Dark` / `Light`: force the named variant
+    /// - `Same`: match the page variant
+    pub code_block_mode: CodeBlockMode,
 }
 
 static DETECTED_COLOR_MODE: std::sync::OnceLock<ColorMode> = std::sync::OnceLock::new();
@@ -738,6 +745,7 @@ impl Default for TerminalOptions {
             mermaid_mode: MermaidMode::default(),
             hyperlink_mode: HyperlinkMode::default(),
             hr_defaults: None,
+            code_block_mode: CodeBlockMode::default(),
         }
     }
 }
@@ -916,6 +924,7 @@ mod tests {
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
             hr_defaults: None,
+            code_block_mode: CodeBlockMode::default(),
         }
     }
 
@@ -1147,16 +1156,22 @@ mod tests {
         let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
         let bg_code = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
 
-        // Should start with top padding row (bg color + clear + reset + newline)
+        // Should start with the reset SGR (clears inherited attributes) followed
+        // by the top padding row (bg color + clear + reset + newline). The
+        // leading `\x1b[0m` is the inherited-attribute reset the code-block
+        // helper always emits before applying the theme's own background and
+        // foreground.
+        let expected_start = format!("\x1b[0m{}\x1b[K\x1b[0m\n", bg_code);
         assert!(
-            output.starts_with(&format!("{}\x1b[K\x1b[0m\n", bg_code)),
-            "Output should start with top padding row"
+            output.starts_with(&expected_start),
+            "Output should start with top padding row; got: {output:?}"
         );
 
         // Should end with bottom padding row (bg color + clear + reset, no newline)
+        let expected_end = format!("{}\x1b[K\x1b[0m", bg_code);
         assert!(
-            output.ends_with(&format!("{}\x1b[K\x1b[0m", bg_code)),
-            "Output should end with bottom padding row"
+            output.ends_with(&expected_end),
+            "Output should end with bottom padding row; got: {output:?}"
         );
     }
 
@@ -1186,8 +1201,10 @@ mod tests {
         let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
         let bg_code = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
 
-        // After the top padding row and background color set, should have a space for left padding
-        let expected_sequence = format!("{}\x1b[K\x1b[0m\n{} ", bg_code, bg_code);
+        // After the top padding row, the body line begins with a reset SGR
+        // (clears inherited attributes) followed by the theme background
+        // color and one space of left padding before the syntax tokens.
+        let expected_sequence = format!("\x1b[K\x1b[0m\n\x1b[0m{} ", bg_code);
         assert!(
             output.contains(&expected_sequence),
             "Code lines should have 1-character left padding after background color"

@@ -1059,6 +1059,18 @@ pub fn dispatch_fs(
     None
 }
 
+/// Returns `true` when `name` matches a canonical name or alias in
+/// [`FS_FUNCTIONS`].
+///
+/// Lets the evaluator distinguish a known filesystem function that fell
+/// through dispatch only because no document resolution context was available
+/// from a genuinely unrecognized symbol.
+pub fn is_fs_function(name: &str) -> bool {
+    FS_FUNCTIONS
+        .iter()
+        .any(|f| f.canonical == name || f.aliases.contains(&name))
+}
+
 /// Dispatches an evaluated function call against the pure helper library.
 ///
 /// Returns `Some(result)` when the name matches an entry in [`PURE_FUNCTIONS`],

@@ -1,6 +1,7 @@
 ---
 created: 2026-06-11
-status: draft
+reviewed: true
+status: ready for planning and implementation
 ---
 
 # Simplified Rendering Components
@@ -16,15 +17,24 @@ components:
 - `CodeBlock` renders one syntax-highlighted code block.
 - `DarkmatterPage` renders one Markdown document.
 
-Both components implement `TerminalRenderable` and `BrowserRenderable`. They are
-the intended public rendering footprint for Darkmatter. Lower-level render-tree
-hooks such as `TerminalCodeRenderer`, highlighter internals, and theme-resolving
-helpers remain implementation details.
+`CodeBlock` is the composable atomic rendering component and implements the
+terminal and browser component traits. `DarkmatterPage` remains the page
+assembler: it renders terminal output with `render(&Markdown)` and browser output
+with `render_to_browser(&Markdown)`. It intentionally does **not** implement
+`BrowserRenderable`, because that trait renders one already-owned component and
+cannot receive the Markdown document a page assembler needs.
+
+Reader note: this review preserves the existing `DarkmatterPage` boundary instead
+of adding a synthetic `BrowserRenderable` implementation. That avoids storing
+extra Markdown on the page just to satisfy a trait shape and keeps
+`DarkmatterPage` aligned with the current render-tree cutover contract.
+Lower-level render-tree hooks such as `TerminalCodeRenderer`, highlighter
+internals, and theme-resolving helpers remain implementation details.
 
 `DarkmatterPage` is not a new type — it already exists and renders Markdown
-documents to the terminal through the render tree. This feature extends it to
-cover the browser target as well, rather than introducing a separate `Page`
-component.
+documents to both terminal and browser targets through the render tree. This
+feature keeps extending that type in place rather than introducing a separate
+`Page` component.
 
 ## Audience
 
@@ -71,9 +81,10 @@ construction; the simplification and the fix are the same change.
 - Introduce `CodeBlock` as the single atomic renderer for syntax-highlighted
   code on terminal and browser targets.
 - Extend `DarkmatterPage` to be the single public renderer for Markdown
-  documents on terminal and browser targets. It already renders the terminal
-  target through the render tree; this feature wires the browser target through
-  the tree too and adds `BrowserRenderable`.
+  documents on terminal and browser targets. It already renders both targets
+  through the render tree via `render(&Markdown)` and
+  `render_to_browser(&Markdown)`; this feature keeps that public boundary while
+  routing nested code panels through `CodeBlock`.
 - Centralize `ThemePair -> Theme` resolution so production code resolves themes
   in one place per component.
 - Collapse the duplicated code-block theme/mode resolution — today spread across
@@ -84,15 +95,18 @@ construction; the simplification and the fix are the same change.
   `CodeHighlighter::from_theme(theme, mode)`. This is both the DRY win and the
   fix for the Motivating Defect.
 - Make `Terminal` the source of truth for terminal color mode.
-- Make browser rendering use an explicit page color mode, defaulting to dark.
+- Keep browser page rendering on the same `DarkmatterPage` color-mode policy as
+  terminal rendering: captured terminal mode is preferred, `Unknown` falls back
+  to the page's configured `ColorMode`, and that configured value defaults to
+  dark.
 - Replace `YamlBlock` behavior with `CodeBlock::yaml(...)`, then deprecate and
   remove `YamlBlock` as a separate public component.
 - Keep arbitrary Markdown fence language strings working while adding typed
   convenience paths for common languages.
 - Reduce public exposure of adapter plumbing such as `TerminalCodeRenderer`.
 - Preserve current rendered output while the implementation is consolidated.
-- Expand `md render` so the CLI exposes the expected page-level tree-renderer
-  style controls.
+- Expand `md render` only where the current global render flags are incomplete;
+  existing global layout flags remain the canonical CLI surface.
 - Add `md code-block <file | content>` as the CLI surface for rendering one
   `CodeBlock`.
 
@@ -106,9 +120,9 @@ construction; the simplification and the fix are the same change.
 - Rewriting the renderable tree model.
 - Removing `Markdown` parsing/composition/hash/schema APIs. This feature only
   simplifies the rendering API surface.
-- Fully solving browser light/dark theme negotiation. Browser rendering gets an
-  explicit mode option with a dark default; richer browser mode detection can be
-  a later feature.
+- Fully solving browser light/dark theme negotiation. Browser rendering keeps
+  the existing configured-mode fallback with a dark default; richer browser mode
+  detection can be a later feature.
 
 ## Foundational Decisions
 
@@ -128,17 +142,26 @@ construction; the simplification and the fix are the same change.
   path must not derive a second, independent mode (for example via the env-only
   `detect_color_mode()`) for the code panel. The Motivating Defect below is a
   direct violation of this rule.
-- **Decision #5** - Browser rendering uses explicit page color mode, defaulting
-  to `ColorMode::Dark`.
-- **Decision #6** - `ColorMode::Unknown` is treated as dark for page/prose
-  resolution. Its inverse for code blocks is light.
+- **Decision #5** - `DarkmatterPage` does not gain a separate
+  `browser_color_mode` field. Browser rendering uses the same page color-mode
+  policy as terminal rendering: a real captured terminal mode wins, and
+  `ColorMode::Unknown` falls back to `with_color_mode(...)` /
+  `TerminalOptions::color_mode` (default dark). This keeps page surface and
+  nested code-panel mode resolution on one source instead of introducing a
+  second browser-only source.
+- **Decision #6** - `ColorMode::Unknown` falls back to the page's configured
+  `ColorMode` before page/prose and code-block variants are resolved. With
+  defaults, that means page/prose resolves dark and the default inverse code
+  block resolves light.
 - **Decision #7** - `ThemePair` is the user/config-facing theme choice. `Theme`
   is the resolved internal implementation detail passed to highlighters.
 - **Decision #8** - Production rendering resolves `ThemePair -> Theme` at the
   component boundary. Code below `CodeBlock` and `DarkmatterPage` receives a
   resolved theme and must not independently choose page/code-block variants.
-- **Decision #9** - Code blocks resolve their theme against the inverse of the
-  page mode. Page/prose rendering resolves against the page mode.
+- **Decision #9** - Code blocks resolve their theme through `CodeBlockMode`.
+  The default is `Inverse` (opposite the page mode), while existing explicit
+  `dark`, `light`, and `same` modes remain supported. Page/prose rendering
+  resolves against the page mode.
 - **Decision #10** - `LanguageGrammar` is a typed convenience resolver, not an
   exhaustive list of syntect languages.
 - **Decision #11** - `YamlBlock` is deprecated as soon as `CodeBlock` can replace
@@ -216,11 +239,18 @@ impl BrowserRenderable for CodeBlock;
 impl TreeRenderable for CodeBlock;
 ```
 
+The `TreeRenderable` projection must be a plain `NodeKind::Code` subtree with
+language and raw info-string metadata attached. It must not run syntax
+highlighting during projection; terminal/browser target folds remain responsible
+for rendering the code panel.
+
 The terminal implementation resolves its theme like this:
 
 ```text
 Terminal + CodeBlock.theme.or(DarkmatterPage.code_theme).or(env/default)
-  -> ThemePair::for_code_block(&term, override)
+  -> page mode from Terminal
+  -> CodeBlockMode::resolve(page_mode)
+  -> ThemePair::resolve(resolved_code_mode)
   -> Theme
   -> CodeHighlighter
   -> terminal code block output
@@ -229,9 +259,9 @@ Terminal + CodeBlock.theme.or(DarkmatterPage.code_theme).or(env/default)
 The browser implementation resolves its theme like this:
 
 ```text
-Browser color mode (default Dark) + CodeBlock theme override
-  -> inverse mode
-  -> Theme
+page mode from DarkmatterPage policy + CodeBlock theme override
+  -> CodeBlockMode::resolve(page_mode)
+  -> ThemePair::resolve(resolved_code_mode)
   -> CodeHighlighter
   -> browser code block output
 ```
@@ -312,11 +342,11 @@ alias table can be a later, additive change.
 
 ### `DarkmatterPage`
 
-`DarkmatterPage` renders a Markdown document. It already exists and renders the
-terminal target through the render tree; this feature extends it to the browser
-target. It keeps its existing constructor and per-edge layout builders, gains a
-`browser_color_mode` field and builder, gains a `with_width` builder to back an
-explicit content width, and gains a `BrowserRenderable` implementation.
+`DarkmatterPage` renders a Markdown document. It already exists and renders both
+terminal and browser targets through the render tree. This feature keeps its
+existing constructor, per-edge layout builders, `render(&Markdown)`, and
+`render_to_browser(&Markdown)` methods. It does **not** add
+`BrowserRenderable`, `browser_color_mode`, or page-level `with_width`.
 
 Existing construction surface (retained):
 
@@ -333,54 +363,61 @@ impl DarkmatterPage {
     pub fn with_page_color(mut self, color: PaintColor) -> Self;
     pub fn with_page_bg_color(mut self, color: PaintColor) -> Self;
     pub fn with_page_code_theme(mut self, theme: ThemePair) -> Self;
+    pub fn with_code_block_mode(mut self, mode: CodeBlockMode) -> Self;
 }
 ```
 
-New construction surface (added by this feature):
+The existing `with_page_code_theme` override flows into the same nested-fence
+`CodeBlock` path the page already drives via its page-code-theme resolution.
+Note that the existing string-based `with_code_theme(impl Into<String>)` builder
+is a separate `TerminalOptions::code_theme` pass-through and is not the
+page-level override.
 
-```rust
-impl DarkmatterPage {
-    pub fn with_width(mut self, width: u16) -> Self;
-    pub fn with_browser_color_mode(mut self, mode: ColorMode) -> Self;
-}
-```
-
-`browser_color_mode` defaults to `ColorMode::Dark` (Decision #5). The existing
-`with_page_code_theme` override flows into the same nested-fence `CodeBlock` path
-the page already drives via its page-code-theme resolution. Note that the
-existing string-based `with_code_theme(impl Into<String>)` builder is a separate
-`TerminalOptions::code_theme` pass-through and is not the page-level override.
-
-`DarkmatterPage` implements:
+`DarkmatterPage` implements terminal component rendering for compatibility:
 
 ```rust
 impl TerminalRenderable for DarkmatterPage;
-impl BrowserRenderable for DarkmatterPage;
 ```
 
-It renders both targets through the render tree.
+Browser rendering remains the inherent page-assembler method:
+
+```rust
+impl DarkmatterPage {
+    pub fn render_to_browser(&self, md: &Markdown) -> Result<String, PageRenderError>;
+}
+```
 
 The terminal implementation resolves page theme from the `Terminal` captured at
 construction. Fenced code blocks inside the page are rendered through the same
-`CodeBlock` renderer and use the inverse of the terminal page mode.
+`CodeBlock` renderer and use `CodeBlockMode` against the terminal page mode.
 
-The browser implementation uses `browser_color_mode`, defaulting to dark. Fenced
-code blocks inside the page use the inverse of that mode.
+The browser implementation uses the same resolved page mode as the page frame:
+captured terminal mode when known, otherwise the configured `ColorMode`
+(default dark). Fenced code blocks inside the page use `CodeBlockMode` against
+that mode.
 
 #### Terminal/browser asymmetry
 
-`DarkmatterPage::new(&Terminal)` captures terminal context at construction, but
-`BrowserRenderable` has no `Terminal`. As a design consequence, the same
-`DarkmatterPage` is terminal-aware for the terminal target and
-`browser_color_mode`-aware for the browser target: the browser render path reads
-`browser_color_mode`, never terminal state. Constructing a page therefore always
-requires a `Terminal`, even when only the browser target is ultimately rendered.
+`DarkmatterPage::new(&Terminal)` captures terminal context at construction, and
+`render_to_browser` intentionally reuses that context for page-frame layout and
+mode resolution. Constructing a page therefore always requires a `Terminal`,
+even when only the browser target is ultimately rendered.
 
-The browser page-frame layout (margins, max-width / width, centering, and
-background applied to HTML output) is net-new work. Today only the terminal
-page-frame exists, via `DarkmatterPage`'s `LayoutContext::from_page`; there is no
-browser page-frame path anywhere yet. This is genuinely new behavior, not a
-rename of an existing path.
+The browser page-frame layout already exists: `render_to_browser` wraps the
+folded HTML when page-frame settings require margin, padding, max-width,
+centering, background, meta, or stylesheet output. This feature should not
+rebuild that wrapper; it should only ensure nested code panels flow through the
+new `CodeBlock` boundary and share the page's resolved mode.
+
+#### Page width decision
+
+This feature does not add a page-level `with_width` builder or `--width` flag.
+`DarkmatterPage` already has `with_max_width`, while exact widths exist at the
+component-policy layer through `renderable::layout::Width::Fixed` and the CLI
+`fill=explicit` grammar. Adding exact page width would create a second page-frame
+sizing contract that needs separate terminal/browser semantics. Defer exact
+page-frame width until there is a concrete use case that cannot be expressed by
+`max-width` plus component explicit widths.
 
 ## CLI Scope
 
@@ -397,27 +434,26 @@ The flags map directly (1:1) onto `DarkmatterPage`'s existing per-edge builders.
 No opaque aggregate layout type is introduced; the authoritative layout lives on
 `DarkmatterPage`'s existing builders.
 
-Required options:
+Existing global render options that `md render` must continue to honor:
 
 | Option | Alias | Builder | Meaning |
 |---|---|---|---|
-| `--margin-top <n>` | `--mt` | `with_margin_top` | Top page margin in terminal cells. |
-| `--margin-bottom <n>` | `--mb` | `with_margin_bottom` | Bottom page margin in terminal cells. |
-| `--margin-left <n>` | `--ml` | `with_margin_left` | Left page margin in terminal cells. |
-| `--margin-right <n>` | `--mr` | `with_margin_right` | Right page margin in terminal cells. |
+| `--mt <n>` | `--margin-top` (additive alias) | `with_margin_top` | Top page margin in terminal cells. |
+| `--mb <n>` | `--margin-bottom` (additive alias) | `with_margin_bottom` | Bottom page margin in terminal cells. |
+| `--ml <n>` | `--margin-left` (additive alias) | `with_margin_left` | Left page margin in terminal cells. |
+| `--mr <n>` | `--margin-right` (additive alias) | `with_margin_right` | Right page margin in terminal cells. |
 | `--max-width <n>` | | `with_max_width` | Maximum page content width. |
-| `--width <n>` | | `with_width` (new) | Explicit page content width. |
-| `--page-background <transparent\|subtle\|pronounced>` | | `with_page_background` | Page background style. `Pronounced` drives code-theme contrast. |
-| `--page-bg-color <color>` | | `with_page_bg_color` | Free-form page background color. |
+| `--page-bg <transparent\|subtle\|pronounced>` | `--page-background` | `with_page_background` | Page background style. `Pronounced` drives code-theme contrast. |
+| `--page-bg-color <color>` | | `with_page_bg_color` | Free-form page background color. New CLI coverage for an existing builder. |
 
 The background flag is split in two: `--page-background` takes the
 `PageBackground` enum (`transparent` / `subtle` / `pronounced`), while
 `--page-bg-color` takes a free-form `PaintColor`. `Pronounced` drives code-theme
 contrast, so it is not interchangeable with a free color.
 
-`--width <n>` is net-new: there is no `with_width` builder today (only
-`with_max_width`), so Phase 3 must add a `with_width` builder to
-`DarkmatterPage` to back this flag.
+`--width <n>` is intentionally out of scope. Exact component width is already
+available through `--fill-* explicit=<length>`; exact page-frame width is a
+separate design.
 
 These flags set `DarkmatterPage` layout/style options. They should not be
 implemented as post-render string padding. Existing CLI layout helpers may be
@@ -472,18 +508,22 @@ Page/prose:
   ThemePair::for_page(&term, override)
 
 Code block:
-  ThemePair::for_code_block(&term, override)
+  term.color_mode()
+  -> CodeBlockMode::resolve(page_mode)
+  -> ThemePair::resolve(resolved_code_mode)
 ```
 
-For browser rendering, the render surface is an explicit browser color mode.
-The default browser color mode is dark.
+For browser rendering, the render surface is the page mode resolved by
+`DarkmatterPage`. The default browser fallback mode is dark, but
+`DarkmatterPage::render_to_browser` uses the captured terminal mode when it is
+known.
 
 ```text
 Page/prose:
-  ThemePair::resolve(browser_mode.known_or(Dark))
+  ThemePair::resolve(page_mode.known_or(configured_mode_or_Dark))
 
 Code block:
-  ThemePair::resolve(browser_mode.known_or(Dark).inverted())
+  ThemePair::resolve(CodeBlockMode::resolve(page_mode.known_or(configured_mode_or_Dark)))
 ```
 
 Lower layers must not repeat this policy. In particular:
@@ -569,12 +609,13 @@ hashing, TOC, or reference APIs.
 ### `DarkmatterPage`
 
 `DarkmatterPage` already owns page-frame rendering concerns and is the public
-page component. This feature extends it in place to cover the browser target
-(adding `BrowserRenderable` and a net-new browser page-frame layout) rather than
-introducing a separate `Page` type or a compatibility alias. The public caller
-should not need to choose between `Markdown::as_terminal`,
-`Markdown::as_html`, and a render-tree entry point for page-framed output:
-`DarkmatterPage` is the one entry point for both targets.
+page component. It already exposes terminal and browser page rendering through
+inherent methods, and this feature keeps that in-place API rather than
+introducing a separate `Page` type, a compatibility alias, or a
+`BrowserRenderable` shim. The public caller should not need to choose between
+`Markdown::as_terminal`, `Markdown::as_html`, and a render-tree entry point for
+page-framed output: `DarkmatterPage` is the one page-framed entry point for both
+targets.
 
 ### `TerminalCodeRenderer`
 
@@ -618,17 +659,16 @@ Darkmatter theme/code-block policy.
 - Re-baseline snapshots invalidated by the accepted dark-mode contrast fix (for
   example the `pronounced` browser snapshot).
 
-### Phase 3 - Extend `DarkmatterPage` to browser + tree
+### Phase 3 - Normalize `DarkmatterPage` browser/page integration
 
-- Add `BrowserRenderable` to `DarkmatterPage`; keep its existing
-  `TerminalRenderable`.
-- Wire the browser page-frame layout (margins, max-width / width, centering,
-  background applied to HTML output). This is net-new: only the terminal
-  page-frame exists today.
-- Add a `browser_color_mode` field and `with_browser_color_mode` builder,
-  defaulting to `ColorMode::Dark`.
-- Add a `with_width` builder to back `--width` (only `with_max_width` exists
-  today).
+- Keep `DarkmatterPage::render_to_browser(&Markdown)` as the browser page
+  boundary; do not add `BrowserRenderable`.
+- Preserve the existing browser page-frame layout (margins, max-width,
+  centering, background, meta, and stylesheet wrapper).
+- Do not add `browser_color_mode`; use the existing captured-terminal /
+  configured-`ColorMode` fallback policy.
+- Do not add page-level `with_width`; keep `with_max_width` as the page-frame
+  sizing API for this feature.
 - Route fenced Markdown code blocks through `CodeBlock` for both targets.
 - Keep `Markdown::as_terminal` and `Markdown::as_html` behavior; they continue
   to delegate appropriately (both already route through the render tree).
@@ -636,9 +676,9 @@ Darkmatter theme/code-block policy.
   `DarkmatterPage`.
 - Map `md render` page layout/style flags 1:1 onto `DarkmatterPage` builders:
   `--margin-top` / `--mt`, `--margin-bottom` / `--mb`, `--margin-left` /
-  `--ml`, `--margin-right` / `--mr`, `--max-width`, `--width` (new
-  `with_width`), `--page-background` (the `PageBackground` enum), and
-  `--page-bg-color` (free-form color).
+  `--ml`, `--margin-right` / `--mr`, `--max-width`, `--page-bg` /
+  `--page-background` (the `PageBackground` enum), and `--page-bg-color`
+  (free-form color).
 
 ### Phase 4 - Retire Legacy Public Rendering Surfaces
 
@@ -658,7 +698,8 @@ Darkmatter theme/code-block policy.
   byte-for-byte equal to `Markdown::as_terminal(default)`.
 - Add targeted golden cases for three gaps the existing suite under-covers:
   - YamlBlock terminal **and** browser output versus `CodeBlock::yaml`.
-  - `ColorMode::Unknown`: page/prose resolves dark, code-block resolves light
+  - `ColorMode::Unknown`: page/prose falls back to the configured page mode
+    (default dark), and the default inverse code block resolves light
     (Decision #6).
   - `CodeBlock`-direct output equals fenced-code-in-`DarkmatterPage` output for
     the same code, language, metadata, theme, and surface.
@@ -678,9 +719,10 @@ Darkmatter theme/code-block policy.
   the renderer never reads). The test must drive a case where the real
   `Terminal` mode and any option-derived mode would disagree, to prove the
   single-source rule (Decision #4) holds.
-- Browser tests must verify that the default browser page mode is dark and that
-  code blocks resolve against the inverse mode.
-- CLI tests for `md render` must verify the margin, width, max-width,
+- Browser tests must verify that the default browser fallback page mode is dark,
+  a known captured terminal mode wins over that fallback, and code blocks resolve
+  through `CodeBlockMode`.
+- CLI tests for `md render` must verify the margin, max-width,
   `--page-background`, and `--page-bg-color` options are reflected through
   tree-renderer layout/style, not post-render string manipulation.
 - CLI tests for `md code-block` must verify file input, literal content input,
@@ -688,8 +730,8 @@ Darkmatter theme/code-block policy.
   ranges.
 - Theme override tests must cover explicit caller overrides and `THEME`
   environment fallback behavior.
-- `ColorMode::Unknown` tests must verify page/prose resolves as dark and
-  code-block resolves as light.
+- `ColorMode::Unknown` tests must verify page/prose falls back to the configured
+  page mode and the default inverse code block resolves to the opposite mode.
 - `LanguageGrammar` tests must cover common variants, aliases, dynamic
   extension/name/token lookup, and unknown grammar errors.
 
@@ -705,12 +747,11 @@ characterization oracle above, not to captured frames.
 
 ## Open Questions
 
-- Should `ThemePair::for_page` and `ThemePair::for_code_block` return internal
-  `Theme` directly, or should a small resolved theme value also carry the
-  effective mode? (`CodeHighlighter::from_theme(theme, mode)` currently takes
-  both separately, so the resolver must produce both regardless; this is an
-  internal-shape question, not a behavioral one, and can be settled at
-  implementation.)
+- Should the new boundary resolver return `(Theme, ColorMode)` directly, or a
+  small `ResolvedTheme` value that carries both fields? `CodeHighlighter::from_theme(theme, mode)`
+  currently takes both separately, so the resolver must produce both regardless;
+  this is an internal-shape question, not a behavioral one, and can be settled at
+  implementation.
 
 ## Resolved Questions
 
@@ -719,9 +760,10 @@ characterization oracle above, not to captured frames.
 - **Guaranteed `from_fence_token` aliases** — the seven existing aliases are
   preserved and four gaps (`sh`, `tsx`, `python`, `yml`) are filled. See the
   `LanguageGrammar` section.
-- **Browser dark/light auto-detection** — out of scope; browser color mode is
-  explicit with a dark default (see Non-Goals and Decision #5). Automatic
-  preference detection is deferred to a later feature.
+- **Browser dark/light auto-detection** — out of scope; browser rendering uses
+  the `DarkmatterPage` page mode with a dark configured fallback when the
+  captured terminal mode is unknown (see Non-Goals and Decision #5). Automatic
+  browser preference detection is deferred to a later feature.
 - **`md code-block` input disambiguation** — handled by the rule already stated
   in the CLI Scope section: resolve from filesystem existence when reliable,
   otherwise add explicit `--file` / `--content` forms before broadening the
@@ -739,7 +781,8 @@ characterization oracle above, not to captured frames.
 - Code blocks visibly separate from the page in **both** light and dark
   terminals — the Motivating Defect is fixed and guarded by the cross-surface
   contrast test, with a single `Terminal::color_mode` feeding page and panel.
-- Browser rendering has an explicit dark default.
+- Browser rendering has a configured dark fallback when no known terminal mode
+  is available.
 - `md render` exposes page-level tree-renderer style controls through
   `DarkmatterPage`.
 - `md code-block` exposes direct `CodeBlock` rendering from the CLI.

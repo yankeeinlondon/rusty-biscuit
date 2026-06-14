@@ -674,7 +674,53 @@ impl Writer<'_> {
                 Ok(self.render_prose(&markup))
             }
             NodeKind::Html { value, block } => self.render_html(node, value, *block),
+            NodeKind::Disclosure { summary, children, .. } => {
+                self.render_disclosure(summary, children)
+            }
             NodeKind::Unsupported { label } => self.render_unsupported(node, label),
+        }
+    }
+
+    /// Renders a disclosure block: the summary is shown normally and the body is
+    /// rendered as a block quote whose text is dim and italic.
+    fn render_disclosure(
+        &mut self,
+        summary: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<String, RenderError> {
+        let effective = self.inherited.effective().clone();
+        let summary_markup = self.render_inline(summary, &effective)?;
+        let summary_line = self.render_prose(&summary_markup);
+
+        let body = if children.is_empty() {
+            String::new()
+        } else {
+            let dim_italic = Style {
+                emphasis: TextEmphasis {
+                    dim: true,
+                    italic: true,
+                    ..Default::default()
+                },
+                ..Style::default()
+            };
+            let (child_ctx, _) = self.inherited.enter(Some(&dim_italic));
+            let prev = std::mem::replace(&mut self.inherited, child_ctx);
+            let rendered = self.render_blocks(children);
+            self.inherited = prev;
+            let rendered = rendered?;
+            // The inherited context above only restores dim/italic for nested
+            // inline spans; plain body text is painted at the block level (as
+            // `render_styled` does), so paint the appearance onto every line
+            // before wrapping it as a block quote.
+            let styled = style::apply_style(&rendered, &dim_italic, &self.opts.context.terminal);
+            BlockQuote::from(styled.as_str()).render(&self.opts.context.terminal)
+        };
+
+        match (summary_line.is_empty(), body.is_empty()) {
+            (true, true) => Ok(String::new()),
+            (true, false) => Ok(body),
+            (false, true) => Ok(summary_line),
+            (false, false) => Ok(format!("{summary_line}\n\n{body}")),
         }
     }
 
@@ -1162,6 +1208,7 @@ impl Writer<'_> {
             | NodeKind::TableRow { .. }
             | NodeKind::TableCell { .. }
             | NodeKind::FootnoteDefinition { .. }
+            | NodeKind::Disclosure { .. }
             | NodeKind::Html { .. }
             | NodeKind::Unsupported { .. } => self.render(node),
         }
@@ -1770,16 +1817,14 @@ impl Writer<'_> {
         let no_color = self.opts.context.color_depth == ColorDepth::None;
         let dim_open = if no_color { "" } else { "\x1b[2m" };
         let dim_close = if no_color { "" } else { "\x1b[0m" };
-        let header = lang
-            .filter(|l| !l.is_empty())
-            .map(|l| format!("{dim_open}```{l}{dim_close}\n"))
-            .unwrap_or_default();
-        let indented: String = body
-            .lines()
-            .map(|line| format!("    {line}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        format!("{header}{dim_open}{indented}{dim_close}")
+        let lang = lang.filter(|l| !l.is_empty()).unwrap_or("");
+        // Plain fenced fallback (no syntax highlighter, e.g. `ColorDepth::None`):
+        // an opening fence, the verbatim body, and a matching CLOSING fence. The
+        // body is not extra-indented — the page frame applies the left margin, so
+        // adding spaces here would double it.
+        format!(
+            "{dim_open}```{lang}{dim_close}\n{dim_open}{body}{dim_close}\n{dim_open}```{dim_close}"
+        )
     }
 
     /// Renders a [`NodeKind::Table`] node with a native two-pass renderer.
@@ -3221,7 +3266,18 @@ mod render_tree_tests {
         let out = render(&node);
         let plain = strip_escape_codes(&out.output);
         assert!(plain.contains("let a = 1;"));
-        assert!(plain.contains("rust"));
+        assert!(plain.contains("```rust"));
+        // Both an opening AND a closing fence (regression: the close was dropped).
+        assert_eq!(
+            plain.matches("```").count(),
+            2,
+            "expected open + close fence, got:\n{plain}"
+        );
+        // The body is not extra-indented; the page frame applies any margin.
+        assert!(
+            !plain.contains("    let a = 1;"),
+            "body should not be 4-space indented:\n{plain}"
+        );
     }
 
     #[test]

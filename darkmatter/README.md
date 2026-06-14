@@ -1,3 +1,6 @@
+---
+hash: ef46db3751d8e999-6fc11745eb6bfc34
+---
 # Darkmatter
 
 <img src="../assets/darkmatter-512.png" style="width: 250px" />

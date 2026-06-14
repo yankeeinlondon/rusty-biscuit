@@ -374,9 +374,10 @@ pub(crate) fn find_syntax<'a>(
 /// Derives the effective color mode of a code panel from its resolved theme
 /// background, by perceived luminance.
 ///
-/// Code blocks select their theme *variant* against the inverted terminal mode
-/// (for page contrast), but a few theme names are single-variant and do not
-/// invert. Downstream contrast decisions — the header pill's text color and the
+/// Code blocks resolve their theme *variant* via [`CodeBlockMode`](crate::markdown::highlighting::CodeBlockMode)
+/// (default `Inverse`, i.e. the opposite of the page mode for contrast), and a
+/// few theme names are single-variant and do not invert. Downstream contrast
+/// decisions — the header pill's text color and the
 /// highlighted-line background math — must therefore key off the panel's
 /// **actual** background, not the requested mode, so a single-variant dark theme
 /// still gets light header text (and vice versa).
@@ -451,6 +452,7 @@ mod tests {
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
             hr_defaults: None,
+            code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         }
     }
 
