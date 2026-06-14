@@ -9,10 +9,7 @@ use biscuit_terminal::terminal::Terminal;
 use std::path::PathBuf;
 
 fn main() {
-    let paths = vec![
-        PathBuf::from("src/lib.rs"),
-        PathBuf::from("README.md"),
-    ];
+    let paths = vec![PathBuf::from("src/lib.rs"), PathBuf::from("README.md")];
     let markup = worktree_cli::commands::dirty_tree::render_markup(&paths);
     let terminal = Terminal::default();
     print!("{}", Prose::new(markup).render(&terminal));

@@ -37,7 +37,9 @@ pub fn run(name: &str, force: u8, delete_branch_flag: bool) -> Result<(), Worktr
         render_dirty_summary(&terminal, &display_name, &dirty);
         let prompt_msg = build_prompt_message(&display_name, &dirty);
         if !confirm(&prompt_msg)? {
-            let cancelled = format!("<dim>Cancelled. Worktree <blue>{display_name}</blue> was not removed.</dim>");
+            let cancelled = format!(
+                "<dim>Cancelled. Worktree <blue>{display_name}</blue> was not removed.</dim>"
+            );
             eprintln!("{}", Prose::new(cancelled).render(&terminal));
             return Ok(());
         }
@@ -191,9 +193,7 @@ mod tests {
 
     #[test]
     fn force_one_many_non_source_prompts() {
-        let paths: Vec<&str> = (0..FORCE_BYPASS_FILE_LIMIT)
-            .map(|_| "x.txt")
-            .collect();
+        let paths: Vec<&str> = (0..FORCE_BYPASS_FILE_LIMIT).map(|_| "x.txt").collect();
         let d = dirty_with(paths, false);
         assert!(decide_prompt(1, &d));
     }

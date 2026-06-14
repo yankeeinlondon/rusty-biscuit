@@ -5,8 +5,8 @@
 //! and SGR color codes in a real terminal (tmux).
 
 use assert_cmd::cargo::cargo_bin;
-use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::TerminalHarness;
+use biscuit_test_harness::tmux::TmuxHarness;
 use serial_test::serial;
 use std::fs;
 use std::process::Command;
@@ -34,9 +34,10 @@ fn temp_repo_with_dirty_worktree() -> tempfile::TempDir {
     // Create a branch and worktree, then dirty it with a source file.
     run_git(path, &["branch", "feat-dirty"]);
     let wt_path = path.join("wt-dirty");
-    run_git(path, &[
-        "worktree", "add", wt_path.to_str().unwrap(), "feat-dirty",
-    ]);
+    run_git(
+        path,
+        &["worktree", "add", wt_path.to_str().unwrap(), "feat-dirty"],
+    );
     // Place the dirty source file at the root so git status --porcelain
     // reports it directly (nested untracked dirs are collapsed to the dir).
     fs::write(wt_path.join("lib.rs"), "pub fn x() {}\n").unwrap();
@@ -63,10 +64,7 @@ fn level2_dirty_tree_renders_in_tmux() {
 
     let bin_path = cargo_bin!("render_dirty_tree").display().to_string();
     harness
-        .send_command_with_env(
-            &bin_path,
-            &[("FORCE_COLOR", "1")],
-        )
+        .send_command_with_env(&bin_path, &[("FORCE_COLOR", "1")])
         .expect("send_command_with_env failed");
 
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);

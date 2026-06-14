@@ -66,7 +66,9 @@ fn remove_nonexistent_worktree_fails() {
         .args(["remove", "no-such-worktree"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("not found").or(predicate::str::contains("WorktreeNotFound")));
+        .stderr(
+            predicate::str::contains("not found").or(predicate::str::contains("WorktreeNotFound")),
+        );
 }
 
 // =============================================================================
@@ -135,7 +137,10 @@ fn remove_with_branch_flag_deletes_branch() {
         .args(["remove", "feat/branch", "-ff", "-b"])
         .assert()
         .success()
-        .stderr(predicate::str::contains("Deleted branch").or(predicate::str::contains("was preserved")));
+        .stderr(
+            predicate::str::contains("Deleted branch")
+                .or(predicate::str::contains("was preserved")),
+        );
 
     assert!(!wt_path.exists(), "worktree directory should be removed");
 }
@@ -149,7 +154,10 @@ fn remove_main_worktree_is_rejected() {
         .args(["remove", "base", "-ff"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("main checkout").or(predicate::str::contains("cannot remove the main worktree")));
+        .stderr(
+            predicate::str::contains("main checkout")
+                .or(predicate::str::contains("cannot remove the main worktree")),
+        );
 }
 
 #[test]
@@ -201,5 +209,8 @@ fn remove_preserves_unmerged_branch() {
             .stdout,
     )
     .unwrap();
-    assert!(branch_list.contains("feat/unmerged"), "unmerged branch should be preserved");
+    assert!(
+        branch_list.contains("feat/unmerged"),
+        "unmerged branch should be preserved"
+    );
 }
