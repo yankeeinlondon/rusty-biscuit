@@ -3,7 +3,7 @@
 //! performance report.
 
 use crate::args::{Cli, OutputFormat};
-use crate::commands::{ResolvedTheme, format_validation_issues, load_markdown, resolve_file_path};
+use crate::commands::{format_validation_issues, load_markdown, resolve_file_path};
 use crate::output::{
     OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_plus_artifact,
     open_output_artifact,
@@ -469,12 +469,6 @@ pub fn run_compose(
         }
     }
 
-    // The compose pipeline only consumes `theme.color_mode` for the
-    // browser output path. Constructing a `Terminal` up front would be
-    // wasteful for the markdown / json output paths, so we pass `None`
-    // and let `ResolvedTheme::from_cli` fall back to `detect_color_mode()`.
-    let theme = ResolvedTheme::from_cli(cli, None);
-
     match output {
         OutputFormat::Auto | OutputFormat::Markdown => {
             let content = if include_frontmatter {
@@ -501,9 +495,6 @@ pub fn run_compose(
             // `<summary>` inline HTML rather than the DSL verbatim.
             let artifact = markdown_plus_artifact(
                 &composed,
-                theme.prose,
-                theme.code,
-                theme.color_mode,
                 cli,
                 input,
             )?;
@@ -511,7 +502,7 @@ pub fn run_compose(
         }
         OutputFormat::Html => {
             let artifact =
-                html_artifact(&composed, theme.prose, theme.code, theme.color_mode, cli, input)?;
+                html_artifact(&composed, cli, input)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {

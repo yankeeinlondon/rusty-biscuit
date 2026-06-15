@@ -10,9 +10,6 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::cleanup::ListSpacingMode;
-use darkmatter::markdown::highlighting::{
-    ColorMode, ThemePair, detect_code_theme, detect_color_mode, detect_prose_theme,
-};
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 use tracing::{debug, info, instrument};
@@ -24,41 +21,10 @@ mod hash;
 pub mod schema;
 
 use code_block::run_code_block;
+
 use compose::{ComposeAllowFlags, build_remote_read_config, parse_compose_positionals, run_compose};
 use frontmatter::{run_edit, run_get, run_rm, run_set};
 use hash::run_hash;
-
-/// Resolved theme configuration for terminal rendering.
-struct ResolvedTheme {
-    prose: ThemePair,
-    code: ThemePair,
-    color_mode: ColorMode,
-}
-
-impl ResolvedTheme {
-    /// Resolves theme from CLI options, falling back to auto-detection.
-    ///
-    /// Phase 2 (centralize theme resolution): the page surface and the
-    /// nested code-block panel must share a single source of truth. The
-    /// `color_mode` is taken from the constructed
-    /// [`biscuit_terminal::terminal::Terminal`] when one is available (the
-    /// CLI's render path constructs one and passes it to the page), and
-    /// only falls back to the env-only `detect_color_mode()` when no
-    /// `Terminal` is present (e.g. a path that only needs the value as a
-    /// parameter, not as a rendering transport).
-    fn from_cli(cli: &Cli, terminal: Option<&Terminal>) -> Self {
-        let prose = cli.theme.unwrap_or_else(detect_prose_theme);
-        let code = cli.code_theme.unwrap_or_else(|| detect_code_theme(prose));
-        let color_mode = terminal
-            .map(Terminal::color_mode)
-            .unwrap_or_else(detect_color_mode);
-        Self {
-            prose,
-            code,
-            color_mode,
-        }
-    }
-}
 
 pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
     let mut conflicts = Vec::new();
@@ -377,28 +343,18 @@ pub fn run_render(
     let indent_size = indent.unwrap_or(darkmatter::markdown::cleanup::DEFAULT_INDENT);
     md.cleanup_with_indent(indent_size);
 
-    // Construct the rendering `Terminal` once so theme resolution, the
-    // page, and the entry point all share the same `color_mode()`. The
-    // single source of truth is what Phase 2 requires: the page surface
-    // and the nested code-block panel must resolve against the same
-    // `Terminal::color_mode()` (the original dual-source defect came from
-    // letting an env-only detector and a real terminal disagree on the
-    // mode).
+    // Only terminal rendering needs a real `Terminal`; MarkdownPlus and HTML
+    // construct their own optimistic terminal inside the artifact builders so
+    // they can resolve a single theme from the same terminal that renders the
+    // page. Markdown, JSON, and non-TTY auto paths never resolve a theme.
     let stdout_is_tty = io::stdout().is_terminal();
-    let term = if stdout_is_tty {
-        Some(Terminal::new())
-    } else {
-        None
-    };
-
-    let theme = ResolvedTheme::from_cli(cli, term.as_ref());
 
     match output {
         OutputFormat::Auto => {
             if stdout_is_tty {
-                let term = term.expect("tty branch sets a Terminal above");
+                let term = Terminal::new();
                 render_terminal_output(
-                    &md, input, cli, term, theme.prose, theme.code, theme.color_mode,
+                    &md, input, cli, term,
                 )?;
                 if show {
                     open_output_artifact(&markdown_artifact(&md))?;
@@ -411,11 +367,13 @@ pub fn run_render(
             emit_or_show_artifact(markdown_artifact(&md), show)?;
         }
         OutputFormat::MarkdownPlus => {
-            let artifact = markdown_plus_artifact(&md, theme.prose, theme.code, theme.color_mode, cli, input)?;
+            let artifact = markdown_plus_artifact(&md, cli, input,
+            )?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&md, theme.prose, theme.code, theme.color_mode, cli, input)?;
+            let artifact = html_artifact(&md, cli, input,
+            )?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {
