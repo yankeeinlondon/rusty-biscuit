@@ -530,6 +530,41 @@ pub(crate) fn load_resolved_theme(theme: Theme) -> SyntectTheme {
     THEME_SET.get(embedded_name).clone()
 }
 
+/// Resolves the theme's inline-code foreground and background for one color mode.
+///
+/// Reduces the [`ThemePair`] to a single syntect theme via `color_mode`, then
+/// reads the `markup.raw.inline.markdown` scope style. When the theme declares
+/// no distinct inline background, syntect resolves the theme's global
+/// background; a transparent or pure-black result falls back to a subtle
+/// mode-appropriate gray, matching the pre-render-tree inline-code contract.
+///
+/// ## Returns
+///
+/// `(foreground, background)` as opaque RGB triples.
+pub(crate) fn inline_code_colors(
+    theme_pair: ThemePair,
+    color_mode: ColorMode,
+) -> ((u8, u8, u8), (u8, u8, u8)) {
+    use super::prose::ProseHighlighter;
+
+    let syntect = load_theme(theme_pair, color_mode);
+    let highlighter = ProseHighlighter::new(&syntect);
+    let style = highlighter.style_for_inline_code(&[highlighter.base_scope()]);
+    let fg = style.foreground;
+    let bg = style.background;
+
+    let foreground = (fg.r, fg.g, fg.b);
+    let background = if bg.a > 0 && (bg.r > 0 || bg.g > 0 || bg.b > 0) {
+        (bg.r, bg.g, bg.b)
+    } else {
+        match color_mode {
+            ColorMode::Light => (226, 229, 236),
+            ColorMode::Dark | ColorMode::Unknown => (50, 50, 55),
+        }
+    };
+    (foreground, background)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
