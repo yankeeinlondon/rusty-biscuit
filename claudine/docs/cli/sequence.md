@@ -102,6 +102,10 @@ Controls whether the sequence should stop immediately if a step fails.
 
 A step is considered failed if the composition fails (e.g., template error) or if the provider CLI exits with a non-zero code.
 
+### `interactive`
+
+Unlike `compose` and `inline-compose`, `sequence` **rejects** an authored `interactive: true` frontmatter property with a hard error. A sequence is serial automation, so a document-level dialog default would be ambiguous across steps. `interactive: false`, `interactive: null`, and an absent key are all accepted as no-op defaults. If you genuinely need an interactive sequence, pass the explicit `--interactive` (`-i`) CLI flag instead; for dialog-shaped prompts prefer `compose` or `inline-compose`.
+
 ## Template Variables (Overlay)
 
 Each step in the sequence has access to a set of automatically injected variables. These "overlay" variables take precedence over any values provided via `--set`.

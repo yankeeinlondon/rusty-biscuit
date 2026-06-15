@@ -68,7 +68,7 @@ output is emitted before B-end.
 | B1.1 | **Parse positionals** [M] | `parse_composition_positionals`: classify each positional as file-ref or `key=value` setter; reject duplicates / empty keys / multi-file. |
 | B1.2 | **Install SIGINT guard** [M] | `install_user_interrupt_guard`: process-scoped signal-hook so Ctrl+C during prep emits a single async-signal-safe INFO notice and sets the global `USER_INTERRUPTED` flag. |
 | B1.3 | **Validate `--timeout` / `--step-timeout` syntax** [O-flag] | Reuses the harness duration grammar so CLI/frontmatter errors share vocabulary. |
-| B1.4 | **Reject `--timeout` / `--step-timeout` + `--interactive`** [O-flag] | |
+| B1.4 | **Reject `--timeout` / `--step-timeout` + `--interactive`** [O-flag] | Early CLI-only fast feedback. The authoritative resolved-mode check (which also catches `interactive: true` frontmatter and composed/env timeouts) is C5.6. |
 | B1.5 | **Merge `--set` JSON5 with shorthand setters** [O-flag] | Shorthand wins on overlapping keys. |
 | B1.6 | **Build `SystemPromptArgs`** [M] | Snapshot of `--append-system-prompt` / `--replace-system-prompt`. |
 
@@ -194,7 +194,8 @@ the `composition_prepare` span.
 | C5.3 | **`resolve_and_prepare_for_session`** [M] | Reads CLI args, walks launch-context hierarchy for `system-prompt.md` discovery, runs Darkmatter prep. |
 | C5.4 | **`profile.apply_system_prompt`** [O-prov] | Provider-specific delivery: Claude `--append-system-prompt` flag, Codex shadow `instructions.md` file, Gemini `OPENCODE_CONFIG_CONTENT`-style env, etc. May produce `sp_artifacts` + warnings. |
 | C5.5 | **Apply `--sandbox`** [O-flag, O-prov] | |
-| C5.6 | **Append MCP extra args** [O-flag] | |
+| C5.6 | **Resolved-mode timeout conflict** [O-mode] | Authoritative check: when `session_interactive` is true, an explicit `timeout` / `step_timeout` from any source (CLI, composed frontmatter, env) hard-fails. The built-in 30m `step_timeout` default is excluded. Error names the resolved source (`--interactive` vs `frontmatter`). |
+| C5.7 | **Append MCP extra args** [O-flag] | |
 
 ### C6. Structured streaming decision
 

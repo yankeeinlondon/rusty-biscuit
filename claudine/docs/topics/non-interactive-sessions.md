@@ -5,7 +5,9 @@ Claudine wraps agentic CLIs in both interactive and non-interactive modes. Non-i
 A session becomes non-interactive when:
 
 - A prompt is provided (positional argument, stdin, or composition file)
-- `claudine compose` or `claudine inline-compose` is used (always non-interactive)
+- `claudine compose` or `claudine inline-compose` is used and the resolved session mode is non-interactive (the default — see below)
+
+`compose` and `inline-compose` default to non-interactive but can be switched to an interactive provider session by `-i` / `--interactive` or an `interactive: true` frontmatter property (resolution precedence: `--no-interactive` > `--interactive` > frontmatter > default). `claudine sequence` is always non-interactive automation and rejects `interactive: true` frontmatter. See [Composition — The `--interactive` and `--no-interactive` Flags](composition.md#the---interactive-and---no-interactive-flags).
 
 ## Information Density Contract
 
@@ -433,8 +435,11 @@ the provider runs in structured-stream mode. Capture-mode and passthrough
 runs (notably Goose) emit a warning and ignore the field.
 
 **Interactive restriction.** Both `--timeout` and `--step-timeout` are
-restricted to non-interactive mode — using either with `--interactive` is a
-hard error.
+restricted to non-interactive mode — combining either with a session that
+resolves to interactive (via `--interactive` or `interactive: true`
+frontmatter) is a hard error. The conflict is checked against the resolved
+session mode, and the diagnostic names the source (`--interactive` vs
+`frontmatter`).
 
 **CLI precedence.** CLI flags override frontmatter. On `compose`,
 `inline-compose`, and `sequence`, the `--step-timeout DURATION` flag uses

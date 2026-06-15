@@ -132,7 +132,7 @@ Each entry point destructures its clap args struct, then calls the shared `parse
 | Positional tokens         | Classified as file ref or `key=value` setter; errors on multiple file refs or empty setter keys |
 | `--set JSON`              | Parsed as JSON5 object; forms the base override map                                             |
 | `key=value` setters       | Override matching keys from `--set` on conflict                                                 |
-| `--step-timeout DURATION` | Validated against the `parse_timeout()` grammar; rejected when combined with `--interactive`    |
+| `--step-timeout DURATION` | Validated against the `parse_timeout()` grammar; rejected when the session resolves to interactive (`--interactive` or `interactive: true` frontmatter) |
 
 #### Step 2: Source Resolution
 
@@ -354,6 +354,7 @@ Applies provider-specific flags to child args:
 |------------------------|-----------------------------------------------------------|
 | `--yolo` / `-y`        | Enables provider-specific auto-approval mode              |
 | `--interactive` / `-i` | Switches from non-interactive to interactive session mode |
+| `--no-interactive`     | Forces non-interactive mode, overriding `interactive: true` frontmatter |
 | `--output` / `-o`      | Sets output format (json, text, stream)                   |
 | `--sandbox`            | Enables provider-specific sandboxing                      |
 | `--model`              | Applied to provider-specific flags                        |
@@ -764,11 +765,11 @@ Roo Code is excluded from composition provider selection because it is a VS Code
 
 The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` → `claude`, `gem` → `gemini`, `oc` → `opencode`). The [argv normalizer](argv-normalization.md) rewrites every shorthand into a canonical `--provider <slug>` pair before clap runs, so runtime provider selection only ever reads the single `--provider` field.
 
-### The `--interactive` Flag
+### The `--interactive` and `--no-interactive` Flags
 
-`-i` / `--interactive` controls the **provider session mode**, not provider selection. The composed prompt is still prepared first, then passed as the initial message for an interactive session.
+`-i` / `--interactive` and `--no-interactive` control the **provider session mode**, not provider selection. The composed prompt is still prepared first, then passed as the initial message for the session. The resolved mode follows a fixed precedence: `--no-interactive` > `-i` / `--interactive` > `interactive` frontmatter property > default (non-interactive). The two flags are mutually exclusive. `compose` and `inline-compose` honor the `interactive` frontmatter property; `sequence` rejects `interactive: true`. See [Composition](composition.md#the---interactive-and---no-interactive-flags) for the full contract.
 
-> **Note:** `inline-compose -i` is provider-gated. Claudine allows it only when the selected provider can recover the final assistant message for the inline rewrite path.
+> **Note:** `inline-compose -i` is provider-gated. Claudine allows it only when the selected provider can recover the final assistant message for the inline rewrite path. When the interactive intent comes from `interactive: true` frontmatter, the diagnostic names `frontmatter` as the source.
 
 ### The `--exclude` Flag
 
