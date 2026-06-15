@@ -66,6 +66,7 @@
 pub mod ast;
 pub mod catalog;
 pub mod ctx;
+pub(crate) mod doc_namespace;
 pub mod functions;
 pub mod lexer;
 pub mod parser;
@@ -188,9 +189,20 @@ pub trait EvaluationLookup {
         }
     }
 
-    /// Returns the document-relative resolution context for filesystem
-    /// functions. Defaults to `None` (filesystem functions then error or treat
-    /// paths as CWD-relative).
+    /// Returns the document-relative resolution context that the seven
+    /// read-side functions (`file_exists`, `frontmatter`, `markdown_title`,
+    /// `markdown_body_empty`, `validate_schema`, `absolute`, `relative`)
+    /// resolve their path arguments against.
+    ///
+    /// The default `None` is the **opt-out / test** case: a lookup that has no
+    /// document anchor (or a unit test that does not exercise read-side
+    /// functions). Every production surface that evaluates the grammar against
+    /// a real document — frontmatter interpolation, body interpolation, `$()`
+    /// ternary conditions, `when=` conditions, the public condition API, and
+    /// claudine's loop/hook conditions — overrides this to return
+    /// `Some(ctx)` so read-side functions resolve identically wherever the
+    /// grammar runs. A `None`-returning lookup makes a read-side function
+    /// return the recoverable "requires a document resolution context" error.
     fn resolution_context(&self) -> Option<ResolutionContext> {
         None
     }
@@ -527,9 +539,10 @@ fn evaluate_function<L: EvaluationLookup>(
             if let Some(result) = functions::dispatch(other, &evaluated) {
                 return result;
             }
-            // A known filesystem function reaches here only because no document
-            // resolution context was available (e.g. frontmatter interpolation);
-            // keep that recoverable so it doesn't read as an unknown symbol.
+            // A known filesystem function reaches here only because the lookup
+            // returned no resolution context — an opt-out or test lookup, not a
+            // real document surface (all of which now supply one). Keep it
+            // recoverable so it doesn't read as an unknown symbol.
             if functions::is_fs_function(other) {
                 return Err(format!(
                     "Filesystem function '{name}' requires a document resolution context, which is unavailable here"

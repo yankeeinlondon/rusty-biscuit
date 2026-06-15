@@ -604,7 +604,9 @@ pub fn absolute_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Str
     }
 }
 
-/// `file_exists(file) -> bool` — invalid paths return `false`, never error.
+/// `file_exists(file) -> bool` — invalid local paths return `false`, never
+/// error. A remote URL argument errors when the resolution context is
+/// local-only (no remote runtime); see the URL branch below.
 pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, String> {
     require_args("file_exists", args, 1)?;
     if any_null(args) {
@@ -614,11 +616,20 @@ pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
         Ok(s) => s,
         Err(_) => return Ok(Value::Bool(false)),
     };
-    // A remote URL "exists" when it was fetched successfully; a denied,
-    // unregistered, or failed fetch reads as non-existent (never errors).
+    // A remote URL "exists" when it was fetched successfully. With a remote
+    // runtime attached (body/post-shell), a denied or failed fetch reads as
+    // non-existent (never errors). With **no** runtime — the local-only
+    // frontmatter context — a URL is unreadable here, so fail loudly rather
+    // than silently reporting it as absent (Decision B).
     if is_remote_url(raw) {
-        let exists = matches!(ctx.fetch_remote_text(raw), Ok(Some(_)));
-        return Ok(Value::Bool(exists));
+        return match ctx.fetch_remote_text(raw) {
+            Ok(Some(_)) => Ok(Value::Bool(true)),
+            Ok(None) => Err(format!(
+                "file_exists() cannot read remote URL {raw:?}: this resolution \
+                 context is local-only (no remote runtime)"
+            )),
+            Err(_) => Ok(Value::Bool(false)),
+        };
     }
     let exists = match resolve_arg(raw, ctx) {
         Ok(Some(p)) => p.exists(),
@@ -1747,5 +1758,28 @@ mod fn_remote_tests {
         let url = format!("{}/blocked.md", server.uri());
         let ctx = ready_ctx(&url, false).await;
         assert_eq!(file_exists_fn(&[json!(url)], &ctx).unwrap(), json!(false));
+    }
+
+    #[test]
+    fn file_exists_remote_url_fails_loudly_in_local_only_context() {
+        // Frontmatter's resolution context carries no remote runtime, so a
+        // remote URL argument is unreadable and must error rather than
+        // silently reporting the URL as absent (Decision B).
+        let ctx = ResolutionContext::new(std::path::PathBuf::from("."));
+        let err = file_exists_fn(&[json!("https://example.com/doc.md")], &ctx)
+            .expect_err("local-only remote URL must fail loudly");
+        assert!(err.contains("local-only"), "unexpected message: {err}");
+    }
+
+    #[test]
+    fn load_markdown_remote_url_fails_loudly_in_local_only_context() {
+        // The document-reading functions share the same local-only contract.
+        let ctx = ResolutionContext::new(std::path::PathBuf::from("."));
+        let err = markdown_title_fn(&[json!("https://example.com/doc.md")], &ctx)
+            .expect_err("local-only remote URL must fail loudly");
+        assert!(
+            err.contains("remote reads are not enabled"),
+            "unexpected message: {err}"
+        );
     }
 }
