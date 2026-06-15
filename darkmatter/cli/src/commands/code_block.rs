@@ -5,6 +5,8 @@ use crate::output::{OutputArtifact, open_output_artifact};
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
+use darkmatter::markdown::CodeBlock;
+use darkmatter::markdown::dsl::{CodeBlockMeta, parse_highlight_spec};
 use darkmatter::markdown::highlighting::ThemePair;
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
@@ -27,9 +29,6 @@ pub fn run_code_block(
     output: CodeBlockOutput,
     cli: &Cli,
 ) -> Result<()> {
-    use darkmatter::markdown::CodeBlock;
-    use darkmatter::markdown::dsl::CodeBlockMeta;
-
     // Resolve input source: --file / --content force the interpretation;
     // otherwise prefer filesystem existence and fall back to literal content.
     let (code, inferred_lang_token) = if force_content {
@@ -90,12 +89,16 @@ pub fn run_code_block(
             meta.line_numbering = true;
         }
         if let Some(h) = highlight {
-            meta.highlight = parse_highlight_cli(h).map_err(|e| {
+            meta.highlight = parse_highlight_spec(h).map_err(|e| {
                 eyre!("Invalid --highlight range: {e} (expected comma-separated lines and ranges, e.g. `1,4-6`)")
             })?;
         }
         block = block.with_meta(meta);
     }
+
+    // Pre-compute the Markdown representation so the stdout and `--show`
+    // paths emit byte-identical artifacts.
+    let markdown_artifact = code_block_markdown(&block);
 
     // Render to the requested output format.
     match output {
@@ -114,27 +117,7 @@ pub fn run_code_block(
             print!("{}", fragment.render());
         }
         CodeBlockOutput::Markdown => {
-            let lang = block
-                .language()
-                .map(|g| g.to_string())
-                .unwrap_or_default();
-            let meta = block.meta();
-            let mut parts: Vec<String> = Vec::new();
-            if !lang.is_empty() {
-                parts.push(lang);
-            }
-            if let Some(t) = &meta.title {
-                parts.push(format!("title=\"{}\"", t.replace('"', "\\\"")));
-            }
-            if meta.line_numbering {
-                parts.push("line-numbering=true".to_string());
-            }
-            if !meta.highlight.is_empty() {
-                parts.push(format!("highlight={}", meta.highlight));
-            }
-            let info = parts.join(" ");
-            let code = block.code();
-            println!("```{info}\n{code}\n```");
+            print!("{markdown_artifact}");
         }
     }
 
@@ -153,29 +136,8 @@ pub fn run_code_block(
                 open_output_artifact(&artifact)?;
             }
             CodeBlockOutput::Markdown => {
-                let lang = block
-                    .language()
-                    .map(|g| g.to_string())
-                    .unwrap_or_default();
-                let meta = block.meta();
-                let mut parts: Vec<String> = Vec::new();
-                if !lang.is_empty() {
-                    parts.push(lang);
-                }
-                if let Some(t) = &meta.title {
-                    parts.push(format!("title=\"{}\"", t.replace('"', "\\\"")));
-                }
-                if meta.line_numbering {
-                    parts.push("line-numbering=true".to_string());
-                }
-                if !meta.highlight.is_empty() {
-                    parts.push(format!("highlight={}", meta.highlight));
-                }
-                let info = parts.join(" ");
-                let code = block.code();
-                let content = format!("```{info}\n{code}\n```\n");
                 let artifact = OutputArtifact {
-                    content,
+                    content: markdown_artifact,
                     extension: "md",
                     label: "code-block-markdown",
                 };
@@ -195,54 +157,55 @@ pub fn run_code_block(
     Ok(())
 }
 
-/// Parses a `--highlight` value (e.g. `1,4-6`) into a [`HighlightSpec`].
+/// Serializes a [`CodeBlock`] back to a Markdown fenced code block.
 ///
-/// This is a CLI-local parser that mirrors the syntax
-/// [`parse_code_info`](darkmatter::markdown::dsl::parse_code_info) accepts
-/// for the `highlight=…` directive, but with explicit error messages on the
-/// CLI path so users see a clear failure rather than a downstream render
-/// error.
-fn parse_highlight_cli(
-    raw: &str,
-) -> Result<darkmatter::markdown::dsl::HighlightSpec, String> {
-    use darkmatter::markdown::dsl::{HighlightSpec, ValidLineRange};
-    let mut spec = HighlightSpec::new();
-
-    for part in raw.split(',') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-
-        if part.contains('-') {
-            let range_parts: Vec<&str> = part.split('-').collect();
-            if range_parts.len() != 2 {
-                return Err(format!("Invalid range format: {part}"));
-            }
-            let start = range_parts[0]
-                .trim()
-                .parse::<usize>()
-                .map_err(|_| format!("Invalid start number: {}", range_parts[0]))?;
-            let end = range_parts[1]
-                .trim()
-                .parse::<usize>()
-                .map_err(|_| format!("Invalid end number: {}", range_parts[1]))?;
-            let range = ValidLineRange::range(start, end)
-                .map_err(|e| format!("{e}"))?;
-            spec.add_line(range.start());
-            if range.end() != range.start() {
-                spec.add_range(range.start(), range.end())
-                    .map_err(|e| format!("{e}"))?;
-            }
-        } else {
-            let line = part
-                .parse::<usize>()
-                .map_err(|_| format!("Invalid line number: {part}"))?;
-            spec.add_line(line);
-        }
+/// The returned string always ends with exactly one trailing newline. The
+/// fence length is chosen so that any run of backticks inside the code body
+/// is shorter than the fence itself, guaranteeing a safe round-trip.
+fn code_block_markdown(block: &CodeBlock) -> String {
+    let lang = block
+        .language()
+        .map(|g| g.to_string())
+        .unwrap_or_default();
+    let meta = block.meta();
+    let mut parts: Vec<String> = Vec::new();
+    if !lang.is_empty() {
+        parts.push(lang);
     }
+    if let Some(title) = &meta.title {
+        parts.push(format!("title=\"{}\"", title.replace('"', "\\\"")));
+    }
+    if meta.line_numbering {
+        parts.push("line-numbering=true".to_string());
+    }
+    if !meta.highlight.is_empty() {
+        parts.push(format!("highlight={}", meta.highlight));
+    }
+    let info = parts.join(" ");
+    let code = block.code();
 
-    Ok(spec)
+    let longest_backtick_run = code
+        .chars()
+        .fold((0usize, 0usize), |(max, current), c| {
+            if c == '`' {
+                (max.max(current + 1), current + 1)
+            } else {
+                (max, 0)
+            }
+        })
+        .0;
+    let fence_len = if longest_backtick_run >= 3 {
+        longest_backtick_run + 1
+    } else {
+        3
+    };
+    let fence = "`".repeat(fence_len);
+
+    if info.is_empty() {
+        format!("{fence}\n{code}\n{fence}\n")
+    } else {
+        format!("{fence}{info}\n{code}\n{fence}\n")
+    }
 }
 
 /// Resolves a raw file path string (no FileReference syntax) to a `PathBuf`.
@@ -259,5 +222,85 @@ fn resolve_file_path_raw(raw: &str) -> Result<PathBuf> {
         Ok(std::env::current_dir()
             .wrap_err("Failed to get current directory")?
             .join(p))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn code_block_markdown_language_only() {
+        let block = CodeBlock::new("fn main() {}").with_fence_language("rust");
+        assert_eq!(code_block_markdown(&block), "```rust\nfn main() {}\n```\n");
+    }
+
+    #[test]
+    fn code_block_markdown_quoted_title_with_double_quote() {
+        let meta = CodeBlockMeta {
+            title: Some(r#"say "hi""#.to_string()),
+            ..Default::default()
+        };
+        let block = CodeBlock::new("x").with_fence_language("rust").with_meta(meta);
+        let md = code_block_markdown(&block);
+        assert!(md.contains(r#"title="say \"hi\"""#), "escaped title not found in: {md:?}");
+    }
+
+    #[test]
+    fn code_block_markdown_line_numbering() {
+        let meta = CodeBlockMeta {
+            line_numbering: true,
+            ..Default::default()
+        };
+        let block = CodeBlock::new("x").with_fence_language("rust").with_meta(meta);
+        assert_eq!(code_block_markdown(&block), "```rust line-numbering=true\nx\n```\n");
+    }
+
+    #[test]
+    fn code_block_markdown_highlight_ranges() {
+        let meta = CodeBlockMeta {
+            highlight: parse_highlight_spec("1,3-5").unwrap(),
+            ..Default::default()
+        };
+        let block = CodeBlock::new("x").with_fence_language("rust").with_meta(meta);
+        assert_eq!(code_block_markdown(&block), "```rust highlight=1,3-5\nx\n```\n");
+    }
+
+    #[test]
+    fn code_block_markdown_empty_language_with_metadata() {
+        let meta = CodeBlockMeta {
+            title: Some("Untitled".to_string()),
+            ..Default::default()
+        };
+        let block = CodeBlock::new("x").with_meta(meta);
+        assert_eq!(code_block_markdown(&block), "```title=\"Untitled\"\nx\n```\n");
+    }
+
+    #[test]
+    fn code_block_markdown_escapes_embedded_fences() {
+        let block = CodeBlock::new("```\ninner\n```").with_fence_language("text");
+        let md = code_block_markdown(&block);
+        assert!(md.starts_with("````text\n"), "expected longer opening fence, got: {md:?}");
+        assert!(md.ends_with("\n````\n"), "expected longer closing fence, got: {md:?}");
+        assert!(md.contains("```\ninner\n```"));
+    }
+
+    #[test]
+    fn code_block_markdown_show_artifact_matches_stdout() {
+        let block = CodeBlock::new("fn main() {}").with_fence_language("rust");
+        let markdown = code_block_markdown(&block);
+        let artifact = OutputArtifact {
+            content: markdown.clone(),
+            extension: "md",
+            label: "code-block-markdown",
+        };
+        assert_eq!(artifact.content, "```rust\nfn main() {}\n```\n");
+        assert_eq!(artifact.content, markdown);
+    }
+
+    #[test]
+    fn parse_highlight_spec_rejects_inverted_range() {
+        let err = parse_highlight_spec("6-4").unwrap_err();
+        assert!(err.to_string().contains("start must be <= end"), "{err}");
     }
 }
