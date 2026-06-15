@@ -1,8 +1,8 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML/Markdown rendering, style frontmatter, syntax highlighting, document comparison, and disclosure blocks. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, disclosure blocks (`::disclosure` / `::details` / `::end-disclosure`), or comparing documents.
-hash: 87f17662fa397abe-42fad25e44d4a604
-last_updated: 2026-06-13
+hash: 87f17662fa397abe-235f5c808cb85e5d
+last_updated: 2026-06-15
 ---
 
 # darkmatter
@@ -107,15 +107,16 @@ The compose pipeline runs in four phases:
 
 **Inline Pre** (serial):
 
-1. **Frontmatter Interpolation** - Resolve `{{ variable }}` in frontmatter values.
+1. **Frontmatter Interpolation (pass 1)** - Resolve `{{ variable }}` in frontmatter values against seed values, `doc.*`, `ctx.*`, `env.*`. Defers keys that reference a whole-value `$(...)`.
 2. **Schema Validation** (pre-operation stage) - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast.
-3. **Frontmatter Shell Expansion** - Execute top-level `$(cmd)` frontmatter values.
-4. **Text Replacement** - Replace literal strings from `replace:` map.
-5. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions.
-6. **Interpolation** - Expand `{{ variable }}` in body content.
-7. **Shell Expansion** - Execute `::shell` directives.
-8. **Shell Blocks** - Execute `::shell-block` directives.
-9. **Link Resolve** - Resolve local links to absolute paths.
+3. **Frontmatter Shell Expansion** - Execute top-level `$(cmd)` frontmatter values. Tokens in executed position follow the [`$()` token-resolution ladder](compose.md): literal → `name(...)` safe function → executable → frontmatter property → null.
+4. **Frontmatter Interpolation (pass 2)** - Resolve the keys deferred in pass 1 against the now-concrete shell-expanded values.
+5. **Text Replacement** - Replace literal strings from `replace:` map.
+6. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions.
+7. **Interpolation** - Expand `{{ variable }}` in body content.
+8. **Shell Expansion** - Execute `::shell` directives.
+9. **Shell Blocks** - Execute `::shell-block` directives.
+10. **Link Resolve** - Resolve local links to absolute paths.
 
 **Transclusion** (concurrent):
 
@@ -165,6 +166,11 @@ links are preserved and not fetched.
   `--remote-refresh`, `--remote-ttl`, and `RemoteReadConfig`.
 - The side-effect `EffectEngine::http_post` uses the same shared fetch policy
   for host allowlist enforcement.
+- Remote URL arguments to read-side functions work only on surfaces with a
+  remote runtime (body interpolation, post-shell frontmatter pass). The
+  **pre-shell frontmatter** context is local-only, so a remote URL there
+  **fails loudly**. `absolute` and `relative` are local-only path transforms —
+  never remote, never part of remote-fetch discovery.
 
 See `darkmatter/docs/topics/remote-url-references.md` for public guidance.
 
@@ -217,6 +223,7 @@ Open only the topic file needed for the task:
 | Topic | File |
 |-------|------|
 | Compose pipeline | `compose.md` |
+| Expressions (read-side functions, `doc.*`/`ctx.*`/`env.*` namespaces, `$()` token resolution, authoring guide) | `darkmatter/docs/topics/darkmatter-expressions.md` |
 | Context variables (`ctx.*`: date/time, repo, file changes, OS, hardware, docs) | `darkmatter/docs/topics/context-variables.md` |
 | Schema validation | `darkmatter/docs/topics/schema-definition.md` |
 | Terminal rendering options | `terminal.md` |
